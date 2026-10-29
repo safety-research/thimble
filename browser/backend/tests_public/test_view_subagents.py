@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -295,6 +296,89 @@ async def test_a_start_refused_otherwise_fails_the_view_with_its_refusal_and_sta
     assert ans.kind == "no-module" and _prop(slug2)["refused"]["kind"] == "no-module"
 
 
+# --------------------------------------------------------------------------- the sandbox of a build's commands
+
+# what srt's seccomp helper says when the user namespace it makes inside bubblewrap gets no capabilities, and what
+# bubblewrap says when it cannot make its own: a kernel that restricts unprivileged user namespaces (Ubuntu 24.04)
+NESTED_USERNS = ("apply-seccomp: write /proc/self/setgroups (nested userns is capability-restricted; caller must provide "
+                 "CAP_SYS_ADMIN)")
+UID_MAP = "bwrap: setting up uid map: Permission denied"
+SYSCTL_FIX = "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+
+
+def _bwrap(tmp_path: Path, monkeypatch, said: str, restricted: str) -> None:
+    """This machine, as the build's sandbox finds it: a bwrap first on PATH that says `said` and fails, and AppArmor's
+    switch for unprivileged user namespaces reading `restricted`."""
+    import os  # noqa: PLC0415
+    import shlex  # noqa: PLC0415
+
+    from app import cc_settings, kernel_wrap  # noqa: PLC0415
+
+    bin_ = tmp_path / "fake-bin"
+    if not bin_.is_dir():
+        bin_.mkdir()
+        monkeypatch.setenv("PATH", f"{bin_}{os.pathsep}{os.environ.get('PATH', '')}")
+    (bin_ / "bwrap").write_text(f"#!/bin/sh\necho {shlex.quote(said)} >&2\nexit 1\n")
+    (bin_ / "bwrap").chmod(0o755)
+    (tmp_path / "userns").write_text(f"{restricted}\n")
+    monkeypatch.setattr(cc_settings, "APPARMOR_USERNS", tmp_path / "userns")
+    monkeypatch.setattr(kernel_wrap, "_srt_works", {})  # probed afresh, and the real answers kept for the next tests
+
+
+async def test_a_build_whose_sandbox_cannot_start_tells_the_analyst_in_its_thread_and_in_main(board, bridge, gates,
+                                                                                            tmp_path, monkeypatch):
+    """The build's commands run in the sandbox (srt, or Claude Code's on its sign-in), which a kernel that restricts
+    user namespaces keeps from starting: one notice, in the foreground of every chat and as a row in the build's thread,
+    says that the view build can't run commands, why, and the sysctl the terminal plugin gives when AppArmor's switch is
+    on; a later build's start where the sandbox starts takes it away."""
+    from app import kernel_wrap, notices, srt  # noqa: PLC0415
+
+    if why := srt.missing(config.REPO_ROOT, srt.node()):
+        pytest.skip(why)
+    works = kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT))
+
+    def box() -> list[dict]:
+        return [n for n in notices.open_notices(CORPUS) if n.get("key") == dev.NO_BOX_KEY]
+
+    def told(slug: str) -> bool:
+        return bool(box()) and box()[0]["chat"] == _prop(slug)["chat"]
+
+    _bwrap(tmp_path, monkeypatch, NESTED_USERNS, "1")
+    slug = _propose(asked=True)
+    await _started(slug)
+    await _until(lambda: told(slug), "no notice said the build can't run commands", tries=1000)
+    [n] = box()
+    assert n["text"] == ("The view build can't run commands on this machine: its sandbox can't start, because the "
+                         f"kernel restricts user namespaces. Allow them: `{SYSCTL_FIX}`"), n["text"]
+    assert (n["agent"], n["kind"]) == ("View build: Posts", "sandbox")
+    rows = [r for r in agents.read_events(agents.paths(CORPUS, n["chat"])[1]) if r["type"] == notices.TYPE]
+    assert [r["text"] for r in rows] == [n["text"]], "a row in the build's thread"
+
+    # bubblewrap's own words where AppArmor's switch is off: the why without the sysctl, in the same one notice
+    _bwrap(tmp_path, monkeypatch, UID_MAP, "0")
+    slug = _propose("Threads", asked=True)
+    await _started(slug)
+    await _until(lambda: told(slug), "the second build's start told nothing", tries=1000)
+    [n] = box()
+    assert n["text"].endswith("because the kernel restricts user namespaces.") and SYSCTL_FIX not in n["text"]
+
+    # another cause: the sandbox's own words, as the plugin says them
+    _bwrap(tmp_path, monkeypatch, "bwrap: execvp /made-up/bash: No such file or directory", "1")
+    slug = _propose("Boards", asked=True)
+    await _started(slug)
+    await _until(lambda: told(slug), "the third build's start told nothing", tries=1000)
+    [n] = box()
+    assert n["text"] == ("The view build can't run commands on this machine: its sandbox can't start (bwrap: execvp "
+                         "/made-up/bash: No such file or directory)."), n["text"]
+
+    # the sandbox starts again: the next build's start takes the notice away
+    if works:
+        (tmp_path / "fake-bin" / "bwrap").unlink()
+        kernel_wrap._srt_works.clear()
+        await _started(_propose("Replies", asked=True))
+        await _until(lambda: not box(), "the notice stayed after a build whose sandbox started", tries=1000)
+
+
 # --------------------------------------------------------------------------- the gate tools
 
 
@@ -576,6 +660,177 @@ async def test_a_change_goes_to_the_last_builder_when_it_can_be_reached_else_to_
     assert "a legend" in bridge.ops("spawn")[-1]["prompt"] and len(bridge.ops("send")) == 1
 
 
+
+async def _built_in_two_attempts(slug: str, monkeypatch) -> str:
+    """A builder of `slug` that passed at its second attempt and ended, reachable from main's session: its agent id. The
+    pool has room beside the view's review, which its pass starts."""
+    monkeypatch.setattr(dev, "VIEW_POOL", 2)
+    agent = await _started(slug)
+    _draft(slug, "<p>FAIL</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    _draft(slug, "<p>v1</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    subagents.run_ended(CORPUS, agent, "done", "Built.", source="handback")
+    await _until(lambda: _prop(slug).get("status") == "built" and (CORPUS, slug) not in dev._view_runs,
+                 "the view was not built")
+    monkeypatch.setattr(dev, "_reachable", lambda c, a: a == agent)
+    return agent
+
+
+def _thread_texts(slug: str) -> list[str]:
+    _, log = agents.paths(CORPUS, str(_prop(slug)["chat"]))
+    return [json.loads(ln).get("text") for ln in log.read_text().splitlines() if '"user"' in ln]
+
+
+async def test_a_message_about_a_built_view_shows_in_its_thread_as_written_not_in_thimble_s_wrapping(
+        board, bridge, gates, monkeypatch):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Why is run 3 missing? It may be a bug.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    sent = bridge.ops("send")[0]
+    assert sent["agent"] == agent and "Why is run 3 missing? It may be a bug." in sent["text"]
+    assert "finish_view" in sent["text"], "the builder gets the message with what a change asks of it"
+    # the mirror reads the builder's prompt: thimble's wrapping is no message in the thread, the analyst's words are
+    lv, sub = types.SimpleNamespace(c=CORPUS), session.Sub(CORPUS, str(_prop(slug)["chat"]), None, agent, role="dev")
+    sub.thimble = view_tools.BUILDER
+    line = json.dumps({"type": "user", "origin": {"kind": "coordinator"},
+                       "message": {"role": "user", "content": sent["text"]}})
+    assert session.translate_sub(lv, sub, line) == 0
+    assert _thread_texts(slug) == ["Why is run 3 missing? It may be a bug."]
+
+
+async def test_a_message_that_asks_for_no_change_is_answered_with_no_build_round_and_its_attempts_kept(
+        board, bridge, gates, monkeypatch):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    gated = len(gates)
+    views.message(CORPUS, slug, "Why is run 3 missing? It may be a bug.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert _prop(slug)["status"] == "built" and _prop(slug)["attempt"] == 2, "an answer starts no build round"
+    subagents.run_ended(CORPUS, agent, "done", "Run 3 has no tickets in March.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"),
+                 "the answer's run was not settled")
+    p = _prop(slug)
+    assert p["status"] == "built" and p["attempt"] == 2 and not p.get("revision") and not p.get("failed_change")
+    assert not p.get("error") and len(gates) == gated, "a message that asks for no change is gated never"
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>"
+
+
+async def test_a_message_that_changes_the_built_view_is_a_change_with_its_attempts_counted_afresh(
+        board, bridge, gates, monkeypatch):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Make the lanes taller.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    _draft(slug, "<p>v2</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    p = _prop(slug)
+    assert p["status"] == "built" and p["attempt"] == 1 and p.get("finish", {}).get("result") == "pass"
+    subagents.run_ended(CORPUS, agent, "done", "Taller lanes.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling, "the change's run was not settled")
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v2</p>"
+    assert _prop(slug)["status"] == "built" and not _prop(slug).get("answering")
+
+
+async def _answer_changes(slug: str, html: str, bridge, monkeypatch) -> str:
+    """The builder of `slug`, built in two attempts, runs again for a message and writes `html` into the view without
+    calling finish_view: its agent id, the run still going."""
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Make the lanes taller.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert _prop(slug).get("answering")
+    _draft(slug, html)
+    return agent
+
+
+async def _settled_end(slug: str) -> dict:
+    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"),
+                 "the run was not settled")
+    return _prop(slug)
+
+
+@pytest.mark.parametrize("html", ["<p>v2</p>", "<p>FAIL v2</p>"])
+async def test_a_message_s_run_that_changes_the_view_without_finish_view_is_gated_once_as_a_change(
+        board, bridge, gates, monkeypatch, html):
+    slug = _propose(asked=True)
+    agent = await _answer_changes(slug, html, bridge, monkeypatch)
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    p = await _settled_end(slug)
+    passed = "FAIL" not in html
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == (html if passed else "<p>v1</p>")
+    assert p["status"] == "built" and not p.get("revision") and not p.get("change")
+    assert (CORPUS, slug) not in dev._view_runs
+    assert p.get("failed_change") == (None if passed else "Make the lanes taller."), "a failed change is kept for Retry"
+    views.message(CORPUS, slug, "Why is run 3 missing?")
+    assert _prop(slug)["status"] == "built" and not _prop(slug).get("changed"), "a later message is no build round"
+
+
+@pytest.mark.parametrize("end", ["quit", "error"])
+async def test_main_s_quit_and_an_error_end_a_message_s_run_that_changed_the_view_as_they_end_a_change(
+        board, bridge, gates, monkeypatch, end):
+    slug = _propose(asked=True)
+    agent = await _answer_changes(slug, "<p>v2</p>" if end == "quit" else "<p>FAIL v2</p>", bridge, monkeypatch)
+    if end == "quit":
+        subagents.close_running(CORPUS)
+    else:
+        subagents.run_ended(CORPUS, agent, "failed", "API Error: 500", source="notification")
+    p = await _settled_end(slug)
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>", "the view is as it was"
+    assert p["status"] == "built" and not p.get("revision") and p.get("failed_change") == "Make the lanes taller."
+    assert p.get("error") == (dev.MAIN_ENDED if end == "quit" else "problem: the page says FAIL")
+    assert p.get("stopped_by") == ("quit" if end == "quit" else None)
+
+
+@pytest.mark.parametrize("html", [None, "<p>v2</p>"])
+async def test_the_stop_in_the_thread_stops_a_message_s_run_and_leaves_the_view_as_it_was(
+        board, bridge, gates, monkeypatch, html):
+    slug = _propose(asked=True)
+    shown: list[tuple[str, str]] = []
+    real = views._emit
+    monkeypatch.setattr(views, "_emit", lambda c, s, st, **kw: shown.append((s, st)) or real(c, s, st, **kw))
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Make the lanes taller.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    shown.clear()
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert shown == [(slug, "built")], "the thread hears of the run that answers, which its Stop stops"
+    if html:
+        _draft(slug, html)  # a change made before finish_view
+    assert views.stop_build(CORPUS, slug) == {"ok": True}
+    await _until(lambda: bridge.ops("stop"), "no TaskStop through the module")
+    subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
+    p = await _settled_end(slug)
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>", "the view is as it was"
+    assert p["status"] == "built" and not p.get("revision")
+    if html:
+        assert p.get("error") == dev.VIEW_STOPPED and p.get("failed_change") == "Make the lanes taller."
+    else:
+        assert not p.get("error") and not p.get("failed_change") and p["attempt"] == 2
+
+
+@pytest.mark.parametrize("wait", [False, True])
+async def test_two_messages_before_the_builder_s_run_starts_reach_it_once_each(board, bridge, gates, monkeypatch, wait):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Why is run 3 missing?")
+    if wait:  # the first is sent before the second is written
+        await _until(lambda: bridge.ops("send"), "the first message never reached the builder")
+    views.message(CORPUS, slug, "And where is run 4?")
+    await asyncio.sleep(0.1)
+    texts = " ".join(s["text"] for s in bridge.ops("send"))
+    assert texts.count("Why is run 3 missing?") == 1 and texts.count("And where is run 4?") == 1
+    subagents.run_again(CORPUS, agent, "coordinator")
+    await asyncio.sleep(0.1)
+    texts = " ".join(s["text"] for s in bridge.ops("send"))
+    assert texts.count("Why is run 3 missing?") == 1 and texts.count("And where is run 4?") == 1
+    assert _prop(slug)["answering"]["text"] == "Why is run 3 missing?\n\nAnd where is run 4?"
+    assert not _prop(slug).get("message"), "nothing is left to send"
+
+
 async def test_an_extension_s_program_builds_the_view_turn_by_turn_in_place_of_a_builder(board, bridge, gates, heard,
                                                                                          monkeypatch):
     turns: list[str] = []
@@ -772,3 +1027,40 @@ def test_the_finish_tools_stop_their_gate_when_their_caller_drops_the_call_and_m
         spec = tools.REGISTRY[name]
         assert spec.drop_stops and spec.sessions == kinds, name
     assert all(n in tools.tool_sections() for n in ("view_check", "finish_view", "view_pictures", "finish_review"))
+
+
+def test_a_later_probe_that_fails_never_takes_the_sandbox_away_and_one_that_works_gives_it_back(monkeypatch):
+    """A build's start probes srt again (srt_problem). A probe that fails says why for the notice but leaves srt_works as
+    it was, so what runs in srt keeps its sandbox; one that works makes srt_works True (the sysctl fixed, no restart);
+    one that does not answer in time says nothing (a busy machine)."""
+    import subprocess
+    from pathlib import Path
+
+    from app import kernel_wrap, srt
+
+    monkeypatch.setattr(srt, "node_version", lambda node: (99, 0, 0))
+    monkeypatch.setattr(kernel_wrap, "srt_argv", lambda argv, **kw: ["true"])
+    monkeypatch.setattr(kernel_wrap, "_srt_works", {})
+    answers: list = []
+
+    def run(*a, **kw):
+        a = answers.pop(0)
+        if isinstance(a, BaseException):
+            raise a
+        return subprocess.CompletedProcess(["true"], a[0], "", a[1])
+
+    monkeypatch.setattr(kernel_wrap.subprocess, "run", run)
+    node, box = "/usr/bin/node", Path("/x/srt")
+    answers[:] = [(0, "")]
+    assert kernel_wrap.srt_works(node, box) is True
+    answers[:] = [(1, "apply-seccomp: unshare(CLONE_NEWUSER): No space left on device")]
+    assert "apply-seccomp" in kernel_wrap.srt_problem(node, box)
+    assert kernel_wrap.srt_works(node, box) is True  # never taken away by a later probe
+    answers[:] = [subprocess.TimeoutExpired(["true"], 30)]
+    assert kernel_wrap.srt_problem(node, box) == ""  # a busy machine says nothing about the sandbox
+    monkeypatch.setattr(kernel_wrap, "_srt_works", {})
+    answers[:] = [(1, "bwrap: setting up uid map: Permission denied")]
+    assert kernel_wrap.srt_works(node, box) is False
+    answers[:] = [(0, "")]
+    assert kernel_wrap.srt_problem(node, box) == ""
+    assert kernel_wrap.srt_works(node, box) is True  # given back once a probe works

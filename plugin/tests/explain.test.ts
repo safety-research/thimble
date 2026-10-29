@@ -2,7 +2,7 @@
 // press, in 0.10's teal and orange; a term is explained once per conversation; each lens's switch hides what it gave;
 // Claude reads each one shown, with the next prompt; words the analyst picks get an explainer on demand, and one that
 // fails says why. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { partOf, registerAnswers, resetAnswers } from '../core/answers'
 import { closePane } from '../core/pane'
@@ -13,7 +13,7 @@ import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
 import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
-import { trayNow } from '../tray/tray'
+import { trayBand, trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
@@ -23,6 +23,7 @@ import { controlWords, titleWords } from '../core/selection'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -303,6 +304,34 @@ test('e explains the words selected in an answer, on the row the selection lies 
   expect(await explainKey(s.$, 'e', 0)).toBe(null)
   expect(await explainBar(s.$, k => k !== 'explain', false)).toEqual([])
   setOptions({})
+})
+
+test('e opens the tray at once on the explainer being written, its words as its title; once written it shows there in place, and a failed one closes it', async () => {
+  setOptions({})
+  for (const ok of [true, false]) {
+    let done: (v: Any) => void = () => undefined
+    const s = setup([LOOK], { complete: new Promise(r => { done = r }) })
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
+    s.$.ui.selection = async () => ({ text: 'the client', requestId: 't1-row' })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const take = await explainKey(s.$, 'e', 0)
+    void take!.later!()
+    await settle()
+    // the call has not answered: the tray stands on the words, its title, with nothing else to read yet
+    expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain' })
+    const band = textOf(await trayBand(s.$, els, 100, 20))
+    expect(band).toContain('the client')
+    expect(band).not.toContain('no longer in the session')
+    done(ok ? reply({ body: 'The program that sends the uploads.', here: '' }) : { isAnswered: false, reason: 'aborted' })
+    await settle()
+    await settle()
+    if (!ok) { expect(await trayNow(s.$)).toBe(null); continue }
+    const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
+    const id = part.order.find(x => part.items[x]!.term === 'the client')!
+    expect((await trayNow(s.$))!.stack).toEqual([{ row: 't1-row', kind: 'explain', id }])
+    // its words, drawn as the reply draws its words
+    expect(JSON.stringify(await trayBand(s.$, els, 100, 20))).toContain('The program that sends the uploads.')
+  }
 })
 
 test('e with nothing selected says to select words with the mouse first, and how outside the fullscreen layout; nothing is written', async () => {

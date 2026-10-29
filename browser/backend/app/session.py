@@ -1305,6 +1305,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     agents.set_running(lv.c, agents.MAIN_ID, False)
     _ask_again(lv, again)
     if was_open:
+        _fixes_turn(lv)
         _cards_checked(lv)
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
@@ -1313,6 +1314,28 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
                 _answer_checked(lv, turn)
         _proposer_turn(lv, cut)
     lv.turn_texts = []
+
+
+def _fixes_turn(lv: Live) -> None:
+    """The person's /thimble-fix words, which main's fix_thimble may take for a few turns of main's, count this one
+    (fixes.main_turn_ended)."""
+    from . import fixes  # noqa: PLC0415
+
+    try:
+        fixes.main_turn_ended(lv.c)
+    except Exception:  # noqa: BLE001 — a count that fails is no reason to fail the mirror
+        log.exception("%s: the fixes did not hear of main's turn end", lv.c)
+
+
+def _fixes_read(lv: Live, event_id: str) -> None:
+    """Event `event_id` reached main's turn: when it carries the person's /thimble-fix, the count of the turns in which
+    fix_thimble may take their words starts with this turn (fixes.words_read)."""
+    from . import fixes  # noqa: PLC0415
+
+    try:
+        fixes.words_read(lv.c, event_id)
+    except Exception:  # noqa: BLE001 — a count that fails is no reason to fail the mirror
+        log.exception("%s: the fixes did not hear of event %s", lv.c, event_id)
 
 
 def _marks_turn(lv: Live, turn: str, cut: str | None) -> None:
@@ -1476,6 +1499,7 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
         lv.turn_threads.append(thread)
     if event_id:  # a start_agent event's start is refused when this turn ends without its Agent call (R3, _no_call)
         lv.turn_calls.add(event_id)
+        _fixes_read(lv, event_id)
     if event_id and event_id in _expected:
         _expected.discard(event_id)
         return
@@ -2988,6 +3012,18 @@ def _continued_in(path: str | None) -> tuple[str, str] | None:
     return None
 
 
+def _sent_quietly(c: str, agent_id: str, prompt: str) -> bool:
+    """Whether a prompt of one of thimble's agents is thimble's own text sent with the person's words (subagents.send
+    `quiet`), which its chat shows as the person wrote them; a store that cannot be read shows the prompt."""
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        return subagents.sent_quietly(c, agent_id, prompt)
+    except Exception:  # noqa: BLE001
+        log.debug("%s: whether %s's prompt was sent quietly is unknown", c, agent_id, exc_info=True)
+        return False
+
+
 def _typed(rec: dict) -> str | None:
     """A message the analyst typed to the subagent in Claude Code's agent view: a queued command or a meta prompt whose
     origin is human, the prompt's wrapper taken off (TYPED_RE). None for any other record."""
@@ -3049,6 +3085,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if sub.skip_prompt or sub.own_prompts:
                 sub.skip_prompt = False
                 return 0
+            if sub.thimble and sub.agent_id and _sent_quietly(lv.c, str(sub.agent_id), prompt):
+                return 0  # thimble's wrapping of the person's words, which the chat shows where they were said
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":

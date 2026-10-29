@@ -30,6 +30,9 @@ from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("thimble")
+# the server log's line while the server cannot accept connections (the loop's exception handler, below)
+NO_ACCEPT_LOG = ("the server cannot accept connections: %s (tries that failed since the last such line: %d); to "
+                 f"restart it, {config.RESTART_HOW}")
 
 
 def stamp_uvicorn_logs() -> None:
@@ -94,8 +97,7 @@ def quiet_accept_errors(loop: asyncio.AbstractEventLoop, every: float = ACCEPT_L
         now = time.monotonic()
         if now - state["at"] < every:
             return
-        log.error("the server cannot accept connections: %s (tries that failed since the last such line: %d); restart "
-                  "it with `thimble server restart`", context.get("exception"), state["n"])
+        log.error(NO_ACCEPT_LOG, context.get("exception"), state["n"])
         state["at"], state["n"] = now, 0
 
     loop.set_exception_handler(handler)
@@ -163,8 +165,9 @@ ROUTER_MODULES = [
     # the orientation's, its critic's and the writers' tray entries in the analyst's terminal
     "tray",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
-    # where the check's records and fixes are kept (the Undo of a fix)
-    "render", "card_check", "checkstore",
+    # where the check's records and fixes are kept (the Undo of a fix); a card drawn taller than the canvas shows,
+    # which its author is told
+    "render", "card_check", "checkstore", "card_size",
     # the review of a built view's pictures, which sends what it finds back to the view's build session
     "view_review",
     # whether the product tour was offered on this install's first launch
@@ -184,9 +187,12 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("THIMBLE_ALLOWED_HOSTS", "127
 # Request timing: a request slower than this many ms is logged at WARNING, every other one at DEBUG. Every response
 # carries `Server-Timing: app;dur=<ms>`, so the browser's Network panel shows the backend's own time.
 SLOW_REQUEST_MS = float(os.environ.get("THIMBLE_SLOW_MS", "300"))
-# the watcher's long polls (events.py) and the hooks module's (module_bridge.py, whose hello may wait for a rekey),
-# slow by design: logged at DEBUG like a fast request
-LONG_POLLS = ("/api/events/pull", "/api/events/permission", "/api/module/next", "/api/module/hello")
+# the watcher's long polls (events.py), the hooks module's (module_bridge.py, whose hello may wait for a rekey) and
+# thimble-browser's wait for a browser that wants a link (ui_link_wanted), slow by design: logged at DEBUG like a fast
+# request
+LONG_POLLS = ("/api/events/pull", "/api/events/permission", "/api/module/next", "/api/module/hello",
+              "/api/ui/link-wanted")
+LINK_TICK_S = 0.25  # how often GET /api/ui/link-wanted looks whether a browser wants a link
 timing_log = logging.getLogger("thimble.timing")
 
 class RequestTiming:
@@ -429,9 +435,9 @@ async def _startup() -> None:
 
 
 # what a new sign-in of a browser shows (signed_in), in each workspace whose main may act for it, at {at} (HH:MM)
-SIGNED_IN_NOTICE = ("A browser signed in to thimble at {at}. If it was not you, click Sign it out, or run `thimble unpair`"
-                    " in a shell to sign out every browser.")
-SIGNED_IN_LINE = "thimble: a browser signed in to thimble at {at}. If it was not you, run `thimble unpair` in a shell."
+SIGNED_IN_NOTICE = "A browser signed in to thimble at {at}. If it was not you, click Sign it out."
+SIGNED_IN_LINE = ("thimble: a browser signed in to thimble at {at}. If it was not you, click Sign it out on its notice in "
+                  "thimble's page.")
 
 
 def signed_in(ws: object, browser: str) -> None:
@@ -439,7 +445,8 @@ def signed_in(ws: object, browser: str) -> None:
     notice with Sign it out (sign-in:<browser>) and as a line under main's next reply in its terminal
     (session.tell_terminal), which the browser cannot hide. The workspaces are the one the link named, when it is
     registered, and each whose main this server follows. The browser that signed in shows no notice of its own sign-in
-    (its id, GET /api/ui/paired)."""
+    or of one before it (its id and when it signed in, GET /api/ui/paired); a browser signed in before it shows this
+    one."""
     from . import notices, session  # noqa: PLC0415
 
     name = ws if isinstance(ws, str) else ""
@@ -546,7 +553,23 @@ def create_app() -> FastAPI:
 
     @app.get("/api/ui/paired")
     def ui_paired(request: Request) -> dict:
-        return {"paired": hook_auth.analyst(request), "id": hook_auth.browser_id(request)}
+        paired = hook_auth.analyst(request)
+        if not paired:  # the page shows its sign-in line: thimble-browser prints a new link in its terminal
+            hook_auth.want_link(request.scope)
+        return {"paired": paired, "id": hook_auth.browser_id(request), "at": hook_auth.signed_in_at(request)}
+
+    @app.get("/api/ui/link-wanted")  # thimble-browser's terminal waits here (cli.new_links), with the token's proof
+    async def ui_link_wanted(request: Request, boot: str = "", wanted: int = -1) -> dict:
+        """{boot, wanted}: this server's start (config.BOOT_ID) and how many asks of a browser that is not signed in
+        want_link counted, once either differs from the query's, else after hook_auth.LINK_WAIT_S, and at once when the
+        server begins to stop or the caller left."""
+        from . import session  # noqa: PLC0415
+
+        deadline = time.monotonic() + hook_auth.LINK_WAIT_S
+        while ((boot, wanted) == (config.BOOT_ID, hook_auth.links_wanted()) and time.monotonic() < deadline
+               and not session._shutting_down() and not await request.is_disconnected()):
+            await asyncio.sleep(LINK_TICK_S)
+        return {"boot": config.BOOT_ID, "wanted": hook_auth.links_wanted()}
 
     # the built UI, last: a mount at / matches everything the routes above did not
     dist = frontend_dist()
@@ -556,7 +579,18 @@ def create_app() -> FastAPI:
     elif not dev_mode():
         log.warning(config.NO_UI_BUILD_HINT)
 
+    _build_routes(app)
     return app
+
+
+def _build_routes(app: FastAPI) -> None:
+    """Build the table of each included router's routes now, before the server listens. FastAPI builds it when a
+    request first reaches the router, on the event loop: a quarter of a second's work or more, and seconds on a busy
+    machine, which the first health call of `server up` or the plugin (1 s, cli.HEALTH_TIMEOUT_S) would wait for."""
+    from fastapi.routing import iter_route_contexts  # noqa: PLC0415
+
+    for _route in iter_route_contexts(app.router.routes):
+        pass
 
 
 app = create_app()

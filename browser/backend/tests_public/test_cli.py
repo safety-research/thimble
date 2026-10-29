@@ -8,7 +8,6 @@ import contextlib
 import json
 import os
 import re
-import socket
 import subprocess
 import sys
 import threading
@@ -18,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import free_port
 
 from app import cli, config, procs
 
@@ -63,7 +63,7 @@ def fake(monkeypatch, home):
 
 def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_restarts_it(home, monkeypatch):
     """thimble's own server alive on its port but not answering (out of file descriptors, as on a Mac whose views'
-    kernels took its 256): start_failure and the doctor's port line name it and say `thimble server restart`, rather
+    kernels took its 256): start_failure and the doctor's port line name it and say how to restart it, rather
     than "see the log" or "another program". Its own new server is still starting, and server.json's server that started
     moments ago is not called stuck."""
     p = cli.port()
@@ -77,10 +77,11 @@ def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_r
     cli.write_state({"port": p, "pid": 4242, "started": "2026-01-01T00:00:00+00:00"})
     cli.LAST_START.clear()
     line = cli.STUCK_LINE.format(pid=4242)
-    assert "thimble server restart" in line
+    assert line.endswith("to restart it, press Ctrl-C in the terminal that runs thimble-browser, then run "
+                         "`thimble-browser --continue`")
     assert cli.stuck_server() == 4242 and cli.start_failure(cli.api_url()) == line
     assert cli.port_line(p, False).startswith(f"{p} is held by thimble's server (pid 4242)")
-    assert "thimble server restart" in cli.port_line(p, False)
+    assert cli.port_line(p, False).endswith(f"to restart it, {config.RESTART_HOW}")
 
     cli.LAST_START.update(pid=4242, port=p)
     monkeypatch.setattr(cli, "spawned_exited", lambda pid: False)
@@ -90,6 +91,47 @@ def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_r
     assert cli.stuck_server() == 4242, "server.json names it though the port's holder cannot be seen"
     cli.write_state({"port": p, "pid": 4242, "started": cli._now()})
     assert cli.stuck_server() is None and cli.start_failure(cli.api_url()) == ""
+
+
+def test_a_start_wait_that_is_not_a_number_of_seconds_leaves_the_default(monkeypatch):
+    """THIMBLE_START_WAIT_S is read where a command waits, so a value that is not a positive number of seconds leaves
+    the default wait rather than failing every command as the module loads."""
+    for bad in ("soon", "-5", "0", "nan", "inf"):
+        monkeypatch.setenv("THIMBLE_START_WAIT_S", bad)
+        assert cli.start_wait_s() == cli.WAIT_S, bad
+    monkeypatch.setenv("THIMBLE_START_WAIT_S", "100")
+    assert cli.start_wait_s() == 100.0
+    r = subprocess.run([sys.executable, "-c", "import app.cli"], cwd=BACKEND, env={**os.environ, "THIMBLE_START_WAIT_S": "soon"},
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_health_probe_waits_as_long_as_thimble_health_timeout_s_says_and_a_bad_value_leaves_the_default(monkeypatch):
+    """THIMBLE_HEALTH_TIMEOUT_S is read at each health probe, so the tests that start real servers on a busy machine
+    let every probe of theirs wait as long as their other waits; a value that is not a positive number of seconds
+    leaves the default."""
+    asked: list[float] = []
+
+    class Loopback:
+        @staticmethod
+        def open(url: str, timeout: float) -> None:
+            asked.append(timeout)
+            raise OSError("no server here")
+
+    def request(method: str, url: str, body: object = None, timeout: float = 5.0) -> tuple[int, dict]:
+        asked.append(timeout)
+        return 0, {}
+
+    monkeypatch.setattr(cli.config, "LOOPBACK", Loopback)
+    monkeypatch.setattr(cli, "_request", request)
+    for bad in ("soon", "-5", "0", "nan", "inf"):
+        monkeypatch.setenv("THIMBLE_HEALTH_TIMEOUT_S", bad)
+        assert cli.health_timeout_s() == cli.HEALTH_TIMEOUT_S, bad
+    monkeypatch.setenv("THIMBLE_HEALTH_TIMEOUT_S", "100")
+    assert not cli.healthy("http://127.0.0.1:9") and cli.health_leader("http://127.0.0.1:9") is None
+    assert cli.foreign_home("http://127.0.0.1:9") is None and asked == [100.0] * 3
+    monkeypatch.delenv("THIMBLE_HEALTH_TIMEOUT_S")
+    assert not cli.healthy("http://127.0.0.1:9") and asked[-1] == cli.HEALTH_TIMEOUT_S
 
 
 def test_two_concurrent_ups_start_one_uvicorn(fake, home):
@@ -190,14 +232,77 @@ def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monk
     assert cli.main(["unpair"]) == 0
     assert asked == [("POST", f"{cli.api_url()}/api/ui/unpair")] and not (home / cli.PAIRED_FILE).exists()
     assert capsys.readouterr().out.splitlines() == [cli.UNPAIRED_LINE]
-    assert "`thimble up`" in cli.UNPAIRED_LINE
+    assert "a new link in the terminal where `thimble-browser` runs" in cli.UNPAIRED_LINE
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {"detail": "Not Found"}))
     assert cli.main(["unpair"]) == 1
     out = capsys.readouterr().out
     assert out.startswith("thimble: the server did not sign the browsers out (it answered 404)")
-    assert out.rstrip().endswith("In a shell: thimble server restart")
+    assert out.rstrip().endswith("To restart it, press Ctrl-C in the terminal that runs thimble-browser, then run "
+                                 "`thimble-browser --continue`.")
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     assert cli.main(["unpair"]) == 0 and capsys.readouterr().out.splitlines() == [cli.UNPAIRED_LINE], "server down"
+
+
+def test_the_terminal_prints_a_new_link_each_time_a_browser_that_is_not_signed_in_opens_the_page(home, monkeypatch,
+                                                                                                 capsys):
+    """thimble-browser, while it holds the terminal (cli.new_links), waits at GET /api/ui/link-wanted, and each time
+    the count it answers grows (a browser that is not signed in opened the page: hook_auth.want_link), it prints a new
+    link for its workspace with a new code. What was counted before its first answer is not its own; a server that
+    started again counts from 0; one that does not answer is asked again; a link the server gives no code for is not
+    printed."""
+    from app import hook_auth
+
+    cli.write_state({"port": 8399, "url": "http://127.0.0.1:8399", "api": "http://127.0.0.1:8399", "env": {}})
+    stop = threading.Event()
+    answers = [(200, {"boot": "b1", "wanted": 2}),  # the first answer: nothing printed
+               (200, {"boot": "b1", "wanted": 3}),  # a browser wants a link: c1
+               (200, {"boot": "b1", "wanted": 3}),  # the wait ended with no browser
+               (0, "ConnectionRefusedError: [Errno 111] Connection refused"),  # the server is starting again
+               (200, {"boot": "b2", "wanted": 0}),  # a new start, no browser yet
+               (200, {"boot": "b3", "wanted": 1}),  # another start, where a browser asked first: c2
+               (200, {"boot": "b3", "wanted": 2})]  # the server gives no code: nothing printed
+    asked: list[str] = []
+    codes = iter(["c1", "c2", ""])
+
+    def request(m, u, b=None, timeout=5.0):
+        if m == "POST" and u == "http://127.0.0.1:8399/api/ui/pair":
+            code = next(codes)
+            return (200, {"code": code, "expires_s": 300}) if code else (404, {"detail": "Not Found"})
+        assert m == "GET" and timeout > hook_auth.LINK_WAIT_S, (m, u, timeout)
+        asked.append(u.removeprefix("http://127.0.0.1:8399"))
+        if not answers:
+            stop.set()
+            return 0, "stopped"
+        return answers.pop(0)
+
+    monkeypatch.setattr(cli, "_request", request)
+    monkeypatch.setattr(cli, "LINK_RETRY_S", 0.0)
+    cli.new_links("runs", stop)
+    assert capsys.readouterr().out.splitlines() == [
+        "thimble browser: new sign-in link: http://127.0.0.1:8399/?ws=runs#p=c1",
+        "thimble browser: new sign-in link: http://127.0.0.1:8399/?ws=runs#p=c2"]
+    wait = "/api/ui/link-wanted?"
+    assert asked == [wait, wait + "boot=b1&wanted=2", wait + "boot=b1&wanted=3", wait + "boot=b1&wanted=3",
+                     wait + "boot=b1&wanted=3", wait + "boot=b2&wanted=0", wait + "boot=b3&wanted=1",
+                     wait + "boot=b3&wanted=2"]
+
+
+def test_only_a_terminal_gets_new_links(monkeypatch):
+    """thimble-browser waits for browsers that want a link (cli.watch_links) only when its output is the terminal, as
+    only a terminal gets the start's link with a code (to_terminal); the event it gives back ends the wait."""
+    started: list[tuple[str, threading.Event]] = []
+    monkeypatch.setattr(cli, "new_links", lambda name, stop: started.append((name, stop)))
+    monkeypatch.setattr(cli, "to_terminal", lambda: False)
+    cli.watch_links("runs")
+    time.sleep(0.2)
+    assert started == [], "output a program reads gets no code"
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)
+    stop = cli.watch_links("runs")
+    for _ in range(200):
+        if started:
+            break
+        time.sleep(0.01)
+    assert started == [("runs", stop)] and not stop.is_set()
 
 
 def test_browser_cookie_mints_a_code_and_trades_it_without_the_token(home, monkeypatch):
@@ -365,9 +470,7 @@ def test_stop_kills_only_a_pid_whose_command_line_is_ours(home):
 
 
 def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return free_port()  # conftest.SERVER_PORTS
 
 
 def _uvicorns_on(p: int) -> list[int]:
@@ -382,15 +485,19 @@ def _uvicorns_on(p: int) -> list[int]:
     return out
 
 
+# each step is a subprocess with a time limit of its own, so the test cannot hang; its time is a server's start, which a
+# machine its parallel runs keep busy makes several times longer
+@pytest.mark.timeout(300)
 def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, data, tmp_path, fake_claude):
-    probe = subprocess.run([sys.executable, "-c", "import app.main"], cwd=BACKEND, capture_output=True, text=True, timeout=120,
-                           env={**os.environ, "THIMBLE_SKIP_KEY": "1"})
-    if probe.returncode != 0:
-        pytest.skip("app.main does not import in this tree: " + probe.stderr.strip().splitlines()[-1][:200])
+    try:  # in this process, which runs the same Python on the same tree, rather than in a new one
+        import app.main  # noqa: F401, PLC0415
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"app.main does not import in this tree: {type(e).__name__}: {e}"[:300])
     port = _free_port()
     # a session the launcher started, with the plugin's hooks on, so /thimble prints the URL alone
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port),
-           "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws")}
+           "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws"), "THIMBLE_START_WAIT_S": "100",
+           "THIMBLE_HEALTH_TIMEOUT_S": "100"}
     env.pop("THIMBLE_DEV", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
@@ -398,7 +505,7 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
     pid = None
     try:
         t0 = time.monotonic()
-        out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=90)
+        out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
         first = time.monotonic() - t0
         lines = out.stdout.splitlines()
         # the link's line alone: the workspace holds nothing from an earlier run, so there is nothing to resume

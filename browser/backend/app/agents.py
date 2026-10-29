@@ -39,7 +39,6 @@ KIND_MAIN, KIND_THREAD, KIND_AGENT = "main", "thread", "agent"
 KINDS = (KIND_MAIN, KIND_THREAD, KIND_AGENT)
 MAIN_ID = "main"
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-CELL_REF_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)")  # a card ref, by either prefix (cite.CARD_RE)
 SUMMARY_LIMIT = 300  # chars of a tool result kept in the log
 STOPPED_LINE = "stopped"
 NO_FORK = "no-fork"  # the Stop of a side thread that has no fork to stop (interrupt_route)
@@ -123,7 +122,7 @@ def _defaults(meta: dict) -> dict:
     meta.setdefault("anchor_text", None)
     meta.setdefault("model", None)
     meta.setdefault("effort", None)
-    meta.setdefault("group", None)  # the canvas group (a notebook id) this chat's cards land in; made on first use
+    meta.setdefault("group", None)  # a thread's canvas group (a notebook id), kept from a workspace where each had one
     if meta["kind"] == KIND_MAIN:
         meta.setdefault("attached", None)  # the Claude Code session that is main, {session, cwd, since, model?} (session.py)
     if meta["kind"] == KIND_THREAD:
@@ -465,34 +464,6 @@ def list_chats(c: str) -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- where a chat's cards land
-
-
-def group_for(c: str, meta: dict) -> str:
-    """The canvas group (a notebook id) a chat's cards land in: main's is the analyst's own group; a thread's is a group
-    of its own beside its anchor, made on first use and remembered on the meta."""
-    if meta.get("kind") == KIND_MAIN or meta.get("kind") == KIND_AGENT:
-        return tools.analyst_notebook(c)
-    if meta.get("group"):
-        from . import notebook  # noqa: PLC0415
-
-        if notebook.read_notebook(_ws(c), str(meta["group"])) is not None:
-            return str(meta["group"])
-    from . import notebook  # noqa: PLC0415
-
-    anchor = str(meta.get("anchor") or "")
-    m = CELL_REF_RE.match(anchor)
-    parent = None
-    if m:
-        hit = notebook.find_cell(_ws(c), m.group(1))
-        parent = hit[0] if hit else None
-    nb = notebook.create_notebook(_ws(c), f"main/{meta.get('title') or meta['id']}", role=notebook.DEFAULT_ROLE,
-                                  parent=parent, anchor=m.group(1) if m else None, chat=meta["id"])
-    meta["group"] = nb["id"]
-    change_meta(c, str(meta["id"]), lambda m_: m_.update(group=nb["id"]))
-    return nb["id"]
-
-
 # --------------------------------------------------------------------------- running, and the cards a chat made
 
 
@@ -534,8 +505,9 @@ CLAIM_EDIT_S = 120  # an `edited` entry this recent is the edit_card call the mi
 
 
 def claim_cell(c: str, cid: str, chat_id: str, *, edit: bool = False) -> None:
-    """Credit a card a subagent or thread fork made (add_card) or changed (edit_card) to its chat. Every card from the shared
-    shim is stamped `terminal`; the mirror knows whose transcript a call is in and replaces that stamp with `chat:<id>`."""
+    """Credit a card a subagent or thread fork made (add_card) or changed (edit_card) to its chat. A card from the shared
+    shim is stamped `terminal`, unless the call was a thread's fork's whose thread was known as the card was made
+    (tools._as_fork); the mirror knows whose transcript a call is in and replaces that stamp with `chat:<id>`."""
     if not cid or not chat_id:
         return
     try:

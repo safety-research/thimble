@@ -27,6 +27,33 @@
       ],
       "default": "auto cite + verify"
     },
+    "checkerModel": {
+      "type": "string",
+      "title": "Checker",
+      "description": "The model of the second Claude that checks citations. same as Claude: the model of the conversation. Haiku 5.5, Sonnet 5.5, Opus 5.5 or Fable 5.1: that model, which reads the conversation without the cache of the conversation's model.",
+      "options": [
+        "same as Claude",
+        "Haiku 5.5",
+        "Sonnet 5.5",
+        "Opus 5.5",
+        "Fable 5.1"
+      ],
+      "default": "same as Claude"
+    },
+    "checkerEffort": {
+      "type": "string",
+      "title": "Effort",
+      "description": "How hard the second Claude that checks citations thinks. same as Claude: the effort of the conversation. low, medium, high, xhigh or max: that effort, of the levels Claude Code offers for the model Checker names.",
+      "options": [
+        "same as Claude",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "default": "same as Claude"
+    },
     "cards": {
       "type": "boolean",
       "title": "Cards",

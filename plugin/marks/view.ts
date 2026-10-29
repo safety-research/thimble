@@ -15,28 +15,30 @@
 //   pending      the turn still runs: the text's own color, underlined; the citations' light purple tint on hover
 //   checking     as pending, and a turning glyph (purple) right after it, until its own verdict arrives
 //   verified     as pending
-//   corrected    the corrected words in place of the marked ones, as pending: once corrected it holds, so it
-//                looks as a verified one does (its tray card says it was corrected). A narrowed one (`narrowed`) keeps
-//                its words: only the part the check cited is the mark, the rest reads as the reply's plain words
+//   corrected    the corrected words in place of the marked ones, as verified, with no sign: a click on them opens
+//                the tray, whose status says the check corrected them, and what they were, with the evidence. A
+//                narrowed one (`narrowed`) keeps its words: only the part the check cited is the mark, the rest reads
+//                as the reply's plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
 //                did not show them), or it did not run or gave no answer: red (`error`), underlined, with ` ×`
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
 //                look whatever the cause
-//   deferred     as pending: a citation whose check waits until the person opens it (the setting Citations: auto
-//                cite, or words the person asked about with c)
+//   deferred     as pending, with a dim ` ?` after it: a citation whose check waits until the person opens it (the
+//                setting Citations: auto cite, or words the person asked about with c), so it is not checked yet
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
-// The sign after a mark (the turning glyph, ×) takes two cells, and every other mark keeps those two cells when the
-// lines are cut (withLooks, a `gap` run that is not drawn), so the lines break at the same words whether a glyph shows
-// or not: no line wraps again when a check starts, nor as each verdict arrives.
+// The sign after a mark (the turning glyph, ×, ?) takes two cells, and every other mark keeps those two cells when
+// the lines are cut (withLooks, a `gap` run that is not drawn), so the lines break at the same words whether a glyph
+// shows or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
 // explainer highlighted teal or a heads-up orange (a fill behind the words); where a span and a mark share words they
 // keep the mark's underline with the span's fill behind them at rest, and take the span's press: an explainer or a
 // heads-up opens before the citation it stands on (] goes on to the citation). A span's own words are one hover group
 // (spanScope), as a citation's are: the pointer over any piece of it (its inline code, its bold words, a line it wraps
-// to) puts its slightly stronger fill (`hoverBg`) behind all of it, never Claude Code's inverse. While the tray shows
+// to) puts its slightly stronger fill (`hoverBg`) behind all of it and underlines it, as thimble's other presses are
+// underlined under the pointer (core/askcell.js quiet), never Claude Code's inverse. While the tray shows
 // a mark (`focus`), it is drawn bold on its tint, so the open one is easy to find. `dim` draws the words dim (a rewrite of them runs),
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 //
@@ -205,6 +207,7 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     if (look?.quiet) { k = e; continue }
     if (look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
     else if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
+    else if (look?.status === 'deferred') out.push({ s: ' ?', mark: r.mark, tag: 'wait' })
     else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
     k = e
   }
@@ -232,12 +235,13 @@ export function spanScope(replyKey: string, k: number): string {
 
 /** A span's run as a press of the feature's, drawn in the span's look. A span split into runs (inline code, bold, the
  *  lines it wraps to) is a press per run, every one in the span's hover group, so the pointer over any piece lights the
- *  whole span with its `hoverBg` (no inverse: Claude Code draws a plain Button inverse under the pointer). */
+ *  whole span with its `hoverBg` and underlines it (no inverse: Claude Code draws a plain Button inverse under the
+ *  pointer). */
 function spanEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const sp = o.spans?.[r.span as number]
   const { tint: _tint, hoverBg, ...look } = sp?.look ?? {}
   const scope = spanScope(o.key, r.span as number)
-  const hover = hoverBg ? { scope, backgroundColor: hoverBg } : { scope }
+  const hover = { scope, ...(hoverBg ? { backgroundColor: hoverBg } : {}), ...(sp?.onPress ? { underline: true } : {}) }
   const p: Any = { children: r.s, ...look, hover }
   if (r.b) p.bold = true
   if (r.it) p.italic = true
@@ -259,6 +263,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const id = look.n > 0 ? `${o.key}:${look.n}` : `${o.key}:at${r.mark as number}`
   const tint = citeHover(id, look.status)
   if (r.tag === 'spin') p.color = accent()
+  else if (r.tag === 'wait') p.dimColor = true
   else if (r.tag) p.color = 'error'
   else if (!look.quiet) Object.assign(p, wordsLook(look.status, id))
   // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill at rest under the
@@ -272,7 +277,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   if (o.focus === r.mark) { p.bold = true; if (!r.tag) p.backgroundColor = tint.backgroundColor }
   if (sp?.onPress && !r.tag) {
     const scope = spanScope(o.key, r.span as number)
-    const hover = { scope, inverse: false, ...(sp.look.hoverBg ? { backgroundColor: sp.look.hoverBg } : {}) }
+    const hover = { scope, inverse: false, underline: true, ...(sp.look.hoverBg ? { backgroundColor: sp.look.hoverBg } : {}) }
     return els.Button({ key, plain: true, label: String(sp.label || r.s).slice(0, 120), hover, children: [els.Text(p)], onPress: () => sp.onPress!() })
   }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
@@ -455,9 +460,9 @@ export function lostSpansEl(els: Any, lost: LostSpan[], key: string): Any | null
   const { Box, Button, Text } = els
   return Box({ key, marginLeft: 2, flexDirection: 'column', children: lost.map((l, i) => {
     const { tint: _tint, hoverBg, ...look } = l.look
-    // the pointer over the line: the words' stronger fill, as on the reply (spanEl), no inverse; the press heats the
-    // group, the words (a Text in its Text) take the fill
-    const hover = { scope: spanScope(key, i), ...(hoverBg ? { backgroundColor: hoverBg } : {}) }
+    // the pointer over the line: the words' stronger fill and their underline, as on the reply (spanEl), no inverse;
+    // the press heats the group, the words (a Text in its Text) take the fill
+    const hover = { scope: spanScope(key, i), ...(hoverBg ? { backgroundColor: hoverBg } : {}), ...(l.onPress ? { underline: true } : {}) }
     const words = [Text({ key: 'w', ...look, hover, children: l.words }), Text({ key: 'd', dimColor: true, children: ` ${l.kind} · the check of the citations changed these words` })]
     return l.onPress
       ? Button({ key: `${key}-${i}`, plain: true, label: `${l.label} (the check changed its words)`.slice(0, 120), hover: { scope: hover.scope, inverse: false }, onPress: () => l.onPress!(), children: [Text({ key: 't', children: words })] })

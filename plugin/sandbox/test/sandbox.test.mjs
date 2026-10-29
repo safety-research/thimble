@@ -9,7 +9,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -217,20 +217,35 @@ test('the probe\'s runner starts with a temp folder too long for a socket in it,
   assert.deepEqual(readdirSync(long), [])
 })
 
-/** setup.mjs's probe (its JSON, or with `json` false the line it prints) in a THIMBLE_HOME of its own, whose sandbox
- *  runtime is a made-up one that runs the shell command `command` in place of the card runner. */
-function probeWith(command, json = true) {
+/** A THIMBLE_HOME of its own whose sandbox runtime is a made-up one, installed as setup.mjs installs it: its entry file
+ *  is `index` (none when null). */
+function madeUpHome(index) {
   const home = mkdtempSync(join(dir, 'home-'))
   const pkg = join(home, 'srt', s.version, 'node_modules', '@anthropic-ai', 'sandbox-runtime')
   mkdirSync(join(pkg, 'dist'), { recursive: true })
   writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@anthropic-ai/sandbox-runtime', version: s.version, type: 'module', main: 'dist/index.js' }))
-  writeFileSync(join(pkg, 'dist', 'index.js'), `export const SandboxRuntimeConfigSchema = { parse: rules => rules }
-export const SandboxManager = { checkDependencies: () => ({ errors: [], warnings: [] }), updateConfig() {}, cleanupAfterCommand() {}, wrapWithSandbox: async () => ${JSON.stringify(command)} }\n`)
+  if (index !== null) writeFileSync(join(pkg, 'dist', 'index.js'), index)
   // the lock file it was installed from, by which setup.mjs knows it is installed
   writeFileSync(join(home, 'srt', s.version, 'node_modules', '.thimble-lock.json'), readFileSync(join(PLUGIN, 'sandbox', 'package-lock.json'), 'utf8'))
-  const r = spawnSync(s.node, [SETUP, ...(json ? ['--json'] : []), '--probe'], { encoding: 'utf8', timeout: 60000, env: { PATH: process.env.PATH, THIMBLE_HOME: home } })
+  return home
+}
+
+/** A made-up sandbox runtime's entry file, whose sandbox runs the shell command `command` in place of the card runner;
+ *  `wrap`, when given, is the body of its wrapWithSandbox in place of that. */
+const madeUpSrt = (command, wrap) => `export const SandboxRuntimeConfigSchema = { parse: rules => rules }
+export const SandboxManager = { checkDependencies: () => ({ errors: [], warnings: [] }), updateConfig() {}, cleanupAfterCommand() {}, wrapWithSandbox: async () => { ${wrap ?? `return ${JSON.stringify(command)}`} } }\n`
+
+/** setup.mjs's probe (its JSON, or with `json` false the line it prints) in a THIMBLE_HOME of its own, whose sandbox
+ *  runtime is a made-up one that runs the shell command `command` in place of the card runner. `o.args`: more
+ *  arguments, `o.env`: more of its environment, `o.wrap`: as madeUpSrt's. */
+function probeWith(command, json = true, o = {}) {
+  const home = madeUpHome(madeUpSrt(command, o.wrap))
+  const r = spawnSync(s.node, [SETUP, ...(json ? ['--json'] : []), '--probe', ...(o.args ?? [])], { encoding: 'utf8', timeout: 120000, env: { PATH: process.env.PATH, THIMBLE_HOME: home, ...o.env } })
   return json ? JSON.parse(r.stdout) : r.stdout
 }
+
+/** setup.mjs's environment where npm cannot reach its registry, with a cache of its own: an install of srt fails. */
+const offline = () => ({ npm_config_cache: mkdtempSync(join(dir, 'npm-cache-')), npm_config_registry: 'http://127.0.0.1:9/', npm_config_fetch_retries: '0' })
 
 test('a runner that ends before it opens its socket: the probe says how it ended and on which Node, also when it said nothing', () => {
   const node = `Node ${s.nodeVersion} (${s.node})`
@@ -258,6 +273,81 @@ test('a runner that an error ends before it opens its socket: the probe quotes t
   assert.match(got.why, /exit 1\b/)
   assert.ok(got.why.includes('made-up: refused') && got.why.includes('ERR_ACCESS_DENIED'), got.why)
   assert.doesNotMatch(got.why, /Node\.js v/)
+})
+
+test('the probe has the runner draw a test card in the sandbox, as a card call does, and its line says so', () => {
+  const r = spawnSync(s.node, [SETUP, '--probe'], { encoding: 'utf8', timeout: 60000, env: { PATH: process.env.PATH, THIMBLE_HOME: process.env.THIMBLE_HOME } })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /the runner drew a test card in \d+ ms\./)
+})
+
+test('a runner that answers but does not draw the test card: the probe says the card did not draw, and why', () => {
+  // a made-up sandbox runtime that starts, in place of the card runner, a made-up one on the probe's socket: it answers
+  // ping, and refuses to draw
+  const home = mkdtempSync(join(dir, 'home-'))
+  const pkg = join(home, 'srt', s.version, 'node_modules', '@anthropic-ai', 'sandbox-runtime')
+  mkdirSync(join(pkg, 'dist'), { recursive: true })
+  const runner = join(home, 'made-up-runner.mjs')
+  writeFileSync(runner, `import http from 'node:http'
+http.createServer((q, r) => { q.resume(); q.on('end', () => r.end(JSON.stringify(q.url === '/ping' ? { ok: true } : { ok: false, error: 'made-up: this runner draws nothing' }))) }).listen(process.argv[2])
+`)
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@anthropic-ai/sandbox-runtime', version: s.version, type: 'module', main: 'dist/index.js' }))
+  writeFileSync(join(pkg, 'dist', 'index.js'), `export const SandboxRuntimeConfigSchema = { parse: rules => rules }
+export const SandboxManager = { checkDependencies: () => ({ errors: [], warnings: [] }), updateConfig() {}, cleanupAfterCommand() {}, wrapWithSandbox: async command => ${JSON.stringify(`${s.node} ${runner} `)} + command.match(/[^\\s'"]*cards\\.sock/)[0] }\n`)
+  writeFileSync(join(home, 'srt', s.version, 'node_modules', '.thimble-lock.json'), readFileSync(join(PLUGIN, 'sandbox', 'package-lock.json'), 'utf8'))
+  const r = spawnSync(s.node, [SETUP, '--json', '--probe'], { encoding: 'utf8', timeout: 60000, env: { PATH: process.env.PATH, THIMBLE_HOME: home } })
+  const got = JSON.parse(r.stdout)
+  assert.equal(got.ok, false)
+  assert.match(got.why, /did not draw a test card: made-up: this runner draws nothing/)
+})
+
+test('with --repair, a sandbox runtime that does not load is installed again, and the probe then draws its test card; without it, the fix names --repair', () => {
+  // a copy of this machine's install whose entry file is gone
+  const home = mkdtempSync(join(dir, 'home-'))
+  cpSync(join(process.env.THIMBLE_HOME, 'srt', s.version), join(home, 'srt', s.version), { recursive: true })
+  const entry = join(home, 'srt', s.version, 'node_modules', '@anthropic-ai', 'sandbox-runtime', 'dist', 'index.js')
+  rmSync(entry)
+  const env = { PATH: process.env.PATH, THIMBLE_HOME: home }
+  const broken = JSON.parse(spawnSync(s.node, [SETUP, '--json', '--probe'], { encoding: 'utf8', timeout: 60000, env }).stdout)
+  assert.equal(broken.ok, false)
+  assert.match(broken.why, /does not load/)
+  assert.ok(broken.fix.endsWith(`node ${SETUP} --probe --repair`), broken.fix)
+  const fixed = JSON.parse(spawnSync(s.node, [SETUP, '--json', '--probe', '--repair'], { encoding: 'utf8', timeout: 300000, env }).stdout)
+  assert.equal(fixed.ok, true, `${fixed.why}. ${fixed.fix}`)
+  assert.match(fixed.repaired, /does not load/)
+  assert.ok(existsSync(entry))
+})
+
+test('with --repair, an install again that fails says both why: the cause it was to repair, and why the install failed', () => {
+  // a made-up install whose entry file is gone, and npm that cannot reach its registry
+  const r = spawnSync(s.node, [SETUP, '--json', '--probe', '--repair'], { encoding: 'utf8', timeout: 120000, env: { PATH: process.env.PATH, THIMBLE_HOME: madeUpHome(null), ...offline() } })
+  const got = JSON.parse(r.stdout)
+  assert.equal(got.ok, false)
+  assert.match(got.why, /^the sandbox runtime in .* does not load \(.*\); .*npm could not install the sandbox runtime .*ECONNREFUSED/)
+  // npm's fix, whose command repairs once npm reaches its registry
+  assert.match(got.fix, /`npm ping`/)
+  assert.ok(got.fix.endsWith(`run: node ${SETUP} --probe --repair`), got.fix)
+  assert.equal(got.repaired, undefined)
+})
+
+test('with --repair, srt is installed again only when its own files fail, not when the machine keeps the runner from starting or answering', () => {
+  const repair = { args: ['--repair'], env: offline() }
+  // the machine's: a runner that ends and says nothing (as Node 25 refused its socket), a kernel that gives bubblewrap
+  // no namespaces, a machine too loaded for the runner to answer in time. srt is not installed again (npm, which
+  // cannot reach its registry here, is not run), and the probe's own cause is said
+  for (const command of ['true', "sh -c 'echo bwrap: No permissions to creating new namespace, likely because the kernel does not allow non-privileged user namespaces >&2; exit 1'", 'sleep 60']) {
+    const got = probeWith(command, true, repair)
+    assert.equal(got.ok, false)
+    assert.match(got.why, /^the card runner /, command)
+    assert.doesNotMatch(got.why, /npm/, command)
+    assert.equal(got.repaired, undefined)
+  }
+  // srt's own: it does not set the sandbox up (run.mjs), or a file of its folder is missing. It is installed again,
+  // which fails here, and says so after the cause
+  const unset = probeWith('', true, { ...repair, wrap: 'throw new Error("made-up: a file of srt is broken")' })
+  assert.match(unset.why, /could not be set up: made-up: a file of srt is broken; .*npm could not install/)
+  const missing = probeWith('', true, { ...repair, wrap: "return \"sh -c 'echo bwrap: execvp \" + new URL('../vendor/seccomp/x64/apply-seccomp', import.meta.url).pathname + \": No such file or directory >&2; exit 1'\"" })
+  assert.match(missing.why, /vendor\/seccomp\/x64\/apply-seccomp: No such file or directory; .*npm could not install/)
 })
 
 test('the sandbox starts its command with the system\'s bash, also when PATH finds another bash first', () => {

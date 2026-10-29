@@ -105,11 +105,13 @@ def _tidy(cwd: Path) -> None:
 
 def settings(spec: Any, bash: bool, tmp: Path | None = None) -> dict[str, Any]:
     """The session's inline settings: its effort as 0.8's calls pinned it (sdk.cli_settings), the sandbox for Bash
-    (required: a sandbox that cannot start refuses the call, module note), edits only in the write folders, and no reads
-    of thimble's private files. `tmp` is the session's TMPDIR, which its commands may write too."""
-    from . import cc_settings, sdk  # noqa: PLC0415
+    (required: a sandbox that cannot start refuses the call, module note), the PATH Bash has on the Messages API
+    (runtime_tools.shell_path), edits only in the write folders, and no reads of thimble's private files. `tmp` is the
+    session's TMPDIR, which its commands may write too."""
+    from . import cc_settings, runtime_tools, sdk  # noqa: PLC0415
 
     out = json.loads(sdk.cli_settings(spec.model, spec.effort or None))
+    out["env"] = {**out.get("env", {}), "PATH": runtime_tools.shell_path()}
     no_write = list(getattr(spec, "no_write", []) or [])
     corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings lets Claude edit the folder
     out["permissions"] = {

@@ -12,17 +12,19 @@ Installs thimble's two products. It checks Node, Python and uv first, and says w
 it installs the plugin, it looks for thimble 0.9, and stops while 0.9 is here: it says what it found, how to keep 0.9's
 workspaces (0.10 cannot open them), and the commands that remove 0.9.
   The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble, then
-    the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt); on Linux it
-    says which system packages the sandbox lacks, with the one command that installs them (it never runs sudo).
+    the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt), and draws a
+    test card in it on the node a new terminal finds; a sandbox whose files are missing or broken it installs again.
+    On Linux it says which system packages the sandbox lacks, with the one command that installs them (it never runs
+    sudo).
     Without the claude command, it prints the two commands to run.
     It also links the thimble command into ~/.local/bin, for a shell: thimble update moves both products to the
     newest release, thimble fixes lists your changes to thimble, and thimble --help lists the rest.
   The browser workbench (thimble 0.8's browser mode), from this checkout: the server (uv sync in browser/backend,
     with its test extras), the page and the sandbox runtime (npm ci in browser/frontend, then a build), and a
     thimble-browser launcher in ~/.local/bin. It says how much disk space this takes, about 1 GB. Then it asks how
-    the workbench reaches Claude: 1 an Anthropic API key (the default), 2 your Claude Code sign-in (it launches
-    headless Claude Code sessions, so it asks you to confirm), 3 Workload Identity Federation (a config file), checks
-    the choice and saves it in ~/.thimble-browser. The page asks the same when this step was skipped.
+    the workbench reaches Claude: 1 your Claude Code sign-in (the default, and recommended; it launches headless
+    Claude Code sessions, so it asks you to confirm), 2 an Anthropic API key, 3 Workload Identity Federation (a config
+    file), checks the choice and saves it in ~/.thimble-browser. The page asks the same when this step was skipped.
 Running it again is safe, and updates both.
 
   --no-browser   install the terminal plugin only
@@ -250,6 +252,40 @@ link_cli() {
 }
 # sq TEXT: TEXT in single quotes, for a launcher
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# fresh_path: the PATH a new terminal starts with, where the claude the person starts finds the node the plugin's cards
+# run on: their login shell ($SHELL), started as a terminal starts it (a login shell, interactive, so it reads their
+# startup files) with no input, prints its environment; '' when it cannot say within 20 s. The shell runs in a session
+# of its own, with no terminal: an interactive shell makes the terminal it finds its own and does not give it back, so
+# the install's next question would stop it ("suspended (tty input)"), and a startup file that reads the terminal would
+# wait there unseen. At 20 s the shell and what it started get SIGKILL (an interactive shell ignores SIGTERM). In the
+# install's Python, as macOS has no setsid command; -I, so no file of the current folder stands in for a module
+fresh_path() {
+  local sh="${SHELL:-}"
+  [ -n "$sh" ] && [ -x "$sh" ] || return 0
+  "$py" -I -c '
+import os, signal, subprocess, sys, tempfile
+sh = sys.argv[1]
+e = os.environ
+env = {"HOME": e.get("HOME", ""), "USER": e.get("USER", ""), "LOGNAME": e.get("LOGNAME") or e.get("USER", ""), "SHELL": sh,
+       "TERM": e.get("TERM") or "xterm-256color", "LANG": e.get("LANG") or "C.UTF-8"}
+# its output in a file, read once the shell ends: a program its startup files leave running may keep a pipe open
+with tempfile.TemporaryFile() as out:
+    p = subprocess.Popen([sh, "-lic", "env"], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.DEVNULL, env=env,
+                         start_new_session=True)
+    try:
+        p.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        p.wait()
+        sys.exit(0)
+    out.seek(0)
+    paths = [line[5:] for line in out.read().decode(errors="replace").splitlines() if line.startswith("PATH=")]
+print(paths[-1] if paths else "")
+' "$sh" 2>/dev/null || true
+}
 
 # ---- the terminal plugin
 
@@ -384,10 +420,23 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
 ' || true)"
     if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
       say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
+      # the test draws a card as a session does: on the node and PATH of a new terminal (fresh_path), else on this
+      # shell's, which a line says when the login shell could not be started (tcsh takes -l only as its one flag); a
+      # failure it can repair (srt's files missing or broken) it repairs (--repair)
+      probe_path="$(fresh_path)"
+      probe_node=""
+      if [ -n "$probe_path" ]; then
+        probe_node="$(PATH="$probe_path"; hash -r; command -v node 2>/dev/null || true)"
+        [ -n "$probe_node" ] || notes+=("a new terminal finds no node, and the plugin's cards run on the node a new terminal finds. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"$(dirname "$(command -v node)"):\$PATH\"")
+      fi
+      if [ -z "$probe_node" ]; then
+        [ -n "$probe_path" ] || say "Your login shell${SHELL:+ ($SHELL)} could not be started as a new terminal starts it, so the test card runs on this shell's node: $(command -v node)"
+        probe_node="$(command -v node)"; probe_path="$PATH"
+      fi
       # its line (npm's progress goes to stderr, and shows as it comes); when the sandbox does not work yet, the line's
       # why and fix again in the notes, at the end. The fix, on the line after the why, often ends in a command: it
       # keeps a line of its own, so that no words follow the command
-      if sandbox="$(node "$at/sandbox/setup.mjs" --probe)"; then
+      if sandbox="$(PATH="$probe_path" "$probe_node" "$at/sandbox/setup.mjs" --probe --repair)"; then
         say "$sandbox"
       else
         say "$sandbox"
@@ -401,7 +450,8 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
     if [ -n "$at" ] && [ -x "$at/bin/thimble" ]; then
       link_cli "$at/bin/thimble"
     fi
-    say "The plugin works in a new claude session, in a folder of data files that you trust."
+    say "To use the plugin, start claude in a folder of data files you trust, or type /reload-plugins in an open session."
+    say "After a change to Node, start claude in a new terminal."
   else
     say "Claude Code (the claude command) is not installed. Install it, then run:"
     if [ -n "$gone" ]; then
@@ -450,7 +500,7 @@ exec $(sq "$browser/scripts/thimble-browser") \"\$@\"
     fi
   elif ! access status >/dev/null 2>&1; then
     # no terminal to ask in (an agent runs this script, or --no-setup): whoever runs it asks the person
-    notes+=("Claude access is not set up yet. Ask the person which way the workbench reaches Claude, then set it with thimble-browser --setup, which checks that Claude answers. Their Claude Code sign-in, only after they accept \"This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.\": --how claude-code --yes. An Anthropic API key: --key-file FILE, a file they write themselves from the clipboard (never take a key in a chat, and never read that file). Workload Identity Federation: --how wif --wif-file FILE (--find-wif lists the config files it finds). Skipped, the page asks at its first start")
+    notes+=("Claude access is not set up yet. Ask the person which way the workbench reaches Claude, then set it with thimble-browser --setup, which checks that Claude answers. Their Claude Code sign-in (recommended), only after they accept \"This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.\": --how claude-code --yes. An Anthropic API key: --key-file FILE, a file they write themselves from the clipboard (never take a key in a chat, and never read that file). Workload Identity Federation: --how wif --wif-file FILE (--find-wif lists the config files it finds). Skipped, the page asks at its first start")
   fi
 
   kb() { du -sk "$1" 2>/dev/null | awk '{print $1}' || echo 0; }
@@ -461,6 +511,10 @@ exec $(sq "$browser/scripts/thimble-browser") \"\$@\"
     "(browser/backend/.venv) and the built page $(mb "$built") MB."
 fi
 
+if [ "$plugin" = 1 ] && [ "$web" = 1 ]; then
+  say ""
+  say "Use the terminal plugin when you work in Claude Code, and the browser workbench to work in a web page."
+fi
 if [ "$web" = 1 ]; then
   say ""
   say "To start the browser workbench, run this in a folder of files:"

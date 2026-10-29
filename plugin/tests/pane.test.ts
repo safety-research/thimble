@@ -1,14 +1,16 @@
 // The side pane (core/pane.ts): its trail of the panes it showed, the top row that names esc, which goes back down it (`esc back to …`)
 // or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, passing over a pane it can no longer show, and
 // closing when Claude Code does not place the pane it goes back to; and the docked frame that keeps the top row and the input bar at its bottom. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
 import { barKey, registerBar } from '../bar/register'
 import { noteViewport } from '../cards/draw'
 import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
-import { setOptions } from '../settings/features.mjs'
+import { treeRows } from '../core/trail.mjs'
+import { setOptions, SWITCHES } from '../settings/features.mjs'
 import { resetThreads } from '../threads/thread'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -208,16 +210,16 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   s.$.ui.focus = async (a: Any) => { focused.push(a.key); return {} }
   await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
   await draw(s)
-  // Minimal first, then Citations and Cards
+  // Minimal first, then Citations and Checker
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
   await draw(s)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
-  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('checkerModel')
   await draw(s)
   expect(await scrollPane(s.$, { by: -1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
-  expect(focused).toEqual(['mode-citations-auto cite + verify', 'mode-cards-on', 'mode-citations-auto cite + verify'])
+  expect(focused).toEqual(['mode-citations-auto cite + verify', 'mode-checkerModel-same as Claude', 'mode-citations-auto cite + verify'])
   // the ring moving along the row picked (← →, tab) sets the choice it lands on; onto another row it lands on that
   // row's choice set, picks that row and changes nothing
   const set: Any[] = []
@@ -242,6 +244,88 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   expect(set.at(-1)).toMatchObject({ key: 'thimble@inline.labels', value: false })
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('labels')
   expect(focused.at(-1)).toBe('mode-labels-off')
+  setOptions({})
+})
+
+test('in the settings, the Checker row shows while a checker can run: in every mode of Citations but off, where ↑ and ↓ pass over it', async () => {
+  const s = setup()
+  const held: Record<string, unknown> = { citations: 'off' }
+  s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
+  s.$.ui.focus = async () => ({})
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const rows = async () => nodes(await draw(s)).map(n => n.props?.key).filter((k: Any) => typeof k === 'string' && k.startsWith('sw-'))
+  // Citations off: no citation is checked, so no Checker row; a step down from Citations lands on Cards
+  expect((await rows()).slice(0, 3)).toEqual(['sw-minimal', 'sw-citations', 'sw-cards'])
+  await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'citations')
+  await draw(s)
+  expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
+  // the Checker row picked before Citations went off: the tint stands on Citations, the row it belongs to
+  await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'checkerModel')
+  const tinted = nodes(await draw(s)).filter(n => String(n.props?.key).startsWith('sw-') && n.props?.backgroundColor)
+  expect(tinted.map(n => n.props.key)).toEqual(['sw-citations'])
+  // every other mode checks citations (manual: the words c cites), so the row shows, after Citations
+  for (const mode of ['auto cite + verify', 'auto cite', 'manual']) {
+    held.citations = mode
+    expect((await rows()).slice(0, 3)).toEqual(['sw-minimal', 'sw-citations', 'sw-checkerModel'])
+  }
+  setOptions({})
+})
+
+test("in the settings on Bedrock, Vertex or Foundry, no Checker row, whatever it holds: the models it names are the first-party API's; ↓ from Citations lands on Cards", async () => {
+  const cases: [Record<string, string>, boolean][] = [
+    [{ CLAUDE_CODE_USE_BEDROCK: '1' }, false], [{ CLAUDE_CODE_USE_VERTEX: 'true' }, false], [{ CLAUDE_CODE_USE_FOUNDRY: 'ON' }, false],
+    [{ CLAUDE_CODE_USE_BEDROCK: '0', CLAUDE_CODE_USE_VERTEX: 'false' }, true],
+  ]
+  for (const [env, shows] of cases) {
+    const s = setup()
+    s.$.env = { get: async (name: string) => env[name] }
+    const held: Record<string, unknown> = { citations: 'auto cite + verify', checkerModel: 'Haiku 5.5' }
+    s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
+    s.$.ui.focus = async () => ({})
+    await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+    const rows = nodes(await draw(s)).map(n => n.props?.key).filter((k: Any) => typeof k === 'string' && k.startsWith('sw-'))
+    expect(rows.slice(0, 3)).toEqual(['sw-minimal', 'sw-citations', shows ? 'sw-checkerModel' : 'sw-cards'])
+    await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'citations')
+    await draw(s)
+    expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
+    expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe(shows ? 'checkerModel' : 'cards')
+  }
+  setOptions({})
+})
+
+test('in the settings, Checker names each model with its version, as Claude Code shows it, and Effort, under it, the levels Claude Code offers for that model; both hide while Citations is off and on Bedrock, Vertex or Foundry', async () => {
+  for (const [env, citations, shows] of [[{}, 'auto cite + verify', true], [{}, 'off', false], [{ CLAUDE_CODE_USE_BEDROCK: '1' }, 'auto cite + verify', false], [{ CLAUDE_CODE_USE_FOUNDRY: 'on' }, 'manual', false]] as [Record<string, string>, string, boolean][]) {
+    const s = setup()
+    s.$.env = { get: async (name: string) => env[name] }
+    const held: Record<string, unknown> = { citations, checkerModel: 'Fable 5.1', checkerEffort: 'xhigh' }
+    s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
+    s.$.ui.focus = async () => ({})
+    await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+    const tree = nodes(await draw(s))
+    const rows = tree.map(n => n.props?.key).filter((k: Any) => typeof k === 'string' && k.startsWith('sw-'))
+    expect(rows.slice(0, 4)).toEqual(shows ? ['sw-minimal', 'sw-citations', 'sw-checkerModel', 'sw-checkerEffort'] : ['sw-minimal', 'sw-citations', 'sw-cards', 'sw-squeezeAnswers'])
+    if (!shows) continue
+    const row = (key: string) => tree.find(n => n.props?.key === `sw-${key}`)
+    // the models as Claude Code shows them, with their versions: the one set lit, its line naming it
+    const checker = nodes(row('checkerModel'))
+    expect(textOf(checker.find(n => n.props?.key === 'choices'))).toBe('same as Claude · Haiku 5.5 · Sonnet 5.5 · Opus 5.5 · Fable 5.1')
+    expect(textOf(checker.find(n => n.props?.key === 'says-checkerModel'))).toBe('The second Claude checks citations on Fable 5.1.')
+    const lit = (ns: Any[]) => ns.filter(n => n.type === 'Text' && n.props?.bold && n.props?.color === 'success').map(textOf)
+    expect(lit(checker)).toEqual(['Fable 5.1'])
+    // each choice keeps the dot after it, so a row the choices wrap onto starts with a choice
+    expect(checker.filter(n => String(n.props?.key).startsWith('opt-')).map(textOf)).toEqual(['same as Claude · ', 'Haiku 5.5 · ', 'Sonnet 5.5 · ', 'Opus 5.5 · ', 'Fable 5.1'])
+    // its effort: the levels Claude Code offers for Fable 5.1, by Claude Code's words for them
+    const effort = nodes(row('checkerEffort'))
+    expect(textOf(effort.find(n => n.props?.key === 'choices'))).toBe('same as Claude · low · medium · high · xhigh · max')
+    expect(lit(effort)).toEqual(['xhigh'])
+    expect(textOf(effort.find(n => n.props?.key === 'says-checkerEffort'))).toBe('The second Claude checks citations at xhigh effort.')
+    // a press on a model sets it by the words the pane shows, which Claude Code keeps, and /config shows too
+    const set: Any[] = []
+    s.$.config.set = async (e: Any) => { set.push(e); return {} }
+    await tree.find(n => n.props?.key === 'mode-checkerModel-Haiku 5.5').props.onPress()
+    expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.checkerModel', value: 'Haiku 5.5' })])
+  }
   setOptions({})
 })
 
@@ -303,4 +387,42 @@ test('an item of the bar a failure line quotes is a part of its own with that it
   expect(pressedWords('t needs a wider terminal: widen the window to show the side pane, or click “t 2 threads”.', named).some(p => p.press)).toBe(false)
   // a key the line names is still a press of its own
   expect(pressedWords('“r coverage” failed. Press x to try again.', named).map(p => p.key ?? (p.press ? 'item' : ''))).toEqual(['item', '', 'x', ''])
+})
+
+test('in the settings, the row picked and the line under it stay in view at any height: ↓ to a row below the window brings it in; its line says what its mode gives, as when it is not picked', async () => {
+  const s = setup()
+  s.$.ui.focus = async () => ({})
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const H = 16
+  await draw(s, H)
+  // ↓ down to Evidence, far below the first window
+  while ((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value !== 'claimsMode') {
+    await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })
+    await draw(s, H)
+  }
+  const tree = await draw(s, H)
+  const inner = nodes(tree).find(n => n.props?.key === 'pane-body-in')
+  const by = -(inner.props.top ?? 0)
+  const rows: Any[] = inner.props.children[0].props.children
+  const k = rows.findIndex(n => n.props?.key === 'sw-claimsMode')
+  const top = treeRows(rows.slice(0, k), 70)
+  // the window: the pane's rows less its top row and the line that says how much more there is
+  expect(top).toBeGreaterThanOrEqual(by)
+  expect(top + treeRows(rows[k], 70)).toBeLessThanOrEqual(by + H - 2)
+  // the line under it says what its mode gives, and nothing more for being picked
+  const says = textOf(nodes(rows[k]).find(n => n.props?.key === 'says-claimsMode'))
+  expect(says).toContain('Claims are found after each answer.')
+  expect(says).toBe((SWITCHES.find(x => x.key === 'claimsMode') as Any).says.auto)
+  setOptions({})
+})
+
+test('in a narrow settings pane, a row whose choices wrap is measured on the lines it takes, so the row picked is brought into view whole', async () => {
+  const s = setup()
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const narrow = { ...DOCK(24), props: { ...DOCK(24).props, bodyColumns: 50 } }
+  const tree = await drawPane(s.$, narrow, await paneNow(s.$), els)
+  // Citations' four modes take two lines beside its name at 50 columns: `auto cite + verify · auto cite ·`, `manual · off`
+  const line = nodes(nodes(tree).find(n => n.props?.key === 'sw-citations')).find(n => n.props?.key === 'line')
+  expect(treeRows(line, 50)).toBe(2)
+  setOptions({})
 })

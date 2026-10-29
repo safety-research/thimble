@@ -249,11 +249,6 @@ export function classifyRequest(method: string, url: string, body?: string | nul
   }
   // a message typed into the orientation's thread, which resumes it or waits in its queue
   if (a === 'orientation' && b === 'message' && method === 'POST') return { kind: 'ask-send', target: 'chat:orient', detail: { event: 'orient-follow-up', chars: (str(B()?.text) ?? '').length } }
-  // the frame the analyst selected or worked in on the canvas, which the canvas reports as it changes
-  if (a === 'canvas' && b === 'active-group' && method === 'PUT') {
-    const group = str(B()?.group)
-    return group ? { kind: 'notebook-switch', target: `group:${group}` } : null
-  }
   if (a === 'filters') {
     if (method === 'PUT') {
       const o = B()

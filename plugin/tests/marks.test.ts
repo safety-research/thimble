@@ -4,7 +4,7 @@
 // not run) with one failure line, and x starts their check; the checker may only read, and run code as one Python
 // script. All data is made up.
 // `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
 import { autoRepair, awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, checkOpened, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
@@ -12,8 +12,9 @@ import { setOptions } from '../settings/features.mjs'
 import { marksIn, withRewrites } from '../marks/message.js'
 import { quietLooks } from '../marks/register'
 import { restoreMarks, rowMarks } from '../marks/store'
-import { messageEl } from '../marks/view'
+import { lostSpansEl, messageEl } from '../marks/view'
 import { tempRun } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -123,7 +124,9 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   // the validator read the fork's real Bash call
   expect(JSON.parse(seen.stdin[0]!).calls[0]).toEqual({ command: "python3 - <<'PY'\nprint('12 of 40')\nPY", output: '12 of 40', by: 'checker' })
   const settled = await drawn($)
+  // the corrected words in place, with no sign after them; the failed one red, with × after it
   expect(settled).toContain('merged 12 of 40.')
+  expect(settled).not.toContain('*')
   expect(settled).toContain('"ship it" ×')
   // once settled no footer counts the marks: each shows its own status where it stands
   expect(settled).not.toContain('citation wrong')
@@ -351,6 +354,7 @@ test("x whose check rewrites the citation's sentence: the reply shows the new se
   const body = textOf(messageEl(ELS, { text, marks: marksIn(text), looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
   expect(body).toContain('It said "ship it now" on line 9.')
   expect(body).toContain('merged 12 of 40.')
+  expect(body).not.toContain('*')
   const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
   expect(told['marks:row-1:repair:3']).toContain('- the sentence "It said "ship it"." is rewritten as "It said "ship it now" on line 9.", which cites "ship it now" (the check: "line 9 holds these words")')
 })
@@ -460,10 +464,11 @@ test('with Citations auto cite, the reply\'s citations wait unchecked; opening o
     const { $, seen } = engine(VALIDATED)
     await noteRow($, 'row-1', REPLY)
     await startCheck($, { turnId: 't-1', reason: 'answer' })
-    // no check after the reply: each citation reads as the reply's own cited words, with no sign after it
+    // no check after the reply: each citation reads as the reply's own cited words, with a dim ? after it, since it is
+    // not checked yet
     expect(seen.spawned.length).toBe(0)
     expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'deferred', 'deferred'])
-    expect(await drawn($)).toContain('merged 15 of 40.')
+    expect(await drawn($)).toContain('merged 15 of 40 ?.')
     // the person opens citation 2: its check alone starts, and it spins
     await checkOpened($, 'row-1', 2)
     expect(seen.spawned.length).toBe(1)
@@ -542,4 +547,12 @@ test("with Citations manual, the citations Claude wrote draw as plain words, und
   } finally {
     setOptions({ citations: 'auto cite + verify' })
   }
+})
+
+test("the pointer over the words of an explainer or a heads-up the check moved off the reply, on their line under it, underlines them over their stronger fill, as on the reply", () => {
+  const line = lostSpansEl(ELS, [
+    { words: 'retry budget', kind: 'explainer', look: { backgroundColor: '#1e4d47', hoverBg: '#2b7068' }, label: 'explain retry budget', onPress: () => undefined },
+  ], 'k')
+  const words = all(line).find(n => n.type === 'Text' && n.props?.children === 'retry budget')
+  expect(words?.props?.hover).toMatchObject({ backgroundColor: '#2b7068', underline: true })
 })

@@ -44,6 +44,8 @@ export interface CellCardProps {
   collapsed: boolean
   /** the edges of the frame's other cards stack under it */
   deck: boolean
+  /** the lone card of a collapsed frame, folded to its question (layout.ts FOLD_H) */
+  folded?: boolean
   dragging: boolean
   /** its details are open in the panel */
   detailOpen: boolean
@@ -146,6 +148,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   const cls = ['bcell', `bcell-kind-${kind}`]
   if (p.selected) cls.push('is-selected')
   if (p.collapsed) cls.push('is-collapsed')
+  if (p.folded) cls.push('is-folded')
   if (p.dragging) cls.push('is-dragging')
   if (p.h != null) cls.push('is-sized')
   if (dimmed) cls.push('is-dimmed')

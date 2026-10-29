@@ -641,8 +641,9 @@ async def ask(c: str, key: str | None, tool_name: str, inp: Any, agent_id: str |
         run.groups[web] = rid
     if updates:
         run.offers[rid] = updates
-    agents.update_agent(c, run.chat, permissions=[*_pending(c, run.chat), entry])
+    # logged before the card shows it, so whatever answers it, from any thread, is logged after it
     agents.log_permission(c, "asked", chat=run.chat, session=key, **entry)
+    agents.update_agent(c, run.chat, permissions=[*_pending(c, run.chat), entry])
     chosen: list[dict[str, Any]] | None = None
     try:
         try:

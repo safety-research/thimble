@@ -1,5 +1,5 @@
 // The typed client for every route of the backend's API.
-import type { FixStatus } from '../chat/fix'
+import type { FixStatus, FixTried } from '../chat/fix'
 import type {
   CanvasResponse,
   Extensions,
@@ -105,10 +105,11 @@ function setHash(params: URLSearchParams): void {
  * it holds stands. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
  * shell/SignIn's line and a notice this page makes say (claimRefused, lib/notices showCodeGone; a later sign-in takes
  * the notice away). The key an earlier version's link carried (`k` in the hash)
- * is taken out of the address and never sent. After the claim the page asks which browser it is (GET /ui/paired), so
- * it leaves out the notice of its own sign-in (lib/notices setBrowserId). Memoised: with no code in the link the
- * cookie the browser already holds stands; a claim the server never answered leaves the code in the address and is
- * tried again by the next call. `j` awaits it, so a write never races the claim. */
+ * is taken out of the address and never sent. After the claim the page asks which browser it is and when it signed in
+ * (GET /ui/paired), so it leaves out the notices of its own sign-in and of those before it (lib/notices setBrowserId).
+ * Memoised: with no code in the link the cookie the browser already holds stands; a claim the server never answered
+ * leaves the code in the address and is tried again by the next call. `j` awaits it, so a write never races the
+ * claim. */
 export function claimKey(): Promise<void> {
   if (keyReady) return keyReady
   if (typeof window === 'undefined') return (keyReady = Promise.resolve())
@@ -158,16 +159,16 @@ async function claim(code: string): Promise<boolean> {
   return false
 }
 
-type Paired = { paired: boolean; id: string }
+type Paired = { paired: boolean; id: string; at?: string }
 // what GET /ui/paired answered after the last claim the server answered; null before one, or when the read failed
 let afterClaim: Promise<Paired | null> = Promise.resolve(null)
 
-/** This browser's id (GET /ui/paired), for lib/notices; a read that fails leaves it unknown. The answer, or null when
- * the read failed. */
+/** This browser's id and when it signed in (GET /ui/paired), for lib/notices; a read that fails leaves them unknown.
+ * The answer, or null when the read failed. */
 async function learnBrowser(): Promise<Paired | null> {
   try {
     const got = await api.paired()
-    setBrowserId(typeof got?.id === 'string' ? got.id : '')
+    setBrowserId(typeof got?.id === 'string' ? got.id : '', typeof got?.at === 'string' ? got.at : '')
     return got ?? null
   } catch {
     return null // unknown: every sign-in notice shows
@@ -491,6 +492,10 @@ export const api = {
   checkCardAgain: (c: string, id: string) => j<{ card: string; check: string }>(`${ws(c)}/cells/${enc(id)}/check`, { method: 'POST' }),
   /** `POST …/cells/{id}/check/stop`: stop the card's check (Stop in its details); the card stays as it is. */
   stopCardCheck: (c: string, id: string) => j<{ card: string; stopped: boolean }>(`${ws(c)}/cells/${enc(id)}/check/stop`, { method: 'POST' }),
+  /** `POST …/cells/{id}/drawn`: the card's body drew `height` px tall, past what the canvas shows at rest, or its page laid
+   * out `width` px wide in a frame `frame` px wide; the server tells the card's author (backend card_size). `told` says
+   * whether it was told now. */
+  cardDrawn: (c: string, id: string, size: CardDrawn) => j<{ told: boolean }>(`${ws(c)}/cells/${enc(id)}/drawn`, { method: 'POST', body: JSON.stringify(size) }),
   /** `GET /card-checks`: whether the automatic check is on, and the checks running now with their phase. */
   cardChecks: (c: string) => j<CardCheckStatus>(`${ws(c)}/card-checks`),
   /** `POST /card-checks/stop`: stop every card check of the workspace. */
@@ -548,9 +553,9 @@ export const api = {
   notices: (c: string) => j<unknown[]>(`${ws(c)}/notices`),
   /** × on a notice, or a fix of the analyst's that went through: the server forgets it (backend notices.dismiss_route). */
   dismissNotice: (c: string, id: string) => j<{ dismissed: boolean }>(`${ws(c)}/notices/${enc(id)}/dismiss`, { method: 'POST' }),
-  /** Whether this browser is signed in, and its id: the first 12 hex digits of its cookie's hash, '' when not signed in
-   * (backend main.ui_paired). */
-  paired: () => j<{ paired: boolean; id: string }>(`${apiBase()}/ui/paired`),
+  /** Whether this browser is signed in, its id (the first 12 hex digits of its cookie's hash) and when it signed in, ''
+   * when not signed in (backend main.ui_paired). */
+  paired: () => j<{ paired: boolean; id: string; at?: string }>(`${apiBase()}/ui/paired`),
   /** A sign-in notice's Sign it out: the server signs the browser `id` out and clears its notice in workspace `c`
    * (backend main.ui_signout). */
   signOut: (id: string, c?: string) => j<{ signed_out: boolean }>(`${apiBase()}/ui/signout`, { method: 'POST', body: JSON.stringify(c ? { id, ws: c } : { id }) }),
@@ -651,8 +656,8 @@ export const api = {
     j<StartAnswer>(`${ws(c)}/write`, { method: 'POST', body: JSON.stringify({ doc: slug, ...body }) }).then(startAnswer),
   /** Send the analyst's session what the analyst wrote at one place (`POST /ws/{c}/events {kind: card}`, the `card`
    * bullet of prompts/main.md): a request sent with ⌘↵ (lib/agentKey) or /card, made in document `doc` after the
-   * passage `after` names, or on card `card`. A card main makes for it with add_card in the group
-   * `request:<request>` lands in the analyst's Your work, and the stream's `card-request {request, card}` names it. */
+   * passage `after` names, or on card `card`. A card main makes for it with add_card, whose group is
+   * `request:<request>`, stands loose on the canvas, and the stream's `card-request {request, card}` names it. */
   askCard: (c: string, body: { text: string; request: string; doc?: string; after?: string; card?: string }) =>
     j<EventPosted>(`${ws(c)}/events`, {
       method: 'POST',
@@ -665,11 +670,14 @@ export const api = {
   /** Use it now, or Use it in Your fixes: the person's click puts the fix on, and the server starts again with it */
   applyFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/apply`, { method: 'POST' }),
   /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows, which main reads with the person's
-   * fixes and starts the fix from; `fix`: words typed in that fix's own thread, a round of it */
+   * fixes and starts the fix from (or a fix's number alone, which tries a fix that did not pass again); `fix`: words
+   * typed in that fix's own thread, a round of it */
   requestFix: (ws: string, words: string, page: string, fix?: number) =>
     j<{ fix?: { id: number; title: string; state: string }; event?: string }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page, ...(fix !== undefined ? { fix } : {}) }) }),
   undoFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/undo`, { method: 'POST' }),
   redoFix: (ws: string, id: number) => j<{ fix: { id: number } }>(`${apiBase()}/ws/${enc(ws)}/fixes/${enc(String(id))}/redo`, { method: 'POST' }),
+  /** Ask Claude on a fix that did not pass: its change and the end of its tests' output, for main's message */
+  fixTried: (id: number) => j<FixTried>(`${apiBase()}/fixes/${enc(String(id))}/tried`),
   dismissFix: (id: number) => j<{ ok: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/dismiss`, { method: 'POST' }),
   // ---- tickets ----
   tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
@@ -722,8 +730,8 @@ export const canvasApi = {
   patchCell: (c: string, id: string, patch: CellPatch) => j<Cell>(`${ws(c)}/cells/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   /** `POST /cells/move`: reorder cards, move them to another group, or place one free. */
   move: (c: string, body: CellMoveBody) => j<Cell[]>(`${ws(c)}/cells/move`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `PUT /canvas/active-group`: the frame the analyst last selected or worked in, where a model's card goes when its call names no group. */
-  activeGroup: (c: string, group: string) => j<{ group: string }>(`${ws(c)}/canvas/active-group`, { method: 'PUT', body: JSON.stringify({ group }) }),
+  /** `POST /cells`: a new card outside every frame (the loose group), at `pos` on the board or below what is drawn. */
+  addCard: (c: string, body: NewCellBody & { pos?: Pos | null }) => j<Cell>(`${ws(c)}/cells`, { method: 'POST', body: JSON.stringify(body) }),
 }
 
 // --- the report editor ---
@@ -902,7 +910,7 @@ export const undoApi = {
 }
 
 // --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
-import type { CardCheckStatus, Check, CheckCover, CheckPatch, CheckRun } from './types'
+import type { CardCheckStatus, CardDrawn, Check, CheckCover, CheckPatch, CheckRun } from './types'
 
 export const marksApi = {
   /** `POST /marks/repair`: check a failed citation again and make it correct (backend marks.repair); a 409 says why

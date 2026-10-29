@@ -706,8 +706,10 @@ export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color:
   return { line: rec.line, who, when, text: first(body), color }
 }
 
-/** ms the records' first paint waits at most for Color by's keys (the file's keys, GET /source/keys) */
-export const COLORS_HOLD_MS = 1500
+/** ms the records' first paint waits at most for Color by's keys (the file's keys, GET /source/keys): long enough for
+ * keys the server answers at once (a file it read before), short enough that a long file, whose keys take seconds to
+ * read, shows its first records as soon as they are read */
+export const COLORS_HOLD_MS = 300
 
 const NO_LANES: Concept[] = []
 const NO_OFF: ReadonlySet<string> = new Set()
@@ -878,19 +880,6 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     measure()
   }, [records, measure])
 
-  // the body or the view in it changed size (the reader resized, a label's column came in): measure again. A pick
-  // (a file-type viewer's page in place of the body, and back) can mount a new body.
-  useEffect(() => {
-    const el = bodyRef.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => {
-      measure()
-      fill.current()
-    })
-    ro.observe(el)
-    for (const c of Array.from(el.children)) ro.observe(c)
-    return () => ro.disconnect()
-  }, [measure, records, viewType, pick])
 
   // a jump lands once its records are in: the record scrolls to the top of the reader
   useLayoutEffect(() => {
@@ -1134,14 +1123,14 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   // the records shown leave room below them and the file goes on (a view or Filter by hides some records): load the next
   // page until the reader is full, then the one before while the reader stands at the top of its records; again after
   // each change of the records and each resize of what the body shows (records hidden or shown again). A reader in a
-  // hidden tab has no height and loads nothing until shown.
+  // hidden tab has no height and loads nothing until shown, and one whose first paint waits (holdPaint) draws no
+  // record yet, so it is not short of any: it loads nothing until they are drawn (the effect below holdPaint).
   fill.current = () => {
     const el = bodyRef.current
-    if (!el || bodyHeight <= 0 || loading || !loaded || error || binary) return
+    if (!el || bodyHeight <= 0 || loading || !loaded || error || binary || holdPaint) return
     const dir = shortOf(el, false)
     if (dir) void loadMore(dir)
   }
-  useEffect(() => fill.current(), [records, loading, loaded, error, binary, last, total, loadMore, viewType, bodyHeight])
 
   // ---- find in the file and go to a line
   const openFinder = useCallback((mode: 'find' | 'line') => setFinder((f) => ({ text: mode === 'line' ? ':' : f?.text ?? '', ask: (f?.ask ?? 0) + 1 })), [])
@@ -1269,8 +1258,9 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const viewRecords = isTranscript && shown?.path === path ? shown.records : null
   const colorRecords = useMemo(() => viewRecords ?? (delimit ? delimit(records) : records), [viewRecords, delimit, records])
   const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total, quiet, filterHolds)
-  // the records' first paint waits for Color by's keys, which the records' colors come from, so they are drawn with
-  // their colors from the first frame rather than plain and then tinted; at most COLORS_HOLD_MS after the records came
+  // the records' first paint waits for the mode the file opens in (the first records' read, builtins), so they are not
+  // drawn in Raw first, and for Color by's keys, which the records' colors come from, so they are drawn with their
+  // colors from the first frame rather than plain and then tinted; at most COLORS_HOLD_MS after the records came
   const colorsPending = colored && !binary && !isDatabase && color.keys == null
   const [waitedFor, setWaitedFor] = useState<string | null>(null)
   useEffect(() => {
@@ -1278,7 +1268,22 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     const t = window.setTimeout(() => setWaitedFor(path), COLORS_HOLD_MS)
     return () => window.clearTimeout(t)
   }, [colorsPending, loaded, path])
-  const holdPaint = colorsPending && waitedFor !== path
+  const holdPaint = !builtins.loaded || (colorsPending && waitedFor !== path)
+  useEffect(() => fill.current(), [records, loading, loaded, error, binary, last, total, loadMore, viewType, bodyHeight, holdPaint])
+  // the body or the view in it changed size (the reader resized, a label's column came in, Filter by hid records):
+  // measure again. A pick (a file-type viewer's page in place of the body, and back) can mount a new body, and the end
+  // of the first paint's wait the view in it.
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      measure()
+      fill.current()
+    })
+    ro.observe(el)
+    for (const c of Array.from(el.children)) ro.observe(c)
+    return () => ro.disconnect()
+  }, [measure, records, viewType, pick, holdPaint])
   const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, viewRecords ?? records, readerLabels.rows, total, quiet)
   const filterLabel = isTranscript && filter.choice.by === 'label' ? filter.choice.id : null
   useEffect(() => {

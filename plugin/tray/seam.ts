@@ -10,7 +10,7 @@
 //                                      come before every other feature's
 //   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most `room` rows
 //   trayBar($, on, preview)            its items at the bar's left while a card ] reached holds the keys (an open
-//                                      tray's keys are in its header)
+//                                      tray's keys are in its header); at rest, ] while the answer shows marks
 //   trayFocus($, row)                  what the tray shows on this row, so the row draws it in focus: a citation by its
 //                                      number (MarkRef kind `citation`), or an explainer's or heads-up's span by its id
 //   markPressed($, row, n)             a press on citation `n` of the row: true when the tray took it (else the
@@ -18,13 +18,15 @@
 //   openTray($, mark)                  open the tray on a mark (an explainer's press, explain/seam.ts): true when it did
 //   trayOffRow($, row)                 close the tray when it stands on this row, whose text changed under its marks
 //                                      (a squeeze version shown, squeeze/term.ts)
+//   trayGiveWay($)                     the tray gives way to the squeeze chips, which take the keys (s): it closes, or
+//                                      a card ] reached gives its keys back; returns what puts it back (s undone)
 //   registerTray                       its own hooks (a question asked with the tray open, ...)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { closeTray, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, trayNow } from './tray'
+import { closeTray, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, trayNow } from './tray'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,6 +63,10 @@ export async function openTray($: Engine, mark: MarkRef): Promise<boolean> {
 export async function trayOffRow($: Engine, row: string): Promise<void> {
   const tray = await trayNow($)
   if (tray?.stack[0]?.row === row) await closeTray($)
+}
+
+export async function trayGiveWay($: Engine): Promise<() => Promise<void>> {
+  return giveWay($)
 }
 
 export const registerTray: Register = (on, ctx) => register(on, ctx)

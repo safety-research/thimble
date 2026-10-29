@@ -3,6 +3,7 @@
 and one refused value drops them all)."""
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -60,6 +61,13 @@ def stub(path, text):
     return path
 
 
+def same_login(tmp_path: Path, path: str) -> str:
+    """A made-up login shell for an install run (SHELL), whose `-lic env` gives `path`, the run's own PATH: so the install's
+    card test runs on the run's made-up node wherever the tests run, never on a node the machine's own login shell finds
+    (bash sets SHELL to the user's login shell when it is unset)."""
+    return str(stub(tmp_path / "same-login", f'echo "PATH={path}"\n'))
+
+
 def needs(tmp_path, claude, stubs=()):
     """scripts/install.sh --no-browser with only stubs on PATH, where claude is a link to the made-up Claude Code 2.1.283
     at `claude`: it says what is missing and stops before it installs anything. `stubs`: other commands, by name."""
@@ -71,7 +79,8 @@ def needs(tmp_path, claude, stubs=()):
         stub(bin_ / name, text)
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable}
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable,
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser"], capture_output=True, text=True, env=env)
     assert p.returncode == 1, p.stdout + p.stderr
     return next(line for line in p.stdout.splitlines() if "Claude Code is 2.1.283" in line)
@@ -120,7 +129,8 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
-           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home")}
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin")],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -135,6 +145,165 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     said = [n.strip() for n in "\n".join(notes).split("Note: ") if n.strip()]
     sandbox = next((n for n in said if "the made-up runner did not start." in n), "")
     assert sandbox.endswith("Install them: sudo made-up-get install bubblewrap socat"), said
+
+
+def install_with_login_shell(tmp_path, login_path, shell=None):
+    """scripts/install.sh --no-browser with made-up commands, run from a shell whose node fails the card test (it says
+    the made-up sandbox does not work), for a person whose login shell (SHELL, a made-up one) starts with the PATH
+    `login_path`, where a made-up node passes it; `shell`: what the login shell does instead, after it notes its
+    arguments. Its output, and the arguments the login shell was started with."""
+    market = tmp_path / "market"
+    (market / ".claude-plugin").mkdir(parents=True)
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
+    (market / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (market / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"userConfig": {}}))
+    stub(market / "plugin" / "sandbox" / "setup.mjs", "")
+    stub(market / "plugin" / "bin" / "thimble", "")
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"installLocation": str(market)}}))
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "node", 'case "$1" in --version) echo v22.20.0 ;;\n'
+         '*) echo "thimble: cards cannot run yet: the made-up node of this shell."; exit 1 ;; esac\n')
+    stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
+    stub(tmp_path / "new-terminal" / "node", 'echo "thimble: cards run in the made-up sandbox; the runner drew a test card in 5 ms ($*)."\n')
+    started = tmp_path / "login.log"
+    login = stub(tmp_path / "login-shell", f'echo "$@" > "{started}"\n'
+                 + (shell if shell is not None else f'echo "made-up: welcome"\necho "PATH={login_path}"\n'))
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "SHELL": str(login)}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    return p.stdout, started.read_text().split()
+
+
+def test_the_card_test_runs_on_the_node_a_new_terminal_finds(tmp_path):
+    """The install draws a test card as a session does: on the node a new terminal finds, from the PATH the person's
+    login shell starts with (a login shell, interactive, as a terminal starts it), and with --repair, which installs
+    the sandbox again when that repairs it. This shell's own node is not the one a session runs on."""
+    out, started = install_with_login_shell(tmp_path, f"{tmp_path / 'new-terminal'}:/usr/bin:/bin")
+    assert started == ["-lic", "env"]
+    market = tmp_path / "market" / "plugin" / "sandbox" / "setup.mjs"
+    assert f"thimble: cards run in the made-up sandbox; the runner drew a test card in 5 ms ({market} --probe --repair)." in out.splitlines()
+    assert "cards cannot run yet" not in out
+
+
+def test_a_new_terminal_that_finds_no_node_is_said(tmp_path):
+    """A new terminal that finds no node cannot start the card runner: a note says so, with the line that puts this
+    shell's node on its PATH, and the card test runs on this shell's node."""
+    out, _ = install_with_login_shell(tmp_path, str(tmp_path / "nothing"))
+    notes = [x for x in out.splitlines() if x.startswith("Note: a new terminal finds no node")]
+    assert notes == [f"Note: a new terminal finds no node, and the plugin's cards run on the node a new terminal finds. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"{tmp_path / 'stubs'}:$PATH\""]
+    assert "the made-up node of this shell" in out
+
+
+def test_a_login_shell_that_cannot_start_as_a_terminal_starts_it_is_said(tmp_path):
+    """A login shell that refuses -lic (tcsh takes -l only as its one flag) gives no PATH: the card test runs on this
+    shell's node, and one line, before the test's own, names that node and says the login shell could not be started."""
+    out, started = install_with_login_shell(tmp_path, "", shell="echo \"Unknown option: \\`-l'\" >&2\nexit 1\n")
+    assert started == ["-lic", "env"]
+    lines = out.splitlines()
+    said = [x for x in lines if str(tmp_path / "login-shell") in x]
+    assert said == [f"Your login shell ({tmp_path / 'login-shell'}) could not be started as a new terminal starts it, so "
+                    f"the test card runs on this shell's node: {tmp_path / 'stubs' / 'node'}"], out
+    assert lines.index(said[0]) + 1 == lines.index("thimble: cards cannot run yet: the made-up node of this shell."), out
+
+
+# a terminal (a pty) whose shell runs a command as a person's shell does: in a process group of its own, which it puts
+# in the terminal's foreground; then it says how the command ended, or that it stopped. It answers the command's
+# question ("[Y/n]: ") with n, and prints what the terminal showed
+TERMINAL = r'''
+import os, pty, select, signal, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+    job = os.fork()
+    if job == 0:
+        os.setpgid(0, 0)
+        os.tcsetpgrp(0, os.getpid())
+        signal.signal(signal.SIGTTOU, signal.SIG_DFL)
+        os.execv("/bin/bash", ["bash", sys.argv[1]])
+    try:
+        os.setpgid(job, job)
+    except OSError:
+        pass
+    _, status = os.waitpid(job, os.WUNTRACED)
+    if os.WIFSTOPPED(status):
+        print("stopped by " + signal.Signals(os.WSTOPSIG(status)).name, flush=True)
+        os.kill(job, signal.SIGKILL)
+        os.waitpid(job, 0)
+    else:
+        print("exit %d" % os.waitstatus_to_exitcode(status), flush=True)
+    os._exit(0)
+shown, answered, end = b"", False, time.time() + 90
+while time.time() < end:
+    if not select.select([fd], [], [], 1)[0]:
+        continue
+    try:
+        got = os.read(fd, 4096)
+    except OSError:
+        break
+    if not got:
+        break
+    shown += got
+    if not answered and b"[Y/n]: " in shown:
+        os.write(fd, b"n\n")
+        answered = True
+if time.time() >= end:
+    os.kill(pid, signal.SIGKILL)
+os.waitpid(pid, 0)
+sys.stdout.write(shown.decode(errors="replace"))
+'''
+
+
+def fresh_path_in_a_terminal(tmp_path, shell, startup):
+    """install.sh's fresh_path, in a terminal, as the install runs it there, for a person whose login shell is `shell`
+    with the startup files `startup` (name: text) in their home; then a question the install reads from the terminal
+    after it, as Keep it? [Y/n]. What the terminal showed: how long fresh_path took and what it said, the answer read,
+    and how the install ended."""
+    home = tmp_path / "home"
+    home.mkdir()
+    for name, text in startup.items():
+        (home / name).write_text(text)
+    fresh_path = re.search(r"^fresh_path\(\) \{\n.*?^\}\n", (ROOT / "scripts" / "install.sh").read_text(), re.S | re.M).group(0)
+    script = tmp_path / "install-part.sh"
+    script.write_text(f"set -euo pipefail\npy='{sys.executable}'\n{fresh_path}"
+                      'start=$SECONDS\nfound="$(fresh_path)"\necho "fresh_path: $((SECONDS - start)) s [$found]"\n'
+                      'printf "Keep it? [Y/n]: "\nread -r keep || keep="nothing"\necho "read: [$keep]"\n')
+    terminal = tmp_path / "terminal.py"
+    terminal.write_text(TERMINAL)
+    env = {"HOME": str(home), "USER": "analyst", "LOGNAME": "analyst", "SHELL": shell, "PATH": "/usr/bin:/bin",
+           "TERM": "xterm-256color", "LANG": "C.UTF-8"}
+    return subprocess.run([sys.executable, str(terminal), str(script)], capture_output=True, text=True, env=env,
+                          timeout=150).stdout
+
+
+@pytest.mark.parametrize("shell", ["bash", "zsh"])
+def test_a_new_terminals_path_is_read_and_the_install_still_reads_its_terminal(tmp_path, shell):
+    """The login shell that says a new terminal's PATH runs interactive, as a terminal starts it, and an interactive
+    shell takes the terminal it finds as its own: the install's next question would then stop it (suspended, tty
+    input). It runs without the terminal, and the install reads the answer typed after it."""
+    at = shutil.which(shell)
+    if not at:
+        pytest.skip(f"no {shell} on this machine")
+    startup = ({".bash_profile": ". ~/.bashrc\n", ".bashrc": "export PATH=/made-up/fast:$PATH\n"} if shell == "bash"
+               else {".zshrc": "export PATH=/made-up/fast:$PATH\n"})
+    shown = fresh_path_in_a_terminal(tmp_path, at, startup)
+    assert re.search(r"fresh_path: \d+ s \[/made-up/fast:", shown), shown
+    assert "read: [n]" in shown and "exit 0" in shown, shown
+
+
+def test_a_startup_file_that_takes_30_s_is_cut_at_20_s(tmp_path):
+    """A login shell whose startup file takes 30 s gives no PATH: it is stopped at 20 s, with what it started (an
+    interactive shell ignores SIGTERM), and the install goes on and reads its terminal."""
+    shown = fresh_path_in_a_terminal(tmp_path, shutil.which("bash") or "/bin/bash",
+                                     {".bash_profile": ". ~/.bashrc\n", ".bashrc": "sleep 30\nexport PATH=/made-up/slow:$PATH\n"})
+    took = re.search(r"fresh_path: (\d+) s \[(.*)\]", shown)
+    assert took and 18 <= int(took.group(1)) <= 26 and took.group(2) == "", shown
+    assert "read: [n]" in shown and "exit 0" in shown, shown
 
 
 def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_rest_installs(tmp_path):
@@ -163,7 +332,8 @@ def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
-           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home")}
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin")],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -245,7 +415,8 @@ def plugin_install(tmp_path, source, claude="", listed=True, settings=None):
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
-           "THIMBLE_HOME": str(tmp_path / "thimble")}
+           "THIMBLE_HOME": str(tmp_path / "thimble"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     return p, [x for x in log.read_text().splitlines() if x.startswith("plugin")] if log.exists() else []
@@ -357,3 +528,93 @@ def test_install_md_says_how_a_plugin_without_a_clone_updates_after_its_first_fi
             "`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of "
             "`~/.thimble`).") in update
     assert (ROOT / "plugin" / "bin" / "thimble").is_file()
+
+
+def whole_install(tmp_path, *args):
+    """scripts/install.sh with made-up commands, both products, no terminal and no question how the workbench reaches
+    Claude (--no-setup, as Claude runs it): the run. The made-up claude installs a plugin with no sandbox to check."""
+    market = tmp_path / "market"
+    (market / ".claude-plugin").mkdir(parents=True)
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
+    (market / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (market / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"userConfig": {}}))
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"installLocation": str(market)}}))
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "node", "echo v22.20.0\n")
+    stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
+    stub(bin_ / "uv", '[ "$1" = --version ] && echo "uv 0.9.0"\nexit 0\n')
+    stub(bin_ / "npm", "exit 0\n")
+    stub(bin_ / "bwrap", "exit 0\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin"), *args],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    return p
+
+
+def test_the_install_gives_the_workbench_s_claude_code_sign_in_first_and_recommends_it(tmp_path):
+    """Claude, when it asks how the workbench reaches Claude (CLAUDE.md, step 4), and the install's note when no terminal
+    asked it (an agent runs the script, or --no-setup), give the Claude Code sign-in first and recommend it, as the
+    question in a terminal does (claude_access.setup, the browser's server tests). Claude asks in a few words per
+    option."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    ask = text.split(" 4. When the workbench was installed", 1)[1].split(" Then: ", 1)[0]
+    at = [ask.index(way) for way in ("Claude Code sign-in", "Anthropic API key", "Workload Identity Federation")]
+    assert at == sorted(at), ask
+    sign_in = ask.split("Claude Code sign-in", 1)[1].split(", an Anthropic API key", 1)[0]
+    assert "first" in sign_in and "recommended" in sign_in, ask
+    assert "a few words per option" in ask, ask
+    note = next(line for line in whole_install(tmp_path).stdout.splitlines()
+                if line.startswith("Note: Claude access is not set up yet."))
+    at = [note.index(way) for way in ("Their Claude Code sign-in", "An Anthropic API key", "Workload Identity Federation:")]
+    assert at == sorted(at), note
+    assert "Their Claude Code sign-in (recommended), only after they accept" in note
+
+
+def test_the_install_summary_says_when_to_use_each_product(tmp_path):
+    """The install's last lines when it installed both products, in one line, and the reply Claude ends an install with
+    (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one product
+    has no choice to explain."""
+    line = "Use the terminal plugin when you work in Claude Code, and the browser workbench to work in a web page."
+    out = whole_install(tmp_path / "both").stdout
+    summary = out.split("== The browser workbench", 1)[1].split("To start the browser workbench", 1)[0]
+    assert line in summary.splitlines(), summary
+    alone = whole_install(tmp_path / "plugin", "--no-browser").stdout
+    assert "Use the terminal plugin when" not in alone and "the browser workbench to work in" not in alone
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    reply = text.split(" 5. While something the user chose", 1)[1].split(" 6. ", 1)[0]
+    assert "- The plugin, when they work in Claude Code:" in reply and "- The workbench, when they want" in reply, reply
+
+
+def test_the_install_summary_says_once_that_reload_plugins_loads_the_plugin_in_an_open_session(tmp_path):
+    """A claude session that is already open, such as the one Claude runs the install in, loads the plugin with
+    /reload-plugins. It keeps the PATH it started with, so after a change to Node, a new terminal has the plugin. The
+    plugin's summary says what to do in both cases, once, in two lines, whichever products the install installed."""
+    for name, args in (("both", ()), ("plugin", ("--no-browser",))):
+        out = whole_install(tmp_path / name, *args).stdout
+        assert out.count("/reload-plugins") == 1, out
+        lines = out.split("To use the plugin, ", 1)[1].split("\n")[:2]
+        assert "/reload-plugins in an open session" in lines[0], out
+        assert lines[1] == "After a change to Node, start claude in a new terminal.", out
+
+
+def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plugin_in_the_open_sessions():
+    """The reply Claude ends an install with (CLAUDE.md, step 5) says that /reload-plugins loads the plugin in this
+    session and in the other open ones, and that a session keeps the PATH it started with, so after a change to Node a
+    new terminal has it. The sample's line (step 6) gives a command for a new terminal when the sample lies outside this
+    session's folder, or after such a change."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    reply = text.split(" 5. While something the user chose", 1)[1].split(" 6. ", 1)[0]
+    plugin = reply.split("- The plugin, when they work in Claude Code:", 1)[1].split(" - The workbench", 1)[0]
+    loads = plugin.split("`/reload-plugins` loads it", 1)[1].split(". ", 1)[0]
+    assert "this session" in loads and "other open" in loads, plugin
+    assert "PATH" in plugin and "change to Node" in plugin and "new terminal" in plugin, plugin
+    sample = text.split(" 6. When the plugin works", 1)[1].split(" ## ", 1)[0]
+    when = sample.split("the line gives a command to run in a new terminal", 1)[0]
+    assert "outside this session's folder" in when and "Node" in when, sample

@@ -441,6 +441,24 @@ test('a corrected claim: one line says so; h shows its History, one word-level d
   assert.deepEqual(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'none', reason: 'The check did not run. The reply was interrupted.' }, 60).map(rowText), ['9   × failed · citation', 'The check did not run.'])
 })
 
+test("a corrected citation's card in the Evidence pane says what the tray's header says: ✓ corrected where it said verified, or ✓ repaired after x, and what it was under it; a rewritten sentence or a narrowed citation says which; one not checked yet has the ? the reply draws after it", () => {
+  const quote = { kind: 'quote', file: 'runs/summary.txt', line: 4, lines: [{ n: 4, text: 'failed: 12', highlight: [8, 10] }] }
+  const fixed = { ref: 'a1@3', row: 'r1', at: 3, n: 1, label: '15 of 40', shown: '12 of 40', status: 'corrected', was: '15 of 40', evidence: quote }
+  const card = s => cardOf(s, 60).rows.map(rowText)
+  assert.deepEqual(card(fixed), ['12 of 40   ✓ corrected · citation', 'was 15 of 40', 'runs/summary.txt:4', '│ failed: 12'])
+  assert.deepEqual(card({ ...fixed, repair: true }).slice(0, 2), ['12 of 40   ✓ repaired · citation', 'was 15 of 40'])
+  assert.equal(card({ ...fixed, rewritten: true, was: 'Of the runs, 15 of 40 failed.' })[1], 'sentence rewritten; was Of the runs, 15 of 40 failed.')
+  assert.equal(card({ ...fixed, narrowed: true, was: '15 of 40 runs' })[1], 'narrowed; was 15 of 40 runs')
+  assert.ok(!card(fixed).join('\n').includes('verified'))
+  // its status in a checked one's tone
+  assert.equal(cardOf(fixed, 60).rows[0].find(x => x.s === '✓ corrected')?.tone, 'good')
+  assert.equal(card({ label: '419', status: 'deferred', row: 'r1', n: 3 })[0], '419   ? not checked · citation')
+  // in the claim's frame too, as the tray draws its card
+  const data = withClaim(linkedClaims(), 'c1', { sources: [fixed] })
+  const framed = panel(graphView(data, { claim: 'c1', open: true }, { w: 72, h: 50 }))
+  assert.match(framed, /│ 12 of 40 +✓ corrected │\n│ was 15 of 40 +│/)
+})
+
 test('long cluster names wrap to two lines in their cells, never into a neighbor', () => {
   const data = sized([7, 4, 3, 3], 4, { name: g => ['how merges and closes differ between emergent and managed runs', 'when the runs claimed PRs', 'how long the runs lasted', 'whether adding issues changed the runs'][g] })
   for (const [w, h] of [[62, 40], [50, 40]]) {

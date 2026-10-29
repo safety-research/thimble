@@ -4,10 +4,11 @@
 // colors; Claude reads a large label run's ask after its command and asks the person with Claude Code's question tool,
 // their answer there runs as the person and Claude reads what it started; a feed line read again never brings an
 // answered ask back. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { colorOf } from '../labels/pane'
 import { answerAsk, labelAskFromFeed, labelAskNow, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

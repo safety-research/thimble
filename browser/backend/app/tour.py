@@ -1,8 +1,9 @@
 """The product tour's first-launch state: $THIMBLE_HOME/tour.json (THIMBLE_HOME, else ~/.thimble), one for every
-workspace this install opens. The page offers the tour once, the first time the dashboard opens, and records here that
-it did, whatever the analyst chose; Settings replays the tour at any time without reading this.
+workspace this install opens. Each dashboard the page opens offers the tour until the analyst answers the offer, and the
+page records here that they did, whatever they chose, so a page no one looked at (one opened as the server started)
+does not use the offer up; Settings replays the tour at any time without reading this.
 
-GET /tour answers {"seen": bool}; POST /tour/seen records the offer. Nothing here touches Claude Code's files.
+GET /tour answers {"seen": bool}; POST /tour/seen records the answer. Nothing here touches Claude Code's files.
 """
 from __future__ import annotations
 

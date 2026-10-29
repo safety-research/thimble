@@ -103,10 +103,10 @@ until you fix it and run it again. Then it:
    in `browser/backend`), and the page with the sandbox runtime (`npm ci` and a build in `browser/frontend`).
 3. writes a `thimble-browser` launcher in `~/.local/bin` (`--bin-dir DIR` puts it elsewhere), and says when that folder
    is not on your `PATH`.
-4. asks how the browser workbench reaches Claude: 1 an Anthropic API key (the default; you paste it, and it is kept in
-   `~/.thimble-browser` readable by you alone), 2 your Claude Code sign-in (it shows that this launches headless Claude
-   Code sessions in the background and asks you to confirm), or 3 Workload Identity Federation (the path of its config
-   file). It checks the choice with one small call.
+4. asks how the browser workbench reaches Claude: 1 your Claude Code sign-in (the default, and recommended; it shows
+   that this launches headless Claude Code sessions in the background and asks you to confirm), 2 an Anthropic API key
+   (you paste it, and it is kept in `~/.thimble-browser` readable by you alone), or 3 Workload Identity Federation (the
+   path of its config file). It checks the choice with one small call.
 5. says how much disk space the browser workbench takes, and, last, what does not work yet or is left to do, such as a
    card sandbox that cannot start here, with its fix.
 
@@ -183,8 +183,9 @@ The browser workbench:
 ## Update and uninstall
 
 To update both products, run `thimble update` in a shell (not inside Claude Code). It moves the plugin and the browser
-workbench to the newest release, keeps your fixes, and says what to do next; after an install with
-`scripts/install.sh --local`, it moves them to the commit your checkout has, so pull it first. A plugin installed
+workbench to the newest release, keeps your fixes (each one that still fits the release stays on; one that does not is
+off, kept in `thimble fixes`, until `thimble reapply` has Claude fit it), and says what to do next; after an install
+with `scripts/install.sh --local`, it moves them to the commit your checkout has, so pull it first. A plugin installed
 without a clone updates with `claude plugin update thimble@thimble` until you use its first fix: from then on, Claude
 Code loads it from your fixes, and only `thimble update` moves it to a new release. Without a clone, your shell does
 not find `thimble`: run `~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place
@@ -235,8 +236,9 @@ The terminal plugin:
   without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
   ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, the command that allows it; when npm
   cannot reach its registry to install the sandbox, `npm ping` shows why. The next card tries again, with no new
-  session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, where
-  `<plugin>` is the installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
+  session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, which draws a test card in it
+  (add `--repair` to install the sandbox again when that fixes it, as the install does), where `<plugin>` is the
+  installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
 - **The line above the prompt says your Node is too old, though a newer one is installed.** The plugin runs on the
   `node` that the terminal you start `claude` from finds first. A Node manager (nvm, fnm, asdf) that your shell's
   startup file does not load is not used, even when the install loaded it in its own commands, as Claude may when it

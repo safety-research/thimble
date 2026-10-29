@@ -174,7 +174,7 @@ export interface Group {
   role: string
   n_cells?: number
   ts?: string
-  /** the session thimble ran beside main whose own group this is, such as `writer:report` (backend tools.SESSION_GROUP_KEY) */
+  /** the session of the agent of thimble's that made this group, such as `writer:report` (backend tools.SESSION_KEY) */
   session?: string
 }
 
@@ -215,6 +215,8 @@ export interface Cell {
   /** the citation check of the takeaway's marks, `[words](#)`, for the takeaway `text` (backend marks.py) */
   takeaway_marks?: { text?: string; items?: import('../marks/marks').MarkItem[] }
   created_by: string
+  /** the session of the agent of thimble's that made this card, such as `writer:report` (backend tools.SESSION_KEY) */
+  session?: string
   created_at_event?: number | null
   created_ts?: string
   ts: string
@@ -278,6 +280,8 @@ export interface CanvasResponse {
   cells: Cell[]
   /** the ids of the cards the route leaves out: a legacy orientation Scratch (backend notebook.canvas) */
   hidden?: string[]
+  /** the anchor of each thread that made a card here, by the thread's chat id (backend threads.anchors_of) */
+  threads?: Record<string, string>
 }
 
 export interface NewCellBody {
@@ -499,6 +503,9 @@ export interface Proposal {
   failed_change?: string
   /** a change to a built view is being made (backend views.revise); the view stays open at the version it last passed */
   revision?: boolean
+  /** the builder's run that takes a message about the built view, while it has not changed the view (backend
+   * dev.build_started); its thread's Stop stops it (dev.stop_answer) */
+  answering?: { agent: string; run?: number; text?: string } | null
   chat?: string | null
   attempts?: number
   /** the review of the built view's pictures (backend view_review) */
@@ -1128,6 +1135,14 @@ export interface CheckPatch {
   prompt?: string
   colour?: number
   covers?: CheckCover[]
+}
+
+/** `POST /ws/{c}/cells/{cid}/drawn` (backend card_size.drawn_route): a card's body drew `height` px tall, or its page laid
+ * out `width` px wide in a frame `frame` px wide, each px at the card's width. */
+export interface CardDrawn {
+  height?: number
+  width?: number
+  frame?: number
 }
 
 /** `GET /ws/{c}/card-checks` (backend card_check.status_route): whether the card check runs, whether it starts by

@@ -105,9 +105,9 @@ def test_server_for_launch_starts_and_waits_for_the_server_and_never_stops_the_l
         return True
 
     monkeypatch.setattr(cli, "ensure_running", running)
-    assert SERVER_FOR_LAUNCH("logs") == ["thimble: the server restarted"] and waits == [cli.WAIT_S]
+    assert SERVER_FOR_LAUNCH("logs") == ["thimble: the server restarted"] and waits == [cli.start_wait_s()]
     monkeypatch.setattr(cli, "ensure_running", lambda wait: False)
-    assert SERVER_FOR_LAUNCH("logs") == [cli.LAUNCH_NO_SERVER_LINE.format(wait=cli.WAIT_S, log=cli.log_path())]
+    assert SERVER_FOR_LAUNCH("logs") == [cli.LAUNCH_NO_SERVER_LINE.format(wait=cli.start_wait_s(), log=cli.log_path())]
 
     def slow(wait: float) -> bool:
         raise TimeoutError("still starting")

@@ -14,7 +14,7 @@
 //   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, the copy at the
 //      width a side pane leaves it when a row that fits at the card's width wraps there, and the copy after each
 //      action. Nothing in it asks for a new version: notes come only for what is wrong (a key the card cannot get, a
-//      row a side pane breaks, a card taller than the screen)
+//      row a side pane breaks, a card taller than its frame shows, draw.ts CARD_ROWS, or than the screen)
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
 // card in the card's place, under the call that first drew it or under the answer v was pressed on (its view whole, or
@@ -38,7 +38,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask, sandboxNotice } from './ask'
-import { applyAnswer, askCard, canRedraw, cardWidth, cardWidthBesidePane, screenRows } from './draw'
+import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidth, cardWidthBesidePane, rowsCut, rowsWord, screenRows } from './draw'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
@@ -318,7 +318,8 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     } else out.push('', `The actions did not run: ${a?.error ?? 'no answer'}`)
   }
   const screen = screenRows()
-  if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
+  if (rowsCut(tallest)) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(tallest))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
+  else if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
   void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0 })
   return { result: out.join('\n') }
 }

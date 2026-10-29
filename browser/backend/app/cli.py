@@ -23,7 +23,8 @@ the command main's Monitor runs (cc_plugin.route, monitor_lines).
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
 owner alone; `token` is new at each start and is what the plugin's hooks and this CLI prove they hold (hook_auth.py). A
 browser signs in with a one-time code from ui_url(pair=True), never with a value from this file. Only a terminal gets a
-link with a code: `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
+link with a code: thimble-browser prints one at its start and a new one for each browser that is not signed in and opens
+the page (new_links), `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
 which gets its code as the hook shows it (leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
 only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
 recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
@@ -97,21 +98,45 @@ PORT_SCAN = 50  # the ports above a taken one that pick_port tries in turn, befo
 BACKEND_DIR = config.REPO_ROOT / "backend"
 FRONTEND_DIR = config.REPO_ROOT / "frontend"
 PLUGIN_DIR = config.REPO_ROOT / "plugin"
-WAIT_S = 20.0
+WAIT_S = 20.0  # how long a command waits for a server it started to answer (start_wait_s)
 LOCK_WAIT_S = 30.0
 STOP_WAIT_S = 6.0
 # how long the server has, after its SIGTERM, to stop its agents and end (runtime.stop_all) before what is left of its
 # session is signalled (_kill): uvicorn's graceful wait (3 s), the agents' (runtime.STOP_WAIT_S) and the modules' own
 SERVER_STOP_S = 15.0
-HEALTH_TIMEOUT_S = 1.0
+HEALTH_TIMEOUT_S = 1.0  # how long a health probe waits for the server's answer (health_timeout_s)
 LOG_TAIL = 15
+
+
+def start_wait_s() -> float:
+    """How long a command waits for a server it started to answer: THIMBLE_START_WAIT_S, as the tests that start real
+    servers set it for a machine their parallel runs keep busy, else WAIT_S, also when it is not a positive number."""
+    try:
+        got = float(os.environ.get("THIMBLE_START_WAIT_S") or WAIT_S)
+    except ValueError:
+        return WAIT_S
+    return got if 0 < got < float("inf") else WAIT_S
+
+
+def health_timeout_s() -> float:
+    """How long a health probe waits for the server's answer: THIMBLE_HEALTH_TIMEOUT_S, as the tests that start real
+    servers set it for a machine their parallel runs keep busy, where an answer can take longer than HEALTH_TIMEOUT_S
+    and a late one would read as no server or as this install's own; else HEALTH_TIMEOUT_S, also when it is not a
+    positive number."""
+    try:
+        got = float(os.environ.get("THIMBLE_HEALTH_TIMEOUT_S") or HEALTH_TIMEOUT_S)
+    except ValueError:
+        return HEALTH_TIMEOUT_S
+    return got if 0 < got < float("inf") else HEALTH_TIMEOUT_S
+
+
 FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what broke; the dev agent runs it as a ticket."
 # `thimble fix` and `thimble revert` change thimble's own code, which only a development install (a git clone of thimble)
 # can do: a release install has no dev agent to repair it and no applied change to take back (dev.RELEASE_LINE)
 DEV_ONLY_LINES = {
     "fix": ("thimble fix changes thimble's own code, which only a development install (a git clone of thimble) can do, "
-            "and this is a release install. `thimble doctor` says what is wrong, and `thimble feedback` writes a problem "
-            "report to send the developer."),
+            "and this is a release install. Report a problem, in thimble's page, writes a problem report to send the "
+            "developer."),
     "revert": ("thimble revert takes back a change thimble's dev agent made to thimble's own code, which happens only in a "
                "development install (a git clone of thimble). This is a release install, so there is nothing to revert."),
 }
@@ -121,17 +146,18 @@ SOURCE_CHANGED = "source changed"  # restart.json's title; dev.PLAIN_REASONS
 RESTARTED_LINE = "thimble: server restarted (source changed)"
 NOT_RESTARTED_LINE = "thimble: source changed since the server started; not restarting while {reason}"
 REGISTER_FAILED_LINE = "thimble: could not open {path} as a workspace (the server refused to register it); see {log} and say `/thimble` again."
-NO_UI_LINE = ("thimble: the dashboard is not built yet, so its link shows no page; run `thimble doctor --verbose` in a "
-              "shell for the fix.")
+NO_UI_LINE = ("thimble: the dashboard is not built yet, so its link shows no page; press Ctrl-C, then run "
+              "`thimble-browser` again, which builds it first.")
 NO_AUTH_LINE = "thimble: WARNING - {problem}. Nothing that calls a model runs until then."
 FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 # where the server did not start: how to send the developer a problem report, which needs no server
-REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
-               "shell; either writes a zip with the logs to send the developer.")
+REPORT_LINE = ("thimble: to report it, click Report a problem in thimble's page once it opens; it writes a zip with the "
+               "logs to send the developer.")
 # a server of this install that runs, holding its port, but does not answer (out of file descriptors, or its loop held)
-STUCK_LINE = "thimble's server (pid {pid}) is running but does not answer; restart it with `thimble server restart`"
+STUCK_LINE = f"thimble's server (pid {{pid}}) is running but does not answer; to restart it, {config.RESTART_HOW}"
 STUCK_AFTER_S = 60.0  # a server server.json says started less long ago may still be starting, so is not called stuck
-UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble action. Run `thimble uninstall` in a terminal; it says what it will remove and asks first."
+UNINSTALL_SHELL_LINE = ("thimble: uninstall is not a /thimble action. To remove the browser workbench, delete "
+                        "~/.local/bin/thimble-browser and the checkout (INSTALL.md, \"Update and uninstall\").")
 # What /thimble prints where the plugin's hooks are off, so that thimble connects through main's Monitor
 # (cc_plugin.route): on that route permission prompts stay in the terminal, and after /clear the Monitor is gone, so the
 # note asks for /thimble again.
@@ -152,7 +178,7 @@ PRECACHED_LINE = ("thimble: opening the orientation that ran in advance on these
                   "from its cards and report; `/thimble fresh` starts over")
 # what /thimble prints in place of the link: main's Stop hook shows the link under the reply with a sign-in code it gets
 # as it shows it (leave_link, plugin/bin/.thimble-watch link_lines), outside the model's context
-LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
+LINK_LINE = "thimble: the dashboard link is under this reply (or in the terminal where `thimble-browser` runs)"
 LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
@@ -206,10 +232,9 @@ ACTIVE_KEY_MAX = 200  # a marker's name longer than this is not written; the wat
 # /thimble in a session the launcher started in terminal mode starts nothing: the renderer opens the home panel, and the
 # skill's command prints this hint of prompts/tools.md (TERMINAL_HOME_LINE when the file has none), which main repeats
 TERMINAL_HOME_HINT = "thimble-terminal-home"
-TERMINAL_HOME_LINE = ("thimble: terminal mode. For the browser workspace, quit, run `thimble mode browser`, and start "
-                      "`thimble` again.")
-TERMINAL_ACTION_LINE = ("thimble: `/thimble {action}` works only in browser mode. For the browser workspace, quit, run "
-                        "`thimble mode browser`, and start `thimble` again.")
+TERMINAL_HOME_LINE = "thimble: terminal mode. For the browser workspace, quit and run `thimble-browser` in this folder."
+TERMINAL_ACTION_LINE = ("thimble: `/thimble {action}` works only in browser mode. For the browser workspace, quit and run "
+                        "`thimble-browser` in this folder.")
 HOOK_RESULT_S = 60.0  # a result older than this is not the one the hook left for this /thimble
 MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 # what `restart` says before it asks (running_work, module note)
@@ -386,9 +411,10 @@ def _server_environ(env: dict[str, Any], p: int, ui: int) -> dict[str, str]:
 # ----------------------------------------------------------------------------- probes
 
 
-def healthy(url: str | None = None, timeout: float = HEALTH_TIMEOUT_S) -> bool:
+def healthy(url: str | None = None, timeout: float | None = None) -> bool:
     try:
-        with config.LOOPBACK.open(f"{url or api_url()}/api/health", timeout=timeout) as r:
+        wait = health_timeout_s() if timeout is None else timeout
+        with config.LOOPBACK.open(f"{url or api_url()}/api/health", timeout=wait) as r:
             return r.status == 200 and bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception:  # noqa: BLE001
         return False
@@ -505,7 +531,7 @@ def is_server(pid: Any, p: int, repo: str | None = None) -> bool:
 def health_leader(url: str | None = None) -> int | None:
     """The pid the server answering at `url` names as the leader of its process session (`leader` of /api/health). None
     when nothing answers or it names none. Seam for tests."""
-    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
+    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=health_timeout_s())
     leader = body.get("leader") if status == 200 and isinstance(body, dict) else None
     return leader if isinstance(leader, int) and not isinstance(leader, bool) and leader > 0 else None
 
@@ -516,7 +542,7 @@ def foreign_home(url: str | None = None) -> str | None:
     names its home only to a request that proves its token (main's /api/health), so a healthy server that names none
     took this install's proof for no proof: another install's or another account's, whose home is FOREIGN_UNNAMED
     here."""
-    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
+    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=health_timeout_s())
     if status != 200 or not isinstance(body, dict) or body.get("ok") is not True:
         return None
     other = body.get("home")
@@ -1440,10 +1466,10 @@ PAIR_TIMEOUT_S = 3.0
 PAIRED_FILE = "paired.json"  # in <home>: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
 NO_CODE_LINE = ("thimble: the server gave no sign-in code, so this link opens thimble read-only in a browser that is "
                 "not signed in yet; see {log}.")
-UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. To sign one in again, open the link /thimble shows, "
-                 "or run `thimble up` in a shell.")
+UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. A browser that opens the page gets a new link in the "
+                 "terminal where `thimble-browser` runs.")
 UNPAIR_FAILED_LINE = ("thimble: the server did not sign the browsers out ({why}), so they stay signed in until it "
-                      "restarts. In a shell: thimble server restart")
+                      f"restarts. To restart it, {config.RESTART_HOW}.")
 
 
 def pair_code(api: str, name: str | None) -> str:
@@ -2053,8 +2079,7 @@ RENDERER_NAME = "thimble-term"
 CARD_RUNNER = "bin/thimble-run"  # under the plugin copy: runs a card's code in the caller's Bash (`thimble-run card <cell>`)
 RUNNER_NAME = "thimble-run"  # the card runner by its name on the session's PATH, as the tools give its command
 NO_RENDERER_LINE = ("thimble: WARNING - terminal mode's renderer cannot load ({why}), so thimble's cards, citations and "
-                    "agents are not drawn in the terminal; `thimble doctor` says more. `thimble mode browser` opens the "
-                    "browser workspace instead.")
+                    "agents are not drawn in the terminal. `thimble-browser` opens the browser workspace instead.")
 OPEN_ELSEWHERE_LINE = "thimble: This workspace is open in {mode} mode in another terminal. Quit that session first."
 LAUNCH_REFUSED_EXIT = 3  # launch-args' exit when the launch is refused (open_elsewhere); the launcher prints nothing more
 # exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept, since moving a thimble
@@ -2159,7 +2184,7 @@ def server_for_launch(c: str) -> list[str]:
             return [FOREIGN_LINE.format(port=port())]
         NOTICES.clear()
         try:
-            up: bool | None = ensure_running(WAIT_S)
+            up: bool | None = ensure_running(start_wait_s())
         except TimeoutError as e:
             _log(str(e))
             up = None
@@ -2172,7 +2197,7 @@ def server_for_launch(c: str) -> list[str]:
             _log(f"launch-args: no server answers at {url} for {c}")
             stuck = stuck_server(url)
             notes.append(f"thimble: {STUCK_LINE.format(pid=stuck)}" if stuck else
-                         LAUNCH_NO_SERVER_LINE.format(wait=WAIT_S, log=log_path()))
+                         LAUNCH_NO_SERVER_LINE.format(wait=start_wait_s(), log=log_path()))
         return notes
     except Exception as e:  # noqa: BLE001 — the launch goes on without it
         _log(f"launch-args: the server was not started: {type(e).__name__}: {e}")
@@ -3139,8 +3164,7 @@ TOO_OLD_LINE = ("thimble: WARNING - Claude Code {version} does not load plugin m
 OLDER_LINE = ("thimble: WARNING - Claude Code {version} is older than {tested}, the version thimble is tested with; if "
               "something fails, run `claude update` and start thimble again.")
 NEWER_LINE = ("thimble: Claude Code {version} is newer than {tested}, the version {thimble} was tested with. If agents do "
-              "not start or their chats stop updating, run `thimble doctor` and report it.")
-NEWER_DOCTOR_TAIL = ("run `thimble doctor` and report it.", "report it (`thimble feedback`).")  # the doctor's own words
+              "not start or their chats stop updating, report it with Report a problem in thimble's page.")
 
 
 def _thimble_named() -> str:
@@ -3205,7 +3229,7 @@ def claude_code_line(commands: bool = True) -> str:
     if not warning:
         return f"{v} (thimble is tested with {TESTED_CLAUDE_CODE})"
     if commands:
-        return warning.removeprefix("thimble: WARNING - ").removeprefix("thimble: ").replace(*NEWER_DOCTOR_TAIL)
+        return warning.removeprefix("thimble: WARNING - ").removeprefix("thimble: ")
     if case == TOO_OLD:
         return (f"{v}, older than {MODS_CLAUDE_CODE}, the first version that loads plugin mods by default, so thimble's "
                 "agents cannot start")
@@ -3318,6 +3342,12 @@ def disk_line(paths: list[Path]) -> str:
     return "; ".join(seen.values()) or "unknown"
 
 
+PORT_STUCK_LINE = (f"{{p}} is held by thimble's server (pid {{pid}}), which does not answer; to restart it, "
+                   f"{config.RESTART_HOW}")
+PORT_TAKEN_LINE = ("{p} is taken by another program ({who}) and thimble cannot start there; stop that program, or start "
+                   "thimble-browser on a free port with `thimble-browser --port <port>`")
+
+
 def port_line(p: int, up: bool) -> str:
     """Who holds the server's port: thimble, nobody, or another program, named, with the way around it."""
     if up:
@@ -3326,10 +3356,9 @@ def port_line(p: int, up: bool) -> str:
         return f"{p} (free)"
     holder = procs.listener(p)
     if holder and is_server(holder, p):
-        return f"{p} is held by thimble's server (pid {holder}), which does not answer; restart it with `thimble server restart`"
+        return PORT_STUCK_LINE.format(p=p, pid=holder)
     who = f"pid {holder}: {procs.cmdline(holder)[:80]}" if holder else "a process this user cannot see"
-    return (f"{p} is taken by another program ({who}) and thimble cannot start there; stop that program, or start "
-            "thimble on a free port with THIMBLE_PORT=<port> thimble")
+    return PORT_TAKEN_LINE.format(p=p, who=who)
 
 
 def delivery_line(cwd: Path) -> str:
@@ -3468,7 +3497,7 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  python: {_checked(python_line)}")
     port_text = _checked(port_line, p, up)
     lines.append(f"  port: {port_text}")
-    stuck = None if up or "thimble server restart" in port_text else _checked(stuck_server, url)
+    stuck = None if up or config.RESTART_HOW in port_text else _checked(stuck_server, url)
     lines.append(f"  server: {'up' if up else 'down'} at {url}; pid {pid or '-'} "
                  f"({'alive' if pid_alive(pid) else 'gone'}); started {st.get('started') or '-'}"
                  + (f"; stopped {st['stopped']}" if st.get("stopped") else "")
@@ -3872,7 +3901,7 @@ def restart(*, keep_vite: bool = False) -> list[str]:
     with lock():
         if not serves():
             start()
-        up = wait_healthy(api_url(), WAIT_S)
+        up = wait_healthy(api_url(), start_wait_s())
     lines.append(f"server {'up' if up else 'did not come up'} at {api_url()}")
     if up:
         _request("POST", f"{api_url()}/api/dev/announce", {}, timeout=10.0)
@@ -4145,7 +4174,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
     NOTICES.clear()
     LAST_START.clear()
     try:
-        up: bool | None = ensure_running(WAIT_S)
+        up: bool | None = ensure_running(start_wait_s())
     except TimeoutError as e:
         _log(str(e))
         up = None
@@ -4164,7 +4193,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         why = start_failure(url)
         _log(f"server up: no server answers at {url}" + (f" ({why})" if why else ""))
         print(f"thimble: no server answers: {why}; see {log_path()}" if why else
-              f"thimble: the server did not start within {WAIT_S:.0f} s; see {log_path()}")
+              f"thimble: the server did not start within {start_wait_s():.0f} s; see {log_path()}")
         print("Say `/thimble` again once that is fixed, or run `thimble doctor` in a shell.")
         print(REPORT_LINE)
         return 0
@@ -4511,6 +4540,8 @@ def _failed_up(what: str, e: BaseException) -> int:
 
 
 BROWSER_LINE = "thimble browser: {what}"
+NEW_LINK_LINE = "new sign-in link: {link}"  # new_links: a browser that is not signed in opened the page
+LINK_RETRY_S = 2.0  # how long new_links waits before it asks again a server that did not answer
 
 
 SESSION_NONE_LINE = {"continue": "no earlier session in {cwd} to continue.",
@@ -4633,7 +4664,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     until Ctrl-C, which stops the server. No Claude Code session starts here: the server runs main and every agent
     itself (runtime.py). `--session` says which session of the folder the page opens (pick_session, open_session): a
     new one, as each `claude` starts a new session, as empty as the folder's first; the latest (`--continue`); one
-    picked from a list (`--resume`); or the one that holds a chat of main by id. With `--detach` it returns once the
+    picked from a list (`--resume`); or the one that holds a chat of main by id. While it holds the terminal, a browser
+    that is not signed in and opens the page gets a new link there (watch_links). With `--detach` it returns once the
     link is printed and the server keeps running."""
     from . import claude_access, llm  # noqa: PLC0415
 
@@ -4653,7 +4685,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
     if refuse_foreign(api_url()):
         return 1
     try:
-        up: bool | None = ensure_running(WAIT_S)
+        up: bool | None = ensure_running(start_wait_s())
     except TimeoutError as e:
         _log(str(e))
         up = None
@@ -4678,8 +4710,47 @@ def cmd_browser(args: argparse.Namespace) -> int:
     if getattr(args, "detach", False):
         return 0
     print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."), flush=True)
-    hold_until_quit()
+    stop = watch_links(name)
+    try:
+        hold_until_quit()
+    finally:
+        stop.set()
     return 0
+
+
+def watch_links(name: str) -> threading.Event:
+    """new_links for workspace `name`, in a thread of its own, when stdout is the terminal (to_terminal), which alone
+    gets a code, as with the start's link. The event that ends it."""
+    stop = threading.Event()
+    if to_terminal():
+        threading.Thread(target=new_links, args=(name, stop), name="thimble-new-links", daemon=True).start()
+    return stop
+
+
+def new_links(name: str, stop: threading.Event) -> None:
+    """Until `stop` is set: each time a browser that is not signed in opens the page (hook_auth.want_link, at most once
+    a minute), a new sign-in link for workspace `name` with a new code (ui_url), printed as at the start
+    (NEW_LINK_LINE). It waits for one at GET /api/ui/link-wanted, which answers once the count or the server's start
+    differs from the last answer; a server that started again counts from 0. A server that does not answer is asked
+    again LINK_RETRY_S later, and a link the server gives no code for is not printed (pair_code logs why)."""
+    from . import hook_auth  # noqa: PLC0415
+
+    seen: dict[str, Any] = {}
+    while not stop.is_set():
+        api = str(read_state().get("api") or api_url())
+        status, got = _request("GET", f"{api}/api/ui/link-wanted?{urllib.parse.urlencode(seen)}",
+                               timeout=hook_auth.LINK_WAIT_S + 10)
+        wanted = got.get("wanted") if status == 200 and isinstance(got, dict) else None
+        if not isinstance(wanted, int) or isinstance(wanted, bool):
+            stop.wait(LINK_RETRY_S)
+            continue
+        boot = str(got.get("boot") or "")
+        before = seen["wanted"] if seen and seen["boot"] == boot else 0
+        if seen and wanted > before and not stop.is_set():
+            link = ui_url(name, pair=True)
+            if "#p=" in link:
+                _say(BROWSER_LINE.format(what=NEW_LINK_LINE.format(link=link)))
+        seen = {"boot": boot, "wanted": wanted}
 
 
 class Quit(Exception):

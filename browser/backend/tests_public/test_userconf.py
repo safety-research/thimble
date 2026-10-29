@@ -159,7 +159,7 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
     with pytest.raises(userconf.ConfigError, match="can't run on this machine") as e:
         userconf.session(CORPUS, "orientation")
     assert str(e.value).startswith("This agent's session runs only in Claude Code's Bash sandbox (sandbox.enforce)")
-    assert "`thimble doctor --verbose`" in str(e.value)
+    assert str(e.value).rstrip().endswith("and it can't run on this machine, so the orientation agent did not start.")
     assert "--sandbox-deps" not in str(e.value) and "install.sh" not in str(e.value)
     # installed since the server's first check: the refusal checks again, so no restart is needed
     checks: list[bool] = []

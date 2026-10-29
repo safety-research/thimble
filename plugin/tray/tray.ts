@@ -6,8 +6,14 @@
 // step through the answers' citations, explainers, heads-ups and cards (drawn inline at Claude's calls, or under an
 // answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
-// answer view asks trayFocus). While it is open its keys are in its header, at the right, each where it acts (the bar
-// keeps its own):
+// answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the mark it
+// opens (`] show explainer` for the answer's first mark, `] next citation` for a later one; on a narrow bar
+// `] explainer`, then `]` alone): while one of the answer's marks is not opened, the first such, its verb in
+// thimble's color; once the person opened each, the first mark, its verb drawn as the bar's other keys' words. The
+// words that name a mark, there and in the tray's header (`] next heads up`), are in that mark's own look (kindLook:
+// an explainer's teal, a heads-up's orange, a citation's underline), so the bar shows what each look is. While it is
+// open, ] and [ stay on the bar, named by the mark they reach, and its other keys are in its header, at the right, each
+// where it acts (the bar keeps its own):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
@@ -23,7 +29,10 @@
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
-//   ] [         the next mark or card, and the one before
+//   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
+//               are, in their look
+//   d u         a body taller than the tray's rows: a page further down, a page back up, while no other key holder (the
+//               fix line, a card on screen) takes the letter; the row under the window names them
 //
 // Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ expand all` (and `− collapse`)
 // under the evidence is + (and -); a click on the citation's words, in the tray's title as in the
@@ -31,44 +40,49 @@
 //
 // The tray takes only the rows the band above the prompt has over the bar (bar/register.ts), so the bar stays on
 // screen: a body taller than that shows in a window of those rows, which the wheel over the band scrolls, over a dim
-// row that says how many more lines there are. A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks
+// row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click
+// that moves the window a page, as d and u do. A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks
 // about it and 0 gives the keys back. An open tray does not change what the next prompt asks: a question about the
 // mark goes to a side thread (a). The tray closes when the person sends a prompt. What the person opens reaches main
 // through core/engaged.ts.
 //
-//   state: tray ({stack} or null), trayCard (the card ] reached: {row, card})
+//   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks the person opened:
+//   `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a heads-up)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failNotice } from '../bar/notice'
+import { spinNow } from '../bar/busy'
+import { failNotice, reasonOf } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { controlWords } from '../core/selection'
-import { revealCard } from '../cards/draw'
+import { keyOwner, revealCard } from '../cards/draw'
 import { quiet } from '../core/askcell.js'
+import { partsAround, textWidth } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
-import { explainSpans, type ExplainPart, type Gloss } from '../explain/seam'
+import { explainSpans, pendingGloss, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, launchRepair, repairOf } from '../marks/checker'
-import { highlighted, wrapCode } from '../marks/evidence'
+import { highlighted, statusEls, wrapCode } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
+import { fixKey } from '../fix/line'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
 import {
-  aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, printLine, push, refOf, restStop, rowsOf, sameRef, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  aboutOf, back, base, canRepair, checkStatus, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
+  open, printLine, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, top, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -84,6 +98,9 @@ type Stand = { row: string; card: string } | null
 
 const TRAY = { plugin: 'thimble', key: 'tray' } as const
 const STAND = { plugin: 'thimble', key: 'trayCard' } as const
+const SEEN = { plugin: 'thimble', key: 'traySeen' } as const
+/** The most marks the seen list keeps: the newest opened */
+const SEEN_KEEP = 400
 
 /** The colors of the tray's frame by what it shows, the ones its words are drawn in (explain/place.mjs markColors): a
  *  citation's purple, an explainer's teal and a heads-up's orange, theme keys that follow the person's theme. */
@@ -142,6 +159,19 @@ export async function closeTray($: Engine): Promise<void> {
   await setTray($, null)
 }
 
+/** The tray gives way to what takes the keys from it (the squeeze chips, s): it closes, and a card ] reached gives its
+ *  keys back. Returns what puts it back as it stood (the key undone: a letter right after it). */
+export async function giveWay($: Engine): Promise<() => Promise<void>> {
+  const was = await keptNow($)
+  if (!was.tray && !was.stand) return async () => undefined
+  await writeTray($, null)
+  await writeStand($, null)
+  return async () => {
+    await writeTray($, was.tray)
+    await writeStand($, was.stand)
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ marks of a row
 
 /** The text a row shows now (a squeezed version in its place), and its citations; null when it draws nothing. */
@@ -194,6 +224,37 @@ async function rowStops($: Engine, row: string): Promise<Stop[]> {
   return stopsOfRow(row, await citesOf($, row, shown), await spansOf($, row, shown), cards) as Stop[]
 }
 
+/** The marks of the answer `row` stands in (its turn's text rows), as ] passes them, in reading order: no cards. */
+async function answerMarks($: Engine, row: string): Promise<Stop[]> {
+  const out: Stop[] = []
+  for (const r of (await turnOfRow($, row))?.rows ?? [row]) {
+    const shown = await shownOf($, r)
+    if (shown) out.push(...(stopsOfRow(r, await citesOf($, r, shown), await spansOf($, r, shown), []) as Stop[]))
+  }
+  return out
+}
+
+/** A mark as the seen list names it. */
+const seenRef = (p: { row: string; kind?: string; n?: number; id?: string }) => `${p.row}|${p.kind === 'citation' ? `c${p.n}` : p.id}`
+
+/** Where ] goes from rest in an answer's stops: while one of its marks is not opened (the bar's ] lit), the first such,
+ *  in reading order; else its first mark (restStop). */
+const restNext = (stops: Stop[], seen: Set<string>): Stop | null => stops.find(p => !p.card && !seen.has(seenRef(p))) ?? (restStop(stops, 1) as Stop | null)
+
+async function seenNow($: Engine): Promise<Set<string>> {
+  const v = (await $.state.get(SEEN)).value
+  return new Set(Array.isArray(v) ? v.map(String) : [])
+}
+
+/** The person opened the mark `f`: it counts as seen, and the bar's ] dims once each mark of its answer does. Lines of a
+ *  file an explainer cites are no mark of the answer. */
+async function markSeen($: Engine, f: Frame): Promise<void> {
+  if (f.kind === 'place') return
+  const had = await seenNow($)
+  const ref = seenRef(f)
+  if (!had.has(ref)) await $.state.set(SEEN, [...had, ref].slice(-SEEN_KEEP))
+}
+
 async function hiddenCard($: Engine, id: string): Promise<boolean> {
   try { return !!(await squeezeHidesCard($, id)) } catch { return false }
 }
@@ -225,21 +286,49 @@ async function allStops($: Engine): Promise<Stop[]> {
   return out
 }
 
-/** Where ] and [ stand now: the tray's first mark, else the card ] reached (-1: neither). */
+/** Where ] and [ stand now: the mark the tray shows, where ] and [ pass it (a heads-up h opened over a citation stands
+ *  where it does, before that citation), so the header names what follows the mark it shows, whichever way it was
+ *  opened; else the tray's first mark (lines of a file an explainer cites stand on it), else the card ] reached (-1:
+ *  none). */
 async function stepPlace($: Engine): Promise<{ list: Stop[]; at: number }> {
   const list = await allStops($)
-  const b = base(await trayNow($)) as Frame | null
+  const tray = await trayNow($)
+  const shown = indexOf(list, top(tray))
+  if (shown >= 0) return { list, at: shown }
+  const b = base(tray) as Frame | null
   const stand = b ? null : await standNow($)
   return { list, at: indexOf(list, b ?? stand) }
 }
 
-/** Whether ] and [ go anywhere from where they stand, and what each goes to. */
-export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean; nextWhat?: string; prevWhat?: string }> {
+/** Whether ] and [ go anywhere from where they stand, and what each goes to: in words, and its kind (tray.mjs
+ *  stopKind). */
+export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean; nextWhat?: string; prevWhat?: string; nextKind?: string | null; prevKind?: string | null }> {
   const { list, at } = await stepPlace($)
   if (at < 0) return { next: true, prev: true }
   const next = stepFrom(list, at, 1)
   const prev = stepFrom(list, at, -1)
-  return { next: !!next, prev: !!prev, ...(next ? { nextWhat: stopWhat(next) } : {}), ...(prev ? { prevWhat: stopWhat(prev) } : {}) }
+  return {
+    next: !!next, prev: !!prev,
+    ...(next ? { nextWhat: stopWhat(next), nextKind: stopKind(next) } : {}), ...(prev ? { prevWhat: stopWhat(prev), prevKind: stopKind(prev) } : {}),
+  }
+}
+
+/** The look of the words that name a kind of mark (`] show explainer`, `] next citation`), on the bar and in the tray's
+ *  header: the mark's own look at rest, as the reply draws it (an explainer's teal fill and a heads-up's orange one,
+ *  explain/place.mjs markColors; a citation's underline, marks/view.ts citeLook), so the words that name a mark show
+ *  what it looks like. A card has none. In the theme set the drawing read last (themeNow). */
+function kindLook(kind: string | null | undefined): Record<string, unknown> | null {
+  const c = markColors(themeLast())
+  if (kind === 'explain') return { backgroundColor: c.glossBg }
+  if (kind === 'heads') return { backgroundColor: c.headsBg }
+  if (kind === 'citation') return { underline: true }
+  return null
+}
+
+/** A bar item's `marked`: the words `what` that name a kind of mark, in its look (kindLook); nothing for a card. */
+const markedAs = (what: string | undefined, kind: string | null | undefined): Pick<BarItem, 'marked'> => {
+  const look = kindLook(kind)
+  return what && look ? { marked: { words: what, look } } : {}
 }
 
 // ------------------------------------------------------------------------------------------------ what a mark is
@@ -250,8 +339,10 @@ async function itemOf($: Engine, row: string, n: number): Promise<MarkItem | nul
   return (await rowMarks($, row))?.items.find(x => x.n === n) ?? null
 }
 
+/** An explainer or a heads-up of the row; an explainer still being written (explain/seam.ts pendingGloss) is its words
+ *  alone. */
 async function glossOf($: Engine, row: string, id: string): Promise<Gloss | null> {
-  return (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id] ?? null
+  return (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id] ?? pendingGloss(row, id)
 }
 
 /** What the tray and the side thread read of a frame. */
@@ -273,8 +364,9 @@ function engagedMark(f: Frame, info: Info): Any {
   return f.kind === 'heads' ? { kind: 'heads', row: f.row, term: g?.term ?? '', title: g?.title ?? '' } : { kind: 'explain', row: f.row, term: g?.term ?? '' }
 }
 
-/** The person opened a mark: main hears it with their next prompt. */
+/** The person opened a mark: main hears it with their next prompt (an explainer still being written, once written). */
 async function told($: Engine, f: Frame): Promise<void> {
+  if (f.kind === 'explain' && pendingGloss(f.row, f.id)) return
   const info = await infoOf($, f)
   await tellOpened($, engagedMark(f, info), info.begins).catch(() => undefined)
 }
@@ -342,6 +434,7 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
   const t = await turnOfRow($, f.row)
   if (t?.answer) await pickAnswer($, t.answer)
   await told($, f)
+  await quietly(markSeen($, f))
   if (o.reveal) await reveal($, f)
 }
 
@@ -349,6 +442,7 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
 async function pushMark($: Engine, f: Frame): Promise<void> {
   await setTray($, push(await trayNow($), f) as Tray)
   await told($, f)
+  await quietly(markSeen($, f))
 }
 
 /** 0: the code back to the output, then the mark under this one, then closed. */
@@ -388,7 +482,8 @@ async function standOn($: Engine, row: string, card: string): Promise<void> {
 }
 
 /** ] and [: the next mark or card in reading order, and the one before. From rest, the answer the keys act on (else
- *  the newest answer's): ] its first mark, [ its last stop (restStop). At the newest reply's last stop, ] stays. */
+ *  the newest answer's): ] the first of its marks the person has not opened, else its first mark (restNext), [ its last
+ *  stop (restStop). At the newest reply's last stop, ] stays. */
 export async function stepMark($: Engine, dir: number): Promise<void> {
   const { list, at } = await stepPlace($)
   let next: Stop | null = null
@@ -398,7 +493,7 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
     const turn = row ? await turnOfRow($, row) : null
     const here = list.filter(p => (turn ? turn.rows.includes(p.row) : p.row === row))
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
-    next = restStop(pool, dir) as Stop | null
+    next = (dir > 0 && here.length ? restNext(here, await seenNow($)) : restStop(pool, dir)) as Stop | null
   }
   if (!next) return
   if (next.card) await standOn($, next.row, next.card)
@@ -462,6 +557,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   }
   const f = top(tray) as Frame | null
   if (!f) return null
+  const page = pageKey($, key)
+  if (page) return page
   if (key === '0') return { now: () => goBack($) }
   if (key === 'a') return { later: () => askAbout($, f, true) }
   if (key === '1') return { now: () => askAbout($, f, true) }
@@ -478,7 +575,7 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
       // the spawn is made while this key's hook runs (launchRepair's first call), and waits out the word window
       // (marks/register.ts); a word refuses it
       const hold = { until, cancelled: false }
-      const failed = (err: unknown) => failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'tray:repair')
+      const failed = (err: unknown) => failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
       return {
         now: async () => { void launchRepair($, r, hold).then(why => { if (why) failNotice($, why, 'tray:repair') }, failed) },
         undo: async () => { hold.cancelled = true },
@@ -502,28 +599,54 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
 // ------------------------------------------------------------------------------------------------ the bar
 
 /** The tray's items at the bar's left: while a card ] reached holds the keys, its keys, as `focus` items, so the bar
- *  names only those; an open tray's keys are in its header; at rest none. */
+ *  names only those; while a tray is open, ] and [ beside the bar's own keys (its other keys are in its header); at
+ *  rest, ] (restItem). */
 export async function trayBar($: Engine, _on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (preview) return []
   const tray = await trayNow($)
   const stand = tray ? null : await standNow($)
-  const steps = (): Promise<BarItem[]> => stepEnds($).then(ends => stepWords(ends).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, focus: true, press: () => stepMark($, s.key === ']' ? 1 : -1) })))
+  const steps = async (focus: boolean): Promise<BarItem[]> => {
+    const ends = await stepEnds($)
+    await themeNow($)
+    // on a narrow bar, as at rest (restWords): the mark's name alone, then the key alone
+    return stepWords(ends).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, shorter: s.what ? [s.what, ''] : [''], ...markedAs(s.what, s.kind), ...(focus ? { focus: true } : {}), press: () => stepMark($, s.key === ']' ? 1 : -1) }))
+  }
   if (stand) {
     return [
       { id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askCard($, stand) },
-      ...(await steps()),
+      ...(await steps(true)),
       { id: 'tray-0', key: '0', words: 'back', focus: true, press: () => writeStand($, null) },
     ]
   }
-  // an open tray names its keys in its header (trayKeys), so the bar keeps its own
-  return []
+  // an open tray: ] and [ stay on the bar, where they are at rest, beside the bar's own keys; its other keys are in its
+  // header (trayKeys)
+  return tray ? steps(false) : restItem($)
 }
 
-/** An open tray's keys, in its header at the right, each a click that does what its key does: ] (or [) the next mark,
- *  h the explainer on a citation's words, a ask, 0 back or close. x repair and + expand all (− collapse) are in the
+/** At rest, while the answer the keys act on shows marks: ] and the mark it opens from rest (restNext), a press too:
+ *  `] show explainer` for the answer's first mark, `] next citation` for a later one, the words that name the mark in
+ *  its own look (markedAs), so the bar shows what each look is while the answer has marks. The rest of its words in
+ *  thimble's color while the answer shows a mark the person has not opened (markSeen). On a narrow bar its words give
+ *  way after coverage's file counts: the verb first (`] explainer`), and after the busy step's words the mark's name
+ *  (`]` alone) (bar/bar.tsx). */
+async function restItem($: Engine): Promise<BarItem[]> {
+  const row = await actingRow($)
+  const marks = row ? await answerMarks($, row) : []
+  if (!marks.length) return []
+  const seen = await seenNow($)
+  const fresh = marks.some(p => !seen.has(seenRef(p)))
+  const next = restNext(marks, seen)
+  const w = restWords(next, marks.indexOf(next!) === 0)
+  await themeNow($)
+  return [{ id: 'tray-next', key: ']', words: w.words, shorter: w.shorter, ...markedAs(w.what, w.kind), ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
+}
+
+/** An open tray's keys, in its header at the right, each a click that does what its key does: h the explainer on a
+ *  citation's words, a ask, 0 back or close (] and [ are on the bar, trayBar). x repair and + expand all (− collapse) are in the
  *  citation's card, where they act, and 2–9 are its links in an explainer's words. */
 async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
-  const out: BarItem[] = (await stepEnds($).then(ends => stepWords(ends))).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, press: () => stepMark($, s.key === ']' ? 1 : -1) }))
+  await themeNow($)
+  const out: BarItem[] = []
   if (f.kind === 'citation') {
     const inner = await innerOf($, f)
     if (inner) {
@@ -577,18 +700,13 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
   return drawsHyperlinks(env)
 }
 
-/** A citation's status as its header says it, beside the kind: a sign, the word and its color. */
-const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
-  checking: { word: 'checking', dim: true },
-  deferred: { word: 'not checked', dim: true },
-  verified: { word: '✓ verified', color: 'success' },
-  corrected: { word: '✓ verified', color: 'success' },
-  failed: { word: '× failed', color: 'error' },
-}
-
-/** A citation's status: the store's, and failed for one with no check (marks/store.ts notRun; one the store no longer
- *  holds, whose reply the reply draws failed too, says so under it). */
-const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status] : null) ?? STATUS.failed!
+/** A citation's status as its header says it, in the words the evidence pane and the claims pane say it in (tray.mjs
+ *  checkStatus): the sign the reply draws after the citation's words in that status, so the tray says what it means
+ *  (the turning glyph while it is checked, × failed, ? not checked yet; ✓ for a checked one, which has none there), and
+ *  its word: verified, or corrected (the right words in place of the ones Claude wrote, which the line under it gives),
+ *  repaired when x corrected it. Failed for one with no check (marks/store.ts notRun; one the store no longer holds,
+ *  whose reply the reply draws failed too, says so under it). */
+const statusOf = (m: MarkItem | null) => checkStatus(m)
 
 /** The color of a line of code: the theme key thimble draws inline code in (marks/view.ts), a blue Claude Code shades
  *  for the theme it draws in. */
@@ -608,8 +726,9 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
   ] }) }
 }
 
-/** A citation's card under its header (the status is in the header). A corrected one says what it was; a failed one
- *  why in one sentence; after a repair (x), what it did; all dim, and under it
+/** A citation's card under its header (the status is in the header). A corrected one says what it was (`was 15 of
+ *  40`; a rewritten sentence or a narrowed citation says which, as the header says only corrected or repaired); a
+ *  failed one why in one sentence; after a repair (x) that verified it as written, why; all dim, and under it
  *  `x repair`, a press that checks it again (the ui.press hook, as x does). Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
  *  block, ended by `+ expand all`, a click that shows all the code and output (`fold`, as +); expanded, all the code
@@ -622,10 +741,9 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const ev = m.evidence
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
-  const fixed = m.rewrite ? (m.repair ? 'repaired by rewriting the sentence; ' : 'sentence rewritten; ') : m.narrowed ? (m.repair ? 'repaired by narrowing; ' : 'narrowed; ') : m.repair ? 'repaired; ' : 'corrected; '
   const notFixed = m.repair ? 'not repaired: ' : ''
   // a rewrite's history is the sentence Claude wrote
-  if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}`)
+  if (m.status === 'corrected' && m.was) dim('was', wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }))
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
@@ -752,26 +870,61 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
 let scrolled = 0
 let windowed: { over: number; rows: number } | null = null
 
+/** The keys that move the window a page down and up, each while no one before the tray takes it (the fix line, fix/
+ *  line.ts) and no card on screen lists it (cards/draw.ts keyOwner): the tray takes a key before a card does. */
+const PAGE_KEYS = { down: 'd', up: 'u' } as const
+/** The page keys the row under the window named as it was last drawn, null where none: a key reads no state. */
+let paging: { down: string | null; up: string | null } = { down: null, up: null }
+
+/** The page keys free now: each one no key holder before the tray takes, and no card on screen lists. */
+async function freePageKeys($: Engine): Promise<{ down: string | null; up: string | null }> {
+  const free = async (k: string) => !(await fixKey($, k).catch(() => null)) && !(await keyOwner($, k).catch(() => null))
+  return { down: (await free(PAGE_KEYS.down)) ? PAGE_KEYS.down : null, up: (await free(PAGE_KEYS.up)) ? PAGE_KEYS.up : null }
+}
+
+/** The rows a page moves the window: all its rows but one, which stays in view. */
+const pageOf = (w: { rows: number }) => Math.max(1, w.rows - 1)
+
 /** The tray's body in at most `fit` rows: whole when it fits; else a window of `fit` − 1 of its rows, and under it a dim
- *  row that says how many more lines there are below (at the end, above). Claude Code scrolls the band only when its
- *  whole tree is taller than its rows, so the wheel over the band moves the window (registerTray's ui.scroll hook).
- *  With fewer than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls it. */
-function fitBody(els: Any, body: Any[], w: number, fit: number): Any[] {
-  const { Box, Text } = els
+ *  row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click that
+ *  moves the window a page, after the key that does the same when it is free (`keys`); in a row too narrow for both,
+ *  `↓ N more` and `↑ N above`. Claude Code scrolls the band only when its whole tree is taller than its rows, so the
+ *  wheel over the band moves the window too (registerTray's ui.scroll hook). With fewer than two rows for the body, it
+ *  shows whole, and the band scrolls as Claude Code scrolls it. `words`: the words of the row under the window, as
+ *  drawn, each part's with its key and without. */
+function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }): { rows: Any[]; words: string[] } {
+  const { Box, Button, Text } = els
   const tall = treeRows(body, w)
-  if (tall <= fit || fit < 2) { windowed = null; return body }
+  if (tall <= fit || fit < 2) { windowed = null; paging = { down: null, up: null }; return { rows: body, words: [] } }
   const rows = fit - 1
   const over = tall - rows
   windowed = { over, rows }
   scrolled = Math.max(0, Math.min(over, scrolled))
   const below = over - scrolled
-  const words = below > 0 ? `↓ ${below} more line${below === 1 ? '' : 's'}` : `↑ ${over} line${over === 1 ? '' : 's'} above`
-  return [
-    Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
-      Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, ...(scrolled ? { position: 'relative', top: -scrolled } : {}), children: body }),
-    ] }),
-    Text({ key: 'tray-scroll', dimColor: true, wrap: 'truncate-end', children: words }),
+  const page = pageOf(windowed)
+  paging = { down: below > 0 ? keys.down : null, up: scrolled > 0 ? keys.up : null }
+  const lines = (n: number) => `${n} line${n === 1 ? '' : 's'}`
+  // each part a click that moves the window a page, its key first when the key is free
+  const part = (id: string, key: string | null, label: string, words: string, by: number): Any => Button({ key: `tray-page-${id}`, plain: true, label, hover: quiet(`tray-page-${id}`), onPress: () => scrollTray($, by), children: [
+    ...(key ? [Text({ key: 'k', color: accent(), bold: true, children: `${key} ` })] : []), Text({ key: 'w', dimColor: true, children: words }),
+  ] })
+  const both = [
+    ...(scrolled > 0 ? [{ id: 'up', key: paging.up, words: `↑ ${lines(scrolled)} above`, short: `↑ ${scrolled} above`, by: -page }] : []),
+    ...(below > 0 ? [{ id: 'down', key: paging.down, words: `↓ ${below} more line${below === 1 ? '' : 's'}`, short: `↓ ${below} more`, by: page }] : []),
   ]
+  // the row's words whole while they fit its one row, else each part without `lines` (the narrowest tray, both parts)
+  const short = both.reduce((n, x, i) => n + (i ? 3 : 0) + (x.key ? textWidth(x.key) + 1 : 0) + textWidth(x.words), 0) > w
+  const shown = both.map(x => ({ ...x, words: short ? x.short : x.words, label: x.words }))
+  const parts = shown.map(x => part(x.id, x.key, x.label, x.words, x.by))
+  return {
+    rows: [
+      Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
+        Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, ...(scrolled ? { position: 'relative', top: -scrolled } : {}), children: body }),
+      ] }),
+      Box({ key: 'tray-scroll', flexDirection: 'row', height: 1, overflow: 'hidden', children: parts.flatMap((x, i) => [...(i ? [Text({ key: `tray-page-s${i}`, dimColor: true, children: ' · ' })] : []), x]) }),
+    ],
+    words: shown.flatMap(x => [x.words, ...(x.key ? [`${x.key} ${x.words}`] : [])]),
+  }
 }
 
 /** The tray's body `by` rows further on in its window (back toward its top when negative), within its ends; false when
@@ -784,6 +937,19 @@ function scrollTray($: Engine, by: number): boolean {
   return true
 }
 
+/** d or u while the row under the window names it: the window a page down or up, undone when a letter follows (the
+ *  person types a word). Null for any other key, which reads nothing. */
+function pageKey($: Engine, key: string): Any | null {
+  const dir = key === paging.down ? 1 : key === paging.up ? -1 : 0
+  if (!dir || !windowed) return null
+  const by = dir * pageOf(windowed)
+  let was = scrolled
+  return {
+    now: async () => { was = scrolled; scrollTray($, by) },
+    undo: async () => { if (scrolled !== was) { scrolled = was; $.ui.invalidate('ui.render') } },
+  }
+}
+
 /** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, drawn and clicked as in
  *  the reply) on top, a citation's status and its keys at its right (trayKeys), then the mark's card, its rows starting where the
  *  title starts. `room`: the rows it may take, so the bar under it stays on screen (0: no limit); a taller body shows
@@ -791,7 +957,7 @@ function scrollTray($: Engine, by: number): boolean {
 export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
-  if (!tray || !f) { windowed = null; controlWords('tray', []); return [] }
+  if (!tray || !f) { windowed = null; paging = { down: null, up: null }; controlWords('tray', []); return [] }
   const { Box, Text } = els
   const w = Math.max(40, Math.min(104, width - 3))
   const inner = w - 4
@@ -834,10 +1000,9 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const tone = TONES[f.kind]
   // its keys at the right, after a citation's status, each drawn as the bar draws a key and a click that presses it
   const keys = await trayKeys($, tray, f)
-  // its keys' words, which a click on one leaves selected: no answer's words (core/selection.ts)
-  controlWords('tray', keys.flatMap(k => [k.words, `${k.key} ${k.words}`]))
   const keysLen = keys.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
-  const rightLen = (status ? status.word.length + 2 : 0) + keysLen
+  // the status: its sign, a space and its word, then two cells before the keys
+  const rightLen = (status ? status.word.length + 4 : 0) + keysLen
   // the title and the keys on one row when both fit, else the title on a row of its own above them
   const oneRow = title.length + 2 + rightLen <= inner
   const roomT = oneRow ? title.length : inner
@@ -851,22 +1016,33 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     Text({ key: 't', ...look, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
   ] })
   const about = aboutOf(f, await infoOf($, f))
+  // each key's words dim, as the bar draws a key's, and the words that name a kind of mark (`] next heads up`) in that
+  // mark's look (kindLook), as the bar's ] names it
   const keyEls = keys.flatMap((k, i) => [
     ...(i ? [Text({ key: `ksep${i}`, dimColor: true, children: ' · ' })] : []),
     els.Button({ key: k.id, plain: true, label: k.key === 'a' ? `ask about ${about}` : `${k.key} ${k.words}`, hover: quiet(k.id), onPress: k.press, children: [
-      Text({ key: 'k', color: accent(), bold: true, children: k.key }), Text({ key: 'w', dimColor: true, children: ` ${k.words}` }),
+      Text({ key: 'k', color: accent(), bold: true, children: k.key }),
+      ...partsAround(` ${k.words}`, k.marked?.words).map((p: { s: string; marked: boolean }, j: number) => Text({ key: j ? `w${j}` : 'w', ...(p.marked ? k.marked!.look : { dimColor: true }), children: p.s })),
     ] }),
   ])
+  // a citation's status: the turning glyph beside `checking` turns with the one after its words in the reply
+  const spin = status?.sign === 'spin' ? await spinNow($) : ''
   const rightEl = Box({ key: 'r', flexDirection: 'row', ...(oneRow ? { flexShrink: 0 } : { flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }), children: [
-    ...(status ? [Text({ key: 's', ...(status.color ? { color: status.color } : { dimColor: true }), children: status.word }), Text({ key: 'gap', children: '  ' })] : []),
+    ...(status ? [...statusEls(els, status, spin), Text({ key: 'gap', children: '  ' })] : []),
     ...keyEls,
   ] })
   const head = oneRow
     ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
     : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
-  // of the rows the tray may take, the frame's two borders and its head take theirs, and the body what is left
-  const shown = fitBody(els, body, inner, room > 0 ? room - 2 - treeRows(head, inner) : Infinity)
-  const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: shown })] })
+  // of the rows the tray may take, the frame's two borders and its head take theirs, and the body what is left; a body
+  // taller than that pages with d and u while they are free
+  const fit = room > 0 ? room - 2 - treeRows(head, inner) : Infinity
+  const keysFree = fit >= 2 && treeRows(body, inner) > fit ? await freePageKeys($) : { down: null, up: null }
+  const shown = fitBody($, els, body, inner, fit, keysFree)
+  // the words of its keys and of the row under its window, which a click on one leaves selected: no answer's words
+  // (core/selection.ts)
+  controlWords('tray', [...keys.flatMap(k => [k.words, `${k.key} ${k.words}`]), ...shown.words])
+  const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: shown.rows })] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }
 
@@ -899,7 +1075,7 @@ export const registerTray: Register = on => {
       if (!f || !(await repair($, f, { until: 0, cancelled: false }))) return next(e)
       return { element: e.element }
     } catch (err) {
-      failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'tray:repair')
+      failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
       return { element: e.element }
     }
   }).catch(($, e, next) => next(e))

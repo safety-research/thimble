@@ -10,6 +10,9 @@ text or markdown chat log whose lines start turns (`User: …`, `**Assistant:** 
 open and no corpus is walked. A false positive costs one more mode beside Raw, so the rules are lenient: a key names
 who speaks in any case style and nesting (`speakerName`, `agent_speaker_id`, `data.speakerId`), but JSON lines read as
 messages only when several of them take turns (_takes_turns), and a markdown file's front matter is never a chat log.
+In a chat log, a line inside a fenced block of code that opens inside a turn (a tool call's code or its output) starts no
+turn, and neither does a line of code or an error message that reads as `Word: …` (`try:`, `except ValueError as e:`,
+`ValueError: …`).
 
 The answer, or None:
     {"format": "stream" | "messages" | "conversations" | "json" | "csv" | "text", "score": 0..1,
@@ -162,6 +165,13 @@ NOT_SPEAKERS = {"info", "debug", "warn", "warning", "error", "fatal", "trace", "
                 "summary", "status", "result", "results", "output", "input", "source", "date", "version", "author",
                 "license", "title", "description", "tags", "type", "id", "name", "url", "link", "path", "total",
                 "default", "required", "optional", "answer key", "figure", "table", "chapter", "section", "page"}
+# the words that open a block of Python code (`try:`, `except ValueError as e:`, `for row in rows:`), which a tool call's
+# code puts at the start of its lines, and which never start who speaks (as `elif`, `class` and `case` can: a given name,
+# a Class Teacher, a Case Worker); of them, those that open a block with no other words
+CODE_OPENERS = frozenset({"try", "except", "else", "finally", "if", "for", "while", "with"})
+CODE_ALONE = frozenset({"try", "except", "else", "finally"})
+# the name of an error, which an error message starts with (`ValueError: …`, `json.decoder.JSONDecodeError: …`)
+_ERROR_NAME = re.compile(r"[\w.]*(?:Error|Exception|Warning)")
 
 TEXTISH = {"", ".txt", ".text", ".md", ".markdown", ".log", ".chat", ".transcript", ".vtt", ".srt", ".rst", ".org",
            ".irc"}
@@ -201,6 +211,12 @@ _STYLE = dict(STYLES)
 # the styles that a line of prose or of a document's headings rarely has, so many turns in them make a strong case
 # without role words
 DISTINCT_STYLES = {"whatsapp", "bracket", "irc", "vtt", "clock-name", "name-clock", "slack"}
+# a fence that opens or closes a block of code in markdown: three or more backticks or tildes at the start of a line or
+# of a turn's words (`User: ```python`); backticks with a backtick after them (```a```) are code inside the line
+_FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})(.*)")
+LOOKBACK_LINES = 200  # lines of a text chat log first read back from a page's first line (_lead_texts), twice as many
+LOOKBACK_MAX = 20_000  # each time after, up to this many lines in all
+LOOKBACK_BYTES = 4 * 1024 * 1024  # ... and this many bytes of them
 
 _lock = threading.Lock()
 _SNIFFS: "OrderedDict[str, tuple[tuple[int, int], dict[str, Any] | None]]" = OrderedDict()
@@ -1454,6 +1470,12 @@ def _sniff_csv(text: str, sep: str) -> dict[str, Any] | None:
 def turn_of(line: str, style: str) -> dict[str, Any] | None:
     """The turn a text chat log's line starts, in `style`: {speaker, time?, at}, `at` the UTF-16 offset where its words
     start; None for a line that goes on the turn before it."""
+    got = _turn_match(line, style)
+    return got[0] if got else None
+
+
+def _turn_match(line: str, style: str) -> tuple[dict[str, Any], int] | None:
+    """turn_of's answer, and where the turn's words start in the line (in characters)."""
     rx = _STYLE.get(style)
     m = rx.match(line) if rx else None
     if not m:
@@ -1467,7 +1489,7 @@ def turn_of(line: str, style: str) -> dict[str, Any] | None:
     time = groups.get("time") or groups.get("time2")
     if time:
         out["time"] = time.strip()
-    return out
+    return out, m.end()
 
 
 def _utf16_len(text: str) -> int:
@@ -1475,8 +1497,97 @@ def _utf16_len(text: str) -> int:
 
 
 def _speaker_ok(speaker: str) -> bool:
+    """Whether the words before a line's colon can name who speaks: not a label of a log or a document (NOT_SPEAKERS),
+    at most four words, no address, and no line of code or of an error (CODE_OPENERS, as code writes them, in lowercase:
+    a person named Else speaks; an error's name)."""
     low = speaker.lower().strip()
-    return bool(low) and low not in NOT_SPEAKERS and len(low.split()) <= 4 and not low.startswith(("http", "www."))
+    words = speaker.split()
+    if not low or low in NOT_SPEAKERS or len(words) > 4 or low.startswith(("http", "www.")):
+        return False
+    if words[0] in CODE_OPENERS and (len(words) > 1 or words[0] in CODE_ALONE):
+        return False
+    return not _ERROR_NAME.fullmatch(words[-1])
+
+
+def _fence_opened(words: str) -> str | None:
+    """The fence a line opens, its run of backticks or tildes (_FENCE); None for a line that opens no block of code."""
+    m = _FENCE.match(words)
+    if not m or (m.group(1)[0] == "`" and "`" in m.group(2)):
+        return None
+    return m.group(1)
+
+
+def _fence_closes(fence: str, line: str) -> bool:
+    """Whether a line closes the block of code that `fence` opened: a run of its character as long or longer, alone."""
+    m = _FENCE.match(line)
+    return bool(m) and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip()
+
+
+def _aider_user(text: str) -> bool:
+    """Whether a line of aider's history is a line of the user's message as aider writes it: `#### `, the words and the
+    two spaces aider writes after each line. A `#### ` heading inside an edit of a markdown file has no such spaces."""
+    return text.startswith("#### ") and text.rstrip("\r").endswith("  ")
+
+
+def _aider_code(texts: Iterable[Any]) -> Iterator[tuple[Any, bool]]:
+    """Per line of aider's chat history, the line and whether it is code: inside a fenced block that a line of the model's
+    reply opens inside a turn (after a `#### ` or `> ` line since the session's head). The block ends at its closing
+    fence, or before a session's head line or a line of the user's message (_aider_user), so a reply cut inside its code
+    (^C) ends at the user's next message."""
+    fence: str | None = None
+    inturn = False
+    for text in texts:
+        if not isinstance(text, str):
+            yield text, False
+            continue
+        if fence is not None:
+            if not (text.startswith(AIDER_HEAD) or _aider_user(text)):
+                if _fence_closes(fence, text):
+                    fence = None
+                yield text, True
+                continue
+            fence = None
+        if text.startswith(AIDER_HEAD):
+            inturn = False
+        elif text.startswith(("#### ", ">")):
+            inturn = True
+        elif inturn:
+            fence = _fence_opened(text)
+        yield text, False
+
+
+def _head_code(lines: list[str], hint: dict[str, Any]) -> list[bool]:
+    """Per line of a head, whether it is code in the chat log the sniff read as `hint`: inside a fenced block that opens
+    inside a turn, with a turn line's words (`User: ```python`) or on a line after one, or the line that opens it. A
+    turn line is one text_turns marks for `hint`; such a block ends at its closing fence, or before a turn line of a
+    speaker who spoke outside a block before it (a message cut inside its code). A block that opens before the first
+    turn line (a config, a banner, a title's underline, a fence left open) is no code: its lines read as they always
+    did, turns too, up to its closing fence, which so opens no block."""
+    if hint["style"] == "aider":
+        return [code for _, code in _aider_code(lines)]
+    speakers = set(hint["speakers"]) if "speakers" in hint else None
+    out: list[bool] = []
+    seen: set[str] = set()
+    fence: str | None = None
+    code = inturn = False
+    for ln in lines:
+        got = _turn_match(ln, hint["style"])
+        low = got[0]["speaker"].lower() if got else ""
+        turn = got is not None and (speakers is None or low in speakers or low in ROLE_WORDS)
+        if fence is not None and not (code and turn and (speakers is None or low in seen)):
+            if _fence_closes(fence, ln):
+                fence = None
+            if code:
+                out.append(True)
+                continue
+        else:
+            fence = _fence_opened(ln[got[1]:] if got else ln)
+            code = inturn or turn
+        if turn:
+            seen.add(low)
+            inturn = True
+        out.append(code and fence is not None and got is None)
+    return out
 
 
 # the first line of a front matter: a YAML `key:`, a TOML `key =` or a TOML `[table]`
@@ -1502,22 +1613,39 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
     take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
     lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first. A
-    front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys)."""
+    front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys).
+    When the chat log so read has fenced blocks of code inside its turns (_head_code: a tool call's code or output), the
+    head is read again without their lines, which so start no turn; in markdown, the code between the first turn line
+    and the last is then the turns' own and leaves the share (I100). The second read keeps the style the first read
+    chose and ranks no other: leaving the blocks' lines out never hands the head to another style (an aider history
+    whose edits add `#### ` headings to a README stays aider's)."""
     raw = text.split("\n")
     lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
         return None
-    best: tuple[float, str, int, dict[str, int]] | None = None
-    for name, rx in STYLES:
+    got = _read_head(lines, markdown, [False] * len(lines))
+    if got is None:
+        return None
+    code = _head_code(lines, got)
+    return _read_head(lines, markdown, code, got["style"]) if any(code) else got
+
+
+def _read_head(lines: list[str], markdown: bool, code: list[bool], style: str | None = None) -> dict[str, Any] | None:
+    """sniff_text's reading of a head whose lines of code (`code`, per line) start no turn: in the style whose turn
+    lines rank highest, or only in `style`."""
+    best: tuple[float, str, int, dict[str, int], int] | None = None
+    for name, _ in STYLES:
+        if style is not None and name != style:
+            continue
         counts: dict[str, int] = {}
         turns = 0
-        hits = [(ln, t) for ln in lines if (t := turn_of(ln, name)) is not None]
+        hits = [(i, t) for i, ln in enumerate(lines) if not code[i] and (t := turn_of(ln, name)) is not None]
         if name == "colon" and hits:
             # a chat log's turns start at its shallowest indent, a YAML file's repeated keys under parents shallower
             # than them: only the shallowest indent that two `Word:` lines share counts
-            by_indent: dict[int, list[tuple[str, dict[str, Any]]]] = {}
-            for ln, t in hits:
-                by_indent.setdefault(len(ln) - len(ln.lstrip()), []).append((ln, t))
+            by_indent: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+            for i, t in hits:
+                by_indent.setdefault(len(lines[i]) - len(lines[i].lstrip()), []).append((i, t))
             hits = next((by_indent[n] for n in sorted(by_indent) if len(by_indent[n]) >= 2), [])
         for _, t in hits:
             turns += 1
@@ -1527,7 +1655,7 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
             continue
         if name == "cc" and len(counts) < 2:
             continue  # a prompt and a reply, so quoted lines alone are no export
-        if name == "aider" and not any(ln.startswith(AIDER_HEAD) for ln in lines):
+        if name == "aider" and not any(ln.startswith(AIDER_HEAD) for ln, c in zip(lines, code) if not c):
             continue
         roles = sum(n for s, n in counts.items() if s in ROLE_WORDS or re.fullmatch(r"(speaker|person|participant|agent)[ _-]?\w{1,3}", s))
         repeated = max(counts.values()) >= 2
@@ -1538,13 +1666,13 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
             continue
         rank = turns + 2 * roles
         if best is None or rank > best[0]:
-            best = (rank, name, turns, counts)
+            best = (rank, name, turns, counts, sum(code[hits[0][0]:hits[-1][0]]))
     if best is None:
         return None
-    _, name, turns, counts = best
+    _, name, turns, counts, between = best
     roles = sum(n for s, n in counts.items() if s in ROLE_WORDS)
     strong = name in ("cc", "aider") or (
-        (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines)))
+        (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines) - between))
     out: dict[str, Any] = {"format": "text", "score": STRONG if strong else WEAK, "style": name}
     if name not in DISTINCT_STYLES and name != "aider":
         # a heading, a bold label or a `Word:` line starts a turn only for a speaker the head shows taking turns
@@ -1903,10 +2031,11 @@ def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | N
 
 def _aider_turns(texts: Iterable[Any]) -> Iterator[dict[str, Any] | None]:
     """aider's chat history as turns, per line the turn it starts or None: a run of `#### ` lines is the user's message,
-    a run of `> ` lines aider's own output, and the first other line after either starts the model's reply."""
+    a run of `> ` lines aider's own output, and the first other line after either starts the model's reply. The lines
+    of a fenced block of code in a turn (an edit's SEARCH and REPLACE lines, a file's code) start none (_aider_code)."""
     prev = ""
-    for text in texts:
-        if not isinstance(text, str) or not text.strip():
+    for text, code in _aider_code(texts):
+        if code or not isinstance(text, str) or not text.strip():
             yield None
             continue
         kind, turn = "reply", None
@@ -1929,24 +2058,90 @@ def _aider_turns(texts: Iterable[Any]) -> Iterator[dict[str, Any] | None]:
 def text_turns(texts: Iterable[Any], hint: dict[str, Any]) -> Iterator[dict[str, Any] | None]:
     """Per line of a text chat log the sniff read as `hint`, the turn it starts (turn_of, aider's runs of lines), else
     None: only for the speakers the sniff names when it names them, or a role such as `System` that first speaks past
-    the head."""
+    the head. A line inside a fenced block of code that opens inside a turn, with a turn line's words or on a line after
+    one (a tool call's code or output), starts none, unless it starts a turn of a speaker the sniff names (of anyone,
+    when it names none), which ends a block left open (a message cut inside its code). A fence before the first turn
+    line is text, as it always was."""
     if hint.get("style") == "aider":
         yield from _aider_turns(texts)
         return
+    style = hint["style"]
     speakers = set(hint["speakers"]) if "speakers" in hint else None
+    fence: str | None = None
+    inturn = False
     for text in texts:
-        t = turn_of(text, hint["style"]) if isinstance(text, str) else None
-        ok = t is not None and (speakers is None or t["speaker"].lower() in speakers or t["speaker"].lower() in ROLE_WORDS)
-        yield t if ok else None
+        turn = None
+        if isinstance(text, str):
+            got = _turn_match(text, style)
+            low = got[0]["speaker"].lower() if got else ""
+            if fence is not None and got and (speakers is None or low in speakers):
+                fence = None
+            if fence is not None:
+                if _fence_closes(fence, text):
+                    fence = None
+            else:
+                if got and (speakers is None or low in speakers or low in ROLE_WORDS):
+                    turn, inturn = got[0], True
+                if inturn:
+                    fence = _fence_opened(text[got[1]:] if got else text)
+        yield turn
+
+
+def _resets(text: str, hint: dict[str, Any]) -> bool:
+    """Whether a line of a text chat log sets what text_turns reads from it on, whatever the lines before it: a turn of
+    a speaker the sniff names, which no block of code holds, or in aider's history a session's head or a line of the
+    user's message (_aider_user)."""
+    if hint.get("style") == "aider":
+        return text.startswith(AIDER_HEAD) or _aider_user(text)
+    got = _turn_match(text, hint["style"])
+    return got is not None and ("speakers" not in hint or got[0]["speaker"].lower() in hint["speakers"])
+
+
+def _lead_texts(path: Path, hint: dict[str, Any], start: int) -> list[str]:
+    """The lines before line `start` of a text chat log that what its lines start depends on (a block of code still
+    open, aider's kind of line before): from the last one before it that sets that afresh (_resets), else from the
+    file's first line. It reads back a chunk of lines at a time, each chunk sized to the bytes left, through at most
+    LOOKBACK_MAX lines and LOOKBACK_BYTES bytes, and keeps only the lines from that line on: a page further inside a
+    turn (a tool's long output) keeps none and reads its lines as a file's first lines are read, no block open and no
+    turn before them."""
+    from .corpus import decode_line, page_lines  # noqa: PLC0415 — corpus reads this module
+
+    chunks: list[list[str]] = []  # the lines read back, a chunk at a time, the page's nearest first
+    n = used = 0
+    end, size = start - 1, LOOKBACK_LINES
+    while end >= 1:
+        first = max(1, end - size + 1)
+        raws = page_lines(path, first, end)[0]
+        if not raws:
+            break
+        lines: list[str] = []
+        found = False
+        for raw in reversed(raws):
+            n, used = n + 1, used + len(raw) + 1
+            if n > LOOKBACK_MAX or used > LOOKBACK_BYTES:
+                return []
+            lines.append(decode_line(raw))
+            if _resets(lines[-1], hint):
+                found = True
+                break
+        lines.reverse()
+        chunks.append(lines)
+        if found:
+            break
+        end = first - 1
+        size = max(1, min(size * 2, LOOKBACK_MAX - n + 1, (LOOKBACK_BYTES - used) * n // used + 1))
+    return [text for lines in reversed(chunks) for text in lines]
 
 
 def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
     """A page of a file's records with what the Transcript mode needs: the sniff (`transcript`) when the file reads as
-    one; for a text chat log each record that starts a turn its `meta.turn` (text_turns); and the fields of each
-    record's turn that Color by reads beside its own keys (`meta.fields`): who starts a turn of a chat log, and of JSON
-    lines of messages those of record_fields. A JSON line whose turn holds more than words carries its blocks
-    (turn_blocks) as `meta.blocks`, and who it stands for as `meta.speaker` when it is a tool call or output of its own
-    (tool_item); a line holding a whole conversation of such turns carries them as `meta.turns`."""
+    one; for a text chat log each record that starts a turn its `meta.turn` (text_turns, from the lines before the page
+    that its turns depend on, _lead_texts, so a page that starts inside a block of code reads it as the whole file
+    does); and the fields of each record's turn that Color by reads beside its own keys (`meta.fields`): who starts a
+    turn of a chat log, and of JSON lines of messages those of record_fields. A JSON line whose turn holds more than
+    words carries its blocks (turn_blocks) as `meta.blocks`, and who it stands for as `meta.speaker` when it is a tool
+    call or output of its own (tool_item); a line holding a whole conversation of such turns carries them as
+    `meta.turns`."""
     hint = sniff(path, rel)
     if hint is None:
         return page
@@ -1954,7 +2149,9 @@ def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
     records = page.get("records") or []
     if hint["format"] == "text":
         texts = [rec.get("record", {}).get("text") if isinstance(rec.get("record"), dict) else None for rec in records]
-        for rec, t in zip(records, text_turns(texts, hint)):
+        first = records[0].get("line", 1) if records else 1
+        lead = _lead_texts(path, hint, first) if first > 1 else []
+        for rec, t in zip(records, itertools.islice(text_turns([*lead, *texts], hint), len(lead), None)):
             if t is not None:
                 meta = rec.setdefault("meta", {})
                 meta["turn"] = t

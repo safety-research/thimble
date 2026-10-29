@@ -7,6 +7,7 @@ import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import './styles/index.css'
 import { ChipContext } from './chat/markdown'
+import { bodyHeight } from './canvas/bodyHeight'
 import { CardFace } from './canvas/CardFace'
 import { CARD_PAD_X } from './canvas/Cell'
 import { CanvasContext, type CanvasCtx } from './canvas/context'
@@ -49,6 +50,9 @@ export interface RenderResult {
   box: Box | null
   /** each frame a card type's page draws in, which the harness checks drew something */
   frames?: Box[]
+  /** the height the card's body draws at the card's width, px: a custom card's page whole, past the part the canvas
+   * shows at rest (bodyHeight) */
+  body?: number
   fonts: boolean
   requests: string[]
   error?: string
@@ -201,7 +205,7 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   await settled(card)
   const fonts = await fontsLoaded()
   const frames = Array.from(card.querySelectorAll('iframe.viewer-frame'), boxOf)
-  return { box: boxOf(card), frames, fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
+  return { box: boxOf(card), frames, body: bodyHeight(card), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
 }
 
 declare global {

@@ -7,7 +7,7 @@ import { tourSteps, welcomeTexts } from './steps'
 
 let tour: Tour | null = null
 
-export interface RunOptions extends Pick<StartOptions, 'showTab' | 'onEnd'> {
+export interface RunOptions extends Pick<StartOptions, 'showTab' | 'onEnd' | 'onAnswer'> {
   /** the first launch, which asks first */
   welcome: boolean
   /** the chat column is open: while it is folded the steps about the chat are left out */
@@ -18,7 +18,7 @@ export function runTour(o: RunOptions): Tour {
   tour ??= createTour(snaps as Snaps)
   // the ask key Settings picks, as the platform writes it (⌘, ⌥, Ctrl or Alt)
   const steps = tourSteps(askKeyLabel(), o.chat)
-  tour.start(steps, { welcome: o.welcome, says: welcomeTexts(), replay: !o.welcome, showTab: o.showTab, onEnd: o.onEnd })
+  tour.start(steps, { welcome: o.welcome, says: welcomeTexts(), replay: !o.welcome, showTab: o.showTab, onEnd: o.onEnd, onAnswer: o.onAnswer })
   return tour
 }
 

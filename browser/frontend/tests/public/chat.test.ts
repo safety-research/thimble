@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { callLineText, callTarget, foldRecords, leadText, madeBy, mainSkips, MCP_PREFIXES, type CallsRow, type ToolGroup, type UserRow } from '../../src/chat/model.ts'
+import { callLineText, callTarget, deckCards, foldRecords, leadText, madeBy, mainSkips, MCP_PREFIXES, orientMade, type CallsRow, type ToolGroup, type UserRow } from '../../src/chat/model.ts'
 import { shownRows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
@@ -54,6 +54,38 @@ describe('the fold', () => {
     expect(rows[5].chat).toBe('ag1')
     expect(rows[6].errorKind).toBe('interrupted')
   })
+})
+
+test("a request's or a thread's card stands loose, so the chat shows it alone, not in a group named after the request", () => {
+  const add = (id: string, group?: string) => [
+    { type: 'tool_use', ts: '2026-08-30T14:00:01Z', id, name: `${P}add_card`, input: { kind: 'note', question: id, text: 'x', ...(group ? { group } : {}) } },
+    { type: 'tool_result', ts: '2026-08-30T14:00:02Z', id, summary: `card:${id}`, cell_id: id },
+  ]
+  const made = madeBy(foldRecords(records([...add('r1', 'request:k2x9'), ...add('t1', 'thread:ab12'), ...add('s1', 'Why did it fail?'), ...add('n1')])))
+  expect(made.cells).toEqual([{ id: 'r1', group: '' }, { id: 't1', group: '' }, { id: 's1', group: 'why did it fail?' }, { id: 'n1', group: '' }])
+  expect(made.groupNames).toEqual({ 'why did it fail?': 'Why did it fail?' })
+})
+
+test('the chat names a group whole, as the call named it: a path of titles, or a title with a slash in it', () => {
+  const add = (id: string, group: string) => [
+    { type: 'tool_use', ts: '2026-10-29T14:00:01Z', id, name: `${P}add_card`, input: { kind: 'note', question: id, text: 'x', group } },
+    { type: 'tool_result', ts: '2026-10-29T14:00:02Z', id, summary: `card:${id}`, cell_id: id },
+  ]
+  const made = madeBy(foldRecords(records([...add('p1', 'Analysis / Spike / Detail'), ...add('p2', 'Analysis  /  Spike / Detail'), ...add('q1', 'Did failures rise after 9/14?'), ...add('d1', 'Other / Detail')])))
+  expect(made.cells).toEqual([
+    { id: 'p1', group: 'analysis / spike / detail' },
+    { id: 'p2', group: 'analysis / spike / detail' },
+    { id: 'q1', group: 'did failures rise after 9/14?' },
+    { id: 'd1', group: 'other / detail' },
+  ])
+  expect(made.groupNames).toEqual({
+    'analysis / spike / detail': 'Analysis / Spike / Detail',
+    'did failures rise after 9/14?': 'Did failures rise after 9/14?',
+    'other / detail': 'Other / Detail',
+  })
+  // the orientation's deck, and a frame in it, are the deck
+  const deck = orientMade(madeBy(foldRecords(records([...add('o1', 'Orientation'), ...add('o2', 'Orientation / Charts'), ...add('o3', 'Charts / Orientation')]))))
+  expect(deckCards(deck)).toBe(2)
 })
 
 test('an extension\'s orientation instructions lead its follow-up as a line naming the extension', () => {

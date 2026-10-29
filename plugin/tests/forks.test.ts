@@ -3,9 +3,10 @@
 // count their time. The line that waits only on thimble's forks reads as a finished turn of its own time, and so does
 // the next one; a line that waits on any other agent stays Claude Code's. All data is made up.
 // `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { registerForks, spawnFork, turnLine } from '../core/forks'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

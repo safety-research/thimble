@@ -4,11 +4,12 @@
 // word that starts with p leaves the card's link as it was; a reload of the plugin while a fork publishes loses neither
 // the publish nor its end; main reads the link, or why there is none, with the next prompt. All data is made up.
 // `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { busySteps, busyWhile } from '../bar/busy'
 import { artifactLine, launch, registerCardHead } from '../cards/head'
 import { registerForks } from '../core/forks'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

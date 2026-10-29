@@ -7,6 +7,7 @@ beside them. Run: python3 -m pytest plugin/tests"""
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from contextlib import closing
@@ -284,3 +285,108 @@ def test_a_corpus_of_thousands_of_folders_keeps_its_record_under_claude_codes_ou
     touched = {g["folder"]: g for g in out if g["touched"]}
     assert set(touched) == {"notes/", "runs/run-0/task-7/trial-1/episode-0/"}
     assert len(out) < len(groups) and all(g["folder"].count("/") < 5 for g in out if not g["touched"])
+
+
+def _folder(tmp_path: Path, n: int) -> tuple[Path, list[str]]:
+    """A made-up folder of n small record files of different sizes."""
+    d = tmp_path / "many"
+    d.mkdir()
+    for i in range(n):
+        (d / f"r{i:03d}.jsonl").write_text('{"step": 1}\n' * (i + 1))
+    return d, sorted(p.name for p in d.iterdir())
+
+
+def test_a_count_stopped_part_way_keeps_what_it_counted_and_the_next_goes_on_from_there(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first count of a big folder on a slow disk outlasted the time Claude Code gives a command, or the next
+    reload of the plugin, which killed it. It kept nothing, so every count began again at the first file and none
+    ended. Each file is now kept as it is counted, so the count after a kill counts only the files left."""
+    import signal
+    import subprocess
+    import textwrap
+    import time
+
+    from kernel import sources as S
+
+    d, files = _folder(tmp_path, 30)
+    cache = tmp_path / "cache" / "counts.json"
+    eleventh = tmp_path / "eleventh"
+    child = textwrap.dedent(f"""
+        import sys, time
+        from pathlib import Path
+        sys.path.insert(0, {str(ENGINE)!r})
+        from kernel import sources as S
+        real, n = S.count_rows, [0]
+        def slow(root, rel):
+            n[0] += 1
+            if n[0] == 11:  # ten files counted: the count is killed while it counts the eleventh
+                Path({str(eleventh)!r}).write_text("")
+                time.sleep(120)
+            return real(root, rel)
+        S.count_rows = slow
+        S.counts(Path({str(d)!r}), {files!r}, Path({str(cache)!r}))
+    """)
+    p = subprocess.Popen([sys.executable, "-c", child])
+    try:
+        until = time.time() + 60
+        while not eleventh.exists():
+            assert p.poll() is None and time.time() < until, "the count ended before it was killed"
+            time.sleep(0.05)
+    finally:
+        p.send_signal(signal.SIGKILL)  # as Claude Code stops it: no cleanup runs
+        p.wait()
+    real = S.count_rows
+    counted: list[str] = []
+    monkeypatch.setattr(S, "count_rows", lambda root, rel: (counted.append(rel), real(root, rel))[1])
+    got = S.counts(d, files, cache)
+    assert len(counted) == 20
+    assert got == S.counts(d, files, None)
+    # and a count after a whole one counts nothing again
+    counted.clear()
+    assert S.counts(d, files, cache) == got and counted == []
+
+
+def test_a_count_given_a_time_stops_counting_then_says_how_far_it_got_and_the_next_run_ends(tmp_path: Path) -> None:
+    """The plugin's count runs within Claude Code's time limit: past the time it is given, the command stops counting the
+    folder's files, keeps what it counted and says how far it got, and the next run goes on and gives the record."""
+    import subprocess
+
+    d, files = _folder(tmp_path, 12)
+    env = {**os.environ, "THIMBLE_PYTHON": sys.executable, "THIMBLE_ROOT": str(d), "THIMBLE_HOME": str(tmp_path / "th"),
+           "THIMBLE_SESSION": "s-cov"}
+    run = lambda *a: subprocess.run([str(ENGINE.parent / "bin" / "thimble"), "coverage", "--json", *a], text=True,  # noqa: E731
+                                    capture_output=True, cwd=d, env=env, timeout=120)
+    first = run("--within", "0")
+    assert first.returncode == 0, first.stderr
+    assert json.loads(first.stdout) == {"counting": {"counted": 0, "files": 12}}
+    second = run("--within", "60")
+    assert second.returncode == 0, second.stderr
+    assert json.loads(second.stdout)["total"]["files"] == 12
+
+
+def test_a_search_the_session_repeats_goes_over_its_folder_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A long session (a resumed one, compacted more than once) searches the same folders again and again, and each
+    search of a folder went over each of its files: a count of a folder of 150,000 files took minutes per thousand calls,
+    so the bar's count of such a session never ended. A search or a command done again changes nothing: the folder is
+    gone over once, and the coverage is the same as of each call once."""
+    from kernel import shellcmd as SH
+
+    d, files = _folder(tmp_path, 50)
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    calls = [{"tool": "Grep", "path": str(d), "glob": "*.jsonl", "mode": "content", "lines": {str(d / "r001.jsonl"): [1]}},
+             {"tool": "Grep", "path": str(d), "glob": None, "mode": "files_with_matches"},
+             bash("grep -rn step . | head -5", 5),
+             bash("python3 - <<'PY'\nimport glob\nfor p in glob.glob('r00*.jsonl'):\n    open(p).read()\nPY", 1),
+             {"tool": "Read", "file": str(d / "r002.jsonl"), "from": 1, "to": 2}]
+    seen = tmp_path / "th" / "seen"
+    seen.mkdir(parents=True)
+    for name, rows in (("s-once", calls), ("s-long", calls * 200)):
+        (seen / f"{name}.jsonl").write_text("".join(json.dumps({"cwd": str(d), **r}) + "\n" for r in rows))
+    once = CV.coverage(Store(d, session="s-once"))
+    gone = [0]
+    under = SH.Known.under
+    monkeypatch.setattr(SH.Known, "under", lambda self, folder: (fs := under(self, folder), gone.__setitem__(0, gone[0] + len(fs)))[0])
+    long = CV.coverage(Store(d, session="s-long"))
+    assert gone[0] <= len(files)
+    assert long["total"] == once["total"]
+    assert [(o["path"], o["status"], o["said"]) for o in long["files"]] == [(o["path"], o["status"], o["said"]) for o in once["files"]]

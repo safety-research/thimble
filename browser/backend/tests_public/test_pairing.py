@@ -75,8 +75,8 @@ def test_a_code_works_once():
     assert re.fullmatch(r"[A-Za-z0-9_-]{32}", key), "a random key of 24 bytes"
     again, none = _claim(code)
     assert _gone(again) and none == ""
-    assert hook_auth.CODE_GONE == ("This sign-in link was already used or has expired. Run `thimble-browser` again for a"
-                                   " new one.")
+    assert hook_auth.CODE_GONE == ("This sign-in link was already used or has expired. Open the new link in the terminal"
+                                   " where `thimble-browser` runs.")
 
 
 def test_a_code_expires_and_a_newer_code_for_the_workspace_voids_it(monkeypatch):
@@ -165,13 +165,30 @@ def test_an_old_key_body_gets_410(client):
 
 @pytest.mark.real_write_guard
 def test_the_paired_route_says_whether_this_browser_is_signed_in_and_its_id(client):
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
     sign_in(client, hook_auth.mint())
     browser = hook_auth._entries()[0]["hash"][:12]
-    assert client.get("/api/ui/paired").json() == {"paired": True, "id": browser}
+    assert client.get("/api/ui/paired").json() == {"paired": True, "id": browser, "at": hook_auth._entries()[0]["at"]}
     client.cookies.clear()
     client.cookies.set(hook_auth.ui_cookie(), "not-signed-in")
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
+
+
+@pytest.mark.real_write_guard
+def test_the_paired_route_says_when_this_browser_signed_in_to_the_millisecond(client):
+    """A browser learns when it signed in, so it leaves out the notices of sign-ins before its own (frontend
+    lib/notices), which are timed to the millisecond (notices.post)."""
+    first = TestClient(client.app, base_url="http://testserver")
+    sign_in(first, hook_auth.mint())
+    sign_in(client, hook_auth.mint())
+    mine, theirs = client.get("/api/ui/paired").json(), first.get("/api/ui/paired").json()
+    [entry] = [e for e in hook_auth._entries() if e["hash"].startswith(mine["id"])]
+    assert mine["at"] == entry["at"]
+    for at in (mine["at"], theirs["at"]):
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}\+00:00", at), at
+    assert theirs["at"] <= mine["at"]
+    bare = TestClient(client.app, base_url="http://testserver")
+    assert bare.get("/api/ui/paired").json()["at"] == ""
 
 
 @pytest.mark.real_write_guard
@@ -182,6 +199,87 @@ def test_the_pair_route_needs_the_token_and_gives_a_code_for_five_minutes(client
     assert client.post("/api/ui/key", json={"code": r.json()["code"], "ws": CORPUS}).status_code == 200
     r = client.post("/api/ui/pair", headers=plugin_headers())
     assert r.status_code == 200 and r.json()["code"], "the start page's code, with no body"
+
+
+def test_a_browser_that_is_not_signed_in_wants_a_new_link_at_most_once_a_minute(client, monkeypatch):
+    """GET /api/ui/paired from a browser that is not signed in, which its page asks before it shows the sign-in line,
+    counts once in LINK_EVERY_S (hook_auth.want_link), so a page that reloads does not fill thimble-browser's terminal
+    with links; once a live code was spent, by a sign-in or by a browser signed in already, which may have used the last
+    link, the next ask counts at once, and a code that is gone changes nothing. A signed-in browser and a screenshot's
+    page want none, and an ask writes nothing."""
+    now = [1000.0]
+    monkeypatch.setattr(hook_auth, "_now", lambda: now[0])
+    assert hook_auth.LINK_EVERY_S == 60 and hook_auth.links_wanted() == 0
+    home = hook_auth.home()
+    home.mkdir(parents=True, exist_ok=True)
+    files = sorted((str(p), p.stat().st_mtime_ns) for p in home.rglob("*"))
+    for _ in range(3):  # a page that reloads
+        assert client.get("/api/ui/paired").json()["paired"] is False
+    assert hook_auth.links_wanted() == 1
+    assert sorted((str(p), p.stat().st_mtime_ns) for p in home.rglob("*")) == files, "nothing written"
+    now[0] += hook_auth.LINK_EVERY_S - 1
+    client.get("/api/ui/paired")
+    assert hook_auth.links_wanted() == 1
+    now[0] += 1
+    client.get("/api/ui/paired")
+    assert hook_auth.links_wanted() == 2
+    now[0] += 10
+    signed = TestClient(client.app, base_url="http://testserver")
+    sign_in(signed, hook_auth.mint(CORPUS))
+    assert signed.get("/api/ui/paired").json()["paired"] is True
+    assert hook_auth.links_wanted() == 2, "a signed-in browser wants none"
+    client.get("/api/ui/paired")
+    assert hook_auth.links_wanted() == 3, "the next ask after a sign-in counts at once"
+    assert client.post("/api/ui/key", json={"code": "never-made"}).status_code == 410
+    client.get("/api/ui/paired")
+    assert hook_auth.links_wanted() == 3, "a code that is gone lifts nothing"
+    assert signed.post("/api/ui/key", json={"code": hook_auth.mint(CORPUS)}).status_code == 204
+    client.get("/api/ui/paired")
+    assert hook_auth.links_wanted() == 4, "a live code a signed-in browser spent lifts the minute too"
+    now[0] += hook_auth.LINK_EVERY_S
+    shot = {hook_auth.SHOT_HEADER: hook_auth.mint_shot()}
+    assert client.get("/api/ui/paired", headers=shot).json()["paired"] is False
+    assert hook_auth.links_wanted() == 4, "a screenshot's page wants none"
+    for site in ("cross-site", "same-site", "none"):  # another site's page, as an <img>, or a link typed or followed
+        assert client.get("/api/ui/paired", headers={"Sec-Fetch-Site": site}).json()["paired"] is False
+    assert hook_auth.links_wanted() == 4, "only the workbench's own page asks for a link"
+    assert client.get("/api/ui/paired", headers={"Sec-Fetch-Site": "same-origin"}).json()["paired"] is False
+    assert hook_auth.links_wanted() == 5, "the page's own ask counts"
+
+
+@pytest.mark.real_read_guard
+def test_thimble_browser_waits_with_the_token_for_a_browser_that_wants_a_link(client, plugin_headers, monkeypatch):
+    """GET /api/ui/link-wanted, which thimble-browser asks with the token's proof (cli.new_links), answers {boot,
+    wanted} at once when either differs from the query's, else as soon as a browser that is not signed in asks
+    GET /api/ui/paired, else after LINK_WAIT_S. A request with no credential gets 401."""
+    import threading
+    import time
+
+    from app import config
+
+    assert client.get("/api/ui/link-wanted").status_code == 401
+    assert hook_auth.LINK_WAIT_S == 25.0
+    monkeypatch.setattr(hook_auth, "LINK_WAIT_S", 5.0)
+    now = {"boot": config.BOOT_ID, "wanted": 0}
+    t0 = time.monotonic()
+    assert client.get("/api/ui/link-wanted", headers=plugin_headers()).json() == now, "the first ask"
+    other = client.get("/api/ui/link-wanted", params={"boot": "an-earlier-start", "wanted": 0}, headers=plugin_headers())
+    assert other.json() == now and time.monotonic() - t0 < 4, "a server that started again answers at once"
+    monkeypatch.setattr(hook_auth, "LINK_WAIT_S", 0.5)
+    t0 = time.monotonic()
+    assert client.get("/api/ui/link-wanted", params=now, headers=plugin_headers()).json() == now
+    assert time.monotonic() - t0 >= 0.5, "nothing new: it waits LINK_WAIT_S"
+    monkeypatch.setattr(hook_auth, "LINK_WAIT_S", 30.0)
+    got: dict = {}
+    waiting = threading.Thread(target=lambda: got.update(
+        r=client.get("/api/ui/link-wanted", params=now, headers=plugin_headers())))
+    waiting.start()
+    time.sleep(0.5)
+    assert waiting.is_alive(), "it waits"
+    page = TestClient(client.app, base_url="http://testserver")
+    assert page.get("/api/ui/paired").json()["paired"] is False
+    waiting.join(10)
+    assert not waiting.is_alive() and got["r"].json() == {"boot": config.BOOT_ID, "wanted": 1}
 
 
 @pytest.mark.real_write_guard
@@ -207,7 +305,7 @@ def test_unpair_with_the_token_signs_every_browser_out_and_signout_with_a_cookie
 
     assert client.post("/api/ui/unpair").status_code == 401, "a signed-in page cannot sign every browser out"
     assert client.post("/api/ui/unpair", headers=plugin_headers()).status_code == 204
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
     assert not (hook_auth.home() / hook_auth.PAIRED_FILE).exists()
     # the key went with the cookie: a new sign-in gets a new key, and the old key's path does not count its cookie
     cookie = client.cookies.get(hook_auth.ui_cookie(), path=hook_auth.browser_path(mine_key))
@@ -236,16 +334,33 @@ def test_a_new_sign_in_shows_a_notice_in_the_named_and_the_attached_workspace_an
     for c in ("other", CORPUS):
         [n] = [n for n in notices.open_notices(c) if n["key"] == f"sign-in:{browser}"]
         assert n["kind"] == "sign-in" and n["action"] == {"label": "Sign it out", "do": "sign-out", "slug": browser}
-        assert re.fullmatch(r"A browser signed in to thimble at \d\d:\d\d\. If it was not you, click Sign it out, or "
-                            r"run `thimble unpair` in a shell to sign out every browser\.", n["text"]), n["text"]
+        assert re.fullmatch(r"A browser signed in to thimble at \d\d:\d\d\. If it was not you, click Sign it out\.",
+                            n["text"]), n["text"]
     line = (hook_auth.home() / "links" / SID).read_text()
-    assert re.fullmatch(r"\nthimble: a browser signed in to thimble at \d\d:\d\d\. If it was not you, run "
-                        r"`thimble unpair` in a shell\.", line), line
+    assert re.fullmatch(r"\nthimble: a browser signed in to thimble at \d\d:\d\d\. If it was not you, click Sign it out "
+                        r"on its notice in thimble's page\.", line), line
     assert not (hook_auth.home() / "links" / "other").exists()
     another = TestClient(client.app, base_url="http://testserver")
     r = another.post("/api/ui/key", json={"code": hook_auth.mint(), "ws": "no-such-workspace"})
     assert r.status_code == 200, "a link of no registered workspace still signs in, and tells the attached main"
     assert line != (hook_auth.home() / "links" / SID).read_text()
+
+
+def test_the_sign_in_texts_name_only_commands_this_version_has():
+    """The sign-in notice, its line in main's terminal and the line in place of the link name none of 0.8's commands
+    (`thimble up`, `thimble unpair`): a command they name is one thimble-browser --help lists, the line in place of
+    the link points to the terminal where thimble-browser runs, which prints a new sign-in link for a browser that
+    is not signed in, and a browser is signed out with Sign it out on its sign-in notice."""
+    from pathlib import Path
+
+    from app import cli
+
+    usage = "\n".join((Path(__file__).resolve().parents[2] / "scripts" / "thimble-browser").read_text().splitlines()[1:21])
+    for text in (main.SIGNED_IN_NOTICE, main.SIGNED_IN_LINE, cli.LINK_LINE):
+        for command in re.findall(r"`([^`]+)`", text):
+            assert command.startswith("thimble-browser") and command in usage, (command, text)
+    assert "in the terminal where `thimble-browser` runs" in cli.LINK_LINE
+    assert "click Sign it out" in main.SIGNED_IN_NOTICE and "click Sign it out" in main.SIGNED_IN_LINE
 
 
 @pytest.mark.real_read_guard
@@ -258,7 +373,7 @@ def test_a_browser_reads_nothing_until_it_signs_in_and_nothing_after_unpair(clie
     assert (r.status_code, r.json()) == (401, refused)
     head = client.head("/api/corpora")
     assert (head.status_code, head.content, head.headers.get("content-length")) == (401, b"", "0")
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
     assert set(client.get("/api/health").json()) == {"ok", "boot", "ui"}, "no path or pid without the token"
     sign_in(client, hook_auth.mint(CORPUS))
     assert client.get("/api/corpora").status_code == 200
@@ -288,7 +403,7 @@ def test_a_cookie_counts_only_under_the_path_of_the_key_it_was_given_with(client
     page.cookies.set(hook_auth.ui_cookie(), cookie)  # sent on every path, so each check below is the server's
     refused = {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}
     for base in ("", f"/b/{other_key}", "/b/no-browser-holds-this-key", f"/b/{key}x"):
-        assert page.get(f"{base}/api/ui/paired").json() == {"paired": False, "id": ""}, base
+        assert page.get(f"{base}/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}, base
         r = page.get(f"{base}/api/corpora")
         assert (r.status_code, r.json()) == (401, refused), base
         r = page.post(f"{base}/api/ui/signout", json={"id": ""})

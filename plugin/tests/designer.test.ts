@@ -3,13 +3,14 @@
 // why. On a plain engine whose $.agent.spawn names the fork it started: its cards anchor to the answer v was pressed on,
 // the busy line names it while it runs, its end says why it drew no card, and a card call with the id of main's card
 // draws a card of its own. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
 import { failLineNow } from '../bar/notice'
 import { metaOf } from '../cards/store'
 import { cardCall } from '../cards/tool'
 import { designAnchor, registerDesigner, vKey } from '../designer/v'
+import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

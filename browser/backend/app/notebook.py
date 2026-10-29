@@ -1,11 +1,13 @@
 """Canvas groups and cells: storage, kernels, execution, bounded outputs, SSE.
 
 A group is a notebook file, workspaces/<c>/notebooks/<id>.json, carrying tree fields (parent, kind, anchor, chat), its
-role and its cells. Runnable cells carry code and outputs and run on a kernel; data cells carry a payload. Kernels are
-detached processes the workspace owns (see the kernels section): one shared kernel for exploration groups, one per group
-for everything else (_kernel_for). Oversized stream outputs are bounded to a head and tail with the full text in a side
-file. The in-memory notebook cache is used by the event-loop thread only, and is trusted only while the file is
-unchanged (mtime_ns, size and inode).
+role and its cards. A card stands in a group only when someone put it there (a frame the analyst made, a sequence of
+cards a call named); every other card stands loose on the board, in the loose group, which draws no frame. Runnable
+cells carry code and outputs and run on a kernel; data cells carry a payload. Kernels are detached processes the
+workspace owns (see the kernels section): one shared kernel for exploration groups, one per group for everything else,
+and one per agent session for that agent's cards (_kernel_for). Oversized stream outputs are bounded to a head and tail
+with the full text in a side file. The in-memory notebook cache is used by the event-loop thread only, and is trusted
+only while the file is unchanged (mtime_ns, size and inode).
 
 Every change holds the store's lock (editing: ledger.locked on the notebooks folder) from its read to its write, and a
 run, which cannot hold it while the code runs, saves its cell into the group as the file holds it then (_merge_cell).
@@ -30,6 +32,7 @@ import subprocess
 import sys
 import threading
 import time
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -37,6 +40,8 @@ from pathlib import Path
 from queue import Empty
 from typing import Any, Literal
 
+import zmq
+import zmq.asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 from jupyter_client import AsyncKernelClient
@@ -310,10 +315,10 @@ def _new_id() -> str:
     return secrets.token_hex(4)
 
 
-MAIN = "main"  # the group a workspace's first cells land in when none is bound; created on demand
+MAIN = "main"  # the id of the analyst's group in a workspace from before groups had random ids (notebooks_dir)
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 DEFAULT_TITLE = "Notebook"
-ANALYST_NOTEBOOK_TITLE = "Your work"  # the analyst's own group; tools.ANALYST_NOTEBOOK_TITLE repeats it
+ANALYST_NOTEBOOK_TITLE = "Your work"  # the title `main` reads as (_title), from a workspace that had one
 UNNAMED_MAIN_TITLES = ("", DEFAULT_TITLE, "Your notebook")  # stored defaults of `main` the analyst never typed
 
 # A group's role: `exploration` is the orientation's deck, `analyst` the analyst's own group and every thread's;
@@ -1171,7 +1176,7 @@ def summary(nb: dict) -> dict:
            "order": nb.get("order")}
     if nb.get("created_by"):
         out["created_by"] = nb["created_by"]
-    if nb.get("session"):  # the THIMBLE_SESSION whose own group it is (tools.SESSION_GROUP_KEY), such as `writer:report`
+    if nb.get("session"):  # the THIMBLE_SESSION of the agent whose group it is (tools.SESSION_KEY): `writer:report`
         out["session"] = nb["session"]
     return out
 
@@ -1401,19 +1406,6 @@ def get_cell(workspace: str, cell_id: str, *, full_outputs: bool = False) -> dic
     if full_outputs and any(isinstance(b, dict) and "truncated" in b for b in cell.get("outputs") or []):
         return {**cell, "outputs": hydrate_outputs(ws, cell["outputs"])}
     return dict(cell)  # a copy: the stored cell is the cached object, which later runs and edits mutate in place
-
-
-@_changes
-def active_notebook_id(workspace: str) -> str:
-    """settings.active_notebook when it names an existing notebook; else `main`, created if it does not exist yet."""
-    ws = _ws(workspace)
-    settings = read_json(ws / "settings.json", {})
-    nb_id = settings.get("active_notebook") if isinstance(settings, dict) else None
-    if isinstance(nb_id, str) and ID_RE.match(nb_id) and _nb_file(ws, nb_id).is_file():
-        return nb_id
-    if not _nb_file(ws, MAIN).is_file():
-        write_notebook(ws, read_notebook(ws, MAIN))
-    return MAIN
 
 
 def load_notebook(workspace: str, nb_id: str = MAIN) -> dict:
@@ -1771,8 +1763,8 @@ def delete_cell(workspace: str, cell_id: str) -> None:
 
 @_changes
 def loose_group(ws: Path) -> str:
-    """The id of the workspace's loose group (LOOSE_KIND), made on first use: a card dragged out of every group lives
-    there, at its own place on the board."""
+    """The id of the workspace's loose group (LOOSE_KIND), made on first use: every card that stands on the board
+    outside a frame lives there, one made with no group and one dragged out of every group alike."""
     for nb_id, nb in _stored(ws):
         if nb.get("kind") == LOOSE_KIND:
             return nb_id
@@ -2420,47 +2412,95 @@ def recorded_kernels(workspace: str) -> list[str | None]:
 # --- start, attach, detach, kill ---
 
 
-CHANNELS = ("_shell_channel", "_iopub_channel", "_stdin_channel", "_hb_channel", "_control_channel")  # AsyncKernelClient's
-HB_SOCKET_WAIT_S = 1.0  # _close_client: the most it waits for a heartbeat thread just started to make its socket
+CHANNELS = ("_shell_channel", "_iopub_channel", "_stdin_channel", "_control_channel")  # the AsyncKernelClient's we open
 
 
 def _client(connection_file: Path) -> AsyncKernelClient:
-    """Channels to the kernel of `connection_file`. A start that fails part way (a server out of file descriptors fails
-    in zmq) closes what it opened before it raises."""
-    kc = AsyncKernelClient()
+    """Channels to the kernel of `connection_file` on a zmq context of their own, all but the heartbeat's: a kernel's
+    liveness is its pid (_Kernel.alive). The heartbeat's channel is a thread of its own, whose stop joins it on the
+    event loop; stopped before the thread had begun (a failed start on a busy machine), the thread ran on and the join
+    never returned. A start that fails part way (a server out of file descriptors fails in zmq) closes what it opened
+    before it raises.
+
+    A client is closed by _close_client, or, left unclosed (a start whose task the loop dropped), when the garbage
+    collector takes it: its sockets are closed first, then its context. Left to themselves, the context's finalizer can
+    run first, find none of its sockets (the collector clears the list it keeps of them before any finalizer runs), and
+    wait on them for good, wherever the collection ran."""
+    ctx = zmq.asyncio.Context()
+    kc = AsyncKernelClient(context=ctx)
     try:
         kc.load_connection_file(str(connection_file))
-        kc.start_channels()
+        kc.start_channels(hb=False)
     except BaseException:
         _close_client(kc)
         raise
+    socks = [ch.socket for ch in (getattr(kc, attr, None) for attr in CHANNELS) if ch is not None and ch.socket is not None]
+    kc._closer = weakref.finalize(kc, _close_sockets, socks, ctx)  # holds the sockets and context until it runs
     return kc
 
 
+def _close_sockets(socks: list[Any], ctx: Any) -> None:
+    """Close the sockets, then end their context, which then waits for none of them. Never raises."""
+    for sock in socks:
+        with contextlib.suppress(Exception):
+            sock.close(linger=0)
+    with contextlib.suppress(Exception):
+        ctx.destroy(linger=0)
+
+
 def _close_client(kc: AsyncKernelClient) -> None:
-    """Close the client's channels and the zmq context it made, whatever a failed start left of them. Never raises, and
-    opens nothing: stop_channels makes each channel it closes, so after a partial start it would open sockets (and fail
-    again where the descriptors ran out) before it reached the context."""
+    """Close the client's channels and its zmq context, whatever a failed start left of them; zmq lets go of their
+    descriptors before this returns. Never raises, and opens nothing: stop_channels makes each channel it closes, so
+    after a partial start it would open sockets (and fail again where the descriptors ran out)."""
+    closer = getattr(kc, "_closer", None)
+    if closer is not None:
+        closer()  # once
     for attr in CHANNELS:
         ch = getattr(kc, attr, None)
         if ch is None:
             continue
         try:
-            if isinstance(ch, threading.Thread) and ch.is_alive():
-                # the heartbeat's thread, joined once it has made its socket: stopped before, the thread fails in zmq
-                deadline = time.monotonic() + HB_SOCKET_WAIT_S
-                while ch.is_alive() and ch.socket is None and time.monotonic() < deadline:
-                    time.sleep(0.005)
-                ch.stop()
-            else:
-                ch.close()
+            ch.close()
         except Exception:  # noqa: BLE001
             log.debug("closing a kernel channel failed", exc_info=True)
     try:
-        if kc._created_context and not kc.context.closed:  # never true for a context that was not made
+        if not kc.context.closed:
             kc.context.destroy(linger=0)  # closes any socket left in it
     except Exception:  # noqa: BLE001
         log.debug("destroying a kernel client's zmq context failed", exc_info=True)
+
+
+def _kernel_info_nowait(kc: AsyncKernelClient, ch: Any) -> bool:
+    """A kernel_info_request on the channel `ch`, without blocking; False when it could not be queued now.
+    jupyter_client's own send blocks while the socket has no pipe to queue to: one at its high-water mark, or none,
+    when zmq dropped it after a handshake with a process that is not this kernel (one that took a port of the
+    connection file first). On the event loop that would hold the whole server, and _wait_ready's limit with it."""
+    try:
+        sock = zmq.Socket.shadow(ch.socket.underlying)
+        sock.send_multipart(kc.session.serialize(kc.session.msg("kernel_info_request")), flags=zmq.DONTWAIT)
+    except zmq.Again:
+        return False
+    return True
+
+
+KERNEL_LOG_TAIL = 4096  # bytes of a kernel's log read for the line that says why it ended
+
+
+def _log_lines(k: _Kernel) -> list[str]:
+    """The last lines of the kernel's log (its stdout and stderr, and its wrapper's), up to KERNEL_LOG_TAIL bytes."""
+    try:
+        with k.log.open("rb") as f:
+            f.seek(max(0, f.seek(0, os.SEEK_END) - KERNEL_LOG_TAIL))
+            return [ln.strip() for ln in f.read().decode("utf-8", "replace").splitlines() if ln.strip()]
+    except OSError:
+        return []
+
+
+# What a kernel's log says when a port of its connection file was taken before it bound it: write_connection_file
+# finds free ports and lets them go, and a process that binds one before the kernel starts (another kernel, or a server)
+# keeps it. The kernel ends at once; started again on new ports, it starts.
+PORT_TAKEN = "Address already in use"
+LAUNCH_TRIES = 3
 
 
 async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, control: bool) -> None:
@@ -2470,7 +2510,7 @@ async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, cont
     ch = kc.control_channel if control else kc.shell_channel
     deadline = time.monotonic() + timeout
     while True:
-        ch.send(kc.session.msg("kernel_info_request"))
+        _kernel_info_nowait(kc, ch)  # never waits: the checks below run each round, whatever the socket does
         try:
             reply = await ch.get_msg(timeout=1)
         except Empty:
@@ -2490,8 +2530,13 @@ async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, cont
                 except Exception:  # noqa: BLE001 — protocol adaptation only
                     pass
                 break
-        if not k.alive():
-            raise RuntimeError("the kernel died before answering kernel_info")
+        ended = not k.alive()
+        # a fresh kernel whose port was taken ends at once, while the sandbox around it may run on a while
+        lines = _log_lines(k) if ended or not control else []
+        taken = next((ln for ln in reversed(lines) if PORT_TAKEN in ln), "")
+        if ended or taken:
+            why = (taken or (lines[-1] if lines else ""))[:300]
+            raise RuntimeError("the kernel died before answering kernel_info" + (f": {why}" if why else ""))
         if time.monotonic() > deadline:
             raise TimeoutError(f"the kernel did not answer kernel_info within {timeout:g} s")
     while True:  # what iopub caught meanwhile belongs to no run
@@ -2642,6 +2687,21 @@ async def _launch(k: _Kernel, workspace: str) -> None:
         argv = wrapped_argv(argv, workspace=workspace, corpus=corpus, connection_file=k.conn, source=source)
     elif wrap == config.KERNEL_WRAP_SRT:
         argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source)
+    for tries_left in range(LAUNCH_TRIES - 1, -1, -1):
+        try:
+            k.kc = await _launch_process(k, workspace, cwd, corpus, argv, wrap, source)
+            return
+        except RuntimeError as e:
+            if PORT_TAKEN not in str(e) or not tries_left:
+                raise
+            log.warning("kernel %s of %s ended at its start: a port of its connection file was taken (%s); starting "
+                        "it again on new ports", k.key, workspace, e)
+
+
+async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, argv: list[str], wrap: str,
+                          source: str) -> AsyncKernelClient:
+    """_launch's kernel process on new ports, and its client once it answers."""
+    wrapped = wrap in config.KERNEL_WRAPPED
     kc: AsyncKernelClient | None = None
     try:  # from the first file written: a failure anywhere leaves no process, channels, lease or file behind (_kill)
         await asyncio.to_thread(write_connection_file, str(k.conn), ip="127.0.0.1", key=secrets.token_hex(16).encode())
@@ -2671,7 +2731,7 @@ async def _launch(k: _Kernel, workspace: str) -> None:
             _close_client(kc)
         await _kill(k)
         raise
-    k.kc = kc
+    return kc
 
 
 async def _attach(k: _Kernel) -> bool:
@@ -3113,13 +3173,15 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
 
 
 def _kernel_for(nb: dict, kernel: str | None, cell: dict | None = None, ws: Path | None = None) -> str | None:
-    """The kernel a cell of `nb` executes on: an explicit `kernel` wins; a card moved from another group keeps the
-    kernel it ran on (`cell.kernel`). Otherwise exploration groups run on the shared kernel (None) and every other group
-    on a dedicated kernel named after it. The terminal's own cells run on its dedicated kernel wherever they land."""
+    """The kernel a cell of `nb` executes on: an explicit `kernel` wins; a card that names its own (`cell.kernel`) runs
+    there, as one moved from another group keeps the kernel it ran on, an agent's card the kernel of its session and a
+    thread's card the thread's kernel. Otherwise exploration groups run on the shared kernel (None) and every other
+    group on a dedicated kernel named after it. The terminal's own cells run on its dedicated kernel wherever they
+    land."""
     if kernel:
         return kernel
     kept = (cell or {}).get("kernel")
-    if isinstance(kept, str):  # a card moved out of the group it ran in keeps that kernel (move_cells); '' is shared
+    if isinstance(kept, str):  # move_cells and tools._maker_fields set it; '' is shared
         return kept or None
     if nb.get("role", DEFAULT_ROLE) == "exploration" and nb.get("created_by") != TERMINAL_CREATOR \
             and (cell or {}).get("created_by") != TERMINAL_CREATOR:
@@ -3621,14 +3683,16 @@ async def run_code(
     timeout_s: float | None = None,
     default_timeout_s: float | None = None,
     kind: str | None = None,
+    fields: dict | None = None,
 ) -> dict:
     """Create a runnable cell at the end of a group and run it, or with `replace` re-run that cell with the new code,
-    its stale takeaway cleared. `notebook` defaults to the bound group, else `main`. `created_at_event` is the index of
-    the tool_use record that made the cell. `timeout_s` is stored as the cell's allowance; `default_timeout_s` applies
-    when none is named and is never stored. Returns the cell with complete outputs; the group stores the bounded
-    version."""
+    its stale takeaway cleared. With no `notebook` the card stands loose on the canvas (loose_group). `created_at_event`
+    is the index of the tool_use record that made the cell. `timeout_s` is stored as the cell's allowance;
+    `default_timeout_s` applies when none is named and is never stored. `fields` are stored on a new cell before it
+    runs, such as the session of the agent that made it and that session's kernel (tools._maker_fields). Returns the
+    cell with complete outputs; the group stores the bounded version."""
     _, full = await _run_code(workspace, code, created_by, title, notebook, created_at_event, replace, kernel, timeout_s,
-                              default_timeout_s, kind)
+                              default_timeout_s, kind, fields)
     return dict(full)  # a copy: the stored cell is the cached object, which later runs and edits mutate in place
 
 
@@ -3644,6 +3708,7 @@ async def _run_code(
     timeout_s: float | None = None,
     default_timeout_s: float | None = None,
     kind: str | None = None,
+    fields: dict | None = None,
 ) -> tuple[dict, dict]:
     """run_code returning (the cell as stored, the cell with its complete outputs). One load, one save."""
     timeout_s = positive_timeout(timeout_s)  # reject a bad value before anything is written
@@ -3665,9 +3730,10 @@ async def _run_code(
             _emit(workspace, cell)
             return await _execute_cell(workspace, nb, cell, kernel, timeout_s, default_timeout_s)
         # the target is gone: append a fresh cell
-    nb_id = notebook or active_notebook_id(workspace)
+    nb_id = notebook or loose_group(_ws(workspace))
     nb = load_notebook(workspace, nb_id)
     cell = new_cell(kind or DEFAULT_KIND, created_by, title, nb_id, code=code, created_at_event=created_at_event)
+    cell.update(fields or {})
     _name_cell(_ws(workspace), cell)
     nb["cells"].append(cell)
     _emit(workspace, cell)
@@ -3755,10 +3821,15 @@ class NotebookMeta(BaseModel):
 @router.get("/ws/{c}/canvas")
 async def canvas_route(c: str) -> dict:
     """The canvas as the browser shows it, the orientation's cards among them as it adds them. A Scratch group is marked
-    first (migrate_scratch), so canvas() leaves it out."""
+    first (migrate_scratch), so canvas() leaves it out. `threads` gives the anchor of each thread that made a card
+    here (threads.anchors_of)."""
+    from . import threads  # noqa: PLC0415 — threads' modules import this one
+
     migrate_scratch(c)
     migrate_writer_groups(c)
-    return canvas(_ws(c))
+    out = canvas(_ws(c))
+    out["threads"] = threads.anchors_of(c, out["cells"])
+    return out
 
 
 # Scratch: a working group of role `working` in stored workspaces. Its cards are kept, since their ids are cited: on
@@ -3839,7 +3910,7 @@ def migrate_writer_groups(c: str) -> list[str]:
     if str(ws) in _writer_groups_migrated:  # by folder, as migrate_scratch
         return []
     _writer_groups_migrated.add(str(ws))
-    session_key = "session"  # tools.SESSION_GROUP_KEY; tools imports this module lazily
+    session_key = "session"  # tools.SESSION_KEY; tools imports this module lazily
     rows = list_notebooks(ws, figures=False)
     nbs = {r["id"]: read_notebook(ws, r["id"]) for r in rows}
     kids: dict[str, list[str]] = {}
@@ -3991,8 +4062,7 @@ def _update_notebook(c: str, nb: str, body: NotebookMeta) -> dict:
 @_changes
 def trash_notebook(ws: Path, nb_id: str) -> bool:
     """Remove a group from the workspace's list: its file moves to TRASH_DIR whole (its cells' side files stay where
-    the file names them), the read cache forgets it, and settings.active_notebook is cleared when it named it. False
-    when there is no such file."""
+    the file names them) and the read cache forgets it. False when there is no such file."""
     p = _nb_file(ws, nb_id)
     if not p.is_file():
         return False
@@ -4000,9 +4070,6 @@ def trash_notebook(ws: Path, nb_id: str) -> bool:
     trash.mkdir(parents=True, exist_ok=True)
     p.replace(trash / p.name)
     _cache.pop(p, None)
-    settings = read_json(ws / "settings.json", {})
-    if isinstance(settings, dict) and settings.get("active_notebook") == nb_id:
-        write_json(ws / "settings.json", {**settings, "active_notebook": None})
     return True
 
 
@@ -4060,6 +4127,26 @@ async def create_cell(c: str, nb: str, body: NewCell) -> dict:
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return insert_cell(c, nb, cell, body.after)
+
+
+class NewLooseCell(NewCell):
+    pos: dict | None = None  # where the card stands on the board; null for below what is drawn
+
+
+@router.post("/ws/{c}/cells")
+async def create_loose_cell(c: str, body: NewLooseCell) -> dict:
+    """A new card on the board outside every frame, in the loose group (made on first use), at `pos` or below the
+    board: the canvas's own new card, since the canvas has no group by default. 400 as create_cell, or for a pos that is
+    not {x, y}."""
+    if body.pos is not None and pos_of(body.pos) is None:
+        raise HTTPException(400, "pos must be {x, y} numbers or null")
+    try:
+        cell = new_cell(body.kind, body.created_by, body.title, code=body.code, payload=body.payload,
+                        created_at_event=body.created_at_event)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    cell["pos"] = pos_of(body.pos)
+    return insert_cell(c, loose_group(_ws(c)), cell, body.after)
 
 
 def _cell_in(c: str, nb: str, cell_id: str) -> dict:

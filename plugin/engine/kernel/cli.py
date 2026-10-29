@@ -4,9 +4,9 @@ a Claude Code session, Claude runs it to label records and to see what it read.
 In a shell:
 
     thimble update                 the newest thimble, for the terminal plugin and the browser workbench. Your fixes
-                                   are set aside, so that nothing is fixed twice; thimble reapply brings them back
-    thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that the new
-                                   release still needs, once
+                                   that still fit it stay on; thimble reapply brings back one that does not
+    thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that did not fit
+                                   the new release, where the release still needs it
     thimble fixes                  your fixes that are not in the release: on, off or ready (also: thimble fix list)
     thimble fix show N             what fix N does, in a few lines
     thimble fix diff N             fix N's change to thimble's code
@@ -49,6 +49,7 @@ from typing import Any
 from . import coverage as CV
 from . import estimate as EST
 from . import labels as LB
+from . import sources as S
 from .store import Store
 
 
@@ -99,7 +100,17 @@ def cover_groups(groups: list[dict[str, Any]], room: int) -> list[dict[str, Any]
 
 def cmd_coverage(a: argparse.Namespace) -> int:
     st = Store()
-    cov = CV.coverage(st, None if a.all else "", per_folder=COVER_PER_FOLDER)
+    until = time.monotonic() + a.within if a.within is not None else None
+    try:
+        cov = CV.coverage(st, None if a.all else "", per_folder=COVER_PER_FOLDER, until=until)
+    except S.Unfinished as u:
+        # the folder's files were not all counted within --within seconds: what was counted is kept, and the next run
+        # goes on from there (the plugin runs it again at once)
+        if a.json:
+            print(json.dumps({"counting": {"counted": u.done, "files": u.total}}))
+        else:
+            print(f"Still counting the folder's files: {u.done:,} of {u.total:,} counted. Run it again to go on.")
+        return 0
     if a.json:
         # The totals, groups and types count every file and always print (the folders as cover_groups keeps them);
         # then the touched files by status, then the untouched files coverage named (a few of each folder), while the
@@ -512,14 +523,19 @@ Both take your names, paths and the names of your data out of the text first. Ru
 UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the
 browser workbench in one go. Run it in a shell, not inside Claude Code.
 
-When you have fixes, it does not put them on the release by itself: the release may already fix some of the same
-things. It sets them aside, so thimble is the plain release, and keeps each fix's old change. Then:
+When you have fixes, it puts each one that still applies back on the release, as it was (fixes you turned off stay
+off), and one the release already has leaves your list. A fix that does not fit the release is set aside: it is off,
+and thimble keeps its old change. Then:
 
-    thimble reapply                  Claude Code opens in ~/.thimble/fixes/live. Claude checks each fix against the
-                                     release, brings back what is still needed (one commit per fix), and runs:
+    thimble reapply                  Claude Code opens in ~/.thimble/fixes/live. Claude checks each set-aside fix
+                                     against the release, brings back what is still needed (one commit per fix), and
+                                     runs:
     thimble update --continue        records those commits as the fixes' new versions and turns them on; a set-aside
                                      fix with no commit is left out, because the release does it or it cannot work there
     thimble update --check           only says whether a newer release is out
+
+After an update by thimble 0.10.5 or before, which set every fix aside, thimble puts back what still applies at your
+next thimble update, thimble fixes or thimble reapply, or when a Claude Code session loads it.
 
 Afterwards: /reload-plugins in Claude Code, and restart thimble-browser.
 
@@ -612,6 +628,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("coverage", help="what entered Claude's context and what was only computed over")
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
+    # the plugin's count: stop counting the folder's files after this many seconds, within Claude Code's time limit
+    p.add_argument("--within", type=float, help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser("fix", help="your changes to thimble", description=_no_share(FIX_HELP),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -625,7 +643,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true")
     p.add_argument("--to", metavar="DIR")
     p.add_argument("--words", help=argparse.SUPPRESS)
-    p.add_argument("--asked", help=argparse.SUPPRESS)  # new, round: the person's own words, which Claude's restate
+    p.add_argument("--asked", help=argparse.SUPPRESS)  # new, round: the person's words beside `words` (a plugin before 0.10.6)
     p.add_argument("--title", help=argparse.SUPPRESS)
     p.add_argument("--summary", help=argparse.SUPPRESS)
     p.add_argument("--made-in", dest="made_in", default="terminal", help=argparse.SUPPRESS)

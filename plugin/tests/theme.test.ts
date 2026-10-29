@@ -1,9 +1,10 @@
 // Which hex set thimble draws in (core/theme.ts): each of Claude Code's named themes by its kind, a custom theme by
 // its base, and auto by what the terminal reports (COLORFGBG), else the set that reads on both backgrounds. All data is
 // made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { resetTheme, themeNow, themeOf, themeOfFgbg } from '../core/theme'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

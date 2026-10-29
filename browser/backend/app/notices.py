@@ -37,7 +37,9 @@ Kinds that tell of the setup rather than a failure:
                another mode
   sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py); key
                `cc-sandbox`: Claude Code's Bash sandbox could not start in a session of the Claude Code sign-in, so
-               its Bash calls were refused (runtime_cc.py), cleared by a later Bash call that ran
+               its Bash calls were refused (runtime_cc.py), cleared by a later Bash call that ran; key `view-sandbox`:
+               the sandbox of a view build's commands can't start on this machine (dev._box_notice), cleared by a
+               later build's start where it starts
   setup        keys `env:<NAME>` and `proxy`: what /thimble found in the shell (events.session_route), in words this
                module writes from the key (setup_text), never words from the request
   sign-in      key `sign-in:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out
@@ -374,7 +376,7 @@ MAIN_MODEL_FIX = "In your terminal: run /model to pick another model"
 # environment is the one the server started with
 SERVER_AUTH = ("Claude Code isn't signed in for thimble's server",
                "In your terminal: run /login (or `claude auth login` in a shell), or if you changed your sign-in (for "
-               "example exported ANTHROPIC_API_KEY), run `thimble server restart`", TERMINAL)
+               f"example exported ANTHROPIC_API_KEY), restart the server: {config.RESTART_HOW}", TERMINAL)
 
 
 def fix_where(cls: Any) -> str:

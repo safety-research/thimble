@@ -205,19 +205,49 @@ def own_statusline() -> dict[str, Any]:
 # --------------------------------------------------------------------------- the sandbox
 # Claude Code's Bash sandbox. On Linux it needs bubblewrap, socat and unprivileged user namespaces (which Ubuntu 24.04
 # restricts unless an AppArmor profile allows bwrap), so sandbox_ok probes it once. A session where it cannot run gets
-# no sandbox block and runs Bash under the analyst's permission mode instead.
+# no sandbox block and runs Bash under the analyst's permission mode instead. Inside bubblewrap the sandbox's seccomp
+# helper makes a user namespace of its own, which a host can refuse while it lets bubblewrap make its own (AppArmor's
+# profile for bwrap can confine what runs in it); every command then fails as its sandbox starts. srt runs the same
+# helper, so on Linux sandbox_ok also takes srt's probe (kernel_wrap.srt_works, which the Messages API's Bash takes),
+# wherever thimble's sandbox runtime can run.
 SANDBOX_PROBE_S = 10.0
-_sandbox: dict[str, bool] = {}
+_sandbox: dict[str, Any] = {}  # sandbox_ok's probe: `ok`, _box_probe's answer, and `srt`, what srt's probe runs with
 
 
 def sandbox_ok(refresh: bool = False) -> bool:
-    """Whether Claude Code's Bash sandbox can run on this machine (the note above), probed once per process; the
-    THIMBLE_SANDBOX environment variable set to 0 or 1 decides instead, for tests and for an analyst who wants it off."""
+    """Whether Claude Code's Bash sandbox can run on this machine (the note above): bubblewrap probed once per process,
+    and srt's probe as it stands, which a later probe that works makes True (the sysctl fixed, without a restart);
+    `refresh` probes both again. The THIMBLE_SANDBOX environment variable set to 0 or 1 decides instead, for tests and
+    for an analyst who wants it off."""
     forced = os.environ.get("THIMBLE_SANDBOX", "").strip()
     if forced in ("0", "1"):
         return forced == "1"
-    if "ok" in _sandbox and not refresh:
+    if "ok" not in _sandbox or refresh:
+        ok = _box_probe()
+        _sandbox.update(ok=ok, srt=_srt_probe_with() if ok else None)
+    if not _sandbox["ok"] or _sandbox["srt"] is None:
         return _sandbox["ok"]
+    from . import kernel_wrap  # noqa: PLC0415
+
+    node, package = _sandbox["srt"]
+    if refresh and not kernel_wrap.srt_works(node, package):
+        kernel_wrap.srt_problem(node, package)  # one that works now makes srt_works True
+    return kernel_wrap.srt_works(node, package)
+
+
+def _srt_probe_with() -> tuple[str, Path] | None:
+    """The Node and the package srt's probe runs with on Linux (the note above); None elsewhere, and where thimble's
+    sandbox runtime can't run (not installed, or a Node too old for it), where bubblewrap's probe answers alone."""
+    if not sys.platform.startswith("linux"):
+        return None
+    from . import srt  # noqa: PLC0415
+
+    node, package = srt.node(), srt.package(config.REPO_ROOT)
+    return None if not node or package is None or srt.missing(config.REPO_ROOT, node) else (node, package)
+
+
+def _box_probe() -> bool:
+    """Whether bubblewrap makes its namespaces here with socat on PATH (on macOS: whether sandbox-exec is there)."""
     ok = False
     if sys.platform == "darwin":
         ok = Path("/usr/bin/sandbox-exec").exists()
@@ -233,7 +263,6 @@ def sandbox_ok(refresh: bool = False) -> bool:
                 ok = done.returncode == 0
             except (OSError, subprocess.SubprocessError):
                 ok = False
-    _sandbox["ok"] = ok
     return ok
 
 

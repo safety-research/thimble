@@ -679,7 +679,8 @@ def canvas(c: str) -> str:
         cells = [x for x in nb.get("cells") or [] if isinstance(x, dict) and x.get("id")]
         if not cells:
             continue
-        lines = [f"### {tools._group_name(rows, row)} ({len(cells)} card{'' if len(cells) == 1 else 's'})"]
+        name = tools.NO_GROUP if row.get("kind") == notebook.LOOSE_KIND else tools._group_name(rows, row)
+        lines = [f"### {name} ({len(cells)} card{'' if len(cells) == 1 else 's'})"]
         for cell in cells:
             kind = cell.get("kind", notebook.DEFAULT_KIND)
             title = " ".join(str(cell.get("title") or "").split())

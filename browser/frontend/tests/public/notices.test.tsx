@@ -355,6 +355,21 @@ describe('the strip above the composer, and the rows', () => {
     }
   })
 
+  test('a browser that just signed in shows no sign-in notice of a sign-in before its own; a browser signed in before it shows the notice of its sign-in', async () => {
+    const signIn = (id: string, ts: string) => ({ id: `s-${id}`, key: `sign-in:${id}`, kind: 'sign-in', ts, text: `A browser signed in to thimble at ${ts.slice(11, 16)}. If it was not you, click Sign it out, or run \`thimble unpair\` in a shell to sign out every browser.`, action: { label: 'Sign it out', do: 'sign-out', slug: id } })
+    // aaaaaaaaaaaa signed in at 10:01, bbbbbbbbbbbb at 10:05; each notice is posted just after its sign-in
+    open = [signIn('aaaaaaaaaaaa', '2026-10-28T10:01:00.250+00:00'), signIn('bbbbbbbbbbbb', '2026-10-28T10:05:00.100+00:00')]
+    try {
+      const el = await strip('nt-sign-in-before')
+      await act(async () => setBrowserId('bbbbbbbbbbbb', '2026-10-28T10:05:00.080+00:00'))
+      expect(el.querySelectorAll('.chat-notice')).toHaveLength(0)
+      await act(async () => setBrowserId('aaaaaaaaaaaa', '2026-10-28T10:01:00.230+00:00'))
+      expect([...el.querySelectorAll('.chat-notice')].map((n) => n.getAttribute('data-key'))).toEqual(['sign-in:bbbbbbbbbbbb'])
+    } finally {
+      await act(async () => setBrowserId(''))
+    }
+  })
+
   test("a link's sign-in code that is gone shows in the strip, first; its × takes it from the page and sends nothing", async () => {
     open = [{ id: 'p1', text: BLOCKED }]
     const el = await strip('nt-code-gone')

@@ -469,6 +469,112 @@ def test_redo_makes_a_new_copy_with_the_earlier_change(world, monkeypatch):
     r = FX.redo(r["id"], "and keep the percent")
     assert r["state"] == "working" and Path(r["work"]).is_dir() and r["words"][-1] == "and keep the percent"
     assert "read" in (FX.tmp_dir(r["id"]) / "earlier.patch").read_text()
+    # what redo gives names the earlier change, for the fixer
+    assert r["earlier"] == str(FX.tmp_dir(r["id"]) / "earlier.patch") and "same_copy" not in r
+    assert "earlier" not in FX.get(r["id"])
+
+
+def _claude_changes(rec: dict) -> Path:
+    """What Claude does in the person's session for a fix that did not pass, as d's message asks: a change in its copy."""
+    p = Path(rec["work"]) / "plugin" / "bar" / "legend.ts"
+    p.write_text("export const wrap = true\n")
+    return p
+
+
+def test_a_try_again_goes_on_in_the_copy_while_it_holds_a_change_no_check_took_and_the_check_takes_it(world, monkeypatch):
+    # the tests fail; Claude, asked with d, changes the copy; the person's /thimble-fix 1 alone (redo) goes on in that
+    # copy, as their words would, and the next check commits and tests Claude's change with the fixer's
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = made(world)
+    r = FX.done(r["id"], "Bar says read", "")
+    assert r["state"] == "failed" and r["commit"]
+    edit = _claude_changes(r)
+    (FX.tmp_dir(r["id"]) / "earlier.patch").write_text("a patch of an earlier try\n")
+    got = FX.redo(r["id"])
+    assert got["same_copy"] is True and "earlier" not in got
+    assert got["state"] == "working" and got["work"] == r["work"] and edit.exists()
+    assert got["rounds"] == r["rounds"] + 1 and got["words"] == r["words"] and got["error"] is None
+    assert not (FX.tmp_dir(r["id"]) / "earlier.patch").exists() and "same_copy" not in FX.get(r["id"])
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    done = FX.done(r["id"], "Bar says read", "The bar says read, and the legend wraps.")
+    assert done["state"] == "ready" and done["tests"] == "passed"
+    assert sorted(f["path"] for f in done["files"]) == ["plugin/bar/bar.tsx", "plugin/bar/legend.ts"]
+    # a copy that holds nothing beyond what the check took: another try starts in a new copy, as before
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    t = made(world, "make the bar bold")
+    t = FX.done(t["id"], "Bar bold", "")
+    again = FX.redo(t["id"])
+    assert "same_copy" not in again and again["earlier"] == str(FX.tmp_dir(t["id"]) / "earlier.patch")
+
+
+def test_after_cannot_a_try_again_keeps_what_claude_changed_in_the_copy_and_a_blocked_fix_may_go_on_with_it(world):
+    # the fixer could not do it and changed nothing (no commit); Claude then changes the copy: another try keeps it
+    r = made(world, edit=False)
+    r = FX.done(r["id"], cannot="it needs the legend to wrap")
+    assert r["state"] == "failed" and not r["commit"] and Path(r["work"]).is_dir()
+    edit = _claude_changes(r)
+    got = FX.redo(r["id"])
+    assert got["same_copy"] is True and got["work"] == r["work"] and edit.exists()
+    done = FX.done(r["id"], "Legend wraps", "The legend wraps.")
+    assert done["state"] == "ready" and [f["path"] for f in done["files"]] == ["plugin/bar/legend.ts"]
+    # with nothing in its copy, another try starts in a new copy, and a patch an earlier try left goes with it
+    n = made(world, "make the bar bold", edit=False)
+    n = FX.done(n["id"], cannot="it needs a newer node")
+    (FX.tmp_dir(n["id"]) / "earlier.patch").write_text("a patch of an earlier try\n")
+    again = FX.redo(n["id"])
+    assert "same_copy" not in again and "earlier" not in again
+    assert not (FX.tmp_dir(n["id"]) / "earlier.patch").exists()
+    # a fix whose fixer could not do without a file no fix may change: another try with nothing new would fail the same
+    # way, but one with Claude's change in its copy goes on there
+    b = FX.new("make the fix line blue")
+    (Path(b["work"]) / "plugin" / "fix").mkdir(parents=True)
+    (Path(b["work"]) / "plugin" / "fix" / "line.ts").write_text("const KEY_COLOR = 'blue'\n")
+    FX.done(b["id"], "Blue fix line", "")
+    FX.again(b["id"])
+    b = FX.done(b["id"], cannot="Only thimble's maintainers can change the fix line.")
+    assert b["blocked"] == ["plugin/fix/line.ts"]
+    (Path(b["work"]) / "plugin" / "fix" / "line.ts").unlink()
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `coverage ${n}` // blue\n")
+    got = FX.redo(b["id"])
+    assert got["same_copy"] is True and got["state"] == "working" and "blocked" not in got
+
+
+def _claude_commits(rec: dict, *args: str) -> None:
+    """Claude commits what it changed in the fix's copy, with git in that folder, as it may in the person's session."""
+    sh("git", "add", "-A", cwd=Path(rec["work"]))
+    sh("git", "commit", "-q", *args, "-m", "Wrap the legend", cwd=Path(rec["work"]))
+
+
+def test_a_try_again_goes_on_in_the_copy_when_claude_committed_its_change_there(world, monkeypatch):
+    # the tests fail; Claude changes the copy and commits the change there, so git sees no changed file in the copy: the
+    # person's /thimble-fix 1 alone still goes on in that copy, and the check takes the change, as one commit on the
+    # commit the copy was cut from
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = made(world)
+    r = FX.done(r["id"], "Bar says read", "")
+    edit = _claude_changes(r)
+    _claude_commits(r)
+    assert sh("git", "status", "--porcelain", cwd=Path(r["work"])) == ""
+    got = FX.redo(r["id"])
+    assert got["same_copy"] is True and got["work"] == r["work"] and edit.exists()
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    done = FX.done(r["id"], "Bar says read", "The bar says read, and the legend wraps.")
+    assert done["state"] == "ready" and sorted(f["path"] for f in done["files"]) == ["plugin/bar/bar.tsx",
+                                                                                      "plugin/bar/legend.ts"]
+    assert sh("git", "rev-parse", f"{done['commit']}^", cwd=FX.live_dir()) == r["base"]
+    # Claude amends the check's commit instead: the same
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    t = made(world, "make the bar bold")
+    t = FX.done(t["id"], "Bar bold", "")
+    _claude_changes(t)
+    _claude_commits(t, "--amend")
+    assert FX.redo(t["id"])["same_copy"] is True
+    # after Cannot, which commits nothing, Claude commits on the commit the copy was cut from: the same
+    n = made(world, "make the legend wrap", edit=False)
+    n = FX.done(n["id"], cannot="it needs a newer node")
+    _claude_changes(n)
+    _claude_commits(n)
+    assert FX.redo(n["id"])["same_copy"] is True
 
 
 def test_export_saves_files_and_sends_nothing(world, tmp_path):
@@ -650,7 +756,7 @@ def three_fixes(world) -> tuple[int, int, int]:
     return a["id"], b["id"], c["id"]
 
 
-def test_update_sets_the_fixes_aside_and_reapply_brings_back_what_the_release_still_needs(world, upstream, monkeypatch):
+def test_update_puts_back_the_fixes_that_fit_and_reapply_brings_back_the_one_that_does_not(world, upstream, monkeypatch):
     monkeypatch.delenv("CLAUDECODE", raising=False)
     a, b, c = three_fixes(world)
     assert FX.update()["newer"] is False  # v0.10.2 is what runs
@@ -662,63 +768,68 @@ def test_update_sets_the_fixes_aside_and_reapply_brings_back_what_the_release_st
                    "v0.10.3", version="0.10.3")
     calls_before = len(calls(world))
     out = FX.update()
-    assert (out["from"], out["to"], out["aside"]) == ("0.10.2", "0.10.3", [a, b, c])
-    # nothing is replayed: thimble is the plain release, and each fix keeps its old change as a patch
+    assert (out["from"], out["to"], out["back"], out["had"], out["aside"]) == ("0.10.2", "0.10.3", [a], [b], [c])
+    # the bar's word is on again, on top of 0.10.3; the note is 0.10.3's own; the legend is 0.10.3's
     live = FX.live_dir()
-    assert sh("git", "rev-parse", "mine", cwd=live) == new and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
+    assert sh("git", "rev-parse", "mine^", cwd=live) == new and "read ${n}" in live_file("plugin/bar/bar.tsx")
+    assert live_file("plugin/legend.ts") == "const legend = `quiet ${n} files`\n"
+    assert sh("git", "log", "--format=%s|%an", "-1", "mine", cwd=live) == "Bar says read|thimble"
     assert FX.release()["tag"] == "v0.10.3" and FX.release()["base"] == new and new in (FX.home() / "off.sh").read_text()
     assert sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == new  # the way back runs from the new release
-    for fid in (a, b, c):
-        r = FX.get(fid)
-        assert r["state"] == "pending" and r["note"] == "set aside at the update to 0.10.3"
-        assert Path(r["pending"]["old"]) == FX.home() / "pending" / "0.10.3" / f"fix-{fid}.patch"
-    assert "Subject: [PATCH] Bar says read" in Path(FX.get(a)["pending"]["old"]).read_text()
-    assert FX.get(c)["pending"]["files"] == ["plugin/legend.ts"]
+    assert FX.get(a)["state"] == "on" and FX.get(a)["commit"] == sh("git", "rev-parse", "mine", cwd=live)
+    assert FX.get(a)["commit"] == sh("git", "rev-parse", f"refs/thimble/fixes/{a}", cwd=live)
+    assert (FX.get(b)["state"], FX.get(b)["released_in"]) == ("released", "0.10.3")
+    # the legend does not fit 0.10.3: it is off, set aside with its old change as a patch, and says why
+    r = FX.get(c)
+    assert r["state"] == "pending" and r["note"] == "set aside at the update to 0.10.3"
+    assert r["error"] == "it does not fit thimble 0.10.3"
+    assert Path(r["pending"]["old"]) == FX.home() / "pending" / "0.10.3" / f"fix-{c}.patch"
+    assert "Subject: [PATCH] Legend counts untouched" in Path(r["pending"]["old"]).read_text()
+    assert r["pending"]["files"] == ["plugin/legend.ts"]
     assert out["lines"] == [
         "Updated thimble 0.10.2 → 0.10.3 (terminal plugin)", "",
-        "You have 3 local fixes. They are off for now: 0.10.3 may already fix some of the same",
-        "things, and Claude checks each one so nothing is fixed twice.", "",
-        "Bring them back:  thimble reapply",
+        "Your fix is on again, replayed onto 0.10.3: Bar says read.",
+        "Already in 0.10.3, so it leaves thimble fixes: A note.", "",
+        "1 local fix does not fit 0.10.3, so it is off: Legend counts untouched.", "",
+        "Bring it back:  thimble reapply",
         "  Claude opens, checks each fix against 0.10.3, keeps what is still needed, and turns it on.", "",
         "Then  Terminal: /reload-plugins in Claude Code"]
-    assert out["reload"] is True and "plugin update thimble@thimble" in calls(world)[calls_before:]
-    # the list: each off, and thimble reapply first under What next; the person's key cannot put an old change on
+    assert out["reload"] is True and calls(world)[calls_before:].count("plugin update thimble@thimble") == 1
+    # the list: the bar's word on, the legend off with why, and thimble reapply first under What next; the person's key
+    # cannot put an old change on
     rows = FX.list_lines(120)
-    assert rows[0] == "Your thimble fixes · thimble 0.10.3 with 3 off"
-    assert [x.split()[1] for x in rows[3:6]] == ["off", "off", "off"]
+    assert rows[0] == "Your thimble fixes · thimble 0.10.3 with 1 on, 1 off"
+    assert [x.split()[:2] for x in rows[3:5]] == [[str(a), "on"], [str(c), "off"]]
+    assert f"  fix {c} is off: it does not fit thimble 0.10.3" in rows
     nxt = rows[rows.index("What next") + 1]
-    assert nxt.split()[:2] == ["thimble", "reapply"] and "the 3 fixes thimble update set aside" in nxt
+    assert nxt.split()[:2] == ["thimble", "reapply"] and "the 1 fix thimble update set aside" in nxt
+    assert "  Set aside     it does not fit thimble 0.10.3" in FX.show_lines(c, 100)
     with pytest.raises(FX.FixError, match="thimble reapply"):
         FX.apply(c, press(c))
-    # thimble reapply: Claude Code in live, with the prompt made from the records
+    # thimble reapply: Claude Code in live, with the prompt made from the records of the fix still set aside
     r = FX.reapply_argv()
-    assert r["argv"][0] == os.environ["THIMBLE_CLAUDE"] and r["cwd"] == str(live)
+    assert r["argv"][0] == os.environ["THIMBLE_CLAUDE"] and r["cwd"] == str(live) and r["carried"] is None
     text = r["argv"][1]
     assert text == Path(r["prompt"]).read_text() and Path(r["prompt"]) == FX.home() / "pending" / "0.10.3.md"
-    assert "The person updated thimble from 0.10.2 to 0.10.3. Before that, they had 3 fixes of their own" in text
-    assert "thimble set them aside, so this copy is plain 0.10.3 now." in text
+    assert ("The person updated thimble from 0.10.2 to 0.10.3. thimble set aside 1 fix of theirs, made with thimble fix; "
+            "it is listed below, and this copy of 0.10.3 does not have it.") in text
     assert "(`git log v0.10.2..v0.10.3` and the diff" in text and "{{" not in text
     assert sh("git", "log", "--format=%s", "v0.10.2..v0.10.3", cwd=live) == "thimble v0.10.3"
-    made_on = FX._date(FX.get(a)["created"])
-    assert (f"1. Bar says read (fix {a}, {made_on}, terminal)\n"
-            f"   They asked: \"the bar should say read, not coverage\"\n"
-            f"   It did: The bar's coverage item says read.\n"
-            f"   Old change: {FX.home() / 'pending' / '0.10.3' / f'fix-{a}.patch'} (plugin/bar/bar.tsx)") in text
-    assert "   They asked: \"the legend should count the files nobody read like the untouched ones\"" in text
-    assert text.rstrip().endswith("(plugin/legend.ts)") and "run `thimble update --continue`" in text
-    # Claude brings back the bar's word and the legend's count, and leaves the note out: 0.10.3 has it
-    (live / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n}`\n")
-    sh("git", "commit", "-q", "-am", "Bar says read", cwd=live)
+    made_on = FX._date(FX.get(c)["created"])
+    assert (f"1. Legend counts untouched (fix {c}, {made_on}, terminal)\n"
+            f"   They asked: \"the legend should count the files nobody read like the untouched ones\"\n"
+            f"   It did: The coverage legend says how many files are untouched.\n"
+            f"   Old change: {FX.home() / 'pending' / '0.10.3' / f'fix-{c}.patch'} (plugin/legend.ts)") in text
+    assert "Bar says read" not in text and "run `thimble update --continue`" in text
+    # Claude brings back the legend's count, fitted to 0.10.3's legend
     (live / "plugin" / "legend.ts").write_text("const legend = `quiet ${n} files · untouched ${m}`\n")
     sh("git", "commit", "-q", "-am", "Legend counts untouched", cwd=live)
     done = FX.continue_()
-    assert done["recorded"] == [a, c] and done["left_out"] == [b] and done["reload"] is True
-    assert done["lines"][0].startswith("Recorded 2 fixes on thimble 0.10.3, now on: Bar says read (")
-    assert done["lines"][1] == (f"Left out: A note. It leaves thimble fixes (0.10.3 does it, or it cannot work there); "
-                                f"thimble fix show {b} still shows it.")
+    assert done["recorded"] == [c] and done["left_out"] == [] and done["reload"] is True
+    assert done["lines"][0].startswith("Recorded 1 fix on thimble 0.10.3, now on: Legend counts untouched (")
     assert done["lines"][-1] == "In Claude Code, type /reload-plugins to load them."
     assert FX.get(a)["state"] == "on" and FX.get(c)["commit"] == sh("git", "rev-parse", "mine", cwd=live)
-    assert FX.get(b)["state"] == "released" and FX.get(b)["left_out"] is True
+    assert FX.get(c)["state"] == "on" and FX.get(c)["error"] is None
     assert not (FX.home() / "pending" / "current.json").exists()
     with pytest.raises(FX.FixError, match="no fixes are set aside"):
         FX.continue_()
@@ -727,9 +838,11 @@ def test_update_sets_the_fixes_aside_and_reapply_brings_back_what_the_release_st
     # the fix the release has leaves the list; thimble fix show still has it
     rows = FX.list_lines(120)
     assert rows[0] == "Your thimble fixes · thimble 0.10.3 with 2 on" and not any(" A note " in x for x in rows)
-    assert any(x.startswith("  Left out") for x in FX.show_lines(b))
-    # the next update finds nothing newer; an undo keeps the recorded fix, now part of mine
-    assert FX.update()["newer"] is False
+    assert any(x.startswith("  In 0.10.3") for x in FX.show_lines(b))
+    # the next update finds nothing newer, and changes nothing; an undo keeps the recorded fix, now part of mine
+    head = sh("git", "rev-parse", "mine", cwd=live)
+    assert FX.update()["lines"] == ["thimble 0.10.3 is the newest release."]
+    assert sh("git", "rev-parse", "mine", cwd=live) == head
     FX.undo(a)
     assert "untouched ${m}" in live_file("plugin/legend.ts") and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
 
@@ -738,7 +851,8 @@ def test_continue_records_only_commits_that_are_set_aside_fixes_and_safe(world, 
     a, b, c = three_fixes(world)
     upstream({"plugin/legend.ts": "const legend = `quiet`\n", "plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
     out = FX.update()
-    assert out["aside"] == [a, b, c]
+    # the note fits 0.10.3 and is on again; the bar's word and the legend's count do not fit it
+    assert (out["back"], out["aside"]) == ([b], [a, c])
     live = FX.live_dir()
     # not committed yet
     (live / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n}`\n")
@@ -764,11 +878,18 @@ def test_continue_records_only_commits_that_are_set_aside_fixes_and_safe(world, 
     assert FX.get(c)["state"] == "pending"
     sh("git", "reset", "-q", "--hard", "HEAD~1", cwd=live)
     done = FX.continue_()
-    assert done["recorded"] == [a] and done["left_out"] == [b, c]
-    # a set-aside fix that a later update finds still waiting goes into the next reapply with its first patch
+    assert done["recorded"] == [a] and done["left_out"] == [c]
+    assert done["lines"][1] == (f"Left out: Legend counts untouched. It leaves thimble fixes (0.10.3 does it, or it cannot "
+                                f"work there); thimble fix show {c} still shows it.")
+    assert FX.get(c)["state"] == "released" and FX.get(c)["left_out"] is True
+    assert any(x.startswith("  Left out") for x in FX.show_lines(c))
+    # the next release changes none of their lines: the note and the bar's word, on, are on again in mine's order
     upstream({"plugin/more.md": "x\n"}, "v0.10.4")
     out = FX.update()
-    assert out["aside"] == [a] and FX.get(a)["pending"]["old"].endswith("0.10.4/fix-1.patch")
+    assert (out["back"], out["aside"]) == ([b, a], [])
+    assert out["lines"][2] == "Your 2 fixes are on again, replayed onto 0.10.4: A note; Bar says read."
+    assert sh("git", "log", "--format=%s", "-2", "mine", cwd=live).splitlines() == ["Bar says read", "A note"]
+    assert not (FX.home() / "pending" / "current.json").exists()
 
 
 def test_continue_turns_on_no_change_the_person_was_not_told_of_and_the_way_back_runs_from_the_release(world, upstream, tmp_path):
@@ -782,7 +903,9 @@ def test_continue_turns_on_no_change_the_person_was_not_told_of_and_the_way_back
     assert FX.done(b["id"], "Cards draw on Node 26", "")["notice"] == {"the sandbox": ["plugin/cards/argv.mjs"]}
     FX.apply(b["id"], press(b["id"]))
     b = b["id"]
-    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n", "plugin/bin/thimble": "#!/bin/sh\necho made-up\n"}, "v0.10.3")
+    # 0.10.3 changes the bar's line and has card runner rules of its own: neither fix fits it
+    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n", "plugin/bin/thimble": "#!/bin/sh\necho made-up\n",
+              "plugin/cards/argv.mjs": "export const flags = []\n"}, "v0.10.3")
     assert FX.update()["aside"] == [a, b]
     # as an update by a thimble from before the release checkout leaves it: no checkout, the shell's link on live's command
     shutil.rmtree(FX.release_dir())
@@ -806,7 +929,7 @@ def test_continue_turns_on_no_change_the_person_was_not_told_of_and_the_way_back
     # the bar's word alone, and fix 2's own file of the sandbox again: both go on, fix 2 still with its note
     (live / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n}`\n")
     sh("git", "commit", "-q", "-am", "Bar says read", cwd=live)
-    (live / "plugin" / "cards").mkdir(parents=True)
+    (live / "plugin" / "cards").mkdir(parents=True, exist_ok=True)
     (live / "plugin" / "cards" / "argv.mjs").write_text("export const flags = ['--allow-net', '--made-up']\n")
     sh("git", "add", "-A", cwd=live)
     sh("git", "commit", "-q", "-m", "Cards draw on Node 26", cwd=live)
@@ -884,7 +1007,7 @@ def test_dev_install_update_moves_live_to_the_checkouts_head_and_replays_the_fix
         f"Updated thimble to your checkout {base7} → {to} (terminal plugin)", "",
         f"Your fix is on again, replayed onto {to}: Bar says read.",
         f"Already in {to}, so it leaves thimble fixes: A note.", "",
-        f"1 local fix did not apply cleanly to {to}. It is off for now: Claude fits it", "to the new code.", "",
+        f"1 local fix does not fit {to}, so it is off: Legend counts untouched.", "",
         "Bring it back:  thimble reapply",
         f"  Claude opens, checks each fix against {to}, keeps what is still needed, and turns it on.", "",
         "Then  Terminal: /reload-plugins in Claude Code"]
@@ -1220,6 +1343,24 @@ def test_a_follow_up_to_an_off_fix_holds_its_change_and_a_round_that_changes_not
     assert FX.round_(b["id"], "and another")["work"] == b["work"]
 
 
+def test_the_list_before_the_first_fix_names_the_thimble_that_runs(world, monkeypatch, tmp_path):
+    # no fix yet, so no release.json: the plugin's own version
+    plugin = tmp_path / "running" / "plugin"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    pj = plugin / ".claude-plugin" / "plugin.json"
+    pj.write_text(json.dumps({"name": "thimble", "version": "0.10.2"}) + "\n")
+    monkeypatch.setattr(FX, "PLUGIN", plugin)
+    assert FX.list_lines() == ["Your thimble fixes · thimble 0.10.2 with no fixes of yours"]
+    # a plugin with no version, as a release has it: the release tag of its checkout's commit
+    pj.write_text(json.dumps({"name": "thimble"}) + "\n")
+    sh("git", "tag", "v0.10.2", world["base"], cwd=world["rel"])
+    assert FX.list_lines() == ["Your thimble fixes · thimble 0.10.2 with no fixes of yours"]
+    # neither: no empty word in the line
+    sh("git", "tag", "-d", "v0.10.2", cwd=world["rel"])
+    assert FX.list_lines() == ["Your thimble fixes · thimble with no fixes of yours"]
+    assert not (FX.home() / "release.json").exists()
+
+
 def test_the_list_shows_a_fix_being_changed_as_its_own_row_never_as_another_fix(world):
     a = on_fix(world)
     b = FX.new("a note")
@@ -1362,6 +1503,114 @@ def test_two_fixes_that_change_the_same_lines_differently_do_not_merge_and_the_l
     assert "+const words = `seen ${n}`" in Path(r["patches"][0]["path"]).read_text()
 
 
+def test_a_fix_that_does_not_fit_names_the_command_that_tries_it_again_never_r(world):
+    # fix 2 was made while fix 1 was off, on the same line: once fix 1 is on, fix 2 does not go on
+    a = on_fix(world)
+    FX.undo(a["id"])
+    b = FX.new("say seen")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\n")
+    FX.done(b["id"], "Bar says seen", "")
+    FX.apply(a["id"], press(a["id"]))
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(b["id"], press(b["id"]))
+    # fix 1 is the one fix in mine that changes the file, so the line names it
+    assert str(e.value) == f"fix {b['id']} does not fit fix {a['id']}; /thimble-fix {b['id']} tries it again"
+    # it waits for another try, and applying it again names the same command
+    assert FX.get(b["id"])["state"] == "redo" and FX.get(b["id"])["error"] == f"it does not fit fix {a['id']}"
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(b["id"], press(b["id"]))
+    assert str(e.value) == f"fix {b['id']} does not fit your thimble any more; /thimble-fix {b['id']} tries it again"
+
+
+def test_a_fix_that_does_not_fit_two_fixes_that_change_its_file_says_your_other_fixes(world):
+    # fix 2 says seen, made on the release; fix 1 says read, and fix 3, made on it, adds a line to the same file
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    b = FX.new("say seen")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\n")
+    FX.done(b["id"], "Bar says seen", "")
+    FX.apply(a["id"], press(a["id"]))
+    c = FX.new("and a title")
+    p = Path(c["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text() + "const title = 'bar'\n")
+    FX.done(c["id"], "Bar has a title", "")
+    FX.apply(c["id"], press(c["id"]))
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(b["id"], press(b["id"]))
+    # fixes 1 and 3 both change the file, so the line names neither, and never "the fixes you have on"
+    assert str(e.value) == f"fix {b['id']} does not fit your other fixes; /thimble-fix {b['id']} tries it again"
+    assert FX.get(b["id"])["error"] == "it does not fit your other fixes"
+
+
+def test_a_fix_from_the_release_before_that_does_not_fit_the_new_release_names_the_release(world, upstream):
+    # fix 1 says read, made on 0.10.2 and never used; 0.10.3 changes the same line, and no other fix is on
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
+    assert FX.update()["aside"] == []
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(a["id"], press(a["id"]))
+    assert str(e.value) == f"fix {a['id']} does not fit thimble 0.10.3; /thimble-fix {a['id']} tries it again"
+    assert FX.get(a["id"])["state"] == "redo" and FX.get(a["id"])["error"] == "it does not fit thimble 0.10.3"
+
+
+def test_a_fix_that_does_not_fit_the_new_release_and_a_fix_on_names_both(world, upstream):
+    # fix 1 says read, made on 0.10.2 and never used; 0.10.3 changes the same line; fix 2, made on 0.10.3, adds a
+    # line to the same file and is on
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
+    FX.update()
+    b = FX.new("and a title")
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text() + "const title = 'bar'\n")
+    FX.done(b["id"], "Bar has a title", "")
+    FX.apply(b["id"], press(b["id"]))
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(a["id"], press(a["id"]))
+    assert str(e.value) == (f"fix {a['id']} does not fit thimble 0.10.3 and your other fixes; /thimble-fix {a['id']} "
+                            "tries it again")
+    assert FX.get(a["id"])["error"] == "it does not fit thimble 0.10.3 and your other fixes"
+
+
+def test_a_fix_made_on_another_fixs_lines_that_the_new_release_left_alone_names_no_release(world, upstream):
+    # fix 1 says read and is on; fix 2, made on it, says read twice and is never used; 0.10.3 leaves the bar alone, so
+    # thimble update puts fix 1 back on it, and the person turns fix 1 off
+    a = on_fix(world)
+    b = FX.new("say read twice")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `read read ${n}`\n")
+    FX.done(b["id"], "Bar says read twice", "")
+    upstream({"plugin/notes.md": "made-up note\n"}, "v0.10.3")
+    assert FX.update()["back"] == [a["id"]]
+    FX.undo(a["id"])
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(b["id"], press(b["id"]))
+    # the lines it does not fit are fix 1's, not the release's
+    assert str(e.value) == f"fix {b['id']} does not fit your other fixes; /thimble-fix {b['id']} tries it again"
+
+
+def test_a_fix_brought_back_on_the_new_release_names_the_one_fix_in_its_way(world, upstream):
+    # fix 1 says read and is on; 0.10.3 adds a line to the bar's file, and thimble update sets fix 1 aside
+    a = on_fix(world)
+    upstream({"plugin/bar/bar.tsx": "const words = `coverage ${n}`\nconst title = 'bar'\n"}, "v0.10.3")
+    FX.update()
+    # Claude brings fix 1 back on 0.10.3 (thimble update --continue), and the person turns it off
+    live = FX.live_dir()
+    (live / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n}`\nconst title = 'bar'\n")
+    sh("git", "commit", "-q", "-am", "Bar says read", cwd=live)
+    assert FX.continue_()["recorded"] == [a["id"]]
+    FX.undo(a["id"])
+    # fix 2, made on 0.10.3, says seen on the same line and is on
+    b = FX.new("say seen")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\nconst title = 'bar'\n")
+    FX.done(b["id"], "Bar says seen", "")
+    FX.apply(b["id"], press(b["id"]))
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(a["id"], press(a["id"]))
+    # fix 1's change sits on 0.10.3 now, so only fix 2's lines are in its way
+    assert str(e.value) == f"fix {a['id']} does not fit fix {b['id']}; /thimble-fix {a['id']} tries it again"
+
+
 def stray(w, refines: int, words: str, path: str, text: str) -> dict:
     """A follow-up made by the old path: a fix of its own, cut from mine, whose record refines another fix."""
     r = FX.put({**FX.new(words), "refines": refines, "refines_always": False})
@@ -1450,7 +1699,7 @@ def test_two_sessions_check_only_their_own_fixes_and_a_copy_that_is_no_checkout_
     assert three["session"] == "s-made-up-a" and Path(three["work"]).is_dir()
     (Path(three["work"]) / ".git").unlink()
     out = FX.done(three["id"], session="s-made-up-a")
-    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "r starts it again" in out["error"]
+    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "y starts it again" in out["error"]
     assert out["work"] is None and not Path(three["work"]).exists()
     again = FX.redo(three["id"], session="s-made-up-a")
     p = Path(again["work"]) / "plugin" / "bar" / "bar.tsx"

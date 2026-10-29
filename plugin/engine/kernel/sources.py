@@ -28,6 +28,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
 from collections import defaultdict
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
@@ -456,28 +457,90 @@ def count_rows(root: Path, rel: str) -> int:
 
 
 PARALLEL_MIN = 64_000_000  # bytes of files not yet counted: counted in worker processes above this
+PARALLEL_FILES = 1_000  # or this many files: each costs an open and a read, which a slow disk makes long
 
 
-def _count_one(args: tuple[str, str]) -> int:
-    return count_rows(Path(args[0]), args[1])
+class Unfinished(Exception):
+    """A count that stopped at its time limit (`counts`' `until`) before it counted every file. What it counted is kept
+    for the next count, which goes on from there."""
+
+    def __init__(self, done: int, total: int):
+        super().__init__(f"counted {done:,} of {total:,} files")
+        self.done, self.total = done, total
 
 
-def _count_many(root: Path, rels: list[str], sizes: dict[str, int]) -> dict[str, int]:
-    """Rows of many files (sources and PDFs): in up to 8 worker processes when they are big together (Linux), else one
-    after another."""
-    if len(rels) > 1 and sum(sizes.get(r, 0) for r in rels) >= PARALLEL_MIN and sys.platform.startswith("linux"):
-        n = max(1, min(8, (os.cpu_count() or 2) - 1, len(rels)))
+def _entry(root: Path, rel: str, size: int, mtime_ns: int) -> dict[str, Any]:
+    """One file's counts as the cache keeps them, by the size and the time of change it had when it was looked at. A
+    file that cannot be read has no rows and no lines."""
+    p = root / rel
+    kind = kind_of_file(root, rel) or file_kind(p)
+    rows = count_rows(root, rel)
+    lines = 0
+    if kind in ("jsonl", "transcript", "text"):
+        lines = rows
+    elif kind in ("markdown", "diff", "csv", "json") and size < 256 * 1024 * 1024:
+        try:
+            lines = count_lines(p)
+        except OSError:
+            lines = 0
+    return {"key": f"{size}:{mtime_ns}", "kind": kind, "rows": rows, "lines": lines, "size": size}
+
+
+def _entries(args: tuple[str, list[tuple[str, int, int]]]) -> list[tuple[str, dict[str, Any]]]:
+    root = Path(args[0])
+    return [(rel, _entry(root, rel, size, mtime_ns)) for rel, size, mtime_ns in args[1]]
+
+
+def _die_with_parent() -> None:
+    """A worker of the count ends when the count's process ends, killed or not (Linux's parent-death signal), so a
+    count that Claude Code stops leaves no worker behind."""
+    try:
+        import ctypes
+        import signal
+
+        ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG
+    except Exception:  # noqa: BLE001 — the worker then ends when its work ends
+        pass
+
+
+def _past(until: float | None) -> bool:
+    return until is not None and time.monotonic() >= until
+
+
+def _count_many(root: Path, todo: list[tuple[str, int, int]], until: float | None) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Each file's counts, as each is counted, the biggest files first: in up to 8 worker processes when there are many
+    of them or they are big together (Linux), else one after another. No file is begun past `until`."""
+    todo = sorted(todo, key=lambda t: -t[1])
+    left = todo
+    if len(todo) > 1 and (len(todo) >= PARALLEL_FILES or sum(t[1] for t in todo) >= PARALLEL_MIN) and sys.platform.startswith("linux"):
+        n = max(1, min(8, (os.cpu_count() or 2) - 1, len(todo)))
         if n > 1:
+            done: set[str] = set()
             try:
                 import multiprocessing as mp
                 from concurrent.futures import ProcessPoolExecutor
 
-                order = sorted(rels, key=lambda r: -sizes.get(r, 0))
-                with ProcessPoolExecutor(max_workers=n, mp_context=mp.get_context("fork")) as ex:
-                    return dict(zip(order, ex.map(_count_one, [(str(root), r) for r in order], chunksize=1)))
-            except Exception:  # noqa: BLE001 — counted one after another below
-                pass
-    return {r: count_rows(root, r) for r in rels}
+                # a few files per task: the big files alone, many small files together
+                size = max(1, min(32, len(todo) // (n * 16)))
+                tasks = [(str(root), todo[i:i + size]) for i in range(0, len(todo), size)]
+                ex = ProcessPoolExecutor(max_workers=n, mp_context=mp.get_context("fork"), initializer=_die_with_parent)
+                try:
+                    for got in ex.map(_entries, tasks):
+                        for rel, c in got:
+                            done.add(rel)
+                            yield rel, c
+                        if _past(until):
+                            return
+                    return
+                finally:
+                    # the tasks not begun are dropped; the ones that run end with their files
+                    ex.shutdown(wait=True, cancel_futures=True)
+            except Exception:  # noqa: BLE001 — the files left are counted one after another below
+                left = [t for t in todo if t[0] not in done]
+    for rel, size, mtime_ns in left:
+        if _past(until):
+            return
+        yield rel, _entry(root, rel, size, mtime_ns)
 
 
 def counted(name: str) -> bool:
@@ -492,54 +555,113 @@ def whole_file(rel: str) -> dict[str, Any]:
     return {"kind": MEDIA_KIND.get(ext_of(rel.rsplit("/", 1)[-1]), "file"), "rows": 1, "lines": 0}
 
 
-def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, dict[str, Any]]:
+def _read_counts(cache_file: Path) -> tuple[dict[str, Any], bool]:
+    """The counts a folder's cache keeps: its last whole count (counts.json), then each file counted since, one line
+    each (counts.jsonl, the journal of a count that has not ended); and whether the journal held any."""
+    cache: dict[str, Any] = {}
+    try:
+        v = json.loads(cache_file.read_text())
+        cache = v if isinstance(v, dict) else {}
+    except (OSError, ValueError):
+        pass
+    added = False
+    try:
+        with open(cache_file.with_suffix(".jsonl"), "rb") as f:
+            for line in f:
+                try:
+                    rel, c = json.loads(line)
+                except ValueError:
+                    continue  # a line cut short where a count was stopped
+                cache[rel] = c
+                added = True
+    except OSError:
+        pass
+    return cache, added
+
+
+@contextmanager
+def _counting(cache_file: Path, until: float | None, wait: bool = True) -> Iterator[bool]:
+    """The folder's count, one at a time (a lock beside its cache, which ends with the process that holds it): whether
+    this count holds it. A count that waits for another, while `until` allows, then reads what that one counted."""
+    try:
+        import fcntl
+    except ImportError:  # no locks here: each count counts on its own
+        yield True
+        return
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(cache_file.with_suffix(".lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    held = False
+    try:
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held = True
+                break
+            except BlockingIOError:
+                if not wait or _past(until):
+                    break
+                time.sleep(0.2)
+            except OSError:  # a disk that keeps no locks: each count counts on its own
+                held = True
+                break
+        yield held
+    finally:
+        os.close(fd)
+
+
+def counts(root: Path, rels: list[str], cache_file: Path | None, until: float | None = None) -> dict[str, dict[str, Any]]:
     """{path: {rows, lines, kind}} for each file of `rels` that is `counted`, cached by size and mtime. A PDF has its
     pages as rows and no lines. A file that is not `counted` is left out: it is one whole file by its name alone
-    (`whole_file`), never opened or kept in the cache, so a folder of a million screenshots costs nothing here."""
-    cache: dict[str, Any] = {}
-    if cache_file:
-        try:
-            cache = json.loads(cache_file.read_text())
-        except (OSError, ValueError):
-            cache = {}
-    out: dict[str, dict[str, Any]] = {}
+    (`whole_file`), never opened or kept in the cache, so a folder of a million screenshots costs nothing here.
+
+    The first count of a big folder reads every file, which takes minutes on a slow disk. Each file is kept as it is
+    counted (the journal, `_read_counts`), so a count stopped before its end (Claude Code's time limit, a reload of the
+    plugin) keeps what it counted, and the next one goes on from there. One count at a time counts a folder's files
+    (`_counting`). `until` (time.monotonic()): the time by which a count stops counting; with files left then, it raises
+    Unfinished."""
     rels = [rel for rel in rels if counted(rel)]
-    # a cache that holds files no longer counted (gone, or whole files) is written again without them
-    changed = bool(cache.keys() - set(rels))
-    cache = {r: cache[r] for r in rels if r in cache}
-    # the files not counted yet (or changed since), counted together first
-    stats: dict[str, Any] = {}
+    stats: dict[str, tuple[int, int]] = {}
     base = str(root)
     for rel in rels:
         try:
-            stats[rel] = os.stat(f"{base}/{rel}")
+            s = os.stat(f"{base}/{rel}")
         except OSError:
             continue
-    todo = [r for r, st in stats.items() if not ((c := cache.get(r)) and c.get("key") == f"{st.st_size}:{st.st_mtime_ns}")]
-    fresh = _count_many(root, todo, {r: stats[r].st_size for r in todo}) if todo else {}
-    for rel in rels:
-        st = stats.get(rel)
-        if st is None:
-            continue
-        key = f"{st.st_size}:{st.st_mtime_ns}"
-        c = cache.get(rel)
-        if c and c.get("key") == key:
-            out[rel] = c
-            continue
-        p = root / rel
-        kind = kind_of_file(root, rel) or file_kind(p)
-        rows = fresh[rel] if rel in fresh else count_rows(root, rel)
-        lines = rows if kind in ("jsonl", "transcript", "text") else (count_lines(p) if kind in ("markdown", "diff", "csv", "json") and st.st_size < 256 * 1024 * 1024 else 0)
-        c = {"key": key, "kind": kind, "rows": rows, "lines": lines, "size": st.st_size}
-        cache[rel] = c
-        out[rel] = c
-        changed = True
-    if changed and cache_file:
-        cache_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(cache))
-        os.replace(tmp, cache_file)
-    return out
+        stats[rel] = (s.st_size, s.st_mtime_ns)
+
+    def stale(cache: dict[str, Any]) -> list[tuple[str, int, int]]:
+        """The files not counted yet, or changed since."""
+        return [(r, size, ns) for r, (size, ns) in stats.items() if not ((c := cache.get(r)) and c.get("key") == f"{size}:{ns}")]
+
+    cache, journaled = _read_counts(cache_file) if cache_file else ({}, False)
+    todo = stale(cache)
+    # a cache that holds files no longer counted (gone, or whole files) is written again without them
+    if cache_file and (todo or journaled or cache.keys() - stats.keys()):
+        with _counting(cache_file, until, wait=bool(todo)) as held:
+            if held and todo:
+                # what another count counted while this one waited
+                cache, _ = _read_counts(cache_file)
+                todo = stale(cache)
+                fd = os.open(cache_file.with_suffix(".jsonl"), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+                try:
+                    for rel, c in _count_many(root, todo, until):
+                        cache[rel] = c
+                        os.write(fd, (json.dumps([rel, c]) + "\n").encode())
+                finally:
+                    os.close(fd)
+                todo = stale(cache)
+            if held and not todo:
+                # every file counted: one whole count, the journal folded into it
+                tmp = cache_file.with_name(f"{cache_file.name}.{os.getpid()}.tmp")
+                tmp.write_text(json.dumps({r: cache[r] for r in stats if r in cache}))
+                os.replace(tmp, cache_file)
+                cache_file.with_suffix(".jsonl").unlink(missing_ok=True)
+    elif todo:
+        cache.update((rel, c) for rel, c in _count_many(root, todo, until))
+        todo = stale(cache)
+    if todo:
+        raise Unfinished(len(stats) - len(todo), len(stats))
+    return {r: cache[r] for r in rels if r in stats}
 
 
 def expand_glob(root: Path, pattern: str) -> list[str]:

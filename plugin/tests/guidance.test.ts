@@ -1,9 +1,10 @@
 // The guidance (guidance/guidance.ts): the first prompt of every conversation, and the first after a compaction, carries
 // guidance.md's text as context beside it, once, and a switched-off feature's section is left out. All text is made up.
 // `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { resetPrompts } from '../prompts/prompts'
+import { test } from './kit'
 import { tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

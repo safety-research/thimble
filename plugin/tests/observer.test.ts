@@ -3,7 +3,7 @@
 // every feature it serves is off; its count of what the session read waits a few seconds at most, and none runs in the
 // home folder; a reply that cannot be read is tried once more, then said on the failure line. All data is made up.
 // `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
 import { registerAnswers, resetAnswers } from '../core/answers'
@@ -12,6 +12,7 @@ import { headsBar, headsKey } from '../explain/seam'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

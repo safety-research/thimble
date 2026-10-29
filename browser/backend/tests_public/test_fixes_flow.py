@@ -1,12 +1,14 @@
 """thimble fix in the browser (app/fixes.py): /thimble-fix starts a fork of main's conversation on a copy the kernel
-makes, the kernel checks what it changed, and a fix that passes is ready: a notice asks the person, and only their
-click (Use it now) puts it on, with the secret of that click, and starts the server again from live. The kernel is a stand-in that keeps its records in memory (the kernel's own tests are plugin/tests/test_fixes.py), and the
+makes, in the person's words as they typed them, never main's; the kernel checks what it changed, and a fix that passes
+is ready: a notice asks the person, and only their click (Use it now) puts it on, with the secret of that click, and
+starts the server again from live. A fix that did not pass says what it tried. The kernel is a stand-in that keeps its records in memory (the kernel's own tests are plugin/tests/test_fixes.py), and the
 Messages API the fake client of test_runtime: no model is called and nothing restarts."""
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -15,7 +17,7 @@ import pytest
 from fastapi import HTTPException
 from test_runtime import CORPUS, api_key, call, main_turn, on, text  # noqa: F401 — `on` is a fixture
 
-from app import agents, config, dev, fixes, tools
+from app import agents, config, dev, events, fixes, tools
 
 PAGE = 'The card open in focus (card:c1), "Incidents by week":\nweek  incidents\n1  4\n2  7'
 
@@ -63,8 +65,16 @@ class Kernel:
             rec.update(state="working", words=[*rec["words"], stdin], rounds=int(rec.get("rounds") or 1) + 1)
         elif verb == "undo":
             rec["state"] = "off"
-        elif verb == "redo":
-            rec.update(state="working", words=[*rec["words"], ""])
+        elif verb == "redo":  # in its copy while that holds work no check took (a test's `unchecked`), else a new copy
+            work = self.home / "fixes" / "work" / str(rec["id"])
+            (work / "browser").mkdir(parents=True, exist_ok=True)
+            same = bool(rec.pop("unchecked", False)) and rec["state"] == "failed"
+            rec.update(state="working", words=[*rec["words"], ""], error=None, work=str(work))
+            patch = str(self.home / "fixes" / "tmp" / str(rec["id"]) / "earlier.patch")
+            said = {"same_copy": True} if same else {"earlier": patch} if rec.get("commit") else {}
+            return fixes.Ran(True, json.dumps({**rec, **said}), "")
+        elif verb == "diff":
+            return fixes.Ran(True, str(rec.get("diff") or ""), "")
         return fixes.Ran(True, json.dumps(rec), "")
 
 
@@ -86,17 +96,53 @@ def fixing(on, monkeypatch, tmp_path):
     monkeypatch.setattr(dev, "_do_restart", restart)
     fixes._phase.clear()
     fixes._fixers.clear()
+    fixes._asked.clear()
+    fixes._waiting.clear()
     k.restarts = restarts  # type: ignore[attr-defined]
     yield k
     fixes._phase.clear()
     fixes._fixers.clear()
+    fixes._asked.clear()
+    fixes._waiting.clear()
+
+
+WAIT_S = 60.0  # the most a test waits for the event it waits on, which a busy machine delays but never skips
+
+
+async def _until(cond: Any, what: str) -> None:
+    """Waits until cond() holds: an apply or an undo runs the kernel in a thread and starts the server again a moment
+    later (fixes.restart, call_later), which a busy machine stretches past any fixed sleep. Fails with `what` after
+    WAIT_S."""
+    end = time.monotonic() + WAIT_S
+    while not cond():
+        assert time.monotonic() < end, f"{what} (waited {WAIT_S:g} s)"
+        await asyncio.sleep(0.02)
 
 
 async def _ended(fid: int = 1) -> None:
-    conv = fixes._fixers.get(fid)
-    if conv is not None and conv.task is not None:
-        await conv.task
-    await asyncio.sleep(0.4)  # the restart is called a moment after
+    """Fix `fid`'s fixer ended, and so did the kernel's checks after it (fixes.settle, which runs in the fixer's task):
+    no fixer of it runs and its phase is neither fixing nor testing."""
+    end = time.monotonic() + WAIT_S
+    while True:
+        conv = fixes._fixers.get(fid)
+        if conv is not None and conv.task is not None and not conv.task.done():
+            await asyncio.wait_for(asyncio.shield(conv.task), max(0.0, end - time.monotonic()))
+            continue
+        if fixes._phase.get(fid) not in ("fixing", "testing"):
+            return
+        assert time.monotonic() < end, f"fix {fid}'s fixer did not end within {WAIT_S:g} s"
+        await asyncio.sleep(0.02)
+
+
+async def _went_on(fid: int = 1) -> None:
+    """What a click on Use it started (fixes.apply's task): the page's build, then the undo or the restart's call."""
+    for task in [t for t in asyncio.all_tasks() if t.get_name() == f"fix-apply:{fid}"]:
+        await asyncio.wait_for(task, WAIT_S)
+
+
+async def _restarted(fixing: Any, after: str, n: int = 1) -> None:
+    """The n-th restart was called (fixes.restart calls dev._do_restart a moment after it returns)."""
+    await _until(lambda: len(fixing.restarts) >= n, f"the server never started again after {after}")
 
 
 def _log(c: str, chat: str = "main") -> list[dict[str, Any]]:
@@ -109,11 +155,12 @@ def _fixer_chats(c: str) -> list[dict[str, Any]]:
 
 async def _mirrored(c: str, chat: str, kind: str = "tool_use") -> list[dict[str, Any]]:
     """The fixer chat's records once the mirror wrote one of `kind`."""
-    for _ in range(50):
+    end = time.monotonic() + WAIT_S
+    while time.monotonic() < end:
         got = _log(c, chat)
         if any(r.get("type") == kind for r in got):
             return got
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
     return _log(c, chat)
 
 
@@ -175,7 +222,8 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
 
     # Use it now: the click's secret to the kernel's apply, then the server starts again from live
     assert (await fixes.apply_route(1, analyst))["restart"] is True
-    await asyncio.sleep(0.4)
+    await _went_on()
+    await _restarted(fixing, "Use it now")
     assert [c[0] for c in fixing.calls].count("apply") == 1
     assert fixing.restarts == [("fix 1: Card says how many rows", config.REPO_ROOT / "backend")]
     assert fixes.status()["fixes"][0]["phase"] == "restarting"
@@ -197,7 +245,8 @@ def scripted(main: list[Any], fixer: list[Any]) -> list[Any]:
 
     def reply(body: dict[str, Any]) -> Any:
         mine = fixer if "The person asked for this change to their thimble" in json.dumps(body["messages"]) else main
-        return mine.pop(0) if mine else text("(no more)")
+        item = mine.pop(0) if mine else text("(no more)")
+        return item(body) if callable(item) else item
 
     return [reply] * (len(main) + len(fixer))
 
@@ -289,9 +338,10 @@ async def test_main_tells_a_follow_up_from_a_new_fix_with_the_person_s_fixes_bes
     asked = _asked(client)
     assert "it should count the columns too" in asked
     assert '1  \\"Card counts rows\\" (ready): The card\'s title now ends with its row count.' in asked
-    # fix_thimble `1 <words>`: a round of fix 1 (`fix round 1`), never a new fix: the same id and the same chat
+    # fix_thimble `1 <words>`: a round of fix 1 (`fix round 1`), never a new fix: the same id and the same chat, in the
+    # person's words, never main's
     assert ("round", "1") in fixing.calls and [c[0] for c in fixing.calls].count("new") == 1
-    assert fixing.recs[1]["words"] == ["count the rows", "count the columns too"]
+    assert fixing.recs[1]["words"] == ["count the rows", "it should count the columns too"]
     [chat] = _fixer_chats(CORPUS)
     assert chat["title"] == "changing Card counts rows"
     assert [(r["type"], r.get("text")) for r in _log(CORPUS)[before:] if r["type"] == "user"] == [
@@ -299,15 +349,18 @@ async def test_main_tells_a_follow_up_from_a_new_fix_with_the_person_s_fixes_bes
     # main's card of the round is the fix's second run, so it shows that run's steps alone
     assert [(r["chat"], r.get("run")) for r in _log(CORPUS)[before:] if r["type"] == "agent"] == [(chat["id"], 1)]
     await _ended()
-    assert [r["text"] for r in _log(CORPUS, chat["id"]) if r["type"] == "user"] == ["count the rows", "count the columns too"]
-    # a number that is no fix of the person's is part of the words of a new fix, as the terminal reads it
+    assert [r["text"] for r in _log(CORPUS, chat["id"]) if r["type"] == "user"] == ["count the rows",
+                                                                                     "it should count the columns too"]
+    # a number of main's that is no fix of the person's names none: a new fix, in the person's words, as the terminal
+    # reads it
     await fixes.request_route(CORPUS, fixes.Asked(words="five rows a page"), analyst)
     await _main_done()
-    assert fixing.recs[2]["words"] == ["5 rows a page"]
+    assert fixing.recs[2]["words"] == ["five rows a page"]
     await _ended(2)
 
 
-async def test_main_may_ask_first_and_starts_the_fix_with_the_answer(fixing, monkeypatch, analyst):
+async def test_main_may_ask_first_and_starts_the_fix_their_answer_names_in_their_own_words(fixing, monkeypatch,
+                                                                                           analyst):
     client = api_key(monkeypatch, scripted(
         [text("Which card: the incidents card or the weeks card?"),
          call("fix_thimble", {"words": "new the incidents card should count its rows"}), text("Started.")],
@@ -317,7 +370,8 @@ async def test_main_may_ask_first_and_starts_the_fix_with_the_answer(fixing, mon
     assert [c[0] for c in fixing.calls] == ["list"] and _fixer_chats(CORPUS) == []
     await main_turn("the incidents one")
     await _main_done()
-    assert fixing.recs[1]["words"] == ["the incidents card should count its rows"]
+    # the fixer has the conversation with the answer; the fix's words are the ones the person typed after /thimble-fix
+    assert fixing.recs[1]["words"] == ["the card should count"]
     await _ended()
     # the fixer still gets the page as it was when the person asked
     fixer = [b for b in client.bodies if "The person asked for this change to their thimble" in json.dumps(b["messages"])]
@@ -340,10 +394,7 @@ async def test_a_fix_whose_server_stopped_while_it_worked_is_taken_as_it_stands_
                       "work": str(fixing.home / "fixes" / "work" / "1"), "base": "HEAD"}
     monkeypatch.setattr(fixes, "_recovered", False)
     await fixes.status_route()  # the route reads the records in a worker thread; the recovery starts on the loop
-    for _ in range(50):
-        if fixing.recs[1]["state"] != "working":
-            break
-        await asyncio.sleep(0.1)
+    await _until(lambda: fixing.recs[1]["state"] != "working", "the recovery's checks never ended")
     assert ("done" in [c[0] for c in fixing.calls]) and fixing.recs[1]["state"] == "ready"
 
 
@@ -359,10 +410,29 @@ def test_main_reads_each_fix_the_words_may_change_by_its_number_name_and_state()
 
 async def test_words_in_the_fix_s_thread_go_to_its_fixer_while_it_works(fixing, monkeypatch, analyst):
     client = api_key(monkeypatch, [text("Working on it."), text("Title: Card counts rows\nWhat it does: Rows and columns.")])
+    # the fixer's first answer comes once the words are in, so they come while it works
+    words_in = asyncio.Event()
+    streams = client.stream
+
+    def stream(**body: Any) -> Any:
+        s = streams(**body)
+        if len(client.bodies) == 1:
+            answer = s.get_final_message
+
+            async def held() -> Any:
+                await words_in.wait()
+                return await answer()
+
+            s.get_final_message = held
+        return s
+
+    client.stream = stream
     await fixes.request(CORPUS, "count the rows", "")
     before = len(_log(CORPUS))
+    await _until(lambda: len(client.bodies) == 1, "the fixer never sent its first request")
     # typed in the fix's own thread while its fixer works: a round of the fix, for the same fixer
     got = await fixes.request_route(CORPUS, fixes.Asked(words="and the columns", fix=1), analyst)
+    words_in.set()
     assert got["fix"]["id"] == 1 and ("round", "1") in fixing.calls
     await _ended()
     assert "The person adds to this fix (round 2): and the columns" in json.dumps(client.bodies[-1]["messages"])
@@ -393,8 +463,31 @@ async def test_later_leaves_the_fix_ready_in_your_fixes_and_use_it_there_puts_it
     listed = fixes.status(every=True)["fixes"]
     assert [(r["id"], r["state"], r["kind"]) for r in listed] == [(1, "ready", None)]
     await fixes.apply_route(1, analyst)  # Use it, in Your fixes
-    await asyncio.sleep(0.4)
+    await _went_on()
+    await _restarted(fixing, "Use it")
     assert fixing.recs[1]["state"] == "on" and fixing.restarts[-1][0] == "fix 1: Card counts rows"
+
+
+async def test_a_fix_that_did_not_pass_says_what_it_tried_for_ask_claude(fixing, monkeypatch):
+    fixing.ends, fixing.error = "failed", "it needs a newer node"
+    api_key(monkeypatch, [text("Title: Cards draw on Node 26\nWhat it does: The card runner starts with --allow-net.")])
+    await fixes.request(CORPUS, "cards should draw on Node 26", "")
+    await _ended()
+    row = fixes.status()["fixes"][0]
+    # the person's words, what the fixer did, the files it changed, and why
+    assert (row["kind"], row["words"], row["error"]) == ("failed", "cards should draw on Node 26", "it needs a newer node")
+    assert row["summary"] == "The card's title now ends with its row count." and row["paths"] == ["a", "b"]
+    # a ready fix's row says no more than it did in 0.10.5: no sentence of the files it changes; and no path of the
+    # copy, which main's sandbox cannot read
+    assert "notice" not in row and "copy" not in row
+    # Ask Claude's click reads what main can use in its place: the change, cut at a line, and the end of the tests'
+    # output
+    fixing.recs[1].update(diff="".join(f"+ line {i} of the change\n" for i in range(600)), tests_tail="FAIL made-up test")
+    got = await fixes.tried_route(1)
+    assert got["diff"].startswith("+ line 0 of the change\n") and got["diff"].endswith("\n…\n")
+    assert len(got["diff"]) <= fixes.TRIED_CHARS + 3 and got["tests"] == "FAIL made-up test"
+    fixing.recs[1].update(diff="+ one line\n", tests_tail=None)
+    assert await fixes.tried_route(1) == {"diff": "+ one line\n", "tests": ""}
 
 
 async def test_a_ready_notice_goes_once_the_fix_is_on_elsewhere(fixing, monkeypatch):
@@ -430,7 +523,11 @@ async def test_a_page_that_does_not_build_takes_the_fix_off_again(fixing, monkey
     await fixes.request(CORPUS, "count the rows", "")
     await _ended()
     await fixes.apply_route(1, analyst)
-    await asyncio.sleep(0.4)
+    await _went_on()
+    await _until(lambda: (fixes.status()["fixes"][0]["said"] or "").endswith("it is off again"), "the failed fix never came off")
+    # a restart the click had scheduled would come RESTART_AFTER_S after it, so before this wait, which starts later,
+    # ends: the loop's timers fire in the order of their deadlines
+    await asyncio.sleep(fixes.RESTART_AFTER_S)
     verbs = [c[0] for c in fixing.calls]
     assert verbs.index("undo") > verbs.index("apply") and fixing.restarts == []
     assert fixes.status()["fixes"][0]["said"].endswith("error TS1005; it is off again")
@@ -441,9 +538,10 @@ async def test_undo_takes_the_fix_off_and_starts_the_server_again(fixing, monkey
     await fixes.request(CORPUS, "count the rows", "")
     await _ended()
     await fixes.apply_route(1, analyst)
-    await asyncio.sleep(0.4)
+    await _went_on()
+    await _restarted(fixing, "Use it now")
     assert (await fixes.undo_route(1, analyst))["restart"] is True
-    await asyncio.sleep(0.4)
+    await _restarted(fixing, "Undo", 2)
     assert fixing.restarts[-1][0] == "undo of fix 1"
     fixes._phase.clear()
     assert fixes.status()["fixes"][0]["said"] == "thimble fix undone: Card counts rows"
@@ -465,10 +563,10 @@ async def test_the_routes_take_the_analyst_s_click_alone(fixing):
 
 
 async def test_file_dev_ticket_on_thimble_s_code_starts_no_fix(fixing):
-    # a change to thimble itself is the person's fix, which fix_thimble starts once they ask for it
+    # a change to thimble itself is the person's fix, which they ask for with /thimble-fix
     res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Wider pane", "body": "the pane is narrow"},
                            tool_use_id="toolu_ticket")
-    assert "fix_thimble" in json.dumps(res.content) and not res.is_error
+    assert "/thimble-fix" in json.dumps(res.content) and not res.is_error
     assert fixing.calls == [] and _fixer_chats(CORPUS) == []
 
 
@@ -649,3 +747,228 @@ def test_the_files_a_copy_changed_are_read_by_git_on_its_own_entry_never_through
     _git("config", "core.fsmonitor", str(work / "made-up-monitor"), cwd=work)
     assert fixes.changed(work, "HEAD") == []
     assert not ran.exists()
+
+
+async def test_a_fix_that_needs_a_file_no_fix_may_change_says_so_so_the_page_offers_no_try_again(fixing, monkeypatch):
+    api_key(monkeypatch, [text("Title: Cards draw on Node 26\nWhat it does: The card runner starts with --allow-net.")])
+    await fixes.request(CORPUS, "cards should draw on Node 26", "")
+    await _ended()
+    assert fixes.status()["fixes"][0]["blocked"] is False
+    # the kernel's record names the protected files the fixer could not do without (kernel fixes.py, `blocked`)
+    fixing.recs[1]["blocked"] = ["plugin/sandbox/setup.mjs"]
+    assert fixes.status()["fixes"][0]["blocked"] is True
+
+
+async def test_fix_thimble_starts_no_fix_from_main_s_words_and_the_person_s_own_head_names_the_fix(fixing, monkeypatch,
+                                                                                                   analyst):
+    # main saw thimble misbehave and calls fix_thimble with no /thimble-fix of the person's: no fix starts, and main
+    # reads that the person asks for one
+    res = await tools.call(CORPUS, "fix_thimble", {"words": "new the legend hides its last row"}, tool_use_id="toolu_f1")
+    said = json.dumps(res.content)
+    assert "thimble started no fix" in said and "/thimble-fix <what should work differently>" in said
+    assert fixing.calls == [] and _fixer_chats(CORPUS) == []
+    # alone, or a number or new with no words after it: nothing says what should change, and main is not asked; the
+    # line is the terminal's
+    assert fixes.EMPTY == "Ask for a change to thimble with /thimble-fix <what should work differently>."
+    for words in ("", "1", "#2:", "new"):
+        with pytest.raises(HTTPException) as e:
+            await fixes.request_route(CORPUS, fixes.Asked(words=words), analyst)
+        assert e.value.status_code == 400 and e.value.detail == fixes.EMPTY
+    # the person's own `1 …` names their fix 1, whatever main's form says; the words after it go to the fix
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "state": "on", "words": ["count the rows"], "updated": 1.0,
+                      "work": None}
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: Rows and columns.")])
+    fixes._asked[CORPUS] = fixes._Asking("1 and the columns", "", fixes.ASKED_TURNS)
+    got = await fixes.from_tool(CORPUS, "new: Columns too")
+    assert got["kind"] == "round" and ("round", "1") in fixing.calls
+    assert fixing.recs[1]["words"] == ["count the rows", "and the columns"]
+    await _ended()
+    # a request is answered once: main's next call starts nothing
+    with pytest.raises(HTTPException) as e:
+        await fixes.from_tool(CORPUS, "1")
+    assert e.value.status_code == 409 and e.value.detail == fixes.NOT_ASKED
+
+
+async def test_the_person_s_words_go_after_two_of_main_s_turns_so_a_later_call_of_main_s_own_starts_no_fix(
+        fixing, monkeypatch, analyst):
+    # the person's /thimble-fix says nothing main can name, so main asks for words that do; the person asks something
+    # else, and then, without /thimble-fix, for a fix: main's call starts no fix from the words of two turns before
+    client = api_key(monkeypatch, scripted(
+        [text("Say what should work differently with /thimble-fix <what should work differently>."),
+         text("Runs 3 and 4 failed."),
+         call("fix_thimble", {"words": "new"}), text("No fix started.")],
+        [text("Title: Something\nWhat it does: Something.")]))
+    await fixes.request_route(CORPUS, fixes.Asked(words="this", page=PAGE), analyst)
+    await _main_done()
+    assert fixes._asked[CORPUS].turns == 1
+    await main_turn("Which runs failed?")
+    await _main_done()
+    assert CORPUS not in fixes._asked
+    await main_turn("Please start a fix of thimble for the notes column")
+    await _main_done()
+    assert [c for c in fixing.calls if c[0] in ("new", "round", "redo")] == [] and _fixer_chats(CORPUS) == []
+    # main read that no fix started, and that the person asks for one with /thimble-fix
+    result = json.dumps(client.bodies[-1]["messages"][-1])
+    assert "thimble started no fix" in result and "/thimble-fix <what should work differently>" in result
+    # words posted while main's turns run: no turn counts until the one that reads them, from which they last two
+    posted: list[str] = []
+    monkeypatch.setattr(events, "post", lambda *a, **k: posted.append(k["event_id"]) or {"id": k["event_id"]})
+    await fixes.ask(CORPUS, "the legend hides its last row")
+    for _ in range(3):  # the turn that runs, and the turns of messages posted before the words
+        fixes.main_turn_ended(CORPUS)
+    assert CORPUS not in fixes._asked and list(fixes._waiting[CORPUS]) == posted
+    fixes.words_read(CORPUS, "made-up-event-of-another-message")
+    assert CORPUS not in fixes._asked
+    fixes.words_read(CORPUS, posted[0])
+    for _ in range(fixes.ASKED_TURNS):
+        assert fixes._asked[CORPUS].words == "the legend hides its last row"
+        fixes.main_turn_ended(CORPUS)
+    assert CORPUS not in fixes._asked and not fixes._waiting[CORPUS]
+
+
+def _fix_calls(fixing: Any) -> list[tuple[str, ...]]:
+    return [c for c in fixing.calls if c[0] in ("new", "round", "redo")]
+
+
+async def test_words_typed_while_main_works_last_from_the_turn_that_reads_them_even_behind_another_message(
+        fixing, monkeypatch, analyst):
+    # main's turn runs (a command that takes a second); meanwhile the person sends another message, then /thimble-fix:
+    # both wait in main's queue. The words count from the turn that reads them, as the terminal's do from the turn its
+    # command runs in: main asks one short question there, and the person's answer starts the fix
+    loop = asyncio.get_running_loop()
+    held: dict[str, Any] = {}
+
+    def first(_body: dict[str, Any]) -> Any:
+        events.post(CORPUS, "main", {"text": "Also, which runs passed?"})
+        held["ask"] = loop.create_task(fixes.ask(CORPUS, "the legend hides its last row", PAGE))
+        return call("Bash", {"command": "sleep 1; echo done", "description": "wait"}, tid="toolu_sleep")
+
+    client = api_key(monkeypatch, scripted(
+        [first, text("Runs 3 and 4 failed."), text("Runs 1 and 2 passed."),
+         text("Is this about one of your fixes, or a new fix?"), call("fix_thimble", {"words": "new"}), text("Started.")],
+        [text("Title: Legend shows every row\nWhat it does: The legend wraps.")]))
+    await main_turn("Which runs failed?")
+    await held["ask"]
+    await _main_done()
+    # the turn that read the words asked its question: they wait for the answer's turn
+    assert fixes._asked[CORPUS].turns == 1
+    await main_turn("a new one")
+    await _main_done()
+    assert [c[0] for c in _fix_calls(fixing)] == ["new"]
+    assert fixing.recs[1]["words"] == ["the legend hides its last row"]
+    assert "thimble started no fix" not in json.dumps(client.bodies)
+    await _ended()
+    # with nothing queued before them, the same: the turn that runs is not theirs
+    fixes._asked.clear()
+
+    def busy(_body: dict[str, Any]) -> Any:
+        held["ask"] = loop.create_task(fixes.ask(CORPUS, "and the legend's title", PAGE))
+        return call("Bash", {"command": "sleep 1; echo done", "description": "wait"}, tid="toolu_sleep2")
+
+    api_key(monkeypatch, scripted(
+        [busy, text("Runs 3 and 4 failed."), text("Is this about your fix, or a new fix?"),
+         call("fix_thimble", {"words": "1"}, "toolu_f2"), text("Changing it.")],
+        [text("Title: Legend shows every row\nWhat it does: The legend wraps, and its title too.")]))
+    await main_turn("Which runs failed?")
+    await held["ask"]
+    await _main_done()
+    assert fixes._asked[CORPUS].turns == 1
+    await main_turn("my fix")
+    await _main_done()
+    assert [c[0] for c in _fix_calls(fixing)] == ["new", "round"]
+    assert fixing.recs[1]["words"] == ["the legend hides its last row", "and the legend's title"]
+
+
+async def test_main_s_own_call_before_its_turn_reads_the_person_s_words_starts_no_fix_and_leaves_the_words_to_that_turn(
+        fixing, monkeypatch, analyst):
+    loop = asyncio.get_running_loop()
+    held: dict[str, Any] = {}
+
+    def offer(_body: dict[str, Any]) -> Any:
+        # the person's /thimble-fix waits in main's queue while main, on its own, calls fix_thimble
+        held["ask"] = loop.create_task(fixes.ask(CORPUS, "the legend hides its last row", PAGE))
+        return call("Bash", {"command": "sleep 1; echo done", "description": "wait"}, tid="toolu_sleep")
+
+    client = api_key(monkeypatch, scripted(
+        [offer, call("fix_thimble", {"words": "new"}, "toolu_own"), text("No fix started."),
+         call("fix_thimble", {"words": "new"}, "toolu_theirs"), text("Started.")],
+        [text("Title: Legend shows every row\nWhat it does: The legend wraps.")]))
+    await main_turn("The legend looks cut off. Can you fix thimble?")
+    await held["ask"]
+    await _main_done()
+    said = json.dumps(client.bodies)
+    assert "thimble started no fix" in said
+    assert [c[0] for c in _fix_calls(fixing)] == ["new"]
+    assert fixing.recs[1]["words"] == ["the legend hides its last row"]
+
+
+async def test_a_fix_s_number_alone_tries_a_fix_that_failed_or_does_not_fit_again_as_its_try_again_does(
+        fixing, monkeypatch, analyst):
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: Rows."), text("Title: Card counts rows\nWhat it does: Rows.")])
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "state": "failed", "words": ["count the rows"],
+                      "updated": 1.0, "work": None, "error": "its tests failed"}
+    before = len(_log(CORPUS))
+    got = await fixes.request_route(CORPUS, fixes.Asked(words="#1"), analyst)
+    # the kernel's redo, in the person's words of before, with no turn of main's
+    assert got["fix"]["id"] == 1 and ("redo", "1") in fixing.calls
+    assert not [r for r in _log(CORPUS)[before:] if r["type"] == "user"]
+    await _ended()
+    # a fix changed in place whose new version did not fit when the person used it: it waits, its record says why, and
+    # the kernel's line names /thimble-fix 1
+    fixing.recs[1].update(state="ready", prev={"state": "on"}, error="its new version does not fit fix 2")
+    await fixes.request_route(CORPUS, fixes.Asked(words="1"), analyst)
+    assert [c for c in fixing.calls if c[0] == "redo"] == [("redo", "1"), ("redo", "1")]
+    await _ended()
+    # a fix with nothing to try again: its number alone says how to ask, as the terminal says it
+    for state, error in (("on", None), ("ready", None)):
+        fixing.recs[1].update(state=state, error=error)
+        with pytest.raises(HTTPException) as e:
+            await fixes.request_route(CORPUS, fixes.Asked(words="1"), analyst)
+        assert e.value.status_code == 400 and e.value.detail == fixes.EMPTY
+    assert [c for c in fixing.calls if c[0] == "redo"] == [("redo", "1"), ("redo", "1")]
+
+
+async def test_try_again_goes_on_in_the_copy_while_it_holds_work_no_check_took_and_the_fixer_reads_so(fixing, monkeypatch):
+    # a fix that did not pass; in the terminal, Claude changed its copy after d: Try again (or /thimble-fix 1 alone) goes
+    # on in that copy, whose check takes the change, and the new fixer reads that the copy holds the last try and what
+    # changed after it, and why that try did not pass
+    fixing.ends, fixing.error = "failed", "it needs a newer node"
+    client = api_key(monkeypatch, scripted([], [text("Title: Card counts rows\nWhat it does: Rows."),
+                                                text("Title: Card counts rows\nWhat it does: Rows, on any node.")]))
+    await fixes.request(CORPUS, "count the rows", "")
+    await _ended()
+    assert fixing.recs[1]["state"] == "failed"
+    fixing.recs[1]["unchecked"] = True
+    got = await fixes.redo(CORPUS, 1)
+    assert got["fix"]["id"] == 1 and ("redo", "1") in fixing.calls
+    await _ended()
+    first = [json.dumps(b["messages"]) for b in client.bodies if "The person asked for this change" in json.dumps(b)][-1]
+    assert ("The last try did not pass because it needs a newer node. Your copy holds the change of that try, and the "
+            "changes that were made in the copy after it. Start from them.") in first
+    assert "earlier.patch" not in first
+    [chat] = _fixer_chats(CORPUS)
+    assert any(r["type"] == "text" and r.get("delta") == "\n· Redo, in its copy\n" for r in _log(CORPUS, chat["id"]))
+    # a copy with nothing beyond what the check took: a new copy, with the earlier change the kernel names
+    fixing.recs[1].update(state="failed", commit="c0ffee1", error="its tests failed in the sandbox")
+    await fixes.redo(CORPUS, 1)
+    await _ended()
+    first = [json.dumps(b["messages"]) for b in client.bodies if "The person asked for this change" in json.dumps(b)][-1]
+    assert "earlier.patch; start from it when it helps. It did not pass because its tests failed in the sandbox." in first
+    assert any(r["type"] == "text" and r.get("delta") == "\n· Redo, in a new copy\n" for r in _log(CORPUS, chat["id"]))
+
+
+def test_the_form_s_head_and_the_fix_it_names():
+    recs = [{"id": 2, "state": "on"}, {"id": 3, "state": "removed"}]
+    assert fixes.head_of("2: it breaks") == (2, False, "it breaks")
+    assert fixes.head_of("#2 - it breaks") == (2, False, "it breaks")
+    assert fixes.head_of("new") == (None, True, "") and fixes.head_of("NEW: a pane") == (None, True, "a pane")
+    assert fixes.head_of("new-style labels") is None and fixes.head_of("it breaks") is None
+    assert fixes.form_of("2 it breaks", recs) == ("it breaks", 2)
+    assert fixes.form_of("3 it breaks", recs) == ("3 it breaks", None)
+    assert fixes.form_of("new: a pane", recs) == ("a pane", None)
+    # the person's own head first, else main's form, with or without words after it
+    assert fixes.named_fix("2 it breaks", "new", recs) == 2
+    assert fixes.named_fix("new a pane", "2", recs) is None
+    assert fixes.named_fix("it breaks", "2", recs) == 2
+    assert fixes.named_fix("it breaks", "#2: it breaks on click", recs) == 2
+    assert fixes.named_fix("it breaks", "3", recs) is None and fixes.named_fix("it breaks", "", recs) is None

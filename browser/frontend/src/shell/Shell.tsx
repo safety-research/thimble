@@ -13,6 +13,7 @@ import { isUnread, readSeen } from '../chat/seen'
 import { useChatMetas, waitingChats } from '../chat/waiting'
 import { Button } from '../components/Button'
 import type { IconName } from '../components/Icon'
+import { HoverTips } from '../components/Tooltip'
 import { FilesTab } from '../files/FilesTab'
 import { LabelEditorHost } from '../files/LabelEditor'
 import { useViews } from '../files/ViewsBar'
@@ -397,6 +398,7 @@ export function Shell({ ws }: { ws: string }) {
       <LabelEditorHost ws={ws} />
       <ClaudeAccessHost />
       <Toasts />
+      <HoverTips />
       <TourHost />
       {!gone && <ServerDown />}
       <NewVersion />

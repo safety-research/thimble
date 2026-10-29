@@ -1,9 +1,10 @@
 // The session's temp folders (hooks/path.ts): Claude Code keeps its own temp folder where it started, which its Bash
 // sandbox lets commands write, while the session's commands get thimble's folder as their TMPDIR. All data is made up.
 // `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { claudeTempRoot } from '../hooks/path'
+import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

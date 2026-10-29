@@ -25,7 +25,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-277 routes, 163 of them writes: 35 token, 1 code, 1 agent token, 132 cookie, 105 cookie or token, 1 media key, 2 none.
+280 routes, 164 of them writes: 35 token, 1 code, 1 agent token, 133 cookie, 107 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -87,6 +87,7 @@ knows the key.
 | POST | `/api/fixes/{fid}/apply` | fixes | cookie |
 | POST | `/api/fixes/{fid}/dismiss` | fixes | cookie |
 | POST | `/api/fixes/{fid}/share` | fix_share | cookie |
+| GET | `/api/fixes/{fid}/tried` | fixes | cookie or token |
 | POST | `/api/fixes/{fid}/undo` | fixes | cookie |
 | GET | `/api/health` | main | none |
 | GET | `/api/jobs` | jobs | cookie or token |
@@ -110,6 +111,7 @@ knows the key.
 | GET | `/api/tour` | tour | cookie or token |
 | POST | `/api/tour/seen` | tour | cookie |
 | POST | `/api/ui/key` | main | code |
+| GET | `/api/ui/link-wanted` | main | cookie or token |
 | POST | `/api/ui/pair` | main | token |
 | GET | `/api/ui/paired` | main | none |
 | POST | `/api/ui/shot` | main | token |
@@ -126,7 +128,6 @@ knows the key.
 | GET | `/api/ws/{c}/calls/{chat}` | calls | cookie or token |
 | GET | `/api/ws/{c}/calls/{chat}/{n}` | calls | cookie or token |
 | GET | `/api/ws/{c}/canvas` | notebook | cookie or token |
-| PUT | `/api/ws/{c}/canvas/active-group` | tools | cookie |
 | GET | `/api/ws/{c}/canvas/comments` | canvas_comments | cookie or token |
 | POST | `/api/ws/{c}/canvas/comments/{cid}/reopen` | canvas_comments | cookie |
 | POST | `/api/ws/{c}/canvas/comments/{cid}/resolve` | canvas_comments | cookie |
@@ -137,6 +138,7 @@ knows the key.
 | GET | `/api/ws/{c}/cards/{cell_id}/plan-runs` | plans | cookie or token |
 | GET | `/api/ws/{c}/cardtypes/{name}/frame` | cardtypes | cookie or token |
 | POST | `/api/ws/{c}/cardtypes/{name}/records` | cardtypes | cookie |
+| POST | `/api/ws/{c}/cells` | notebook | cookie |
 | POST | `/api/ws/{c}/cells/move` | notebook | cookie |
 | GET | `/api/ws/{c}/cells/names` | notebook | cookie or token |
 | DELETE | `/api/ws/{c}/cells/{cell_id}` | notebook | cookie |
@@ -152,6 +154,7 @@ knows the key.
 | POST | `/api/ws/{c}/cells/{cell_id}/versions/{entry}/restore` | notebook | cookie |
 | POST | `/api/ws/{c}/cells/{cid}/check` | card_check | cookie |
 | POST | `/api/ws/{c}/cells/{cid}/check/stop` | card_check | cookie |
+| POST | `/api/ws/{c}/cells/{cid}/drawn` | card_size | cookie |
 | POST | `/api/ws/{c}/cells/{cid}/fixes/{fix_id}/undo` | checkstore | cookie |
 | GET | `/api/ws/{c}/chats` | agents | cookie or token |
 | POST | `/api/ws/{c}/chats` | agents | cookie |

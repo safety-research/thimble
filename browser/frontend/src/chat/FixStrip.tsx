@@ -7,8 +7,10 @@
 //               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later. Nothing
 //               goes on by itself: Use it now is the person's click. The server then starts again from the fixed code,
 //               the row says "Reloading thimble…", and the page loads the new build by itself when nothing typed would
-//               be lost. A fix that did not pass says why, with Redo. An earlier row, or one the person answered, is a
-//               quiet line of what it said.
+//               be lost. A fix that did not pass says why, with Try again (not when it needs a file no fix may change, as
+//               the terminal's line) and Ask Claude, which shows what it tried and puts its failure in main's composer
+//               for the person to send, with its change and the end of its tests' output, once: it is not offered again.
+//               An earlier row, or one the person answered, is a quiet line of what it said.
 //   FixPage     what the page does for every fix: the reload after the server started again, and Your fixes
 //               (`/thimble-fix` alone: every fix with its state, Use it on a ready one, Undo on one that is on).
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -19,10 +21,11 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { servedBuild, thisBuild } from '../lib/chunkRecovery'
 import { track } from '../lib/telemetry'
-import { changedLines, fixActions, fixText, reloading, STATE_WORDS, working, workingText, type FixAction, type FixRow } from './fix'
+import { askClaudeText, changedLines, fixActions, fixText, reloading, STATE_WORDS, triedLines, working, workingText, type FixAction, type FixRow } from './fix'
+import { offerDraft } from './pending'
 
 const ICON = { ready: 'check', fixed: 'check', undone: 'undo', request: 'flag', failed: 'warning', problem: 'warning' } as const
-const LABEL: Record<FixAction, string> = { use: 'Use it now', what: 'What changed', later: 'Later', undo: 'Undo', redo: 'Redo' }
+const LABEL: Record<FixAction, string> = { use: 'Use it now', what: 'What changed', later: 'Later', undo: 'Undo', redo: 'Try again', ask: 'Ask Claude' }
 const FIXED = 'thimble fixed:'
 
 /** Whether the page holds typed text a reload would lose. */
@@ -133,6 +136,8 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
   useEffect(() => bus.on('fixHeld', (e) => e.id === fid && setHeld(e.held)), [fid])
   const [busy, setBusy] = useState<FixAction | null>(null)
   const [what, setWhat] = useState(false)
+  // Ask Claude put the failure in main's composer: it is not offered again
+  const [asked, setAsked] = useState(false)
   const row = latest ? rows.find((r) => r.id === fid) ?? null : null
 
   const run = (r: FixRow, a: FixAction) => {
@@ -140,6 +145,22 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
     track('ui-click', { target: `fix:${r.id}`, detail: { action: a } })
     if (a === 'what') {
       setWhat((w) => !w)
+      return
+    }
+    if (a === 'ask') {
+      // what it tried shows under the row, and main's composer takes its failure, with its change and the end of its
+      // tests' output (main's sandbox cannot read the fix's copy); nothing goes until the person sends it
+      setWhat(true)
+      setBusy(a)
+      api
+        .fixTried(r.id)
+        .catch(() => null)
+        .then((tried) => {
+          offerDraft('main', askClaudeText(r, tried))
+          bus.emit('openChat', { chatId: 'main' })
+          setAsked(true)
+        })
+        .finally(() => setBusy(null))
       return
     }
     setBusy(a)
@@ -184,7 +205,7 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
   const said = fixText(row)
   const lead = said.startsWith(FIXED) ? FIXED : ''
   const ask = acts.includes('use')
-  const buttons = acts.map((a) => (
+  const buttons = acts.filter((a) => !(a === 'ask' && asked)).map((a) => (
     <Button
       key={a}
       variant={a === 'use' ? 'primary' : 'secondary'}
@@ -210,9 +231,9 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
         {!ask && buttons}
       </div>
       {ask && <div className="chat-fix-acts">{buttons}</div>}
-      {ask && what && (
+      {what && (
         <dl className="chat-fix-what">
-          {changedLines(row).map((l) => (
+          {(ask ? changedLines(row) : triedLines(row)).map((l) => (
             <div key={l.label}>
               <dt>{l.label}:</dt>
               <dd>{l.text}</dd>

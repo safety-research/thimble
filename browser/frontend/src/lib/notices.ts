@@ -9,7 +9,8 @@
 // Signing in (lib/api.ts claimKey): a link's sign-in code that was used, replaced by a newer one or expired shows as a
 // notice this page makes itself (showCodeGone, an id under PAGE_NOTICE), in every workspace's strip and on the start
 // page, whose × sends nothing. A browser's sign-in posts a `sign-in` notice with Sign it out (backend main.signed_in);
-// the browser that signed in leaves out its own (setBrowserId, from GET /ui/paired).
+// the browser that signed in leaves out its own and those of sign-ins before it (setBrowserId, from GET /ui/paired),
+// and a browser signed in before it shows it.
 import { useSyncExternalStore } from 'react'
 import { api } from './api'
 import { bus, type Events } from './bus'
@@ -71,21 +72,26 @@ export function withoutNotice(list: readonly Notice[], gone: { id?: string; key?
 
 /** The words of backend hook_auth.CODE_GONE: the sign-in code of the link this page opened was used, replaced by a
  * newer one, or expired. */
-export const CODE_GONE_TEXT = 'This sign-in link was already used or has expired. Run `thimble-browser` again for a new one.'
+export const CODE_GONE_TEXT = 'This sign-in link was already used or has expired. Open the new link in the terminal where `thimble-browser` runs.'
 /** The start of the id of a notice this page made, which the server does not hold. */
 export const PAGE_NOTICE = 'page:'
 
-// the notices this page made (shown in every workspace's strip and on the start page), and this browser's id (the
-// first 12 hex digits of its cookie's hash, '' while not known or not signed in)
+// the notices this page made (shown in every workspace's strip and on the start page), this browser's id (the first
+// 12 hex digits of its cookie's hash, '' while not known or not signed in) and when it signed in ('' while not known)
 let page: Notice[] = []
 let browserId = ''
+let signedInAt = ''
 const pageSubs = new Set<() => void>()
 
-/** Whether `n` is the sign-in notice of this browser itself (backend main.signed_in: key `sign-in:<id>`, and its Sign it
- * out names the id). Pure but for the id. */
-function ownSignIn(n: Notice): boolean {
-  if (!browserId || n.kind !== 'sign-in') return false
-  return n.key === `sign-in:${browserId}` || noticeActions(n.action).some((a) => a.do === 'sign-out' && a.slug === browserId)
+/** Whether `n` is a sign-in notice this browser leaves out: its own (backend main.signed_in: key `sign-in:<id>`, and
+ * its Sign it out names the id), or one posted before this browser signed in, a sign-in it came after. A browser
+ * signed in before another still shows that one's. Pure but for the id and the time. */
+function leftOut(n: Notice): boolean {
+  if (n.kind !== 'sign-in') return false
+  if (browserId && (n.key === `sign-in:${browserId}` || noticeActions(n.action).some((a) => a.do === 'sign-out' && a.slug === browserId))) return true
+  const at = Date.parse(signedInAt)
+  const posted = n.ts ? Date.parse(n.ts) : NaN
+  return !Number.isNaN(at) && !Number.isNaN(posted) && posted < at
 }
 
 /** Every reader learns that the page's notices or this browser's id changed. */
@@ -94,10 +100,12 @@ function touchAll(): void {
   stores.forEach((s) => s.subs.forEach((fn) => fn()))
 }
 
-/** This browser's id, as GET /ui/paired answers it after the claim: its own sign-in notice is left out. */
-export function setBrowserId(id: string): void {
-  if (id === browserId) return
+/** This browser's id and when it signed in, as GET /ui/paired answers them after the claim: its own sign-in notice and
+ * those of sign-ins before it are left out. */
+export function setBrowserId(id: string, at = ''): void {
+  if (id === browserId && at === signedInAt) return
   browserId = id
+  signedInAt = at
   touchAll()
 }
 
@@ -137,8 +145,8 @@ function subscribePage(fn: () => void): () => void {
 
 interface Store {
   list: Notice[]
-  /** what useNotices shows: the page's notices, then the list less this browser's own sign-in, kept while its parts
-   * stay the same */
+  /** what useNotices shows: the page's notices, then the list less the sign-ins this browser leaves out (leftOut), kept
+   * while its parts stay the same */
   view: { list: Notice[]; page: Notice[]; id: string; out: Notice[] } | null
   subs: Set<() => void>
   off: (() => void) | null
@@ -159,8 +167,9 @@ function storeOf(ws: string): Store {
 
 function viewOf(s: Store): readonly Notice[] {
   const v = s.view
-  if (v && v.list === s.list && v.page === page && v.id === browserId) return v.out
-  s.view = { list: s.list, page, id: browserId, out: [...page, ...s.list.filter((n) => !ownSignIn(n))] }
+  const id = `${browserId}@${signedInAt}`
+  if (v && v.list === s.list && v.page === page && v.id === id) return v.out
+  s.view = { list: s.list, page, id, out: [...page, ...s.list.filter((n) => !leftOut(n))] }
   return s.view.out
 }
 
@@ -225,7 +234,8 @@ function subscribe(ws: string, fn: () => void): () => void {
   }
 }
 
-/** The workspace's open notices, oldest first, after the notices this page made; this browser's own sign-in left out. */
+/** The workspace's open notices, oldest first, after the notices this page made; this browser's own sign-in and those
+ * before it left out. */
 export function useNotices(ws: string): readonly Notice[] {
   return useSyncExternalStore(
     storeOf(ws).sub,

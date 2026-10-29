@@ -5,7 +5,13 @@
 // set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
 // `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
-// tinted across the pane, with no mark of its own (a `›` there read as a row that opens).
+// tinted across the pane, with no mark of its own (a `›` there read as a row that opens), and the pane keeps that row
+// and its line in view at any height (core/pane.ts keepsInView), as the pick moves with ↑ and ↓. A setting that
+// changes the work of another feature (`under`: Checker and its Effort, the checks of Citations) shows only while that
+// feature is on, as nothing it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids or
+// their effort (`firstParty`: Checker, Effort) shows only where Claude Code reaches Claude through Anthropic's
+// first-party API (settings/term.ts firstPartyApi). Effort offers the levels Claude Code offers for the model Checker
+// names (settings/features.mjs choicesIn).
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -16,14 +22,15 @@
 import type { EngineInterface } from 'claude-code'
 
 import { barRows } from '../bar/bar'
-import { arrowsOwn, PANE_ID } from '../core/pane'
-import { SWITCHES, switchesFrom } from '../settings/features.mjs'
-import { heldValues, settingsAction } from '../settings/term'
+import { arrowsOwn, keepsInView, PANE_ID } from '../core/pane'
+import { treeRows } from '../core/trail.mjs'
+import { choicesIn, SWITCHES, switchesFrom } from '../settings/features.mjs'
+import { firstPartyApi, heldValues, settingsAction } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Engine = EngineInterface
-type Switch = { key: string; title: string; group?: string; choices?: string[]; says?: Record<string, string> }
+type Switch = { key: string; title: string; group?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string> }
 
 /** The row picked, kept across the plugin's loads (each change loads it again). */
 const PICKED = { plugin: 'thimble', key: 'settingsRow' } as const
@@ -36,8 +43,9 @@ const IN = 2 + NAME + 1
 const MINIMAL_TITLE = 'MINIMAL MODE '
 
 const ROWS = SWITCHES as Switch[]
-/** A feature's choices as the pane shows them: its modes, or on and off. */
-const choicesOf = (s: Switch) => s.choices ?? ['on', 'off']
+/** A feature's choices as the pane offers them with `values` (Effort: the levels of the model Checker names): its
+ *  modes, or on and off; with no values, every mode it has. */
+const choicesOf = (s: Switch, values?: Record<string, unknown>) => (s.choices ? (values ? choicesIn(s.key, values) as string[] : s.choices) : ['on', 'off'])
 /** The choice set, as the pane names it. */
 const shownOf = (s: Switch, v: unknown) => (s.choices ? String(v) : v ? 'on' : 'off')
 /** A choice's element key, and the feature and choice it names. */
@@ -51,9 +59,18 @@ function parseKey(key: string | undefined): { s: Switch; c: string | null } | nu
   return null
 }
 
-async function pickedNow($: Engine): Promise<string> {
+/** The rows shown with these values: a setting `under` a feature that is off is not, nor one of first-party model ids
+ *  off the first-party API (`firstParty`). */
+const shownRows = (values: Record<string, unknown>, firstParty: boolean) =>
+  ROWS.filter(s => (!s.under || switchesFrom(values)(s.under)) && (firstParty || !s.firstParty))
+
+/** The row picked, of the rows shown: one picked that does not show now stands for the feature it is under. */
+async function pickedNow($: Engine, rows?: Switch[]): Promise<string> {
+  const shown = rows ?? shownRows(await heldValues($), await firstPartyApi($))
   const k = (await $.state.get(PICKED)).value as string | undefined
-  return ROWS.some(s => s.key === k) ? k! : ROWS[0]!.key
+  if (shown.some(s => s.key === k)) return k!
+  const under = ROWS.find(s => s.key === k)?.under
+  return shown.some(s => s.key === under) ? under! : shown[0]!.key
 }
 
 /** Set a choice: on and off are a switch's true and false. */
@@ -97,22 +114,25 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
   const { Box, Button, Text } = els
   const width = Math.max(30, Number(e.props?.bodyColumns) || 60)
   const values = await heldValues($)
-  const picked = await pickedNow($)
-  const at = ROWS.findIndex(s => s.key === picked)
-  arrowsOwn(dir => pick($, ROWS[Math.max(0, Math.min(ROWS.length - 1, at + dir))]!))
+  const shown = shownRows(values, await firstPartyApi($))
+  const picked = await pickedNow($, shown)
+  const at = shown.findIndex(s => s.key === picked)
+  arrowsOwn(dir => pick($, shown[Math.max(0, Math.min(shown.length - 1, at + dir))]!))
   const bar = await barRows($, els, width - 4, { on: switchesFrom(values), preview: true })
-  const rows = ROWS.flatMap((s, i) => {
+  const rows = shown.flatMap((s, i) => {
     const set = shownOf(s, values[s.key])
     const here = s.key === picked
-    const head = s.group && ROWS[i - 1]?.group !== s.group
+    const head = s.group && shown[i - 1]?.group !== s.group
       ? [Box({ key: `group-${s.group}`, marginTop: 1, children: [Text({ bold: true, dimColor: true, children: s.group.toUpperCase() })] })]
       : []
-    const choices = choicesOf(s).flatMap((c, k) => [
-      ...(k ? [Text({ key: `sep-${c}`, dimColor: true, children: ' · ' })] : []),
+    // each choice with the dot after it, so a row the choices wrap onto starts with a choice, never with a dot
+    const options = choicesOf(s, values)
+    const choices = options.map((c, k) => Box({ key: `opt-${c}`, flexDirection: 'row', flexShrink: 0, children: [
       Button({ key: choiceKey(s, c), plain: true, label: `${s.title}: ${c}`, onPress: () => chooseHere($, s, c), ...(here && c === set ? { autoFocus: true } : {}), children: [
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
       ] }),
-    ])
+      ...(k < options.length - 1 ? [Text({ key: 'sep', dimColor: true, children: ' · ' })] : []),
+    ] }))
     // Minimal stands over the rows as a heading would, what it does under it
     const minimal = s.key === 'minimal'
     const says = minimal ? s.says?.on : s.says?.[set]
@@ -124,15 +144,20 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
           Text({ key: 'title', bold: true, children: minimal ? MINIMAL_TITLE : s.title.padEnd(NAME) }),
         ] }),
         Text({ key: 'gap', children: ' ' }),
-        Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: [
+        // the choices take the rest of the line, named, so the pane measures the rows they wrap onto as drawn
+        Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, width: Math.max(1, width - at), children: [
           ...choices,
         ] }),
       ] }),
       ...(says ? [Box({ key: `says-${s.key}`, marginLeft: at, width: width - at, children: [Text({ dimColor: true, wrap: 'wrap', children: says })] })] : []),
     ] })]
   })
+  const preview = Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar })
+  // the row picked and the line under it stay in view in a pane of any height (core/pane.ts keepsInView)
+  const mine = rows.findIndex((r: Any) => r?.props?.key === `sw-${picked}`)
+  keepsInView(mine < 0 ? null : { key: `${picked}:${shownOf(shown[at]!, values[picked])}`, top: treeRows([preview, ...rows.slice(0, mine)], width), rows: treeRows(rows[mine], width) })
   return Box({ flexDirection: 'column', width, children: [
-    Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar }),
+    preview,
     ...rows,
     Box({ key: 'foot', marginTop: 1, children: [Text({ dimColor: true, children: '↑↓ setting · ←→ choice' })] }),
   ] })

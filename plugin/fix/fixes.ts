@@ -51,11 +51,14 @@ export type Fix = {
   /** the conversation the fix was asked in (THIMBLE_CONVERSATION at new): a /resume keeps it, with a new session */
   conversation?: string | null
   /** the last check did not use the change, and why; kept until the next check, so that the next fixer in the copy
-   *  (another round, at once, or r) is told */
+   *  (another round, at once, or y on the failed line) is told */
   refused?: Refusal | null
   /** the files no fix may change that its fixer could not do without, when it ended with `Cannot:`: another try fails
    *  the same way, so its failed line offers none */
   blocked?: string[]
+  /** redo's answer, for the new fixer: the earlier change's patch, when another try starts in a new copy; or that it
+   *  goes on in the fix's copy (same_copy), which holds work no check took yet, such as the change Claude made there */
+  earlier?: string; same_copy?: boolean
   /** the kinds of files it changes that the person is told of before they use it, by kind (the sandbox, dependencies…) */
   notice?: Record<string, string[]>
   /** when this round of work started, in seconds, which a refused try and a reload keep */
@@ -65,8 +68,8 @@ export type Fix = {
   testing?: { since: number; lock: string } | null
   /** what came of the tests, written by the kernel's runner, which no line has shown yet (thimble fix shown clears it) */
   unshown?: boolean
-  /** the person's own words of each round, beside `words` (Claude's, for the fixer), when they typed /thimble-fix
-   *  <words>; null for a round without them */
+  /** a record from before the fixer read only the person's words: their own words of each round, beside `words`
+   *  (Claude's then); null for a round without them. A request now keeps the person's words in `words` */
   asked?: (string | null)[]
 }
 /** A fix as the person and Claude read it in a session: its name (its title), cut to `n` cells. The number is the
@@ -75,6 +78,13 @@ export const fixName = (f: Pick<Fix, 'id' | 'title'>, n = 60): string => cut(f.t
 
 /** Whether a fix had a version before this round: a change to a fix the person has, not a new fix. */
 export const isChange = (f: Pick<Fix, 'prev'>): boolean => !!f.prev
+
+/** Whether the fix's number alone (/thimble-fix N) tries it again, in the person's words of before, as y on its failed
+ *  line does (request.ts redoFix): it failed, it no longer fits (redo), or its new version did not fit when the person
+ *  pressed y (a fix changed in place that waits, whose record says why). The kernel's line for each that does not fit
+ *  names /thimble-fix N. */
+export const triesAgain = (f: Pick<Fix, 'state' | 'prev' | 'error'>): boolean =>
+  f.state === 'failed' || f.state === 'redo' || (f.state === 'ready' && !!f.prev && !!f.error)
 
 /** The bar's step while a fixer works: `fixing <name>` for a new fix, `changing <name>` for a fix the person has. */
 export const fixingWord = (f: Fix): string => `${isChange(f) ? 'changing' : 'fixing'} ${fixName(f, 28)}`
@@ -101,13 +111,41 @@ export function fixSlug(f: Pick<Fix, 'id' | 'title'>): string {
   return `fix-${slug || f.id}`
 }
 
+/** The head of a request's explicit form (request.ts formOf): `N` (a fix's number) or `new`, each with a mark after it
+ *  or none (`2: …`, `#2 - …`, `new: …`), and the words after it, '' when there are none. Null when the words have no
+ *  head. */
+export function formHead(words: string): { n: number | null; fresh: boolean; rest: string } | null {
+  const m = /^(?:#?(\d+)|(new))(?:\s*[:.)–—-])?(?:\s+([\s\S]*))?$/i.exec(words)
+  return m ? { n: m[1] ? Number(m[1]) : null, fresh: !!m[2], rest: (m[3] ?? '').trim() } : null
+}
+
+/** The person's own words after /thimble-fix, without the form's head (`2 …`, `new: …`): it says which fix the words
+ *  are for, and is no words for the fixer. '' when the head is all they typed. `named`: whether fix N is one a form may
+ *  name. */
+export function ownWords(asked: string, named: (n: number) => boolean): string {
+  const a = asked.trim()
+  const h = formHead(a)
+  return h && (h.fresh || (h.n != null && named(h.n))) ? h.rest : a
+}
+
+/** The person's words of each round of a fix: `words`, or on a record from before, their own words kept beside them
+ *  (`asked`), without the form's head. */
+export const askedWords = (f: Pick<Fix, 'id' | 'words' | 'asked'>): string[] =>
+  (f.words || []).map((w, i) => ownWords(f.asked?.[i] ?? '', n => n === f.id) || w)
+
 /** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
  *  the tests' output when they failed. */
 export type Refusal = { why: string; files: string[]; tests?: string }
-export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
+/** What the kernel did with the fixes an update set aside, as it read the list (engine/kernel/fixes.py carry, once
+ *  after each update): the fixes that fit the new release (`to`) on again, or kept off as the person had every fix
+ *  (off); those it has already (had); those off because they do not fit it (aside, each with why). `reload`: live
+ *  changed, and Claude Code copied it. */
+export type Carried = { to: string; back: number[]; had: number[]; aside: number[]; why?: Record<string, string>; off?: boolean; reload?: boolean }
+export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number; carried?: Carried | null }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
- *  u), failed (d what changed · r redo · n dismiss), request (no code), a new release with the fixes replayed on it
- *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
+ *  u), failed (y try again · d ask Claude · n dismiss), request (no code), a new release with the fixes replayed on it
+ *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it
+ *  (a failed fix: what it tried, while the prompt box holds its failure for Claude). `reload` (applied): `pending` while
  *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
 export type FixLine = {
   id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string; open?: boolean; reload?: 'pending' | 'restart'
@@ -115,6 +153,8 @@ export type FixLine = {
   back?: boolean
   /** request: a round of a fix the person has changed no code, so the fix stays as it was */
   kept?: boolean
+  /** update: the session loads what changed */
+  loads?: boolean
 }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
@@ -306,11 +346,9 @@ export async function notNow($: Engine, id: number): Promise<string | null> {
   return r.ok ? null : `× ${cut(r.err || 'thimble fix notnow gave nothing', 220)}`
 }
 
-/** /thimble-fix alone: how to ask, and where the fixes are listed and managed (a shell: they act across sessions). */
-export const FIX_ALONE = [
-  'Ask for a change to thimble with /thimble-fix <what should work differently>.',
-  'Your fixes are listed and managed in a shell: thimble fix list (thimble fix --help shows the rest).',
-].join('\n')
+/** /thimble-fix with no words that say what should change (alone, or the number of a fix that it does not try again,
+ *  triesAgain): how to ask. */
+export const FIX_ALONE = 'Ask for a change to thimble with /thimble-fix <what should work differently>.'
 
 /** /thimble-fix update: thimble update runs in a shell, not in this session, because it changes the thimble the session
  *  runs. The reply says so, with the commands. */
@@ -323,6 +361,23 @@ export async function checkUpdate($: Engine): Promise<void> {
   const r = await kernelFix($, ['update', '--check', '--once', '--json'], { timeoutMs: 60000 }).catch(() => null)
   const d = r?.ok ? jsonOf<Any>(r.out) : null
   if (d?.newer && d.say !== false) await setFixLine($, { id: 0, kind: 'release', said: d.line || `thimble ${d.to} is out (you have ${d.from}) · in a shell: thimble update` })
+}
+
+/** At session start, when the kernel put back the fixes an update set aside as it read the list (`carried`): one line
+ *  says what came of them (`↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit it`), and the session loads
+ *  them. An update by thimble 0.10.5 or before set every fix aside and stopped there; this load is the first that runs
+ *  after it, from /reload-plugins or a new session. */
+export async function carriedLine($: Engine, list: FixList | null): Promise<void> {
+  const c = list?.carried
+  if (!c || !(c.back.length || c.had.length || c.aside.length)) return
+  const n = c.back.length
+  const m = c.aside.length
+  const said = [`thimble ${c.to}`,
+    ...(n ? [`${n} fix${n === 1 ? '' : 'es'} ${c.off ? `kept, off as you had ${n === 1 ? 'it' : 'them'}` : 'on again'}`] : []),
+    ...(c.had.length ? [`${c.had.length} already in it`] : []),
+    ...(m ? [`${m} off: ${m === 1 ? 'it does' : 'they do'} not fit it`] : [])].join(' · ')
+  await setFixLine($, { id: 0, kind: 'update', said, loads: !!c.reload })
+  await load($, c)
 }
 
 /** Claude ran `thimble update` (the pending fixes' prompt asks for --continue): the session loads what it changed at the

@@ -52,8 +52,9 @@ export function matches(card: Pick<SideCard, 'title' | 'takeaway'>, query: strin
   return words.every((w) => hay.includes(w))
 }
 
-/** The sidebar's sections: Starred, then Figures and Your work in canvas order, each card once. Cards
- * without a question are left out. With a query, only matching cards and non-empty sections. */
+/** The sidebar's sections: Starred, then Figures and Your work in canvas order, each card once. A card a writer made
+ * (its `session`) is a figure wherever it stands. Cards without a question are left out. With a query, only matching
+ * cards and non-empty sections. */
 export function cardSections(cells: readonly Cell[], groups: readonly Group[], query = '', figureOf: (cell: Cell) => string | null = () => null): CardSection[] {
   const byId = new Map(groups.map((g) => [g.id, g]))
   const lists: Record<CardSectionKey, SideCard[]> = { starred: [], figures: [], yours: [] }
@@ -63,7 +64,7 @@ export function cardSections(cells: readonly Cell[], groups: readonly Group[], q
     const card: SideCard = { id: c.id, title, takeaway: (c.takeaway ?? '').trim(), shape: cardShape(figureOf(c)) }
     if (!matches(card, query)) continue
     if ((c as { starred?: boolean }).starred === true) lists.starred.push(card)
-    lists[sectionOf(byId.get(c.notebook), byId)].push(card)
+    lists[c.session ? 'figures' : sectionOf(byId.get(c.notebook), byId)].push(card)
   }
   const keys: CardSectionKey[] = ['starred', 'figures', 'yours']
   return keys.map((key) => ({ key, name: SECTION_NAMES[key], cards: lists[key] })).filter((s) => !query.trim() || s.cards.length > 0)

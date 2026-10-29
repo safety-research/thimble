@@ -3,6 +3,7 @@ every hint the code names is a section of prompts/tools.md with the placeholders
 Heads up and Explainers checks say what the terminal plugin's lenses say."""
 
 import ast
+import itertools
 import re
 import string
 from pathlib import Path
@@ -224,3 +225,228 @@ def test_the_lens_checks_say_what_the_terminal_lenses_say(check):
     browser = _shared((REPO / "prompts" / "checks" / f"{check}.md").read_text("utf-8"))
     terminal = _shared((REPO.parent / "plugin" / "prompts" / f"{LENS_TEXTS[check]}.md").read_text("utf-8"))
     assert browser and browser == terminal
+
+
+def _examples(text: str) -> list[list[str]]:
+    """The example blocks of a prompt's text: each run of lines indented by four spaces, its lines stripped."""
+    blocks: list[list[str]] = []
+    run: list[str] = []
+    for line in text.splitlines() + [""]:
+        if line.startswith("    ") and line.strip():
+            run.append(line.strip())
+        elif run:
+            blocks.append(run)
+            run = []
+    return blocks
+
+
+def _what_to_make(mode: str) -> tuple[str, list[list[str]]]:
+    """The guidance's What to make (shared.md), as main's prompt includes it: its paragraph, and its example's turns,
+    each an `Analyst` line with the lines under it."""
+    section = prompts.section("main", "What to make", mode)
+    para = next(p for p in section.split("\n\n") if p.strip() and not p.startswith("    "))
+    turns: list[list[str]] = []
+    for line in (ln for block in _examples(section) for ln in block):
+        if line.startswith("Analyst"):
+            turns.append([line])
+        elif turns:
+            turns[-1].append(line)
+    return para, turns
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
+    """The guidance says a page the analyst comes back to, such as a dashboard, is a view whatever they call it, and its
+    example answers a request for a dashboard with propose_view and a question about the records with a card;
+    propose_view's description says what a view is in the same words, so main does not answer it with cards."""
+    from app import tools
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    para, turns = _what_to_make(mode)
+    assert "dashboard" in para and "is a view, whatever they call it" in para
+    dashboard = next(t for t in turns if "dashboard" in t[0])
+    assert any("propose_view" in line for line in dashboard[1:])
+    assert any(line.startswith("card") for t in turns for line in t[1:])
+    assert "dashboard" in tools.descriptions()["propose_view"]
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
+    """The guidance's example sizes each answer to its question: a casual question answered in a few sentences in the
+    chat with no card, and a question about how something works answered with its steps in order and a diagram card,
+    with no table."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    _, turns = _what_to_make(mode)
+    casual = next(t for t in turns if "folder" in t[0])
+    chat = next(line for line in casual if line.startswith("chat"))
+    assert "card:" not in chat and chat.count(". ") <= 2
+    assert not any(line.startswith(("card", "group", "view")) for line in casual)
+    how = next(t for t in turns if "how does" in t[0].lower())
+    assert any(line.startswith("chat") for line in how) and any("diagram" in line for line in how)
+    assert not any("table" in line for line in how)
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_says_why_a_finding_nobody_asked_for_gets_one_sentence(mode, monkeypatch):
+    """The guidance says why a reply stays short: the analyst asks in the middle of other work and reads the answer once,
+    so a reply shaped like a report makes them read past what they did not ask for; and a finding they did not ask about
+    gets one sentence at most, since they ask when they want more. Without these reasons, replies grew longer and added
+    paragraphs that nobody asked for."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    para, _ = _what_to_make(mode)
+    assert "in the middle of other work" in para and "shaped like a report" in para
+    assert "read past what they did not ask for" in para
+    unasked = next(s for s in para.split(". ") if "did not ask about" in s)
+    assert "one sentence at most" in unasked and "they ask when they want more" in unasked
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_answers_beside_one_card_in_a_sentence_or_two(mode, monkeypatch):
+    """The guidance opens with what the chat is for, talking with the analyst, while a card shows the evidence; it says
+    what the reply beside a single card holds, the answer in a sentence or two, and why, so that the analyst does not
+    read what the card shows twice; and its example's one-card turn shows that reply, one sentence that links the card.
+    Before, the example's one-card turn had no chat line, and replies beside one card said the card's rows again as a
+    list."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    para, turns = _what_to_make(mode)
+    assert para.startswith("The chat is where you talk with the analyst")
+    beside = next(s for s in para.split(". ") if "reply beside it" in s)
+    assert "the answer in a sentence or two" in beside and "the same thing twice" in beside
+    one = next(t for t in turns if any(line.startswith("card") for line in t[1:]) and "diagram" not in " ".join(t))
+    chat = next(line for line in one if line.startswith("chat"))
+    assert "[[card:<id>]]" in chat and chat.count(". ") == 0
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
+    """The guidance answers a question about how something works with its steps in order, one sentence each, and a
+    diagram card when they branch, as the card kinds say a diagram is for how things branch and connect; its example of
+    such a question draws one for steps that branch, not for a straight line of steps."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    kinds = prompts.section("main", "Cards", mode)
+    assert "`diagram` for how things branch" in kinds and "Steps in a straight line read better as a timeline" in kinds
+    para, turns = _what_to_make(mode)
+    how_works = next(s for s in para.split(". ") if "how something works" in s)
+    assert "order of its steps" in how_works and "in order in the chat, one sentence each" in how_works
+    assert "a diagram card when they branch" in how_works
+    how = next(t for t in turns if "how does" in t[0].lower())
+    diagram = next(line for line in how if "diagram" in line)
+    assert "branch" in diagram or "join" in diagram
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
+    """The guidance says why a casual question, such as what a folder holds, gets two to four sentences in the chat:
+    it comes before any analysis, so that the analyst can choose what to ask next. Not a broad question: a broad
+    question about the data, such as the main ways the runs fail, asks for analysis, whose work goes in cards."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    para, _ = _what_to_make(mode)
+    sentences = para.split(". ")
+    i = next(i for i, s in enumerate(sentences) if "casual question" in s)
+    assert "folder" in sentences[i] and "before any analysis" in sentences[i] and "what to ask next" in sentences[i]
+    short = sentences[i + 1]
+    assert "two to four plain sentences in the chat" in short and "without a list or a card" in short
+    assert "one thing that stands out" in short
+    assert "broad" not in para
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
+    """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
+    words, since the checker finds words copied from a README in the README; and a README or a design note only for
+    what its authors wrote, since it can be out of date. Main names a disagreement with the code in one sentence when it
+    is on what the analyst asked about; before, it named one in almost every answer, also where it did not touch the
+    question."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    section = prompts.section("main", "Citing claims in the chat", mode)
+    para = next(p for p in section.split("\n\n") if "README" in p)
+    assert "out of date" in para and "read its code" in para and "words copied from a README" in para
+    assert "disagrees with the code on what the analyst asked about, tell them in one sentence" in para
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(mode, monkeypatch):
+    """The guidance keeps the runs that lead to an answer, such as a first look at the files, in the shell, which shows
+    them folded, and puts only what answers on the canvas; main's prompt no longer puts all of its analysis work in
+    cards, which made a first look at the data a card on the canvas. The card that answers shows the numbers or records
+    the answer rests on, since the analyst rarely opens the shell's output; without that reason, those numbers moved
+    into longer replies."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    main = prompts.load("main", mode)
+    assert "analysis work in cards" not in main and "never sees your shell output" not in main
+    para, turns = _what_to_make(mode)
+    runs = next(s for s in para.split(". ") if "in the shell" in s)
+    assert "first look at the files" in runs and "folded" in runs and "Only what answers goes on the canvas" in para
+    assert any(line.startswith("shell") for line in turns[0])
+    card = next(s for s in para.split(". ") if "is one card" in s)
+    assert "numbers or records the answer rests on" in card and "rarely opens your shell output" in card
+
+
+def _grouped(blocks: list[list[str]]) -> list[int]:
+    """How many cards each group of an example holds: the numbered lines under each `group` line."""
+    counts: list[int] = []
+    for block in blocks:
+        for i, line in enumerate(block):
+            if re.match(r"^(Good|Bad)?\s*group\b", line):
+                counts.append(len(list(itertools.takewhile(lambda ln: re.match(r"^\d+\s", ln), block[i + 1:]))))
+    return counts
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_names_a_group_only_for_a_sequence_of_cards(mode, monkeypatch):
+    """The canvas has no group by default, and a card added without one stands loose on it. add_card's `group` says what
+    a group is for, a sequence of cards that answer one question together, and that a single card leaves it out; main's
+    examples agree: a single card with no group, and each group a sequence of cards. Before, the description said only
+    how to name a group, and two examples put one card in a group."""
+    from app import tools
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    group = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["group"]["description"]
+    assert "sequence of cards" in group and "single card" in group
+    blocks = [*_examples(prompts.section("main", "What to make", mode)),
+              *_examples(prompts.section("main", "Cards", mode)), *_examples(prompts.load("card-types", mode))]
+    counts = _grouped(blocks)
+    assert counts and min(counts) >= 2, counts
+    own = [ln for b in _examples(prompts.section("main", "What to make", mode)) for ln in b if ln.startswith("group")]
+    assert own and all(re.search(r'"[^"]+\?"', ln) for ln in own), "the guidance's group is named by its question"
+    single = [b for b in blocks if any(line.startswith("question") for line in b)]
+    assert single and not _grouped(single), "a card that answers a question alone has no group"
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_a_card_shows_the_evidence_chosen_for_its_answer(mode, monkeypatch):
+    """The guidance's Cards section says what a card's content is: the evidence for one answer, the numbers or records
+    it rests on, chosen and shaped for the question, so that the analyst sees the answer at a glance. That is only the
+    records that answer, or all of them in one compact form with the ones that answer marked, also when the analyst asks
+    for every record or the answer is a pattern among them; each number once, numbers that the analyst compares in a form
+    that compares them and a few numbers of different kinds as the rows of a small table, never in large type in a box
+    of its own, the look of a dashboard; no field that does not help answer the question; and rows that all say the same
+    thing as their count.
+    Its example's bad contents are a table of every record with fields that do not help, and boxes of numbers that a
+    chart then gives again. The form stays the card's own choice, after the evidence: be creative about how it presents
+    the content. add_card's `html` names no class and gives no example, since its example was numbers in boxes, and says
+    that the card shows the question above the page and the takeaway under it, so the page does not say the answer
+    again. Before, cards listed every run with every field, gave the same numbers in boxes, bars and a sentence, and
+    listed rows that all said "passed"."""
+    from app import tools
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    cards = prompts.section("main", "Cards", mode)
+    paras = cards.split("\n\n")
+    para = next(p for p in paras if p.startswith("The content is the evidence for one answer"))
+    assert "chosen and shaped for the question" in para and "at a glance" in para
+    assert "only the records that answer" in para and "with the ones that answer marked" in para
+    assert "when they asked" not in para, "an explicit ask for every record is the analyst's own call"
+    assert "Show each number once" in para and "Show numbers that the analyst compares" in para
+    assert "a few numbers of different kinds, such as a month's totals, as the rows of a small table" in para
+    assert "each in a box of its own, are the look of a dashboard" in para
+    assert "does not help answer the question" in para and "give their count" in para
+    creative = next(i for i, p in enumerate(paras) if p.startswith("Be creative about how you present the content"))
+    assert creative > paras.index(para) and paras[creative + 1].startswith("- `plot`"), "the form comes after the evidence"
+    example = next(b for b in _examples(cards) if any(line.startswith("Good") and "content" in line for line in b))
+    bad = [line for line in example if line.startswith("Bad")]
+    assert any("table" in line for line in bad) and any("box" in line for line in bad)
+    assert not any(line.startswith("group") for line in example), "the example is one card"
+    html = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["html"]["description"]
+    assert "plain HTML" in html and "class=" not in html and "tc-" not in html
+    assert "its question above the page and its takeaway under it" in html and "does not say the answer again" in html

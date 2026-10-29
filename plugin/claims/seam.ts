@@ -29,7 +29,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failNotice } from '../bar/notice'
+import { failNotice, reasonOf } from '../bar/notice'
 import { closePane, paneShows } from '../core/pane'
 import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
@@ -80,7 +80,8 @@ async function toggleClaims($: Engine, byKey = false): Promise<void> {
 }
 
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  if (preview) return on('claims') ? [{ id: 'claims', key: 'w', words: 'evidence' }] : []
+  // the settings' preview names w by the bar's words, as it names coverage and the labels: the count once there are claims
+  if (preview) return on('claims') ? [{ id: 'claims', key: 'w', words: (await claimCount($).catch(() => 0)) ? await claimsBarWords($) : 'evidence' }] : []
   const items = on('claims') ? await barItems($) : []
   named = items.length > 0
   return items
@@ -148,7 +149,7 @@ export const registerClaims: Register = (on, options) => {
       if (!(await repairShown($))) return next(e)
       return { element: e.element }
     } catch (err) {
-      failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'claims:repair')
+      failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'claims:repair')
       return { element: e.element }
     }
   }).catch(($, e, next) => next(e))

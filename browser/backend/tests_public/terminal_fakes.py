@@ -64,9 +64,14 @@ class FileModule:
         return {"ok": True}
 
     def write(self) -> None:
+        """module.json, whole: written beside and renamed over it, so a read never finds it half-written. This stand-in
+        writes it every 20 ms, a hundred times as often as the module, and from a thread of the reader's own process:
+        in place, a busy machine let a read of the server find it half-written past read_module's five tries."""
         self.out["beat"] = int(time.time() * 1000)
         path = sf.module_path(self.ws)
-        path.write_text(json.dumps(self.out), "utf-8")
+        tmp = path.with_name(f".{path.name}.{threading.get_ident()}")
+        tmp.write_text(json.dumps(self.out), "utf-8")
+        os.replace(tmp, path)
 
     def ended(self, agent_id: str, answer: str = "", reason: str = "answer", **more: Any) -> None:
         self.n += 1
@@ -107,9 +112,13 @@ class FileModule:
         return self
 
     def stop(self) -> None:
+        """Ends the thread, and returns once it wrote its last (a busy machine only makes that later)."""
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=60)
+            assert not self._thread.is_alive(), "the module's thread did not end"
+            self._thread = None
+        self._stop = threading.Event()
 
     def ops(self, op: str) -> list[dict]:
         return [a for _, o, a in self.seen if o == op]

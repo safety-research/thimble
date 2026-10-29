@@ -17,8 +17,8 @@
 #   page       the page's type check, unit tests and build (browser/frontend), after npm ci when its packages are missing
 #
 # Each test has a time limit, so a test that hangs fails with its name: 120 s for node --test and pytest (the browser's
-# in browser/backend/pyproject.toml; the plugin's when pytest-timeout is installed), and vitest's testTimeout (10 s) for
-# the page.
+# in browser/backend/pyproject.toml; the plugin's when pytest-timeout is installed) and for a hooks test that loads the
+# plugin (plugin/tests/kit.ts; the kit's 5 s for one that does not), and vitest's testTimeout (10 s) for the page.
 #
 # The plugin's steps need claude (Claude Code 2.1.307 or later), node 22.18 or later, and Python 3.10 or later with pytest:
 # THIMBLE_PYTHON, else python3. The browser's steps need uv and node 22.12 or later. Each step runs with a Claude Code
@@ -56,14 +56,16 @@ for step in "${steps[@]}"; do
       node --test --test-timeout=120000 "${files[@]}" ;;
     python)
       limit=()  # with pytest-timeout (CI installs it), a test that runs past 120 s fails with its name and its stack
-      if "$THIMBLE_PYTHON" -c 'import pytest_timeout' 2>/dev/null; then limit=(--timeout=120 --timeout-method=thread)
+      if "$THIMBLE_PYTHON" -c 'import pytest_timeout' 2>/dev/null; then
+        limit=(--timeout=120 --timeout-method=thread -o faulthandler_timeout=110)  # every thread's stack, a little before
       else echo "pytest-timeout is not installed, so a test that hangs holds the run"; fi
       "$THIMBLE_PYTHON" -m pytest plugin -q -p no:cacheprovider ${limit[@]+"${limit[@]}"} ;;
     parity) browser_tests tests_public/test_prompts.py tests_public/test_american_names.py ;;
     server)
       # one worker per CPU, at most 8 (THIMBLE_TEST_WORKERS sets another count): the tests that time a page, a kernel or
       # a hold fail when more workers than CPUs share the machine, as on CI's 4-CPU runner
-      cpus=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)
+      # nproc counts the CPUs this process may run on (taskset, a container's cpuset); getconf counts the machine's
+      cpus=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)
       browser_tests -n "${THIMBLE_TEST_WORKERS:-$((cpus < 8 ? cpus : 8))}" tests_public ;;
     page)
       [ -d browser/frontend/node_modules ] || npm --prefix browser/frontend ci --no-audit --no-fund

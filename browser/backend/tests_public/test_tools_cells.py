@@ -22,7 +22,8 @@ async def _stack(workspaces_tmp, monkeypatch):
 
 @pytest.fixture()
 def group() -> str:
-    """The caller's own group, made the way tools.analyst_notebook would."""
+    """The caller's own group, which its calls name as their notebook (tools.Ctx.notebook), where its cards land when a
+    call names no group (tools.default_group)."""
     return notebook.create_notebook(config.workspace_dir(CORPUS), "Your work", role="analyst")["id"]
 
 

@@ -1,9 +1,10 @@
 // The settings pane: /thimble-settings opens it with the keys, it shows the bar as the switches leave it, and a press on
 // a switch turns it off through Claude Code ($.config.set). All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { DEFAULTS, choiceOf, citationsFrom, featureOn, noteChange, setOptions, valueIn } from '../settings/features.mjs'
 import { registerSettings, settingsAction, settleMinimal } from '../settings/term'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -252,6 +253,34 @@ test('a mode saved under the old fields moves to Citations at the first session,
   await call('session.start', { isInteractive: true })
   expect(set).toEqual([])
   expect(choiceOf('citations')).toBe('auto cite')
+  setOptions({})
+})
+
+test("/config hides Checker and its Effort on Bedrock, Vertex or Foundry (a variable set to a true value), whose model ids are not the first-party API's; elsewhere they show", async () => {
+  const hooks: Record<string, Any[]> = {}
+  const on: Any = (event: string, a: Any, b?: Any) => {
+    ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
+    const reg: Any = { catch: () => reg }
+    return reg
+  }
+  let env: Record<string, string> = {}
+  const $: Any = { plugin: { name: 'thimble' }, env: { get: async (name: string) => env[name] } }
+  const hidden = async (key: string) => {
+    const chain = hooks['config.describe'] ?? []
+    const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i]($, ev, (x: Any) => run(i + 1, x)) : ev)
+    return (await run(0, { key, label: 'x', isHidden: false })).isHidden
+  }
+  registerSettings(on, { checkerModel: 'Haiku 5.5' } as never)
+  const cases: [Record<string, string>, boolean][] = [
+    [{ CLAUDE_CODE_USE_BEDROCK: '1' }, true], [{ CLAUDE_CODE_USE_VERTEX: 'yes' }, true], [{ CLAUDE_CODE_USE_FOUNDRY: 'TRUE' }, true],
+    [{ CLAUDE_CODE_USE_BEDROCK: '0' }, false], [{}, false],
+  ]
+  for (const [vars, hides] of cases) {
+    env = vars
+    expect(await hidden('thimble@inline.checkerModel')).toBe(hides)
+    expect(await hidden('thimble@inline.checkerEffort')).toBe(hides)
+    expect(await hidden('thimble@inline.citations')).toBe(false)
+  }
   setOptions({})
 })
 

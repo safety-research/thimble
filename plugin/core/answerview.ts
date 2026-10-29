@@ -176,12 +176,12 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the tray's steps, s, b, e, then c cite. While an item of
- *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
+/** The features' items at the bar's left, after v: the tray's steps (at rest its ]), s, b, e, then c cite. While an
+ *  item of what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
   // while the tray holds the keys (its own in its header), the open chips' keys (0 [ ]) wait: each key shows once
-  const holds = tray.length > 0 || (!preview && (await safe(trayHolds($), false)))
+  const holds = tray.some(x => x.focus) || (!preview && (await safe(trayHolds($), false)))
   return [
     ...tray,
     ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),

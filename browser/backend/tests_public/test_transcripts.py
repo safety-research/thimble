@@ -459,9 +459,10 @@ def test_each_turn_stands_on_its_line_whatever_wrote_the_json(chats):
               "ts": f"{1700000000 + i}.0001"} for i in range(3000)]
     (chats / "logs" / "slack-escaped.json").write_text(json.dumps(slack, indent=1).replace("/", "\\/"))
     for name, first in (("parts.json", lambda t: t["text"].split("\n")[0]), ("slack-escaped.json", lambda t: t["text"][:10])):
-        t0 = time.monotonic()
+        # the parse's CPU time (it runs in this thread), which other processes on a busy machine do not stretch
+        t0 = time.thread_time()
         got = transcripts.parse_turns(chats / "logs" / name, f"logs/{name}")
-        assert time.monotonic() - t0 < 3, f"{name}: one pass, not one per turn"
+        assert time.thread_time() - t0 < 3, f"{name}: one pass, not one per turn"
         raw = (chats / "logs" / name).read_text().split("\n")
         assert len(got["turns"]) == 3000
         assert all(first(t) in raw[t["line"] - 1] for t in got["turns"]), name
@@ -473,9 +474,9 @@ def test_turns_whose_words_are_not_found_cost_a_few_passes(chats, monkeypatch):
     msgs = [{"role": "user", "content": f"message {i} " + "x" * 400} for i in range(4000)]
     (chats / "logs" / "missed.json").write_text(json.dumps(msgs, indent=1))
     monkeypatch.setattr(transcripts, "_needles", lambda t: ["\x01 not in the file"])
-    t0 = time.monotonic()
+    t0 = time.thread_time()  # the parse's CPU time, as above
     got = transcripts.parse_turns(chats / "logs" / "missed.json", "logs/missed.json")
-    assert time.monotonic() - t0 < 3 and {t["line"] for t in got["turns"]} == {1}
+    assert time.thread_time() - t0 < 3 and {t["line"] for t in got["turns"]} == {1}
 
 
 def test_a_file_asked_for_at_once_by_many_is_parsed_once(chats, monkeypatch):
@@ -630,6 +631,269 @@ def test_a_role_that_first_speaks_past_the_head_still_starts_a_turn(chats, monke
     page = client.get(f"{CHATS}/source", params={"path": "logs/late.md"}).json()
     assert page["transcript"]["speakers"] == ["assistant", "user"]
     assert [r["meta"].get("turn", {}).get("speaker") for r in page["records"]] == [None, "User", "Assistant", "User", "Assistant", "System"]
+
+
+# an agent's tool call in a text chat log: its code and its output, each in a fenced block (15 lines)
+TOOL_CALL = ("Assistant: I will check the parser.\nTool call: python\n```python\ntry:\n    import parser\n"
+             "except ImportError as e:\n    print(e)\n```\nTool result:\n```\nTraceback (most recent call last):\n"
+             '  File "<stdin>", line 2, in <module>\nModuleNotFoundError: No module named \'parser\'\nHost: example.com\n```\n')
+
+
+def test_lines_inside_a_tool_call_start_no_turn(chats, monkeypatch):
+    """A tool call's code and output (Python's try: and except:, an error message, a header line) start no turn: not in
+    a fenced block, on a page that starts inside one (read back to the turn it is in, at most LOOKBACK_MAX lines and
+    LOOKBACK_BYTES bytes, else none), in the speakers Color by reads, nor in aider's edits; nor do a line of code and an
+    error message outside a block. A block left open (a message cut in its code) ends at the next turn of a speaker the
+    log has."""
+    log = "User: Why does the parser fail?\n" + TOOL_CALL * 3 + "Assistant: The parser module is missing.\nUser: ok\n"
+    (chats / "logs" / "agent.txt").write_text(log)
+    hint = transcripts.sniff(chats / "logs" / "agent.txt", "logs/agent.txt")
+    assert hint["speakers"] == ["assistant", "tool call", "tool result", "user"]
+
+    def turns(name, **params):
+        page = client.get(f"{CHATS}/source", params={"path": f"logs/{name}", **params}).json()
+        return [(r["line"], r["meta"]["turn"]["speaker"]) for r in page["records"] if r["meta"].get("turn")]
+
+    calls = [(2 + 15 * k + d, who) for k in range(3) for d, who in ((0, "Assistant"), (1, "Tool call"), (8, "Tool result"))]
+    assert turns("agent.txt") == [(1, "User"), *calls, (47, "Assistant"), (48, "User")]
+    assert turns("agent.txt", start=12, count=10) == [(17, "Assistant"), (18, "Tool call")], "a page inside a block"
+    lines = log.split("\n")
+    assert transcripts._lead_texts(chats / "logs" / "agent.txt", hint, 40) == lines[32:39], "from line 33, Tool call"
+    with monkeypatch.context() as m:
+        m.setattr(transcripts, "LOOKBACK_LINES", 1)
+        m.setattr(transcripts, "LOOKBACK_MAX", 2)
+        assert transcripts._lead_texts(chats / "logs" / "agent.txt", hint, 40) == [], "the turn starts 7 lines back"
+        m.setattr(transcripts, "LOOKBACK_MAX", 7)
+        assert transcripts._lead_texts(chats / "logs" / "agent.txt", hint, 40) == lines[32:39]
+    keys = client.get(f"{CHATS}/source/keys", params={"path": "logs/agent.txt"}).json()["keys"]
+    assert {v["value"] for v in keys[0]["values"]} == {"User", "Assistant", "Tool call", "Tool result"}
+
+    plain = ("User: run the check\nAssistant: Running it.\nTool: python\ntry:\n    check()\nexcept ValueError as e:\n"
+             "    print(e)\nValueError: bad input\n") * 2 + "User: ok\n"
+    (chats / "logs" / "plain.txt").write_text(plain)
+    assert [w for _, w in turns("plain.txt")] == ["User", "Assistant", "Tool"] * 2 + ["User"]
+
+    aider = ("\n# aider chat started at 2026-09-01 10:00:00\n\n#### Fix the off-by-one.\n\nI will edit range.py.\n\n"
+             "range.py\n```python\n<<<<<<< SEARCH\nfor i in range(n + 1):\n=======\nfor i in range(n):\n>>>>>>> REPLACE\n"
+             "```\n\n> Applied edit to range.py\n\n#### Thanks.\n\nYou are welcome.\n")
+    (chats / "logs" / "edit.aider.chat.history.md").write_text(aider)
+    assert turns("edit.aider.chat.history.md") == [(4, "User"), (6, "Assistant"), (17, "Aider"), (19, "User"),
+                                                   (21, "Assistant")]
+
+    cut = "User: show the script\nAssistant: Here it is:\n```python\ntry:\n    run()\n" + "User: thanks\nAssistant: ok\n" * 2
+    (chats / "logs" / "cut.txt").write_text(cut)
+    assert turns("cut.txt") == [(1, "User"), (2, "Assistant"), (6, "User"), (7, "Assistant"), (8, "User"),
+                                (9, "Assistant")]
+
+
+def test_a_readme_with_much_code_around_an_example_exchange_keeps_rendered_first(chats):
+    """Only the code between two turn lines is a transcript's tool calls: a README whose 50 lines of code stand before
+    and after a 4-line example exchange, among 13 lines of prose and headings, keeps Rendered first."""
+    prose = "\n".join(f"Line {i} of prose on how rangetools works." for i in range(8))
+    install = "```bash\n" + "\n".join(f"pip install rangetools==1.{i}" for i in range(23)) + "\n```"
+    usage = "```python\n" + "\n".join(f"r{i} = rng.make({i}, {i + 5})" for i in range(23)) + "\n```"
+    doc = (f"# rangetools\n\n{prose}\n\n## Install\n\n{install}\n\n## Example\n\nUser: how do I make a range?\n"
+           f"Assistant: call rng.make(1, 5).\nUser: and step by two?\nAssistant: pass step=2.\n\n## Usage\n\n{usage}\n\n"
+           "That is all.\n")
+    (chats / "logs" / "rangetools.md").write_text(doc)
+    got = transcripts.sniff(chats / "logs" / "rangetools.md", "logs/rangetools.md")
+    assert got == {"format": "text", "score": transcripts.WEAK, "style": "colon", "speakers": ["assistant", "user"]}
+
+
+def test_a_markdown_transcript_whose_turns_hold_tool_calls_opens_in_transcript(chats):
+    """In markdown the share of turn lines is taken over the file's own lines, not the lines of the code it quotes: an
+    agent's transcript whose turns hold long tool calls in code blocks is sure (Transcript first), as the same text is
+    in a .txt file; a document quoting an example exchange keeps Rendered first
+    (test_markdown_quoting_an_example_exchange_keeps_rendered_first)."""
+    call = ("**Tool call: Bash**\n\n```bash\npython - <<'EOF'\ntry:\n    import parser\nexcept ImportError as e:\n"
+            "    print(e)\nEOF\n```\n\n```\nTraceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\n"
+            "ModuleNotFoundError: No module named 'parser'\n```\n\n")
+    doc = ("# Session\n\n## User\n\nWhy does the parser fail?\n\n## Assistant\n\nI will run it.\n\n" + call * 4
+           + "## Assistant\n\nThe parser module is missing.\n\n## User\n\nInstall it.\n\n## Assistant\n\nDone.\n")
+    for name in ("agent.md", "agent-copy.txt"):
+        (chats / "logs" / name).write_text(doc)
+        got = transcripts.sniff(chats / "logs" / name, f"logs/{name}")
+        assert got == {"format": "text", "score": transcripts.STRONG, "style": "heading",
+                       "speakers": ["assistant", "user"]}, name
+
+
+def chat_turns(name: str, **params) -> list[tuple[int, str]]:
+    """The turns a source page of logs/<name> marks: (line, who speaks)."""
+    page = client.get(f"{CHATS}/source", params={"path": f"logs/{name}", **params}).json()
+    return [(r["line"], r["meta"]["turn"]["speaker"]) for r in page["records"] if r["meta"].get("turn")]
+
+
+def test_a_person_named_like_a_word_of_python_still_speaks(chats):
+    """Python's words that open a block of code are lowercase (`else:`, `try:`): a person named Else starts turns."""
+    (chats / "logs" / "else.txt").write_text("Else: Did you get the tickets?\nMarta: Yes, two.\nElse: See you at eight.\n"
+                                             "Marta: See you.\n")
+    got = transcripts.sniff(chats / "logs" / "else.txt", "logs/else.txt")
+    assert got and got["speakers"] == ["else", "marta"]
+    assert [w for _, w in chat_turns("else.txt")] == ["Else", "Marta", "Else", "Marta"]
+    assert transcripts.turn_of("else:", "colon") is None and transcripts.turn_of("Try: it", "colon") is not None
+
+
+# aider's chat history as aider writes it: two spaces end each line of the user's message and of its own output, a ^C
+# writes its notice before the cut reply, and the cut reply stops inside an edit of a markdown file
+AIDER_CUT = ("\n# aider chat started at 2026-09-01 10:00:00\n\n> Aider v0.60.0  \n> Main model: m with diff edit format  \n\n"
+             "#### Add an install section to the README.  \n>  \n>  \n> ^C again to exit  \n\n"
+             "I will add it under the title.\n\nREADME.md\n```markdown\n<<<<<<< SEARCH\n# Range tools\n=======\n"
+             "# Range tools\n\n#### Install\n\n\n#### No, put it under Usage.  \n\n"
+             "I will put it under Usage.\n\nREADME.md\n```markdown\n<<<<<<< SEARCH\n## Usage\n=======\n## Usage\n\n"
+             "#### Install\n\nRun pip install range-tools.\n>>>>>>> REPLACE\n```\n\n> Applied edit to README.md  \n")
+
+
+def test_an_aider_reply_cut_inside_an_edit_ends_at_the_user_s_next_message(chats):
+    """A reply cut inside its code (^C) leaves a block open: the user's next message, a `#### ` line with the two spaces
+    aider writes after it, ends that block in the sniff and in the turns, and a page after it reads back only to it. A
+    `#### ` heading inside an edit of a markdown file stays code."""
+    p = chats / "logs" / "cut.aider.chat.history.md"
+    p.write_text(AIDER_CUT)
+    hint = transcripts.sniff(p, "logs/cut.aider.chat.history.md")
+    assert hint == {"format": "text", "score": transcripts.STRONG, "style": "aider"}
+    assert chat_turns("cut.aider.chat.history.md") == [(4, "Aider"), (7, "User"), (8, "Aider"), (12, "Assistant"),
+                                                        (24, "User"), (26, "Assistant"), (41, "Aider")]
+    assert chat_turns("cut.aider.chat.history.md", start=29, count=20) == [(41, "Aider")], "a page inside the second edit"
+    assert transcripts._lead_texts(p, hint, 30) == AIDER_CUT.split("\n")[23:29], "from line 24, the user's message"
+
+
+def test_an_aider_session_s_head_ends_a_block_left_open_in_the_sniff_too(chats):
+    """A reply cut inside its code at the end of a session: the next session's head line ends the block, in the sniff
+    as in the turns, so the user's messages after it count."""
+    log = ("\n# aider chat started at 2026-09-01 10:00:00\n\n#### Add an install section.\n\nREADME.md\n```markdown\n"
+           "<<<<<<< SEARCH\n# Range tools\n\n# aider chat started at 2026-09-01 11:00:00\n\n#### Fix the off-by-one.\n\n"
+           "I will edit range.py.\n")
+    (chats / "logs" / "quit.aider.chat.history.md").write_text(log)
+    got = transcripts.sniff(chats / "logs" / "quit.aider.chat.history.md", "logs/quit.aider.chat.history.md")
+    assert got == {"format": "text", "score": transcripts.STRONG, "style": "aider"}
+    assert chat_turns("quit.aider.chat.history.md") == [(4, "User"), (6, "Assistant"), (13, "User"), (15, "Assistant")]
+
+
+def aider_readme_session(i: int, ask: str, gap: str) -> str:
+    """Session `i` of aider's chat history as aider writes it: its head, aider's `> ` lines (`> Main model: ...` reads
+    as a `Word:` line too), the user's message `ask`, and a reply whose edit adds `#### ` headings to a README."""
+    return (f"\n# aider chat started at 2026-09-0{i} 10:00:00\n\n> Aider v0.60.0  \n"
+            "> Main model: claude with diff edit format  \n> Weak model: haiku  \n> Git repo: .git with 12 files  \n"
+            f"> Repo-map: using 1024 tokens, auto refresh  \n\n#### {ask}  \n\nI will edit README.md.\n\nREADME.md\n"
+            "```markdown\n<<<<<<< SEARCH\n# Tools\n=======\n# Tools\n\n#### Install\n\nRun pip.\n\n#### Usage\n\n"
+            f"Run it.\n{gap}>>>>>>> REPLACE\n```\n\n> Applied edit to README.md  \n")
+
+
+# aider histories whose edits add `#### ` headings to a README, and the turns their pages mark
+AIDER_README = {
+    "three.aider.chat.history.md": (
+        "".join(aider_readme_session(i, f"Update the docs, part {i}.", "\n") for i in (1, 2, 3)),
+        [(4, "Aider"), (10, "User"), (12, "Assistant"), (32, "Aider"), (36, "Aider"), (42, "User"), (44, "Assistant"),
+         (64, "Aider"), (68, "Aider"), (74, "User"), (76, "Assistant"), (96, "Aider")]),
+    "two.aider.chat.history.md": (
+        "".join(aider_readme_session(i, "Add install and usage sections to the README.", "") for i in (1, 2)),
+        [(4, "Aider"), (10, "User"), (12, "Assistant"), (31, "Aider"), (35, "Aider"), (41, "User"), (43, "Assistant"),
+         (62, "Aider")]),
+}
+
+
+@pytest.mark.parametrize("name", sorted(AIDER_README))
+def test_an_aider_history_whose_edits_add_headings_stays_aider_s(chats, name):
+    """The sniff reads the head again without the lines of the blocks in its turns in the style it chose first, and
+    ranks no other: an aider history whose edits add `#### ` headings to a README stays aider's, so the user's messages,
+    the replies and aider's own output keep their turns, and aider's `> Main model:` lines start none."""
+    log, want = AIDER_README[name]
+    (chats / "logs" / name).write_text(log)
+    got = transcripts.sniff(chats / "logs" / name, f"logs/{name}")
+    assert got == {"format": "text", "score": transcripts.STRONG, "style": "aider"}
+    assert chat_turns(name) == want
+
+
+def test_a_chat_whose_blocks_hold_another_style_s_lines_keeps_the_style_0_10_5_reads(chats):
+    """A `## User` chat whose tool blocks hold `Host:` and `Model:` lines reads in the colon style and with the turns
+    thimble 0.10.5 reads: the second read leaves the `Model:` lines of the blocks inside a turn out of the sniff (which
+    so is no longer sure), but ranks no other style."""
+    log = ("## User\n\nCheck it.\n\n## Assistant\n\n```\nHost: a\nHost: b\n```\n\n## User\n\nAgain.\n\n## Assistant\n\n"
+           "```\nModel: x\n```\n\n```\nModel: y\n```\n\n```\nModel: z\n```\n")
+    (chats / "logs" / "tools.md").write_text(log)
+    got = transcripts.sniff(chats / "logs" / "tools.md", "logs/tools.md")
+    assert got == {"format": "text", "score": transcripts.WEAK, "style": "colon", "speakers": ["host"]}
+    assert chat_turns("tools.md") == [(8, "Host"), (9, "Host"), (19, "Model"), (23, "Model"), (27, "Model")]
+
+
+def test_a_label_that_opens_a_block_of_code_opens_it_in_the_turns_too(chats):
+    """A label that names no speaker (`Command:`) can open a block of code with its words; the turns open it as the
+    sniff does, so a header line of the output after it (`Host:`) starts no turn, on the page or in Color by."""
+    log = ("User: Is the export up?\nAssistant: I will fetch its head.\nCommand: ```bash\n"
+           "curl -I http://exports.example.test/orders\n```\nOutput:\n```\nHTTP/1.1 200 OK\nHost: exports.example.test\n"
+           "```\nAssistant: The export is up.\nUser: thanks\nAssistant: ok\n")
+    (chats / "logs" / "label.txt").write_text(log)
+    assert transcripts.sniff(chats / "logs" / "label.txt", "logs/label.txt")["speakers"] == ["assistant", "user"]
+    assert chat_turns("label.txt") == [(1, "User"), (2, "Assistant"), (11, "Assistant"), (12, "User"), (13, "Assistant")]
+    keys = client.get(f"{CHATS}/source/keys", params={"path": "logs/label.txt"}).json()["keys"]
+    assert {v["value"] for v in keys[0]["values"]} == {"User", "Assistant"}
+
+
+CHAT = "User: My order is late.\nAssistant: What is its number?\nUser: 4411.\nAssistant: It ships today.\n"
+FORTY = "".join(f"User: question {i}?\nAssistant: answer {i}.\n" for i in range(20))  # a chat log of 40 turns
+CODE = "User: show the code\nAssistant: Here:\n```python\nprint(1)\n```\nUser: ok\nAssistant: ok\n"
+NAMED = "Else: Did you get the tickets?\nMarta: Yes, two.\nElse: See you at eight.\nMarta: See you.\n"
+SURE = {"format": "text", "score": transcripts.STRONG, "style": "colon", "speakers": ["assistant", "user"]}
+# chat logs with a fence before their first turn line (a banner of tildes, alone or a pair around the chat, a title's or
+# a label's line of tildes, a fence left open, a block of code), each with the sniff and the turns thimble 0.10.5 reads
+BEFORE_THE_CHAT = [
+    ("banner.txt", "~~~~~~~~\n" + CHAT, SURE, ["User", "Assistant"] * 2),
+    ("support.rst", "Support chat\n~~~~~~~~~~~~\n\n" + CHAT, SURE, ["User", "Assistant"] * 2),
+    ("pasted.txt", "```\n" + CHAT, SURE, ["User", "Assistant"] * 2),
+    ("pasted-code.txt", "```\n" + FORTY + CODE, SURE, ["User", "Assistant"] * 22),
+    ("config.txt", "```yaml\nserver: alpha\nport: 80\n```\n\n" + CHAT, None, []),  # more names than four turns allow
+    ("config-forty.txt", "```\nserver: alpha\nport: 80\n```\n\n" + FORTY, SURE, ["User", "Assistant"] * 20),
+    ("sections.rst", "Support chat\n~~~~~~~~~~~~\n\n" + FORTY + "\nFollow-up notes\n~~~~~~~~~~~~~~~\n\nThe customer was "
+     "satisfied.\n", SURE, ["User", "Assistant"] * 20),
+    ("banners.txt", "~~~~~~~~~~\n" + FORTY + "~~~~~~~~~~\n", SURE, ["User", "Assistant"] * 20),
+    ("banners.md", "~~~~~~~~~~\n" + FORTY + "~~~~~~~~~~\n", SURE, ["User", "Assistant"] * 20),
+    ("named.txt", "~~~~~~~~~~\n" + NAMED + "~~~~~~~~~~\n",
+     {"format": "text", "score": transcripts.WEAK, "style": "colon", "speakers": ["else", "marta"]}, ["Else", "Marta"] * 2),
+    ("desk.txt", "From: support desk\n~~~~~~~~~~~~~~~~~~~~\n" + FORTY, SURE, ["User", "Assistant"] * 20),
+    ("model.txt", "```yaml\nmodel: m1\n```\n" + CHAT,
+     {"format": "text", "score": transcripts.STRONG, "style": "colon", "speakers": ["assistant", "model", "user"]},
+     ["model"] + ["User", "Assistant"] * 2),
+]
+
+
+def test_a_fence_before_the_first_turn_line_reads_as_it_always_did(chats):
+    """A fence before a chat log's first turn line opens no block that hides a turn: each log reads as thimble 0.10.5
+    reads it, so each chat log it found is found, with the same turns. A block of code before the chat keeps its own
+    lines too, even one that reads as a turn (`model: m1`), and its closing fence opens no block."""
+    for name, text, sniffed, who in BEFORE_THE_CHAT:
+        (chats / "logs" / name).write_text(text)
+        assert transcripts.sniff(chats / "logs" / name, f"logs/{name}") == sniffed, name
+        assert [w for _, w in chat_turns(name)] == who, name
+
+
+def test_a_page_deep_in_a_long_turn_reads_back_a_few_mb_at_most(chats, monkeypatch):
+    """A page inside a tool's long output reads back to the turn it is in through at most about LOOKBACK_BYTES bytes
+    of lines, and keeps only the lines from that turn's first line on; when the turn starts further back, it keeps none
+    and reads as if no block were open."""
+    from app import corpus
+
+    log = ("User: a\nAssistant: b\n" * 2 + "User: dump it\nAssistant: Here it is:\n```\n" + ("x" * 1023 + "\n") * 300
+           + "```\nAssistant: done\nUser: ok\n")
+    p = chats / "logs" / "dump.txt"
+    p.write_text(log)
+    hint = transcripts.sniff(p, "logs/dump.txt")
+    assert hint["speakers"] == ["assistant", "user"]
+    read: list[int] = []
+    real = corpus.page_lines
+
+    def page_lines(path, start, end):
+        got = real(path, start, end)
+        read.append(sum(len(raw) + 1 for raw in got[0]))
+        return got
+
+    monkeypatch.setattr(corpus, "page_lines", page_lines)
+    monkeypatch.setattr(transcripts, "LOOKBACK_LINES", 8)
+    monkeypatch.setattr(transcripts, "LOOKBACK_BYTES", 64 * 1024)
+    assert transcripts._lead_texts(p, hint, 300) == [], "the turn starts 294 KB back"
+    assert sum(read) < 2 * 64 * 1024
+    read.clear()
+    assert transcripts._lead_texts(p, hint, 40) == log.split("\n")[5:39], "from line 6, the turn's first line"
+    assert sum(read) < 2 * 64 * 1024
 
 
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():

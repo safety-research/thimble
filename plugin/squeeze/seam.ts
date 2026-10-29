@@ -20,7 +20,8 @@
 //                                      chips' keys while they are open)
 //   registerSqueeze                    its own hooks: /rewrite (what + writes in the prompt box, hidden from the
 //                                      typeahead) and its autocomplete, the chips' Client, the prompt that carries the
-//                                      version told to Claude, a resumed session's cards
+//                                      version told to Claude, a resumed session's cards, the end of main's turn (the
+//                                      chips s asked for while it ran open on its answer)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
@@ -30,7 +31,7 @@ import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
 import { promptSent, recOf } from './term'
-import { addOwn, barItems, type CardsIn, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
+import { addOwn, answerDone, barItems, type CardsIn, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,6 +117,14 @@ export const registerSqueeze: Register = on => {
   on('prompt.change', async ($, e, next) => {
     const r = await next(e)
     await promptHasKeys($, String(e.text ?? '')).catch(() => undefined)
+    return r
+  }).catch(($, e, next) => next(e))
+
+  // main's turn ends: the chips that s asked for while its answer was being written open on that answer (ui.ts
+  // answerDone). The answer is set before this hook hears the end (core/answers.ts)
+  on('turn.complete', { turnId: /\S/ }, async ($, e, next) => {
+    const r = await next(e)
+    if (e.agentId === undefined) await answerDone($, e.turnId).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 

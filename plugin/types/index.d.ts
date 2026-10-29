@@ -16,6 +16,16 @@ declare module 'claude-code' {
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
        *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`) */
       marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }>
+      /** the lines of checks that could not start that this session showed, so a reply's check says each once, but
+       *  for a line that offers the person's OK (marks/checker.ts sayCannotStart) */
+      checksRefused: string[]
+      /** the person's OK (g) for thimble to start its checks of citations this session, which Claude Code refused where
+       *  nobody was asked (auto mode's classifier gave no verdict, don't ask mode): thimble answers Claude Code's own ask
+       *  on them with allow (marks/checker.ts allowsCheck) */
+      checksAllowed: boolean | null
+      /** the check the line that offers g is about, which g starts again: { kind: 'check', whole, reply, note? } or
+       *  { kind: 'repair', repair } (marks/checker.ts Held) */
+      checksHeld: unknown
 
       // ---- cards (cards/)
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,
@@ -49,8 +59,8 @@ declare module 'claude-code' {
       /** thimble's own work while it runs: the glyph's frame and how many jobs run (bar/busy.ts) */
       busy: { frame: number; n: number }
       /** the bar's counts: the share of the folder's files Claude touched, in words, the labels, a number that changes
-       *  with each count, and why the last count failed (bar/counts.ts) */
-      counts: { coverage: string | null; labels: number; gen: number; error: string | null } | null
+       *  with each count, why the last count failed, and when the count that runs began (bar/counts.ts) */
+      counts: { coverage: string | null; labels: number; gen: number; error: string | null; since?: number | null } | null
       /** what the person opened inside a pane of the bar's, by kind: coverage {open, file} (panes/) */
       paneView: StateFamily<unknown>
       /** the failure line or a notice, until the person's next prompt (bar/notice.ts) */
@@ -106,6 +116,9 @@ declare module 'claude-code' {
       tray: { stack: unknown[] } | null
       /** the card ] reached, which holds the keys: { row, card } */
       trayCard: { row: string; card: string } | null
+      /** the marks the person opened (`<row>|c<n>`, `<row>|<id>`): the bar's ] is lit while the answer shows one not in
+       *  it */
+      traySeen: string[]
 
       // ---- side threads (threads/)
       /** a side thread, by its key (threads/thread.ts Thread): { id, key, agentId, scope, subject, root, status, asks,
@@ -115,16 +128,18 @@ declare module 'claude-code' {
       threadsGen: number
 
       // ---- fixes (fix/): the person's changes to their own thimble; the kernel keeps the records (fixes.jsonl)
-      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read (fixes.ts) */
-      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number } | null
+      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read; what the
+       *  kernel did with the fixes an update set aside as it read them, once (fixes.ts FixList, Carried) */
+      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number; carried?: { to: string; back: number[]; had: number[]; aside: number[]; why?: Record<string, string>; off?: boolean; reload?: boolean } | null } | null
       /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
-       *  changed; a reload that waits for Claude's turn or a restart (fixes.ts FixLine) */
-      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' } | null
+       *  changed; a reload that waits for Claude's turn or a restart; for an update, whether the session loads what
+       *  changed (fixes.ts FixLine) */
+      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; loads?: boolean } | null
       /** whether this session looked for a newer release already (register.ts) */
       fixUpdated: boolean
       /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */
       fixAsked: number
-      /** the words the person typed after /thimble-fix, which the kernel keeps beside Claude's (fix/register.ts) */
+      /** the words the person typed after /thimble-fix, which the fix the skill starts takes (fix/register.ts) */
       fixAskedWords: string
       /** the strays from before rounds changed a fix in place that the fix's line told of already (fix/register.ts) */
       fixStrays: string[]
@@ -132,8 +147,6 @@ declare module 'claude-code' {
       fixers: Record<string, number>
       /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id (fixer.ts) */
       fixerBox: Record<string, string[]>
-      /** the fixes Claude started with the fix-thimble skill, by the fix's id (fixer.ts) */
-      fixBy: Record<string, 'claude'>
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
       /** a record's state beside its text, by its id (a row, or `<host row>#cu` for a catch-up): { running, want,
@@ -146,6 +159,8 @@ declare module 'claude-code' {
       squeezeOpen: { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean } | null
       /** the chips the person typed this session, newest last */
       squeezeOwn: string[]
+      /** s pressed while main's turn ran: the turn whose answer the chips open on once it ends (squeeze/ui.ts) */
+      squeezeWait: { turn: string } | null
       /** the cards a squeeze changed: the copy each shows and the version it drew, the cards left out of the version
        *  shown, what the version shown did to each (squeeze/cards.ts) */
       squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }

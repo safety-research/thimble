@@ -1,8 +1,9 @@
 // register.ts: marks. Claude marks the claims of its reply as markdown links to `#` (`[352](#) of the [410](#) refund
 // requests`); after each reply one checker fork verifies each mark with evidence, and a deterministic validator checks
 // that evidence (checker.ts). The reply is drawn with its marks (view.ts): underlined, a purple tint on hover, a turning glyph
-// after each mark until its own verdict arrives, corrected words in place (as a verified one), Claude Code's error red
-// with × when the check could not confirm it or did not run (failed). The bar's busy line says the check runs; nothing
+// after each mark until its own verdict arrives, corrected words in place with no sign (a click on them opens the tray,
+// whose status says corrected and what they were), Claude Code's error red with × when the check could not confirm it or
+// did not run (failed), a dim ? after one not checked yet (deferred). The bar's busy line says the check runs; nothing
 // under the reply counts the marks. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
@@ -14,8 +15,12 @@
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
 //                    autoRepair), as x does
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script
-//   agent.spawn      a repair's fork (x in the tray): waits out the key's word window, refused when a word came
-//                    (a repair thimble starts itself has no word window)
+//   turn.step        the checker's requests: the model and the effort the setting Checker names
+//   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
+//                    refused when a word came (a repair thimble starts itself has no word window)
+//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g): Claude Code's
+//                    own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask mode
+//                    would refuse it (checker.ts allowsCheck)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
@@ -23,7 +28,7 @@
 //                    and the margin of each passage it draws, which asks a side thread about it
 import type { EngineInterface, Register } from 'claude-code'
 
-import { SPIN } from '../bar/busy'
+import { SPIN, spinNow } from '../bar/busy'
 import { checkSpans, markFocus, markPressed, passagesFor, spansFor, textView, underText, type Span } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
@@ -32,8 +37,9 @@ import { shownWords } from '../core/selection'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
-import { choiceOf, featureOn } from '../settings/features.mjs'
-import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { checkerEffort, checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
+import { firstPartyApi } from '../settings/term'
+import { AGAIN_DESCRIPTION, allowsCheck, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -42,7 +48,10 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-const BUSY = { plugin: 'thimble', key: 'busy' } as const
+/** The spawns a key started that wait out its word window: x's repair, and a check g starts again. */
+const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
+/** Why thimble answers allow to Claude Code at tool.check on a check of its own. */
+const CHECKS_ALLOWED = "thimble's check of citations, which the person allowed this session"
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
  *  words of one of the row's checked marks looks as that one does, and opens its evidence. A rewrite may word a
@@ -178,14 +187,35 @@ export const registerMarks: Register = on => {
     return no ? { deny: no } : next(e)
   })
 
-  // x's repair waits out the word window, and is refused when a letter came in it (hooks/keys.ts undoes x)
-  on('agent.spawn', { description: REPAIR_DESCRIPTION }, async ($, e, next) => {
+  // the checker's requests on the model the setting Checker names, at the effort its Effort names (settings/features.mjs
+  // checkerModel, checkerEffort): a fork keeps the conversation's model and effort, and its spawn takes no other, so
+  // each request of a checker's turn names them. Unset, the requests go as they are; so do they on Bedrock, Vertex or
+  // Foundry, which do not take the first-party ids Checker names (settings/term.ts firstPartyApi), whatever it holds
+  on('turn.step', { agentId: /./ }, async function* ($, e, next) {
+    const checker = forkOf(e.agentId)?.kind === 'checker'
+    const model = checker ? checkerModel() : null
+    const effort = checker ? checkerEffort(model ?? e.model) : null
+    if ((!model && !effort) || !(await firstPartyApi($))) return yield* next(e)
+    return yield* next({ ...e, ...(model ? { model } : {}), ...(effort ? { effort } : {}) })
+  })
+
+  // x's repair, and a check g starts again, wait out the word window, and are refused when a letter came in it
+  // (hooks/keys.ts undoes the key)
+  on('agent.spawn', { description: HELD_SPAWN }, async ($, e, next) => {
     const h = heldRepair()
     if (next.origin.plugin !== 'thimble' || !h) return next(e)
     const left = h.until - Number(await $.clock.now())
     if (left > 0) await $.clock.sleep(left)
-    if (h.cancelled) return { deny: 'the person typed a word that starts with x' }
+    if (h.cancelled) return { deny: 'the person typed a word that starts with the key' }
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // a checker's spawn of thimble's own, once the person let thimble start its checks (g, checker.ts allowsCheck):
+  // Claude Code's own ask, which auto mode's classifier would settle or don't ask mode refuse, is answered allow; a deny,
+  // and an ask a rule, a hook, a setting or another plugin made, stand
+  on('tool.check', { tool: 'Agent' }, async ($, e, next) => {
+    const v = await next(e)
+    return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
   // fails safe (core/rowhook.ts): a throw here answers the drawing beneath, which the hooks around this one draw on
@@ -244,9 +274,9 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     return shown === raw ? below() : below({ ...e, props: { ...e.props, text: shown } })
   }
   if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) return plain()
-  // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations` runs
-  const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
-  const spin = SPIN[frame % SPIN.length]!
+  // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations`
+  // runs (the tray's `checking` turns with it)
+  const spin = reply?.checking ? await spinNow($) : SPIN[0]!
   const runs = await mainRuns($)
   // a mark of Claude's own words with no check in the store: pending while its turn runs or its check starts, else
   // failed, since its check did not run (the tray has no record of it to check)
@@ -273,6 +303,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
       spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
+      // a press on a citation's words, or on the sign after them (view.ts markEl)
       onMark: async (k: number) => {
         const n = looks[k]!.n
         if (await markPressed($, row, n)) return

@@ -2,7 +2,11 @@
 // what it says and what it brings; and what the welcome before them says. Every example is the tour's own
 // (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
 // analyst to act acts only on that example, so nothing reaches the server.
+import { TIP_DELAY_MS } from '../components/Tooltip'
+import { fitChips } from '../files/ColorBy'
+import { shownIn } from '../files/Reader'
 import { TRACK_LANES } from '../files/Ruler'
+import { frameOf } from '../files/Tracks'
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
 
@@ -236,48 +240,75 @@ const sideExample = (api: Api, section: SideSection) => {
   return { wrap, aside, layout }
 }
 
-// ---------- Labels: one agent's transcript in the Transcript view with two labels on it, each in colours of its own:
-// what each step does (four values) and whether it coordinates with other agents (yes/no); the ruler beside it shows
-// both down the whole file. Captured, with the Labels sidebar that lists them, over the real one, which the step opens.
+// ---------- Labels: one agent's transcript in the Transcript mode, colored by one label of a few values: what each step
+// does (reads code, changes code, runs tests, talks to other agents; other, in no color). Each record's bar and its row
+// are in its value's color, and resting on a record names its label and value, as thimble's own hover does (`tips`);
+// the strip beside the transcript shows the colors down the whole file. Captured, with the Labels sidebar that lists the
+// label, over the real one, which the step opens; what thimble fits to the window (Color by's chips, the strip's thumb)
+// the step fits as thimble does.
 
-/** the transcript's lines (agent-05.jsonl, as the Labels sidebar counts its records), which its ruler stands for, the
- * records the example leaves out included */
+/** the transcript's lines (agent-05.jsonl, as the Labels sidebar counts its records), which its strip stands for, the
+ * records the Transcript mode hides included */
 const TX_LINES = 76
+/** the line the transcript opens at, where the agent claims a pull request on the board the agents share, reads the
+ * code, runs the tests and changes the code: every value's color within its first ten records, so on screen in a short
+ * window too */
+const TX_OPEN = 16
+/** the values whose records the demo rests on, the first two of these with a record on screen, each its first there, in
+ * the order they stand */
+const TIP_DEMO = ['what the step does: runs tests', 'what the step does: talks to other agents', 'what the step does: changes code']
 
-/** The labels' marks on the example transcript's ruler, drawn from the records it shows as thimble's ruler draws them
- * (files/Ruler.tsx Marks): a lane per label, in the order of a record's gutter cells, with its stripe, and on it a mark
- * over each run of records whose cell is lit in one colour. A lane is a grid of a row per line of the file's `total`,
- * and a mark spans its records' rows in their cells' colour, so the ruler spans the bar at any height, with no gap
- * between two marks that meet, and shows the records' colours in either theme. */
-function drawRuler(reader: HTMLElement, total: number): void {
-  const bar = reader.querySelector('.reader-ruler-bar')
-  if (!bar) return
-  const lanes: { from: number; to: number; colour: string }[][] = []
+/** The label's lane on the example transcript's strip, drawn from the records it shows as thimble's strip draws a label
+ * (files/Tracks.tsx paintLane): one lane on its stripe (TRACK_LANES), and on it a mark over each run of records whose
+ * bar is in one color. The lane is a grid of a row per line of the file's `total`, and a mark spans its records' rows in
+ * their bars' color, so the strip spans the track at any height, with no gap between two marks that meet, and shows the
+ * records' colors in either theme. */
+function drawStrip(reader: HTMLElement, total: number): void {
+  const track = reader.querySelector('.track-over')
+  if (!track) return
+  const runs: { from: number; to: number; color: string }[] = []
   for (const rec of reader.querySelectorAll<HTMLElement>('.reader-record[data-line]')) {
     const line = Number(rec.dataset.line)
-    rec.querySelectorAll<HTMLElement>('.reader-gutter-cell').forEach((cell, k) => {
-      const runs = (lanes[k] ??= [])
-      const colour = cell.classList.contains('is-lit') ? cell.style.background : ''
-      if (!colour) return
-      const last = runs[runs.length - 1]
-      if (last && last.to === line - 1 && last.colour === colour) last.to = line
-      else runs.push({ from: line, to: line, colour })
-    })
+    const color = rec.querySelector<HTMLElement>('.reader-bands > .reader-band')?.style.background ?? ''
+    if (!color) continue
+    const last = runs[runs.length - 1]
+    if (last && last.to === line - 1 && last.color === color) last.to = line
+    else runs.push({ from: line, to: line, color })
   }
-  const marks = document.createElement('div')
-  marks.className = 'reader-ruler-marks'
-  const { lane: width, gap, inset } = TRACK_LANES
-  lanes.forEach((runs, k) => {
-    const lane = document.createElement('div')
-    Object.assign(lane.style, { position: 'absolute', top: '0', bottom: '0', left: `${inset + k * (width + gap)}px`, width: `${width}px`, display: 'grid', gridTemplateRows: `repeat(${total}, minmax(0, 1fr))`, background: 'rgba(var(--ink-rgb), 0.035)' })
-    for (const r of runs) {
-      const mark = document.createElement('div')
-      Object.assign(mark.style, { gridRow: `${r.from} / ${r.to + 1}`, background: r.colour })
-      lane.append(mark)
-    }
-    marks.append(lane)
-  })
-  bar.prepend(marks)
+  const { lane: width, inset } = TRACK_LANES
+  const lane = document.createElement('div')
+  lane.className = 'tour-strip-lane'
+  Object.assign(lane.style, { position: 'absolute', top: '0', bottom: '0', left: `${inset}px`, width: `${width}px`, display: 'grid', gridTemplateRows: `repeat(${total}, minmax(0, 1fr))`, background: 'rgba(var(--ink-rgb), 0.035)' })
+  for (const r of runs) {
+    const mark = document.createElement('div')
+    Object.assign(mark.style, { gridRow: `${r.from} / ${r.to + 1}`, background: r.color })
+    lane.append(mark)
+  }
+  track.prepend(lane)
+}
+
+/** The example reader's badge, centered in the first free room of its rows wide enough for it: its bar's, between its
+ * tabs and its first control, as the report's badge sits in its bar's empty middle; else, in a narrow Files panel, the
+ * transcript's top row's, left of its chips. */
+function placeTag(rd: HTMLElement, tag: HTMLElement): void {
+  const box = (sel: string) => rd.querySelector(sel)?.getBoundingClientRect() ?? null
+  const bar = box('.reader-bar'),
+    tabs = box('.reader-bar > .reader-tabs-wrap > .reader-tabs'),
+    find = box('.reader-bar > .reader-find-open'),
+    row = box('.reader-viewbar'),
+    chip = box('.reader-viewbar > *')
+  const rooms: { y: number; h: number; from: number; to: number }[] = []
+  if (bar && tabs && find) rooms.push({ y: bar.top, h: bar.height, from: tabs.right, to: find.left })
+  // the row's padding and the gap before its chips (files.css .reader-viewbar)
+  if (row) rooms.push({ y: row.top, h: row.height, from: row.left + 14, to: chip ? chip.left - 10 : row.right - 14 })
+  const w = tag.offsetWidth,
+    h = tag.offsetHeight
+  const room = rooms.find((r) => r.to - r.from >= w + 16) ?? rooms[rooms.length - 1]
+  if (!room || !w) return
+  const R = rd.getBoundingClientRect()
+  const left = `${Math.round((room.from + room.to - w) / 2 - R.left)}px`,
+    top = `${Math.round(room.y + (room.h - h) / 2 - R.top)}px`
+  if (tag.style.left !== left || tag.style.top !== top) Object.assign(tag.style, { left, top, right: 'auto' })
 }
 
 const labelsExample = (api: Api): Example => {
@@ -285,16 +316,20 @@ const labelsExample = (api: Api): Example => {
   const rd = api.snap('txReader', 'tour-ex-reader')
   const reader = rd.firstElementChild as HTMLElement
   reader.querySelectorAll('.reader-tab:not(.active)').forEach((t) => t.remove())
-  drawRuler(reader, TX_LINES)
+  drawStrip(reader, TX_LINES)
   Object.assign(rd.style, { display: 'flex', flexDirection: 'column', background: api.groundOf(realReader() || api.q(filesPanel)) })
   Object.assign(reader.style, { flex: '1', minHeight: '0', overflow: 'hidden' })
-  Object.assign(api.tag(rd).style, { left: '50%', right: 'auto', transform: 'translateX(-50%)' })
+  const tag = api.tag(rd)
+  // the Color by row's value chips, which fit the row as thimble's do
+  const chips = reader.querySelector<HTMLElement>('.colorby-chips'),
+    more = chips?.querySelector<HTMLElement>('.colorby-more')
+  let fitAt = ''
   holdBrowser(api)
   const side = sideExample(api, 'labels')
   const putBack = holdSide('labels')
   const status = statusExample(api, 'agent-05.jsonl · Transcript')
   api.ex.append(rd, side.wrap, status.wrap)
-  // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
+  // the transcript opens at TX_OPEN and stays there while the panel's size changes, until anything else scrolls it
   let pinned = true,
     setTo: number | null = null
   const layout = () => {
@@ -310,23 +345,32 @@ const labelsExample = (api: Api): Example => {
     }
     if (!r || !placed) return false
     Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+    const fit = `${reader.clientWidth}|${document.fonts?.status}`
+    if (chips && more && reader.clientWidth && fit !== fitAt) {
+      fitChips(chips, more, more.querySelector<HTMLElement>('.btn-label > span'))
+      fitAt = fit
+    }
+    placeTag(rd, tag)
     const sc = rd.querySelector<HTMLElement>('.reader-body')
     if (!sc || !sc.clientHeight) return
     if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
     if (pinned) {
-      const row = rd.querySelector('[data-line="22"]')
+      // its record just under the bar that stays at the transcript's top
+      const row = rd.querySelector(`.reader-record[data-line="${TX_OPEN}"]`),
+        bar = rd.querySelector('.reader-viewbar')
       if (row) {
-        sc.scrollTop += row.getBoundingClientRect().top - sc.getBoundingClientRect().top - 6
+        sc.scrollTop += row.getBoundingClientRect().top - (bar ? bar.getBoundingClientRect().bottom : sc.getBoundingClientRect().top)
         setTo = sc.scrollTop
       }
     }
-    // the ruler's thumb frames the span on screen, as thimble's does
-    const bar = rd.querySelector<HTMLElement>('.reader-ruler-bar'),
-      thumb = rd.querySelector<HTMLElement>('.reader-ruler-thumb')
-    if (bar && thumb) {
-      const span = sc.scrollHeight - sc.clientHeight
-      const h = Math.max(32, (bar.clientHeight * sc.clientHeight) / sc.scrollHeight)
-      Object.assign(thumb.style, { height: `${h}px`, transform: `translateY(${span > 0 ? ((bar.clientHeight - h) * sc.scrollTop) / span : 0}px)` })
+    // the strip's thumb frames the lines on screen, as thimble's does (Reader shownIn)
+    const track = rd.querySelector<HTMLElement>('.track-over'),
+      thumb = rd.querySelector<HTMLElement>('.track-frame-over'),
+      shown = shownIn(sc, TX_LINES)
+    if (track && thumb && shown) {
+      const f = frameOf(shown, track.clientHeight)
+      const at = `translateY(${f.top}px)`
+      if (thumb.style.transform !== at || thumb.style.height !== `${f.height}px`) Object.assign(thumb.style, { height: `${f.height}px`, transform: at })
     }
   }
   return { els: { reader: rd, labels: side.wrap, status: status.wrap }, layout, cleanup: putBack }
@@ -585,8 +629,51 @@ export function tourSteps(key: string, chat = true): Step[] {
       anchor: (api) => [api.els.reader, api.els.labels, sideButton('labels')],
       scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
+      // resting on a record names its label and value, as thimble's own hover does
+      tips: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       title: 'Labels',
       body: 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.',
+      // the pointer rests on a record's bar and its label and value show, then on a record of another value
+      demo: async (api) => {
+        const body = api.els.reader?.querySelector('.reader-body') as HTMLElement | undefined
+        const B = body && api.rectOf(body)
+        if (!body || !B) return
+        // the first record of each value whose head is on screen, below the bar that stays at the transcript's top
+        const from = api.rectOf(body.querySelector('.reader-viewbar'))
+        const top = from ? from.y + from.height : B.y
+        // its name, under the pointer, stays inside the transcript
+        const room = 72
+        const rows = TIP_DEMO.map((tip) =>
+          [...body.querySelectorAll<HTMLElement>('.reader-record[data-tip]')].find((r) => {
+            const q = r.getBoundingClientRect()
+            return r.dataset.tip === tip && q.top >= top && q.top + room <= B.y + B.height
+          }),
+        )
+          .filter((r): r is HTMLElement => !!r)
+          .slice(0, 2)
+          .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+        const barOf = (row: HTMLElement) => {
+          const q = api.rectOf(row)
+          return q && { x: q.x + 2, y: q.y + Math.min(14, q.height / 2) }
+        }
+        const a = rows[0] && barOf(rows[0])
+        if (!a) return
+        api.cursor.show(a.x + 260, a.y - 80)
+        await api.sleep(450)
+        for (const [k, row] of rows.entries()) {
+          api.fx.querySelectorAll('.tip[data-demo]').forEach((t) => t.remove())
+          await api.cursor.move(() => barOf(row), undefined, k ? 650 : 900)
+          // the first name waits its moment; the next, a moment after, shows at once, as thimble's own do
+          if (!k) await api.sleep(TIP_DELAY_MS)
+          const p = barOf(row)
+          if (p) api.showTip(row, p.x, p.y)
+          await api.sleep(2000)
+        }
+        api.fx.querySelectorAll('.tip[data-demo]').forEach((t) => t.remove())
+        const c = api.cursor.pos
+        await api.cursor.move(c.x + 260, c.y - 90, 600)
+        api.cursor.hide()
+      },
     },
     {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
@@ -725,7 +812,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       },
       // moving on closes the ask box, which would otherwise stay open over the next surface
       leave: (api) => {
-        if (api.realBox()) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        api.closeBox()
         api.closeMock()
       },
       title: `${key}-click to ask`,

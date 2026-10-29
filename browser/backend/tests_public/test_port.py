@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import bound_port
 
 from app import cli, config, hook_auth, permission_hook, procs
 
@@ -30,9 +31,8 @@ PLUGIN_BIN = config.REPO_ROOT / "plugin" / "bin"
 
 
 def _held() -> socket.socket:
-    """A listener on a free port of the loopback, as another program holds a port."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("127.0.0.1", 0))
+    """A listener on a free port of the loopback, as another program holds a port (conftest.SERVER_PORTS)."""
+    s = bound_port()
     s.listen(8)
     return s
 
@@ -195,7 +195,7 @@ def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed
         out = capsys.readouterr().out
         assert server.ports == [p], "THIMBLE_PORT alone"
         assert f"thimble: no server answers: {p} is taken by another program" in out and foreign not in out
-        assert "start thimble on a free port with THIMBLE_PORT=<port> thimble" in out
+        assert "start thimble-browser on a free port with `thimble-browser --port <port>`" in out
     finally:
         held.close()
 
@@ -219,22 +219,36 @@ def _uvicorns_on(p: int) -> list[int]:
     return out
 
 
+# how long the two homes' test waits for a server to start (THIMBLE_START_WAIT_S) and for its health to answer, the
+# test's own probes and those of the `server up` it runs (THIMBLE_HEALTH_TIMEOUT_S), which a busy machine delays
+WAIT_S = 100
+
+
 def _health(home: Path) -> dict:
     """The proven /api/health of the server home/server.json names."""
     st = json.loads((home / "server.json").read_text())
     req = urllib.request.Request(f"{st['api']}/api/health", headers=hook_auth.headers(st["token"], st["port"]))
-    with urllib.request.urlopen(req, timeout=5) as r:
+    with urllib.request.urlopen(req, timeout=WAIT_S) as r:
         return json.loads(r.read())
 
 
+def _app_main_imports() -> None:
+    """Skip where app.main does not import in this tree, which the server `up` starts imports: tried in this process,
+    which runs the same Python on the same tree, rather than in a new one, which a busy machine takes long to start."""
+    try:
+        import app.main  # noqa: F401, PLC0415
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"app.main does not import in this tree: {type(e).__name__}: {e}"[:300])
+
+
+# each step is a subprocess with a time limit of its own, so the test cannot hang; its time is two servers' start, which
+# a machine its parallel runs keep busy makes several times longer
+@pytest.mark.timeout(300)
 def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp_path, fake_claude):
     """Two installs (THIMBLE_HOMEs) whose server.json both name one free port: the first starts there, the second
     finds another install's server there and starts on a free port; each `up` again finds its own server, each reader
     of each home finds its own, and stopping one leaves the other running."""
-    probe = subprocess.run([sys.executable, "-c", "import app.main"], cwd=BACKEND, capture_output=True, text=True,
-                           timeout=120, env={**os.environ, "THIMBLE_SKIP_KEY": "1"})
-    if probe.returncode != 0:
-        pytest.skip("app.main does not import in this tree: " + probe.stderr.strip().splitlines()[-1][:200])
+    _app_main_imports()
     held = _held()
     shared = held.getsockname()[1]
     held.close()
@@ -250,25 +264,31 @@ def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp
         homes[name] = h
         envs[name] = {**_clean_env(dict(os.environ)), "THIMBLE_HOME": str(h),
                       "THIMBLE_DATA_DIR": str(d.parent), "THIMBLE_WORKSPACES_DIR": str(tmp_path / f"ws-{name}"),
-                      "THIMBLE_CLAUDE_BIN": os.environ.get("THIMBLE_CLAUDE_BIN", "")}
+                      "THIMBLE_CLAUDE_BIN": os.environ.get("THIMBLE_CLAUDE_BIN", ""), "THIMBLE_START_WAIT_S": str(WAIT_S),
+                      "THIMBLE_HEALTH_TIMEOUT_S": str(WAIT_S)}
 
     def up(name: str) -> list[str]:
         cwd = Path(envs[name]["THIMBLE_DATA_DIR"]) / "mini"
         out = subprocess.run([sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(cwd)], cwd=BACKEND,
-                             env=envs[name], capture_output=True, text=True, timeout=90)
+                             env=envs[name], capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out
         return out.stdout.splitlines()
+
+    def log(name: str) -> str:  # the end of the server's log, which says why a start failed
+        p = homes[name] / "server.log"
+        return p.read_text(errors="replace")[-1500:] if p.exists() else ""
 
     ports: list[int] = []
     try:
         first = up("a")
         st_a = json.loads((homes["a"] / "server.json").read_text())
         ports.append(st_a["port"])
-        assert st_a["port"] == shared and first[0] == f"thimble: http://127.0.0.1:{shared}/?ws=mini", first
+        assert st_a["port"] == shared and first[0] == f"thimble: http://127.0.0.1:{shared}/?ws=mini", (first, log("a"))
         second = up("b")
         st_b = json.loads((homes["b"] / "server.json").read_text())
         ports.append(st_b["port"])
-        assert st_b["port"] != shared and second[0] == f"thimble: http://127.0.0.1:{st_b['port']}/?ws=mini", second
+        assert st_b["port"] != shared and second[0] == f"thimble: http://127.0.0.1:{st_b['port']}/?ws=mini", (
+            second, log("b"))
         assert not any("(set by THIMBLE_PORT)" in ln for ln in second), "no FOREIGN_LINE without THIMBLE_PORT"
         assert st_a["pid"] != st_b["pid"] and cli.pid_alive(st_a["pid"]) and cli.pid_alive(st_b["pid"])
         for name, st in (("a", st_a), ("b", st_b)):

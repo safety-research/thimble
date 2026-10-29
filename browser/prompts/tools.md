@@ -43,11 +43,11 @@ Add a card, with its question and its content in one call. {{if:browser}}thimble
     "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in thimble.chart(kind, df) after import thimble when a kind fits, else in an Altair or matplotlib chart, its colors left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). thimble.chart takes the DataFrame's columns in the kind's order, named as the axes: bar (category, value[, group]), line (x, y[, series]), area (x, y[, series]), scatter (x, y[, group]), dots (x, row[, group]), box (value, group), histogram (value[, group]), density (value[, group]), violin (value, group), ecdf (value[, group]), range (item, before, after[, group]) or heatmap (x, y, value), and label=<label> draws a label's values in its colors; interval=(lo, hi) on bar, dots or line names the columns of each value's low and high ends; panels=True draws each group in a panel of its own; fit=\"linear\" or \"smooth\" on scatter adds a trend line. thimble.chart(..., show=False) returns the chart as an Altair chart to layer your own marks on, such as a few events called out above a daily bar chart, colored with thimble.theme.accent, .ink, .muted, .pale or .series[i]. Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, color a label's values with thimble.colors(label, values), a {value: color} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card shows. Each is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight one passage of a long record, quoted exactly."},
     "text": {"type": "string", "description": "The markdown a note card shows."},
-    "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show. Scripts run, the network does not. A chart in it takes thimble's chart style from CSS variables: `--viz-1` to `--viz-7` for series in order, `--viz-seq-1` to `--viz-seq-5` for an amount, `--viz-other` for the rest, `--viz-font`, `--viz-size` and `--viz-bar-radius` for the corners at a bar's end. Scripts also have thimble.colors.series, thimble.colors.seq and thimble.vegaConfig, the config of thimble's own Vega-Lite charts."},
+    "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show: one question answered on one screen, about 690 px wide and 800 px tall in its card. The card shows its question above the page and its takeaway under it, so the page starts with its content and does not say the answer again. Its frame has thimble's card stylesheet, which gives plain HTML, such as a table, a list or a paragraph, thimble's type and the paper's colors. So write it without colors, borders or fonts of your own, and the analyst reads the data and not the page. Scripts run, the network does not. A chart in it takes thimble's chart style from CSS variables: `--viz-1` to `--viz-7` for series in order, `--viz-seq-1` to `--viz-seq-5` for an amount, `--viz-other` for the rest, `--viz-font`, `--viz-size` and `--viz-bar-radius` for the corners at a bar's end. Scripts also have thimble.colors.series, thimble.colors.seq and thimble.vegaConfig, the config of thimble's own Vega-Lite charts."},
     "libs": {"type": "array", "items": {"type": "string"}, "description": "The libraries a custom card's scripts use, loaded before its html: vega, vega-lite and vega-embed, or an npm package as name@version. If a package is not installed, the result gives the command that installs it."},
     "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan card's steps in order, each one short line of what it does and the files or results it makes. A plan covers one phase, such as building and piloting, and its question names it, as in \"Plan: build the environment and pilot it\". A plan has no takeaway."},
     "follows": {"type": "string", "description": "For a plan of the next phase, card:<id> of the plan it follows."},
-    "group": {"type": "string", "description": "The group's title or id. A new title makes a group."},
+    "group": {"type": "string", "description": "The group of a sequence of cards that answer one question together, in order, named by the question. A new title makes a group, and a group's title or id puts the card in it. Leave it out for a single card, but give the `group` of an event that asks for a card."},
     "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, mark each claim the card shows as `[words](#)`, as in the chat, with the whole quantity inside the mark: `[31 of the 40](#) runs`. thimble checks it against the card's output. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right. The card's own id is written `card:<id>`, which thimble fills in."}
   },
   "required": ["question"]
@@ -233,7 +233,7 @@ Open a card of a card type as its view in Files, as the card's Open as view does
 
 ## propose_view
 
-Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes. Call it only when the analyst asks for a view; thimble shows the analyst view proposals of its own. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
+Propose a view, a page of the records that the analyst keeps and comes back to, such as a dashboard, which shows them in a form their files hide; or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes.
 
 ```json
 {
@@ -404,7 +404,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## start_writing
 
-Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document. Pass a model or an effort only when the analyst names one, so that the writer otherwise runs on the values thimble's Settings give it.
+Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document.
 
 ```json
 {
@@ -455,7 +455,7 @@ Turn a report check off, {{if:browser}}as the switch in the Comments pane does, 
 
 ## file_dev_ticket
 
-File a ticket for thimble's developer agent to change a view it built for this corpus, named in `view`. A change to thimble itself is a fix of the person's thimble, which `fix_thimble` starts.
+File a ticket for thimble's developer agent to change a view it built for this corpus, named in `view`. A change to thimble itself is a fix of the person's thimble, which they ask for with /thimble-fix.
 
 ```json
 {
@@ -472,13 +472,13 @@ File a ticket for thimble's developer agent to change a view it built for this c
 
 ## fix_thimble
 
-Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is the person's own tool, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, offer a fix and start it only when they say yes. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
+Start the fix the person asks for with /thimble-fix. A copy of you changes thimble in the background, in a copy of its code, from their words as they typed them, and the person decides with a click whether to use the fix. `words` names the fix their words change. thimble is the person's own tool, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, you may tell them that /thimble-fix <what should work differently> asks for a fix.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "words": {"type": "string", "description": "`N <words>` to change the person's fix N, or `new <words>` for a new fix: what thimble does wrong, and what it should do."}
+    "words": {"type": "string", "description": "`N` to change the person's fix N, or `new` for a new fix."}
   },
   "required": ["words"]
 }
@@ -614,6 +614,14 @@ The code was stopped after {limit}. Make it faster and run it again with `edit_c
 ## card-run
 
 The card's code did not run yet. Run this command with Bash next: `{command}`. It runs the code and prints the card's result with the start of each output. thimble shows the card when its code has run.
+
+## card-tall
+
+card:{cid}'s body draws {height} px tall at the card's width, and about {limit} px of a card's body fit on the analyst's screen with its question and takeaway, so they never see the whole card at once.
+
+## card-wide
+
+card:{cid}'s page lays out {width} px wide, and the card gives it {frame} px, so the analyst does not see all of it at the card's width.
 
 ## kind-mismatch
 
@@ -889,7 +897,7 @@ Filed {label}: {title}. {start}
 
 ## file_dev_ticket-fix
 
-This call filed nothing: a change to thimble itself is a fix of the person's thimble, which `fix_thimble` starts when they ask for it.
+This call filed nothing: a change to thimble itself is a fix of the person's thimble, which they ask for with /thimble-fix <what should work differently>.
 
 ## fix_thimble-new
 
@@ -942,6 +950,10 @@ The checks failed, attempt {n} of {of}:
 {report}
 
 Fix what failed, check the view again with `view_check`, then call `finish_view` again.
+
+## finish-view-unchanged
+
+The view's files are as they were built, so there is nothing to check, and the view stays as it is.
 
 ## finish-view-stop
 

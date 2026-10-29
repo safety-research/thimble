@@ -179,6 +179,12 @@ def available(names: tuple[str, ...] | list[str]) -> list[str]:
     return [n for n in names if n != "Bash" or not sandbox_reason()]
 
 
+def shell_path() -> str:
+    """The PATH an agent's shell commands run with, in either engine (here and runtime_cc.settings): the bin folder of
+    the venv this server runs in first, so Bash finds the Python and libraries the cards use, then this process's."""
+    return os.pathsep.join([str(Path(sys.prefix) / "bin"), os.environ.get("PATH", "/usr/bin:/bin")])
+
+
 def definitions(names: list[str], corpus_edits: bool | None = None) -> list[dict[str, Any]]:
     """The Messages API's tool entries for the built-in `names`: client tools, and the server tools for the web. Bash,
     Write and Edit say what they may do in the corpus folder by `corpus_edits` (CORPUS_WORDS)."""
@@ -377,8 +383,7 @@ async def _bash(box: Box, a: dict[str, Any]) -> Out:
     argv = kernel_wrap.srt_argv(["/bin/bash", "-c", command], node=str(srt.node()),
                                 srt_dir=srt.package(config.REPO_ROOT) or config.REPO_ROOT, rules=_rules(box))
     env = {k: v for k in ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME") if (v := os.environ.get(k))}
-    env.update(PATH=os.pathsep.join([str(Path(sys.prefix) / "bin"), os.environ.get("PATH", "/usr/bin:/bin")]),
-               HOME=str(home), TMPDIR=str(home / "tmp"), npm_config_cache=str(home / ".npm-cache"))
+    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(home / "tmp"), npm_config_cache=str(home / ".npm-cache"))
     proc = await asyncio.create_subprocess_exec(*argv, cwd=str(box.cwd), env=env, stdin=asyncio.subprocess.DEVNULL,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
                                                 start_new_session=True)

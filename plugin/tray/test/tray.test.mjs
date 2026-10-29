@@ -3,7 +3,8 @@
 //   node --test plugin/tray/test/tray.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { aboutOf, back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printLine, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
+import { partsAround } from '../../core/text.js'
+import { aboutOf, back, base, checkStatus, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top, wasLine } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -37,6 +38,40 @@ test('an explainer or a heads-up on a citation\'s words, or over them, stops bef
   const stops = stopsOfRow('r2', cites, [{ id: 'g1', kind: 'explain', start: 11, end: 22 }, { id: 'h1', kind: 'heads', start: 44, end: 70 }], ['c9'])
   assert.deepEqual(stops.map(s => s.card ?? (s.kind === 'citation' ? `c${s.n}` : s.id)), ['g1', 'c1', 'h1', 'c2', 'c9'])
   assert.deepEqual(stops.map(stopWhat).slice(0, 2), ['explainer', 'citation'])
+})
+
+test('the bar names the mark ] opens by its kind, the words that name it apart to draw in its look: show the answer\'s first mark, next a later one; a narrow bar keeps the name, then the key alone, never a verb with no name', () => {
+  const stops = stopsOfRow('r2', [{ n: 1, start: 30 }], [{ id: 'g1', kind: 'explain', start: 5 }, { id: 'h1', kind: 'heads', start: 50 }], ['c9'])
+  assert.deepEqual(stops.map(stopKind), ['explain', 'citation', 'heads', null])
+  assert.deepEqual(restWords(stops[0], true), { words: 'show explainer', what: 'explainer', kind: 'explain', shorter: ['explainer', ''] })
+  assert.deepEqual(restWords(stops[1], false), { words: 'next citation', what: 'citation', kind: 'citation', shorter: ['citation', ''] })
+  assert.deepEqual(restWords(stops[2], false), { words: 'next heads up', what: 'heads up', kind: 'heads', shorter: ['heads up', ''] })
+  // the tray's header: what ] and [ go to, by name and kind; a card has no kind
+  assert.deepEqual(stepWords({ next: true, prev: true, nextWhat: 'heads up', nextKind: 'heads' }), [{ key: ']', words: 'next heads up', what: 'heads up', kind: 'heads' }])
+  assert.deepEqual(stepWords({ next: false, prev: true, prevWhat: 'card', prevKind: null }), [{ key: '[', words: 'previous card', what: 'card', kind: null }])
+  // the words around the name, which the bar and the header draw in their own looks
+  assert.deepEqual(partsAround(' show explainer', 'explainer'), [{ s: ' show ', marked: false }, { s: 'explainer', marked: true }])
+  assert.deepEqual(partsAround(' heads up', 'heads up'), [{ s: ' ', marked: false }, { s: 'heads up', marked: true }])
+  assert.deepEqual(partsAround(' show', 'explainer'), [{ s: ' show', marked: false }])
+  assert.deepEqual(partsAround(' next card', undefined), [{ s: ' next card', marked: false }])
+})
+
+test("a citation's check in the words every place that shows its card says it in (the tray's header, the evidence pane, the claims pane): the reply's sign after it, then the word; a corrected one says corrected, or repaired after x, with what it was under it", () => {
+  const word = m => { const s = checkStatus(m); return `${s.sign} ${s.word} (${s.tone})` }
+  assert.equal(word({ status: 'checking' }), 'spin checking (dim)')
+  assert.equal(word({ status: 'deferred' }), '? not checked (dim)')
+  assert.equal(word({ status: 'verified' }), '✓ verified (good)')
+  assert.equal(word({ status: 'verified', repair: true }), '✓ verified (good)')
+  assert.equal(word({ status: 'corrected', was: '15 of 40' }), '✓ corrected (good)')
+  assert.equal(word({ status: 'corrected', was: '15 of 40', repair: true }), '✓ repaired (good)')
+  assert.equal(word({ status: 'failed' }), '× failed (bad)')
+  // a status no check gave, or no citation, is failed (marks/store.ts notRun)
+  assert.equal(word({ status: 'pending' }), '× failed (bad)')
+  assert.equal(checkStatus(null).key, 'failed')
+  // under a corrected one's status: what it was, its marks gone; a rewritten sentence or a narrowed citation says which
+  assert.equal(wasLine({ was: '**15** of 40' }), 'was 15 of 40')
+  assert.equal(wasLine({ was: 'Of the runs, 15 of 40 failed.', rewritten: true }), 'sentence rewritten; was Of the runs, 15 of 40 failed.')
+  assert.equal(wasLine({ was: '15 of 40 runs', narrowed: true }), 'narrowed; was 15 of 40 runs')
 })
 
 test('a citation\'s card: why in one sentence, and the one line of evidence that holds the value, cut around it', () => {

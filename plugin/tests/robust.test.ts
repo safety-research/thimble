@@ -2,9 +2,10 @@
 // answers the drawing beneath it when its own drawing throws, asking for it once; and a paste into the empty prompt,
 // which asks the cards about its first key alone (hooks/keys.ts), so the prompt.edit hook keeps within its short budget
 // whatever the paste's length. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { askOnce } from '../core/rowhook'
+import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

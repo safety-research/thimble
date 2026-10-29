@@ -23,8 +23,9 @@
 //   sessionGlosses($)                  every explainer of this session: a pane shows the one of words picked there
 //   explainTerm($, row, term)          on demand: an explainer of words the analyst picked (a citation's words, a term
 //                                      in a pane, the selection), written by the explain-expand call and kept on its message
-//                                      as the look's are; explaining(term) says while it is written, and
-//                                      pendingSpans draws its words teal from the press on
+//                                      as the look's are; explaining(term) says while it is written,
+//                                      pendingSpans draws its words teal from the press on, and the tray opens on
+//                                      them at once (pendingGloss), the explainer shown there once written
 //   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar: an explainer of the words the
 //                                      analyst selected with the mouse in Claude's words (core/selection.ts;
 //                                      fullscreen layout only), on the answer they lie in, else the newest answer
@@ -58,7 +59,7 @@ import { citeShown } from '../marks/cite'
 import { withoutMarks } from '../marks/message.js'
 import { headsUpsNow, type Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
-import { openTray } from '../tray/seam'
+import { openTray, trayFocus, trayOffRow } from '../tray/seam'
 import { askGloss } from './expand'
 import { anchorTerm, holds, markColors, markHolding, mergeLook, placeGlosses, termOf } from './place.mjs'
 
@@ -265,6 +266,14 @@ export async function pendingSpans($: Engine, row: string, text: string): Promis
   }))
 }
 
+/** The explainer of words asked for on `row` while it is written (`id` as pendingSpans names it): its words alone, which
+ *  the tray shows as its title until the explainer is written; null for any other id. */
+export function pendingGloss(row: string, id: string): Gloss | null {
+  if (!String(id ?? '').startsWith('asking:')) return null
+  const a = askedOn.get(id.slice('asking:'.length))
+  return a && a.row === row ? { id, term: a.words, asked: true } : null
+}
+
 /** Whether an explainer of these words is being written now; why the last one was not, else ''. */
 export function explaining(term: string): { pending: boolean; why: string } {
   const t = normTerm(term)
@@ -274,9 +283,10 @@ export function explaining(term: string): { pending: boolean; why: string } {
 /**
  * An explainer of `term`, the words the analyst picked in the message `row`: the session's one when it has one, else
  * one written now (explain/expand.ts askGloss), kept on that message, so its words show it there too. Returns where it
- * is, or a sentence that says why there is none. The panes draw again when it is written.
+ * is, or a sentence that says why there is none. The panes draw again when it is written. `opened` is called with
+ * the explainer being written (pendingGloss) as soon as the call starts, so it can be shown before it is written.
  */
-export async function explainTerm($: Engine, row: string, term: string): Promise<SessionGloss | string> {
+export async function explainTerm($: Engine, row: string, term: string, o: { opened?: (mark: MarkRef & { id: string }) => Promise<unknown> } = {}): Promise<SessionGloss | string> {
   const words = termOf(term).replace(/\s+/g, ' ').trim()
   if (!words) return 'Pick some words to explain.'
   if (!featureOn('explain')) return 'Explainers are off. Turn on "Explainers" in /thimble-settings to use them.'
@@ -289,6 +299,7 @@ export async function explainTerm($: Engine, row: string, term: string): Promise
   failed.delete(t)
   $.ui.invalidate('ui.render')
   try {
+    if (o.opened) await o.opened({ row, kind: 'explain', id: `asking:${t}` }).catch(() => undefined)
     const got = await askGloss($, row, words)
     if (typeof got === 'string') { failed.set(t, got); return got }
     const m = await memory($)
@@ -314,15 +325,21 @@ async function rowHolding($: Engine, words: string): Promise<string | null> {
   return rows[0] ?? null
 }
 
-/** The explainer of `words` on `row`, written now when there is none, then opened in the tray; a failure says why. */
+/** The explainer of `words` on `row`, opened in the tray: one the session has at once; else the tray opens at once on
+ *  the words while it is written, and shows it there once written, unless the person moved the tray on meanwhile. A
+ *  failure says why, and closes the tray on the words. */
 function explainOpen($: Engine, row: string, words: string): void {
+  let pending: (MarkRef & { id: string }) | null = null
+  const stillShown = async () => { const f = pending ? await trayFocus($, pending.row) : null; return !!f && f.kind === 'explain' && f.id === pending!.id }
   void (async () => {
-    const got = await explainTerm($, row, words)
-    if (typeof got === 'string') failNotice($, got, 'explain')
-    else {
+    const got = await explainTerm($, row, words, { opened: async mark => { pending = mark; await openTray($, mark) } })
+    if (typeof got === 'string') {
+      if (await stillShown()) await trayOffRow($, pending!.row)
+      failNotice($, got, 'explain')
+    } else {
       await failCleared($, 'explain')
       await hintUsed($, 'explain')
-      await openMark($, { row: got.row, kind: 'explain', id: got.id }, got)
+      if (!pending || (await stillShown())) await openMark($, { row: got.row, kind: 'explain', id: got.id }, got)
     }
   })().catch(err => failNotice($, `The explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}`, 'explain'))
 }

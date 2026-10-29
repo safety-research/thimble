@@ -6,10 +6,24 @@
 // (`Hint: …`, bar.tsx), or above them when it does not fit there whole, and it goes on its own after HINT_MS, or at the
 // next key thimble takes.
 //
+//   reasonOf(x)  the words of an error or a refusal as a failure line quotes them
+//
 //   state: failLine (a failure, a notice, or a hint)
 import type { EngineInterface } from 'claude-code'
 
+import { cutWords } from '../core/text.js'
+import { firstSentence } from '../tray/tray.mjs'
+
 type Engine = EngineInterface
+
+/** The words of an error or a refusal as a failure line quotes them inside a sentence of its own: their first sentence
+ *  whole, without its full stop, cut at a word's edge (with …) only when that sentence alone is longer than `n` cells.
+ *  A refusal Claude Code writes for the model goes on with what the model should do next, which is not the person's
+ *  to read. */
+export function reasonOf(x: unknown, n = 160): string {
+  const said = String((x as Error)?.message || x || '')
+  return cutWords(firstSentence(said).replace(/\.$/, ''), n)
+}
 
 const FAIL = { plugin: 'thimble', key: 'failLine' } as const
 

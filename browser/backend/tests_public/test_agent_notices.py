@@ -201,7 +201,7 @@ def test_a_card_check_that_failed_by_itself_is_told_and_a_card_s_own_outcome_is_
     n = _open(card_check.NOTICE_KEY)
     assert n["text"].startswith('The card check of the card "Who replies most?" failed: Claude Code isn\'t signed in '
                                 "for thimble's server. In your terminal: run /login")
-    assert n["text"].endswith("run `thimble server restart`.") and n["action"] is None
+    assert n["text"].endswith("run `thimble-browser --continue`.") and n["action"] is None
     assert n["agent"] == "Card check" and n["chat"] is None
     card_check._end(run, "ok")
     assert _open(card_check.NOTICE_KEY) is None

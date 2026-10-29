@@ -1,12 +1,16 @@
 // thimble fix in the page (backend fixes.py): `/thimble-fix <words>` in the chat asks Claude to change the person's own
 // thimble. The words go with a text copy of what the page shows now (pageText), so "this card" can name what is open.
 // As in the terminal, main reads the words with the person's fixes beside it and starts the fix with its fix_thimble
-// tool: a round of the fix the words follow up on, or a new fix, or first one short question. The fixer is main's
+// tool: a round of the fix the words follow up on, or a new fix, or first one short question; the fix takes the words
+// as the person typed them. The fixer is main's
 // subagent, which works in the background in a thread of its own (`fixing <name>` in the tree): main's chat shows its
 // card where main started it, the row above the composer says how the work goes, and a row of main's chat and of the
 // fix's thread says how it ended, at the time it ended (FixStrip), from GET /api/fixes and the stream's `fix` events. A
 // message in a fix's own thread changes that fix (a round of it, never a new fix). `/thimble-fix` alone opens Your
-// fixes.
+// fixes; a fix's number alone tries a fix that did not pass again, as its Try again does (the server's answer, else how
+// to ask). A fix that did not pass offers Ask Claude, once: what it tried, and its failure in main's composer
+// (askClaudeText), with its change and the end of its tests' output, which main's sandbox cannot read from the fix's
+// copy, for the person to send to Claude, who can find why it failed and what to ask for with /thimble-fix N.
 
 export const FIX_COMMAND = '/thimble-fix'
 
@@ -14,6 +18,18 @@ export const FIX_COMMAND = '/thimble-fix'
 export function fixWords(text: string): string | null {
   const m = /^\s*\/thimble-fix(?:\s+([\s\S]*))?$/.exec(text)
   return m ? (m[1] ?? '').trim() : null
+}
+
+/** The server's line on how to ask for a fix (backend fixes.py EMPTY), as the terminal answers `/thimble-fix` with
+ * nothing to try again (plugin/fix/fixes.ts FIX_ALONE). */
+export const FIX_ALONE = 'Ask for a change to thimble with /thimble-fix <what should work differently>.'
+
+/** The toast when the server started nothing for a /thimble-fix (lib/api's `<status> <detail>`): its line on how to ask
+ * (FIX_ALONE), shown on its own, as the terminal shows it; anything else, another 400 too, is why no fix started.
+ * Pure. */
+export function notStartedToast(e: Error): { text: string; kind?: 'error' } {
+  const said = e.message.replace(/^\d{3}\s+/, '')
+  return said === FIX_ALONE ? { text: said } : { text: `thimble fix did not start: ${said}`, kind: 'error' }
 }
 
 /** One fix the row can show (backend fixes.status). */
@@ -35,6 +51,10 @@ export interface FixRow {
   change?: boolean
   /** how many files it changed */
   files?: number
+  /** the files it changed, by path */
+  paths?: string[]
+  /** it needs a change to a file no fix may change, so another try fails the same way (the kernel's `blocked`) */
+  blocked?: boolean
   tests: string | null
   error: string | null
   created?: number
@@ -67,15 +87,16 @@ export function fixText(r: FixRow): string {
   return r.said || r.title
 }
 
-export type FixAction = 'use' | 'what' | 'later' | 'undo' | 'redo'
+export type FixAction = 'use' | 'what' | 'later' | 'undo' | 'redo' | 'ask'
 
 /** The buttons a fix's row offers: Use it now, What changed and Later on a ready fix, Undo on a fix that is on,
- * Redo on one that did not pass. Pure. */
+ * Try again and Ask Claude on one that did not pass; no Try again when it needs a file no fix may change (as the
+ * terminal's line). Pure. */
 export function fixActions(r: FixRow): FixAction[] {
   if (r.phase) return []
   if (r.kind === 'ready' && r.state === 'ready') return ['use', 'what', 'later']
   if (r.kind === 'fixed' && r.state === 'on') return ['undo']
-  if ((r.kind === 'failed' || r.kind === 'problem') && ['failed', 'off', 'redo', 'ready', 'request'].includes(r.state)) return ['redo']
+  if ((r.kind === 'failed' || r.kind === 'problem') && ['failed', 'off', 'redo', 'ready', 'request'].includes(r.state)) return r.blocked ? ['ask'] : ['redo', 'ask']
   return []
 }
 
@@ -89,6 +110,48 @@ export function changedLines(r: FixRow): { label: string; text: string }[] {
     ...(r.summary ? [{ label: 'Claude did', text: r.summary }] : []),
     { label: 'Changed', text: `${n} file${n === 1 ? '' : 's'} · ${tests}` },
   ]
+}
+
+/** What a fix that did not pass tried, in a few lines (Ask Claude): the person's words, what Claude did, the files it
+ * changed, and why it did not pass, as the kernel says it. Pure. */
+export function triedLines(r: FixRow): { label: string; text: string }[] {
+  return [
+    ...(r.words ? [{ label: 'You asked', text: r.words }] : []),
+    ...(r.summary ? [{ label: 'Claude did', text: r.summary }] : []),
+    ...(r.paths?.length ? [{ label: 'Tried', text: r.paths.join(', ') }] : []),
+    ...(r.error ? [{ label: 'Why', text: r.error }] : []),
+  ]
+}
+
+/** What a fix that did not pass tried, as the server reads it for Ask Claude (GET /api/fixes/{id}/tried): its change, cut
+ * at a line, and the end of its tests' output; '' for none. */
+export interface FixTried {
+  diff: string
+  tests: string
+}
+
+/** The failure of a fix that did not pass, as a message to Claude in the person's words, which Ask Claude puts in main's
+ * composer for them to send: what went wrong (the kernel's reason, or what the row says, such as a page that did not
+ * build), what they asked, what the fixer tried, its change and the end of its tests' output (`tried`), since main's
+ * sandbox cannot read the fix's copy nor change thimble's code, and what main can do: find why, and what the person
+ * should add with /thimble-fix N, which goes on with the fix (the terminal's d, where Claude Code can change the copy,
+ * says the rest, plugin/fix/line.ts askClaudeText). Pure. */
+export function askClaudeText(r: FixRow, tried: FixTried | null = null): string {
+  const one = (s: string) => {
+    const t = String(s || '').replace(/\s+/g, ' ').trim()
+    return (t.length > 240 ? `${t.slice(0, 239).trimEnd()}…` : t).replace(/[\s.]+$/, '')
+  }
+  const failed = r.state === 'failed' || !r.said
+    ? `My thimble fix ${r.id}, “${r.title || r.words}”, did not pass: ${one(r.error || 'its tests failed')}.`
+    : `My thimble fix ${r.id}: ${one(r.said ?? '')}.`
+  const asked = r.words ? ` I asked: “${one(r.words)}”.` : ''
+  const did = r.summary ? ` Its fixer, which works in a sandbox, tried this: ${one(r.summary)}.` : ' Its fixer works in a sandbox.'
+  // what the server read, as far as it is text: an answer of another shape adds nothing
+  const diff = typeof tried?.diff === 'string' ? tried.diff.trimEnd() : ''
+  const tail = typeof tried?.tests === 'string' ? tried.tests.trim() : ''
+  const change = diff.trim() ? `\n\nIts change:\n\`\`\`diff\n${diff}\n\`\`\`` : ''
+  const tests = tail ? `\n\nThe end of its tests' output:\n\`\`\`\n${tail}\n\`\`\`` : ''
+  return `${failed}${asked}${did}${change}${tests}${change || tests ? '\n\n' : ' '}Find why it failed, and tell me what to add with /thimble-fix ${r.id}.`
 }
 
 /** How Your fixes names a fix's state. */

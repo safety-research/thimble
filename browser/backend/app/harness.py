@@ -95,12 +95,11 @@ NO_CC_SESSIONS = ("thimble reaches Claude with an API key or Workload Identity F
 NO_BOX = ("The role's sandbox could not run here, so its program runs without one and can read what you can, "
           "thimble's token among it.")
 NO_BOX_ENFORCED = ("thimble runs an agent's program only in its sandbox (sandbox.enforce), and the sandbox can't run on "
-                   "this machine, so the {role} agent did not start. `thimble doctor --verbose` says why.")
+                   "this machine, so the {role} agent did not start.")
 # the notice an extension's program that runs without a sandbox posts once per extension (`no-box:<extension>`), whose
 # dismissal holds for the workspace (notices.py)
 NO_BOX_NOTICE = ("The {name} extension's program runs without a sandbox here, so it can read and change what you can, "
-                 "thimble's token among it. In a shell, `thimble doctor --verbose` names what the sandbox needs; "
-                 "Settings turns the extension off.")
+                 "thimble's token among it. Settings turns the extension off.")
 NO_DEFAULT = ("thimble lends no implementation of the {role} role to a program. Run the role's work in your program, "
               "or add to thimble's prompt for it with the prompt way.")
 TASK_WORK = ("tasks", "work")  # under the workspace: each task run's work folder, removed when the run ends

@@ -2,10 +2,17 @@
 // and a check can measure its text. The kernel writes text as <text> (backend matplotlibrc: svg.fonttype none), and here
 // the figure is made safe and fitted to the page:
 //   - nothing that runs or reaches out survives (scripts, foreignObject, event attributes, external hrefs), then
-//     DOMPurify's SVG profile (lib/sanitize) over the whole;
+//     DOMPurify's SVG profile (lib/sanitize) over the whole. A <use> (matplotlib's markers and ticks) keeps its href
+//     only when it names one shape of the same figure, so nothing outside the figure is drawn and no figure multiplies
+//     what it draws;
 //   - no <style>, which would restyle every svg on the page; a `*` rule's stroke and fill move to the root;
 //   - ids are prefixed per figure, so figures never share clip paths or glyphs;
 //   - fonts and thimble's matplotlibrc colours become the page's tokens; a white background is dropped;
+//   - in a matplotlib figure (its group figure_1) whose root declares no fill, black that it leaves unwritten (a text's
+//     or a shape's fill, which SVG paints black) takes the paper's ink from the root, so a black name on the figure's
+//     own background reads on every paper. Its fills keep their colors, white among them: a black name on a white or a
+//     light box takes the dark ink again where the paper is dark (lib/ink, which Outputs runs on the drawn figure). Any
+//     other drawing (graphviz, an icon) keeps its own black;
 //   - it keeps its aspect and never grows past its natural width.
 // The DOM half needs a browser (DOMParser); restyle and rootDecls are pure.
 import { purifySvg } from './sanitize'
@@ -38,9 +45,16 @@ const COLOURS: Record<string, { fill: string; stroke: string }> = {
   black: { fill: 'var(--text-primary)', stroke: 'var(--viz-ink-1)' },
 }
 
+/** matplotlib's white, which a figure's or an axes' background drops (module note) */
+const WHITE = new Set(['#ffffff', '#fff', 'white'])
+
+/** The fill the root of a matplotlib figure gives what declares none: SVG paints it black, which is where matplotlib
+ * leaves its black. */
+export const ROOT_FILL = 'fill: var(--text-primary)'
+
 /**
  * A figure element's style attribute rewritten for the page (module note): the families in the page's faces, the
- * matplotlibrc colours as theme tokens, and, when `background` (a figure or axes patch), white fill dropped. Pure.
+ * matplotlibrc colours as theme tokens, and when `background` (a figure or axes patch) white fill dropped. Pure.
  */
 export function restyle(style: string, background = false): string {
   return style
@@ -63,8 +77,8 @@ export function restyle(style: string, background = false): string {
         if (m && SANS_FIRST.test(m[2])) return ` font: ${m[1]} var(--font-body)`
         return decl
       }
+      if (prop === 'fill' && background && WHITE.has(v)) return ' fill: none'
       if ((prop === 'fill' || prop === 'stroke') && COLOURS[v]) return ` ${prop}: ${COLOURS[v][prop]}`
-      if (prop === 'fill' && background && (v === '#ffffff' || v === '#fff' || v === 'white')) return ' fill: none'
       return decl
     })
     .join(';')
@@ -85,7 +99,18 @@ export function rootDecls(css: string): string {
   return out.join('; ')
 }
 
+/** Whether a stylesheet's declarations or a style attribute declare a fill. Pure. */
+const declaresFill = (decls: string | null): boolean => /(?:^|;)\s*fill\s*:/i.test(decls ?? '')
+
+/** A figure's or an axes' background: a path in patch_N right under figure_N or axes_N, by the ids matplotlib wrote. */
+function isBackground(el: Element): boolean {
+  const g = el.parentElement
+  return el.nodeName === 'path' && !!g && /^patch_\d+$/.test(g.getAttribute('id') ?? '') && !!g.parentElement && /^(?:figure|axes)_\d+$/.test(g.parentElement.getAttribute('id') ?? '')
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg'
+/** what a <use> may name: one shape, never a group of them (module note) */
+const ONE_SHAPE = new Set(['path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'image'])
 const DANGEROUS = ['script', 'foreignObject', 'iframe', 'object', 'embed', 'audio', 'video', 'animate', 'set', 'animateTransform', 'animateMotion']
 const LENGTH = /^\s*([\d.]+)\s*(pt|px)?\s*$/
 
@@ -114,18 +139,25 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
   const styles = Array.from(svg.getElementsByTagName('style'))
   const inherited = styles.map((st) => rootDecls(st.textContent ?? '')).filter(Boolean).join('; ')
   for (const st of styles) st.remove()
-  if (inherited) svg.setAttribute('style', [svg.getAttribute('style'), inherited].filter(Boolean).join('; '))
+  // a matplotlib figure, known by its group figure_1 before the ids are prefixed, takes the paper's ink only when its
+  // root declares no fill of its own (module note)
+  const paper = Array.from(svg.getElementsByTagName('g')).some((g) => g.getAttribute('id') === 'figure_1') && !svg.hasAttribute('fill') && !declaresFill(svg.getAttribute('style')) && !declaresFill(inherited)
+  const rootStyle = [paper ? ROOT_FILL : '', svg.getAttribute('style'), inherited].filter(Boolean).join('; ')
+  if (rootStyle) svg.setAttribute('style', rootStyle)
   // links keep their content, not their target
   for (const a of Array.from(svg.getElementsByTagName('a'))) {
     while (a.firstChild) a.parentNode?.insertBefore(a.firstChild, a)
     a.remove()
   }
-  const ids = new Set<string>()
+  // each id, the first element that has it
+  const ids = new Map<string, Element>()
   const all = [svg, ...Array.from(svg.getElementsByTagName('*'))]
   for (const el of all) {
     const id = el.getAttribute('id')
-    if (id) ids.add(id)
+    if (id && !ids.has(id)) ids.set(id, el)
   }
+  // read before the ids are prefixed, as a parent's id is before its children are reached below
+  const backgrounds = new Set(all.filter(isBackground))
   const ref = (s: string) => s.replace(/url\(\s*#([^)\s]+)\s*\)/g, (m, id: string) => (ids.has(id) ? `url(#${prefix}${id})` : 'none'))
   for (const el of all) {
     for (const attr of Array.from(el.attributes)) {
@@ -136,16 +168,15 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
       }
       if (name === 'href' || name === 'xlink:href') {
         const v = attr.value.trim()
-        if (v.startsWith('#') && ids.has(v.slice(1))) el.setAttribute(attr.name, `#${prefix}${v.slice(1)}`)
-        else if (!/^data:image\/(?:png|jpe?g|gif|webp);/i.test(v)) el.removeAttribute(attr.name)
+        const named = v.startsWith('#') ? ids.get(v.slice(1)) : undefined
+        const use = el.nodeName === 'use'
+        if (named && (!use || ONE_SHAPE.has(named.nodeName))) el.setAttribute(attr.name, `#${prefix}${v.slice(1)}`)
+        else if (use || !/^data:image\/(?:png|jpe?g|gif|webp);/i.test(v)) el.removeAttribute(attr.name)
         continue
       }
       if (name === 'id') el.setAttribute('id', prefix + attr.value)
-      else if (name === 'style') {
-        const g = el.parentElement
-        const background = el.nodeName === 'path' && !!g && /^patch_\d+$/.test(g.getAttribute('id') ?? '') && !!g.parentElement && /^(?:figure|axes)_\d+$/.test(g.parentElement.getAttribute('id') ?? '')
-        el.setAttribute('style', ref(restyle(attr.value, background)))
-      } else if (attr.value.includes('url(')) el.setAttribute(attr.name, ref(attr.value))
+      else if (name === 'style') el.setAttribute('style', ref(restyle(attr.value, backgrounds.has(el))))
+      else if (attr.value.includes('url(')) el.setAttribute(attr.name, ref(attr.value))
     }
   }
   const width = px(svg.getAttribute('width'))

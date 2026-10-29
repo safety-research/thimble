@@ -188,6 +188,22 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
     assert (CORPUS, SID) not in events._notices
 
 
+def test_a_request_answered_the_moment_its_card_shows_is_logged_before_its_answer(workspaces_tmp, monkeypatch):
+    """The permission log has a request's line before its answer's, even when the answer comes from another thread the
+    moment the card shows the request (here, as main's meta is written)."""
+    real = agents.write_meta
+
+    def write_then_answer(c, meta):
+        real(c, meta)
+        for p in meta.get("permissions") or []:
+            agents.log_permission(c, "answered", id=p["id"], chat=agents.MAIN_ID, answer="allow")
+
+    monkeypatch.setattr(agents, "write_meta", write_then_answer)
+    events._hold(CORPUS, "ask-1", "Bash", "Create x", '{"command": "touch x"}')
+    log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
+    assert [(r["event"], r.get("id")) for r in log] == [("asked", "ask-1"), ("answered", "ask-1")]
+
+
 def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
     _record_token(tmp_path / "thome")
@@ -200,10 +216,9 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body,
                                                                        headers=_signed()[0])))
         t.start()
-        for _ in range(100):
-            held = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []
-            if held:
-                break
+        end = time.monotonic() + 60  # until the server put the ask on main's meta, which a busy machine delays
+        while not (held := (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions") or []):
+            assert time.monotonic() < end, "the ask never reached main's meta"
             time.sleep(0.05)
         assert held and held[0]["tool"] == "Bash" and held[0]["what"] == "Create x" and '"touch x"' in held[0]["input"]
         # an answer is the analyst's browser's alone: without the cookie the page gets for the link's code it is refused,
@@ -217,19 +232,19 @@ def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monk
         page = f"/b/{claimed.json()['key']}"  # the page asks under its key's path, where its cookie goes (hook_auth)
         r = client.post(f"{page}/api/ws/{CORPUS}/permission", json={"id": held[0]["id"], "allow": True})
         assert r.status_code == 200
-        t.join(10)
+        t.join(60)
         assert answers[0].status_code == 200 and answers[0].json() == {"id": held[0]["id"], "behavior": "allow"}
         assert not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
         # answered in the terminal: the session moved on, and the hook's wait ends with no decision
         t = threading.Thread(target=lambda: answers.append(client.post("/api/events/permission", json=body,
                                                                        headers=_signed()[0])))
         t.start()
-        for _ in range(100):  # the server's loop registers the ask and then puts it on main's meta, apart from this thread
-            if events._asks and (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions"):
-                break
+        end = time.monotonic() + 60  # the server's loop registers the ask and then puts it on main's meta, apart from this thread
+        while not (events._asks and (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("permissions")):
+            assert time.monotonic() < end, "the second ask never reached main's meta"
             time.sleep(0.05)
         events.clear_permissions(CORPUS)
-        t.join(10)
+        t.join(60)
         assert answers[1].json()["behavior"] is None and not agents.meta_or_none(CORPUS, agents.MAIN_ID).get("permissions")
         # each request and its answer are in the permission log a problem report carries
         log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]

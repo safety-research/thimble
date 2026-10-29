@@ -489,9 +489,9 @@ def test_a_labels_file_of_many_cleared_blocks_reads_as_its_store_and_in_one_pass
     lines.append(labels_store.clear_row("turns.jsonl", 39_990))
     jsonl = tmp_path / "k.jsonl"
     jsonl.write_text("".join(json.dumps(r) + "\n" for r in lines))
-    t0 = time.monotonic()
+    t0 = time.thread_time()  # the read's CPU time (it runs in this thread), which a busy machine does not stretch
     rows, covers = kernel_thimble._jsonl_parts(jsonl)
-    took = time.monotonic() - t0
+    took = time.thread_time() - t0
     labels_store.rebuild_file(str(jsonl))
     want_rows, want_covers = kernel_thimble._store_parts(jsonl.with_suffix(".sqlite"))
     norm = lambda rs: sorted(json.dumps([p, n, lab, src, v, ref]) for p, n, lab, src, v, _c, ref in rs)  # noqa: E731

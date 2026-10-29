@@ -870,12 +870,19 @@ class _LabelsWriter:
         self._thread.start()
         return self
 
-    def put(self, data: bytes, rows: list[dict]) -> None:
-        """Queue one chunk (blocking while the queue is full: call it in a worker thread)."""
+    def put(self, data: bytes, rows: list[dict], *, written: bool = False) -> None:
+        """Queue one chunk (blocking while the queue is full: call it in a worker thread). With `written`, return once
+        the chunk is in the file and the store, so what reads the store next counts its rows."""
         if self.error is not None:
             raise self.error
         if data or rows:
-            self.q.put((data, rows))
+            done = threading.Event() if written else None
+            self.q.put((data, rows, done))
+            while done is not None and not done.wait(1.0):
+                if not self._thread.is_alive():
+                    break
+            if self.error is not None:
+                raise self.error
 
     def close(self) -> None:
         self.q.put(None)
@@ -893,8 +900,10 @@ class _LabelsWriter:
                 item = self.q.get()
                 if item is None:
                     break
-                data, rows = item
+                data, rows, done = item
                 if self.error is not None:
+                    if done is not None:
+                        done.set()
                     continue
                 try:
                     with lock:
@@ -917,6 +926,9 @@ class _LabelsWriter:
                                               "store is rebuilt from it on the next read", self.out.name)
                 except OSError as e:
                     self.error = e
+                finally:
+                    if done is not None:
+                        done.set()
         finally:
             if conn is not None:
                 conn.close()
@@ -2554,7 +2566,8 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             answers, msg = head.result()
             rows, n_failed = settle(b, answers)
             if rows:
-                await asyncio.to_thread(writer.put, concept_scan.jsonl_bytes(rows), rows)
+                # counted once in the store, where the run so far that apply_scoped answers with reads its counts
+                await asyncio.to_thread(partial(writer.put, written=True), concept_scan.jsonl_bytes(rows), rows)
             labeled += len(rows)
             failed += n_failed
             matches += sum(1 for r in rows if r["label"] == pos_label)
@@ -4042,9 +4055,9 @@ def _label_cards(ws: Path, concept_id: str) -> list[tuple[dict, dict]]:
 
 
 def label_card(c: str, concept: dict, group: str | None, created_by: str, question: str | None = None) -> dict:
-    """The concept's card on the canvas: a cell of kind `label` with payload {concept}, in `group` (the analyst's own group
-    by default), titled with `question`, else the label's name. An existing card is kept and takes a new question when one
-    is given, unless the analyst locked it."""
+    """The concept's card on the canvas: a cell of kind `label` with payload {concept}, in `group`, by default loose on
+    the canvas outside every frame (notebook.loose_group), titled with `question`, else the label's name. An existing
+    card is kept and takes a new question when one is given, unless the analyst locked it."""
     from . import notebook
 
     ws = _ws(c)
@@ -4058,9 +4071,7 @@ def label_card(c: str, concept: dict, group: str | None, created_by: str, questi
             return dict(cell)
     nb = notebook.read_notebook(ws, group) if group and ID_RE.match(group) else None
     if nb is None:
-        from . import tools
-
-        nb = notebook.read_notebook(ws, tools.analyst_notebook(c))
+        nb = notebook.read_notebook(ws, notebook.loose_group(ws))
     cell = notebook.new_cell("label", created_by, title or concept["name"], nb["id"], payload={"concept": concept["id"]})
     notebook.insert_cell(c, nb["id"], cell)
     _emit(c, {"type": "cell", "notebook": nb["id"], "cell": cell["id"], "kind": "note"})

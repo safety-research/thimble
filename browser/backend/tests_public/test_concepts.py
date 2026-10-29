@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 
 import httpx
 import pytest
@@ -332,9 +333,9 @@ async def test_a_prompt_apply_asks_a_rate_limited_or_refused_call_no_second_time
     assert {asked[r] for r, st in status.items() if st == "refused"} == {1}
 
 
-async def _scoped_prompt_label(monkeypatch, *, in_flight: int, wait_s: float) -> tuple[dict, float]:
-    """apply_scoped's answer for a prompt label over the board's 8 posts, one per call and each call 0.3 s, with one
-    labeled unit enough; and the seconds from the first call's start to the answer."""
+async def _scoped_prompt_label(monkeypatch, *, in_flight: int, wait_s: float, pace=None) -> tuple[dict, float]:
+    """apply_scoped's answer for a prompt label over the board's 8 posts, one per call, with one labeled unit enough;
+    and the seconds from the first call's start to the answer. `pace(n)` is the n-th call's wait (none by default)."""
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
     monkeypatch.setattr(concepts, "CONCURRENCY", in_flight)
     monkeypatch.setattr(concepts, "APPLY_ENOUGH", 1)
@@ -344,7 +345,8 @@ async def _scoped_prompt_label(monkeypatch, *, in_flight: int, wait_s: float) ->
 
     async def call(c, concept, items, comment=True, on_retry=None):
         started.append(loop.time())
-        await asyncio.sleep(0.3)
+        if pace is not None:
+            await pace(len(started) - 1)
         return _ok(FakeClassify.rule(items))
 
     monkeypatch.setattr(concepts, "classify_structured", call)
@@ -378,17 +380,83 @@ async def test_a_prompt_apply_asks_a_batch_cut_off_twice_in_halves_until_only_th
     assert sorted(sizes) == [1, 1, 2, 3, 5, 5, 10, 10, 10]
 
 
+class _RunClock:
+    """concepts' time module with monotonic() `ahead` seconds ahead of the real one, which a test moves: a classifier
+    call that takes minutes on the run's clock, which its eta reads (concepts._eta), costs the test none of them. With
+    `stopped`, monotonic() moves only when the test moves it, so an eta is the same on any machine."""
+
+    def __init__(self, stopped: bool = False) -> None:
+        self.ahead = 0.0
+        self.at = time.monotonic() if stopped else None
+
+    def monotonic(self) -> float:
+        return (time.monotonic() if self.at is None else self.at) + self.ahead
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+
+class _WaitPolls:
+    """concepts' asyncio module, whose wait() also notes each time wait_apply looks at the run while it goes on (its
+    timed wait on the run's task): `seen_labeled` is set once one of those looks found `labeled` units in the run
+    record. wait_apply decides what it answers right after that wait, before anything else runs."""
+
+    def __init__(self, c: str, labeled: int) -> None:
+        self.c, self.labeled = c, labeled
+        self.seen_labeled = asyncio.Event()
+
+    async def wait(self, fs, *, timeout=None, return_when=asyncio.ALL_COMPLETED):
+        out = await asyncio.wait(fs, timeout=timeout, return_when=return_when)
+        if timeout is not None and any(t is concepts._tasks.get(k) for t in fs for k in list(concepts._tasks)):
+            runs = [r for (c, _k), r in list(concepts._runs.items()) if c == self.c]
+            if any(int(r.get("labeled") or 0) >= self.labeled and r.get("status") not in ("done", "error") for r in runs):
+                self.seen_labeled.set()
+        return out
+
+    def __getattr__(self, name: str):
+        return getattr(asyncio, name)
+
+
 async def test_a_prompt_label_that_will_not_end_within_the_wait_answers_with_its_first_rows(workspaces_tmp, monkeypatch):
     """Once APPLY_ENOUGH units are labeled and the run's eta is past the wait left, apply_scoped answers with the run so
     far before the wait ends, and the run goes on."""
-    s, took = await _scoped_prompt_label(monkeypatch, in_flight=1, wait_s=2.0)
-    assert s["partial"] and 1 <= sum(s["counts"].values()) < 8 and took < 1.0
+    clock, go_on = _RunClock(), asyncio.Event()
+    monkeypatch.setattr(concepts, "time", clock)
+
+    async def pace(n: int) -> None:
+        # the first call takes ten minutes on the run's clock, so the 7 units left put its eta far past the wait; the
+        # others wait for the answer, so the run is still going when it comes
+        if n == 0:
+            clock.ahead += 600.0
+        else:
+            await go_on.wait()
+
+    try:
+        s, took = await _scoped_prompt_label(monkeypatch, in_flight=1, wait_s=60.0, pace=pace)
+    finally:
+        go_on.set()
+    assert s["partial"] and 1 <= sum(s["counts"].values()) < 8 and took < 30.0
     done = await concepts.wait_apply(CORPUS, s["concept"], 60)
     assert done["labeled"] == 8
 
 
 async def test_a_prompt_label_that_will_end_within_the_wait_answers_whole(workspaces_tmp, monkeypatch):
-    s, _took = await _scoped_prompt_label(monkeypatch, in_flight=4, wait_s=5.0)
+    """With APPLY_ENOUGH units labeled but an eta within the wait left, apply_scoped keeps waiting, and answers with the
+    whole run once it ends."""
+    clock, polls = _RunClock(stopped=True), _WaitPolls(CORPUS, labeled=1)
+    monkeypatch.setattr(concepts, "time", clock)
+    monkeypatch.setattr(concepts, "asyncio", polls)
+
+    async def pace(n: int) -> None:
+        # the first call takes a second on the run's clock, so the 7 units left put its eta at 7 s, well within the
+        # wait; the others go on only once wait_apply has looked at the run with that unit labeled, and kept waiting
+        if n == 0:
+            clock.ahead += 1.0
+        else:
+            await polls.seen_labeled.wait()
+
+    s, _took = await _scoped_prompt_label(monkeypatch, in_flight=4, wait_s=60.0, pace=pace)
+    assert polls.seen_labeled.is_set()
     assert not s["partial"] and sum(s["counts"].values()) == 8
 
 
