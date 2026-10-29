@@ -136,7 +136,12 @@ export const askedWords = (f: Pick<Fix, 'id' | 'words' | 'asked'>): string[] =>
 /** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
  *  the tests' output when they failed. */
 export type Refusal = { why: string; files: string[]; tests?: string }
-export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
+/** What the kernel did with the fixes an update set aside, as it read the list (engine/kernel/fixes.py carry, once
+ *  after each update): the fixes that fit the new release (`to`) on again, or kept off as the person had every fix
+ *  (off); those it has already (had); those off because they do not fit it (aside, each with why). `reload`: live
+ *  changed, and Claude Code copied it. */
+export type Carried = { to: string; back: number[]; had: number[]; aside: number[]; why?: Record<string, string>; off?: boolean; reload?: boolean }
+export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number; carried?: Carried | null }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
  *  u), failed (y try again · d ask Claude · n dismiss), request (no code), a new release with the fixes replayed on it
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it
@@ -148,6 +153,8 @@ export type FixLine = {
   back?: boolean
   /** request: a round of a fix the person has changed no code, so the fix stays as it was */
   kept?: boolean
+  /** update: the session loads what changed */
+  loads?: boolean
 }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
@@ -354,6 +361,23 @@ export async function checkUpdate($: Engine): Promise<void> {
   const r = await kernelFix($, ['update', '--check', '--once', '--json'], { timeoutMs: 60000 }).catch(() => null)
   const d = r?.ok ? jsonOf<Any>(r.out) : null
   if (d?.newer && d.say !== false) await setFixLine($, { id: 0, kind: 'release', said: d.line || `thimble ${d.to} is out (you have ${d.from}) · in a shell: thimble update` })
+}
+
+/** At session start, when the kernel put back the fixes an update set aside as it read the list (`carried`): one line
+ *  says what came of them (`↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit it`), and the session loads
+ *  them. An update by thimble 0.10.5 or before set every fix aside and stopped there; this load is the first that runs
+ *  after it, from /reload-plugins or a new session. */
+export async function carriedLine($: Engine, list: FixList | null): Promise<void> {
+  const c = list?.carried
+  if (!c || !(c.back.length || c.had.length || c.aside.length)) return
+  const n = c.back.length
+  const m = c.aside.length
+  const said = [`thimble ${c.to}`,
+    ...(n ? [`${n} fix${n === 1 ? '' : 'es'} ${c.off ? `kept, off as you had ${n === 1 ? 'it' : 'them'}` : 'on again'}`] : []),
+    ...(c.had.length ? [`${c.had.length} already in it`] : []),
+    ...(m ? [`${m} off: ${m === 1 ? 'it does' : 'they do'} not fit it`] : [])].join(' · ')
+  await setFixLine($, { id: 0, kind: 'update', said, loads: !!c.reload })
+  await load($, c)
 }
 
 /** Claude ran `thimble update` (the pending fixes' prompt asks for --continue): the session loads what it changed at the

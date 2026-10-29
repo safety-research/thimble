@@ -59,7 +59,8 @@ a shared fix goes through. Binary files are refused too. It may change the rest 
 file and its command hooks, the launcher, thimble's scripts and lock files (a package added from REGISTRIES): its record
 names the kinds and the files (notice), and the line that asks whether to use it says them in one sentence, as thimble
 fix show does; a fix that thimble update --continue turns on again, with no key press, may change only those it changed
-before (continue_). A file moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
+before (continue_), and one that an update puts back on its own (carry) is the very change the person had on. A file
+moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
 prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
 refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
 to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
@@ -2584,14 +2585,24 @@ def reapply_prompt() -> Path:
 
 
 def reapply_argv() -> dict[str, Any]:
-    """thimble reapply: Claude Code (claude) in live, with the reapply prompt as its first message, once the way back
-    runs from the release checkout (_way_back)."""
+    """thimble reapply: first the set-aside fixes that still apply go on again (carry, after an update by an older
+    thimble); then Claude Code (claude) in live, with the reapply prompt as its first message, for the fixes still set
+    aside, once the way back runs from the release checkout (_way_back). `carried`: what carry did; argv None when it
+    put back every fix."""
     if not (live_dir() / ".git").exists():
         raise FixError("you have no fixes: there is nothing to bring back")
+    carried = carry(browser=True)
+    if carried and not carried["aside"]:
+        return {"argv": None, "carried": carried}
     with Lock():
         prompt = reapply_prompt()
         _way_back()
-    return {"argv": [claude(), prompt.read_text()], "cwd": str(live_dir()), "prompt": str(prompt)}
+        if not is_on():
+            # every fix is off (live shows the release): Claude brings the fixes back on mine all the same, and
+            # --continue keeps them off
+            _unstamp()
+            git("checkout", "-q", "mine", cwd=live_dir(), hooks=False)
+    return {"argv": [claude(), prompt.read_text()], "cwd": str(live_dir()), "prompt": str(prompt), "carried": carried}
 
 
 def browser_home() -> Path:
@@ -2676,14 +2687,146 @@ def _set_aside(ids: list[int], recs: dict[int, dict[str, Any]], version: str, ke
         put(r)
 
 
+def _aside_before(fid: int) -> dict[str, Any]:
+    """Fix `fid`'s record as it was before an update set it aside: its last line in fixes.jsonl whose state is not
+    pending ({} when it has none)."""
+    was: dict[str, Any] = {}
+    try:
+        lines = (home() / "fixes.jsonl").read_text().splitlines()
+    except OSError:
+        return was
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and str(r.get("id")) == str(fid) and r.get("state") != "pending":
+            was = r
+    return was
+
+
+def _came_detached(live: Path, tip: str) -> bool:
+    """Whether live showed the plain release (every fix turned off: HEAD detached) when an update moved it onto mine at
+    `tip`, as live's HEAD log says ("checkout: moving from <commit> to mine"). An update by thimble 0.10.5 or before
+    then wrote that the fixes are on (state.json): this is the one trace of it."""
+    lead, tail = "checkout: moving from ", " to mine"
+    for line in git("reflog", "--format=%H %gs", "HEAD", cwd=live, check=False).splitlines():
+        sha, _, msg = line.partition(" ")
+        if sha == tip and msg.startswith(lead) and msg.endswith(tail):
+            return bool(re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", msg[len(lead):-len(tail)]))
+    return False
+
+
+def _carry(sync: bool = True) -> dict[str, Any] | None:
+    """carry(), under the lock. sync: have Claude Code copy live when a fix went on (update copies it itself)."""
+    d = home() / "pending"
+    cur = read_json(d / "current.json")
+    live = live_dir()
+    if not isinstance(cur, dict) or cur.get("carried") or not (live / ".git").exists():
+        return None
+    recs = records()
+    ids = [int(i) for i in cur.get("ids") or [] if recs.get(int(i), {}).get("state") == "pending"]
+    tip = str(cur.get("tip") or "")
+    if not ids or not tip or git("rev-parse", "-q", "--verify", "mine", cwd=live, check=False) != tip:
+        return None
+    changed = run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=live).stdout.splitlines()
+    if any(x[3:] != PLUGIN_JSON for x in changed):
+        return None
+    # the release as the person reads it, as what a fix does not fit names it (_misfit): a dev install's checkout at a
+    # release tag is that release
+    version = release_name() or str(cur.get("version") or "")
+    off = not is_on() or (cur.get("off") is None and _came_detached(live, tip))
+    _unstamp()
+    git("checkout", "-q", "mine", cwd=live, hooks=False)
+    back: list[tuple[int, str]] = []
+    had: list[int] = []
+    missed: list[int] = []
+    for fid in ids:
+        p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{fid}"], cwd=live,
+                check=False, env=as_thimble())
+        if p.returncode != 0:
+            run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
+            missed.append(fid)
+        elif run(["git", "diff", "--quiet", "HEAD^", "HEAD"], cwd=live, check=False).returncode == 0:
+            # the release has this change already
+            git("reset", "-q", "--hard", "HEAD^", cwd=live)
+            had.append(fid)
+        else:
+            back.append((fid, git("rev-parse", "HEAD", cwd=live)))
+    for fid, c in back:
+        git("update-ref", f"refs/thimble/fixes/{fid}", c, cwd=live)
+        r, was = records()[fid], _aside_before(fid)
+        r.update(error=None, pending=None, note=was.get("note"))
+        if (was.get("prev") or {}).get("state") == "on" and was.get("state") not in ("on", "sent"):
+            # a fix changed in place: the version the person had is on again, and its new version waits as it did
+            r.update(state=was.get("state"), prev={**(r.get("prev") or {}), **was["prev"], "commit": c})
+        else:
+            r.update(state="sent" if was.get("state") == "sent" else "on", commit=c, files=_numstat(live, f"{c}^", c),
+                     on_at=r.get("on_at") or was.get("on_at") or time.time())
+        put(r)
+    for fid in had:
+        r = records()[fid]
+        r.update(state="released", released_in=version, note=f"already in {version}", pending=None, error=None)
+        put(r)
+    why: dict[int, str] = {}
+    for fid in missed:
+        r = records()[fid]
+        r["error"] = why[fid] = f"it does not fit {_misfit(fid, f'refs/thimble/fixes/{fid}')}"
+        put(r)
+    if missed:
+        write_json(d / "current.json", {**cur, "ids": missed, "tip": head(), "carried": True})
+    else:
+        (d / "current.json").unlink(missing_ok=True)
+    if off:
+        git("checkout", "-q", "--detach", release()["base"], cwd=live, hooks=False)
+        write_json(home() / "state.json", {"on": False})
+    # the way back from the release checkout, which an update by a thimble from before it did not make
+    _way_back()
+    recs = records()
+    out = {"to": version, "back": [f for f, _ in back], "had": had, "aside": missed, "why": why, "off": off,
+           "titles": {i: recs[i]["title"] for i in [*(f for f, _ in back), *had, *missed]}, "reload": False}
+    if any(str(f.get("path") or "").startswith("browser/") for fid, _ in back for f in recs[fid].get("files") or []):
+        # the browser workbench's page is built again from it: at once by thimble update and thimble reapply (carry), else
+        # when thimble-browser starts next
+        out["browser"] = "stale"
+    if sync and back and not off:
+        out.update(_sync())
+    return out
+
+
+def carry(browser: bool = False) -> dict[str, Any] | None:
+    """The fixes an update set aside that still apply to the new release, on again, with no key press, as they were
+    before it (on, sent, or the version a fix changed in place had): each is cherry-picked onto mine, in the order mine
+    had them. One the release already has leaves the list (released); one that does not apply stays set aside, its
+    record saying what it does not fit (error), for thimble reapply. Fixes the person had turned off stay off.
+
+    thimble update carries at once. An update by thimble 0.10.5 or before set every fix aside and stopped there: this
+    kernel's next list carries them (thimble fixes, and the plugin's list at session start), or its thimble reapply or
+    thimble update. Nothing happens once carried, or while live is not as the update left it (mine moved on from the
+    update's tip, or a file changed: a reapply session works there). browser: build the browser workbench's page again
+    (and install its packages when their lock files changed) when a fix that went on changes it, as thimble update and
+    thimble reapply do; a list leaves that to thimble-browser's next start, which builds the page. What it did, or
+    None."""
+    cur = read_json(home() / "pending" / "current.json")
+    if not isinstance(cur, dict) or cur.get("carried") or not (live_dir() / ".git").exists():
+        return None
+    with Lock():
+        out = _carry()
+    if out and browser and out.get("browser") == "stale" and not out.get("off"):
+        out.update(browser_on_live())
+    return out
+
+
 def update(check: bool = False, once: bool = False) -> dict[str, Any]:
     """thimble update: the newest release for both modes.
 
-    The fixes that were on are not replayed: the release may already fix some of the same things, so they are set aside
-    (state pending, their old change in pending/<version>/fix-<id>.patch), and mine is the plain release. thimble
-    reapply then opens Claude Code in live to bring back each fix the release still needs, and `thimble update
-    --continue` records what Claude committed. Claude Code loads the plugin from live, and thimble-browser runs from
-    live/browser. With check, only whether a newer release is out.
+    The fixes that were on are set aside (state pending, their old change in pending/<version>/fix-<id>.patch), mine is
+    the plain release, and then each fix that still applies goes on again (carry): the person keeps what still fits,
+    and a fix that does not fit the release stays off, its record saying so. thimble reapply then opens Claude Code in
+    live to bring back each fix that is set aside, fitted to the release, and `thimble update --continue` records what
+    Claude committed. Fixes the person had turned off stay off. Claude Code loads the plugin from live, and
+    thimble-browser runs from live/browser. With no newer release, it carries the fixes an update by an older thimble
+    set aside. With check, only whether a newer release is out.
 
     A dev install (the person's own clone, kind clone) has no releases to wait for: the target is what the person
     checked out (_update_dev). once: the session's check, which says a new commit once."""
@@ -2717,12 +2860,19 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         return out
     if check or not out["newer"]:
         same = now == latest["version"]
-        return {**out, "lines": [] if check else [f"thimble {now} is the newest release." if same else
-                                                  f"thimble {now} is up to date; the newest release is {latest['version']}."]}
+        line = (f"thimble {now} is the newest release." if same else
+                f"thimble {now} is up to date; the newest release is {latest['version']}.")
+        # the fixes an update by an older thimble set aside, which it left at that
+        carried = None if check or not has_live else carry(browser=True)
+        if carried:
+            return {**out, "carried": carried, "reload": bool(carried.get("reload")),
+                    "lines": [line, *_carried_lines(carried)]}
+        return {**out, "lines": [] if check else [line]}
     with Lock():
         ensure_live()
         live, rel = live_dir(), release()
         old = str(rel["base"])
+        was_on = is_on()
         ref = f"refs/thimble/releases/{latest['tag']}"
         run(["git", "fetch", "-q", "--no-tags", latest["url"], f"+refs/tags/{latest['tag']}:{ref}"], cwd=live, timeout=600)
         new = git("rev-parse", f"{ref}^{{commit}}", cwd=live)
@@ -2734,7 +2884,10 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         _set_aside(aside, recs, version, version, now)
         _unstamp()
         git("checkout", "-q", "-B", "mine", new, cwd=live)
-        write_json(home() / "state.json", {"on": True})
+        if was_on:
+            write_json(home() / "state.json", {"on": True})
+        else:
+            git("checkout", "-q", "--detach", new, cwd=live)
         rel.update(base=new, version=_version_at(live, new), tag=latest["tag"], updated=time.time())
         write_json(home() / "release.json", rel)
         _write_off_sh(rel)
@@ -2743,15 +2896,19 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         if aside:
             d.mkdir(parents=True, exist_ok=True)
             write_json(d / "current.json", {"version": version, "from": now, "from_commit": old, "to_commit": new,
-                                            "ids": aside, "tip": head(), "made": time.time()})
+                                            "ids": aside, "tip": head(), "made": time.time(), "off": not was_on})
         else:
             (d / "current.json").unlink(missing_ok=True)
         _repoint()
+        carried = (_carry(sync=False) if aside else None) or {}
         synced = _sync()
     browser = browser_on_live()
-    out = {**out, "aside": aside, **synced, **browser}
+    recs = records()
+    left = carried.get("aside", aside)
+    out = {**out, "aside": left, "back": carried.get("back", []), "had": carried.get("had", []), "off": not was_on,
+           "titles": {i: recs[i]["title"] for i in aside if i in recs}, **synced, **browser}
     out["lines"] = _summary(out)
-    out["said"] = f"thimble {version}" + (f" · {len(aside)} fix{'' if len(aside) == 1 else 'es'} set aside" if aside else "")
+    out["said"] = f"thimble {version}" + (f" · {len(left)} fix{'' if len(left) == 1 else 'es'} off" if left else "")
     return out
 
 
@@ -2832,7 +2989,13 @@ def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[s
                 write_json(home() / "release.json", {**rel, "told": new})
         return {**out, "lines": []}
     if not out["newer"]:
-        return {**out, "lines": [f"thimble is up to date with your checkout ({to}).", *_dirty_line(co["dirty"])]}
+        # the fixes an update by an older thimble set aside, which it left at that
+        carried = carry(browser=True) if rel else None
+        lines = [f"thimble is up to date with your checkout ({to}).", *_dirty_line(co["dirty"])]
+        if carried:
+            return {**out, "carried": carried, "reload": bool(carried.get("reload")),
+                    "lines": [*lines, *_carried_lines(carried)]}
+        return {**out, "lines": lines}
     with Lock():
         ensure_live()
         live, rel = live_dir(), release()
@@ -2869,23 +3032,31 @@ def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[s
         d = home() / "pending"
         if aside:
             write_json(d / "current.json", {"version": to, "key": key, "from": frm, "from_commit": old, "to_commit": new,
-                                            "ids": aside, "tip": head(), "made": time.time()})
+                                            "ids": aside, "tip": head(), "made": time.time(), "off": not was_on})
+            # what each set-aside fix does not fit, and a fix an earlier update set aside that applies now goes on
+            carried = _carry(sync=False) or {}
+            back, had = [*back, *carried.get("back", [])], [*had, *carried.get("had", [])]
+            aside = carried.get("aside", aside)
         else:
             (d / "current.json").unlink(missing_ok=True)
         _repoint()
         synced = _sync()
     browser = browser_on_live()
     recs = records()
-    out = {**out, "aside": aside, "back": back, "had": had, "titles": {i: recs[i]["title"] for i in [*back, *had]},
-           **synced, **browser}
+    out = {**out, "aside": aside, "back": back, "had": had, "off": not was_on,
+           "titles": {i: recs[i]["title"] for i in [*back, *had, *aside]}, **synced, **browser}
     out["lines"] = _summary(out)
-    out["said"] = f"thimble {to}" + (f" · {len(aside)} fix{'' if len(aside) == 1 else 'es'} set aside" if aside else "")
+    out["said"] = f"thimble {to}" + (f" · {len(aside)} fix{'' if len(aside) == 1 else 'es'} off" if aside else "")
     return out
 
 
+def _named(ids: list[int], titles: dict[int, str]) -> str:
+    return "; ".join(titles.get(i) or f"fix {i}" for i in ids)
+
+
 def _summary(d: dict[str, Any], paint: Paint | None = None) -> list[str]:
-    """What thimble update prints: the versions, the fixes it set aside and how to bring them back, and how each mode
-    loads the release."""
+    """What thimble update prints: the versions, the fixes on again, those the release has, those off because they do
+    not fit it and how to bring them back, and how each mode loads the release."""
     import textwrap  # noqa: PLC0415
 
     c = paint or Paint(False)
@@ -2901,29 +3072,51 @@ def _summary(d: dict[str, Any], paint: Paint | None = None) -> list[str]:
     titles = d.get("titles") or {}
     if d.get("back"):
         k = len(d["back"])
-        out += ["", f"{'Your fix is' if k == 1 else f'Your {k} fixes are'} on again, replayed onto {d['to']}: "
-                f"{'; '.join(titles[i] for i in d['back'])}."]
+        how = f"replayed onto {d['to']} and {'stays off, as you had it' if k == 1 else 'stay off, as you had them'}" \
+            if d.get("off") else f"on again, replayed onto {d['to']}"
+        out += ["", f"{'Your fix is' if k == 1 else f'Your {k} fixes are'} {how}: {_named(d['back'], titles)}."]
     if d.get("had"):
         out += [*([] if d.get("back") else [""]), f"Already in {d['to']}, so {'it leaves' if len(d['had']) == 1 else 'they leave'} "
-                f"thimble fixes: {'; '.join(titles[i] for i in d['had'])}."]
+                f"thimble fixes: {_named(d['had'], titles)}."]
     if d.get("browser") == "failed":
         out.append(f"The browser workbench stays on the release it had: {d.get('browser_error')}. Run thimble update "
                    "again after you correct that.")
     k = len(d.get("aside") or [])
     if k:
         n = f"{k} local fix{'' if k == 1 else 'es'}"
-        if d.get("dev"):
-            text = (f"{n.capitalize()} did not apply cleanly to {d['to']}. {'It is' if k == 1 else 'They are'} off for now: "
-                    f"Claude fits {'it' if k == 1 else 'each one'} to the new code.")
-        else:
-            text = (f"You have {n}. {'It is' if k == 1 else 'They are'} off for now: {d['to']} may already fix some of the "
-                    "same things, and Claude checks each one so nothing is fixed twice.")
-        para = textwrap.wrap(text, 88)
-        para[0] = para[0].replace(n, c("bold", n), 1)
+        para = textwrap.wrap(f"{n.capitalize()} {'does' if k == 1 else 'do'} not fit {d['to']}, so "
+                             f"{'it is' if k == 1 else 'they are'} off: {_named(d['aside'], titles)}.", 88)
+        para[0] = para[0].replace(n.capitalize(), c("bold", n.capitalize()), 1)
         out += ["", *para, "", f"{c('title', 'Bring them back:' if k > 1 else 'Bring it back:')}  {c('cmd', 'thimble reapply')}",
                 c("dim", f"  Claude opens, checks each fix against {d['to']}, keeps what is still needed, and turns it on.")]
     out += ["", f"{c('title', 'Then')}  Terminal: {c('cmd', '/reload-plugins')} in Claude Code"
             + (f" · Browser: restart {c('cmd', 'thimble-browser')}" if both else "")]
+    return out
+
+
+def _carried_lines(c: dict[str, Any]) -> list[str]:
+    """What carry() did, for the shell, a line each: the fixes on again (or kept off, as the person had them), those the
+    release has, those off because they do not fit it, and how to load them."""
+    v, t = f"thimble {c['to']}", c.get("titles") or {}
+    out = []
+    if c.get("back"):
+        k = len(c["back"])
+        if c.get("off"):
+            how = f"Your fix fits {v} and stays off, as you had it" if k == 1 else \
+                f"Your {k} fixes fit {v} and stay off, as you had them"
+        else:
+            how = f"Your fix fits {v} and is on again" if k == 1 else f"Your {k} fixes fit {v} and are on again"
+        out.append(f"{how}: {_named(c['back'], t)}.")
+    if c.get("had"):
+        leave = "it leaves" if len(c["had"]) == 1 else "they leave"
+        out.append(f"Already in {v}, so {leave} thimble fixes: {_named(c['had'], t)}.")
+    if c.get("aside"):
+        k = len(c["aside"])
+        out.append(f"Off, as {'it does' if k == 1 else 'they do'} not fit {v}: {_named(c['aside'], t)}. "
+                   f"thimble reapply has Claude fit {'it' if k == 1 else 'them'}.")
+    if c.get("reload"):
+        out.append("In Claude Code, type /reload-plugins to load them" + (
+            "; restart thimble-browser for the browser." if c.get("browser") in ("stale", "ready") else "."))
     return out
 
 
@@ -2993,20 +3186,26 @@ def continue_() -> dict[str, Any]:
             r.update(state="released", released_in=version, note=f"left out at {version}", left_out=True, pending=None)
             put(r)
         (home() / "pending" / "current.json").unlink(missing_ok=True)
-        synced = _sync() if found else {"reload": False}
-    browser = browser_on_live() if found else {}
+        off = not is_on()
+        if off:
+            # every fix is off, as the person had them: the fixes Claude brought back wait in mine for thimble fix on
+            _unstamp()
+            git("checkout", "-q", "--detach", release()["base"], cwd=live, hooks=False)
+        synced = _sync() if found and not off else {"reload": False}
+    browser = browser_on_live() if found and not off else {}
     recs = records()
     lines = []
     if found:
         on = "; ".join(f"{recs[f]['title']} ({c[:7]})" for f, c, _ in found)
-        lines.append(f"Recorded {len(found)} fix{'' if len(found) == 1 else 'es'} on thimble {version}, now on: {on}.")
+        lines.append(f"Recorded {len(found)} fix{'' if len(found) == 1 else 'es'} on thimble {version}, "
+                     f"{'kept off, as you had your fixes; thimble fix on turns them on' if off else 'now on'}: {on}.")
     if left:
         lines.append(f"Left out: {'; '.join(recs[i]['title'] for i in left)}. {'It leaves' if len(left) == 1 else 'They leave'} "
                      f"thimble fixes ({version} does {'it' if len(left) == 1 else 'them'}, or {'it' if len(left) == 1 else 'they'} "
                      f"cannot work there); thimble fix show {left[0]} still shows {'it' if len(left) == 1 else 'each one'}.")
     if browser.get("browser") == "failed":
         lines.append(f"The browser workbench was not rebuilt: {browser.get('browser_error')}.")
-    if found:
+    if found and not off:
         lines.append("In Claude Code, type /reload-plugins to load them" + (
             "; restart thimble-browser for the browser." if browser.get("browser") == "ready" else "."))
     return {"said": " ".join(lines), "lines": lines, "recorded": [f for f, _, _ in found], "left_out": left, **synced, **browser}
@@ -3037,6 +3236,12 @@ CHANGING = {"working": "changing", "ready": "change ready", "failed": "change fa
 
 
 def listing() -> dict[str, Any]:
+    """The fixes as the list shows them, after the fixes an update set aside that still apply went on again (carry,
+    which says what it did here once: `carried`) and strays folded into their fixes (fold_strays)."""
+    try:
+        carried = carry()
+    except (FixError, OSError, subprocess.SubprocessError):
+        carried = None
     folded: list[dict[str, Any]] = []
     if any(r.get("refines") is not None and not r.get("fold_conflict") and r.get("state") in REFINABLE
            for r in records().values()):
@@ -3051,7 +3256,7 @@ def listing() -> dict[str, Any]:
     return {"fixes": recs, "on": on, "live": str(live_dir()), "version": release_name(rel),
             "base": rel.get("base") or "", "kind": rel.get("kind") or "", "pointed": bool(rel.get("pointed")),
             "count_on": sum(r.get("state") == "on" for r in recs),
-            "aside": [r["id"] for r in recs if r.get("state") == "pending"], "folded": folded}
+            "aside": [r["id"] for r in recs if r.get("state") == "pending"], "folded": folded, "carried": carried}
 
 
 def can_share() -> bool:
@@ -3090,8 +3295,10 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     fixes = d["fixes"]
     # thimble 0.10.3, or thimble alone when nothing names the release
     name = f"thimble {d['version']}" if d["version"] else "thimble"
+    # what carrying the fixes an update set aside did as the list was read, first
+    said = [*_carried_lines(d["carried"]), ""] if d.get("carried") else []
     if not fixes:
-        return [f"{c('title', 'Your thimble fixes')} · {name} with no fixes of yours"]
+        return [*said, f"{c('title', 'Your thimble fixes')} · {name} with no fixes of yours"]
     words = {r["id"]: (state_word(r) if d["on"] or r.get("state") != "on" else "off") for r in fixes}
     titles = {r["id"]: r["title"] for r in fixes}
     counts: dict[str, int] = {}
@@ -3100,7 +3307,7 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         counts[w] = counts.get(w, 0) + 1
     parts = [c("green", f"{counts.pop('on')} on")] if "on" in counts else []
     parts += [f"{n} {w}" for w, n in counts.items()]
-    out = [f"{c('title', 'Your thimble fixes')} · {name} with {', '.join(parts)}", ""]
+    out = [*said, f"{c('title', 'Your thimble fixes')} · {name} with {', '.join(parts)}", ""]
     iw = max(1, *(len(str(r["id"])) for r in fixes))
     sw = max(6, *(len(w) for w in words.values()))
     tw = min(40, max(3, *(len(t) for t in titles.values())))
@@ -3119,6 +3326,10 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     prs = [r for r in fixes if r.get("pr")]
     if prs:
         out += ["", *[c("dim", f"  fix {r['id']} has a pull request: {r['pr']}") for r in prs]]
+    # a fix set aside at an update, and why: one that did not fit the release
+    unfit = [r for r in fixes if r.get("state") == "pending" and r.get("error")]
+    if unfit:
+        out += ["", *[c("dim", f"  fix {r['id']} is off: {r['error']}") for r in unfit]]
     on_ids = [r["id"] for r in fixes if words[r["id"]] == "on"]
     off_ids = [r["id"] for r in fixes if r.get("state") in ("off", "ready")]
     first = fixes[0]["id"]
@@ -3176,7 +3387,10 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
         out += _wrapped("Pull request", str(r["pr"]), width)
     files = r.get("files") or []
     p = r.get("pending") or {}
-    if r.get("state") == "pending":
+    if r.get("state") == "pending" and r.get("error"):
+        # it did not fit the release when the update put the fixes back on it
+        out += _wrapped("Set aside", str(r["error"]), width)
+    elif r.get("state") == "pending":
         out += _wrapped("Set aside", f"at the update to {p.get('version') or release_name()}, so that nothing is fixed "
                         "twice", width)
     elif r.get("state") == "released" and r.get("left_out"):
@@ -3811,6 +4025,12 @@ def cmd_reapply(a) -> int:
     except FixError as e:
         print(f"thimble reapply: {e}", file=sys.stderr)
         return 1
+    if r.get("carried"):
+        # the prompt alone goes to stdout with --print
+        print("\n".join(_carried_lines(r["carried"])), file=sys.stderr if getattr(a, "print", False) else sys.stdout,
+              flush=True)
+    if r["argv"] is None:
+        return 0
     if getattr(a, "print", False):
         print(r["argv"][1], end="")
         return 0

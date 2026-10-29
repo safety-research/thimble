@@ -4,9 +4,9 @@ a Claude Code session, Claude runs it to label records and to see what it read.
 In a shell:
 
     thimble update                 the newest thimble, for the terminal plugin and the browser workbench. Your fixes
-                                   are set aside, so that nothing is fixed twice; thimble reapply brings them back
-    thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that the new
-                                   release still needs, once
+                                   that still fit it stay on; thimble reapply brings back one that does not
+    thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that did not fit
+                                   the new release, where the release still needs it
     thimble fixes                  your fixes that are not in the release: on, off or ready (also: thimble fix list)
     thimble fix show N             what fix N does, in a few lines
     thimble fix diff N             fix N's change to thimble's code
@@ -523,14 +523,19 @@ Both take your names, paths and the names of your data out of the text first. Ru
 UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the
 browser workbench in one go. Run it in a shell, not inside Claude Code.
 
-When you have fixes, it does not put them on the release by itself: the release may already fix some of the same
-things. It sets them aside, so thimble is the plain release, and keeps each fix's old change. Then:
+When you have fixes, it puts each one that still applies back on the release, as it was (fixes you turned off stay
+off), and one the release already has leaves your list. A fix that does not fit the release is set aside: it is off,
+and thimble keeps its old change. Then:
 
-    thimble reapply                  Claude Code opens in ~/.thimble/fixes/live. Claude checks each fix against the
-                                     release, brings back what is still needed (one commit per fix), and runs:
+    thimble reapply                  Claude Code opens in ~/.thimble/fixes/live. Claude checks each set-aside fix
+                                     against the release, brings back what is still needed (one commit per fix), and
+                                     runs:
     thimble update --continue        records those commits as the fixes' new versions and turns them on; a set-aside
                                      fix with no commit is left out, because the release does it or it cannot work there
     thimble update --check           only says whether a newer release is out
+
+After an update by thimble 0.10.5 or before, which set every fix aside, thimble puts back what still applies at your
+next thimble update, thimble fixes or thimble reapply, or when a Claude Code session loads it.
 
 Afterwards: /reload-plugins in Claude Code, and restart thimble-browser.
 

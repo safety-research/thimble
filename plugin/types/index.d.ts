@@ -128,11 +128,13 @@ declare module 'claude-code' {
       threadsGen: number
 
       // ---- fixes (fix/): the person's changes to their own thimble; the kernel keeps the records (fixes.jsonl)
-      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read (fixes.ts) */
-      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number } | null
+      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read; what the
+       *  kernel did with the fixes an update set aside as it read them, once (fixes.ts FixList, Carried) */
+      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number; carried?: { to: string; back: number[]; had: number[]; aside: number[]; why?: Record<string, string>; off?: boolean; reload?: boolean } | null } | null
       /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
-       *  changed; a reload that waits for Claude's turn or a restart (fixes.ts FixLine) */
-      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' } | null
+       *  changed; a reload that waits for Claude's turn or a restart; for an update, whether the session loads what
+       *  changed (fixes.ts FixLine) */
+      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; loads?: boolean } | null
       /** whether this session looked for a newer release already (register.ts) */
       fixUpdated: boolean
       /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */

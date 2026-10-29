@@ -1,6 +1,6 @@
 You are in this person's own copy of thimble's source code ({{LIVE}}). thimble is a plugin for Claude Code, and a browser workbench, that helps a person make sense of a folder of files.
 
-The person updated thimble from {{FROM}} to {{TO}}. Before that, they had {{N_FIXES}} of their own, made with thimble fix; {{THEY_ARE}} listed below. thimble set {{THEM}} aside, so this copy is plain {{TO}} now. Bring back each fix that {{TO}} still needs, once.
+The person updated thimble from {{FROM}} to {{TO}}. thimble set aside {{N_FIXES}} of theirs, made with thimble fix; {{THEY_ARE}} listed below, and this copy of {{TO}} does not have {{THEM}}. Bring back each fix that {{TO}} still needs, once.
 
 **Do not bring back what the release already does.** The release may fix the same problem in another way, in other files, or in other words. For each fix, read what the person asked, then what {{TO}} changed in the same place (`git log {{FROM_REF}}..{{TO_REF}}` and the diff of the files the fix changed). When you can, try the person's case on {{TO}}. If {{TO}} already does what they asked, leave the fix out. If it does part of it, bring back only the rest.
 

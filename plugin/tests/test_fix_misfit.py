@@ -24,7 +24,7 @@ def bar(w, fid_rec, text):
     (Path(fid_rec["work"]) / "plugin" / "bar" / "bar.tsx").write_text(text)
 
 
-# A. only the release changed the file; the fix was made while an unrelated fix was on (set aside at the update)
+# A. only the release changed the file; the fix was made while an unrelated fix was on (on again after the update)
 def test_only_the_release_changed_the_file_of_a_fix_made_while_another_fix_was_on(world, upstream):
     n = FX.new("a note")
     (Path(n["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
@@ -33,12 +33,13 @@ def test_only_the_release_changed_the_file_of_a_fix_made_while_another_fix_was_o
     a = made(world)
     FX.done(a["id"], "Bar says read", "")
     upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
-    assert FX.update()["aside"] == [n["id"]]
+    assert FX.update()["back"] == [n["id"]]
     m = said(a["id"])
     assert m == f"fix {a['id']} does not fit thimble 0.10.3; /thimble-fix {a['id']} tries it again"
 
 
-# A2. as A, and the unrelated fix is brought back (on, other file) before the y
+# A2. as A, where the unrelated fix did not fit the release either, and Claude brought it back (on, other file) before
+# the y
 def test_only_the_release_changed_it_with_the_other_fix_on_again(world, upstream):
     n = FX.new("a note")
     (Path(n["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
@@ -46,8 +47,8 @@ def test_only_the_release_changed_it_with_the_other_fix_on_again(world, upstream
     FX.apply(n["id"], press(n["id"]))
     a = made(world)
     FX.done(a["id"], "Bar says read", "")
-    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
-    FX.update()
+    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n", "plugin/notes.md": "made-up release note\n"}, "v0.10.3")
+    assert FX.update()["aside"] == [n["id"]]
     live = FX.live_dir()
     (live / "plugin" / "notes.md").write_text("made-up note\n")
     sh("git", "add", "plugin/notes.md", cwd=live)
@@ -193,7 +194,7 @@ def test_a_release_that_holds_the_lines_the_fix_was_made_on_names_the_one_fix_in
     bar(world, b, "const words = `read ${n}`\nconst title = 'bar'\n")
     FX.done(b["id"], "Bar has a title", "")
     upstream({"plugin/bar/bar.tsx": "const words = `read ${n}`\n"}, "v0.10.3")
-    assert FX.update()["aside"] == [a["id"]]
+    assert FX.update()["had"] == [a["id"]]
     c = FX.new("another title")
     bar(world, c, "const words = `read ${n}`\nconst title = 'baz'\n")
     FX.done(c["id"], "Bar has another title", "")
@@ -232,6 +233,7 @@ def test_a_shallow_live_made_on_another_fix_s_lines_with_the_file_left_alone_say
     bar(world, b, "const words = `read read ${n}`\n")
     FX.done(b["id"], "Bar says read twice", "")
     upstream({"plugin/notes.md": "made-up note\n"}, "v0.10.3")
-    assert FX.update()["aside"] == [a["id"]]
+    assert FX.update()["back"] == [a["id"]]
+    FX.undo(a["id"])
     m = said(b["id"])
     assert m == f"fix {b['id']} does not fit your other fixes; /thimble-fix {b['id']} tries it again"

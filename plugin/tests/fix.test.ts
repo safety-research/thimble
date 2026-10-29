@@ -85,7 +85,13 @@ function setup(o: { keys?: boolean } = {}) {
   // other fixes a test gives the kernel
   const others: Any[] = []
   const all = () => [...(made ? [fix] : []), ...others].filter(f => f.state !== 'removed')
-  const list = () => ({ fixes: all(), on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: all().filter(f => f.state === 'on').length, pointed: true })
+  // what the kernel's carry did as it read the list, which it says once (a test sets `listed.carried`)
+  const listed: Any = { carried: null }
+  const list = () => {
+    const carried = listed.carried
+    listed.carried = null
+    return { fixes: all(), on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: all().filter(f => f.state === 'on').length, pointed: true, carried }
+  }
   const kernel = (argv: string[], stdin?: string) => {
     const ok = (out: unknown) => ({ exitCode: 0, stdout: typeof out === 'string' ? out : JSON.stringify(out), stderr: '' })
     const verb = argv[argv.indexOf('fix') + 1]
@@ -221,7 +227,7 @@ function setup(o: { keys?: boolean } = {}) {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, others, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, redraws }
+  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, redraws }
 }
 
 /** The person's /thimble-fix <words>: the command runs the plugin's prompt command with the words a moment later, and
@@ -1347,6 +1353,36 @@ test('at session start one line says a newer release is out, once a session; /th
   expect(String(r.text)).toContain('In a terminal, run thimble update')
   expect(String(r.text)).toContain('thimble reapply')
   expect(s.commands).toEqual([])
+})
+
+test("after an update by an older thimble, the fixes the kernel put back as it read the list get one line at session start, and the plugins load them", async () => {
+  const s = setup()
+  Object.assign(s.fix, { state: 'on', work: null, commit: 'c0ffee1' })
+  s.made()
+  s.others.push({ ...s.fix, id: 2, title: 'make the checks run on haiku', state: 'pending', commit: 'c0ffee2', error: 'it does not fit thimble 0.10.6' })
+  s.fix.check = { from: '0.10.6', to: '0.10.6', newer: false }
+  s.listed.carried = { to: '0.10.6', back: [1], had: [], aside: [2], why: { 2: 'it does not fit thimble 0.10.6' }, off: false, reload: true }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect(textOf(await fixLineRows(s.$, ELS, 140))).toContain('↑ thimble 0.10.6 · 1 fix on again · 1 off: it does not fit it · thimble reloaded · thimble fix list, in a shell, lists your fixes')
+  expect(s.commands).toEqual(['reload-plugins'])
+  // the reload starts the module again: the kernel says it once, so no second load, and the line stays until the prompt
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect(s.commands).toEqual(['reload-plugins'])
+  expect(textOf(await fixLineRows(s.$, ELS, 140))).toContain('↑ thimble 0.10.6 · 1 fix on again')
+  await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
+  expect(await fixLineRows(s.$, ELS, 140)).toEqual([])
+  // fixes kept off as the person had them, and one that does not fit: a line, and nothing to load
+  const t = setup()
+  Object.assign(t.fix, { state: 'pending', work: null, commit: 'c0ffee1', error: 'it does not fit thimble 0.10.6' })
+  t.made()
+  t.fix.check = { from: '0.10.6', to: '0.10.6', newer: false }
+  t.listed.carried = { to: '0.10.6', back: [], had: [], aside: [1], why: { 1: 'it does not fit thimble 0.10.6' }, off: false, reload: false }
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await t.tick()
+  expect(textOf(await fixLineRows(t.$, ELS, 140))).toContain('↑ thimble 0.10.6 · 1 off: it does not fit it · thimble fix list, in a shell, lists your fixes')
+  expect(t.commands).toEqual([])
 })
 
 test("on a dev install the line names the checkout's new commit, once for that commit", async () => {
