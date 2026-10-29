@@ -558,17 +558,23 @@ def whole_install(tmp_path, *args):
     return p
 
 
-def test_the_install_recommends_the_workbench_s_claude_code_sign_in_to_a_subscriber(tmp_path):
+def test_the_install_gives_the_workbench_s_claude_code_sign_in_first_and_recommends_it(tmp_path):
     """Claude, when it asks how the workbench reaches Claude (CLAUDE.md, step 4), and the install's note when no terminal
-    asked it (an agent runs the script, or --no-setup), recommend the Claude Code sign-in to a person with a Claude
-    subscription. The question in a terminal (claude_access.setup) is the browser's server tests'."""
+    asked it (an agent runs the script, or --no-setup), give the Claude Code sign-in first and recommend it, as the
+    question in a terminal does (claude_access.setup, the browser's server tests). Claude asks in a few words per
+    option."""
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
     ask = text.split(" 4. When the workbench was installed", 1)[1].split(" Then: ", 1)[0]
+    at = [ask.index(way) for way in ("Claude Code sign-in", "Anthropic API key", "Workload Identity Federation")]
+    assert at == sorted(at), ask
     sign_in = ask.split("Claude Code sign-in", 1)[1].split(", an Anthropic API key", 1)[0]
-    assert "recommended" in sign_in and "Claude subscription" in sign_in, ask
+    assert "first" in sign_in and "recommended" in sign_in, ask
+    assert "a few words per option" in ask, ask
     note = next(line for line in whole_install(tmp_path).stdout.splitlines()
                 if line.startswith("Note: Claude access is not set up yet."))
-    assert "Their Claude Code sign-in, recommended when they have a Claude subscription, only after they accept" in note
+    at = [note.index(way) for way in ("Their Claude Code sign-in", "An Anthropic API key", "Workload Identity Federation:")]
+    assert at == sorted(at), note
+    assert "Their Claude Code sign-in (recommended), only after they accept" in note
 
 
 def test_the_readme_and_the_install_summary_say_when_to_use_each_product(tmp_path):

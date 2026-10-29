@@ -9,9 +9,9 @@ agents (side threads, the writers, the view builders, the report checks) itself,
 
 | Way | What runs |
 |---|---|
-| An Anthropic API key (the default) | The server calls the Claude API itself. No Claude Code process starts. |
+| Your Claude Code sign-in (the default) | The server launches headless Claude Code sessions in the background, through the Agent SDK. It asks you to confirm first, since this uses your Claude subscription. |
+| An Anthropic API key | The server calls the Claude API itself. No Claude Code process starts. |
 | Workload Identity Federation | The same, with the IDs and token source of a config file you name (`backend/app/wif.py` lists its keys). |
-| Your Claude Code sign-in | The server launches headless Claude Code sessions in the background, through the Agent SDK. It asks you to confirm first, since this uses your Claude subscription. |
 
 Each way gets the same prompts, the same tools and the same records, so the page looks the same. The choice is made
 once, at install or at the page's first start, and changed in Settings, Claude access. When Claude cannot be reached,

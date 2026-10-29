@@ -3,7 +3,7 @@
 # at the top of the repository, installs what it needs and puts a launcher for it on PATH. Here it builds the page again
 # when its sources are newer than the build, then starts the server on 127.0.0.1, opens the folder as a workspace and
 # prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and thimble's agents itself, on
-# the way to reach Claude chosen at install or in the page: an Anthropic API key, your Claude Code sign-in, or Workload
+# the way to reach Claude chosen at install or in the page: your Claude Code sign-in, an Anthropic API key, or Workload
 # Identity Federation. Ctrl-C stops the server. Each start is a new session, as in Claude Code: an empty chat, canvas,
 # report and labels, as at the folder's first start. --continue and --resume bring an earlier session back whole.
 #

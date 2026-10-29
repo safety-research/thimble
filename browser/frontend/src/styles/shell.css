@@ -1200,11 +1200,6 @@ button.settings-ext-name:hover .settings-ext-caret {
   font-weight: 400;
   color: var(--text-secondary);
 }
-.access-choice-note {
-  grid-column: 2;
-  color: var(--text-tertiary);
-  font-size: var(--text-sm);
-}
 .access-field {
   margin: 8px 0;
 }
