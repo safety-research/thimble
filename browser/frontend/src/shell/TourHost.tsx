@@ -1,6 +1,7 @@
 // The product tour's place in the shell. Each dashboard this install opens (backend tour.py, in thimble's own home),
-// once the shell is drawn with its session attached, shows a welcome that asks whether to take the tour, and says that
-// the tour uses example data, until the person answers one (Take the tour, Skip or Esc), whatever the answer: that
+// once the shell is drawn with its session attached and the first run's step that chooses how thimble reaches Claude
+// is answered (shell/ClaudeAccess), shows a welcome that asks whether to take the tour, and says that the tour uses
+// example data, until the person answers one (Take the tour, Skip or Esc), whatever the answer: that
 // answer is recorded, so a welcome no one answered, on a page opened before the person's own, leaves the offer to the
 // next page. Settings'
 // Take the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While it runs,
@@ -12,6 +13,7 @@ import { bus, type Tab } from '../lib/bus'
 import { hold } from '../lib/telemetry'
 import { refFromUrl } from '../lib/teleport'
 import { setTouring } from '../lib/touring'
+import { accessAnswered } from './ClaudeAccess'
 
 /** The chat column is open, not folded. */
 const chatOn = () => !!document.querySelector('.chat[data-panel="chat"]')
@@ -35,6 +37,7 @@ export function TourHost() {
       running = true
       try {
         if (welcome) {
+          await accessAnswered()
           while (alive && !ready()) await sleep(250)
           await document.fonts?.ready.catch(() => undefined)
           await sleep(900)

@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm'
 import { Fragment, memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Cell, Concept, MimeBundle, OutputTruncation } from '../lib/types'
 import { frameStyle, frameTokens, useFrameFonts, withFrameStyle } from '../lib/frame'
+import { shotScript } from '../lib/frameShot'
 import { useTheme } from '../lib/theme'
 import { token } from '../lib/vizTheme'
 import { useVisibleSize } from '../lib/visibleSize'
@@ -486,12 +487,13 @@ function ErrorOut({ err, maxLines, fold = false }: { err: any; maxLines?: number
   )
 }
 
-/** A scripted html output in a sandboxed frame, painted on the card in the page's theme. */
+/** A scripted html output in a sandboxed frame, painted on the card in the page's theme, which draws itself for a
+ * ⌘-click's picture (lib/frameShot). */
 function HtmlFrame({ html }: { html: string }) {
   const { resolved, key } = useTheme()
   const fonts = useFrameFonts()
   // key: the tokens are read again when the paper or the accent changes; the frame waits for the page's faces
-  const doc = useMemo(() => (fonts == null ? null : withFrameStyle(html, frameStyle(resolved, frameTokens(), fonts))), [html, resolved, key, fonts])
+  const doc = useMemo(() => (fonts == null ? null : withFrameStyle(html, frameStyle(resolved, frameTokens(), fonts) + shotScript())), [html, resolved, key, fonts])
   const [loaded, setLoaded] = useState(false)
-  return doc == null ? null : <iframe className="outputs-iframe" sandbox="allow-scripts" srcDoc={doc} title="html output" data-body="" data-settled={loaded ? 'true' : 'false'} onLoad={() => setLoaded(true)} />
+  return doc == null ? null : <iframe className="outputs-iframe" sandbox="allow-scripts" srcDoc={doc} title="html output" data-body="" data-settled={loaded ? 'true' : 'false'} data-shot="" onLoad={() => setLoaded(true)} />
 }
