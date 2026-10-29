@@ -1,7 +1,8 @@
 // request.ts: a request for a change in the person's own words, as they typed them after /thimble-fix, which the
-// fix-thimble skill starts, and y (try again) on a fix that failed, or redo of one that no longer fits. Each makes the
-// copy with the kernel, then starts the fixer in it. Claude decides whether the words follow up on a fix the person
-// has: /thimble-fix gives it the list of their fixes (register.ts), and it starts the skill with one of these forms:
+// fix-thimble skill starts, and y (try again) on a fix that failed, or redo of one that no longer fits. Each has the
+// kernel make the copy, or go on in the fix's own, then starts the fixer in it. Claude decides whether the words follow
+// up on a fix the person has: /thimble-fix gives it the list of their fixes (register.ts), and it starts the skill with
+// one of these forms:
 //
 //   N              a round of fix N itself, never a new fix: words for its fixer while one works, else a round in its
 //                  copy (ready), else the kernel changes it in place (on or off): a copy holds its change, and the
