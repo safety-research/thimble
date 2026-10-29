@@ -148,9 +148,9 @@ def test_a_fix_whose_change_applies_but_fails_the_checks_on_the_release_stays_of
                         "In Claude Code, type /reload-plugins to load them.", "",
                         "Your thimble fixes · thimble 0.10.3 with 2 on, 1 off"]
     assert [x for x in rows if "does not fit" in x] == [f"  fix {b} is off: it does not fit thimble 0.10.3"]
-    # the three together failed, and again (each run that fails runs once more); then a alone passed, a and b failed
-    # twice, and a and c passed
-    assert runs(log) == 6
+    # the three together failed, and again (each run that fails runs once more); the release alone passed; then a alone
+    # passed, a and b failed twice, and a and c passed
+    assert runs(log) == 7
     assert sh("git", "log", "--format=%s", f"{new}..mine", cwd=live).splitlines() == ["Legend counts untouched", "Bar says read"]
     assert not (live / "plugin" / "hints.ts").exists() and "read ${n}" in live_file("plugin/bar/bar.tsx")
     assert [FX.get(i)["state"] for i in (a, b, c)] == ["on", "pending", "on"]
@@ -158,7 +158,7 @@ def test_a_fix_whose_change_applies_but_fails_the_checks_on_the_release_stays_of
     assert sh("git", "rev-parse", f"refs/thimble/fixes/{c}", cwd=live) == sh("git", "rev-parse", "mine", cwd=live)
     assert "plugin update thimble@thimble" in calls(world)
     # once: nothing runs the checks again, and thimble reapply has Claude fit fix b alone
-    assert FX.carry() is None and runs(log) == 6
+    assert FX.carry() is None and runs(log) == 7
     text = FX.reapply_argv()["argv"][1]
     assert "Hints say who asked" in text and "Bar says read" not in text and "Legend counts untouched" not in text
 
@@ -170,7 +170,7 @@ def test_a_fix_that_fails_the_checks_at_thimble_update_stays_off_and_the_release
     new = upstream({"plugin/rule.md": "the bar says coverage\n"}, "v0.10.3")
     log = checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/rule.md && grep -qs 'read ' plugin/bar/bar.tsx")
     out = FX.update()
-    assert (out["back"], out["had"], out["aside"]) == ([], [], [a]) and runs(log) == 2
+    assert (out["back"], out["had"], out["aside"]) == ([], [], [a]) and runs(log) == 3
     assert out["lines"][2:4] == ["1 local fix does not fit 0.10.3, so it is off: Bar says read.", ""]
     assert out["lines"][4] == "Bring it back:  thimble reapply"
     live = FX.live_dir()
@@ -221,6 +221,27 @@ def test_when_the_checks_cannot_run_nothing_moves_and_the_next_carry_checks_agai
         assert FX.listing()["due"] == {"to": "0.10.3", "n": 3}
     # the sandbox is there now: the next carry puts them back
     assert FX.carry()["back"] == [a, b, c] and [FX.get(i)["state"] for i in (a, b, c)] == ["on"] * 3
+
+
+def test_when_the_release_alone_fails_the_checks_too_no_fix_is_called_a_misfit_and_nothing_moves(world, upstream, monkeypatch, tmp_path):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a, b, c = three_fixes(world)
+    upstream({"plugin/other.md": "made-up\n"}, "v0.10.3")
+    update_as_before()
+    live = FX.live_dir()
+    tip = sh("git", "rev-parse", "mine", cwd=live)
+    # the tests fail whatever the fixes (a machine too busy for their time limits, say)
+    log = checks_that_fail_on(monkeypatch, tmp_path, "true")
+    rows = FX.list_lines(120)
+    assert " ".join(rows[:rows.index("")]) == ("Your 3 fixes stay off: thimble could not check them on thimble 0.10.3 (the "
+                                              "checks fail without them too).")
+    # the three together, then the release alone, each twice: then nothing moves, and no fix is called a misfit
+    assert runs(log) == 4
+    assert [(FX.get(i)["state"], FX.get(i)["error"]) for i in (a, b, c)] == [("pending", None)] * 3
+    assert sh("git", "rev-parse", "mine", cwd=live) == tip and FX.listing()["due"] == {"to": "0.10.3", "n": 3}
+    # the tests pass again: the next carry puts the fixes back
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    assert FX.carry()["back"] == [a, b, c]
 
 
 def test_a_list_for_the_plugin_or_the_workbench_never_carries_and_says_what_waits(world, upstream, monkeypatch, capsys):
@@ -629,7 +650,7 @@ def test_a_dev_update_checks_the_fixes_on_the_checkouts_commit(world, monkeypatc
     log = checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/rule.md && grep -qs 'read ' plugin/bar/bar.tsx")
     out = FX.update()
     to = f"main at {new[:7]}"
-    assert (out["back"], out["had"], out["aside"]) == ([b], [], [a]) and runs(log) == 5
+    assert (out["back"], out["had"], out["aside"]) == ([b], [], [a]) and runs(log) == 6
     assert (FX.get(a)["state"], FX.get(a)["error"]) == ("pending", f"it does not fit thimble {to}")
     assert FX.get(b)["state"] == "on" and sh("git", "rev-parse", "mine^", cwd=FX.live_dir()) == new
     assert "coverage ${n}" in live_file("plugin/bar/bar.tsx")

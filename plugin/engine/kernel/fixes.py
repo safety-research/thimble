@@ -3035,10 +3035,16 @@ def _carry_trial(tip: str, ids: list[int]) -> tuple[list[tuple[int, str]], list[
     return back, had, missed
 
 
-def _carry_tests(back: list[tuple[int, str]]) -> tuple[bool | None, str]:
-    """The checks of work/carry as `back` left it (_carry_argv), after which no git runs in the copy: (True, the log's
-    last lines) passed, (False, the same) failed, (None, why) could not run (the sandbox runtime is missing, say)."""
-    paths = sorted({str(f["path"]) for _, c in back for f in _numstat(live_dir(), f"{c}^", c)})
+def _carry_paths(back: list[tuple[int, str]]) -> list[str]:
+    """The files the fixes of `back` change."""
+    return sorted({str(f["path"]) for _, c in back for f in _numstat(live_dir(), f"{c}^", c)})
+
+
+def _carry_tests(back: list[tuple[int, str]], paths: list[str] | None = None) -> tuple[bool | None, str]:
+    """The checks of work/carry as `back` left it (_carry_argv), for the files its fixes change, or for `paths`, after
+    which no git runs in the copy: (True, the log's last lines) passed, (False, the same) failed, (None, why) could not
+    run (the sandbox runtime is missing, say)."""
+    paths = _carry_paths(back) if paths is None else paths
     try:
         page = _page_packages() if any(p.startswith("browser/frontend/") for p in paths) else []
         if page and not os.environ.get("THIMBLE_FIX_TESTS"):
@@ -3052,8 +3058,9 @@ def _carry_tests(back: list[tuple[int, str]]) -> tuple[bool | None, str]:
 def _carry_check(tip: str, ids: list[int], to: str, say) -> dict[str, Any]:
     """The fixes of `ids` on the release (`tip`), checked as done checks a fix (_carry_tests) before any goes on: {back,
     had, missed, failed}, back with each fix that passed and its commit, in order; or {unchecked: why} when the checks
-    could not run. Fixes that fail together are tried again one at a time, each on top of those that passed before it,
-    so that a fix whose change applies but does not work on the release keeps none of the others off."""
+    could not run, or fail on the release alone too. Fixes that fail together are tried again one at a time, each on top
+    of those that passed before it, so that a fix whose change applies but does not work on the release keeps none of
+    the others off."""
     back, had, missed = _carry_trial(tip, ids)
     out: dict[str, Any] = {"back": back, "had": had, "missed": missed, "failed": []}
     if not back:
@@ -3066,6 +3073,13 @@ def _carry_check(tip: str, ids: list[int], to: str, say) -> dict[str, Any]:
         return {"unchecked": tail}
     if ok:
         return out
+    # the release alone, with the same checks: when it fails them too (a machine too busy for the tests' time limits,
+    # say), they say nothing of the fixes
+    paths = _carry_paths(back)
+    _carry_trial(tip, [])
+    ok, tail = _carry_tests([], paths)
+    if not ok:
+        return {"unchecked": tail if ok is None else "the checks fail without them too"}
     order = [f for f, _ in back]
     if k == 1:
         return {**out, "back": [], "failed": order}
