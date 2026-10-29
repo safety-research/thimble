@@ -10,7 +10,7 @@
 #   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given; starts a new session
 #   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
 #   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
-#   thimble-browser --link [FOLDER]       a fresh sign-in link to the server that runs; it starts no new session
+#   thimble-browser --link [FOLDER]       a new sign-in link for the workbench that runs
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
 #   thimble-browser --demo [NAME...]      the demo datasets (also: thimble demo)
 #   thimble-browser --setup --how claude-code --yes | --key-file F | --how wif --wif-file F   the same, without asking
