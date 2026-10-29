@@ -128,12 +128,14 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
     const head = s.group && shown[i - 1]?.group !== s.group
       ? [Box({ key: `group-${s.group}`, marginTop: 1, children: [Text({ bold: true, dimColor: true, children: s.group.toUpperCase() })] })]
       : []
-    const choices = choicesOf(s, values).flatMap((c, k) => [
-      ...(k ? [Text({ key: `sep-${c}`, dimColor: true, children: ' · ' })] : []),
+    // each choice with the dot after it, so a row the choices wrap onto starts with a choice, never with a dot
+    const options = choicesOf(s, values)
+    const choices = options.map((c, k) => Box({ key: `opt-${c}`, flexDirection: 'row', flexShrink: 0, children: [
       Button({ key: choiceKey(s, c), plain: true, label: `${s.title}: ${labelOf(s, c)}`, onPress: () => chooseHere($, s, c), ...(here && c === set ? { autoFocus: true } : {}), children: [
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: labelOf(s, c) }),
       ] }),
-    ])
+      ...(k < options.length - 1 ? [Text({ key: 'sep', dimColor: true, children: ' · ' })] : []),
+    ] }))
     // Minimal stands over the rows as a heading would, what it does under it
     const minimal = s.key === 'minimal'
     const says = minimal ? s.says?.on : s.says?.[set]

@@ -313,6 +313,8 @@ test('in the settings, Checker names each model with its version, as Claude Code
     expect(textOf(checker.find(n => n.props?.key === 'says-checkerModel'))).toBe('The second Claude checks citations on Fable 5.1.')
     const lit = (ns: Any[]) => ns.filter(n => n.type === 'Text' && n.props?.bold && n.props?.color === 'success').map(textOf)
     expect(lit(checker)).toEqual(['Fable 5.1'])
+    // each choice keeps the dot after it, so a row the choices wrap onto starts with a choice
+    expect(checker.filter(n => String(n.props?.key).startsWith('opt-')).map(textOf)).toEqual(['same as Claude · ', 'Haiku 5.5 · ', 'Sonnet 5.5 · ', 'Opus 5.5 · ', 'Fable 5.1'])
     // its effort: the levels Claude Code offers for Fable 5.1, by Claude Code's words for them
     const effort = nodes(row('checkerEffort'))
     expect(textOf(effort.find(n => n.props?.key === 'choices'))).toBe('same as Claude · low · medium · high · xhigh · max')
