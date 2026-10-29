@@ -12,7 +12,7 @@ import { GlyphCites } from '../components/RefChip'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
-import { CardBody, LabelHead, asksQuestion } from './bodies'
+import { CardBody, LabelHead, asksQuestion, exampleRefs } from './bodies'
 import { CardLabels } from './CardFace'
 import { conceptName, useConceptDetail } from './concepts'
 import { CanvasContext } from './context'
@@ -102,7 +102,7 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
                 {cell.takeaway ? (
                   <div className="bfocus-take">
                     <div className={'chat-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} />
+                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} />
                     </div>
                   </div>
                 ) : null}

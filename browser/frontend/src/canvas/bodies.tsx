@@ -36,6 +36,13 @@ import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
+/** The records an example card quotes, as its payload holds them, which the citations of its takeaway are told apart
+ * from (chat/markdown ChatMarkdown `among`); none for any other card. */
+export function exampleRefs(cell: Cell): readonly unknown[] | undefined {
+  const refs = kindOf(cell) === 'example' ? (cell.payload as Record<string, unknown> | undefined)?.refs : undefined
+  return Array.isArray(refs) ? refs : undefined
+}
+
 export function CardBody({ cell, width, label, big = false }: { cell: Cell; width: number; label: ConceptDetailState; big?: boolean }) {
   const { ws, concepts, drawn } = useContext(CanvasContext)
   const kind = kindOf(cell)

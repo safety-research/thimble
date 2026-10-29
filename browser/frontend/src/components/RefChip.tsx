@@ -63,13 +63,17 @@ export { decodeLabel }
  * the link's text, and a whole card's citation its chip with the card's short name. */
 export const GlyphCites = createContext(false)
 
+/** The prefixes of the file chips shown together (lib/refs prefixesAmong): a reply's or a takeaway's citations, with the
+ * records of the example card a takeaway is on, so files of one name read apart as the card's addresses do. */
+export const ShownTogether = createContext<ReadonlyMap<string, string>>(new Map())
+
 const ID_TOKEN = /\b(cell|concept|chat|group|report|view|call)[:]([A-Za-z0-9_-]{4,})(?:\/\d+)?(?:#[A-Za-z0-9_@.-]*)?/g
 /** An id-looking `kind:<id>` replaced by its kind word, so a chip never shows a hash. */
 export function scrubIds(s: string): string {
   return s.replace(ID_TOKEN, '$1')
 }
 
-export function compactLabel(ref: string): string {
+export function compactLabel(ref: string, among?: ReadonlyMap<string, string>): string {
   const p = parseRef(ref)
   if (!p) return scrubIds(ref.trim()) || 'reference'
   if (p.kind === 'cell') {
@@ -79,13 +83,14 @@ export function compactLabel(ref: string): string {
     if (p.out != null) return `${name} · ${cellSpanLabel(p)}`
     return name + (p.exec != null ? `@${p.exec}` : '')
   }
-  if (p.kind === 'concept') return conceptLabel(p.conceptId) ?? refLabel(ref)
-  return refLabel(ref)
+  if (p.kind === 'concept') return conceptLabel(p.conceptId) ?? refLabel(ref, among)
+  return refLabel(ref, among)
 }
 
 /** A chip's name: a cell's or view's name alone, and for a ref into part of a card its table cell or lines (lib/refs
- * cardPartLabel), without the card's name when the chip sits in that card (`home`). Other refs read as compactLabel. */
-export function chipLabel(ref: string, home?: string | null, ws = ''): string {
+ * cardPartLabel), without the card's name when the chip sits in that card (`home`). Other refs read as compactLabel,
+ * a file's told apart from the files shown with it (`among`, ShownTogether). */
+export function chipLabel(ref: string, home?: string | null, ws = '', among?: ReadonlyMap<string, string>): string {
   const p = parseRef(ref)
   if (p?.kind === 'call') {
     // what the call points at in plain words, once a thread or a read registered it; its step number until then
@@ -98,7 +103,7 @@ export function chipLabel(ref: string, home?: string | null, ws = ''): string {
     return cardPartLabel(p, name, home === p.cellId) ?? name + (p.exec != null ? `@${p.exec}` : '')
   }
   if (p?.kind === 'view' && p.key) return p.slug
-  return compactLabel(ref)
+  return compactLabel(ref, among)
 }
 
 /** Ask for the name a ref's chip shows when it is not known yet: a card's, a label's, a call's (lib/calls registers it
@@ -300,7 +305,8 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   // named without the card's name
   const [home, setHome] = useState<string | null>(null)
   useLayoutEffect(() => setHome(chipEl.current?.closest<HTMLElement>('[data-cite-home]')?.dataset.citeHome ?? null), [])
-  const name = () => chipLabel(ref, home, ws)
+  const among = useContext(ShownTogether)
+  const name = () => chipLabel(ref, home, ws, among)
   const label = useSyncExternalStore(onNames, name, name)
   const parsed = parseRef(ref)
   const unresolved = !parsed && !broken
