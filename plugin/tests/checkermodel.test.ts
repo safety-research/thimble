@@ -1,7 +1,7 @@
-// The model the checker of the citations runs on (the setting Checker, marks/register.ts): a fork keeps the
-// conversation's model, so each request of a checker fork's turn names the model the setting names, by its id
-// (core/models.js); unset, or same as Claude, the request goes as it is. Main's requests and another fork's never
-// change. All data is made up. `claude plugin test plugin`.
+// The model the checker of the citations runs on (the setting Checker, marks/register.ts), and its effort (Checker's
+// Effort): a fork keeps the conversation's model and effort, so each request of a checker fork's turn names the model
+// the setting names, by its id (core/models.js), and the effort Effort names; unset, or same as Claude, the request
+// goes as it is. Main's requests and another fork's never change. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { spawnFork } from '../core/forks'
@@ -13,7 +13,7 @@ import { test } from './kit'
 type Any = any
 
 /** The marks module's hooks, on an engine whose forks start and whose process has the variables `env`: the model each
- *  step of an agent's turn is sent with. */
+ *  step of an agent's turn is sent with, and its effort. */
 async function setup(env: Record<string, string> = {}) {
   const hooks: Record<string, Any[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
@@ -30,30 +30,32 @@ async function setup(env: Record<string, string> = {}) {
   }
   const checker = (await spawnFork($, { kind: 'checker', prompt: 'CHECK', description: 'checking citations' })).agentId!
   const designer = (await spawnFork($, { kind: 'designer', prompt: 'DESIGN', description: 'designing a card' })).agentId!
-  /** The model a step of `agentId`'s turn (main's when none) is sent with, through the marks module's turn.step hooks. */
-  const sent = async (agentId?: string): Promise<string> => {
-    let model = ''
+  /** The model and the effort a step of `agentId`'s turn (main's when none) is sent with, through the marks module's
+   *  turn.step hooks. */
+  const step = async (agentId?: string): Promise<{ model: string; effort?: unknown }> => {
+    let got: { model: string; effort?: unknown } = { model: '' }
     const chain = hooks['turn.step'] ?? []
     const at = (i: number): ((e: Any) => AsyncGenerator<unknown, Any>) => async function* (e: Any) {
       if (i < chain.length) return yield* chain[i]($, e, at(i + 1))
-      model = e.model
+      got = { model: e.model, effort: e.effort }
       return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] }
     }
     for await (const _ of at(0)({ turnId: 't1', index: 0, model: 'claude-made-up-opus', effort: 'high', messageCount: 3, ...(agentId ? { agentId } : {}) })) { /* the step's pieces */ }
-    return model
+    return got
   }
-  return { sent, checker, designer }
+  const sent = async (agentId?: string): Promise<string> => (await step(agentId)).model
+  return { sent, step, checker, designer }
 }
 
-test("with Checker haiku, each request of the checker's turn names Haiku's id; main's and the designer's keep their model", async () => {
+test("with Checker Haiku 5.5, each request of the checker's turn names Haiku's id; main's and the designer's keep their model", async () => {
   const { sent, checker, designer } = await setup()
-  setOptions({ checkerModel: 'haiku' })
+  setOptions({ checkerModel: 'Haiku 5.5' })
   try {
     expect(await sent(checker)).toBe('claude-haiku-5-5')
     expect(await sent()).toBe('claude-made-up-opus')
     expect(await sent(designer)).toBe('claude-made-up-opus')
     expect(await sent('agent-of-someone-else')).toBe('claude-made-up-opus')
-    setOptions({ checkerModel: 'sonnet' })
+    setOptions({ checkerModel: 'Sonnet 5.5' })
     expect(await sent(checker)).toBe('claude-sonnet-5-5')
   } finally {
     setOptions({})
@@ -69,11 +71,13 @@ test("unset, or same as Claude, the checker's requests keep the conversation's m
   // a value that is no choice of the setting is its default
   setOptions({ checkerModel: 'claude-made-up-tiny' })
   expect(await sent(checker)).toBe('claude-made-up-opus')
+  setOptions({ checkerModel: 'haiku' })
+  expect(await sent(checker)).toBe('claude-made-up-opus')
   setOptions({})
 })
 
 test("on Bedrock, Vertex or Foundry the checker's requests keep the conversation's model, whatever Checker holds: the ids it names are the first-party API's", async () => {
-  setOptions({ checkerModel: 'haiku' })
+  setOptions({ checkerModel: 'Haiku 5.5' })
   try {
     // set to a true value, as Claude Code reads one (1, true, yes or on, in any case)
     for (const env of [{ CLAUDE_CODE_USE_BEDROCK: '1' }, { CLAUDE_CODE_USE_VERTEX: 'true' }, { CLAUDE_CODE_USE_FOUNDRY: ' Yes ' }]) {
@@ -84,6 +88,29 @@ test("on Bedrock, Vertex or Foundry the checker's requests keep the conversation
     for (const env of [{ CLAUDE_CODE_USE_BEDROCK: '0' }, { CLAUDE_CODE_USE_VERTEX: 'false' }, { CLAUDE_CODE_USE_FOUNDRY: '' }]) {
       const { sent, checker } = await setup(env)
       expect(await sent(checker)).toBe('claude-haiku-5-5')
+    }
+  } finally {
+    setOptions({})
+  }
+})
+
+test("with Effort set, each request of the checker's turn names that effort, on the model Checker names (Fable 5.1 too); same as Claude keeps the conversation's; main's and the designer's keep theirs; on Bedrock both stay", async () => {
+  const { step, checker, designer } = await setup()
+  setOptions({ checkerModel: 'Fable 5.1', checkerEffort: 'xhigh' })
+  try {
+    expect(await step(checker)).toEqual({ model: 'claude-fable-5-1', effort: 'xhigh' })
+    expect(await step()).toEqual({ model: 'claude-made-up-opus', effort: 'high' })
+    expect(await step(designer)).toEqual({ model: 'claude-made-up-opus', effort: 'high' })
+    // Effort alone: the conversation's model, at the effort set
+    setOptions({ checkerEffort: 'low' })
+    expect(await step(checker)).toEqual({ model: 'claude-made-up-opus', effort: 'low' })
+    // Checker alone: that model, at the conversation's effort
+    setOptions({ checkerModel: 'Haiku 5.5', checkerEffort: 'same as Claude' })
+    expect(await step(checker)).toEqual({ model: 'claude-haiku-5-5', effort: 'high' })
+    for (const env of [{ CLAUDE_CODE_USE_BEDROCK: '1' }, { CLAUDE_CODE_USE_VERTEX: 'yes' }]) {
+      setOptions({ checkerModel: 'Fable 5.1', checkerEffort: 'max' })
+      const s = await setup(env)
+      expect(await s.step(s.checker)).toEqual({ model: 'claude-made-up-opus', effort: 'high' })
     }
   } finally {
     setOptions({})

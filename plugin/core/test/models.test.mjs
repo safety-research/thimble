@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { aboutDollars, dollars, modelOf } from '../models.js'
+import { ALIASES, EFFORTS, aboutDollars, dollars, modelById, modelNamed, modelOf, shownName } from '../models.js'
 
 test('an alias names its model and prices its tokens; a rough price reads in plain dollars', () => {
   assert.equal(modelOf('sonnet').name, 'Claude Sonnet 5.5')
@@ -10,4 +10,23 @@ test('an alias names its model and prices its tokens; a rough price reads in pla
   assert.equal(dollars('sonnet', 1e6, 1e5), 3)
   assert.equal(dollars('made-up', 1, 1), null)
   assert.deepEqual([0.004, 0.27, 3.6, 27].map(aboutDollars), ['under $0.01', 'about $0.25', 'about $4', 'about $25'])
+})
+
+test("Claude Code's four aliases, Fable among them: each model as Claude Code shows it, the id a request names, and the effort levels Claude Code offers for it", () => {
+  assert.deepEqual(ALIASES, ['haiku', 'sonnet', 'opus', 'fable'])
+  assert.deepEqual(ALIASES.map(shownName), ['Haiku 5.5', 'Sonnet 5.5', 'Opus 5.5', 'Fable 5.1'])
+  assert.deepEqual(ALIASES.map(a => modelOf(a).id), ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'])
+  assert.equal(dollars('fable', 1e6, 1e5), 15)
+  assert.deepEqual(EFFORTS, ['low', 'medium', 'high', 'xhigh', 'max'])
+  for (const a of ALIASES) assert.deepEqual(modelOf(a).efforts, EFFORTS)
+  // a request's id, with or without its context window's suffix
+  assert.equal(modelById('claude-fable-5-1'), modelOf('fable'))
+  assert.equal(modelById('claude-opus-5-5[1m]'), modelOf('opus'))
+  assert.equal(modelById('claude-made-up-7'), null)
+  assert.equal(shownName('made-up'), 'made-up')
+  // a model by the name Claude Code shows it by, which the setting Checker saves
+  for (const a of ALIASES) assert.equal(modelNamed(shownName(a)), modelOf(a))
+  assert.equal(modelNamed('Fable 5.1').id, 'claude-fable-5-1')
+  assert.equal(modelNamed('haiku'), null)
+  assert.equal(modelNamed('Haiku 9.9'), null)
 })

@@ -7,10 +7,11 @@
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
 // tinted across the pane, with no mark of its own (a `›` there read as a row that opens), and the pane keeps that row
 // and its line in view at any height (core/pane.ts keepsInView), as the pick moves with ↑ and ↓. A setting that
-// changes the work of another feature (`under`: Checker, the checks of Citations) shows only while that feature is on,
-// as nothing it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids (`firstParty`:
-// Checker) shows only where Claude Code reaches Claude through Anthropic's first-party API (settings/term.ts
-// firstPartyApi).
+// changes the work of another feature (`under`: Checker and its Effort, the checks of Citations) shows only while that
+// feature is on, as nothing it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids or
+// their effort (`firstParty`: Checker, Effort) shows only where Claude Code reaches Claude through Anthropic's
+// first-party API (settings/term.ts firstPartyApi). Effort offers the levels Claude Code offers for the model Checker
+// names (settings/features.mjs choicesIn).
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -23,7 +24,7 @@ import type { EngineInterface } from 'claude-code'
 import { barRows } from '../bar/bar'
 import { arrowsOwn, keepsInView, PANE_ID } from '../core/pane'
 import { treeRows } from '../core/trail.mjs'
-import { SWITCHES, switchesFrom } from '../settings/features.mjs'
+import { choicesIn, SWITCHES, switchesFrom } from '../settings/features.mjs'
 import { firstPartyApi, heldValues, settingsAction } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,8 +43,9 @@ const IN = 2 + NAME + 1
 const MINIMAL_TITLE = 'MINIMAL MODE '
 
 const ROWS = SWITCHES as Switch[]
-/** A feature's choices as the pane shows them: its modes, or on and off. */
-const choicesOf = (s: Switch) => s.choices ?? ['on', 'off']
+/** A feature's choices as the pane offers them with `values` (Effort: the levels of the model Checker names): its
+ *  modes, or on and off; with no values, every mode it has. */
+const choicesOf = (s: Switch, values?: Record<string, unknown>) => (s.choices ? (values ? choicesIn(s.key, values) as string[] : s.choices) : ['on', 'off'])
 /** The choice set, as the pane names it. */
 const shownOf = (s: Switch, v: unknown) => (s.choices ? String(v) : v ? 'on' : 'off')
 /** A choice's element key, and the feature and choice it names. */
@@ -123,12 +125,14 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
     const head = s.group && shown[i - 1]?.group !== s.group
       ? [Box({ key: `group-${s.group}`, marginTop: 1, children: [Text({ bold: true, dimColor: true, children: s.group.toUpperCase() })] })]
       : []
-    const choices = choicesOf(s).flatMap((c, k) => [
-      ...(k ? [Text({ key: `sep-${c}`, dimColor: true, children: ' · ' })] : []),
+    // each choice with the dot after it, so a row the choices wrap onto starts with a choice, never with a dot
+    const options = choicesOf(s, values)
+    const choices = options.map((c, k) => Box({ key: `opt-${c}`, flexDirection: 'row', flexShrink: 0, children: [
       Button({ key: choiceKey(s, c), plain: true, label: `${s.title}: ${c}`, onPress: () => chooseHere($, s, c), ...(here && c === set ? { autoFocus: true } : {}), children: [
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
       ] }),
-    ])
+      ...(k < options.length - 1 ? [Text({ key: 'sep', dimColor: true, children: ' · ' })] : []),
+    ] }))
     // Minimal stands over the rows as a heading would, what it does under it
     const minimal = s.key === 'minimal'
     const says = minimal ? s.says?.on : s.says?.[set]

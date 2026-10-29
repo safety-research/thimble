@@ -15,8 +15,12 @@
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
 //                    autoRepair), as x does
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script
-//   agent.spawn      a repair's fork (x in the tray): waits out the key's word window, refused when a word came
-//                    (a repair thimble starts itself has no word window)
+//   turn.step        the checker's requests: the model and the effort the setting Checker names
+//   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
+//                    refused when a word came (a repair thimble starts itself has no word window)
+//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g): Claude Code's
+//                    own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask mode
+//                    would refuse it (checker.ts allowsCheck)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
@@ -33,9 +37,9 @@ import { shownWords } from '../core/selection'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
-import { checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
+import { checkerEffort, checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -43,6 +47,11 @@ import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
+
+/** The spawns a key started that wait out its word window: x's repair, and a check g starts again. */
+const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
+/** Why thimble answers allow to Claude Code at tool.check on a check of its own. */
+const CHECKS_ALLOWED = "thimble's check of citations, which the person allowed this session"
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
  *  words of one of the row's checked marks looks as that one does, and opens its evidence. A rewrite may word a
@@ -178,23 +187,35 @@ export const registerMarks: Register = on => {
     return no ? { deny: no } : next(e)
   })
 
-  // the checker's requests on the model the setting Checker names (settings/features.mjs checkerModel): a fork
-  // keeps the conversation's model, and its spawn takes no other, so each request of a checker's turn names that model.
-  // Unset, the requests go as they are; so do they on Bedrock, Vertex or Foundry, which do not take the first-party ids
-  // Checker names (settings/term.ts firstPartyApi), whatever it holds
+  // the checker's requests on the model the setting Checker names, at the effort its Effort names (settings/features.mjs
+  // checkerModel, checkerEffort): a fork keeps the conversation's model and effort, and its spawn takes no other, so
+  // each request of a checker's turn names them. Unset, the requests go as they are; so do they on Bedrock, Vertex or
+  // Foundry, which do not take the first-party ids Checker names (settings/term.ts firstPartyApi), whatever it holds
   on('turn.step', { agentId: /./ }, async function* ($, e, next) {
-    const model = forkOf(e.agentId)?.kind === 'checker' ? checkerModel() : null
-    return yield* next(model && (await firstPartyApi($)) ? { ...e, model } : e)
+    const checker = forkOf(e.agentId)?.kind === 'checker'
+    const model = checker ? checkerModel() : null
+    const effort = checker ? checkerEffort(model ?? e.model) : null
+    if ((!model && !effort) || !(await firstPartyApi($))) return yield* next(e)
+    return yield* next({ ...e, ...(model ? { model } : {}), ...(effort ? { effort } : {}) })
   })
 
-  // x's repair waits out the word window, and is refused when a letter came in it (hooks/keys.ts undoes x)
-  on('agent.spawn', { description: REPAIR_DESCRIPTION }, async ($, e, next) => {
+  // x's repair, and a check g starts again, wait out the word window, and are refused when a letter came in it
+  // (hooks/keys.ts undoes the key)
+  on('agent.spawn', { description: HELD_SPAWN }, async ($, e, next) => {
     const h = heldRepair()
     if (next.origin.plugin !== 'thimble' || !h) return next(e)
     const left = h.until - Number(await $.clock.now())
     if (left > 0) await $.clock.sleep(left)
-    if (h.cancelled) return { deny: 'the person typed a word that starts with x' }
+    if (h.cancelled) return { deny: 'the person typed a word that starts with the key' }
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // a checker's spawn of thimble's own, once the person let thimble start its checks (g, checker.ts allowsCheck):
+  // Claude Code's own ask, which auto mode's classifier would settle or don't ask mode refuse, is answered allow; a deny,
+  // and an ask a rule, a hook, a setting or another plugin made, stand
+  on('tool.check', { tool: 'Agent' }, async ($, e, next) => {
+    const v = await next(e)
+    return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
   // fails safe (core/rowhook.ts): a throw here answers the drawing beneath, which the hooks around this one draw on
