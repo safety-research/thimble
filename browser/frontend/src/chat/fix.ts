@@ -39,7 +39,7 @@ export interface FixRow {
   files?: number
   /** the files it changed, by path */
   paths?: string[]
-  /** its copy of thimble, where its fixer worked, as the person reads the path; '' when it has none */
+  /** its copy of thimble, where its fixer worked, by its whole path; '' when it has none */
   copy?: string
   /** it needs a change to a file no fix may change, so another try fails the same way (the kernel's `blocked`) */
   blocked?: boolean

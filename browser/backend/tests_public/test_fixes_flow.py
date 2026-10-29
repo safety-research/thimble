@@ -461,12 +461,11 @@ async def test_a_fix_that_did_not_pass_says_what_it_tried_for_ask_claude(fixing,
     await fixes.request(CORPUS, "cards should draw on Node 26", "")
     await _ended()
     row = fixes.status()["fixes"][0]
-    # the person's words, what the fixer did, the files it changed, why, and its copy as the person reads its path
+    # the person's words, what the fixer did, the files it changed, why, and its copy by its whole path, which main can
+    # read as it is (main's home folder is a session's, not the person's)
     assert (row["kind"], row["words"], row["error"]) == ("failed", "cards should draw on Node 26", "it needs a newer node")
     assert row["summary"] == "The card's title now ends with its row count." and row["paths"] == ["a", "b"]
-    assert row["copy"] == fixing.recs[1]["work"]  # outside the home folder here, so as it is
-    monkeypatch.setattr(fixes.Path, "home", classmethod(lambda cls: fixing.home))
-    assert fixes.status()["fixes"][0]["copy"] == "~/fixes/work/1"
+    assert row["copy"] == fixing.recs[1]["work"] and Path(row["copy"]).is_absolute()
     # a ready fix's row says no more than it did in 0.10.5: no sentence of the files it changes
     assert "notice" not in row
 

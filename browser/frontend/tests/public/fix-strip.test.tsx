@@ -70,7 +70,7 @@ describe('the row and the notice', () => {
     ])
   })
 
-  const failed = (over: Partial<FixRow> = {}) => row({ state: 'failed', kind: 'failed', said: '“Card says how many rows” did not pass: its tests failed in the sandbox', error: 'its tests failed in the sandbox', paths: ['browser/frontend/src/canvas/Focus.tsx'], copy: '~/.thimble/fixes/work/3', ...over })
+  const failed = (over: Partial<FixRow> = {}) => row({ state: 'failed', kind: 'failed', said: '“Card says how many rows” did not pass: its tests failed in the sandbox', error: 'its tests failed in the sandbox', paths: ['browser/frontend/src/canvas/Focus.tsx'], copy: '/home/t/.thimble/fixes/work/3', ...over })
 
   test('what a fix that did not pass tried, and its failure as a message to Claude in one paragraph', () => {
     expect(triedLines(failed())).toEqual([
@@ -79,7 +79,7 @@ describe('the row and the notice', () => {
       { label: 'Tried', text: 'browser/frontend/src/canvas/Focus.tsx' },
       { label: 'Why', text: 'its tests failed in the sandbox' },
     ])
-    expect(askClaudeText(failed())).toBe("My thimble fix 3, “Card says how many rows”, did not pass: its tests failed in the sandbox. I asked: “make this card's title say how many rows”. Its fixer, which works in a sandbox, tried this: The card's title ends with its row count. Its copy of thimble, with its change, is ~/.thimble/fixes/work/3. Find why it failed, and make the change if you can.")
+    expect(askClaudeText(failed())).toBe("My thimble fix 3, “Card says how many rows”, did not pass: its tests failed in the sandbox. I asked: “make this card's title say how many rows”. Its fixer, which works in a sandbox, tried this: The card's title ends with its row count. Its copy of thimble, with its change, is /home/t/.thimble/fixes/work/3. Find why it failed, and make the change if you can.")
     // a fix that went off again after the page did not build: what the row says, since the kernel gives no reason
     const off = failed({ state: 'off', error: null, summary: '', copy: '', said: '“Card says how many rows” did not go on: the page did not build: error TS1005; it is off again' })
     expect(askClaudeText(off)).toBe("My thimble fix 3: “Card says how many rows” did not go on: the page did not build: error TS1005; it is off again. I asked: “make this card's title say how many rows”. Its fixer works in a sandbox. Find why it failed, and make the change if you can.")

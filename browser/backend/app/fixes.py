@@ -140,12 +140,6 @@ def notes_path() -> Path:
     return cli.home().expanduser() / "fixes.json"
 
 
-def _tilde(p: str) -> str:
-    """A path as the person reads it: ~ for their home folder."""
-    home = str(Path.home())
-    return "~" + p[len(home):] if p.startswith(home + os.sep) else p
-
-
 def _cut(text: str, n: int) -> str:
     t = re.sub(r"\s+", " ", text or "").strip()
     return t if len(t) <= n else t[: n - 1].rstrip() + "…"
@@ -365,9 +359,10 @@ def status(every: bool = False) -> dict[str, Any]:
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
                      "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
-                     # what it tried, for a fix that did not pass: the files it changed, and its copy of thimble
+                     # what it tried, for a fix that did not pass: the files it changed, and its copy of thimble, by
+                     # its whole path (main's home folder is not the person's)
                      "paths": [str(f.get("path") or "") for f in files if isinstance(f, dict)][:20],
-                     "copy": _tilde(str(r.get("work") or "")),
+                     "copy": str(r.get("work") or ""),
                      # it needs a change to a file no fix may change: another try without new words fails the same way
                      "blocked": bool(r.get("blocked")),
                      "workspace": conv.c if conv is not None else n.get("workspace"),
