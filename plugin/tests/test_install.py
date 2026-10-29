@@ -844,43 +844,72 @@ def test_what_claude_reads_about_the_version_says_where_it_comes_from():
 INSTALL_DOCS = ("README.md", "CLAUDE.md", "INSTALL.md", "browser/README.md")
 
 
-def named_paths(doc):
-    """The repository's paths a doc names, in its code spans, code blocks and links: a relative path under an entry of
-    the doc's folder or of the repository's top, or a file name (README.md's `docs/assets/thimble-term.png` and
-    `INSTALL.md`, browser/README.md's `backend/app/wif.py` and `scripts/install.sh`, "at the top of the repository").
-    Not URLs, paths in a home (~/) or from the root, placeholders (<plugin>), globs, or a path under no such entry
-    (`refs/thimble/`, a data folder's `thimble/`)."""
+def tracked():
+    """The repository's files, by their paths."""
+    return subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+
+
+def named_paths(doc, text=None):
+    """The repository's paths a doc names, wherever it names them: code blocks, code spans, links (a link's #anchor is
+    no part of its path) and plain text. A path of names joined by / is one when its first folder is an entry of the
+    doc's folder or of the repository's top, or it has three names or more, or it ends in a file of a type the
+    repository has (by its extension); a lone file name of such a type is one in code or a link (README.md's
+    `docs/assets/thimble-term.png` and `INSTALL.md`, browser/README.md's `backend/app/wif.py`). Not URLs, paths in a
+    home (~/) or from the root, variables, packages (@), placeholders (<plugin>, path/to/), globs, or two names that
+    are none of these (`refs/thimble/`, the repository safety-research/thimble, `workspaces/.archive`)."""
+    text = (ROOT / doc).read_text() if text is None else text
     at = (ROOT / doc).parent
-    text = (ROOT / doc).read_text()
-    spans = re.findall(r"```[a-z]*\n(.*?)```", text, re.S)
-    text = re.sub(r"```[a-z]*\n.*?```", "", text, flags=re.S)
-    spans += re.findall(r"`([^`\n]+)`", text) + re.findall(r"\]\(([^)\s]+)\)", text)
+    types = {Path(f).suffix for f in tracked() if Path(f).suffix}
+    blocks = re.findall(r"```[a-z]*\n(.*?)```", text, re.S)
+    prose = re.sub(r"```[a-z]*\n.*?```", " ", text, flags=re.S)
+    spans = re.findall(r"`([^`\n]+)`", prose)
+    links = re.findall(r"\]\(([^)\s]+)\)", prose) + re.findall(r'\b(?:src|href)="([^"]+)"', prose)
+    prose = re.sub(r"`[^`\n]+`|\]\([^)\s]*\)|<[^>\n]*>", " ", prose)
     out = []
-    for word in " ".join(spans).split():
-        p = word.strip("'\",;:()").rstrip("/.")
-        if not p or "://" in p or p[0] in "~$/-@" or set(p) & set("<>*=$#"):
+    for word, code in [(w, True) for w in " ".join(blocks + spans + links).split()] + [(w, False) for w in prose.split()]:
+        p = word.strip("'\",;:()[]*_!?").split("#")[0].rstrip("/.")
+        if not p or "://" in p or p[0] in "~$/-@" or set(p) & set("<>*=$") or p.startswith("path/to/"):
             continue
-        top = p.split("/")[0]
-        if ("/" in p and ((at / top).exists() or (ROOT / top).exists())) or re.fullmatch(r"[\w.-]+\.(md|sh|py|mjs|json|csv)", p):
+        names = p.split("/")
+        if not all(re.fullmatch(r"[\w.-]+", n) for n in names):
+            continue
+        typed = Path(names[-1]).suffix in types
+        if len(names) > 1 and ((at / names[0]).exists() or (ROOT / names[0]).exists() or len(names) > 2 or typed):
+            out.append(p)
+        elif len(names) == 1 and code and typed:
             out.append(p)
     return out
 
 
+def missing(doc, text=None):
+    """The paths a doc names (named_paths) that are not in the repository: beside the doc or at its top, or as the
+    end of one of its paths (a file of a folder the doc names before it: the plugin's engine/thimble.py), or that its
+    build makes there (git ignores those: frontend/dist)."""
+    at = (ROOT / doc).parent
+    files = ["/" + f for f in tracked()]
+    out = []
+    for p in named_paths(doc, text):
+        if (at / p).exists() or (ROOT / p).exists():
+            continue
+        if "/" in p and any(f.endswith("/" + p) or f"/{p}/" in f for f in files):
+            continue
+        if any(subprocess.run(["git", "check-ignore", "-q", q], cwd=ROOT).returncode == 0 for q in (str(at / p), f"{at / p}/")):
+            continue
+        out.append(p)
+    return out
+
+
 def test_every_path_the_install_docs_name_is_in_the_repository():
-    """The docs an install reads name only files that are in the repository, beside the doc or at its top, or that its
-    build makes there (git ignores those), so that Claude, which reads them first when it installs thimble, never looks
-    for one that is not there."""
+    """The docs an install reads name only files that are in the repository, so that Claude, which reads them first
+    when it installs thimble, never looks for one that is not there. The check sees a path wherever a doc names it: a
+    mistyped folder, a link with an anchor, a file of any type the repository has, and a path in plain text."""
     names = {doc: named_paths(doc) for doc in INSTALL_DOCS}
     assert "examples/sample/runs.csv" in names["CLAUDE.md"] and "INSTALL.md" in names["README.md"]
-    for doc, paths in names.items():
-        at = (ROOT / doc).parent
-        for p in paths:
-            if (at / p).exists() or (ROOT / p).exists():
-                continue
-            # a file or a folder of the build (frontend/dist), which git ignores
-            ignored = any(subprocess.run(["git", "check-ignore", "-q", q], cwd=ROOT).returncode == 0
-                          for q in (str(at / p), f"{at / p}/"))
-            assert ignored, f"{doc} names {p}, which is not in the repository"
+    assert "docs/assets/thimble-banner.svg" in names["README.md"] and "engine/thimble.py" in names["INSTALL.md"]
+    assert {doc: missing(doc) for doc in INSTALL_DOCS} == {doc: [] for doc in INSTALL_DOCS}
+    made_up = ("Run `plugins/bin/thimble`, read [the notes](INSTAL.md#update) and `pyproject.toml`, and see\n"
+               "docs/missing.png, then [the steps](INSTALL.md#update) and `refs/thimble/` and path/to/folder.\n")
+    assert sorted(missing("CLAUDE.md", made_up)) == ["INSTAL.md", "docs/missing.png", "plugins/bin/thimble", "pyproject.toml"]
 
 
 def test_claude_knows_0_9_by_what_the_install_script_finds():
