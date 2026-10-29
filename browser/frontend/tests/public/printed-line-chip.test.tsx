@@ -7,9 +7,10 @@
 import { act } from 'react'
 import { beforeAll, afterEach, expect, test } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
-import { chipLabel } from '../../src/components/RefChip.tsx'
+import { chipLabel, compactLabel, spanWhere } from '../../src/components/RefChip.tsx'
 import { api } from '../../src/lib/api.ts'
 import { registerCells } from '../../src/lib/cellName.ts'
+import { refLabel } from '../../src/lib/refs.ts'
 import snaps from '../../src/tour/examples.json'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -50,6 +51,14 @@ test("the real chip names a line as the tour's demo names it", () => {
 test("outside its card the chip names the card, then the line of its output", () => {
   expect(chipLabel('card:ab12cd34@out0#L8')).toBe('payments-release · card output line 8')
   expect(chipLabel('card:ab12cd34@out1#L8-L9', 'another1')).toBe('payments-release · card output lines 8–9')
+})
+
+test("every other place that names a line of a card's output names it as the chip does: a ref's short label, a chip in the editor and the hover's place", () => {
+  for (const out of [0, 1]) {
+    expect(refLabel(`card:ab12cd34@out${out}#L8`)).toBe('card output line 8')
+    expect(compactLabel(`card:ab12cd34@out${out}#L8-L9`)).toBe('payments-release · card output lines 8–9')
+    expect(spanWhere(`card:ab12cd34@out${out}#L8`)).toBe('card output line 8')
+  }
 })
 
 /** The card as the server reads it for a line of its printed output: its title, the lines around the cited one. */
