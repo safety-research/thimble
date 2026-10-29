@@ -137,19 +137,14 @@ declare module 'claude-code' {
       fixUpdated: boolean
       /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */
       fixAsked: number
-      /** the words the person typed after /thimble-fix, which the kernel keeps beside Claude's (fix/register.ts) */
+      /** the words the person typed after /thimble-fix, which the fix the skill starts takes (fix/register.ts) */
       fixAskedWords: string
-      /** the turn of main's in which the fix-thimble skill last started a fix: no offer a bare /thimble-fix takes up
-       *  (fix/register.ts) */
-      fixStartedIn: string
       /** the strays from before rounds changed a fix in place that the fix's line told of already (fix/register.ts) */
       fixStrays: string[]
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
       fixers: Record<string, number>
       /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id (fixer.ts) */
       fixerBox: Record<string, string[]>
-      /** the fixes Claude started with the fix-thimble skill, by the fix's id (fixer.ts) */
-      fixBy: Record<string, 'claude'>
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
       /** a record's state beside its text, by its id (a row, or `<host row>#cu` for a catch-up): { running, want,

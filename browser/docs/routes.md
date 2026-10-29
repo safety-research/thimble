@@ -87,6 +87,7 @@ knows the key.
 | POST | `/api/fixes/{fid}/apply` | fixes | cookie |
 | POST | `/api/fixes/{fid}/dismiss` | fixes | cookie |
 | POST | `/api/fixes/{fid}/share` | fix_share | cookie |
+| GET | `/api/fixes/{fid}/tried` | fixes | cookie or token |
 | POST | `/api/fixes/{fid}/undo` | fixes | cookie |
 | GET | `/api/health` | main | none |
 | GET | `/api/jobs` | jobs | cookie or token |

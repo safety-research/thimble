@@ -58,7 +58,7 @@ import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
 import { LabelAsks } from './LabelAsk'
 import { NoticeStrip } from './Notice'
-import { fixWords, pageText } from './fix'
+import { fixWords, notStartedToast, pageText } from './fix'
 import { FixPage, FixWorking } from './FixStrip'
 import { pendingRequests } from './permissions'
 
@@ -725,7 +725,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         .requestFix(ws, fixing ?? text, pageText(), inFix ? target.fix : undefined)
         .then(() => true)
         .catch((e: Error) => {
-          bus.emit('toast', { text: `thimble fix did not start: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
+          bus.emit('toast', notStartedToast(e))
           return false
         })
     }

@@ -1305,6 +1305,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     agents.set_running(lv.c, agents.MAIN_ID, False)
     _ask_again(lv, again)
     if was_open:
+        _fixes_turn(lv)
         _cards_checked(lv)
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
@@ -1313,6 +1314,28 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
                 _answer_checked(lv, turn)
         _proposer_turn(lv, cut)
     lv.turn_texts = []
+
+
+def _fixes_turn(lv: Live) -> None:
+    """The person's /thimble-fix words, which main's fix_thimble may take for a few turns of main's, count this one
+    (fixes.main_turn_ended)."""
+    from . import fixes  # noqa: PLC0415
+
+    try:
+        fixes.main_turn_ended(lv.c)
+    except Exception:  # noqa: BLE001 — a count that fails is no reason to fail the mirror
+        log.exception("%s: the fixes did not hear of main's turn end", lv.c)
+
+
+def _fixes_read(lv: Live, event_id: str) -> None:
+    """Event `event_id` reached main's turn: when it carries the person's /thimble-fix, the count of the turns in which
+    fix_thimble may take their words starts with this turn (fixes.words_read)."""
+    from . import fixes  # noqa: PLC0415
+
+    try:
+        fixes.words_read(lv.c, event_id)
+    except Exception:  # noqa: BLE001 — a count that fails is no reason to fail the mirror
+        log.exception("%s: the fixes did not hear of event %s", lv.c, event_id)
 
 
 def _marks_turn(lv: Live, turn: str, cut: str | None) -> None:
@@ -1476,6 +1499,7 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
         lv.turn_threads.append(thread)
     if event_id:  # a start_agent event's start is refused when this turn ends without its Agent call (R3, _no_call)
         lv.turn_calls.add(event_id)
+        _fixes_read(lv, event_id)
     if event_id and event_id in _expected:
         _expected.discard(event_id)
         return

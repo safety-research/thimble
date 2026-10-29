@@ -151,12 +151,20 @@ def test_a_new_version_that_does_not_fit_while_the_fixes_are_off_leaves_them_off
     before = live_now()
     with pytest.raises(FX.FixError, match="^the new version of fix 1 does not fit fix 2; /thimble-fix 1 tries it again$"):
         FX.apply(a["id"], press(a["id"]))
-    # live and state.json as they were; fix 2 is kept for on, and fix 1's new version still waits for a y
+    # live and state.json as they were; fix 2 is kept for on, and fix 1's new version still waits for a y, its record
+    # saying why it does not fit
     assert live_now() == before and not FX.is_on()
     assert not (FX.live_dir() / "plugin" / "bar" / "extra.ts").exists()
     assert FX.get(b["id"])["state"] == "on" and FX.get(a["id"])["state"] == "ready"
+    assert FX.get(a["id"])["error"] == "its new version does not fit fix 2"
     FX.all_on()
     assert FX.is_on() and live_file("plugin/bar/extra.ts") == "export const extra = 2\n"
+    # /thimble-fix 1, as the error says, tries it again: a new copy with the version the person has, the new version's
+    # change to start from, and no reason left on the record
+    r = FX.redo(a["id"])
+    assert r["state"] == "working" and r["error"] is None and r["prev"]["state"] == "off"
+    assert (Path(r["work"]) / "plugin" / "notes.md").exists()
+    assert "extra = 1" in (FX.tmp_dir(a["id"]) / "earlier.patch").read_text()
 
 
 def fails_after_the_move(w, monkeypatch, step: str, ref: str) -> None:

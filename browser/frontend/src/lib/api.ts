@@ -1,5 +1,5 @@
 // The typed client for every route of the backend's API.
-import type { FixStatus } from '../chat/fix'
+import type { FixStatus, FixTried } from '../chat/fix'
 import type {
   CanvasResponse,
   Extensions,
@@ -670,11 +670,14 @@ export const api = {
   /** Use it now, or Use it in Your fixes: the person's click puts the fix on, and the server starts again with it */
   applyFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/apply`, { method: 'POST' }),
   /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows, which main reads with the person's
-   * fixes and starts the fix from; `fix`: words typed in that fix's own thread, a round of it */
+   * fixes and starts the fix from (or a fix's number alone, which tries a fix that did not pass again); `fix`: words
+   * typed in that fix's own thread, a round of it */
   requestFix: (ws: string, words: string, page: string, fix?: number) =>
     j<{ fix?: { id: number; title: string; state: string }; event?: string }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page, ...(fix !== undefined ? { fix } : {}) }) }),
   undoFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/undo`, { method: 'POST' }),
   redoFix: (ws: string, id: number) => j<{ fix: { id: number } }>(`${apiBase()}/ws/${enc(ws)}/fixes/${enc(String(id))}/redo`, { method: 'POST' }),
+  /** Ask Claude on a fix that did not pass: its change and the end of its tests' output, for main's message */
+  fixTried: (id: number) => j<FixTried>(`${apiBase()}/fixes/${enc(String(id))}/tried`),
   dismissFix: (id: number) => j<{ ok: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/dismiss`, { method: 'POST' }),
   // ---- tickets ----
   tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),

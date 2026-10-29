@@ -63,7 +63,10 @@ before (continue_). A file moved counts as both its names. thimble checks this w
 prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
 refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
 to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
-cannot be done (done with `cannot`), which is the failure the person sees. The quick tests run with no network, for one
+cannot be done (done with `cannot`), which is the failure the person sees. Another try at a failed fix (redo: y on its
+line, or /thimble-fix N alone) goes on in its copy while the copy holds work that no check took, such as the change
+Claude made there in the person's session, so that the check takes it; else it starts in a new copy cut from mine, with
+the earlier change to start from. The quick tests run with no network, for one
 fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (run_tests).
 They run in a process of their own (the runner), apart from the call that checks the fix, so that they may take longer
 than Claude Code lets a call run: the record stays working, with `testing`, until the runner writes what came of them,
@@ -1106,8 +1109,9 @@ REFINABLE = ("on", "off", "ready")
 
 def new(words: str, made_in: str = "terminal", title: str | None = None, session: str | None = None,
         asked: str | None = None) -> dict[str, Any]:
-    """A request: a copy cut from mine. `session`: the Claude Code session whose fixer works on it; only that session
-    checks it at the fixer's end. `asked`: the person's own words, when Claude wrote `words` from them (_asked_of)."""
+    """A request in the person's own words (`words`, as they typed them after /thimble-fix): a copy cut from mine.
+    `session`: the Claude Code session whose fixer works on it; only that session checks it at the fixer's end.
+    `asked`: the person's own words beside `words`, as a plugin from before 0.10.6 gave them (_asked_of)."""
     words = (words or "").strip()
     if not words:
         raise FixError("say what should work differently: /thimble-fix make the bar say how many citations failed")
@@ -1132,9 +1136,9 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
 
 
 def _asked_of(rec: dict[str, Any]) -> list[str | None]:
-    """The person's own words of each round, beside `words`, which Claude wrote from them for the fixer (after the
-    person's /thimble-fix <words>): None for a round with no words of theirs (a fix Claude offered, a record from before
-    thimble kept them)."""
+    """The person's own words of each round kept beside `words`, on a record from before 0.10.6, whose `words` Claude
+    wrote from them for the fixer: None for a round with none kept. A request now keeps the person's words in `words`
+    itself, with nothing beside them."""
     asked = list(rec.get("asked") or [])
     n = len(rec.get("words") or [])
     return (asked + [None] * n)[:n]
@@ -1195,6 +1199,42 @@ def _fresh(rec: dict[str, Any]) -> dict[str, Any]:
     return {**out, "started": time.time()}
 
 
+def _in_copy(rec: dict[str, Any], words: list[str], session: str | None, asked: str | None) -> dict[str, Any]:
+    """The next round of a fix in the copy it has, written under the fixes' lock, which the runner of the round before
+    writes under too: words for a fixer that still works go on in its time; any other round starts its own. The tests of
+    the round before, should they run, are no longer this fix's: their runner writes nothing (tests_runner)."""
+    rec = rec if rec.get("state") == "working" else _fresh(rec)
+    rec.pop("testing", None)
+    rec.pop("unshown", None)
+    rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
+               **({"session": session} if session else {}))
+    return put(_named_patches(_with_words(rec, words, asked), " ".join(words)))
+
+
+def _unchecked(rec: dict[str, Any]) -> bool:
+    """Whether the fix's copy holds work that no check of thimble's took, such as the change Claude makes in the
+    person's session for a fix that did not pass, or what a fixer that ended with `Cannot:` left: a file changed, added
+    or removed there, or a commit made there. A check commits all that the copy holds, and thimble leaves the copy's
+    HEAD at the commit the copy was cut from (base) or at the commit of a check (commit, or round_commit once a round of
+    a fix changed in place settled); so a HEAD at another commit that has base in its history is one made in the copy
+    since, such as a commit on the last check's, or that check's commit amended. git reads the copy on its own entry
+    (_own_git), and not when the copy holds a repository of its own (_nested_git)."""
+    g = _own_git(rec.get("work"))
+    if g is None or _nested_git(rec["work"]):
+        return False
+    env = {**os.environ, **g}
+    p = run(["git", "status", "--porcelain"], cwd=rec["work"], check=False, env=env)
+    if p.returncode != 0:
+        return False
+    if p.stdout.strip():
+        return True
+    base = str(rec.get("base") or "")
+    now = run(["git", "rev-parse", "-q", "--verify", "HEAD"], cwd=rec["work"], check=False, env=env).stdout.strip()
+    if not base or not now or now in (base, rec.get("commit"), rec.get("round_commit")):
+        return False
+    return run(["git", "merge-base", "--is-ancestor", base, now], cwd=rec["work"], check=False, env=env).returncode == 0
+
+
 def round_(fid: int | str, words: str, session: str | None = None, asked: str | None = None) -> dict[str, Any]:
     """More words for a fix, whose fixer works in `session`: a new round of the same fix, never a new fix. A fix whose
     copy is still there (working, ready, or refused) gets the round in that copy. A fix that is on, off or ready with
@@ -1202,18 +1242,10 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
     until the person's y puts the new version on (apply), and u goes back to it (undo). A fix that failed, or no longer
     fits, starts again in a new copy (redo). `asked`: the person's own words, as in new."""
     words = (words or "").strip()
-    # a round in the copy is written under the fixes' lock, which the runner of the round before writes under too
     with Lock():
         rec = get(fid)
         if _is_checkout(rec.get("work")):
-            # words for a fixer that still works go on in its time; any other round starts its own. The tests of the
-            # round before, should they run, are no longer this fix's: their runner writes nothing (tests_runner)
-            rec = rec if rec.get("state") == "working" else _fresh(rec)
-            rec.pop("testing", None)
-            rec.pop("unshown", None)
-            rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
-                       **({"session": session} if session else {}))
-            return put(_named_patches(_with_words(rec, [words], asked), words))
+            return _in_copy(rec, [words], session, asked)
     if rec.get("state") in ("failed", "redo"):
         return redo(rec["id"], words, session, asked)
     if rec.get("state") not in REFINABLE or not rec.get("commit"):
@@ -1746,7 +1778,8 @@ def _put_back(was: dict[str, Any]) -> None:
 def _or_put_back(fid: int):
     """The steps of a y on fix `fid` from the move of live on, up to Claude Code's copy of it: when any of them fails (a
     fix that does not fit, a git error, a copy that fails), live, the refs it moves and state.json go back as they were
-    (_put_back), and the same error goes on. The records change after these steps, except for why a fix needs a redo."""
+    (_put_back), and the same error goes on. The records change after these steps, except for why a fix needs a redo or
+    why its new version does not fit."""
     was = _live_as_is(fid)
     try:
         yield
@@ -1850,7 +1883,8 @@ def _swap(fid: int) -> dict[str, Any]:
     """y on a fix changed in place: its new version takes the place of the one before, which stays under
     refs/thimble/prev/<id> for u. A fix that was on is rebuilt in its place in mine; one that was off goes on last. A y
     that fails after live moved, such as one whose new version does not fit the other fixes, leaves live, mine, the
-    fixes' refs and state.json as they were (_or_put_back)."""
+    fixes' refs and state.json as they were (_or_put_back). A new version that does not fit still waits, and its record
+    says why (error), so that /thimble-fix N, as the error says, tries it again."""
     live = live_dir()
     rec = get(fid)
     p = rec.get("prev") or {}
@@ -1871,8 +1905,11 @@ def _swap(fid: int) -> dict[str, Any]:
             order = [*[i for i in order if i != fid], fid]
             failed = _rebuild(order)
         if fid in failed:
-            raise FixError(f"the new version of fix {fid} does not fit {_misfit(fid, rec['commit'])}; /thimble-fix {fid} "
-                           "tries it again")
+            whom = _misfit(fid, rec["commit"])
+            r = get(fid)
+            r.update(error=f"its new version does not fit {whom}")
+            put(r)
+            raise FixError(f"the new version of fix {fid} does not fit {whom}; /thimble-fix {fid} tries it again")
         if old:
             git("update-ref", f"refs/thimble/prev/{fid}", old, cwd=live)
         git("update-ref", "-d", f"refs/thimble/next/{fid}", cwd=live)
@@ -2131,17 +2168,28 @@ def not_now(fid: int | str) -> dict[str, Any]:
 
 
 def redo(fid: int | str, words: str = "", session: str | None = None, asked: str | None = None) -> dict[str, Any]:
-    """y on a failed fix's line: a new copy, cut from mine as it is now, for the same fix: the fixer gets the person's
-    words again, and the earlier change (tmp/<id>/earlier.patch) to start from. A fix whose fixer could not do without
-    the files no fix may change (blocked) starts again only with new words."""
-    rec = get(fid)
-    if rec.get("state") not in ("redo", "pending", "failed", "off", "ready", "request"):
-        raise FixError(f"fix {rec['id']} is {rec.get('state')}")
-    if rec.get("blocked") and not (words or "").strip():
-        raise FixError(f"fix {rec['id']} needs a change to {_and(rec['blocked'])}, which no fix may make, so another try "
-                       f"would fail the same way; thimble file issue {rec['id']}, in a shell, sends it to thimble's "
-                       "maintainers")
+    """y on a failed fix's line, or /thimble-fix N alone: the same fix again, whose fixer gets the person's words again.
+    A failed fix whose copy holds work that no check took (_unchecked), such as the change Claude made there for it in
+    the person's session, goes on in that copy, as more words do (round_), so that the next check takes that work too;
+    what this gives then says so (same_copy). Any other starts in a new copy, cut from mine as it is now, with the earlier
+    change to start from (tmp/<id>/earlier.patch, which `earlier` in what this gives names when there is one). A fix
+    whose fixer could not do without the files no fix may change (blocked) starts again only with new words, or with such
+    work in its copy."""
+    words = (words or "").strip()
     with Lock():
+        rec = get(fid)
+        if rec.get("state") not in ("redo", "pending", "failed", "off", "ready", "request"):
+            raise FixError(f"fix {rec['id']} is {rec.get('state')}")
+        patch = tmp_dir(rec["id"]) / "earlier.patch"
+        if rec.get("state") == "failed" and _unchecked(rec):
+            # the copy and what it holds stay; a patch of an earlier try is no change of this one
+            with contextlib.suppress(OSError):
+                patch.unlink()
+            return {**_in_copy(rec, [words] if words else [], session, asked), "same_copy": True}
+        if rec.get("blocked") and not words:
+            raise FixError(f"fix {rec['id']} needs a change to {_and(rec['blocked'])}, which no fix may make, so another "
+                           f"try would fail the same way; thimble file issue {rec['id']}, in a shell, sends it to "
+                           "thimble's maintainers")
         ensure_live()
         if rec.get("prev"):
             # a round of a fix changed in place: the copy holds the fix as the person has it, the round's change apart
@@ -2159,16 +2207,23 @@ def redo(fid: int | str, words: str = "", session: str | None = None, asked: str
             git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir(), hooks=False)
             _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
+        wrote = False
         if earlier.strip():
             try:
-                _write_new(tmp_dir(rec["id"]) / "earlier.patch", earlier)
+                _write_new(patch, earlier)
+                wrote = True
             except OSError:
                 pass  # the new copy starts all the same, without the earlier change to start from
+        if not wrote:
+            # a patch of an earlier try is no change of this one
+            with contextlib.suppress(OSError):
+                patch.unlink()
         rec = _fresh(rec)
         rec.pop("unshown", None)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,
                    session=session or None)
-        return put(_with_words(rec, [words.strip()] if words.strip() else [], asked))
+        out = put(_with_words(rec, [words] if words else [], asked))
+        return {**out, "earlier": str(patch)} if wrote else out
 
 
 def undo(fid: int | str) -> dict[str, Any]:
@@ -3110,7 +3165,8 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     out = [f"{c('title', r['title'])} · fix {r['id']} · {_state_paint(c, r, is_on())} · {made}"]
     rounds_said = [(str(w).strip(), str(a or "").strip()) for w, a in zip(r.get("words") or [], _asked_of(r))]
     for i, (w, a) in enumerate(x for x in rounds_said if x[0] or x[1]):
-        # the person's own words, and the words Claude wrote from them for the fixer when they differ
+        # the person's own words; on a record from before 0.10.6, also the words Claude wrote from them for the fixer
+        # when they differ
         out += _wrapped("You asked" if i == 0 else "Then", f'"{" ".join((a or w).split())}"', width)
         if a and w and " ".join(a.split()) != " ".join(w.split()):
             out += _wrapped("Claude wrote", f'"{" ".join(w.split())}"', width)

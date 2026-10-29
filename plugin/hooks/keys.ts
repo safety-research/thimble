@@ -4,7 +4,7 @@
 //                                    asked (auto mode's classifier gave no verdict, don't ask mode), while it shows:
 //                                    thimble's checks are allowed this session, and that check starts again
 //   y d n u  fix/line.ts fixKey      the line of a fix above the bar, while it shows: y use it now, d what
-//                                    changed, n later, u undo (a failed fix: y try again, d what it tried, n dismiss)
+//                                    changed, n later, u undo (a failed fix: y try again, d ask Claude, n dismiss)
 //   v        designer/v.ts vKey      a card of the last answer
 //   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
 //                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers' (e:
@@ -194,7 +194,13 @@ export const registerKeys: Register = on => {
     if (r === true) return { text: '', cursor: 0 }
     taken = ''
     if (!e.text && r === e.inputText) return next(e)
-    // a word whose first keys thimble had taken, or keys typed into a box that shows empty
+    // a word whose first keys thimble had taken, or keys typed into a box that shows empty. The hooks after this one do
+    // not see this edit, so what draws from the box draws again (a failed fix's keys show only at an empty prompt)
+    try {
+      $.ui.invalidate('ui.render')
+    } catch {
+      // it draws at its next change
+    }
     return { text: r, cursor: r.length }
   }).catch(($, e, next) => next(e))
 }
