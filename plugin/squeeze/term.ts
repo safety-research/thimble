@@ -68,9 +68,11 @@ const BLANK: SqzUi = { running: null, error: null }
 /** The wait before a call, when settings.json does not say (settleMs). */
 const SETTLE_MS = 1000
 
-// the module's memory: per record, the number of its latest change while one is on its way, the change whose call
-// runs and what stops that call; the text writing in per record; the settings; the last screen width
+// the module's memory: per record, the number of its latest change while one is on its way (each change a number of
+// its own, never used again: `numbered`), the change whose call runs and what stops that call; the text writing in per
+// record; the settings; the last screen width
 const latest = new Map<string, number>()
+const numbered = new Map<string, number>()
 const inflight = new Map<string, number>()
 const stops = new Map<string, AbortController>()
 const revealing = new Map<string, number>()
@@ -147,7 +149,8 @@ export async function wantLevels($: Engine, id: string, at: At): Promise<void> {
  *  row are written once, at the last level; and one call at a time runs: a change that comes while a call runs stops
  *  that call, so the rewrite starts over at the new levels. `key`: the key that asked for it. */
 export async function setLevels($: Engine, id: string, at: At, key: string | null = null): Promise<void> {
-  const gen = (latest.get(id) ?? 0) + 1
+  const gen = (numbered.get(id) ?? 0) + 1
+  numbered.set(id, gen)
   latest.set(id, gen)
   stopCall(id)
   await setUi($, id, { want: at, error: null })
@@ -171,6 +174,22 @@ export async function setLevels($: Engine, id: string, at: At, key: string | nul
     if (inflight.get(id) === gen) inflight.delete(id)
     await done($, id, gen)
   }
+}
+
+/** The chips closed: a change on its way stops, its wait or its call, so the record keeps the version it shows and
+ *  nothing is written after. Returns the levels that change was going to (null: none was on its way), which a close
+ *  undone asks for again. A catch-up not written yet is written on, at its latest levels: there is no version of it to
+ *  keep. */
+export async function stopLevels($: Engine, id: string): Promise<At | null> {
+  if (!latest.has(id)) return null
+  const rec = await recOf($, id)
+  if (rec?.catchup && typeof rec.shown !== 'string') return null
+  const was = (await uiOf($, id)).want ?? null
+  latest.delete(id)
+  stopCall(id)
+  await setUi($, id, { running: null, want: null, asked: null, error: null })
+  await noteSettled($, id)
+  return was
 }
 
 /** The call that runs for a record, stopped: it resolves `aborted`, and its result is not shown (once). */
@@ -491,6 +510,7 @@ export async function dismissCatchUp($: Engine, id: string, o: { undo?: boolean;
 /** For tests: the module's memory, cleared. */
 export function resetSqueeze(): void {
   latest.clear()
+  numbered.clear()
   inflight.clear()
   stops.clear()
   revealing.clear()
