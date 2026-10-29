@@ -121,62 +121,109 @@ export function useTooltip(text: string | null | undefined, className?: string, 
   return { props, tip: anchor ? <Tip id={id} text={text} place={place} className={className} /> : null }
 }
 
+/** What the pointer does to the tip of a mark that names a value, whoever draws it (HoverTips; the tour's examples,
+ * tour/engine): the mark under the pointer shows its tip once the pointer has rested on it a moment, at once when the
+ * pointer has just left another tip (as it runs along the rows). No tip shows while the pointer is busy, a button held
+ * for a selection or a drag or the ask key held, since it would cover what the pointer marks. A tip taken away (a
+ * press, Escape) stays away from its mark until the pointer reaches another, and that one waits its moment. `show`
+ * draws `mark`'s tip for the pointer at (x, y), false when it has none to draw; `hide` takes it away. */
+export function markTips(show: (mark: Element, x: number, y: number) => boolean, hide: () => void) {
+  let on: Element | null = null
+  let shown = false
+  let timer = 0
+  let x = 0
+  let y = 0
+  // `warm`: the pointer left the tip for another place, so the next tip shows at once
+  const away = (warm: boolean) => {
+    window.clearTimeout(timer)
+    timer = 0
+    if (!shown) return
+    shown = false
+    if (warm) lastClosed = Date.now()
+    hide()
+  }
+  return {
+    /** the pointer at (`px`, `py`), over `mark` (null for none) */
+    move(mark: Element | null, px: number, py: number, busy: boolean) {
+      x = px
+      y = py
+      if (busy) {
+        away(false)
+        on = mark
+        return
+      }
+      if (mark === on) return
+      away(true)
+      on = mark
+      if (!mark) return
+      const go = () => {
+        timer = 0
+        if (on === mark && mark.isConnected) shown = show(mark, x, y)
+      }
+      if (Date.now() - lastClosed < TIP_WARM_MS) go()
+      else timer = window.setTimeout(go, TIP_DELAY_MS)
+    },
+    /** the tip taken away from `mark` (a press on it), or from the mark under the pointer (Escape) */
+    dismiss(mark: Element | null = on) {
+      away(false)
+      on = mark
+    },
+    /** the tip gone, and the mark under the pointer waits its moment again (a scroll moved the marks, the pointer left) */
+    reset() {
+      away(false)
+      on = null
+    },
+  }
+}
+
+/** A mark that names a value: an element whose `data-tip` says something. */
+export const TIP_MARK = '[data-tip]:not([data-tip=""])'
+/** The mark at `target`: it, or the nearest element around it that is one. */
+const markAt = (target: EventTarget | null) => (target instanceof Element ? target.closest(TIP_MARK) : null)
+
 /**
  * The one tooltip for marks that name a value, of which a file has as many as records (a record's labels and their
  * values, a label's cell beside a record): the element under the pointer with `data-tip` shows its text, line by line,
- * under the pointer where it rests, after a moment as a control's tip does (at once if a tip showed a moment ago); it
- * goes when the pointer leaves the element, at a press, a scroll or Escape. Drawn once for the page (shell/Shell), so a
- * mark needs no listener of its own.
+ * under the pointer where it rests, by markTips' rules. It goes when the pointer leaves the element, at a press, a
+ * scroll or Escape. Drawn once for the page (shell/Shell), so a mark needs no listener of its own. The text a mark's tip
+ * shows is for the pointer; the mark gives it to a screen reader in its own words (an aria-label or aria-description).
  */
 export function HoverTips() {
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null)
   useEffect(() => {
-    let on: Element | null = null
-    let timer: number | undefined
-    let x = 0
-    let y = 0
-    const hide = () => {
-      window.clearTimeout(timer)
-      on = null
-      setTip((t) => {
-        if (t) lastClosed = Date.now()
-        return null
-      })
-    }
+    const tips = markTips(
+      (mark, x, y) => {
+        const text = mark.getAttribute('data-tip')
+        if (text) setTip({ text, x, y })
+        return !!text
+      },
+      () => setTip(null),
+    )
+    // (the DOM's pointer events: this file's PointerEvent is React's)
     const move = (e: MouseEvent & { pointerType?: string }) => {
       if (e.pointerType === 'touch') return
-      x = e.clientX
-      y = e.clientY
-      const el = e.target instanceof Element ? e.target.closest('[data-tip]') : null
-      if (el === on) return
-      hide()
-      const text = el?.getAttribute('data-tip')
-      if (!el || !text) return
-      on = el
-      const show = () => {
-        if (on === el && el.isConnected) setTip({ text, x, y })
-      }
-      if (Date.now() - lastClosed < TIP_WARM_MS) show()
-      else timer = window.setTimeout(show, TIP_DELAY_MS)
+      tips.move(markAt(e.target), e.clientX, e.clientY, e.buttons !== 0 || document.body.hasAttribute('data-cmd'))
     }
+    const press = (e: MouseEvent) => tips.dismiss(markAt(e.target))
     // the pointer left the page
     const out = (e: MouseEvent) => {
-      if (!e.relatedTarget) hide()
+      if (!e.relatedTarget) tips.reset()
     }
+    const scroll = () => tips.reset()
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') hide()
+      if (e.key === 'Escape') tips.dismiss()
     }
     document.addEventListener('pointermove', move, { capture: true, passive: true })
     document.addEventListener('pointerout', out, true)
-    document.addEventListener('pointerdown', hide, true)
-    window.addEventListener('scroll', hide, true)
+    document.addEventListener('pointerdown', press, true)
+    window.addEventListener('scroll', scroll, true)
     window.addEventListener('keydown', key, true)
     return () => {
-      window.clearTimeout(timer)
+      tips.reset()
       document.removeEventListener('pointermove', move, { capture: true })
       document.removeEventListener('pointerout', out, true)
-      document.removeEventListener('pointerdown', hide, true)
-      window.removeEventListener('scroll', hide, true)
+      document.removeEventListener('pointerdown', press, true)
+      window.removeEventListener('scroll', scroll, true)
       window.removeEventListener('keydown', key, true)
     }
   }, [])
