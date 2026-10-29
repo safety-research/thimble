@@ -1106,8 +1106,9 @@ REFINABLE = ("on", "off", "ready")
 
 def new(words: str, made_in: str = "terminal", title: str | None = None, session: str | None = None,
         asked: str | None = None) -> dict[str, Any]:
-    """A request: a copy cut from mine. `session`: the Claude Code session whose fixer works on it; only that session
-    checks it at the fixer's end. `asked`: the person's own words, when Claude wrote `words` from them (_asked_of)."""
+    """A request in the person's own words (`words`, as they typed them after /thimble-fix): a copy cut from mine.
+    `session`: the Claude Code session whose fixer works on it; only that session checks it at the fixer's end.
+    `asked`: the person's own words beside `words`, as a plugin from before 0.10.6 gave them (_asked_of)."""
     words = (words or "").strip()
     if not words:
         raise FixError("say what should work differently: /thimble-fix make the bar say how many citations failed")
@@ -1132,9 +1133,9 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
 
 
 def _asked_of(rec: dict[str, Any]) -> list[str | None]:
-    """The person's own words of each round, beside `words`, which Claude wrote from them for the fixer (after the
-    person's /thimble-fix <words>): None for a round with no words of theirs (a fix Claude offered, a record from before
-    thimble kept them)."""
+    """The person's own words of each round kept beside `words`, on a record from before 0.10.6, whose `words` Claude
+    wrote from them for the fixer: None for a round with none kept. A request now keeps the person's words in `words`
+    itself, with nothing beside them."""
     asked = list(rec.get("asked") or [])
     n = len(rec.get("words") or [])
     return (asked + [None] * n)[:n]
@@ -1746,7 +1747,8 @@ def _put_back(was: dict[str, Any]) -> None:
 def _or_put_back(fid: int):
     """The steps of a y on fix `fid` from the move of live on, up to Claude Code's copy of it: when any of them fails (a
     fix that does not fit, a git error, a copy that fails), live, the refs it moves and state.json go back as they were
-    (_put_back), and the same error goes on. The records change after these steps, except for why a fix needs a redo."""
+    (_put_back), and the same error goes on. The records change after these steps, except for why a fix needs a redo or
+    why its new version does not fit."""
     was = _live_as_is(fid)
     try:
         yield
@@ -1850,7 +1852,8 @@ def _swap(fid: int) -> dict[str, Any]:
     """y on a fix changed in place: its new version takes the place of the one before, which stays under
     refs/thimble/prev/<id> for u. A fix that was on is rebuilt in its place in mine; one that was off goes on last. A y
     that fails after live moved, such as one whose new version does not fit the other fixes, leaves live, mine, the
-    fixes' refs and state.json as they were (_or_put_back)."""
+    fixes' refs and state.json as they were (_or_put_back). A new version that does not fit still waits, and its record
+    says why (error), so that /thimble-fix N, as the error says, tries it again."""
     live = live_dir()
     rec = get(fid)
     p = rec.get("prev") or {}
@@ -1871,8 +1874,11 @@ def _swap(fid: int) -> dict[str, Any]:
             order = [*[i for i in order if i != fid], fid]
             failed = _rebuild(order)
         if fid in failed:
-            raise FixError(f"the new version of fix {fid} does not fit {_misfit(fid, rec['commit'])}; /thimble-fix {fid} "
-                           "tries it again")
+            whom = _misfit(fid, rec["commit"])
+            r = get(fid)
+            r.update(error=f"its new version does not fit {whom}")
+            put(r)
+            raise FixError(f"the new version of fix {fid} does not fit {whom}; /thimble-fix {fid} tries it again")
         if old:
             git("update-ref", f"refs/thimble/prev/{fid}", old, cwd=live)
         git("update-ref", "-d", f"refs/thimble/next/{fid}", cwd=live)
@@ -3110,7 +3116,8 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     out = [f"{c('title', r['title'])} · fix {r['id']} · {_state_paint(c, r, is_on())} · {made}"]
     rounds_said = [(str(w).strip(), str(a or "").strip()) for w, a in zip(r.get("words") or [], _asked_of(r))]
     for i, (w, a) in enumerate(x for x in rounds_said if x[0] or x[1]):
-        # the person's own words, and the words Claude wrote from them for the fixer when they differ
+        # the person's own words; on a record from before 0.10.6, also the words Claude wrote from them for the fixer
+        # when they differ
         out += _wrapped("You asked" if i == 0 else "Then", f'"{" ".join((a or w).split())}"', width)
         if a and w and " ".join(a.split()) != " ".join(w.split()):
             out += _wrapped("Claude wrote", f'"{" ".join(w.split())}"', width)

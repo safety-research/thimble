@@ -1305,6 +1305,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     agents.set_running(lv.c, agents.MAIN_ID, False)
     _ask_again(lv, again)
     if was_open:
+        _fixes_turn(lv)
         _cards_checked(lv)
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
@@ -1313,6 +1314,17 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
                 _answer_checked(lv, turn)
         _proposer_turn(lv, cut)
     lv.turn_texts = []
+
+
+def _fixes_turn(lv: Live) -> None:
+    """The person's /thimble-fix words, which main's fix_thimble may take for a few turns of main's, count this one
+    (fixes.main_turn_ended)."""
+    from . import fixes  # noqa: PLC0415
+
+    try:
+        fixes.main_turn_ended(lv.c)
+    except Exception:  # noqa: BLE001 — a count that fails is no reason to fail the mirror
+        log.exception("%s: the fixes did not hear of main's turn end", lv.c)
 
 
 def _marks_turn(lv: Live, turn: str, cut: str | None) -> None:

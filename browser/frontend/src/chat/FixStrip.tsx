@@ -9,7 +9,8 @@
 //               the row says "Reloading thimble…", and the page loads the new build by itself when nothing typed would
 //               be lost. A fix that did not pass says why, with Try again (not when it needs a file no fix may change, as
 //               the terminal's line) and Ask Claude, which shows what it tried and puts its failure in main's composer
-//               for the person to send. An earlier row, or one the person answered, is a quiet line of what it said.
+//               for the person to send, with its change and the end of its tests' output, once: it is not offered again.
+//               An earlier row, or one the person answered, is a quiet line of what it said.
 //   FixPage     what the page does for every fix: the reload after the server started again, and Your fixes
 //               (`/thimble-fix` alone: every fix with its state, Use it on a ready one, Undo on one that is on).
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -135,6 +136,8 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
   useEffect(() => bus.on('fixHeld', (e) => e.id === fid && setHeld(e.held)), [fid])
   const [busy, setBusy] = useState<FixAction | null>(null)
   const [what, setWhat] = useState(false)
+  // Ask Claude put the failure in main's composer: it is not offered again
+  const [asked, setAsked] = useState(false)
   const row = latest ? rows.find((r) => r.id === fid) ?? null : null
 
   const run = (r: FixRow, a: FixAction) => {
@@ -145,10 +148,19 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
       return
     }
     if (a === 'ask') {
-      // what it tried shows under the row, and main's composer takes its failure; nothing goes until the person sends it
+      // what it tried shows under the row, and main's composer takes its failure, with its change and the end of its
+      // tests' output (main's sandbox cannot read the fix's copy); nothing goes until the person sends it
       setWhat(true)
-      offerDraft('main', askClaudeText(r))
-      bus.emit('openChat', { chatId: 'main' })
+      setBusy(a)
+      api
+        .fixTried(r.id)
+        .catch(() => null)
+        .then((tried) => {
+          offerDraft('main', askClaudeText(r, tried))
+          bus.emit('openChat', { chatId: 'main' })
+          setAsked(true)
+        })
+        .finally(() => setBusy(null))
       return
     }
     setBusy(a)
@@ -193,7 +205,7 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
   const said = fixText(row)
   const lead = said.startsWith(FIXED) ? FIXED : ''
   const ask = acts.includes('use')
-  const buttons = acts.map((a) => (
+  const buttons = acts.filter((a) => !(a === 'ask' && asked)).map((a) => (
     <Button
       key={a}
       variant={a === 'use' ? 'primary' : 'secondary'}

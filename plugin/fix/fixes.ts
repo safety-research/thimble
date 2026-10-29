@@ -76,6 +76,13 @@ export const fixName = (f: Pick<Fix, 'id' | 'title'>, n = 60): string => cut(f.t
 /** Whether a fix had a version before this round: a change to a fix the person has, not a new fix. */
 export const isChange = (f: Pick<Fix, 'prev'>): boolean => !!f.prev
 
+/** Whether the fix's number alone (/thimble-fix N) tries it again, in a new copy and the person's words of before, as y
+ *  on its failed line does: it failed, it no longer fits (redo), or its new version did not fit when the person pressed
+ *  y (a fix changed in place that waits, whose record says why). The kernel's line for each that does not fit names
+ *  /thimble-fix N. */
+export const triesAgain = (f: Pick<Fix, 'state' | 'prev' | 'error'>): boolean =>
+  f.state === 'failed' || f.state === 'redo' || (f.state === 'ready' && !!f.prev && !!f.error)
+
 /** The bar's step while a fixer works: `fixing <name>` for a new fix, `changing <name>` for a fix the person has. */
 export const fixingWord = (f: Fix): string => `${isChange(f) ? 'changing' : 'fixing'} ${fixName(f, 28)}`
 
@@ -129,7 +136,8 @@ export type Refusal = { why: string; files: string[]; tests?: string }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
  *  u), failed (y try again · d ask Claude · n dismiss), request (no code), a new release with the fixes replayed on it
- *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
+ *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it
+ *  (a failed fix: what it tried, while the prompt box holds its failure for Claude). `reload` (applied): `pending` while
  *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
 export type FixLine = {
   id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string; open?: boolean; reload?: 'pending' | 'restart'
@@ -328,7 +336,8 @@ export async function notNow($: Engine, id: number): Promise<string | null> {
   return r.ok ? null : `× ${cut(r.err || 'thimble fix notnow gave nothing', 220)}`
 }
 
-/** /thimble-fix with no words that say what should change (alone, or a fix's number alone): how to ask. */
+/** /thimble-fix with no words that say what should change (alone, or the number of a fix that it does not try again,
+ *  triesAgain): how to ask. */
 export const FIX_ALONE = 'Ask for a change to thimble with /thimble-fix <what should work differently>.'
 
 /** /thimble-fix update: thimble update runs in a shell, not in this session, because it changes the thimble the session

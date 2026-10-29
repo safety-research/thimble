@@ -7,8 +7,10 @@
 // card where main started it, the row above the composer says how the work goes, and a row of main's chat and of the
 // fix's thread says how it ended, at the time it ended (FixStrip), from GET /api/fixes and the stream's `fix` events. A
 // message in a fix's own thread changes that fix (a round of it, never a new fix). `/thimble-fix` alone opens Your
-// fixes. A fix that did not pass offers Ask Claude: what it tried, and its failure in main's composer (askClaudeText),
-// for the person to send to Claude, who can change what the fixer's sandbox could not.
+// fixes; a fix's number alone tries a fix that did not pass again, as its Try again does (the server's answer, else how
+// to ask). A fix that did not pass offers Ask Claude, once: what it tried, and its failure in main's composer
+// (askClaudeText), with its change and the end of its tests' output, which main's sandbox cannot read from the fix's
+// copy, for the person to send to Claude, who can find why it failed and what to ask for with /thimble-fix N.
 
 export const FIX_COMMAND = '/thimble-fix'
 
@@ -39,8 +41,6 @@ export interface FixRow {
   files?: number
   /** the files it changed, by path */
   paths?: string[]
-  /** its copy of thimble, where its fixer worked, by its whole path; '' when it has none */
-  copy?: string
   /** it needs a change to a file no fix may change, so another try fails the same way (the kernel's `blocked`) */
   blocked?: boolean
   tests: string | null
@@ -111,11 +111,20 @@ export function triedLines(r: FixRow): { label: string; text: string }[] {
   ]
 }
 
+/** What a fix that did not pass tried, as the server reads it for Ask Claude (GET /api/fixes/{id}/tried): its change, cut
+ * at a line, and the end of its tests' output; '' for none. */
+export interface FixTried {
+  diff: string
+  tests: string
+}
+
 /** The failure of a fix that did not pass, as a message to Claude in the person's words, which Ask Claude puts in main's
  * composer for them to send: what went wrong (the kernel's reason, or what the row says, such as a page that did not
- * build), what they asked, what the fixer tried, and where its change is (the terminal's d says the same,
- * plugin/fix/line.ts askClaudeText). Pure. */
-export function askClaudeText(r: FixRow): string {
+ * build), what they asked, what the fixer tried, its change and the end of its tests' output (`tried`), since main's
+ * sandbox cannot read the fix's copy nor change thimble's code, and what main can do: find why, and what the person
+ * should add with /thimble-fix N, which goes on with the fix (the terminal's d, where Claude Code can change the copy,
+ * says the rest, plugin/fix/line.ts askClaudeText). Pure. */
+export function askClaudeText(r: FixRow, tried: FixTried | null = null): string {
   const one = (s: string) => {
     const t = String(s || '').replace(/\s+/g, ' ').trim()
     return (t.length > 240 ? `${t.slice(0, 239).trimEnd()}…` : t).replace(/[\s.]+$/, '')
@@ -124,9 +133,13 @@ export function askClaudeText(r: FixRow): string {
     ? `My thimble fix ${r.id}, “${r.title || r.words}”, did not pass: ${one(r.error || 'its tests failed')}.`
     : `My thimble fix ${r.id}: ${one(r.said ?? '')}.`
   const asked = r.words ? ` I asked: “${one(r.words)}”.` : ''
-  const tried = r.summary ? ` Its fixer, which works in a sandbox, tried this: ${one(r.summary)}.` : ' Its fixer works in a sandbox.'
-  const where = r.copy ? ` Its copy of thimble, with its change, is ${r.copy}.` : ''
-  return `${failed}${asked}${tried}${where} Find why it failed, and make the change if you can.`
+  const did = r.summary ? ` Its fixer, which works in a sandbox, tried this: ${one(r.summary)}.` : ' Its fixer works in a sandbox.'
+  // what the server read, as far as it is text: an answer of another shape adds nothing
+  const diff = typeof tried?.diff === 'string' ? tried.diff.trimEnd() : ''
+  const tail = typeof tried?.tests === 'string' ? tried.tests.trim() : ''
+  const change = diff.trim() ? `\n\nIts change:\n\`\`\`diff\n${diff}\n\`\`\`` : ''
+  const tests = tail ? `\n\nThe end of its tests' output:\n\`\`\`\n${tail}\n\`\`\`` : ''
+  return `${failed}${asked}${did}${change}${tests}${change || tests ? '\n\n' : ' '}Find why it failed, and tell me what to add with /thimble-fix ${r.id}.`
 }
 
 /** How Your fixes names a fix's state. */

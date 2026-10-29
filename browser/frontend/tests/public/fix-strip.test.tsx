@@ -5,7 +5,8 @@
 // checks, Use it now (the person's click puts it on), What changed (a few lines, not a diff) and Later. After Use it
 // now: "Reloading thimble…", then the row says what it said, with nothing left to ask (Your fixes offers Undo). A fix
 // that did not pass says why, with Try again and Ask Claude, which shows what it tried and puts its failure in main's
-// composer for the person to send. An earlier row of a fix is a quiet line of what it said.
+// composer for the person to send, once, with its change and the end of its tests' output. An earlier row of a fix is a
+// quiet line of what it said.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { askClaudeText, changedLines, fixActions, fixText, fixWords, pageText, triedLines, workingText, type FixRow } from '../../src/chat/fix.ts'
@@ -70,19 +71,25 @@ describe('the row and the notice', () => {
     ])
   })
 
-  const failed = (over: Partial<FixRow> = {}) => row({ state: 'failed', kind: 'failed', said: '“Card says how many rows” did not pass: its tests failed in the sandbox', error: 'its tests failed in the sandbox', paths: ['browser/frontend/src/canvas/Focus.tsx'], copy: '/home/t/.thimble/fixes/work/3', ...over })
+  const failed = (over: Partial<FixRow> = {}) => row({ state: 'failed', kind: 'failed', said: '“Card says how many rows” did not pass: its tests failed in the sandbox', error: 'its tests failed in the sandbox', paths: ['browser/frontend/src/canvas/Focus.tsx'], ...over })
+  const TRIED = { diff: 'diff --git a/browser/frontend/src/canvas/Focus.tsx b/browser/frontend/src/canvas/Focus.tsx\n-  title\n+  `${title} · ${n} rows`\n', tests: 'FAIL Focus.test.tsx > the title counts rows' }
 
-  test('what a fix that did not pass tried, and its failure as a message to Claude in one paragraph', () => {
+  test('what a fix that did not pass tried, and its failure as a message to Claude, with what main can read: its change and the end of its tests', () => {
     expect(triedLines(failed())).toEqual([
       { label: 'You asked', text: "make this card's title say how many rows" },
       { label: 'Claude did', text: "The card's title ends with its row count." },
       { label: 'Tried', text: 'browser/frontend/src/canvas/Focus.tsx' },
       { label: 'Why', text: 'its tests failed in the sandbox' },
     ])
-    expect(askClaudeText(failed())).toBe("My thimble fix 3, “Card says how many rows”, did not pass: its tests failed in the sandbox. I asked: “make this card's title say how many rows”. Its fixer, which works in a sandbox, tried this: The card's title ends with its row count. Its copy of thimble, with its change, is /home/t/.thimble/fixes/work/3. Find why it failed, and make the change if you can.")
+    // main's sandbox cannot read the fix's copy, nor change thimble: the message carries the change and the tests'
+    // end, and asks what main can do, never the copy's path
+    expect(askClaudeText(failed(), TRIED)).toBe("My thimble fix 3, “Card says how many rows”, did not pass: its tests failed in the sandbox. I asked: “make this card's title say how many rows”. Its fixer, which works in a sandbox, tried this: The card's title ends with its row count.\n\nIts change:\n```diff\ndiff --git a/browser/frontend/src/canvas/Focus.tsx b/browser/frontend/src/canvas/Focus.tsx\n-  title\n+  `${title} · ${n} rows`\n```\n\nThe end of its tests' output:\n```\nFAIL Focus.test.tsx > the title counts rows\n```\n\nFind why it failed, and tell me what to add with /thimble-fix 3.")
+    // with nothing read (the server could not say, or said something else), one paragraph
+    expect(askClaudeText(failed())).toBe("My thimble fix 3, “Card says how many rows”, did not pass: its tests failed in the sandbox. I asked: “make this card's title say how many rows”. Its fixer, which works in a sandbox, tried this: The card's title ends with its row count. Find why it failed, and tell me what to add with /thimble-fix 3.")
+    expect(askClaudeText(failed(), { ok: true } as never)).toBe(askClaudeText(failed()))
     // a fix that went off again after the page did not build: what the row says, since the kernel gives no reason
-    const off = failed({ state: 'off', error: null, summary: '', copy: '', said: '“Card says how many rows” did not go on: the page did not build: error TS1005; it is off again' })
-    expect(askClaudeText(off)).toBe("My thimble fix 3: “Card says how many rows” did not go on: the page did not build: error TS1005; it is off again. I asked: “make this card's title say how many rows”. Its fixer works in a sandbox. Find why it failed, and make the change if you can.")
+    const off = failed({ state: 'off', error: null, summary: '', said: '“Card says how many rows” did not go on: the page did not build: error TS1005; it is off again' })
+    expect(askClaudeText(off, { diff: '', tests: '' })).toBe("My thimble fix 3: “Card says how many rows” did not go on: the page did not build: error TS1005; it is off again. I asked: “make this card's title say how many rows”. Its fixer works in a sandbox. Find why it failed, and tell me what to add with /thimble-fix 3.")
     expect(triedLines(off).map((l) => l.label)).toEqual(['You asked', 'Tried'])
   })
 
@@ -100,6 +107,7 @@ describe('the row and the notice', () => {
       const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
       if (u.endsWith('/fixes?every=true') && method === 'GET') return json({ problem: '', fixes: every })
       if (u.endsWith('/fixes') && method === 'GET') return json({ problem: '', fixes })
+      if (u.endsWith('/fixes/3/tried') && method === 'GET') return json(TRIED)
       return json({ ok: true, restart: true })
     })
   })
@@ -212,7 +220,7 @@ describe('the row and the notice', () => {
     expect(sent).toEqual(['POST /ws/mini/fixes/3/redo'])
   })
 
-  test("Ask Claude shows what the fix tried under its row and puts its failure in main's composer, in main; nothing is sent", async () => {
+  test("Ask Claude shows what the fix tried under its row and puts its failure in main's composer, in main, once; nothing is sent", async () => {
     takeDrafts()
     const opened: unknown[] = []
     const off = bus.on('openChat', (e) => void opened.push(e))
@@ -221,18 +229,36 @@ describe('the row and the notice', () => {
     await settle()
     expect(el.querySelector('.chat-fix-what')).toBeNull()
     await click(button(el, 'Ask Claude'))
+    await settle()
     off()
     expect([...el.querySelectorAll('.chat-fix-what dt')].map((d) => d.textContent)).toEqual(['You asked:', 'Claude did:', 'Tried:', 'Why:'])
     expect(el.querySelector('.chat-fix-what')?.textContent).toContain('browser/frontend/src/canvas/Focus.tsx')
-    expect(takeDrafts()).toEqual([{ thread: 'main', text: askClaudeText(failed()) }])
+    // the message carries the change and the end of the tests' output, as the server read them
+    expect(takeDrafts()).toEqual([{ thread: 'main', text: askClaudeText(failed(), TRIED) }])
     expect(opened).toEqual([{ chatId: 'main' }])
     expect(sent).toEqual([])
-    // one that needs a file no fix may change asks Claude the same way
+    // the message is in the composer: Ask Claude is not offered a second time, and Try again stays
+    expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Try again'])
+    expect(takeDrafts()).toEqual([])
+    // one that needs a file no fix may change asks Claude the same way, and then offers nothing, what it tried shown
     unmountAll()
     fixes = [failed({ blocked: true })]
     const blocked = await mount(result(true, failed().said ?? '', 'failed'))
     await settle()
     expect([...blocked.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Ask Claude'])
+    await click(button(blocked, 'Ask Claude'))
+    await settle()
+    expect([...blocked.querySelectorAll('button')]).toEqual([])
+    expect(blocked.querySelector('.chat-fix-what')).not.toBeNull()
+    expect(takeDrafts().length).toBe(1)
+    // a server that cannot say what it tried: the message goes without it
+    unmountAll()
+    vi.stubGlobal('fetch', async (url: string) => (String(url).endsWith('/tried') ? new Response('{"detail":"thimble fix diff gave nothing"}', { status: 409 }) : new Response(JSON.stringify({ problem: '', fixes: [failed()] }), { status: 200, headers: { 'content-type': 'application/json' } })))
+    const bare = await mount(result(true, failed().said ?? '', 'failed'))
+    await settle()
+    await click(button(bare, 'Ask Claude'))
+    await settle()
+    expect(takeDrafts()).toEqual([{ thread: 'main', text: askClaudeText(failed()) }])
   })
 
   test('back from the restart with something typed: the row offers Reload', async () => {

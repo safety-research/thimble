@@ -16,8 +16,9 @@
 //                          with /thimble-fix (skills/fix-thimble/SKILL.md). Claude reads what came of it in the
 //                          skill's place
 //   /thimble-fix           alone, or a fix's number alone: how to ask for a fix, at once, without a turn of Claude's.
-//                          The number of a fix that failed or no longer fits tries it again, in the person's words of
-//                          before, as y on its failed line does (request.ts redoFix)
+//                          The number of a fix that failed or no longer fits (fixes.ts triesAgain: also a new version
+//                          that did not fit at y) tries it again, in the person's words of before, as y on its failed
+//                          line does (request.ts redoFix); the kernel's line for a fix that does not fit says so
 //   the fixer's calls      its shell runs in the sandbox runtime (no site but the package registries, reads only the
 //                          system, its tools and the copy, writes only the copy), at most 5 minutes a command, with no
 //                          dialog unless the person's rules deny the command, and never publishes to the registries;
@@ -29,6 +30,8 @@
 //   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it now · d what
 //                          changed · n later, and Claude Code sends a notification
 //   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
+//   the prompt box         while a failed fix's view shows what it tried (d), each change of the box draws the bar
+//                          again: its keys show only while the box is empty, where they act (line.ts)
 //   session start          a newer release is out: one line says so (thimble update, in a shell, moves to it); a
 //                          fixer that works on across a reload keeps its step on the bar, and its time; what came of
 //                          a check that no session waited for (the session ended, or the plugin reloaded, while the
@@ -44,8 +47,8 @@ import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
-import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
-import { lineSeen } from './line'
+import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, triesAgain, UPDATE_IN_SHELL, updateRan } from './fixes'
+import { lineSeen, redrawFor } from './line'
 import { fixesContext, redoFix, request } from './request'
 
 type Engine = EngineInterface
@@ -133,16 +136,12 @@ const fixerAgents = new Set<string>()
 const ASKED = { plugin: 'thimble', key: 'fixAsked' } as const
 const ASKED_WORDS = { plugin: 'thimble', key: 'fixAskedWords' } as const
 
-/** The states of a fix that its number alone tries again: it failed, or it no longer fits (y on a failed line does the
- *  same; the kernel's line for a fix that does not fit names /thimble-fix N). */
-const TRY_AGAIN = ['failed', 'redo']
-
-/** /thimble-fix with a fix's number and no words: a fix that failed or no longer fits starts again in a new copy, in the
- *  person's words of before, a moment after the command's hook, as y on its failed line does after the key; any other
- *  gets how to ask. The command's answer, or null when there is none. */
+/** /thimble-fix with a fix's number and no words: a fix that failed or no longer fits (fixes.ts triesAgain) starts again
+ *  in a new copy, in the person's words of before, a moment after the command's hook, as y on its failed line does after
+ *  the key; any other gets how to ask. The command's answer, or null when there is none. */
 async function numberAlone($: Engine, n: number | null): Promise<string | null> {
   const f = n == null ? null : (await refreshFixes($))?.fixes.find(x => x.id === n)
-  if (!f || !TRY_AGAIN.includes(f.state)) return FIX_ALONE
+  if (!f || !triesAgain(f)) return FIX_ALONE
   $.clock.after(0, () => {
     void (async () => {
       const bad = await redoFix($, f.id)
@@ -150,6 +149,17 @@ async function numberAlone($: Engine, n: number | null): Promise<string | null> 
     })().catch(err => $.ui.toast(`thimble could not try “${fixName(f)}” again: ${cut(String((err as Error)?.message || err), 160)}`))
   })
   return null
+}
+
+/** The prompt box now holds `text`: the bar draws again when a failed fix's view shows keys the box no longer lets act,
+ *  or hides keys that act again (line.ts redrawFor). Nothing is read while no such view shows, so a key typed costs
+ *  nothing more, and nothing here fails the edit. */
+function boxChanged($: Engine, text: unknown): void {
+  try {
+    if (redrawFor(String(text ?? '') === '')) $.ui.invalidate('ui.render')
+  } catch {
+    // the bar draws at its next change
+  }
 }
 
 async function knowFixers($: Engine): Promise<void> {
@@ -319,5 +329,18 @@ export const registerFix: Register = on => {
   on('prompt.submit', { origin: { kind: /^(?:composer)$/ } }, async ($, e, next) => {
     if (!e.command) await lineSeen($).catch(() => undefined)
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // a failed fix's view after d shows its keys only while the prompt box is empty: the bar draws again when the box
+  // empties or fills, by an edit, or by a clear, an undo, a recalled prompt or a fill (boxChanged)
+  on('prompt.edit', { origin: { kind: /^composer$/ } }, async ($, e, next) => {
+    const r = await next(e)
+    boxChanged($, r?.text)
+    return r
+  }).catch(($, e, next) => next(e))
+  on('prompt.change', { origin: { kind: /^[\s\S]+$/ } }, async ($, e, next) => {
+    const r = await next(e)
+    boxChanged($, e.text)
+    return r
   }).catch(($, e, next) => next(e))
 }

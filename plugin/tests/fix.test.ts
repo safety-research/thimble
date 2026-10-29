@@ -6,7 +6,8 @@
 // changed; y applies it with a secret only that press holds and reloads the plugins (at the turn's end when Claude is
 // mid-reply; a --plugin-dir session is told to restart); u undoes it; n leaves it ready in the list; /thimble-fix alone
 // says how to ask; a failed fix's d shows what it tried and puts its failure in the prompt box for the person to send to
-// Claude; a failed fix's line goes at the next prompt. The fixer's shell runs in the sandbox the kernel describes, with
+// Claude, and the keys under it show only while the box is empty, where they act; a failed fix's line goes at the next
+// prompt. The fixer's shell runs in the sandbox the kernel describes, with
 // a time limit, its writes stay in its copy, and it publishes nothing to the package registries it reaches. All data is
 // made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
@@ -17,6 +18,7 @@ import { askClaudeText, fixKey, fixLineRows } from '../fix/line'
 import { NOT_ASKED, notStarted, registerFix, wordsOfSkill } from '../fix/register'
 import { fixesContext, formOf, namedFix } from '../fix/request'
 import { textOf as screenText, TEXT_ELS } from '../fix/screen'
+import { registerKeys } from '../hooks/keys'
 import { promptStub } from './stubs'
 import { test } from './kit'
 
@@ -47,14 +49,17 @@ function admits(m: Any, e: Any): boolean {
 
 let now = 0
 
-/** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. */
-function setup() {
+/** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. `keys`: the
+ *  keys' hook too (hooks/keys.ts), registered first as the plugin registers it, so that a key typed at the prompt goes
+ *  where the person's key goes. */
+function setup(o: { keys?: boolean } = {}) {
   const hooks: Record<string, { m: Any; fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? { m: null, fn: a } : { m: a, fn: b })
     const reg: Any = { catch: () => reg }
     return reg
   }
+  if (o.keys) registerKeys(on, {} as never)
   registerFix(on, {} as never)
   const state = new Map<string, unknown>()
   const files = new Map<string, string>()
@@ -70,9 +75,10 @@ function setup() {
   const config: { key: string; value: unknown }[] = []
   const copied: string[] = []
   const asked: Any[] = []
-  // the person's prompt box, and each fill a plugin made of it
+  // the person's prompt box, each fill a plugin made of it, and each time a hook asked for the bar to draw again
   const box = { text: '' }
   const fills: Any[] = []
+  const redraws: string[] = []
   const fix: Any = { id: 1, title: 'make the bar say read', words: ["make the bar's coverage item say read"], rounds: 1, made_in: 'terminal', created: 1761200000, state: 'working', work: WORK, commit: null, files: [], tests: null, summary: '', error: null }
   // the kernel's records: none until the first request
   let made = false
@@ -190,12 +196,12 @@ function setup() {
       },
     },
     model: { complete: async (req: Any) => { asked.push(req); return { isAnswered: true, text: JSON.stringify({ title: 'Bar says coverage, not read', wrong: 'The bar said coverage after Claude read a file.', fixed: 'The bar says read.' }) } } },
-    ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: () => undefined },
+    ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: (ev: string) => { redraws.push(ev) } },
   }
   /** An event through the module's hooks that admit it, in order, then `base`. */
   const call = (event: string, e: Any, base: (e: Any) => Any = async x => x) => {
     const chain = (hooks[event] ?? []).filter(h => admits(h.m, e))
-    const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i]!.fn($, ev, Object.assign((x: Any) => run(i + 1, x), { called: false, origin: { plugin: 'thimble' } })) : base(ev))
+    const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i]!.fn($, ev, Object.assign((x: Any) => run(i + 1, x), { called: false, origin: { plugin: 'thimble' }, signal: { aborted: false } })) : base(ev))
     return run(0, e)
   }
   /** The timers that came due, run (each may add more). */
@@ -212,7 +218,7 @@ function setup() {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, others, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills }
+  return { $, call, tick, end, made: () => { made = true }, others, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, redraws }
 }
 
 /** The person's /thimble-fix <words>: the command runs the plugin's prompt command with the words a moment later, and
@@ -846,8 +852,12 @@ test('a fixer that finds the request cannot be met ends with Cannot: the line sh
   expect(await fixKey(s.$, 'y')).toBe(null)
   expect(s.notes).toEqual([])
   await (await fixKey(s.$, 'd'))!.later()
+  // the box holds the failure d put there, so what it tried shows with no key under it: n would type into it
   rows = await fixLineRows(s.$, ELS, 110)
-  expect(rows.slice(-3).map(textOf)).toEqual(['    Tried       plugin/bar/bar.tsx', `    Why         ${why}`, '    n dismiss'])
+  expect(rows.slice(-2).map(textOf)).toEqual(['    Tried       plugin/bar/bar.tsx', `    Why         ${why}`])
+  // the person clears the box: n acts there again, and shows
+  s.box.text = ''
+  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    n dismiss')
   // a failure another try can mend: y tries it again, the person's own key, and the new fixer is told where the
   // earlier change is
   const t = setup()
@@ -859,6 +869,7 @@ test('a fixer that finds the request cannot be met ends with Cannot: the line sh
   expect(rows.map((r: Any) => r.props.key)).not.toContain('fix-line-why')
   expect(textOf(rows[1])).toBe('    y try again · d ask Claude · n dismiss')
   await (await fixKey(t.$, 'd'))!.later()
+  t.box.text = ''
   expect(textOf((await fixLineRows(t.$, ELS, 110)).at(-1))).toBe('    y try again · n dismiss')
   await (await fixKey(t.$, 'y'))!.later()
   expect(t.verbs()).toContain('redo 1')
@@ -881,7 +892,8 @@ test('a failed fix offers y try again and d ask Claude, never r: y, or a click o
   expect(textOf(open.find((r: Any) => r.props.key === 'fix-what-tried'))).toBe('    Tried       plugin/bar/bar.tsx')
   expect(textOf(open.find((r: Any) => r.props.key === 'fix-what-why'))).toBe('    Why         it needs the scan off')
   expect(textOf(open)).not.toContain('Changed')
-  await (await fixKey(s.$, 'd'))!.later()
+  // d asked Claude already: it is no key of the view it opened
+  expect(await fixKey(s.$, 'd')).toBe(null)
   // a click on `y try again` does what y does
   const buttons = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(buttons) : [...(n.type === 'Button' ? [n] : []), ...buttons(n.props?.children)])
   const again = buttons(rows).find(b => b.props.label === 'y try again')
@@ -892,43 +904,66 @@ test('a failed fix offers y try again and d ask Claude, never r: y, or a click o
 })
 
 /** The message d puts in the prompt box for fix 1 as the tests make it fail: Cannot after a refused try. */
-const ASK_CLAUDE = "My thimble fix 1, “make the bar say read”, did not pass: it needs the scan off. I asked: “make the bar's coverage item say read”. Its fixer, which works in a sandbox, tried this: The scan skips the notes you name. Its copy of thimble is /made-up/.thimble/fixes/work/1, and thimble fix diff 1 shows its change. Find why it failed, and make the change if you can."
+const ASK_CLAUDE = "My thimble fix 1, “make the bar say read”, did not pass: it needs the scan off. I asked: “make the bar's coverage item say read”. Its fixer, which works in a sandbox, tried this: The scan skips the notes you name. Its copy of thimble is /made-up/.thimble/fixes/work/1, and thimble fix diff 1 shows its change. Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix 1 and what you changed, so that thimble tests it."
 
-test("a failed fix's d asks Claude: what it tried shows in the line's place, and the prompt box takes the failure, for the person to send with ↵; no key sends anything", async () => {
+test("a failed fix's d asks Claude: what it tried shows in the line's place, and the prompt box takes the failure, for the person to send with ↵; no key sends anything, and the keys under it show only while the box is empty", async () => {
   const s = setup()
   s.fix.refuse = 'its tests failed in the sandbox'
   await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   await s.end('Cannot: it needs the scan off', 'agent-fixer-2')
   const before = { commands: [...s.commands], sent: s.sent.length, spawns: s.spawns.length }
   await (await fixKey(s.$, 'd'))!.later()
-  // the line's place: what it tried and why; the box: the failure in the person's words, as a message to Claude
+  // the line's place: what it tried and why, with no key under it while the box holds the failure (a key typed there
+  // goes into the message); the box: the failure in the person's words, as a message to Claude
   expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toEqual([
     '  make the bar say read',
     "    You asked   make the bar's coverage item say read",
     '    Claude did  The scan skips the notes you name.',
     '    Tried       plugin/bar/bar.tsx',
     '    Why         it needs the scan off',
-    '    y try again · n dismiss',
   ])
   expect(s.fills).toEqual([{ text: ASK_CLAUDE, mode: 'replace' }])
   // nothing went to Claude or anywhere else: no command, no message, no fork
   expect(s.commands).toEqual(before.commands)
   expect(s.sent.length).toBe(before.sent)
   expect(s.spawns.length).toBe(before.spawns)
-  // d again closes it, and leaves the box as it is
-  await (await fixKey(s.$, 'd'))!.later()
-  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    y try again · d ask Claude · n dismiss')
+  // d asked Claude already: it is no key of the view it opened
+  expect(await fixKey(s.$, 'd')).toBe(null)
+  // the person clears the box (esc esc): the bar draws again, and the keys that act at an empty prompt show
+  const drawn = s.redraws.length
+  s.box.text = ''
+  await s.call('prompt.change', { text: '', cursor: 0, origin: { kind: 'clear' } })
+  expect(s.redraws.slice(drawn)).toEqual(['ui.render'])
+  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    y try again · n dismiss')
   expect(s.fills.length).toBe(1)
+  // the person types a word: the keys go again, and a key typed with nothing to draw anew asks for no drawing
+  await s.call('prompt.edit', { origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'w' }, async () => ({ text: 'w', cursor: 1 }))
+  expect(s.redraws.slice(drawn)).toEqual(['ui.render', 'ui.render'])
+  s.box.text = 'w'
+  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    Why         it needs the scan off')
+  await s.call('prompt.edit', { origin: { kind: 'composer' }, text: 'w', cursor: 1, start: 1, end: 1, inputText: 'h' }, async () => ({ text: 'wh', cursor: 2 }))
+  expect(s.redraws.slice(drawn).length).toBe(2)
+  // the person sends their prompt: a prompt like any, and the line goes, as at any prompt
+  await s.call('prompt.submit', { text: 'what does the scan keep private?', origin: { kind: 'composer' } })
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  // with no such view, the box's changes ask for no drawing
+  await s.call('prompt.change', { text: '', cursor: 0, origin: { kind: 'clear' } })
+  expect(s.redraws.slice(drawn).length).toBe(2)
   // a click on `d ask Claude` while the person has typed something: the failure goes after their words, on a line of
   // its own
-  s.box.text = 'and the legend'
+  const u = setup()
+  u.fix.refuse = 'its tests failed in the sandbox'
+  await requested(u, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  await u.end('Cannot: it needs the scan off', 'agent-fixer-2')
+  u.box.text = 'and the legend'
   const buttons = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(buttons) : [...(n.type === 'Button' ? [n] : []), ...buttons(n.props?.children)])
-  await buttons(await fixLineRows(s.$, ELS, 110)).find(b => b.props.label === 'd ask Claude').props.onPress()
-  expect(s.fills.at(-1)).toEqual({ text: `\n${ASK_CLAUDE}`, mode: 'append' })
-  expect(s.box.text).toBe(`and the legend\n${ASK_CLAUDE}`)
-  // the person sends it: a prompt like any, and the line goes, as at any prompt
-  await s.call('prompt.submit', { text: s.box.text, origin: { kind: 'composer' } })
-  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  await buttons(await fixLineRows(u.$, ELS, 110)).find(b => b.props.label === 'd ask Claude').props.onPress()
+  expect(u.fills.at(-1)).toEqual({ text: `\n${ASK_CLAUDE}`, mode: 'append' })
+  expect(u.box.text).toBe(`and the legend\n${ASK_CLAUDE}`)
+  expect(buttons(await fixLineRows(u.$, ELS, 110))).toEqual([])
+  // the person sends it: the line goes
+  await u.call('prompt.submit', { text: u.box.text, origin: { kind: 'composer' } })
+  expect(await fixLineRows(u.$, ELS, 110)).toEqual([])
   // a blocked fix asks Claude the same way
   const t = setup()
   t.fix.refuse = WAY_BACK
@@ -938,16 +973,51 @@ test("a failed fix's d asks Claude: what it tried shows in the line's place, and
   expect(String(t.fills[0]?.text)).toContain('did not pass: the scan keeps your data private, so a fix may not change it.')
 })
 
-test("the failure Claude reads names the person's words of each round, what the fixer tried, and where its change is, in one paragraph", () => {
+test("at the prompt, d on a failed fix puts its failure in the box; y and n then type into it, as the view shows them not, and once the box is empty again they show, and y tries the fix again", async () => {
+  const s = setup({ keys: true })
+  s.fix.refuse = 'its tests failed in the sandbox'
+  await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  await s.end('Cannot: it needs the scan off', 'agent-fixer-2')
+  // a key the person types: through the keys' hook and the fix module's, then into the box when no one takes it
+  const typed = async (e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length })
+  const press = async (k: string) => {
+    const at = s.box.text.length
+    const r = await s.call('prompt.edit', { origin: { kind: 'composer' }, key: { key: k }, text: s.box.text, cursor: at, start: at, end: at, inputText: k }, typed)
+    s.box.text = r.text
+    await s.tick()
+  }
+  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    y try again · d ask Claude · n dismiss')
+  await press('d')
+  expect(s.box.text).toBe(ASK_CLAUDE)
+  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    Why         it needs the scan off')
+  // the person adds to the message: their keys are words, and nothing is tried again or dismissed
+  const verbs = s.verbs().length
+  await press('y')
+  await press('n')
+  expect(s.box.text).toBe(`${ASK_CLAUDE}yn`)
+  expect(s.verbs().slice(verbs).filter(v => /^(redo|notnow)\b/.test(v))).toEqual([])
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toContain('    Why         it needs the scan off')
+  // they clear the box instead of sending it: the view's keys show, and y at the empty prompt tries the fix again
+  s.box.text = ''
+  await s.call('prompt.change', { text: '', cursor: 0, origin: { kind: 'clear' } })
+  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    y try again · n dismiss')
+  await press('y')
+  expect(s.box.text).toBe('')
+  expect(s.verbs().slice(verbs)).toContain('redo 1')
+})
+
+test("the failure Claude reads names the person's words of each round, what the fixer tried, where its change is, and how a change Claude makes there gets tested, in one paragraph", () => {
   const f = (o: Any) => ({ id: 4, title: 'Legend shows every row', words: ['the legend hides its last row'], rounds: 1, made_in: 'terminal', created: 0, state: 'failed', work: null, commit: 'c', files: [], tests: null, summary: '', error: 'its tests failed in the sandbox', ...o })
-  expect(askClaudeText(f({}), null)).toBe('My thimble fix 4, “Legend shows every row”, did not pass: its tests failed in the sandbox. I asked: “the legend hides its last row”. Its fixer works in a sandbox. thimble fix diff 4 shows its change. Find why it failed, and make the change if you can.')
-  // the rounds in turn, a summary of several lines and a reason that ends with its own stop, as one paragraph
+  // with no copy, there is nowhere for Claude's change: it says what to add with /thimble-fix 4
+  expect(askClaudeText(f({}), null)).toBe('My thimble fix 4, “Legend shows every row”, did not pass: its tests failed in the sandbox. I asked: “the legend hides its last row”. Its fixer works in a sandbox. thimble fix diff 4 shows its change. Find why it failed, and tell me what to add with /thimble-fix 4.')
+  // the rounds in turn, a summary of several lines and a reason that ends with its own stop, as one paragraph; Claude's
+  // change goes in the copy, where /thimble-fix 4 <words> goes on (y, or the number alone, would start a new copy)
   const t = askClaudeText(f({ words: ['the legend hides its last row', 'and wrap long names'], summary: 'The legend wraps.\nNames break at 40 cells.', error: 'it needs a newer node.' }), '~/.thimble/fixes/work/4')
-  expect(t).toBe('My thimble fix 4, “Legend shows every row”, did not pass: it needs a newer node. I asked: “the legend hides its last row · then and wrap long names”. Its fixer, which works in a sandbox, tried this: The legend wraps. Names break at 40 cells. Its copy of thimble is ~/.thimble/fixes/work/4, and thimble fix diff 4 shows its change. Find why it failed, and make the change if you can.')
+  expect(t).toBe('My thimble fix 4, “Legend shows every row”, did not pass: it needs a newer node. I asked: “the legend hides its last row · then and wrap long names”. Its fixer, which works in a sandbox, tried this: The legend wraps. Names break at 40 cells. Its copy of thimble is ~/.thimble/fixes/work/4, and thimble fix diff 4 shows its change. Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix 4 and what you changed, so that thimble tests it.')
   expect(t).not.toContain('\n')
 })
 
-test("/thimble-fix with the number of a fix that failed or no longer fits tries it again in a new copy, in the person's words of before, as y on its failed line does; another fix's number says how to ask", async () => {
+test("/thimble-fix with the number of a fix that failed or no longer fits, a new version that did not fit at y included, tries it again in a new copy, in the person's words of before, as y on its failed line does; another fix's number says how to ask", async () => {
   const s = setup()
   s.fix.refuse = 'its tests failed in the sandbox'
   await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
@@ -971,6 +1041,17 @@ test("/thimble-fix with the number of a fix that failed or no longer fits tries 
   await s.tick()
   await until(() => s.spawns.length === 4)
   expect(s.verbs().filter(v => v === 'redo 1').length).toBe(2)
+  // a changed fix whose new version did not fit at y: it still waits, its record says why, and the kernel's line names
+  // /thimble-fix 1, which tries it again
+  Object.assign(s.fix, { state: 'ready', prev: { state: 'on', commit: 'c0ffee0', title: 'make the bar say read' }, error: 'its new version does not fit fix 2' })
+  expect(await s.call('command.run', { command: 'thimble-fix', args: '1' }, none)).toEqual({})
+  await s.tick()
+  await until(() => s.spawns.length === 5)
+  expect(s.verbs().filter(v => v === 'redo 1').length).toBe(3)
+  expect(s.toasts).toContain('A fork of this session is changing “make the bar say read” again, in a new copy.')
+  // a new version that waits for y with nothing against it: its number alone says how to ask
+  Object.assign(s.fix, { state: 'ready', error: null })
+  expect(await s.call('command.run', { command: 'thimble-fix', args: '1' }, none)).toEqual({ text: FIX_ALONE })
   // a fix that cannot do without a file no fix may change: the kernel says why, on the line
   const t = setup()
   t.fix.refuse = WAY_BACK

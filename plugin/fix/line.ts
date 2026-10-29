@@ -24,13 +24,15 @@
 //             fixer could not do without the files no fix may change (blocked) offers no y: d ask Claude · n dismiss)
 //             d shows what it tried in its place, and the prompt box takes the failure as a message to Claude, which
 //             the person sends with ↵ or not: Claude, outside the fixer's sandbox, can look into it and change what the
-//             fixer could not, with its own permission prompts:
+//             fixer could not, in the fix's copy, with its own permission prompts (/thimble-fix N <words> then goes on in
+//             that copy):
 //             <title>
 //               You asked   <the person's words>
 //               Claude did  <what the fixer says it did>
 //               Tried       <the files it changed>
 //               Why         <why it did not pass>
-//               y try again · n dismiss
+//               y try again · n dismiss   (only while the prompt box is empty: the keys type into the message d put
+//                                         there, so they show again once the person sends it or clears the box)
 //   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it   (until the
 //             ◇ Claude changed no code: <title> stays as it was   (a round of a fix the person has)    next prompt)
 //   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo   (until the next prompt)
@@ -48,7 +50,7 @@ import { quiet } from '../core/askcell.js'
 import { cut, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
 import { testsWord } from './fixer'
-import { applyFix, askedWords, type Fix, fixesDir, fixesNow, fixLineNow, fixName, fixOf, noticeText, notNow, setFixLine, shownPath, undoFix } from './fixes'
+import { applyFix, askedWords, type Fix, fixesDir, fixesNow, type FixLine, fixLineNow, fixName, fixOf, noticeText, notNow, setFixLine, shownPath, undoFix } from './fixes'
 import { redoFix } from './request'
 
 type Engine = EngineInterface
@@ -59,17 +61,35 @@ type Any = any
 const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['y', 'd', 'n'], request: ['n'] }
 
 /** The keys the line takes for this fix: a failed fix whose fixer could not do without the files no fix may change
- *  (blocked) offers no y, which would fail the same way. */
-const keysOf = (kind: string, f: Pick<Fix, 'blocked'> | null): string[] =>
-  (KEYS[kind] ?? []).filter(k => !(kind === 'failed' && k === 'y' && f?.blocked?.length))
+ *  (blocked) offers no y, which would fail the same way; once d asked Claude, what it tried shows, with y and n alone. */
+const keysOf = (l: Pick<FixLine, 'kind' | 'open'>, f: Pick<Fix, 'blocked'> | null): string[] =>
+  (KEYS[l.kind] ?? []).filter(k => !(l.kind === 'failed' && ((k === 'y' && f?.blocked?.length) || (k === 'd' && l.open))))
 
 /** What a key on the line does, once the word window closed (it cannot be undone). */
 export async function fixKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
   // a key no line takes reads nothing: a key's hook has a few milliseconds of its own time
   if (!Object.values(KEYS).some(ks => ks.includes(k))) return null
   const l = await fixLineNow($)
-  if (!l || !keysOf(l.kind, l.kind === 'failed' ? await fixOf($, l.id) : null).includes(k)) return null
+  if (!l || !keysOf(l, l.kind === 'failed' ? await fixOf($, l.id) : null).includes(k)) return null
   return { later: () => pressLine($, l.id, l.kind, k) }
+}
+
+/** A failed fix's view after d as the bar last drew it: whether its keys showed, which they do only while the prompt box
+ *  is empty, as they act only there; null while no such view shows. The drawing keeps it (fixLineRows). */
+let keysShown: boolean | null = null
+
+/** Whether the bar should draw again for a prompt box that is now empty (`empty`) or not: a failed fix's view shows its
+ *  keys while the box is not empty, or hides them while it is (register.ts asks at each change of the box). */
+export const redrawFor = (empty: boolean): boolean => keysShown !== null && keysShown !== empty
+
+/** Whether the person's prompt box is empty, where the line's keys act (hooks/keys.ts); a session with no box reads as
+ *  empty. */
+async function boxEmpty($: Engine): Promise<boolean> {
+  try {
+    return (await $.prompt.read()).text === ''
+  } catch {
+    return true
+  }
 }
 
 async function pressLine($: Engine, id: number, kind: string, k: string): Promise<void> {
@@ -96,15 +116,19 @@ async function pressLine($: Engine, id: number, kind: string, k: string): Promis
 }
 
 /** The failure of a failed fix, as a message to Claude in the person's words: what they asked, what the fixer tried and
- *  why it did not pass, and where its change is. `copy`: the fix's copy of thimble as the person reads its path, or
- *  null when it has none. */
+ *  why it did not pass, where its change is, and how a change Claude makes in its copy gets tested: the person's
+ *  /thimble-fix N <words> goes on in that copy (a new try, y or the number alone, starts a new one). `copy`: the fix's
+ *  copy of thimble as the person reads its path, or null when it has none. */
 export function askClaudeText(f: Fix, copy: string | null): string {
   const one = (s: string) => cut(String(s || '').replace(/\s+/g, ' ').trim(), 240).replace(/[\s.]+$/, '')
   const words = askedWords(f).filter(w => w.trim())
   const asked = words.length ? ` I asked: “${one(words.join(' · then '))}”.` : ''
   const tried = f.summary ? ` Its fixer, which works in a sandbox, tried this: ${one(f.summary)}.` : ' Its fixer works in a sandbox.'
   const where = `${copy ? ` Its copy of thimble is ${copy}, and` : ''} thimble fix diff ${f.id} shows its change.`
-  return `My thimble fix ${f.id}, “${fixName(f)}”, did not pass: ${one(f.error || 'its tests failed')}.${asked}${tried}${where} Find why it failed, and make the change if you can.`
+  const ask = copy
+    ? ` Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix ${f.id} and what you changed, so that thimble tests it.`
+    : ` Find why it failed, and tell me what to add with /thimble-fix ${f.id}.`
+  return `My thimble fix ${f.id}, “${fixName(f)}”, did not pass: ${one(f.error || 'its tests failed')}.${asked}${tried}${where}${ask}`
 }
 
 /** d on a failed fix: the prompt box takes its failure as a message to Claude (askClaudeText), after what the person
@@ -172,7 +196,7 @@ const triedRows = (f: Fix): [string, string][] => [
 
 /** A failed fix's keys: y tries it again, unless its fixer could not do without the files no fix may change
  *  (blocked); d asks Claude (what it tried, and the prompt box takes its failure). `open`: the keys under what it
- *  tried. */
+ *  tried, which d asked Claude for already. */
 function failedKeys(els: Any, f: Fix | null, open: boolean, press: (k: string) => unknown): Any[] {
   const blocked = !!f?.blocked?.length
   const keys: [string, string][] = [...(blocked ? [] : [['y', 'try again'] as [string, string]]), ...(open ? [] : [['d', 'ask Claude'] as [string, string]]), ['n', 'dismiss']]
@@ -182,6 +206,7 @@ function failedKeys(els: Any, f: Fix | null, open: boolean, press: (k: string) =
 /** The line's rows, `width` cells wide, or none. */
 export async function fixLineRows($: Engine, els: Any, width: number): Promise<Any[]> {
   const l = await fixLineNow($)
+  keysShown = null
   if (!l) return []
   const { Box, Text } = els
   const f: Fix | null = l.id ? await fixOf($, l.id) : null
@@ -194,7 +219,10 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     return [...whatChanged(els, f, width, [['Changed', `${filesWord(f)} · ${testsWord(f)}`]]), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['y', 'use it now'], ['n', 'later']], press) })]
   }
   if (l.kind === 'failed' && f && l.open) {
-    return [...whatChanged(els, f, width, triedRows(f)), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: failedKeys(els, f, true, press) })]
+    // its keys while they act: not while the box holds the failure d put there, or anything the person typed
+    keysShown = await boxEmpty($)
+    const keys = keysShown ? [Box({ key: 'fix-line-2', flexDirection: 'row', width, children: failedKeys(els, f, true, press) })] : []
+    return [...whatChanged(els, f, width, triedRows(f)), ...keys]
   }
   let first: Any[] = []
   let second: Any[] = []
