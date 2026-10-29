@@ -2732,7 +2732,9 @@ def _carry(sync: bool = True) -> dict[str, Any] | None:
     changed = run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=live).stdout.splitlines()
     if any(x[3:] != PLUGIN_JSON for x in changed):
         return None
-    version = str(cur.get("version") or release_name())
+    # the release as the person reads it, as what a fix does not fit names it (_misfit): a dev install's checkout at a
+    # release tag is that release
+    version = release_name() or str(cur.get("version") or "")
     off = not is_on() or (cur.get("off") is None and _came_detached(live, tip))
     _unstamp()
     git("checkout", "-q", "mine", cwd=live, hooks=False)

@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, calls, fake, live_file, made, on_fix, press, sh, three_fixes, upstream, world  # noqa: E402, F401
+from test_fixes import FX, calls, commit_in_checkout, fake, live_file, made, on_fix, press, sh, three_fixes, upstream, world  # noqa: E402, F401
 
 
 def update_as_before() -> list[int]:
@@ -276,3 +276,21 @@ def test_reapply_while_every_fix_is_off_brings_the_fix_back_and_keeps_it_off(wor
     FX.all_on()
     assert "read ${n}" in live_file("plugin/bar/bar.tsx") and "untouched ${m}" in live_file("plugin/legend.ts")
     assert sh("git", "rev-parse", "mine~3", cwd=live) == new
+
+
+def test_after_a_dev_update_to_a_release_tag_every_line_names_the_release(world, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a = on_fix(world)["id"]
+    # the person pulls 0.10.3 into their clone (scripts/install.sh --local): it changed the bar's line
+    new = commit_in_checkout(world, {"plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "thimble 0.10.3")
+    sh("git", "tag", "v0.10.3", new, cwd=world["rel"])
+    # the update of thimble 0.10.5's kernel: it set the fix aside, and said nothing of why
+    with monkeypatch.context() as m:
+        m.setattr(FX, "_carry", lambda sync=True: None)
+        assert FX.update()["aside"] == [a]
+    assert FX.get(a)["error"] is None
+    # the list names the release the checkout is at, as the fix's line does
+    rows = FX.list_lines(120)
+    assert rows[0] == "Off, as it does not fit thimble 0.10.3: Bar says read. thimble reapply has Claude fit it."
+    assert rows[2].startswith("Your thimble fixes · thimble 0.10.3 with 1 off")
+    assert f"  fix {a} is off: it does not fit thimble 0.10.3" in rows
