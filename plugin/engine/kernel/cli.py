@@ -5,8 +5,8 @@ In a shell:
 
     thimble update                 the newest thimble, for the terminal plugin and the browser workbench. Your fixes
                                    that still fit it stay on; thimble reapply brings back one that does not
-    thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that does not fit
-                                   the new release, fitted to it, where the release still needs it
+    thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that did not fit
+                                   the new release, where the release still needs it
     thimble fixes                  your fixes that are not in the release: on, off or ready (also: thimble fix list)
     thimble fix show N             what fix N does, in a few lines
     thimble fix diff N             fix N's change to thimble's code
