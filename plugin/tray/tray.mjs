@@ -153,11 +153,11 @@ export function stepWords(ends) {
 
 /** The bar's words for ] at rest, which opens `next` of the answer's marks (`first`: its first mark): `show` the first,
  *  `next` a later one, then what it is (`] show explainer`, `] next citation`); on a narrow bar the words that name it
- *  alone, then the verb alone, then none (`shorter`, longest first). */
+ *  alone, then none (`shorter`, longest first): a verb with no mark's name would name no look. */
 export function restWords(next, first) {
   const verb = first ? 'show' : 'next'
   const what = stopWhat(next)
-  return { words: `${verb} ${what}`, what, kind: stopKind(next), shorter: [what, verb, ''] }
+  return { words: `${verb} ${what}`, what, kind: stopKind(next), shorter: [what, ''] }
 }
 
 /** A title cut to `n` characters: a place (`engine/lineage.py:463`) loses the start of its path first, so its line

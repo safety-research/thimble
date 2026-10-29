@@ -15,11 +15,12 @@
 //                  in place of the left's keys, after the busy step, while it fits there whole; the right stays, so a
 //                  hint can point at it
 //
-// A bar too narrow for its items gives way in this order: the busy step's other steps, then its words (whole words,
-// down to its glyph and seconds), then coverage's file counts, then the words of an item that has shorter ones
-// (`] show explainer` to `] explainer`, `] show`, then `]` alone), and only then a whole count: the labels', then
-// coverage. What gave way takes back the room left: the words of such an item first, then coverage's file counts, then
-// the busy step. The keys stay:
+// A bar too narrow for its items gives way in this order: the busy step's other steps, then coverage's file counts,
+// then the words of an item that has shorter ones down to the longest of those (`] show explainer` to `] explainer`),
+// then the busy step's words (whole words, down to its glyph and seconds), then the item's shorter words (`]` alone),
+// and only then a whole count: the labels', then coverage. So the words that say what a sign means stay longest: the
+// name of the mark ] opens, in that mark's look, and the busy step's words beside its glyph, which also turns after a
+// citation being checked. What gave way takes back the room left in the reverse order. The keys stay:
 // what still does not fit goes on more rows, each item whole, the right's items on a row of their own when beside the
 // first row they would take no fewer rows. The settings pane draws the same bar as
 // its switches would leave it (`preview`), on as many rows as its items take: nothing in it is a press, no work shows
@@ -52,10 +53,11 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
  *  what holds the keys now (the open tray, the open chips); while any shows, the bar's left names only those, after
  *  the busy step. `color` and `bold`: words drawn lit (`s ● short`) or as a failure, not dim. `shorter`: the words in
- *  fewer cells, longest first, which a narrow bar draws after coverage's file counts gave way and before any count
- *  does; '' is the key alone, drawn as the bar's other keys are (in the item's color when it has one), never dim, as a
- *  dim key reads as one that does nothing. `marked`: words of it drawn in a look of their own wherever they stand in the
- *  words shown (the kind of mark ] opens, in that mark's look: `] show explainer`, explainer on the explainers' teal). */
+ *  fewer cells, longest first, which a narrow bar draws after coverage's file counts gave way: the first of them it
+ *  keeps longer than the busy step's words, and before any count gives way (the order at the top of this file); '' is
+ *  the key alone, drawn as the bar's other keys are (in the item's color when it has one), never dim, as a dim key reads
+ *  as one that does nothing. `marked`: words of it drawn in a look of their own wherever they stand in the words shown
+ *  (the kind of mark ] opens, in that mark's look: `] show explainer`, explainer on the explainers' teal). */
 type Item = { id: string; key?: string; words: string; shorter?: string[]; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean; marked?: { words: string; look: Record<string, unknown> } }
 /** An item a feature puts on the bar (core/answerview.ts barLeft, barRight). */
 export type BarItem = Item
@@ -172,12 +174,14 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const whole = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
   let left = whole
   if (!preview) {
-    // a narrow bar: the busy step gives way first, down to its glyph and seconds, then coverage's file counts, then the
-    // words of an item that has shorter ones (] names the mark it opens: the bar's one sign of what the marks' looks
-    // are), and only then a whole count: the labels', then coverage. A count that went comes back when it fits on its
-    // own, except beside a hint, which the counts give way to: the labels' count is shorter, so it can fit where
-    // coverage does not. What gave way takes back the room left: each such item the longest of its words that fits,
-    // then coverage's file counts (beside coverage alone), then the busy step
+    // a narrow bar, in the order at the top of this file: from the least it can draw (the busy step's glyph and seconds,
+    // each item's shortest words, coverage without its file counts), a whole count gives way while it is still too
+    // wide: the labels', then coverage. A count that went comes back when it fits on its own, except beside a hint, which
+    // the counts give way to: the labels' count is shorter, so it can fit where coverage does not. Then what gave way
+    // takes back the room left, the words that say what a sign means first: the mark ] opens (`] explainer`: the bar's
+    // one sign of what the marks' looks are), the busy step's words (`checking 3 citations`: what the glyph that turns
+    // after a citation means), the rest of the item's words (`] show explainer`), coverage's file counts (beside
+    // coverage alone), then the busy step's other steps
     const least = whole.map((x, i) => (b && !i ? busyItem(b, 0) : shortest(x)))
     const all = right
     const bare = (x: Item) => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x)
@@ -190,15 +194,21 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
       if (spare(least, tried) >= 0) right = tried
     }
     left = [...least]
-    whole.forEach((x, i) => {
+    // each item that has shorter words: the longest of `tried` that fits in the room left
+    const takeWords = (tried: (x: Item) => string[]) => whole.forEach((x, i) => {
       if (!x.shorter?.length) return
       const room = itemLen(left[i]!) + spare(left, right)
-      const fits = [x.words, ...x.shorter].find(w => itemLen({ ...x, words: w }) <= room)
+      const fits = tried(x).find(w => itemLen({ ...x, words: w }) <= room)
       if (fits !== undefined) left[i] = { ...x, words: fits }
     })
+    // the busy step's words in the room left: its newest step's alone (`alone`), or with its other steps
+    const takeBusy = (alone: boolean) => { if (b) left[0] = busyItem(alone ? { ...b, more: [] } : b, len(left[0]!.words) + spare(left, right)) }
+    takeWords(x => x.shorter!)
+    takeBusy(true)
+    takeWords(x => [x.words])
     const back = right.map(x => all.find(y => y.id === x.id) ?? x)
     if (spare(left, back) >= 0) right = back
-    if (b) left[0] = busyItem(b, len(least[0]!.words) + spare(left, right))
+    takeBusy(false)
   }
   // what still does not fit takes more rows, each item whole: the left's in rows under its first item, beside the right's
   // on the first row, or, when that takes no fewer rows, with the right's on a row of their own under them

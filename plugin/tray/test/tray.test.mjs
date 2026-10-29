@@ -40,12 +40,12 @@ test('an explainer or a heads-up on a citation\'s words, or over them, stops bef
   assert.deepEqual(stops.map(stopWhat).slice(0, 2), ['explainer', 'citation'])
 })
 
-test('the bar names the mark ] opens by its kind, the words that name it apart to draw in its look: show the answer\'s first mark, next a later one; a narrow bar keeps the name before the verb', () => {
+test('the bar names the mark ] opens by its kind, the words that name it apart to draw in its look: show the answer\'s first mark, next a later one; a narrow bar keeps the name, then the key alone, never a verb with no name', () => {
   const stops = stopsOfRow('r2', [{ n: 1, start: 30 }], [{ id: 'g1', kind: 'explain', start: 5 }, { id: 'h1', kind: 'heads', start: 50 }], ['c9'])
   assert.deepEqual(stops.map(stopKind), ['explain', 'citation', 'heads', null])
-  assert.deepEqual(restWords(stops[0], true), { words: 'show explainer', what: 'explainer', kind: 'explain', shorter: ['explainer', 'show', ''] })
-  assert.deepEqual(restWords(stops[1], false), { words: 'next citation', what: 'citation', kind: 'citation', shorter: ['citation', 'next', ''] })
-  assert.deepEqual(restWords(stops[2], false), { words: 'next heads up', what: 'heads up', kind: 'heads', shorter: ['heads up', 'next', ''] })
+  assert.deepEqual(restWords(stops[0], true), { words: 'show explainer', what: 'explainer', kind: 'explain', shorter: ['explainer', ''] })
+  assert.deepEqual(restWords(stops[1], false), { words: 'next citation', what: 'citation', kind: 'citation', shorter: ['citation', ''] })
+  assert.deepEqual(restWords(stops[2], false), { words: 'next heads up', what: 'heads up', kind: 'heads', shorter: ['heads up', ''] })
   // the tray's header: what ] and [ go to, by name and kind; a card has no kind
   assert.deepEqual(stepWords({ next: true, prev: true, nextWhat: 'heads up', nextKind: 'heads' }), [{ key: ']', words: 'next heads up', what: 'heads up', kind: 'heads' }])
   assert.deepEqual(stepWords({ next: false, prev: true, prevWhat: 'card', prevKind: null }), [{ key: '[', words: 'previous card', what: 'card', kind: null }])

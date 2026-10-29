@@ -8,7 +8,7 @@
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
 // answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the mark it
 // opens (`] show explainer` for the answer's first mark, `] next citation` for a later one; on a narrow bar
-// `] explainer`, `] show`, then `]` alone): while one of the answer's marks is not opened, the first such, its verb in
+// `] explainer`, then `]` alone): while one of the answer's marks is not opened, the first such, its verb in
 // thimble's color; once the person opened each, the first mark, its verb drawn as the bar's other keys' words. The
 // words that name a mark, there and in the tray's header (`] next heads up`), are in that mark's own look (kindLook:
 // an explainer's teal, a heads-up's orange, a citation's underline), so the bar shows what each look is. While it is
@@ -623,8 +623,8 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
  *  `] show explainer` for the answer's first mark, `] next citation` for a later one, the words that name the mark in
  *  its own look (markedAs), so the bar shows what each look is while the answer has marks. The rest of its words in
  *  thimble's color while the answer shows a mark the person has not opened (markSeen). On a narrow bar its words give
- *  way after coverage's file counts: the verb first (`] explainer`), then the mark's name (`] show`), then `]` alone
- *  (bar/bar.tsx). */
+ *  way after coverage's file counts: the verb first (`] explainer`), and after the busy step's words the mark's name
+ *  (`]` alone) (bar/bar.tsx). */
 async function restItem($: Engine): Promise<BarItem[]> {
   const row = await actingRow($)
   const marks = row ? await answerMarks($, row) : []
