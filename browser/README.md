@@ -30,7 +30,6 @@ cd path/to/folder
 thimble-browser
 thimble-browser path/to/folder --port 8400
 thimble-browser --continue    # or -r / --resume to pick an earlier session
-thimble-browser --link        # a new sign-in link for the workbench that runs
 ```
 
 `thimble-browser` opens the folder you are in, or the folder you name. It starts the server on 127.0.0.1, port 8300 or

@@ -32,13 +32,19 @@ may read (userconf.private_paths), and it outlives a restart, as the sessions a 
 
 Everything the analyst does in thimble (a message, a click, a permission answer, a change of Settings or of a permission
 mode) must come from a signed-in browser (analyst). The dashboard link carries a one-time code after `#p=`, which the
-server makes when the link is shown (mint: main's Stop hook, `thimble up`); the page trades it for an HttpOnly,
-SameSite=Strict cookie and a random key of that browser's own (claim), and the code then stops working, as it does
-PAIR_TTL_S after it was made or when a newer code for the same workspace is made. A browser that is signed in already
-spends a code with no change. The server keeps only the sha256 of each code, and of each browser's cookie and key
+server makes when the link is shown (mint: thimble-browser's terminal, main's Stop hook); the page trades it for an
+HttpOnly, SameSite=Strict cookie and a random key of that browser's own (claim), and the code then stops working, as it
+does PAIR_TTL_S after it was made or when a newer code for the same workspace is made. A browser that is signed in
+already spends a code with no change. The server keeps only the sha256 of each code, and of each browser's cookie and key
 (PAIRED_FILE, read at start and then kept in memory), so no file, transcript or link holds a credential that lasts. The
 token proves only the routes hooks, the shim, the module and the CLI use (guarded); with it a process can mint a code,
 and each new sign-in prints a line in main's terminal and posts a notice.
+
+A page that is not signed in asks whether it is (GET /api/ui/paired) before it shows its sign-in line, and the server
+counts that ask (want_link), at most once in LINK_EVERY_S unless a code was spent since. thimble-browser waits for
+the count in the terminal it holds (GET /api/ui/link-wanted, cli.new_links) and prints a new link there, with a new code
+from the token route, as at its start. So a code reaches that terminal alone, as the start's does, and nothing is
+written.
 
 A cookie is bound to a host and a path, never to a port, so a browser sends a cookie of 127.0.0.1 to every server on
 127.0.0.1 (and one of localhost to every server on localhost) whose page asks for a path the cookie covers. A cookie
@@ -49,7 +55,7 @@ alone. The page keeps the key (frontend lib/browserKey) and sends every request 
 BrowserPath takes off again before any check or route sees the request; the cookie counts only on the path of the key
 it was given with (_cookie_hash). No other page knows the key, so the browser sends the cookie to no other server, on
 any port or host name. A browser that lost its key (cleared site data, a private window, a new browser) shows the
-sign-in line, and the link signs it in again with a new cookie and key.
+sign-in line, and the new link thimble-browser then prints signs it in again with a new cookie and key.
 
 Reads are gated too (LocalReadGuard), since another account on a shared computer reaches the loopback port as well:
 every GET or HEAD under /api needs the signed-in browser's cookie or a hook proof (the CLI sends one with every
@@ -130,6 +136,9 @@ OLD_COOKIE_PATH = "/api/"
 # in thimble's home: [{hash, key, at}], the sha256 of each signed-in browser's cookie and key (claim)
 PAIRED_FILE = "paired.json"
 PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
+LINK_EVERY_S = 60  # want_link counts a browser that is not signed in at most this often, so a page that reloads does
+# not fill thimble-browser's terminal with links
+LINK_WAIT_S = 25.0  # how long GET /api/ui/link-wanted holds thimble-browser's request while no browser wants a link
 # a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
 ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
                 " answer a permission request, change a permission mode): open it from the link `thimble-browser`"
@@ -141,7 +150,8 @@ ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 WRITE_REFUSED = "open thimble from the link `thimble-browser` printed in your terminal, to make changes"
 # the page's own words for it are lib/notices CODE_GONE_TEXT
-CODE_GONE = "This sign-in link was already used or has expired. Run `thimble-browser --link` for a new one."
+CODE_GONE = ("This sign-in link was already used or has expired. Open the new link in the terminal where "
+             "`thimble-browser` runs.")
 # A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
 # these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
 OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
@@ -357,12 +367,42 @@ def mint(ws: str = "") -> str:
 
 
 def _spend(code: object) -> bool:
-    """Spend the code `code`: whether it was alive."""
+    """Spend the code `code`: whether it was alive. A live code spent may be that of the last link thimble-browser
+    printed, so the next browser that wants a link gets one at once (want_link)."""
+    global _wanted_at
     if not isinstance(code, str) or not code:
         return False
     with _pair_lock:
         got = _codes.pop(_sha(code), None)
-    return got is not None and got[0] > _now()
+        alive = got is not None and got[0] > _now()
+        if alive:
+            _wanted_at = None
+    return alive
+
+
+# how many asks of a browser that is not signed in want_link counted since the server started, and when it counted the
+# last one on _now's clock (None before the first, and again once a live code is spent); in memory only
+_wanted = 0
+_wanted_at: float | None = None
+
+
+def want_link(scope: dict) -> None:
+    """A browser that is not signed in asked whether it is (GET /api/ui/paired), as its page does before it shows the
+    sign-in line: count it (links_wanted), so thimble-browser prints a new link in its terminal (module note). After a
+    counted ask, others count again LINK_EVERY_S later, as the link printed for it still works, or once a live code was
+    spent (_spend), which may be that link's. A screenshot's page (shot_proven) wants none."""
+    global _wanted, _wanted_at
+    if shot_proven(Headers(scope=scope), scope.get("method", "")):
+        return
+    now = _now()
+    with _pair_lock:
+        if _wanted_at is None or now - _wanted_at >= LINK_EVERY_S:
+            _wanted, _wanted_at = _wanted + 1, now
+
+
+def links_wanted() -> int:
+    """How many asks want_link counted since the server started."""
+    return _wanted
 
 
 # a live shot token's sha256 -> when it expires on _now's clock; in memory only, so a restart voids every one

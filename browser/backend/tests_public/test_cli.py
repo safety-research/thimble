@@ -232,7 +232,7 @@ def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monk
     assert cli.main(["unpair"]) == 0
     assert asked == [("POST", f"{cli.api_url()}/api/ui/unpair")] and not (home / cli.PAIRED_FILE).exists()
     assert capsys.readouterr().out.splitlines() == [cli.UNPAIRED_LINE]
-    assert "`thimble-browser --link`" in cli.UNPAIRED_LINE
+    assert "a new link in the terminal where `thimble-browser` runs" in cli.UNPAIRED_LINE
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {"detail": "Not Found"}))
     assert cli.main(["unpair"]) == 1
     out = capsys.readouterr().out
@@ -241,6 +241,68 @@ def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monk
                                  "`thimble-browser --continue`.")
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     assert cli.main(["unpair"]) == 0 and capsys.readouterr().out.splitlines() == [cli.UNPAIRED_LINE], "server down"
+
+
+def test_the_terminal_prints_a_new_link_each_time_a_browser_that_is_not_signed_in_opens_the_page(home, monkeypatch,
+                                                                                                 capsys):
+    """thimble-browser, while it holds the terminal (cli.new_links), waits at GET /api/ui/link-wanted, and each time
+    the count it answers grows (a browser that is not signed in opened the page: hook_auth.want_link), it prints a new
+    link for its workspace with a new code. What was counted before its first answer is not its own; a server that
+    started again counts from 0; one that does not answer is asked again; a link the server gives no code for is not
+    printed."""
+    from app import hook_auth
+
+    cli.write_state({"port": 8399, "url": "http://127.0.0.1:8399", "api": "http://127.0.0.1:8399", "env": {}})
+    stop = threading.Event()
+    answers = [(200, {"boot": "b1", "wanted": 2}),  # the first answer: nothing printed
+               (200, {"boot": "b1", "wanted": 3}),  # a browser wants a link: c1
+               (200, {"boot": "b1", "wanted": 3}),  # the wait ended with no browser
+               (0, "ConnectionRefusedError: [Errno 111] Connection refused"),  # the server is starting again
+               (200, {"boot": "b2", "wanted": 0}),  # a new start, no browser yet
+               (200, {"boot": "b3", "wanted": 1}),  # another start, where a browser asked first: c2
+               (200, {"boot": "b3", "wanted": 2})]  # the server gives no code: nothing printed
+    asked: list[str] = []
+    codes = iter(["c1", "c2", ""])
+
+    def request(m, u, b=None, timeout=5.0):
+        if m == "POST" and u == "http://127.0.0.1:8399/api/ui/pair":
+            code = next(codes)
+            return (200, {"code": code, "expires_s": 300}) if code else (404, {"detail": "Not Found"})
+        assert m == "GET" and timeout > hook_auth.LINK_WAIT_S, (m, u, timeout)
+        asked.append(u.removeprefix("http://127.0.0.1:8399"))
+        if not answers:
+            stop.set()
+            return 0, "stopped"
+        return answers.pop(0)
+
+    monkeypatch.setattr(cli, "_request", request)
+    monkeypatch.setattr(cli, "LINK_RETRY_S", 0.0)
+    cli.new_links("runs", stop)
+    assert capsys.readouterr().out.splitlines() == [
+        "thimble browser: new sign-in link: http://127.0.0.1:8399/?ws=runs#p=c1",
+        "thimble browser: new sign-in link: http://127.0.0.1:8399/?ws=runs#p=c2"]
+    wait = "/api/ui/link-wanted?"
+    assert asked == [wait, wait + "boot=b1&wanted=2", wait + "boot=b1&wanted=3", wait + "boot=b1&wanted=3",
+                     wait + "boot=b1&wanted=3", wait + "boot=b2&wanted=0", wait + "boot=b3&wanted=1",
+                     wait + "boot=b3&wanted=2"]
+
+
+def test_only_a_terminal_gets_new_links(monkeypatch):
+    """thimble-browser waits for browsers that want a link (cli.watch_links) only when its output is the terminal, as
+    only a terminal gets the start's link with a code (to_terminal); the event it gives back ends the wait."""
+    started: list[tuple[str, threading.Event]] = []
+    monkeypatch.setattr(cli, "new_links", lambda name, stop: started.append((name, stop)))
+    monkeypatch.setattr(cli, "to_terminal", lambda: False)
+    cli.watch_links("runs")
+    time.sleep(0.2)
+    assert started == [], "output a program reads gets no code"
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)
+    stop = cli.watch_links("runs")
+    for _ in range(200):
+        if started:
+            break
+        time.sleep(0.01)
+    assert started == [("runs", stop)] and not stop.is_set()
 
 
 def test_browser_cookie_mints_a_code_and_trades_it_without_the_token(home, monkeypatch):

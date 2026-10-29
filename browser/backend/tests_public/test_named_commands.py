@@ -7,7 +7,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 APP = REPO / "browser" / "backend" / "app"
-# a command in code (`thimble-browser --link`), or one a text gives bare after "In a shell:", "run" or "then"
+# a command in code (`thimble-browser --continue`), or one a text gives bare after "In a shell:", "run" or "then"
 IN_CODE = re.compile(r"`(thimble(?:-browser)?(?: [^`]*)?)`")
 BARE = re.compile(r"(?:[Ss]hell:|\b[Rr]un|\bthen)\s+(thimble(?:-browser)?(?: (?:--?[\w-]+|[a-z][\w-]*))+)")
 
@@ -15,7 +15,7 @@ BARE = re.compile(r"(?:[Ss]hell:|\b[Rr]un|\bthen)\s+(thimble(?:-browser)?(?: (?:
 def accepts() -> tuple[set[str], set[str], set[str]]:
     """What the current CLIs accept: the options `thimble-browser --help` lists, and the terminal plugin's thimble
     commands and options (its parser's)."""
-    usage = "\n".join((REPO / "browser" / "scripts" / "thimble-browser").read_text().splitlines()[1:22])
+    usage = "\n".join((REPO / "browser" / "scripts" / "thimble-browser").read_text().splitlines()[1:21])
     kernel = (REPO / "plugin" / "engine" / "kernel" / "cli.py").read_text()
     browser_opts = set(re.findall(r"(?<![\w-])(--?[a-z][\w-]*)", usage))
     commands = set(re.findall(r'sub\.add_parser\("([\w-]+)"', kernel)) | {"fixes", "help", "-h", "--help"}
@@ -39,7 +39,7 @@ def test_every_command_the_cli_and_server_texts_name_is_one_the_current_clis_acc
     messages and log lines) that names a `thimble …` or `thimble-browser …` command names one the current CLIs accept:
     thimble-browser with options its --help lists, or thimble alone or with a command and options its parser has."""
     browser_opts, commands, opts = accepts()
-    assert {"--link", "--continue", "--port"} <= browser_opts and {"update", "fix", "label"} <= commands
+    assert {"--continue", "--resume", "--port"} <= browser_opts and {"update", "fix", "label"} <= commands
 
     def accepted(command: str) -> bool:
         words = command.split()

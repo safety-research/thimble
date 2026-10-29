@@ -187,9 +187,12 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("THIMBLE_ALLOWED_HOSTS", "127
 # Request timing: a request slower than this many ms is logged at WARNING, every other one at DEBUG. Every response
 # carries `Server-Timing: app;dur=<ms>`, so the browser's Network panel shows the backend's own time.
 SLOW_REQUEST_MS = float(os.environ.get("THIMBLE_SLOW_MS", "300"))
-# the watcher's long polls (events.py) and the hooks module's (module_bridge.py, whose hello may wait for a rekey),
-# slow by design: logged at DEBUG like a fast request
-LONG_POLLS = ("/api/events/pull", "/api/events/permission", "/api/module/next", "/api/module/hello")
+# the watcher's long polls (events.py), the hooks module's (module_bridge.py, whose hello may wait for a rekey) and
+# thimble-browser's wait for a browser that wants a link (ui_link_wanted), slow by design: logged at DEBUG like a fast
+# request
+LONG_POLLS = ("/api/events/pull", "/api/events/permission", "/api/module/next", "/api/module/hello",
+              "/api/ui/link-wanted")
+LINK_TICK_S = 0.25  # how often GET /api/ui/link-wanted looks whether a browser wants a link
 timing_log = logging.getLogger("thimble.timing")
 
 class RequestTiming:
@@ -550,8 +553,23 @@ def create_app() -> FastAPI:
 
     @app.get("/api/ui/paired")
     def ui_paired(request: Request) -> dict:
-        return {"paired": hook_auth.analyst(request), "id": hook_auth.browser_id(request),
-                "at": hook_auth.signed_in_at(request)}
+        paired = hook_auth.analyst(request)
+        if not paired:  # the page shows its sign-in line: thimble-browser prints a new link in its terminal
+            hook_auth.want_link(request.scope)
+        return {"paired": paired, "id": hook_auth.browser_id(request), "at": hook_auth.signed_in_at(request)}
+
+    @app.get("/api/ui/link-wanted")  # thimble-browser's terminal waits here (cli.new_links), with the token's proof
+    async def ui_link_wanted(request: Request, boot: str = "", wanted: int = -1) -> dict:
+        """{boot, wanted}: this server's start (config.BOOT_ID) and how many asks of a browser that is not signed in
+        want_link counted, once either differs from the query's, else after hook_auth.LINK_WAIT_S, and at once when the
+        server begins to stop or the caller left."""
+        from . import session  # noqa: PLC0415
+
+        deadline = time.monotonic() + hook_auth.LINK_WAIT_S
+        while ((boot, wanted) == (config.BOOT_ID, hook_auth.links_wanted()) and time.monotonic() < deadline
+               and not session._shutting_down() and not await request.is_disconnected()):
+            await asyncio.sleep(LINK_TICK_S)
+        return {"boot": config.BOOT_ID, "wanted": hook_auth.links_wanted()}
 
     # the built UI, last: a mount at / matches everything the routes above did not
     dist = frontend_dist()
