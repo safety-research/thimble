@@ -1,10 +1,10 @@
 """How thimble reaches Claude: one choice per install, made once and changed in Settings.
 
-    api-key       an Anthropic API key the person pasted (the default). The server calls the Messages API itself.
+    claude-code   the person's Claude Code sign-in (the default, and recommended). thimble launches headless Claude
+                  Code sessions in the background (runtime_cc.py), and only with the person's consent to CONSENT.
+    api-key       an Anthropic API key the person pasted. The server calls the Messages API itself.
     wif           Workload Identity Federation, from a config file the person names (wif.py). The server calls the
                   Messages API itself.
-    claude-code   the person's Claude Code sign-in. thimble launches headless Claude Code sessions in the background
-                  (runtime_cc.py), and only with the person's consent to CONSENT.
 
 With api-key and wif nothing launches a `claude` process: every agent runs in the server (runtime_api.py). The choice
 is kept in <home>/claude-access.json ({how, wif_file, consent}), the key in <home>/anthropic-api-key (0600); neither
@@ -39,7 +39,7 @@ from . import wif
 router = APIRouter()
 
 API_KEY, CLAUDE_CODE, WIF = "api-key", "claude-code", "wif"
-CHOICES = (API_KEY, CLAUDE_CODE, WIF)
+CHOICES = (CLAUDE_CODE, API_KEY, WIF)  # the order of the install's question and of the page's dialog
 ACCESS_FILE = "claude-access.json"
 KEY_FILE = "anthropic-api-key"
 CONSENT = ("This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in "
@@ -217,7 +217,7 @@ def problem() -> dict[str, str] | None:
     fix = "Open Claude access in Settings, or run thimble-browser --setup in a terminal."
     if not h:
         return {"what": "thimble does not know yet how to reach Claude.",
-                "fix": "Choose an API key, your Claude Code sign-in or Workload Identity Federation."}
+                "fix": "Choose your Claude Code sign-in, an API key or Workload Identity Federation."}
     if h == API_KEY and not has_key():
         return {"what": "No Anthropic API key is saved.", "fix": "Paste one. " + fix}
     if h == WIF:
@@ -363,11 +363,10 @@ def _ask(prompt: str, default: str = "") -> str:
 
 def setup(argv: list[str] | None = None) -> int:
     """`python -m app.claude_access setup [--how H] [--key-file F] [--wif-file F] [--yes] [--find-wif]`: ask how to
-    reach Claude (1 API key, the default; 2 Claude Code sign-in, recommended to a person with a Claude subscription,
-    after the consent text; 3 WIF, its config file), check it, and save it. The key is read from --key-file, else
-    without echo, or from stdin when it is not a terminal; it is never printed. --find-wif lists the WIF config files
-    found (find_wif) and saves nothing. Exit 0 when saved and checked, 1 when not saved, 2 when saved and the check
-    failed."""
+    reach Claude (1 Claude Code sign-in, the default and recommended, after the consent text; 2 API key; 3 WIF, its
+    config file), check it, and save it. The key is read from --key-file, else without echo, or from stdin when it is
+    not a terminal; it is never printed. --find-wif lists the WIF config files found (find_wif) and saves nothing. Exit
+    0 when saved and checked, 1 when not saved, 2 when saved and the check failed."""
     ap = argparse.ArgumentParser(prog="thimble-browser --setup")
     ap.add_argument("--how", choices=CHOICES)
     ap.add_argument("--key-file", help="a file that holds the Anthropic API key alone (implies --how api-key)")
@@ -393,11 +392,10 @@ def setup(argv: list[str] | None = None) -> int:
     choice = args.how
     if not choice:
         print("How should thimble browser reach Claude?")
-        print("  1  an Anthropic API key (default)")
-        print("  2  your Claude Code sign-in (recommended if you have a Claude subscription; launches headless Claude "
-              "Code sessions)")
-        print("  3  Workload Identity Federation (a config file)")
-        choice = {"1": API_KEY, "2": CLAUDE_CODE, "3": WIF}.get(_ask("Choose 1, 2 or 3 [1]: ", "1"))
+        print("  1  Claude Code sign-in (recommended)")
+        print("  2  Anthropic API key")
+        print("  3  Workload Identity Federation")
+        choice = {"1": CLAUDE_CODE, "2": API_KEY, "3": WIF}.get(_ask("Choose 1, 2 or 3 [1]: ", "1"))
         if not choice:
             print("thimble: no choice saved; run thimble-browser --setup again.")
             return 1

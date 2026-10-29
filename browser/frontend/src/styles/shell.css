@@ -1184,7 +1184,7 @@ button.settings-ext-name:hover .settings-ext-caret {
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: 8px;
-  align-items: baseline;
+  align-items: center;
   padding: 8px 10px;
   border-radius: var(--radius-ui);
   box-shadow: 0 0 0 1px var(--border-subtle);
@@ -1199,11 +1199,6 @@ button.settings-ext-name:hover .settings-ext-caret {
 .access-choice-mark {
   font-weight: 400;
   color: var(--text-secondary);
-}
-.access-choice-note {
-  grid-column: 2;
-  color: var(--text-tertiary);
-  font-size: var(--text-sm);
 }
 .access-field {
   margin: 8px 0;

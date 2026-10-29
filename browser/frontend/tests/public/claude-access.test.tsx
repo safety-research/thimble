@@ -6,7 +6,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { ErrorRow } from '../../src/chat/Rows.tsx'
 import { ClaudeAccessDialog } from '../../src/shell/ClaudeAccess.tsx'
 import { bus } from '../../src/lib/bus.ts'
-import { mount, unmountAll } from './mount.tsx'
+import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => {
   unmountAll()
@@ -58,13 +58,21 @@ test('on the first run Not now and Escape close the step, so the person can look
   expect(closed).toHaveBeenCalledTimes(2)
 })
 
-test("the Claude Code sign-in is marked as the install's question marks it, recommended with a Claude subscription; the API key stays the default", async () => {
-  const status = { how: '', describe: 'not chosen yet', problem: null, key_saved: false, wif_file: '', consent_text: '' }
-  vi.stubGlobal('fetch', async () => new Response(JSON.stringify(status), { status: 200, headers: { 'content-type': 'application/json' } }))
+test("the choices are the install question's, in its order and words: the Claude Code sign-in first, recommended and chosen, unless another way is saved", async () => {
+  let saved = ''
+  vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ how: saved, describe: '', problem: null, key_saved: !!saved, wif_file: '', consent_text: '' }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  const chosen = (el: HTMLElement) => el.querySelector('.access-choice input:checked')?.closest('.access-choice')?.getAttribute('data-how')
   const el = await mount(<ClaudeAccessDialog first onClose={() => undefined} />)
-  const label = (how: string) => el.querySelector(`[data-how="${how}"] .access-choice-label`)?.textContent
-  expect(label('claude-code')).toBe('Claude Code sign-in (recommended if you have a Claude subscription)')
-  expect(label('api-key')).toBe('Anthropic API key')
-  expect(label('wif')).toBe('Workload Identity Federation')
-  expect((el.querySelector('[data-how="api-key"] input') as HTMLInputElement).checked).toBe(true)
+  await settle()
+  expect([...el.querySelectorAll('.access-choice')].map((c) => [c.getAttribute('data-how'), c.textContent])).toEqual([
+    ['claude-code', 'Claude Code sign-in (recommended)'],
+    ['api-key', 'Anthropic API key'],
+    ['wif', 'Workload Identity Federation'],
+  ])
+  expect(chosen(el)).toBe('claude-code')
+  unmountAll()
+  saved = 'api-key'
+  const again = await mount(<ClaudeAccessDialog first={false} onClose={() => undefined} />)
+  await settle()
+  expect(chosen(again)).toBe('api-key')
 })

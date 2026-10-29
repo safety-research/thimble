@@ -558,32 +558,35 @@ def whole_install(tmp_path, *args):
     return p
 
 
-def test_the_install_recommends_the_workbench_s_claude_code_sign_in_to_a_subscriber(tmp_path):
+def test_the_install_gives_the_workbench_s_claude_code_sign_in_first_and_recommends_it(tmp_path):
     """Claude, when it asks how the workbench reaches Claude (CLAUDE.md, step 4), and the install's note when no terminal
-    asked it (an agent runs the script, or --no-setup), recommend the Claude Code sign-in to a person with a Claude
-    subscription. The question in a terminal (claude_access.setup) is the browser's server tests'."""
+    asked it (an agent runs the script, or --no-setup), give the Claude Code sign-in first and recommend it, as the
+    question in a terminal does (claude_access.setup, the browser's server tests). Claude asks in a few words per
+    option."""
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
     ask = text.split(" 4. When the workbench was installed", 1)[1].split(" Then: ", 1)[0]
+    at = [ask.index(way) for way in ("Claude Code sign-in", "Anthropic API key", "Workload Identity Federation")]
+    assert at == sorted(at), ask
     sign_in = ask.split("Claude Code sign-in", 1)[1].split(", an Anthropic API key", 1)[0]
-    assert "recommended" in sign_in and "Claude subscription" in sign_in, ask
+    assert "first" in sign_in and "recommended" in sign_in, ask
+    assert "a few words per option" in ask, ask
     note = next(line for line in whole_install(tmp_path).stdout.splitlines()
                 if line.startswith("Note: Claude access is not set up yet."))
-    assert "Their Claude Code sign-in, recommended when they have a Claude subscription, only after they accept" in note
+    at = [note.index(way) for way in ("Their Claude Code sign-in", "An Anthropic API key", "Workload Identity Federation:")]
+    assert at == sorted(at), note
+    assert "Their Claude Code sign-in (recommended), only after they accept" in note
 
 
-def test_the_readme_and_the_install_summary_say_when_to_use_each_product(tmp_path):
-    """The README's usage, the install's last lines when it installed both products, and the reply Claude ends an install
-    with (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one
-    product has no choice to explain."""
-    plugin, web = "Use the terminal plugin when you work in Claude Code", "Use the browser workbench when you want"
-    readme = " ".join((ROOT / "README.md").read_text().replace("**", "").split())
-    usage = readme.split("## Usage", 1)[1].split(" ### ", 1)[0]
-    assert plugin in usage and web in usage, usage
-    out = " ".join(whole_install(tmp_path / "both").stdout.split())
+def test_the_install_summary_says_when_to_use_each_product(tmp_path):
+    """The install's last lines when it installed both products, in one line, and the reply Claude ends an install with
+    (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one product
+    has no choice to explain."""
+    line = "Use the terminal plugin when you work in Claude Code, and the browser workbench to work in a web page."
+    out = whole_install(tmp_path / "both").stdout
     summary = out.split("== The browser workbench", 1)[1].split("To start the browser workbench", 1)[0]
-    assert plugin in summary and web in summary, summary
+    assert line in summary.splitlines(), summary
     alone = whole_install(tmp_path / "plugin", "--no-browser").stdout
-    assert "Use the terminal plugin when" not in alone and "Use the browser workbench when" not in alone
+    assert "Use the terminal plugin when" not in alone and "the browser workbench to work in" not in alone
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
     reply = text.split(" 5. While something the user chose", 1)[1].split(" 6. ", 1)[0]
     assert "- The plugin, when they work in Claude Code:" in reply and "- The workbench, when they want" in reply, reply
@@ -592,14 +595,13 @@ def test_the_readme_and_the_install_summary_say_when_to_use_each_product(tmp_pat
 def test_the_install_summary_says_once_that_reload_plugins_loads_the_plugin_in_an_open_session(tmp_path):
     """A claude session that is already open, such as the one Claude runs the install in, loads the plugin with
     /reload-plugins. It keeps the PATH it started with, so after a change to Node, a new terminal has the plugin. The
-    plugin's summary says both, once, whichever products the install installed."""
+    plugin's summary says what to do in both cases, once, in two lines, whichever products the install installed."""
     for name, args in (("both", ()), ("plugin", ("--no-browser",))):
-        out = " ".join(whole_install(tmp_path / name, *args).stdout.split())
+        out = whole_install(tmp_path / name, *args).stdout
         assert out.count("/reload-plugins") == 1, out
-        summary = out.split("The plugin works in", 1)[1].split(" == ", 1)[0]
-        open_session = summary.split("/reload-plugins", 1)[1].split(". ", 1)[0]
-        assert "already open" in open_session, summary
-        assert "change to Node" in summary and "new terminal" in summary and "PATH" in summary, summary
+        lines = out.split("To use the plugin, ", 1)[1].split("\n")[:2]
+        assert "/reload-plugins in an open session" in lines[0], out
+        assert lines[1] == "After a change to Node, start claude in a new terminal.", out
 
 
 def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plugin_in_the_open_sessions():

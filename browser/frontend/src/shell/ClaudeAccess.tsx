@@ -1,10 +1,10 @@
-// How thimble reaches Claude (backend claude_access.py): an Anthropic API key (the default), the person's Claude Code
-// sign-in, or Workload Identity Federation. The setup step opens by itself while no way is chosen (the first run, when
-// install.sh's question was skipped), and again from Settings, from a chat's card that says Claude cannot be reached
-// (bus `claudeAccess`), or from the line in Settings. Not now (or Escape) closes it, so the person can still browse
-// without access; it opens by itself again on the next start while nothing is saved. Claude Code sign-in needs the
-// person's yes to the consent text, since it launches headless Claude Code sessions in the background. Saving checks
-// the choice with one small call and says what failed in plain words.
+// How thimble reaches Claude (backend claude_access.py): the person's Claude Code sign-in (the default, and
+// recommended), an Anthropic API key, or Workload Identity Federation. The setup step opens by itself while no way is
+// chosen (the first run, when install.sh's question was skipped), and again from Settings, from a chat's card that says
+// Claude cannot be reached (bus `claudeAccess`), or from the line in Settings. Not now (or Escape) closes it, so the
+// person can still browse without access; it opens by itself again on the next start while nothing is saved. Claude
+// Code sign-in needs the person's yes to the consent text, since it launches headless Claude Code sessions in the
+// background. Saving checks the choice with one small call and says what failed in plain words.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { TextInput } from '../components/Field'
@@ -13,11 +13,11 @@ import { bus } from '../lib/bus'
 
 type How = 'api-key' | 'claude-code' | 'wif'
 
-/** `mark`: after the label, in the words of the install's question (backend claude_access.py setup). */
-const CHOICES: { how: How; label: string; mark?: string; note: string }[] = [
-  { how: 'api-key', label: 'Anthropic API key', note: 'thimble calls the Claude API itself.' },
-  { how: 'claude-code', label: 'Claude Code sign-in', mark: 'recommended if you have a Claude subscription', note: 'Uses your Claude subscription through Claude Code.' },
-  { how: 'wif', label: 'Workload Identity Federation', note: 'thimble calls the Claude API with a config file you name.' },
+/** In the order and the words of the install's question (backend claude_access.py setup); the first is the default. */
+const CHOICES: { how: How; label: string; mark?: string }[] = [
+  { how: 'claude-code', label: 'Claude Code sign-in', mark: 'recommended' },
+  { how: 'api-key', label: 'Anthropic API key' },
+  { how: 'wif', label: 'Workload Identity Federation' },
 ]
 
 /** The dialog, mounted once in the shell; it opens on bus `claudeAccess`, or by itself while no way is chosen. */
@@ -50,7 +50,7 @@ export function ClaudeAccessHost() {
 
 export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose: () => void }) {
   const [status, setStatus] = useState<ClaudeAccess | null>(null)
-  const [how, setHow] = useState<How>('api-key')
+  const [how, setHow] = useState<How>(CHOICES[0].how)
   const [key, setKey] = useState('')
   const [file, setFile] = useState('')
   const [consent, setConsent] = useState(false)
@@ -103,7 +103,6 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
                 {c.label}
                 {c.mark && <span className="access-choice-mark"> ({c.mark})</span>}
               </span>
-              <span className="access-choice-note">{c.note}</span>
             </label>
           ))}
         </div>
