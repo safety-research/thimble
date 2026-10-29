@@ -897,7 +897,7 @@ test("while the answer's citation is checked, the bar names it in a citation's l
   await press(']')
   const band = await $.ui.render(BAND)
   const head = byKey(band, 'tray-head')
-  expect(textOf(head)).toMatch(new RegExp(`41 of the 44 failures[${SPIN}] checking {2}\\] next heads up`))
+  expect(textOf(head)).toMatch(new RegExp(`41 of the 44 failures[${SPIN}] checking {2}a ask`))
   const sign = kids(head).find(n => n.type === 'Text' && glyphs.test(textOf(n)))
   expect(sign?.props).toMatchObject({ color: accent() })
   expect(textOf(sign)).toBe(textOf(spin).trim())

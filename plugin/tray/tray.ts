@@ -12,7 +12,8 @@
 // thimble's color; once the person opened each, the first mark, its verb drawn as the bar's other keys' words. The
 // words that name a mark, there and in the tray's header (`] next heads up`), are in that mark's own look (kindLook:
 // an explainer's teal, a heads-up's orange, a citation's underline), so the bar shows what each look is. While it is
-// open its keys are in its header, at the right, each where it acts (the bar keeps its own):
+// open, ] and [ stay on the bar, named by the mark they reach, and its other keys are in its header, at the right, each
+// where it acts (the bar keeps its own):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
@@ -28,8 +29,8 @@
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
-//   ] [         the next mark or card after the one it shows, and the one before, named by what they are, in their
-//               look
+//   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
+//               are, in their look
 //   d u         a body taller than the tray's rows: a page further down, a page back up, while no other key holder (the
 //               fix line, a card on screen) takes the letter; the row under the window names them
 //
@@ -598,25 +599,28 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
 // ------------------------------------------------------------------------------------------------ the bar
 
 /** The tray's items at the bar's left: while a card ] reached holds the keys, its keys, as `focus` items, so the bar
- *  names only those; an open tray's keys are in its header; at rest, ] (restItem). */
+ *  names only those; while a tray is open, ] and [ beside the bar's own keys (its other keys are in its header); at
+ *  rest, ] (restItem). */
 export async function trayBar($: Engine, _on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (preview) return []
   const tray = await trayNow($)
   const stand = tray ? null : await standNow($)
-  const steps = async (): Promise<BarItem[]> => {
+  const steps = async (focus: boolean): Promise<BarItem[]> => {
     const ends = await stepEnds($)
     await themeNow($)
-    return stepWords(ends).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, ...markedAs(s.what, s.kind), focus: true, press: () => stepMark($, s.key === ']' ? 1 : -1) }))
+    // on a narrow bar, as at rest (restWords): the mark's name alone, then the key alone
+    return stepWords(ends).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, shorter: s.what ? [s.what, ''] : [''], ...markedAs(s.what, s.kind), ...(focus ? { focus: true } : {}), press: () => stepMark($, s.key === ']' ? 1 : -1) }))
   }
   if (stand) {
     return [
       { id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askCard($, stand) },
-      ...(await steps()),
+      ...(await steps(true)),
       { id: 'tray-0', key: '0', words: 'back', focus: true, press: () => writeStand($, null) },
     ]
   }
-  // an open tray names its keys in its header (trayKeys), so the bar keeps its own
-  return tray ? [] : restItem($)
+  // an open tray: ] and [ stay on the bar, where they are at rest, beside the bar's own keys; its other keys are in its
+  // header (trayKeys)
+  return tray ? steps(false) : restItem($)
 }
 
 /** At rest, while the answer the keys act on shows marks: ] and the mark it opens from rest (restNext), a press too:
@@ -637,13 +641,12 @@ async function restItem($: Engine): Promise<BarItem[]> {
   return [{ id: 'tray-next', key: ']', words: w.words, shorter: w.shorter, ...markedAs(w.what, w.kind), ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
 }
 
-/** An open tray's keys, in its header at the right, each a click that does what its key does: ] (or [) the next mark,
- *  h the explainer on a citation's words, a ask, 0 back or close. x repair and + expand all (− collapse) are in the
+/** An open tray's keys, in its header at the right, each a click that does what its key does: h the explainer on a
+ *  citation's words, a ask, 0 back or close (] and [ are on the bar, trayBar). x repair and + expand all (− collapse) are in the
  *  citation's card, where they act, and 2–9 are its links in an explainer's words. */
 async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
-  const ends = await stepEnds($)
   await themeNow($)
-  const out: BarItem[] = stepWords(ends).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, ...markedAs(s.what, s.kind), press: () => stepMark($, s.key === ']' ? 1 : -1) }))
+  const out: BarItem[] = []
   if (f.kind === 'citation') {
     const inner = await innerOf($, f)
     if (inner) {
