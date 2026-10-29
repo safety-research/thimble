@@ -1,8 +1,8 @@
 // What a thread is told about the element it was opened on: the part of the browser it is in, its kind, a CSS selector,
 // and a PNG taken at the ⌘-click. The element is described as a chain of plain nodes (itself, then ancestors up to the
 // nearest panel), so the pure part (describe, selectorPath) runs in node; chainOf is the DOM adapter, and capturePng
-// draws the element with html-to-image, loaded on first use, and lays over it the picture each frame in it draws of
-// itself (lib/frameShot), since html-to-image cannot read a sandboxed frame's document.
+// draws the element with html-to-image, loaded on first use, and lays the picture each frame in it gives of itself
+// (lib/frameShot) over the frame's box, since html-to-image cannot read a sandboxed frame's document.
 import { framePicture } from '../lib/frameShot'
 
 /** the most segments a selector path carries */
@@ -179,6 +179,41 @@ async function layFrames(canvas: HTMLCanvasElement, at: DOMRect, frames: readonl
   }
 }
 
+/** html-to-image's picture `svg` (an SVG data URL) with each frame that draws itself an empty box of its size: a frame
+ * takes no room in a picture, which loads no page, so what comes after it would move up into its place, under the
+ * frame's own picture. The frame's page, which html-to-image copies with it, is left out. */
+function boxed(svg: string): string {
+  const doc = new DOMParser().parseFromString(decodeURIComponent(svg.slice(svg.indexOf(',') + 1)), 'image/svg+xml')
+  if (doc.querySelector('parsererror')) throw new Error('the picture cannot be read')
+  for (const f of Array.from(doc.querySelectorAll('iframe[data-shot]'))) {
+    const box = doc.createElementNS('http://www.w3.org/1999/xhtml', 'div')
+    box.setAttribute('style', f.getAttribute('style') ?? '')
+    f.replaceWith(box)
+  }
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(doc))}`
+}
+
+/** The SVG image `svg` (a data URL) drawn on `bg` at `ratio` device pixels per CSS pixel, or fewer for a picture larger
+ * than a canvas can be, as html-to-image draws its own. */
+async function onCanvas(svg: string, ratio: number, bg: string): Promise<HTMLCanvasElement> {
+  const pic = new Image()
+  pic.src = svg
+  await pic.decode()
+  await new Promise((resolve) => requestAnimationFrame(resolve))
+  const k = Math.min(ratio, CANVAS_MAX_PX / Math.max(pic.naturalWidth, pic.naturalHeight, 1))
+  const canvas = document.createElement('canvas')
+  canvas.width = pic.naturalWidth * k
+  canvas.height = pic.naturalHeight * k
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = bg
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(pic, 0, 0, canvas.width, canvas.height)
+  return canvas
+}
+
+/** the longest side html-to-image draws a canvas */
+const CANVAS_MAX_PX = 16384
+
 /** A data URL of the element drawn as a PNG, or null when it cannot be drawn in CAPTURE_WAIT_MS. */
 export async function capturePng(el: HTMLElement): Promise<string | null> {
   const r = el.getBoundingClientRect()
@@ -193,10 +228,8 @@ export async function capturePng(el: HTMLElement): Promise<string | null> {
     const css = await fontCss
     const fonts = css ? { fontEmbedCSS: css } : { skipFonts: true }
     const options = { backgroundColor: bg, pixelRatio: ratio, cacheBust: false, ...fonts }
-    if (!frames.length) return m.toPng(el, options)
-    // a frame that draws itself is left out of the copy html-to-image draws, which would carry its whole page for an
-    // empty box
-    const canvas = await m.toCanvas(el, { ...options, filter: (n: HTMLElement) => !(n instanceof HTMLIFrameElement && n.hasAttribute('data-shot')) })
+    if (!el.querySelector('iframe[data-shot]')) return m.toPng(el, options)
+    const canvas = await onCanvas(boxed(await m.toSvg(el, options)), ratio, bg)
     await layFrames(canvas, r, frames, await pictures)
     return canvas.toDataURL('image/png')
   })
