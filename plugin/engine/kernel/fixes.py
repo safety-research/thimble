@@ -3309,9 +3309,12 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
         else:
             (d / "current.json").unlink(missing_ok=True)
         _repoint()
+        # the workbench's packages and page for the release first: the checks of a fix to the page build it with them
+        browser = browser_on_live()
         carried = (_carry(sync=False, say=say) if aside else None) or {}
         synced = _sync()
-    browser = browser_on_live()
+    if carried.get("browser") == "stale" and not carried.get("off"):
+        browser = browser_on_live()
     recs = records()
     left = carried.get("aside", aside)
     out = {**out, "aside": left, "back": carried.get("back", []), "had": carried.get("had", []), "off": not was_on,
@@ -3410,12 +3413,16 @@ def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[s
             d.mkdir(parents=True, exist_ok=True)
             write_json(d / "current.json", {"version": to, "key": key, "from": frm, "from_commit": old, "to_commit": new,
                                             "ids": aside, "tip": head(), "made": time.time(), "off": not was_on})
-            carried = _carry(sync=False, say=say) or {}
         else:
             (d / "current.json").unlink(missing_ok=True)
+        # the workbench's packages and page for the checkout first: the checks of a fix to the page build it with them
+        browser = browser_on_live()
+        if aside:
+            carried = _carry(sync=False, say=say) or {}
         _repoint()
         synced = _sync()
-    browser = browser_on_live()
+    if carried.get("browser") == "stale" and not carried.get("off"):
+        browser = browser_on_live()
     recs = records()
     left = carried.get("aside", aside)
     out = {**out, "aside": left, "back": carried.get("back", []), "had": carried.get("had", []), "off": not was_on,

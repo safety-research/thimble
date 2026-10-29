@@ -634,3 +634,25 @@ def test_a_dev_update_checks_the_fixes_on_the_checkouts_commit(world, monkeypatc
     assert FX.get(b)["state"] == "on" and sh("git", "rev-parse", "mine^", cwd=FX.live_dir()) == new
     assert "coverage ${n}" in live_file("plugin/bar/bar.tsx")
     assert f"1 local fix does not fit {to}, so it is off: Bar says read." in out["lines"]
+
+
+def test_thimble_update_installs_the_workbench_of_the_new_release_before_it_checks_a_fix_to_the_page(world, upstream, monkeypatch, tmp_path):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    (tmp_path / "browser-home").mkdir()
+    monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp_path / "browser-home"))
+    log = tmp_path / "steps.log"
+    # npm and uv log what they are asked, and install a folder of packages as they would
+    fake(world["bin"] / "npm", log, '[ "$3" = ci ] && mkdir -p "$2/node_modules"')
+    fake(world["bin"] / "uv", log, '[ "$1" = sync ] && mkdir -p "$3/.venv"')
+    monkeypatch.setenv("PATH", f"{world['bin']}:{os.environ['PATH']}")
+    a = fix_of("the tab names the folder", "browser/frontend/src/App.tsx", "document.title = 'made-up'\n",
+               "The tab names the folder")
+    # 0.10.3 has the workbench, with page packages of its own
+    upstream({"browser/frontend/package-lock.json": "made-up lock\n", "browser/backend/uv.lock": "made-up lock\n"}, "v0.10.3")
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", f"echo check >> '{log}'")
+    out = FX.update()
+    fe = FX.live_dir() / "browser" / "frontend"
+    steps = [x for x in log.read_text().splitlines() if not x.startswith("sync ")]
+    # the page's packages and its build for 0.10.3 come first, then the fix's check, then the build with the fix
+    assert steps == [f"--prefix {fe} ci --no-audit --no-fund", f"--prefix {fe} run build", "check", f"--prefix {fe} run build"]
+    assert out["back"] == [a] and out["browser"] == "ready" and FX.get(a)["state"] == "on"
