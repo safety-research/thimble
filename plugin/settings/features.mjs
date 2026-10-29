@@ -8,10 +8,15 @@
 // with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
 // choiceOf(key) for a mode, when it acts.
 
-import { modelOf } from '../core/models.js'
+import { ALIASES, EFFORTS, modelById, modelOf, shownName } from '../core/models.js'
 
 /** What Minimal does, as the settings pane says it under its row. */
 const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.'
+
+/** Words in a list: `a, b or c`. */
+const listed = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(', ')} or ${ws.at(-1)}` : ws.join(''))
+/** The models Checker names, each by its alias and as Claude Code shows it: `haiku (Haiku 5.5)`. */
+const NAMED_MODELS = listed(ALIASES.map(a => `${a} (${shownName(a)})`))
 
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `group`:
  *  the heading the pane lists it under, with the others of its group (Answers, Comments on an answer's words, Panes;
@@ -20,11 +25,13 @@ const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers,
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
  *  look runs while one such feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims:
  *  `auto`; in `on demand`, a look of their own runs when the person asks). `says`: what each mode
- *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. `under`: the
- *  feature whose work this setting changes (Checker: the checks of Citations); the pane shows its row only while that
- *  feature is on. `firstParty`: the setting names models by the ids of Anthropic's first-party API (core/models.js),
- *  which Bedrock, Vertex and Foundry do not take: where Claude Code runs on one of them (settings/term.ts
- *  firstPartyApi), neither the pane nor /config shows its row, and what it holds does nothing. */
+ *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. `labels`: a
+ *  choice as the pane shows it, where that is not its value (Checker's `haiku` as `Haiku 5.5`). `under`: the
+ *  feature whose work this setting changes (Checker and its Effort: the checks of Citations); the pane shows its row
+ *  only while that feature is on. `firstParty`: the setting names models by the ids of Anthropic's first-party API
+ *  (core/models.js), or sets the effort of those models' requests, which Bedrock, Vertex and Foundry do not take from
+ *  thimble: where Claude Code runs on one of them (settings/term.ts firstPartyApi), neither the pane nor /config shows
+ *  its row, and what it holds does nothing. */
 export const SWITCHES = [
   {
     key: 'minimal', title: 'Minimal', default: false,
@@ -42,13 +49,20 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'checkerModel', title: 'Checker', group: 'Answers', under: 'citations', firstParty: true, default: 'same as Claude', choices: ['same as Claude', 'haiku', 'sonnet', 'opus'],
-    does: 'The model of the second Claude that checks citations. same as Claude: the model of the conversation. haiku, sonnet or opus: that model, which reads the conversation without the cache of the conversation\'s model.',
+    key: 'checkerModel', title: 'Checker', group: 'Answers', under: 'citations', firstParty: true, default: 'same as Claude', choices: ['same as Claude', ...ALIASES],
+    labels: Object.fromEntries(ALIASES.map(a => [a, shownName(a)])),
+    does: `The model of the second Claude that checks citations. same as Claude: the model of the conversation. ${NAMED_MODELS}: that model, which reads the conversation without the cache of the conversation's model.`,
     says: {
       'same as Claude': 'The second Claude checks citations on the model of the conversation.',
-      'haiku': 'The second Claude checks citations on Haiku.',
-      'sonnet': 'The second Claude checks citations on Sonnet.',
-      'opus': 'The second Claude checks citations on Opus.',
+      ...Object.fromEntries(ALIASES.map(a => [a, `The second Claude checks citations on ${shownName(a)}.`])),
+    },
+  },
+  {
+    key: 'checkerEffort', title: 'Effort', group: 'Answers', under: 'citations', firstParty: true, default: 'same as Claude', choices: ['same as Claude', ...EFFORTS],
+    does: `How hard the second Claude that checks citations thinks. same as Claude: the effort of the conversation. ${listed(EFFORTS)}: that effort, of the levels Claude Code offers for the model Checker names.`,
+    says: {
+      'same as Claude': 'The second Claude checks citations at the effort of the conversation.',
+      ...Object.fromEntries(EFFORTS.map(e => [e, `The second Claude checks citations at ${e} effort.`])),
     },
   },
   {
@@ -289,4 +303,28 @@ export const switchOf = key => BY_KEY.get(key) ?? null
 export function checkerModel() {
   const m = choiceOf('checkerModel')
   return m === 'same as Claude' ? null : modelOf(m)?.id ?? null
+}
+
+/** The effort levels Claude Code offers for a model (core/models.js), by the model's alias or its request's id; every
+ *  level for a model thimble does not list, as Claude Code itself fits a level to the model it sends to. */
+const effortsOf = (model) => (modelOf(model) ?? modelById(model))?.efforts ?? EFFORTS
+
+/** The choices of a setting as the settings pane offers them with `values`: Effort offers the levels of the model
+ *  Checker names (of the conversation's: every level); any other setting its choices. */
+export function choicesIn(key, values) {
+  const s = BY_KEY.get(key)
+  if (!s?.choices) return null
+  if (key !== 'checkerEffort') return s.choices
+  const m = valueIn(values, 'checkerModel')
+  return ['same as Claude', ...(m === 'same as Claude' ? EFFORTS : effortsOf(m))]
+}
+
+/** The effort of the checker's requests (the setting Checker's Effort) on `model`, the model a request names, or null
+ *  for the effort of the conversation, which a fork keeps. A level the model does not offer gives way to the highest it
+ *  offers below it, as Claude Code fits /effort to a model. */
+export function checkerEffort(model) {
+  const e = choiceOf('checkerEffort')
+  if (e === 'same as Claude') return null
+  const offered = effortsOf(model)
+  return offered.includes(e) ? e : offered.filter(l => EFFORTS.indexOf(l) < EFFORTS.indexOf(e)).at(-1) ?? null
 }

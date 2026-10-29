@@ -256,7 +256,7 @@ test('a mode saved under the old fields moves to Citations at the first session,
   setOptions({})
 })
 
-test("/config hides Checker on Bedrock, Vertex or Foundry (a variable set to a true value), whose model ids are not the first-party API's; elsewhere it shows", async () => {
+test("/config hides Checker and its Effort on Bedrock, Vertex or Foundry (a variable set to a true value), whose model ids are not the first-party API's; elsewhere they show", async () => {
   const hooks: Record<string, Any[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
@@ -278,6 +278,7 @@ test("/config hides Checker on Bedrock, Vertex or Foundry (a variable set to a t
   for (const [vars, hides] of cases) {
     env = vars
     expect(await hidden('thimble@inline.checkerModel')).toBe(hides)
+    expect(await hidden('thimble@inline.checkerEffort')).toBe(hides)
     expect(await hidden('thimble@inline.citations')).toBe(false)
   }
   setOptions({})

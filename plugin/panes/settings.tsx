@@ -7,10 +7,12 @@
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
 // tinted across the pane, with no mark of its own (a `›` there read as a row that opens), and the pane keeps that row
 // and its line in view at any height (core/pane.ts keepsInView), as the pick moves with ↑ and ↓. A setting that
-// changes the work of another feature (`under`: Checker, the checks of Citations) shows only while that feature is on,
-// as nothing it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids (`firstParty`:
-// Checker) shows only where Claude Code reaches Claude through Anthropic's first-party API (settings/term.ts
-// firstPartyApi).
+// changes the work of another feature (`under`: Checker and its Effort, the checks of Citations) shows only while that
+// feature is on, as nothing it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids or
+// their effort (`firstParty`: Checker, Effort) shows only where Claude Code reaches Claude through Anthropic's
+// first-party API (settings/term.ts firstPartyApi). A choice shows as the setting names it (`labels`: Checker's models
+// with their versions, `Haiku 5.5`), and Effort offers the levels Claude Code offers for the model Checker names
+// (settings/features.mjs choicesIn).
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -23,13 +25,13 @@ import type { EngineInterface } from 'claude-code'
 import { barRows } from '../bar/bar'
 import { arrowsOwn, keepsInView, PANE_ID } from '../core/pane'
 import { treeRows } from '../core/trail.mjs'
-import { SWITCHES, switchesFrom } from '../settings/features.mjs'
+import { choicesIn, SWITCHES, switchesFrom } from '../settings/features.mjs'
 import { firstPartyApi, heldValues, settingsAction } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Engine = EngineInterface
-type Switch = { key: string; title: string; group?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string> }
+type Switch = { key: string; title: string; group?: string; under?: string; firstParty?: boolean; choices?: string[]; labels?: Record<string, string>; says?: Record<string, string> }
 
 /** The row picked, kept across the plugin's loads (each change loads it again). */
 const PICKED = { plugin: 'thimble', key: 'settingsRow' } as const
@@ -42,10 +44,13 @@ const IN = 2 + NAME + 1
 const MINIMAL_TITLE = 'MINIMAL MODE '
 
 const ROWS = SWITCHES as Switch[]
-/** A feature's choices as the pane shows them: its modes, or on and off. */
-const choicesOf = (s: Switch) => s.choices ?? ['on', 'off']
-/** The choice set, as the pane names it. */
+/** A feature's choices as the pane offers them with `values` (Effort: the levels of the model Checker names): its
+ *  modes, or on and off; with no values, every mode it has. */
+const choicesOf = (s: Switch, values?: Record<string, unknown>) => (s.choices ? (values ? choicesIn(s.key, values) as string[] : s.choices) : ['on', 'off'])
+/** The choice set, as the setting holds it. */
 const shownOf = (s: Switch, v: unknown) => (s.choices ? String(v) : v ? 'on' : 'off')
+/** A choice in the words the pane draws: its label (`Haiku 5.5`), or its value. */
+const labelOf = (s: Switch, c: string) => s.labels?.[c] ?? c
 /** A choice's element key, and the feature and choice it names. */
 const choiceKey = (s: Switch, c: string) => `mode-${s.key}-${c}`
 function parseKey(key: string | undefined): { s: Switch; c: string | null } | null {
@@ -123,10 +128,10 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
     const head = s.group && shown[i - 1]?.group !== s.group
       ? [Box({ key: `group-${s.group}`, marginTop: 1, children: [Text({ bold: true, dimColor: true, children: s.group.toUpperCase() })] })]
       : []
-    const choices = choicesOf(s).flatMap((c, k) => [
+    const choices = choicesOf(s, values).flatMap((c, k) => [
       ...(k ? [Text({ key: `sep-${c}`, dimColor: true, children: ' · ' })] : []),
-      Button({ key: choiceKey(s, c), plain: true, label: `${s.title}: ${c}`, onPress: () => chooseHere($, s, c), ...(here && c === set ? { autoFocus: true } : {}), children: [
-        Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
+      Button({ key: choiceKey(s, c), plain: true, label: `${s.title}: ${labelOf(s, c)}`, onPress: () => chooseHere($, s, c), ...(here && c === set ? { autoFocus: true } : {}), children: [
+        Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: labelOf(s, c) }),
       ] }),
     ])
     // Minimal stands over the rows as a heading would, what it does under it
@@ -136,7 +141,7 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
     return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'column', width, ...(here ? { backgroundColor: SEL_TINT } : {}), children: [
       Box({ key: 'line', flexDirection: 'row', children: [
         Text({ key: 'mark', children: '  ' }),
-        Button({ key: `switch-${s.key}`, plain: true, label: `${s.title}: ${set}`, onPress: () => pick($, s), children: [
+        Button({ key: `switch-${s.key}`, plain: true, label: `${s.title}: ${labelOf(s, set)}`, onPress: () => pick($, s), children: [
           Text({ key: 'title', bold: true, children: minimal ? MINIMAL_TITLE : s.title.padEnd(NAME) }),
         ] }),
         Text({ key: 'gap', children: ' ' }),

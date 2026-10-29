@@ -33,7 +33,7 @@ import { shownWords } from '../core/selection'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
-import { checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
+import { checkerEffort, checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
 import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
@@ -180,13 +180,16 @@ export const registerMarks: Register = on => {
     return no ? { deny: no } : next(e)
   })
 
-  // the checker's requests on the model the setting Checker names (settings/features.mjs checkerModel): a fork
-  // keeps the conversation's model, and its spawn takes no other, so each request of a checker's turn names that model.
-  // Unset, the requests go as they are; so do they on Bedrock, Vertex or Foundry, which do not take the first-party ids
-  // Checker names (settings/term.ts firstPartyApi), whatever it holds
+  // the checker's requests on the model the setting Checker names, at the effort its Effort names (settings/features.mjs
+  // checkerModel, checkerEffort): a fork keeps the conversation's model and effort, and its spawn takes no other, so
+  // each request of a checker's turn names them. Unset, the requests go as they are; so do they on Bedrock, Vertex or
+  // Foundry, which do not take the first-party ids Checker names (settings/term.ts firstPartyApi), whatever it holds
   on('turn.step', { agentId: /./ }, async function* ($, e, next) {
-    const model = forkOf(e.agentId)?.kind === 'checker' ? checkerModel() : null
-    return yield* next(model && (await firstPartyApi($)) ? { ...e, model } : e)
+    const checker = forkOf(e.agentId)?.kind === 'checker'
+    const model = checker ? checkerModel() : null
+    const effort = checker ? checkerEffort(model ?? e.model) : null
+    if ((!model && !effort) || !(await firstPartyApi($))) return yield* next(e)
+    return yield* next({ ...e, ...(model ? { model } : {}), ...(effort ? { effort } : {}) })
   })
 
   // x's repair waits out the word window, and is refused when a letter came in it (hooks/keys.ts undoes x)

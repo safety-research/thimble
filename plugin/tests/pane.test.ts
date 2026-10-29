@@ -294,6 +294,39 @@ test("in the settings on Bedrock, Vertex or Foundry, no Checker row, whatever it
   setOptions({})
 })
 
+test('in the settings, Checker names each model with its version, as Claude Code shows it, and Effort, under it, the levels Claude Code offers for that model; both hide while Citations is off and on Bedrock, Vertex or Foundry', async () => {
+  for (const [env, citations, shows] of [[{}, 'auto cite + verify', true], [{}, 'off', false], [{ CLAUDE_CODE_USE_BEDROCK: '1' }, 'auto cite + verify', false], [{ CLAUDE_CODE_USE_FOUNDRY: 'on' }, 'manual', false]] as [Record<string, string>, string, boolean][]) {
+    const s = setup()
+    s.$.env = { get: async (name: string) => env[name] }
+    const held: Record<string, unknown> = { citations, checkerModel: 'fable', checkerEffort: 'xhigh' }
+    s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
+    s.$.ui.focus = async () => ({})
+    await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+    const tree = nodes(await draw(s))
+    const rows = tree.map(n => n.props?.key).filter((k: Any) => typeof k === 'string' && k.startsWith('sw-'))
+    expect(rows.slice(0, 4)).toEqual(shows ? ['sw-minimal', 'sw-citations', 'sw-checkerModel', 'sw-checkerEffort'] : ['sw-minimal', 'sw-citations', 'sw-cards', 'sw-squeezeAnswers'])
+    if (!shows) continue
+    const row = (key: string) => tree.find(n => n.props?.key === `sw-${key}`)
+    // the models as Claude Code shows them, with their versions: the one set lit, its line naming it
+    const checker = nodes(row('checkerModel'))
+    expect(textOf(checker.find(n => n.props?.key === 'choices'))).toBe('same as Claude · Haiku 5.5 · Sonnet 5.5 · Opus 5.5 · Fable 5.1')
+    expect(textOf(checker.find(n => n.props?.key === 'says-checkerModel'))).toBe('The second Claude checks citations on Fable 5.1.')
+    const lit = (ns: Any[]) => ns.filter(n => n.type === 'Text' && n.props?.bold && n.props?.color === 'success').map(textOf)
+    expect(lit(checker)).toEqual(['Fable 5.1'])
+    // its effort: the levels Claude Code offers for Fable 5.1, by Claude Code's words for them
+    const effort = nodes(row('checkerEffort'))
+    expect(textOf(effort.find(n => n.props?.key === 'choices'))).toBe('same as Claude · low · medium · high · xhigh · max')
+    expect(lit(effort)).toEqual(['xhigh'])
+    expect(textOf(effort.find(n => n.props?.key === 'says-checkerEffort'))).toBe('The second Claude checks citations at xhigh effort.')
+    // a press on a model sets it by its alias, which Claude Code keeps
+    const set: Any[] = []
+    s.$.config.set = async (e: Any) => { set.push(e); return {} }
+    await tree.find(n => n.props?.key === 'mode-checkerModel-haiku').props.onPress()
+    expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.checkerModel', value: 'haiku' })])
+  }
+  setOptions({})
+})
+
 test('a pane a key could not open in a narrow window: the notice offers the click that opens it here; the panes that lay out by their rows ask for them', async () => {
   const s = setup()
   s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (118 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
