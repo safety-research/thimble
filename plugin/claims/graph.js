@@ -36,7 +36,7 @@
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, inverse, part}.
 import { blocks, marksIn } from '../marks/message.js'
 import { tableLines } from '../marks/table.mjs'
-import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printLine, wasLine } from '../tray/tray.mjs'
+import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printedBy, wasLine } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
 const cut = (s, k) => (Array.from(String(s ?? '')).length <= k ? String(s ?? '') : Array.from(String(s ?? '')).slice(0, Math.max(0, k - 1)).join('') + '…')
@@ -551,7 +551,7 @@ export function snippetOf(ev, room) {
   const fit = lineWindow(line, Math.max(9, room))
   const cutLine = fit.text !== line.text
   if (ev.kind === 'computed') {
-    const code = printLine(ev.code, line.text)
+    const code = printedBy(ev)
     const shown = midCut(code, room)
     return { code: shown, text: fit.text, spans: fit.spans, more: hiddenOutput(ev), cut: cutLine || shown !== code }
   }

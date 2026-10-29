@@ -376,6 +376,9 @@ test("a claim picked: the claim bold, its description plain, its citations as th
   assert.ok(whole.rows.length > 40 && whole.rows.every(r => rowText(r).length <= 56))
   const long = snippetOf({ kind: 'computed', code: 'print(x)', output: `${'a'.repeat(80)} 42 ${'b'.repeat(80)}`, highlight: [[81, 83]] }, 30)
   assert.ok(long.text.length <= 30 && long.text.slice(long.spans[0][0], long.spans[0][1]) === '42' && long.cut)
+  // the line of code is the one that printed the cited value, not a neighbor's print of another value
+  const said = snippetOf({ kind: 'computed', code: 'print(len(saves))\nprint(sum(s["kind"] == "edit" for s in saves))', output: '3752\n812', highlight: [[5, 8]] }, 60)
+  assert.equal(said.code, 'print(sum(s["kind"] == "edit" for s in saves))')
 })
 
 test('many citations: every one in view or a scroll away; the current one whole and the others one line each when they do not fit whole; the description never cut', () => {

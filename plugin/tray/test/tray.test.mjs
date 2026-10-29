@@ -130,3 +130,28 @@ test('the line of code above a citation\'s output is one that printed it: never 
   assert.equal(printLine("print('totals')\nprint(n)", '41'), 'print(n)')
   assert.equal(printLine("print('totals')", '41'), '')
 })
+
+test("of several prints, the line shown is the one that printed the cited line, by its words or its place among them; a neighbor's print of other values never stands in for it", () => {
+  // a literal inside the print's own expression picks what it counts and is not printed: the sum printed 12, not the
+  // print of len above it
+  const two = "print(len(runs))\nprint(sum(r['status'] == 'failed' for r in runs))"
+  assert.equal(printLine(two, '40\n12', 1), "print(sum(r['status'] == 'failed' for r in runs))")
+  assert.equal(printLine(two, '40\n12', 0), 'print(len(runs))')
+  // a heading print, then the value's: the heading's words are on a line above
+  const day = 'print("Failures by day:")\nprint(runs[runs.status == "failed"].groupby("day").size())'
+  assert.equal(printLine(day, 'Failures by day:\nday\n2026-10-01    3\n2026-10-02    5\ndtype: int64', 3), 'print(runs[runs.status == "failed"].groupby("day").size())')
+  // a loop that prints a label line, then a value line: each value line is the value's print, the line before the
+  // loop the print before it
+  const loop = 'print(len(runs))\nfor d in days:\n    print("day", d)\n    print(counts[d])'
+  const out = '40\nday 2026-10-01\n3\nday 2026-10-02\n5'
+  assert.deepEqual([0, 2, 4].map(i => printLine(loop, out, i)), ['print(len(runs))', 'print(counts[d])', 'print(counts[d])'])
+  // a label print that goes on with a value of several lines, then a print of one value: the value's last line is the
+  // second print's, the lines between could be either's, so none is shown
+  const label = 'print("by status:", counts)\nprint(len(runs))'
+  const said = 'by status: status\npassed    28\nfailed    12\n40'
+  assert.deepEqual([2, 3].map(i => printLine(label, said, i)), ['', 'print(len(runs))'])
+  // three prints of values, each of several lines or one: a line inside them could be any one's, so none is shown,
+  // though a comparison's literal names a word of the line
+  const three = 'print(runs.shape)\nprint(runs["status"].value_counts())\nprint(runs.groupby("config")["status"].apply(lambda s: (s == "failed").mean()))'
+  assert.equal(printLine(three, '(40, 5)\nstatus\npassed    28\nfailed    12\nName: count, dtype: int64\nconfig\na    0.20\nb    0.45', 3), '')
+})

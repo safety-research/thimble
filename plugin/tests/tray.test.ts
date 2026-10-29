@@ -204,6 +204,17 @@ test('a corrected value computed by code: drawn in the reply as a verified one, 
   expect(band).toContain('failed: 11')
 })
 
+test("a value computed by code shows, above its output line, the line that printed it: not the print of another value beside it, though a literal of its own print is a word of the line", CITES, async ($, on) => {
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'import json\nruns = [json.loads(l) for l in open("runs.jsonl")]\nprint(len(runs))\nprint(sum(r["status"] == "failed" for r in runs))', output: '40\n12', highlight: [[3, 5]] },
+  }, 's-tray-said')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const band = textOf(await $.ui.render(above()))
+  expect(band).toContain('print(sum(r["status"] == "failed" for r in runs))│12')
+  expect(band).not.toContain('print(len(runs))')
+})
+
 test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', CITES, async ($, on) => {
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',

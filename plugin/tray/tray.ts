@@ -82,7 +82,7 @@ import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../sque
 import { openThread } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, checkStatus, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, printLine, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, top, wasLine,
+  open, printedBy, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, top, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -780,13 +780,13 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const line = evidenceLine(ev)
   if (!line) return rows
   if (ev.kind === 'computed' && tl) {
-    const said = printLine(ev.code, line.text)
+    const said = printedBy(ev)
     if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK, wrap: 'truncate-end', children: said }) })
     rows.push(ruled(els, tl[0]!.text, [], w, 'th'), ...tl.slice(1).map((l, i) => ruled(els, l.text, l.spans as [number, number][], w, i ? `tr${i}` : 'tr')))
     return rows
   }
   if (ev.kind === 'computed') {
-    const said = printLine(ev.code, line.text)
+    const said = printedBy(ev)
     if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK, wrap: 'truncate-end', children: said }) })
   } else if (place) rows.push({ h: 1, el: place })
   const cut = lineWindow(line, w - 2)
