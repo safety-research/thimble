@@ -35,7 +35,7 @@ import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
+import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey, trayTight } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { askOnce } from './rowhook'
 
@@ -166,9 +166,15 @@ export async function underCard($: Engine, els: Any, id: string, cols: number): 
 // ------------------------------------------------------------------------------------------------ above the prompt
 
 /** What stands above the bar: the tray while it is open. `room`: the rows it may take, so the bar under it stays on
- *  screen (0: no limit). */
-export async function aboveBar($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
-  return els0(await safe(trayBand($, els, width, room > 0 ? Math.max(1, room) : 0), []))
+ *  screen (0: no limit); `spare`: the band's blank rows, which an expanded tray takes too (aboveTight says when). */
+export async function aboveBar($: Engine, els: Any, width: number, room = 0, spare = 0): Promise<Any[]> {
+  return els0(await safe(trayBand($, els, width, room > 0 ? Math.max(1, room) : 0, spare), []))
+}
+
+/** Whether what stands above the bar took the band's blank rows as last drawn (an expanded tray): the band leaves them
+ *  out then. */
+export function aboveTight(): boolean {
+  try { return trayTight() } catch { return false }
 }
 
 /** A seam's bar items, checked; in the settings pane's preview none is a press. */

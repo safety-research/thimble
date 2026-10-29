@@ -12,7 +12,7 @@
 //                since
 import type { EngineInterface, Register } from 'claude-code'
 
-import { aboveBar } from '../core/answerview'
+import { aboveBar, aboveTight } from '../core/answerview'
 import { closePane, narrowNotice, openPane, paneNow, paneShows } from '../core/pane'
 import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
@@ -122,10 +122,15 @@ export const registerBar: Register = on => {
       const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off (the
-      // bar's rows as drawn: a failure line or a hint wraps)
+      // bar's rows as drawn: a failure line or a hint wraps). A tray the person expanded takes the blank rows too
       const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - treeRows(rows, width) - 2) : 0
-      const above = await aboveBar($, els, width, room)
-      return els.Box({ flexDirection: 'column', children: [...(above.length ? [els.Text({ key: 'above-gap', children: ' ' }), ...above] : []), els.Text({ key: 'gap', children: ' ' }), ...rows] })
+      const above = await aboveBar($, els, width, room, 2)
+      const gaps = !(above.length && aboveTight())
+      return els.Box({ flexDirection: 'column', children: [
+        ...(above.length ? [...(gaps ? [els.Text({ key: 'above-gap', children: ' ' })] : []), ...above] : []),
+        ...(gaps ? [els.Text({ key: 'gap', children: ' ' })] : []),
+        ...rows,
+      ] })
     } catch {
       // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
       return next(e)

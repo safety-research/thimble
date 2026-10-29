@@ -548,7 +548,7 @@ test('a tray taller than the rows the band has over the bar shows its body in a 
   // the tray's head and its keys stay; the body shows from its top, the lines under the window counted
   expect(d.text).toContain('a ask')
   expect(d.window?.props?.top).toBeUndefined()
-  expect(Number(/↓ (\d+) more line/.exec(d.text)?.[1])).toBeGreaterThan(5)
+  expect(Number(/expand (\d+) more line/.exec(d.text)?.[1])).toBeGreaterThan(5)
   // the wheel over the band moves the window, a row a tick, and the band itself does not move
   await wheel(2)
   d = await drawn(8)
@@ -574,12 +574,24 @@ test('a tray taller than the rows the band has over the bar shows its body in a 
   expect(bandScrolls()).toBe(1)
 })
 
-test('a tray cut at a short height pages: ↓ N more lines is a click that moves its window a page, ↑ N lines above one back, and d and u do the same; a word that starts with d is typed', CITES, async ($, on) => {
+test('a tray cut at a short height: d expand N more lines, a click too, shows the rest, as many lines as the band has room for, its blank rows too, and the row then says how many remain; ↑ N lines above and u go a page back up; a word that starts with d is typed', CITES, async ($, on) => {
   const { clock } = await resumed($, on, TALL, 's-tray-page')
+  const lines = (n: number) => `${n} line${n === 1 ? '' : 's'}`
   const drawn = async (maxRows = 8) => {
     const band = await $.ui.render(above(maxRows))
     const top = all(band).find(n => n.props?.key === 'tray-window-in')?.props?.top
-    return { band, text: textOf(band), top: typeof top === 'number' ? -top : 0, button: (id: string) => all(band).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`) }
+    const keys = kidsOf(band).map(n => String(n.props?.key))
+    // the band's blank rows: above the tray, and over the bar
+    const blanks = kidsOf(band).filter(n => n.type === 'Text' && textOf(n) === ' ').length
+    return {
+      band, keys, blanks, text: textOf(band), top: typeof top === 'number' ? -top : 0, rows: Number(all(band).find(n => n.props?.key === 'tray-window')?.props?.height),
+      button: (id: string) => all(band).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`),
+    }
+  }
+  // the band fits its rows, the bar's row last: the bar stays on screen
+  const fits = (d: Awaited<ReturnType<typeof drawn>>) => {
+    expect(treeRows(d.band, 100)).toBeLessThanOrEqual(8)
+    expect(d.keys.at(-1)).toMatch(/^bar/)
   }
   // a click on the row under the window, in the band as mounted at the same height
   const click = async (id: string) => {
@@ -600,32 +612,54 @@ test('a tray cut at a short height pages: ↓ N more lines is a click that moves
   await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
   await open()
   let d = await drawn()
-  const below = Number(/↓ (\d+) more line/.exec(d.text)?.[1])
+  fits(d)
+  const below = Number(/expand (\d+) more line/.exec(d.text)?.[1])
+  const first = d.rows
   expect(below).toBeGreaterThan(5)
   expect(d.top).toBe(0)
-  // a click on ↓ N more lines: a page further down, and ↑ N lines above under the window too
-  const down = d.button('down')
-  expect(textOf(down)).toBe(`d ↓ ${below} more lines`)
+  // the band's blank rows, above the tray and over the bar
+  expect(d.blanks).toBe(2)
+  // the row under the window: its key, where it acts, then what it does
+  expect(textOf(d.button('down'))).toBe(`d expand ${below} more lines`)
+  // a click on it: the tray takes the band's blank rows too, and its window moves on to the lines after the ones shown
   await click('down')
   d = await drawn()
-  const page = d.top
-  expect(page).toBeGreaterThan(0)
-  expect(d.text).toContain(`↑ ${page} line${page === 1 ? '' : 's'} above`)
-  // ↑ N lines above: a page back up
+  fits(d)
+  expect(d.blanks).toBe(0)
+  expect(d.rows).toBe(first + 2)
+  const moved = d.top
+  expect(moved).toBe(Math.max(1, first - 1))
+  // the lines that still remain, and those above
+  expect(d.text).toContain(`d expand ${below - 2 - moved} more line`)
+  expect(d.text).toContain(`↑ ${lines(moved)} above`)
+  // ↑ N lines above: a page back up; the tray keeps the rows it took
   await click('up')
-  expect((await drawn()).top).toBe(0)
-  // d at an empty prompt pages down, u back up
+  d = await drawn()
+  expect(d.top).toBe(0)
+  expect(d.rows).toBe(first + 2)
+  // d at an empty prompt shows the lines after the window, u goes back up
   expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
-  expect((await drawn()).top).toBe(page)
+  expect((await drawn()).top).toBe(first + 1)
   await clock.advance(2000)
   expect(await $.prompt.edit(key('u'))).toEqual({ text: '', cursor: 0 })
   expect((await drawn()).top).toBe(0)
   await clock.advance(2000)
-  // a word that starts with d: the page goes back, and the word is typed
+  // another mark, or the same one opened again, starts in the rows over the bar
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  await open()
+  d = await drawn()
+  expect(d.rows).toBe(first)
+  expect(d.blanks).toBe(2)
+  // a word that starts with d: the tray goes back as it was, and the word is typed
   expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
+  expect((await drawn()).rows).toBe(first + 2)
   const word = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'o' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'o' } as never) as Any
   expect(word.text).toBe('do')
-  expect((await drawn()).top).toBe(0)
+  d = await drawn()
+  expect(d.top).toBe(0)
+  expect(d.rows).toBe(first)
+  expect(d.blanks).toBe(2)
 })
 
 // a value code computed, the citation's evidence three hundred lines of output
@@ -653,14 +687,14 @@ test('at the narrowest tray, with lines above and below in the hundreds, the row
   const text = textOf(row)
   // both parts, each with its key, in the row's 36 columns
   expect(text.length).toBeLessThanOrEqual(36)
-  const [, above_, below_] = /^u ↑ (\d+) above · d ↓ (\d+) more$/.exec(text) ?? []
+  const [, above_, below_] = /^u ↑ (\d+) above · d expand (\d+) more$/.exec(text) ?? []
   expect(Number(above_)).toBeGreaterThanOrEqual(100)
   expect(Number(below_)).toBeGreaterThanOrEqual(100)
   // each part still a click named by its whole words
-  expect(all(row).filter(n => n.type === 'Button').map(n => n.props.label)).toEqual([`↑ ${above_} lines above`, `↓ ${below_} more lines`])
+  expect(all(row).filter(n => n.type === 'Button').map(n => n.props.label)).toEqual([`↑ ${above_} lines above`, `expand ${below_} more lines`])
   // a wider tray keeps the whole words
   const wide = textOf(all(await $.ui.render(above(8))).find(n => n.props?.key === 'tray-scroll'))
-  expect(wide).toMatch(/^u ↑ \d+ lines above · d ↓ \d+ more lines$/)
+  expect(wide).toMatch(/^u ↑ \d+ lines above · d expand \d+ more lines$/)
 })
 
 // a heads-up whose words are a citation's words, or hold them
@@ -941,11 +975,11 @@ test("a click that slid a cell on the row under a paged tray's window leaves a p
   await open()
   await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
   await open()
-  expect(textOf(await $.ui.render(above(8)))).toMatch(/d ↓ \d+ more lines/)
+  expect(textOf(await $.ui.render(above(8)))).toMatch(/d expand \d+ more lines/)
   // a click on it that slid a cell: its words, with its key and without
   expect(await counts({ text: 'more' }, 8)).toBe(false)
   expect(await counts({ text: 'lines' }, 8)).toBe(false)
-  expect(await counts({ text: 'd ↓' }, 8)).toBe(false)
+  expect(await counts({ text: 'd expand' }, 8)).toBe(false)
   // the answer's own words still count
   expect(await counts({ text: 'failed on the p95 check', requestId: 'row-t1' }, 8)).toBe(true)
 })

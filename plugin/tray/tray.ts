@@ -31,8 +31,8 @@
 //   0 close     back to the mark under it, or close
 //   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
 //               are, in their look
-//   d u         a body taller than the tray's rows: a page further down, a page back up, while no other key holder (the
-//               fix line, a card on screen) takes the letter; the row under the window names them
+//   d u         a body taller than the tray's rows: d its rest (expand), u a page back up, while no other key holder
+//               (the fix line, a card on screen) takes the letter; the row under the window names them
 //
 // Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ expand all` (and `− collapse`)
 // under the evidence is + (and -); a click on the citation's words, in the tray's title as in the
@@ -40,11 +40,13 @@
 //
 // The tray takes only the rows the band above the prompt has over the bar (bar/register.ts), so the bar stays on
 // screen: a body taller than that shows in a window of those rows, which the wheel over the band scrolls, over a dim
-// row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click
-// that moves the window a page, as d and u do. A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks
-// about it and 0 gives the keys back. An open tray does not change what the next prompt asks: a question about the
-// mark goes to a side thread (a). The tray closes when the person sends a prompt. What the person opens reaches main
-// through core/engaged.ts.
+// row that says how many more lines there are below (`expand N more lines`) and above (`↑ N lines above`). d, or a
+// click on `expand N more lines`, shows the rest, as many of its lines as the terminal has room for: the tray takes the
+// band's blank rows too, and its window moves on to the lines after the ones shown; while lines still remain, the row
+// says how many. u, or a click on `↑ N lines above`, moves the window a page back up. A card ] reaches takes the keys
+// (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. An open tray does not change what the next
+// prompt asks: a question about the mark goes to a side thread (a). The tray closes when the person sends a prompt.
+// What the person opens reaches main through core/engaged.ts.
 //
 //   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks the person opened:
 //   `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a heads-up)
@@ -133,8 +135,9 @@ async function writeTray($: Engine, tray: Tray): Promise<void> {
   const next = tray && Array.isArray(tray.stack) && tray.stack.length ? tray : null
   await $.state.set(TRAY, next as never)
   kept = { ...(await keptNow($)), tray: next }
-  // what it shows now starts at its top (fitBody)
+  // what it shows now starts at its top, in the rows the band has over the bar and its blank rows (fitBody)
   scrolled = 0
+  expanded = false
 }
 
 async function writeStand($: Engine, stand: Stand): Promise<void> {
@@ -869,13 +872,21 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
 }
 
 /** How many rows of the tray's body its window has scrolled past, and the window as last drawn (how many rows of the
- *  body it hides, and its own rows; null when the body fits): what the wheel over the band moves (scrollTray). A change
- *  of the tray starts it at its top again (writeTray). */
+ *  body it hides, its own rows, and the rows it gains once expanded; null when the body fits): what the wheel over the
+ *  band moves (scrollTray). `expanded`: the person asked for the rest of the body (expandTray), so the window takes the
+ *  band's blank rows too; `tight`, whether the tray as last drawn took them, so the band leaves them out (bar/
+ *  register.ts). A change of the tray starts it at its top again, not expanded (writeTray). */
 let scrolled = 0
-let windowed: { over: number; rows: number } | null = null
+let windowed: { over: number; rows: number; grow: number } | null = null
+let expanded = false
+let tight = false
 
-/** The keys that move the window a page down and up, each while no one before the tray takes it (the fix line, fix/
- *  line.ts) and no card on screen lists it (cards/draw.ts keyOwner): the tray takes a key before a card does. */
+/** Whether the tray as last drawn took the band's blank rows (expanded): the band draws none then. */
+export const trayTight = (): boolean => tight
+
+/** The keys that show the rest of the body (`down`: expand) and move the window a page back up, each while no one
+ *  before the tray takes it (the fix line, fix/line.ts) and no card on screen lists it (cards/draw.ts keyOwner): the
+ *  tray takes a key before a card does. */
 const PAGE_KEYS = { down: 'd', up: 'u' } as const
 /** The page keys the row under the window named as it was last drawn, null where none: a key reads no state. */
 let paging: { down: string | null; up: string | null } = { down: null, up: null }
@@ -890,36 +901,36 @@ async function freePageKeys($: Engine): Promise<{ down: string | null; up: strin
 const pageOf = (w: { rows: number }) => Math.max(1, w.rows - 1)
 
 /** The tray's body in at most `fit` rows: whole when it fits; else a window of `fit` − 1 of its rows, and under it a dim
- *  row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click that
- *  moves the window a page, after the key that does the same when it is free (`keys`); in a row too narrow for both,
- *  `↓ N more` and `↑ N above`. Claude Code scrolls the band only when its whole tree is taller than its rows, so the
+ *  row that says how many more lines there are below (`expand N more lines`), a click that shows them as expandTray
+ *  does, and above (`↑ N lines above`), a click that moves the window a page back up, each after the key that does the
+ *  same when it is free (`keys`); in a row too narrow for both, `expand N more` and `↑ N above`. `grow`: the rows the
+ *  window gains once expanded. Claude Code scrolls the band only when its whole tree is taller than its rows, so the
  *  wheel over the band moves the window too (registerTray's ui.scroll hook). With fewer than two rows for the body, it
  *  shows whole, and the band scrolls as Claude Code scrolls it. `words`: the words of the row under the window, as
  *  drawn, each part's with its key and without. */
-function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }): { rows: Any[]; words: string[] } {
+function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }, grow = 0): { rows: Any[]; words: string[] } {
   const { Box, Button, Text } = els
   const tall = treeRows(body, w)
   if (tall <= fit || fit < 2) { windowed = null; paging = { down: null, up: null }; return { rows: body, words: [] } }
   const rows = fit - 1
   const over = tall - rows
-  windowed = { over, rows }
+  windowed = { over, rows, grow }
   scrolled = Math.max(0, Math.min(over, scrolled))
   const below = over - scrolled
-  const page = pageOf(windowed)
   paging = { down: below > 0 ? keys.down : null, up: scrolled > 0 ? keys.up : null }
   const lines = (n: number) => `${n} line${n === 1 ? '' : 's'}`
-  // each part a click that moves the window a page, its key first when the key is free
-  const part = (id: string, key: string | null, label: string, words: string, by: number): Any => Button({ key: `tray-page-${id}`, plain: true, label, hover: quiet(`tray-page-${id}`), onPress: () => scrollTray($, by), children: [
+  // each part a click that does what its key does, its key first when the key is free
+  const part = (id: string, key: string | null, label: string, words: string, press: () => unknown): Any => Button({ key: `tray-page-${id}`, plain: true, label, hover: quiet(`tray-page-${id}`), onPress: press, children: [
     ...(key ? [Text({ key: 'k', color: accent(), bold: true, children: `${key} ` })] : []), Text({ key: 'w', dimColor: true, children: words }),
   ] })
   const both = [
-    ...(scrolled > 0 ? [{ id: 'up', key: paging.up, words: `↑ ${lines(scrolled)} above`, short: `↑ ${scrolled} above`, by: -page }] : []),
-    ...(below > 0 ? [{ id: 'down', key: paging.down, words: `↓ ${below} more line${below === 1 ? '' : 's'}`, short: `↓ ${below} more`, by: page }] : []),
+    ...(scrolled > 0 ? [{ id: 'up', key: paging.up, words: `↑ ${lines(scrolled)} above`, short: `↑ ${scrolled} above`, press: () => windowed && scrollTray($, -pageOf(windowed)) }] : []),
+    ...(below > 0 ? [{ id: 'down', key: paging.down, words: `expand ${below} more line${below === 1 ? '' : 's'}`, short: `expand ${below} more`, press: () => expandTray($) }] : []),
   ]
   // the row's words whole while they fit its one row, else each part without `lines` (the narrowest tray, both parts)
   const short = both.reduce((n, x, i) => n + (i ? 3 : 0) + (x.key ? textWidth(x.key) + 1 : 0) + textWidth(x.words), 0) > w
   const shown = both.map(x => ({ ...x, words: short ? x.short : x.words, label: x.words }))
-  const parts = shown.map(x => part(x.id, x.key, x.label, x.words, x.by))
+  const parts = shown.map(x => part(x.id, x.key, x.label, x.words, x.press))
   return {
     rows: [
       Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
@@ -941,24 +952,34 @@ function scrollTray($: Engine, by: number): boolean {
   return true
 }
 
-/** d or u while the row under the window names it: the window a page down or up, undone when a letter follows (the
- *  person types a word). Null for any other key, which reads nothing. */
+/** d, or a click on `expand N more lines`: the rest of the body, as many of its lines as the terminal has room for. The
+ *  tray takes every row the band has over the bar, its blank rows too (`expanded`), and its window moves on to the lines
+ *  after the ones shown, the last of those staying in view; the row under it says how many lines still remain. */
+function expandTray($: Engine): void {
+  if (!windowed) return
+  if (windowed.grow > 0 && !expanded) { expanded = true; $.ui.invalidate('ui.render') }
+  scrollTray($, pageOf(windowed))
+}
+
+/** d or u while the row under the window names it: the rest of the body (expandTray), or the window a page back up;
+ *  undone when a letter follows (the person types a word). Null for any other key, which reads nothing. */
 function pageKey($: Engine, key: string): Any | null {
   const dir = key === paging.down ? 1 : key === paging.up ? -1 : 0
   if (!dir || !windowed) return null
-  const by = dir * pageOf(windowed)
-  let was = scrolled
+  let was = { scrolled, expanded }
   return {
-    now: async () => { was = scrolled; scrollTray($, by) },
-    undo: async () => { if (scrolled !== was) { scrolled = was; $.ui.invalidate('ui.render') } },
+    now: async () => { was = { scrolled, expanded }; if (dir > 0) expandTray($); else if (windowed) scrollTray($, -pageOf(windowed)) },
+    undo: async () => { if (scrolled !== was.scrolled || expanded !== was.expanded) { scrolled = was.scrolled; expanded = was.expanded; $.ui.invalidate('ui.render') } },
   }
 }
 
 /** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, drawn and clicked as in
  *  the reply) on top, a citation's status and its keys at its right (trayKeys), then the mark's card, its rows starting where the
  *  title starts. `room`: the rows it may take, so the bar under it stays on screen (0: no limit); a taller body shows
- *  in a window of the rows left (fitBody). */
-export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
+ *  in a window of the rows left (fitBody). `spare`: the band's blank rows, which the tray takes too once the person
+ *  asked for the rest of its body (expandTray). */
+export async function trayBand($: Engine, els: Any, width: number, room = 0, spare = 0): Promise<Any[]> {
+  tight = false
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) { windowed = null; paging = { down: null, up: null }; controlWords('tray', []); return [] }
@@ -1042,10 +1063,15 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
     : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
   // of the rows the tray may take, the frame's two borders and its head take theirs, and the body what is left; a body
-  // taller than that pages with d and u while they are free
-  const fit = room > 0 ? room - 2 - treeRows(head, inner) : Infinity
-  const keysFree = fit >= 2 && treeRows(body, inner) > fit ? await freePageKeys($) : { down: null, up: null }
-  const shown = fitBody($, els, body, inner, fit, keysFree)
+  // taller than that shows its rest with d (and goes back up with u) while they are free. Expanded, the tray takes the
+  // band's blank rows too, while its body needs them
+  const base = room > 0 ? room - 2 - treeRows(head, inner) : Infinity
+  const extra = room > 0 ? Math.max(0, spare) : 0
+  const tall = treeRows(body, inner)
+  tight = expanded && extra > 0 && tall > base
+  const fit = tight ? base + extra : base
+  const keysFree = fit >= 2 && tall > fit ? await freePageKeys($) : { down: null, up: null }
+  const shown = fitBody($, els, body, inner, fit, keysFree, expanded ? 0 : extra)
   // the words of its keys and of the row under its window, which a click on one leaves selected: no answer's words
   // (core/selection.ts)
   controlWords('tray', [...keys.flatMap(k => [k.words, `${k.key} ${k.words}`]), ...shown.words])
