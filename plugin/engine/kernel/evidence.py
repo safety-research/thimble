@@ -199,11 +199,15 @@ def short(s: str, n: int) -> str:
 # missing, never the whole cited words again.
 
 def sentence(clause: str) -> str:
-    """A clause of a reason as the sentence the person reads: its first letter capital, a stop at its end."""
+    """A clause of a reason as the sentence the person reads: a stop at its end, and a capital first letter unless its
+    first word is a name, whose case is its own, as check_reason keeps it: a file's path or name (`peer/run.log is
+    outside …`), or a word with a digit, a dash or a capital in it."""
     s = norm_ws(clause)
     if not s:
         return s
-    s = s[0].upper() + s[1:]
+    first = re.match(r"[^\s,;:]+", s)
+    if first and re.fullmatch(r"[a-z]+", first.group(0)):
+        s = s[0].upper() + s[1:]
     return s if s[-1] in ".!?" else s + "."
 
 

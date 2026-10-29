@@ -485,6 +485,24 @@ def test_a_link_to_a_file_outside_the_folder_and_a_pipe_are_no_evidence(tmp_path
     assert check_mark(mark('"x"'), quote("pipe", 1, "x"), [], str(data))["status"] == "failed"
 
 
+def test_a_reason_that_opens_with_the_cited_file_names_it_as_it_is(tmp_path: Path):
+    """A failed citation's reason that opens with the cited file keeps the file's name as it is: with its first letter
+    capital it named a file that does not exist (`Peer/run.log is outside …` for peer/run.log). A reason that opens
+    with a plain word still opens with a capital."""
+    data, shared = tmp_path / "data", tmp_path / "shared"
+    data.mkdir()
+    shared.mkdir()
+    (shared / "run.log").write_text("shelter request refused\n")
+    (data / "peer").symlink_to(shared, target_is_directory=True)
+    (data / "notes.md").write_text("the lake shelter seats twenty\n")
+    outside = check_mark(mark('"shelter request refused"'), quote("peer/run.log", 1, "shelter request refused"), [], str(data))
+    assert (outside["status"], outside["reason"]) == ("failed", "peer/run.log is outside the folder this session works in."), outside
+    short = check_mark(mark('"seats twenty"'), quote("notes.md", 9, "seats twenty"), [], str(data))
+    assert (short["status"], short["reason"]) == ("failed", "notes.md has no line 9."), short
+    assert one_sentence(outside["reason"]) and one_sentence(short["reason"])
+    assert check_mark(mark('"x"'), quote("nope.txt", 1, "x"), [], str(data))["reason"] == "There is no file nope.txt in this session's folder."
+
+
 def test_a_path_from_the_start_folder_holds_after_main_moved_the_shell(tmp_path: Path):
     (tmp_path / "plugin" / "draw").mkdir(parents=True)
     (tmp_path / "plugin" / "draw" / "box.mjs").write_text("const a = 1\nexport function box() {}\n")
