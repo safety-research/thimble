@@ -6,6 +6,7 @@
 // values), carries its text in `data-tip`, which the page's one HoverTips shows under the pointer.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type PointerEvent, type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { createPortal } from 'react-dom'
+import { isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 
 const GAP = 6
 const MARGIN = 8
@@ -121,13 +122,27 @@ export function useTooltip(text: string | null | undefined, className?: string, 
   return { props, tip: anchor ? <Tip id={id} text={text} place={place} className={className} /> : null }
 }
 
-/** What the pointer does to the tip of a mark that names a value, whoever draws it (HoverTips; the tour's examples,
- * tour/engine): the mark under the pointer shows its tip once the pointer has rested on it a moment, at once when the
- * pointer has just left another tip (as it runs along the rows). No tip shows while the pointer is busy, a button held
- * for a selection or a drag or the ask key held, since it would cover what the pointer marks. A tip taken away (a
- * press, Escape) stays away from its mark until the pointer reaches another, and that one waits its moment. `show`
- * draws `mark`'s tip for the pointer at (x, y), false when it has none to draw; `hide` takes it away. */
+/** What a move of the pointer says (a pointer event): where the pointer is, the buttons held, and the modifier keys,
+ * the ask key among them. */
+export interface PointerAt {
+  clientX: number
+  clientY: number
+  buttons: number
+  metaKey: boolean
+  ctrlKey: boolean
+  altKey: boolean
+}
+
+/** What the pointer and the keys do to the tip of a mark that names a value, whoever draws it (HoverTips; the tour's
+ * examples, tour/engine), from the events that reach it: the mark under the pointer shows its tip once the pointer has
+ * rested on it a moment, at once when the pointer has just left another tip (as it runs along the rows). No tip shows
+ * while the pointer is busy, a button held for a selection or a drag or the ask key held for the ⌘ pointer
+ * (lib/platform), since it would cover what the pointer marks: a press or the ask key takes the tip away the moment it
+ * goes down, and a tip still waiting its moment with it, whether the pointer moves or not. A tip taken away (a press,
+ * the ask key, Escape) stays away from its mark until the pointer reaches another, and that one waits its moment.
+ * `show` draws `mark`'s tip for the pointer at (x, y), false when it has none to draw; `hide` takes it away. */
 export function markTips(show: (mark: Element, x: number, y: number) => boolean, hide: () => void) {
+  const mac = isMacPlatform()
   let on: Element | null = null
   let shown = false
   let timer = 0
@@ -142,16 +157,17 @@ export function markTips(show: (mark: Element, x: number, y: number) => boolean,
     if (warm) lastClosed = Date.now()
     hide()
   }
+  // the tip taken away from `mark`, the mark under the pointer, which shows none until the pointer reaches another
+  const drop = (mark: Element | null) => {
+    away(false)
+    on = mark
+  }
   return {
-    /** the pointer at (`px`, `py`), over `mark` (null for none) */
-    move(mark: Element | null, px: number, py: number, busy: boolean) {
-      x = px
-      y = py
-      if (busy) {
-        away(false)
-        on = mark
-        return
-      }
+    /** a move of the pointer, `e`, over `mark` (null for none) */
+    point(mark: Element | null, e: PointerAt) {
+      x = e.clientX
+      y = e.clientY
+      if (e.buttons !== 0 || pointKeyHeld(e, mac)) return drop(mark)
       if (mark === on) return
       away(true)
       on = mark
@@ -163,10 +179,11 @@ export function markTips(show: (mark: Element, x: number, y: number) => boolean,
       if (Date.now() - lastClosed < TIP_WARM_MS) go()
       else timer = window.setTimeout(go, TIP_DELAY_MS)
     },
-    /** the tip taken away from `mark` (a press on it), or from the mark under the pointer (Escape) */
-    dismiss(mark: Element | null = on) {
-      away(false)
-      on = mark
+    /** a press of a button on `mark` (null for none) */
+    press: drop,
+    /** a key going down, `e`: the ask key and Escape take the tip away from the mark under the pointer */
+    key(e: { key: string }) {
+      if (e.key === 'Escape' || isPointKey(e.key, mac)) drop(on)
     },
     /** the tip gone, and the mark under the pointer waits its moment again (a scroll moved the marks, the pointer left) */
     reset() {
@@ -184,9 +201,10 @@ const markAt = (target: EventTarget | null) => (target instanceof Element ? targ
 /**
  * The one tooltip for marks that name a value, of which a file has as many as records (a record's labels and their
  * values, a label's cell beside a record): the element under the pointer with `data-tip` shows its text, line by line,
- * under the pointer where it rests, by markTips' rules. It goes when the pointer leaves the element, at a press, a
- * scroll or Escape. Drawn once for the page (shell/Shell), so a mark needs no listener of its own. The text a mark's tip
- * shows is for the pointer; the mark gives it to a screen reader in its own words (an aria-label or aria-description).
+ * under the pointer where it rests, by markTips' rules. It goes when the pointer leaves the element, at a press, the ask
+ * key, a scroll or Escape. Drawn once for the page (shell/Shell), so a mark needs no listener of its own. The text a
+ * mark's tip shows is for the pointer; the mark gives it to a screen reader in its own words (an aria-label or
+ * aria-description).
  */
 export function HoverTips() {
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null)
@@ -202,17 +220,15 @@ export function HoverTips() {
     // (the DOM's pointer events: this file's PointerEvent is React's)
     const move = (e: MouseEvent & { pointerType?: string }) => {
       if (e.pointerType === 'touch') return
-      tips.move(markAt(e.target), e.clientX, e.clientY, e.buttons !== 0 || document.body.hasAttribute('data-cmd'))
+      tips.point(markAt(e.target), e)
     }
-    const press = (e: MouseEvent) => tips.dismiss(markAt(e.target))
+    const press = (e: MouseEvent) => tips.press(markAt(e.target))
     // the pointer left the page
     const out = (e: MouseEvent) => {
       if (!e.relatedTarget) tips.reset()
     }
     const scroll = () => tips.reset()
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') tips.dismiss()
-    }
+    const key = (e: KeyboardEvent) => tips.key(e)
     document.addEventListener('pointermove', move, { capture: true, passive: true })
     document.addEventListener('pointerout', out, true)
     document.addEventListener('pointerdown', press, true)

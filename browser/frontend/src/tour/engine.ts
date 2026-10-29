@@ -8,7 +8,8 @@
 // is open, typing in it does, and Enter closes it as Esc does, sending nothing; on a step with `chips`, hovering an
 // underlined value in its card shows that value's source; on a step with `tips`, resting on a mark of its example that
 // names a value (`data-tip`, a record's label and value) shows that name, as thimble's one tooltip does
-// (components/Tooltip HoverTips). Esc closes the tour; while an ask box or a source is open, Esc closes only that.
+// (components/Tooltip HoverTips), by its rules, the ask key and a press included. Esc closes the tour; while an ask box
+// or a source is open, Esc closes only that.
 //
 // Examples are the tour's own markup (./examples.json, ./steps), laid over the page under the dim and removed when
 // their step ends. Nothing the tour shows reaches the server.
@@ -1123,10 +1124,10 @@ export function createTour(snaps: Snaps): Tour {
 
   // ---- the marks of a `tips` step's example that name a value (`data-tip`): the one under a point (the example sits
   // under the block, so every layer at the point is looked at), and its name as thimble's one tooltip shows it
-  // (components/Tooltip HoverTips), by the same rules (markTips): under the pointer where it rests, after a moment, at
-  // once when a name went a moment ago, none while a button is held, none again on a mark pressed until the pointer
-  // reaches another. The analyst's own name ends the demo, which shows names too (marked as the demo's, and removed
-  // with it)
+  // (components/Tooltip HoverTips), by the same rules from the same events (markTips): under the pointer where it rests,
+  // after a moment, at once when a name went a moment ago, none while a button or the ask key is held, the pointer still
+  // or not, and none again on its mark until the pointer reaches another. The analyst's own name ends the demo, which
+  // shows names too (marked as the demo's, and removed with it)
   const tipAt = (x: number, y: number): Element | null => {
     const within = steps[i]?.tips?.(api)
     if (!within) return null
@@ -1167,7 +1168,7 @@ export function createTour(snaps: Snaps): Tour {
   // events until the button is let go, the moves of a drag included
   const onPoint = (e: PointerEvent) => {
     if (e.pointerType === 'touch' || !e.isTrusted) return
-    if (i >= 0 && steps[i]?.tips) tips.move(tipAt(e.clientX, e.clientY), e.clientX, e.clientY, e.buttons !== 0)
+    if (i >= 0 && steps[i]?.tips) tips.point(tipAt(e.clientX, e.clientY), e)
     else hideTip()
   }
   /** the demo's name for `mark`, the demo's last one going */
@@ -1232,6 +1233,8 @@ export function createTour(snaps: Snaps): Tour {
     const allowed = s.allow ? s.allow(api) : null
     const inAllowed = !!allowed && t instanceof Node && allowed.contains(t)
     if (isKey) {
+      // the ask key going down takes the analyst's name away, as it takes thimble's own
+      if (s.tips && ev.type === 'keydown') tips.key(ke)
       if (ke.key === 'Escape' && !inAllowed) return onEsc(ke)
       if (inAllowed && ke.key !== 'Tab') return
       if (ke.key === 'Tab') {
@@ -1278,7 +1281,7 @@ export function createTour(snaps: Snaps): Tour {
       return
     }
     // a press takes the analyst's name away, as it takes thimble's own
-    if (s.tips && ev.type === 'pointerdown') tips.dismiss(tipAt(me.clientX, me.clientY))
+    if (s.tips && ev.type === 'pointerdown') tips.press(tipAt(me.clientX, me.clientY))
     if (inAllowed) return
     if (s.chips && !pointHeld(me)) {
       const chip = chipAt(me.clientX, me.clientY)

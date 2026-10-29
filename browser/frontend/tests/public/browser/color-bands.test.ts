@@ -6,7 +6,8 @@
 // line number and text stand where they stood with one choice. With one choice the edge is the one 3 px band, and Off
 // draws none. The pointer resting on a record's band names the label and the record's value of it in thimble's tooltip
 // (components/Tooltip HoverTips), in the Transcript mode as in the Table mode, and while a button is held across the
-// records (a selection) no name shows.
+// records (a selection) no name shows, nor while the ask key is held: the key going down takes a name away at once with
+// the pointer still, and a name waiting its moment as the key goes down never shows.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -213,6 +214,55 @@ test(`the pointer resting on a record's band names its label and value in thimbl
     await page.mouse.move(q.x, q.y + 6 * q.h + 2)
     await page.waitForTimeout(700)
     assert.deepEqual(await tips(), [], `${mode}: none on the record the button was let go over`)
+    await page.close()
+  }
+}, 120_000)
+
+test(`the ask key takes a record's name away the moment it goes down with the pointer still, and none shows while it is held, pressed as the pointer stops too, nor once it is let go`, async (ctx) => {
+  if (!browser) return ctx.skip()
+  for (const mode of ['transcript', 'table']) {
+    const page = await open(`?mode=${mode}`)
+    await page.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
+    const band = (line: number) =>
+      page.evaluate((line) => {
+        const b = document.querySelector<HTMLElement>(`.reader-card[data-line="${line}"]`)!.querySelectorAll('.reader-band')[1].getBoundingClientRect()
+        return { x: b.left + b.width / 2, y: b.top + Math.min(12, b.height / 2) }
+      }, line)
+    const tips = () => page.evaluate(() => [...document.querySelectorAll('.tip')].map((t) => String(t.textContent)))
+    // every name that shows over `ms`, looked at each 50 ms
+    const during = async (ms: number) => {
+      const seen = new Set<string>()
+      for (let t = 0; t < ms; t += 50) {
+        for (const x of await tips()) seen.add(x)
+        await page.waitForTimeout(50)
+      }
+      return [...seen]
+    }
+    // off the records, long enough that the next name waits its moment
+    const off = async () => {
+      await page.mouse.move(500, 690, { steps: 2 })
+      await page.waitForTimeout(700)
+    }
+    // the ask key off a Mac, as this page runs: ⌘ (the Windows or Super key) or Ctrl
+    for (const [k, key] of ['Meta', 'Control'].entries()) {
+      const p = await band(5 + k * 4)
+      await off()
+      await page.mouse.move(p.x, p.y, { steps: 4 })
+      await page.waitForTimeout(600)
+      assert.equal((await tips()).length, 1, `${mode} ${key}: the name shows before the key`)
+      await page.keyboard.down(key)
+      assert.deepEqual(await tips(), [], `${mode} ${key}: the key going down takes the name away, the pointer still`)
+      assert.deepEqual(await during(900), [], `${mode} ${key}: none while the key is held`)
+      await page.keyboard.up(key)
+      assert.deepEqual(await during(700), [], `${mode} ${key}: none once it is let go, the pointer still`)
+      const q = await band(7 + k * 4)
+      await off()
+      await page.mouse.move(q.x, q.y, { steps: 3 })
+      await page.keyboard.down(key)
+      assert.deepEqual(await during(900), [], `${mode} ${key}: pressed as the pointer stops, none while the key is held`)
+      await page.keyboard.up(key)
+      assert.deepEqual(await during(700), [], `${mode} ${key}: none once it is let go`)
+    }
     await page.close()
   }
 }, 120_000)

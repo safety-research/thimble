@@ -2,24 +2,38 @@
 // The one tooltip for marks that name a value (src/components/Tooltip.tsx HoverTips, drawn once by the shell, by the
 // rules of markTips): the mark under the pointer with `data-tip` (a record's labels and their values, a label's cell
 // beside a record) shows its text under the pointer after a moment, as a control's tip does, at once when the pointer has
-// just left a tip; the pointer leaving it, a press, a scroll or Escape takes the tip away. None shows while a button is
-// held (a selection or a drag over the records) or while the ask key is held, and a tip taken away by a press or Escape
-// stays away from its mark until the pointer reaches another, which waits its moment. Where it stands is
-// placeAtPointer's.
+// just left a tip; the pointer leaving it, a press, the ask key, a scroll or Escape takes the tip away. None shows while
+// a button is held (a selection or a drag over the records) or while the ask key is held (the key Settings picks), the
+// pointer still or moving: the key going down takes a tip away at once, and a tip waiting its moment with it. A tip taken
+// away by a press, the ask key or Escape stays away from its mark until the pointer reaches another, which waits its
+// moment. Where it stands is placeAtPointer's.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { HoverTips, placeAtPointer, TIP_DELAY_MS, TIP_WARM_MS } from '../../src/components/Tooltip.tsx'
+import { setAskKey } from '../../src/lib/platform.ts'
 import { mount, unmountAll } from './mount.tsx'
 
-beforeEach(() => vi.useFakeTimers())
+// each test's clock starts a minute past the last one's, as a page's clock only goes on: a tip a test before took away
+// never went "a moment ago"
+let now = Date.now()
+beforeEach(() => void vi.useFakeTimers({ now: (now += 60_000) }))
 afterEach(() => {
   unmountAll()
   vi.useRealTimers()
 })
 
 const tips = () => [...document.querySelectorAll<HTMLElement>('.tip')]
-/** The pointer moved onto `el`, at (x, y), with `buttons` held (none by default). */
-const point = (el: Element, x = 120, y = 60, buttons = 0) => act(async () => void el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y, pointerType: 'mouse', buttons })))
+/** The modifier keys down with an event. */
+type Mods = { metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean }
+/** The pointer moved onto `el`, at (x, y), with `buttons` held (none by default) and the modifier keys `mods` down. */
+const point = (el: Element, x = 120, y = 60, buttons = 0, mods: Mods = {}) => act(async () => void el.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x, clientY: y, pointerType: 'mouse', buttons, ...mods })))
+/** The key `key` going down or up in the page, with the modifier keys `mods` down after it. */
+const key = (type: 'keydown' | 'keyup', key: string, mods: Mods = {}) => act(async () => void document.body.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, ...mods })))
+/** The ask key Settings picks by default, off a Mac as this page runs: ⌘ (the Windows or Super key) or Ctrl. */
+const ASK = [
+  { key: 'Meta', mods: { metaKey: true } },
+  { key: 'Control', mods: { ctrlKey: true } },
+] as const
 /** A press of the main button on `el`. */
 const press = (el: Element) => act(async () => void el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 120, clientY: 60, pointerType: 'mouse', button: 0, buttons: 1 })))
 const wait = (ms: number) => act(async () => void vi.advanceTimersByTime(ms))
@@ -135,18 +149,111 @@ test('a press takes the name away from its mark until the pointer reaches anothe
   }
 })
 
-test('while the ask key is held (the ⌘ pointer on), no name shows', async () => {
-  const [tested, talked] = await page()
-  await point(tested)
-  await wait(TIP_DELAY_MS)
-  expect(tips()).toHaveLength(1)
-  document.body.setAttribute('data-cmd', '1')
-  try {
-    await point(talked, 120, 90)
+test('while the ask key is held (the ⌘ pointer on), no name shows across the marks, nor on the mark it is let go over', async () => {
+  const [tested, talked, plain] = await page()
+  for (const ask of ASK) {
+    await point(document.body)
+    await wait(TIP_WARM_MS + 50)
+    await point(tested)
+    await wait(TIP_DELAY_MS)
+    expect(tips(), ask.key).toHaveLength(1)
+    await key('keydown', ask.key, ask.mods)
+    for (const [el, y] of [[talked, 90], [plain, 120], [tested, 62], [talked, 92]] as const) {
+      await point(el, 120, y, 0, ask.mods)
+      await wait(TIP_DELAY_MS + 50)
+      expect(tips(), `${ask.key} held over ${el.textContent}`).toEqual([])
+    }
+    await key('keyup', ask.key)
+    await point(talked, 124, 94)
     await wait(TIP_DELAY_MS + 50)
+    expect(tips(), `${ask.key} let go over a mark`).toEqual([])
+  }
+  // the key held as the pointer moves, though its key-down reached a frame and not the page
+  await point(document.body)
+  await wait(TIP_WARM_MS + 50)
+  await point(tested, 120, 60, 0, { metaKey: true })
+  await wait(TIP_DELAY_MS + 50)
+  expect(tips(), 'the key held with no key-down').toEqual([])
+})
+
+test('the ask key going down takes the name away at once, the pointer still; let go, its mark shows none until the pointer reaches another, which waits its moment', async () => {
+  const [tested, talked] = await page()
+  for (const ask of ASK) {
+    await point(document.body)
+    await wait(TIP_WARM_MS + 50)
+    await point(tested)
+    await wait(TIP_DELAY_MS)
+    expect(tips(), ask.key).toHaveLength(1)
+    await key('keydown', ask.key, ask.mods)
+    expect(tips(), `${ask.key} down`).toEqual([])
+    await wait(TIP_DELAY_MS + 50)
+    expect(tips(), `${ask.key} held`).toEqual([])
+    await key('keyup', ask.key)
+    await wait(TIP_DELAY_MS + 50)
+    expect(tips(), `${ask.key} let go`).toEqual([])
+    await point(tested, 150, 64)
+    await wait(TIP_DELAY_MS + 50)
+    expect(tips(), `${ask.key} let go, the pointer moving on its mark`).toEqual([])
+    await point(talked, 150, 90)
     expect(tips()).toEqual([])
+    await wait(TIP_DELAY_MS)
+    expect(tips().map((t) => t.textContent)).toEqual([talked.getAttribute('data-tip')])
+  }
+})
+
+test('the ask key pressed as the pointer stops on a mark: the name waiting its moment shows neither while the key is held nor once it is let go', async () => {
+  const [tested] = await page()
+  for (const ask of ASK) {
+    await point(document.body)
+    await wait(TIP_WARM_MS + 50)
+    await point(tested)
+    await wait(TIP_DELAY_MS / 2)
+    await key('keydown', ask.key, ask.mods)
+    await wait(TIP_DELAY_MS * 3)
+    expect(tips(), `${ask.key} held`).toEqual([])
+    await key('keyup', ask.key)
+    await wait(TIP_DELAY_MS + 50)
+    expect(tips(), `${ask.key} let go`).toEqual([])
+  }
+})
+
+test('the ask key is the one Settings picks: with ⌥ picked, ⌥ takes the name away and ⌘ does not', async () => {
+  const [tested, talked] = await page()
+  setAskKey('alt')
+  try {
+    await point(tested)
+    await wait(TIP_DELAY_MS)
+    await key('keydown', 'Meta', { metaKey: true })
+    await point(tested, 124, 62, 0, { metaKey: true })
+    expect(tips().map((t) => t.textContent), '⌘ is not the ask key').toEqual([tested.getAttribute('data-tip')])
+    await key('keyup', 'Meta')
+    await key('keydown', 'Alt', { altKey: true })
+    expect(tips(), '⌥ down').toEqual([])
+    await point(talked, 120, 90, 0, { altKey: true })
+    await wait(TIP_DELAY_MS + 50)
+    expect(tips(), '⌥ held').toEqual([])
+    await key('keyup', 'Alt')
   } finally {
-    document.body.removeAttribute('data-cmd')
+    setAskKey('meta')
+  }
+})
+
+test('on a Mac the ask key is ⌘ alone: Ctrl, whose click opens the context menu there, leaves the name', async () => {
+  const platform = Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform')
+  Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel', configurable: true })
+  try {
+    const [tested] = await page()
+    await point(tested)
+    await wait(TIP_DELAY_MS)
+    await key('keydown', 'Control', { ctrlKey: true })
+    await point(tested, 124, 62, 0, { ctrlKey: true })
+    expect(tips().map((t) => t.textContent), 'Ctrl held').toEqual([tested.getAttribute('data-tip')])
+    await key('keyup', 'Control')
+    await key('keydown', 'Meta', { metaKey: true })
+    expect(tips(), '⌘ down').toEqual([])
+    await key('keyup', 'Meta')
+  } finally {
+    if (platform) Object.defineProperty(Navigator.prototype, 'platform', platform)
   }
 })
 
