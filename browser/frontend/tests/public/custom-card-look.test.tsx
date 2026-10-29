@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 // A custom card looks like thimble's own pages by construction (lib/cardStyle): its frame's head carries thimble's card
-// stylesheet, the paper's tokens and the few named classes cards draw, ahead of the page's own styles, which still win,
-// and with no !important against a style of the page's. Each class it styles carries thimble's prefix, so a page's own
-// classes take none of its rules (tests/public/browser/card-classes.test.ts draws both).
+// stylesheet, which gives plain HTML the paper's tokens and thimble's type, ahead of the page's own styles, which still
+// win, and with no !important against a style of the page's. It styles elements only, never a class, so a page needs no
+// class of thimble's to take its look and a page's own classes take none of its rules (tests/public/browser/
+// card-classes.test.ts draws both). add_card's `html` says so and names no class: its earlier example, numbers in boxes
+// of their own, made cards that looked like a dashboard.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { CustomFrame } from '../../src/canvas/DataViz.tsx'
-import { CARD_CLASSES, CARD_PREFIX, CARD_STYLE } from '../../src/lib/cardStyle.ts'
+import { CARD_STYLE } from '../../src/lib/cardStyle.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(unmountAll)
@@ -19,30 +21,27 @@ async function frameOf(el: HTMLElement): Promise<HTMLIFrameElement> {
   return frame!
 }
 
-test("the frame carries thimble's card stylesheet with its classes ahead of the page's own style, and no !important", async () => {
-  const page = "<style>.tc-label{color:red}</style><div class='tc-steps'><div class='tc-box'><div class='tc-label'>Opened</div><div class='tc-value'>412</div></div></div>"
-  const doc = (await frameOf(await mount(<CustomFrame html={page} title="Pull requests" />))).getAttribute('srcdoc') ?? ''
+test("the frame carries thimble's card stylesheet ahead of the page's own style, and no !important", async () => {
+  const page = '<style>th{color:red}</style><table><tr><th>Queue</th><th>Answered within a day</th></tr><tr><td>Refunds</td><td>82%</td></tr></table>'
+  const doc = (await frameOf(await mount(<CustomFrame html={page} title="Queues" />))).getAttribute('srcdoc') ?? ''
   expect(doc).toContain(CARD_STYLE)
-  for (const c of CARD_CLASSES) expect(CARD_STYLE).toContain(`.${c}{`)
+  expect(CARD_STYLE).toContain('th{')
   // the page's own rule comes after the stylesheet's, so it wins
-  expect(doc.indexOf(CARD_STYLE)).toBeLessThan(doc.indexOf('.tc-label{color:red}'))
+  expect(doc.indexOf(CARD_STYLE)).toBeLessThan(doc.indexOf('th{color:red}'))
   expect(CARD_STYLE).not.toContain('!important')
   // colors from the paper's tokens, never a color of its own
   expect(CARD_STYLE).not.toMatch(/#[0-9a-f]{3,6}\b|rgb\(/i)
 })
 
-test("add_card's html names the stylesheet's classes, and its example uses only them", () => {
+test("add_card's html says that plain HTML takes thimble's look, and names no class and no example of numbers in boxes", () => {
   const tools = readFileSync(path.resolve(__dirname, '../../../prompts/tools.md'), 'utf8')
   const schema = JSON.parse(tools.split('## add_card')[1].split('```json')[1].split('```')[0]) as { properties: { html: { description: string } } }
   const html = schema.properties.html.description
-  for (const c of CARD_CLASSES) expect(html).toContain(c)
-  const used = [...html.matchAll(/class='([^']+)'/g)].flatMap((m) => m[1].split(/\s+/))
-  expect(used.length).toBeGreaterThan(0)
-  for (const c of used) expect(CARD_CLASSES as readonly string[]).toContain(c)
+  expect(html).toContain('plain HTML')
+  expect(html).not.toMatch(/class=|tc-|<div/)
 })
 
-test("every class the stylesheet styles carries thimble's prefix, so a page's own `steps` or `label` takes none of its rules", () => {
-  const styled = [...CARD_STYLE.matchAll(/\.(-?[A-Za-z_][\w-]*)/g)].map((m) => m[1])
-  expect(new Set(styled)).toEqual(new Set(CARD_CLASSES))
-  for (const c of styled) expect(c.startsWith(CARD_PREFIX)).toBe(true)
+test("the stylesheet styles elements only, never a class, so a page's own `steps` or `label` takes none of its rules", () => {
+  expect([...CARD_STYLE.matchAll(/\.(-?[A-Za-z_][\w-]*)/g)].map((m) => m[1])).toEqual([])
+  for (const el of ['h2', 'p', 'small', 'table', 'th', 'td']) expect(CARD_STYLE).toMatch(new RegExp(`(^|[},])${el}[{,]`))
 })

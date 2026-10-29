@@ -1,7 +1,7 @@
-// thimble's card stylesheet (src/lib/cardStyle.ts) styles only the classes a page opts into with thimble's prefix, in a
-// real browser: a custom card's page (src/canvas/DataViz.tsx CustomFrame) that names classes of its own `steps`,
-// `label` and `value`, as models often do for a list of steps, keeps its own layout (a list down the card, no arrows,
-// its type sizes), and a page that uses `tc-steps`, `tc-box`, `tc-label` and `tc-value` takes thimble's look.
+// thimble's card stylesheet (src/lib/cardStyle.ts) styles a page's plain HTML and no class, in a real browser: a custom
+// card's page (src/canvas/DataViz.tsx CustomFrame) that names classes of its own `steps`, `label` and `value`, as models
+// often do for a list of steps, keeps its own layout (a list down the card, its type sizes), and a page of plain HTML,
+// a heading and a table with no class at all, takes thimble's look.
 import assert from 'node:assert/strict'
 import { afterAll, beforeAll, test } from 'vitest'
 import type { Browser, Frame, Page } from 'playwright'
@@ -23,24 +23,27 @@ const OWN = `<style>
 <li id="second"><div class="row"><span class="label">Build</span><span class="value">4 min</span></div></li>
 </ol>`
 
-// a page that opts into thimble's classes
-const THIMBLE = `<div class="tc-steps" id="steps"><div class="tc-box"><div class="tc-label">Opened</div><div class="tc-value" id="value">412</div></div>
-<div class="tc-box" id="second"><div class="tc-label">Merged</div><div class="tc-value">296</div></div></div>`
+// a page of plain HTML, with no class at all
+const PLAIN = `<h2 id="head">Queues under the target</h2>
+<table id="table"><tr><th id="th">Queue</th><th>Answered within a day</th></tr>
+<tr><td id="td">Refunds</td><td>82%</td></tr></table>
+<small id="small">March</small>`
 
 beforeAll(async () => {
   const script = await bundle('card-classes', [
     `import { createRoot } from 'react-dom/client'`,
     `import { CustomFrame } from '${src('canvas/DataViz.tsx')}'`,
     `const own = ${JSON.stringify(OWN)}`,
-    `const thimble = ${JSON.stringify(THIMBLE)}`,
-    `createRoot(document.getElementById('root')!).render(<div style={{ width: 700 }}><CustomFrame html={own} title="own" height={200} /><CustomFrame html={thimble} title="thimble" height={200} /></div>)`,
+    `const plain = ${JSON.stringify(PLAIN)}`,
+    `createRoot(document.getElementById('root')!).render(<div style={{ width: 700 }}><CustomFrame html={own} title="own" height={200} /><CustomFrame html={plain} title="plain" height={200} /></div>)`,
   ])
   browser = await launch()
   page = await browser.newPage({ viewport: { width: 900, height: 900 } })
   await page.route('**/*', (route) => {
     const p = new URL(route.request().url()).pathname
     if (p.startsWith('/api/')) return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
-    return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>' })
+    // the paper's tokens a frame reads from the page (lib/frame frameTokens), made up
+    return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><style>:root{--text-primary:#202020;--text-secondary:#707070;--border-subtle:#d0d0d0}</style></head><body><div id="root"></div></body></html>' })
   })
   await page.goto(`${ORIGIN}/`)
   await page.addScriptTag({ path: script })
@@ -67,6 +70,16 @@ test("a page's own `steps`, `label` and `value` take nothing of thimble's styles
   assert.equal(await f.evaluate(() => getComputedStyle(document.getElementById('label')!).fontSize), '13px')
 })
 
-test("a page that opts into thimble's classes takes its look: the parts in a row with an arrow between them, the value large", async () => {
-  assert.deepEqual(await look(await frame('thimble')), { display: 'flex', arrow: '"→"', value: '22px' })
+test("a page of plain HTML takes thimble's look with no class: the heading in the card's type, the table's head small in the secondary ink over a hairline", async () => {
+  const f = await frame('plain')
+  const got = await f.evaluate(() => {
+    const css = (id: string) => getComputedStyle(document.getElementById(id)!)
+    return {
+      head: [css('head').fontSize, css('head').fontWeight],
+      th: [css('th').fontSize, css('th').borderBottomStyle, css('th').borderBottomWidth],
+      collapse: css('table').borderCollapse,
+      secondary: css('th').color === css('small').color && css('th').color !== css('td').color,
+    }
+  })
+  assert.deepEqual(got, { head: ['14px', '500'], th: ['12px', 'solid', '1px'], collapse: 'collapse', secondary: true })
 })
