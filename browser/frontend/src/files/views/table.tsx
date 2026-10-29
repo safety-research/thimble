@@ -481,7 +481,7 @@ const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, band
           <span className="reader-table-dots" style={{ '--dots': dots } as CSSProperties}>
             {marks.cells.map((c) =>
               c.values.length ? (
-                <span key={c.id} className="reader-table-dot" style={{ background: cellFill(c.values) }} title={cellTitle(c)} />
+                <span key={c.id} className="reader-table-dot" style={{ background: cellFill(c.values) }} data-tip={cellTitle(c)} />
               ) : (
                 <span key={c.id} className="reader-table-dot is-empty" />
               ),

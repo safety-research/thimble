@@ -67,10 +67,11 @@ describe('a whole-file JSON transcript’s turns', () => {
     const card = (line: string) => el.querySelector(`.reader-card[data-line="${line}"]`)
     expect([...el.querySelectorAll('.reader-card')].map((c) => c.getAttribute('data-line'))).toEqual(['3', '9', '20'])
     expect(kinds(card('3'))).toEqual(['reader-text'])
-    // each row shows the turn's own number (its step's, else its place), the file's line on hover
+    // each row shows the turn's own number (its step's, else its place), the file's line on hover (the one tooltip)
     const no = (line: string) => card(line)!.querySelector('.reader-lineno')!
     expect(['3', '9', '20'].map((l) => no(l).textContent)).toEqual(['1', '3', '3'])
-    expect(no('9').getAttribute('title')).toBe('line 9')
+    expect(no('9').getAttribute('data-tip')).toBe('line 9')
+    expect(no('9').hasAttribute('title')).toBe(false)
     expect(card('9')!.classList.contains('is-folded')).toBe(true)
     expect(card('9')!.querySelector('.reader-fold-text')!.textContent).toBe('Listing the folder. · bash ls -la /app · total 8 hello.py')
     await open(card('9'))

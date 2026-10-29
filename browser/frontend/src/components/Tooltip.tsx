@@ -2,7 +2,8 @@
 // control does, shown on hover after a moment (at once if a tip showed a moment ago) and at once on keyboard focus; it
 // goes with the pointer, the focus, a press or Escape. An icon Button takes its text from `title` (Button.tsx); other
 // icon-only controls use TipButton or a Tipped box; a disabled menu item uses Menu's `tip`. No control uses the
-// browser's own title.
+// browser's own title. A mark that names a value, of which a file has as many as records (a record's labels and their
+// values), carries its text in `data-tip`, which the page's one HoverTips shows under the pointer.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type FocusEvent, type PointerEvent, type ReactNode, type ButtonHTMLAttributes } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -25,6 +26,18 @@ export function placeTip(rect: Rect, w: number, h: number, vw: number, vh: numbe
   const left = Math.max(MARGIN, Math.min(x, vw - MARGIN - w))
   const below = rect.bottom + GAP
   const top = below + h <= vh - MARGIN ? below : Math.max(MARGIN, rect.top - GAP - h)
+  return { left, top }
+}
+
+/** px under the pointer a tip at the pointer stands, clear of the pointer's arrow */
+const UNDER_POINTER = 20
+
+/** Where a tip of `w`×`h` goes for the pointer at (`x`, `y`): just under it, from its left, else over it when there is
+ * no room below, clamped to the viewport. Pure. */
+export function placeAtPointer(x: number, y: number, w: number, h: number, vw: number, vh: number): { left: number; top: number } {
+  const left = Math.max(MARGIN, Math.min(x, vw - MARGIN - w))
+  const below = y + UNDER_POINTER
+  const top = below + h <= vh - MARGIN ? below : Math.max(MARGIN, y - GAP - h)
   return { left, top }
 }
 
@@ -106,6 +119,69 @@ export function useTooltip(text: string | null | undefined, className?: string, 
     onBlur: hide,
   }
   return { props, tip: anchor ? <Tip id={id} text={text} place={place} className={className} /> : null }
+}
+
+/**
+ * The one tooltip for marks that name a value, of which a file has as many as records (a record's labels and their
+ * values, a label's cell beside a record): the element under the pointer with `data-tip` shows its text, line by line,
+ * under the pointer where it rests, after a moment as a control's tip does (at once if a tip showed a moment ago); it
+ * goes when the pointer leaves the element, at a press, a scroll or Escape. Drawn once for the page (shell/Shell), so a
+ * mark needs no listener of its own.
+ */
+export function HoverTips() {
+  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null)
+  useEffect(() => {
+    let on: Element | null = null
+    let timer: number | undefined
+    let x = 0
+    let y = 0
+    const hide = () => {
+      window.clearTimeout(timer)
+      on = null
+      setTip((t) => {
+        if (t) lastClosed = Date.now()
+        return null
+      })
+    }
+    const move = (e: MouseEvent & { pointerType?: string }) => {
+      if (e.pointerType === 'touch') return
+      x = e.clientX
+      y = e.clientY
+      const el = e.target instanceof Element ? e.target.closest('[data-tip]') : null
+      if (el === on) return
+      hide()
+      const text = el?.getAttribute('data-tip')
+      if (!el || !text) return
+      on = el
+      const show = () => {
+        if (on === el && el.isConnected) setTip({ text, x, y })
+      }
+      if (Date.now() - lastClosed < TIP_WARM_MS) show()
+      else timer = window.setTimeout(show, TIP_DELAY_MS)
+    }
+    // the pointer left the page
+    const out = (e: MouseEvent) => {
+      if (!e.relatedTarget) hide()
+    }
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') hide()
+    }
+    document.addEventListener('pointermove', move, { capture: true, passive: true })
+    document.addEventListener('pointerout', out, true)
+    document.addEventListener('pointerdown', hide, true)
+    window.addEventListener('scroll', hide, true)
+    window.addEventListener('keydown', key, true)
+    return () => {
+      window.clearTimeout(timer)
+      document.removeEventListener('pointermove', move, { capture: true })
+      document.removeEventListener('pointerout', out, true)
+      document.removeEventListener('pointerdown', hide, true)
+      window.removeEventListener('scroll', hide, true)
+      window.removeEventListener('keydown', key, true)
+    }
+  }, [])
+  const place = useCallback((w: number, h: number) => (tip ? placeAtPointer(tip.x, tip.y, w, h, window.innerWidth, window.innerHeight) : { left: MARGIN, top: MARGIN }), [tip])
+  return tip ? <Tip text={tip.text} place={place} className="tip-lines" /> : null
 }
 
 /**
