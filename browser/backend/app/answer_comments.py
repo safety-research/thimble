@@ -25,7 +25,8 @@ dismissed with `resolution` superseded (a later run of its check covered its pas
 
 An explainer and a heads-up (the Explainers and Heads up checks, APART) never share a sentence, as in the terminal: the
 comment already there keeps it, so a new comment of the other check on that sentence is not stored (add), and a
-dismissed one does not open again there (set_status). Each tint in the chat then opens its own comment.
+dismissed one does not open again there (set_status). Each tint in the chat then opens its own comment. Only a comment
+the chat shows keeps its sentence: one of a check turned off, or whose Show in leaves out Chat, keeps none.
 """
 from __future__ import annotations
 
@@ -268,10 +269,25 @@ def _new_id(used: set[str]) -> str:
             return i
 
 
-def _held(items: list[dict[str, Any]], check: Any, ref: str) -> dict[str, Any] | None:
-    """The open comment of the check APART from `check` on the passage `ref`, which keeps it; None when none does."""
+def _in_chat(check: dict[str, Any] | None) -> bool:
+    """Whether the chat shows a check's comments now: the check is on, and its Show in has Chat."""
+    from . import checks  # noqa: PLC0415 — checks imports this module
+
+    return check is not None and bool(check.get("shown")) and checks.covers(check, "answers")
+
+
+def _seen(c: str) -> set[str]:
+    """The checks of APART whose comments the chat shows now (_in_chat)."""
+    from . import checks  # noqa: PLC0415 — checks imports this module
+
+    return {cid for cid in APART if _in_chat(checks.read(c, cid))}
+
+
+def _held(items: list[dict[str, Any]], check: Any, ref: str, seen: set[str]) -> dict[str, Any] | None:
+    """The open comment of the check APART from `check` on the passage `ref`, which keeps it while the chat shows that
+    check's comments (`seen`, _seen); None when none does."""
     other = APART.get(str(check or ""))
-    if other is None:
+    if other is None or other not in seen:
         return None
     return next((x for x in items if x.get("check") == other and x.get("ref") == ref
                  and (x.get("status") or "open") == "open"), None)
@@ -281,9 +297,10 @@ def add(c: str, *, passage: dict[str, Any], text: str, author: str, details: str
         run: str | None = None, evidence: str = "") -> tuple[dict[str, Any], bool]:
     """Store a comment on one passage of an answer, with the passage's raw text as `quote` and its offsets, or find
     the same open one. (the comment, whether it is new). On a passage that an open comment of the check APART from
-    `check` holds, nothing is stored: (that comment, False)."""
+    `check` holds, while the chat shows it, nothing is stored: (that comment, False)."""
     text = _collapse(text)
     details = str(details or "").strip()[:DETAILS_CHARS]
+    seen = _seen(c)
 
     def fn(items: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
         same = next((x for x in items if x.get("ref") == passage["ref"] and x.get("check") == check
@@ -291,7 +308,7 @@ def add(c: str, *, passage: dict[str, Any], text: str, author: str, details: str
                      and _collapse(x.get("text")) == text and str(x.get("details") or "") == details), None)
         if same is not None:
             return same, False
-        held = _held(items, check, passage["ref"])
+        held = _held(items, check, passage["ref"], seen)
         if held is not None:
             return held, False
         cm = {"id": _new_id({str(x["id"]) for x in items}), "turn": passage["turn"], "row": passage["row"],
@@ -309,14 +326,16 @@ def add(c: str, *, passage: dict[str, Any], text: str, author: str, details: str
 
 def set_status(c: str, cid: str, status: str) -> dict[str, Any]:
     """Dismiss a comment (`dismissed`, resolution done) or open it again (`open`). The comment; 404 for no comment of
-    that id, 409 for one whose passage an open comment of the check APART from its own holds now."""
+    that id, 409 for one whose passage an open comment of the check APART from its own holds now, while the chat shows
+    it."""
+    seen = _seen(c)
 
     def fn(items: list[dict[str, Any]]) -> dict[str, Any] | None:
         for x in items:
             if str(x["id"]) != cid:
                 continue
             if status == "open" and (x.get("status") or "open") != "open" and (
-                    held := _held(items, x.get("check"), str(x.get("ref") or ""))) is not None:
+                    held := _held(items, x.get("check"), str(x.get("ref") or ""), seen)) is not None:
                 raise HTTPException(409, f"comment {cid!r} does not open again: its sentence holds comment "
                                          f"{held['id']!r} of {held.get('check')}, and the two never share one")
             if status == "open":
@@ -375,7 +394,7 @@ def state(c: str, sid: str | None = None, status: str = "open") -> dict[str, Any
     every = {str(x["id"]): x for x in checks.list_checks(c)}
     # a check the analyst turned off, or whose Show in leaves out the chat, leaves nothing in the chat: its comments and
     # its running state stay in the store and come back when it is turned on again
-    off = {cid for cid, x in every.items() if not x.get("shown") or not checks.covers(x, "answers")}
+    off = {cid for cid, x in every.items() if not _in_chat(x)}
     out = []
     for x in _read(c):
         if (status == "open" and (x.get("status") or "open") != "open") or (turns is not None and x.get("turn") not in turns):

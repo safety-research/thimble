@@ -9,6 +9,7 @@ import { commentsOfRow, plainQuote, type AnswerComment } from '../../src/chat/an
 import { foldRecords, type TextRow } from '../../src/chat/model.ts'
 import { Rows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
+import { LabelsSidebar } from '../../src/shell/LabelsSidebar.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => {
@@ -157,6 +158,43 @@ describe("a check's comment on Claude's answer, in main's chat", () => {
       const pop = document.querySelector<HTMLElement>('.answer-cm-pop')!
       expect([pop.dataset.answerCommentPop, pop.querySelector('.wu-cm-name')?.textContent]).toEqual([id, name])
       await act(async () => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    }
+  })
+
+  test("Go to it in the Comments sidebar on the comment of such a pair the chat does not draw opens that comment, which stands on its passage while it is open", async () => {
+    const heads = comment({ id: 'h1', check: 'heads-up', check_name: 'Heads up', color: 2 })
+    const gloss = comment({ id: 'g1', check: 'explainers', check_name: 'Explainers', color: 6, text: 'agents: the programs that post on the board.' })
+    const checks = [
+      { id: 'heads-up', name: 'Heads up', prompt: 'Mark what the reader should know.', colour: 2, builtin: true, shown: true, covers: ['documents', 'cards', 'answers'] },
+      { id: 'explainers', name: 'Explainers', prompt: 'Explain the terms a reader may not know.', colour: 6, builtin: true, shown: true, covers: ['answers'] },
+    ]
+    vi.stubGlobal('fetch', async (url: unknown) => {
+      const u = String(url)
+      const body = u.includes('/answer-comments') ? { comments: [heads, gloss], running: [] } : u.endsWith('/checks') ? checks : u.includes('/concepts') ? [] : { comments: [] }
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    // jsdom has no scrollIntoView, which brings the passage into view
+    Element.prototype.scrollIntoView = () => undefined
+    try {
+      const el = await mount(<Rows rows={foldRecords(records)} ws="mini" chat="main" />)
+      const side = await mount(<LabelsSidebar ws="mini" section="comments" onClose={() => undefined} />)
+      await settle()
+      await settle()
+      const drawn = () => [...new Set([...el.querySelectorAll<HTMLElement>('mark.answer-tint')].map((m) => m.dataset.answerComment))]
+      expect(drawn()).toEqual(['h1'])
+      await click(side.querySelector('[data-category="explainers"] .lside-name'))
+      const go = [...side.querySelectorAll('.lside-comment[data-comment="g1"] button')].find((b) => b.textContent === 'Go to it')!
+      await click(go)
+      await settle()
+      const pop = document.querySelector<HTMLElement>('.answer-cm-pop')!
+      expect([pop.dataset.answerCommentPop, pop.querySelector('.wu-cm-name')?.textContent]).toEqual(['g1', 'Explainers'])
+      expect(drawn()).toEqual(['g1'])
+      expect(el.querySelector('mark.answer-tint-open')?.getAttribute('data-answer-comment')).toBe('g1')
+      // closed, the one there first stands on the passage again
+      await act(async () => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+      expect(drawn()).toEqual(['h1'])
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
     }
   })
 })

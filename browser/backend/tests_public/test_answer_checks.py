@@ -188,6 +188,42 @@ async def test_an_explainer_and_a_heads_up_never_share_a_sentence_the_one_there_
                                                             (s3, "explainers")]
 
 
+def test_only_a_comment_the_chat_shows_keeps_its_sentence(board):
+    """A comment of the Explainers check holds its sentence from a heads-up only while the chat shows it: with
+    Explainers turned off, or with Chat left out of its Show in, a heads-up is stored on that sentence, and a dismissed
+    one opens again there."""
+    answer_comments.store_answer(CORPUS, _turn())
+    s1, s2 = answer_comments.passages(_turn())[:2]
+
+    def add(p: dict, cid: str, text: str) -> tuple[dict, bool]:
+        return answer_comments.add(CORPUS, passage=p, text=text, author=checks.AUTHOR, check=cid, run=f"run-{cid}")
+
+    checks.edit(CORPUS, "explainers", shown=True)
+    gloss, new = add(s1, "explainers", "board: the page where the agents post to each other.")
+    assert new
+    other, new = add(s2, "explainers", "agent-02: the agent that posts the status reports.")
+    assert new
+    # while the chat shows the explainer, a heads-up on its sentence is not stored
+    held, new = add(s1, IMPORTANT, "The 18 posts are March's alone; the board holds 40 in all.")
+    assert (held["id"], new) == (gloss["id"], False)
+    # Explainers off: the chat shows no explainer there, so the heads-up keeps that sentence
+    checks.edit(CORPUS, "explainers", shown=False)
+    heads, new = add(s1, IMPORTANT, "The 18 posts are March's alone; the board holds 40 in all.")
+    assert new and heads["check"] == IMPORTANT and heads["ref"] == s1["ref"]
+    # Explainers on, with Chat left out of its Show in: the same
+    checks.edit(CORPUS, "explainers", shown=True, covers=["documents", "cards"])
+    later, new = add(s2, IMPORTANT, "agent-02 posted 6 of the 18.")
+    assert new and later["check"] == IMPORTANT
+    # a dismissed heads-up opens again on a sentence whose explainer the chat does not show, and not on one it shows
+    answer_comments.set_status(CORPUS, later["id"], answer_comments.SETTLED)
+    assert answer_comments.set_status(CORPUS, later["id"], "open")["status"] == "open"
+    answer_comments.set_status(CORPUS, later["id"], answer_comments.SETTLED)
+    checks.edit(CORPUS, "explainers", covers=["documents", "cards", "answers"])
+    with pytest.raises(HTTPException) as refused:
+        answer_comments.set_status(CORPUS, later["id"], "open")
+    assert refused.value.status_code == 409 and other["id"] in refused.value.detail
+
+
 async def test_a_check_off_or_out_of_the_chat_leaves_nothing_there_and_its_comments_come_back(board, bridge):
     act = await _answered()
     res = await _comment(act, f"answer:{TURN}#s2", "agent-02 posted 6 of 18, not most.", "toolu_b1")
