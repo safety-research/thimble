@@ -5,6 +5,7 @@ import { useTheme } from '../lib/theme'
 import type { GraphDataset, TimelineDataset } from '../lib/types'
 import { cardStyle } from '../lib/cardStyle'
 import { chartScript, frameStyle, frameTokens, useCardLibs, useFrameFonts, withFrameStyle } from '../lib/frame'
+import { shotScript } from '../lib/frameShot'
 import { useVisibleSize } from '../lib/visibleSize'
 import { inkScript, paperInks } from '../lib/ink'
 import { token, VIZ_SERIES } from '../lib/vizTheme'
@@ -988,8 +989,9 @@ export const CUSTOM_OPEN_MAX_H = 8000
  * html now measured, never a size of the page before it. The frame's `data-height` is that
  * height, which the card harness measures (render.tsx). A page wider than its frame is cut at the frame's edge, and the
  * card dragged wider shows more of it. Its head carries the theme, thimble's card stylesheet (lib/cardStyle), the ink that mends text the paper made hard to read (lib/ink), the bridge that tells the page what the ⌘ pointer and the wheel do
- * in the frame (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws`
- * (useCardLibs), before the page's own styles and scripts. */
+ * in the frame (cardBridge), the script that draws the page for a ⌘-click's picture (lib/frameShot), the chart style
+ * (chartScript) and the libraries the card names in workspace `ws` (useCardLibs), before the page's own styles and
+ * scripts. */
 export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[]; onTall?: (height: number) => void; onWide?: (width: number, frame: number) => void }) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [full, setFull] = useState(() => Math.max(CUSTOM_MIN_H, Math.ceil(typeof height === 'number' ? height : 160)))
@@ -1008,7 +1010,7 @@ export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide
   const head = useCardLibs(ws, libs)
   // the tokens are read at embed time, once per theme. It waits for the page's fonts and libraries, so the page is drawn once
   // inkScript: text the paper made hard to read takes the ink that reads (lib/ink)
-  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + cardStyle() + bridgeScript() + chartScript() + inkScript(paperInks(token)) + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
+  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + cardStyle() + bridgeScript() + shotScript() + chartScript() + inkScript(paperInks(token)) + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       const frame = ref.current
@@ -1047,7 +1049,7 @@ export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide
   }, [measured, html, onWide])
   return (
     <div className={`canvas-card-frame${capped && !open ? ' is-clipped' : ''}`} data-body="" data-settled={sized ? 'true' : 'false'} data-height={sized ? full : undefined}>
-      {doc != null && <iframe ref={ref} className="canvas-card-html" sandbox="allow-scripts" srcDoc={doc} title={title || 'custom'} style={{ height: h }} onLoad={() => tellCmd(ref.current)} />}
+      {doc != null && <iframe ref={ref} className="canvas-card-html" sandbox="allow-scripts" srcDoc={doc} title={title || 'custom'} style={{ height: h }} data-shot="" onLoad={() => tellCmd(ref.current)} />}
       {capped && (
         <button type="button" className="bcell-more" onMouseDown={(e) => e.stopPropagation()} onClick={() => setOpen((v) => !v)}>
           {open ? 'Show less' : 'Show all'}

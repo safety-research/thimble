@@ -46,6 +46,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { viewFonts, viewStyle, withFrameStyle } from '../lib/frame'
+import { shotScript } from '../lib/frameShot'
 import { getAskKey, onAskKey } from '../lib/platform'
 import { recordOf } from '../lib/refs'
 import { notePress } from '../lib/surfaces'
@@ -491,9 +492,10 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   // the theme's tokens are read when the page is built, so a theme change reloads the page with the new colours; the
   // page waits for the app's faces so it is drawn once, in them
   // the Colour by choice kept for the view is read as the page is built, so the page starts on it; the page's later
-  // choices are kept (the `colour` message) without building it again
+  // choices are kept (the `colour` message) without building it again. A card's page draws itself for a ⌘-click's
+  // picture of the card (lib/frameShot)
   const doc = useMemo(
-    () => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts + (card ? '' : colourScript(readStorage<unknown>(colourKey(ws, slug), null))))),
+    () => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts + (card ? shotScript() : colourScript(readStorage<unknown>(colourKey(ws, slug), null))))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [page, fonts, resolved, key], // key: the tokens are read again when the paper or the accent changes
   )
@@ -767,6 +769,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
       srcDoc={doc}
       title={title}
       style={fit && height ? { height } : undefined}
+      data-shot={card ? '' : undefined}
     />
   )
 }

@@ -1,7 +1,9 @@
 // What a thread is told about the element it was opened on: the part of the browser it is in, its kind, a CSS selector,
 // and a PNG taken at the ⌘-click. The element is described as a chain of plain nodes (itself, then ancestors up to the
 // nearest panel), so the pure part (describe, selectorPath) runs in node; chainOf is the DOM adapter, and capturePng
-// draws the element with html-to-image, loaded on first use.
+// draws the element with html-to-image, loaded on first use, and lays over it the picture each frame in it draws of
+// itself (lib/frameShot), since html-to-image cannot read a sandboxed frame's document.
+import { framePicture } from '../lib/frameShot'
 
 /** the most segments a selector path carries */
 export const PATH_LEVELS = 6
@@ -124,16 +126,79 @@ export function commonElement(els: readonly HTMLElement[]): HTMLElement | null {
 // the element in its own type rather than a fallback whose metrics break the lines; '' when they cannot be read.
 let fontCss: Promise<string> | null = null
 
+/** A frame in the element that draws itself (lib/frameShot, marked `data-shot`): its box, and the part of it the boxes
+ * around it, up to the element, let show; on screen, where the click found them. */
+interface Framed {
+  frame: HTMLIFrameElement
+  box: DOMRect
+  shows: { left: number; top: number; right: number; bottom: number }
+}
+
+/** The frames in `el` that draw themselves and show some of their page. */
+function framesIn(el: HTMLElement): Framed[] {
+  const out: Framed[] = []
+  for (const frame of Array.from(el.querySelectorAll<HTMLIFrameElement>('iframe[data-shot]'))) {
+    const box = frame.getBoundingClientRect()
+    const shows = { left: box.left, top: box.top, right: box.right, bottom: box.bottom }
+    for (let p = frame.parentElement; p; p = p.parentElement) {
+      const s = getComputedStyle(p)
+      const r = s.overflowX !== 'visible' || s.overflowY !== 'visible' ? p.getBoundingClientRect() : null
+      if (r && s.overflowX !== 'visible') [shows.left, shows.right] = [Math.max(shows.left, r.left), Math.min(shows.right, r.right)]
+      if (r && s.overflowY !== 'visible') [shows.top, shows.bottom] = [Math.max(shows.top, r.top), Math.min(shows.bottom, r.bottom)]
+      if (p === el) break
+    }
+    if (shows.right - shows.left >= 1 && shows.bottom - shows.top >= 1) out.push({ frame, box, shows })
+  }
+  return out
+}
+
+/** Each frame's picture laid over its place in the element's picture (`at` is the element's box on screen), cut to the
+ * part of the frame that shows. */
+async function layFrames(canvas: HTMLCanvasElement, at: DOMRect, frames: readonly Framed[], pngs: readonly (string | null)[]): Promise<void> {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const kx = canvas.width / at.width
+  const ky = canvas.height / at.height
+  for (let i = 0; i < frames.length; i++) {
+    const png = pngs[i]
+    if (!png) continue
+    const pic = new Image()
+    pic.src = png
+    try {
+      await pic.decode()
+    } catch {
+      continue
+    }
+    const { box, shows } = frames[i]
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect((shows.left - at.left) * kx, (shows.top - at.top) * ky, (shows.right - shows.left) * kx, (shows.bottom - shows.top) * ky)
+    ctx.clip()
+    ctx.drawImage(pic, (box.left - at.left) * kx, (box.top - at.top) * ky, box.width * kx, box.height * ky)
+    ctx.restore()
+  }
+}
+
 /** A data URL of the element drawn as a PNG, or null when it cannot be drawn in CAPTURE_WAIT_MS. */
 export async function capturePng(el: HTMLElement): Promise<string | null> {
   const r = el.getBoundingClientRect()
   if (r.width < 1 || r.height < 1) return null
   const bg = getComputedStyle(document.body).backgroundColor
+  const ratio = Math.min(2, window.devicePixelRatio || 1)
+  // each frame that draws itself is asked at once, so it draws what the click saw
+  const frames = framesIn(el)
+  const pictures = Promise.all(frames.map((f) => framePicture(f.frame, ratio)))
   const draw = import('html-to-image').then(async (m) => {
     fontCss ??= m.getFontEmbedCSS(document.body).catch(() => '')
     const css = await fontCss
     const fonts = css ? { fontEmbedCSS: css } : { skipFonts: true }
-    return m.toPng(el, { backgroundColor: bg, pixelRatio: Math.min(2, window.devicePixelRatio || 1), cacheBust: false, ...fonts })
+    const options = { backgroundColor: bg, pixelRatio: ratio, cacheBust: false, ...fonts }
+    if (!frames.length) return m.toPng(el, options)
+    // a frame that draws itself is left out of the copy html-to-image draws, which would carry its whole page for an
+    // empty box
+    const canvas = await m.toCanvas(el, { ...options, filter: (n: HTMLElement) => !(n instanceof HTMLIFrameElement && n.hasAttribute('data-shot')) })
+    await layFrames(canvas, r, frames, await pictures)
+    return canvas.toDataURL('image/png')
   })
   const late = new Promise<null>((resolve) => window.setTimeout(() => resolve(null), CAPTURE_WAIT_MS))
   try {
