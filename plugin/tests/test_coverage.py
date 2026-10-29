@@ -411,40 +411,43 @@ def test_a_long_sessions_record_in_parts_counts_the_calls_of_every_part(tmp_path
 
 def test_a_long_session_whose_calls_each_go_over_every_file_counts_in_about_the_time_of_a_short_one(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A long session (a resumed one, compacted more than once) runs code that globs every file and searches the whole
-    folder again and again, each time in other words. Each such call went over each file it named: the count of a
-    session of a few thousand calls over 150,000 files took minutes. The files a call names are one set, added once,
-    so the count of 4,000 such calls over 5,000 files takes about as long as the count of four, and says the same."""
+    """A long session (a resumed one, compacted more than once) runs code that globs every file and opens one more,
+    searches the whole folder, Greps with a glob no call used before, and names folders outside the folder (`$OUT/x/`
+    can be any folder), each time in other words. Each such call went over each file or folder it could name: the count
+    of a few thousand calls over 150,000 files took minutes. A glob's files are one set, added once, and a glob is
+    tried only on what can match it, so 2,500 such calls over 20,000 files in 2,000 folders count in about the time of
+    five. (The folder is made up, listed and counted in memory: the time measured is the session's pass.)"""
     import time
 
     from kernel import sources as S
 
-    # the files' rows counted one after another, with no worker process: the time measured is the session's pass
-    monkeypatch.setattr(S, "PARALLEL_FILES", 10 ** 9)
+    files = sorted(f"r{i:04d}/{n}" for i in range(2000) for n in [f"e{j}.jsonl" for j in range(9)] + ["meta.json"])
+    monkeypatch.setattr(S, "list_files", lambda root: files)
+    monkeypatch.setattr(S, "counts", lambda root, rels, cache, until=None: {f: {"kind": "jsonl", "rows": 3, "lines": 3} for f in rels})
     d = tmp_path / "runs"
-    for i in range(200):
-        (d / f"r{i:03d}").mkdir(parents=True)
-        for j in range(25):
-            (d / f"r{i:03d}" / f"e{j:02d}.jsonl").write_text('{"step": 1}\n' * 3)
+    d.mkdir()
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
     monkeypatch.delenv("THIMBLE_ROOT", raising=False)
 
     def calls(n: int) -> list[str]:
         out = []
         for i in range(n):
-            for r in (bash(f"python3 - <<'PY'\nimport glob\nfor p in glob.glob('*/*.jsonl'):\n    open(p).read()\nprint({i})\nPY", 1),
+            r = f"r{i % 2000:04d}"
+            for c in (bash(f"python3 - <<'PY'\nimport glob, json\nm = json.load(open('{r}/meta.json'))\n"
+                           f"n = sum(1 for p in glob.glob('*/e*.jsonl'))\nprint(m, n, {i})\nPY", 1),
+                      {"tool": "Grep", "path": str(d), "glob": f"*{r}*e{i // 2000 % 9}*", "mode": "content", "lines": {}},
                       bash(f"grep -rn 'step {i}' . | head -3", 3),
-                      {"tool": "Grep", "path": str(d), "glob": "*.jsonl", "mode": "content", "lines": {}},
-                      {"tool": "Read", "file": str(d / "r001" / "e01.jsonl"), "from": 1, "to": 2}):
-                out.append(json.dumps({"cwd": str(d), **r}) + "\n")
+                      bash(f"ls $OUT/made{i}/ /tmp/made/x{i}/ | head", 2),
+                      {"tool": "Read", "file": str(d / "r0001" / "e1.jsonl"), "from": 1, "to": 2}):
+                out.append(json.dumps({"cwd": str(d), **c}) + "\n")
         return out
 
     seen = tmp_path / "th" / "seen"
     seen.mkdir(parents=True)
     (seen / "s-short.jsonl").write_text("".join(calls(1)))
-    long = calls(1000)
-    (seen / "s-long.jsonl").write_text("".join(long[:2000]))
-    (seen / "s-long.2.jsonl").write_text("".join(long[2000:]))
+    long = calls(500)
+    (seen / "s-long.jsonl").write_text("".join(long[:1250]))
+    (seen / "s-long.2.jsonl").write_text("".join(long[1250:]))
 
     def timed(session: str) -> tuple[dict, float]:
         took = []
@@ -456,7 +459,42 @@ def test_a_long_session_whose_calls_each_go_over_every_file_counts_in_about_the_
 
     short, short_s = timed("s-short")
     many, many_s = timed("s-long")
-    assert many["total"] == short["total"] and many["total"]["touched_files"] == 5000
-    assert [(o["path"], o["said"]) for o in many["files"]] == [(o["path"], o["said"]) for o in short["files"]]
-    # each call over every file again: the first 2,000 calls alone took 1.4 s more; now all 4,000 take 0.2 s more
+    assert short["total"]["touched_files"] == many["total"]["touched_files"] == 20000
+    assert short["total"]["seen_files"] == many["total"]["seen_files"] == 1
+    last = next(o for o in many["files"] if o["path"] == "r0499/meta.json")
+    assert "python3" in last["computed_by"]
+    # each call over every file again: the first version took 10 s more, and 600 MB; r106-int 26 s more; now 0.2 s more
     assert many_s - short_s < 1.0, (short_s, many_s)
+
+
+def test_a_glob_is_tried_only_on_the_files_that_can_match_it_and_names_what_a_test_of_every_file_does() -> None:
+    """A glob not seen before went over every file: each new Grep glob, `find -name` pattern or word that can name any
+    folder (`$OUT/x/` is `*/x`) cost a pass over 150,000 files. A glob's literal parts lie in folder names or in the
+    file's name, so only the files under folders, or with names, that hold them are tried; a part that names any
+    folder (`*`, `**`) is looked up from the first part after it that names something. Code that globs many files and
+    opens one more keeps the glob's own set, so a long session holds no copy of it per call."""
+    import fnmatch
+    import re
+
+    from kernel import shellcmd as SH
+
+    files = sorted([f"r{i:04d}/{n}" for i in range(300) for n in [f"e{j}.jsonl" for j in range(5)] + ["meta.json"]]
+                   + [f"r{i:04d}/steps/s{j}.json" for i in range(0, 300, 7) for j in range(3)]
+                   + ["made/x", "a/made/x", "a/b/made/x", "a/b/c/made/y", "top.json"])
+    K = SH.Known(files)
+    # a Grep's glob (fnmatch, by name or by path): tried on few files, matching what a test of every file matches
+    assert sorted(K.candidates("*r0123*")) == [f"r0123/{n}" for n in ["e0.jsonl", "e1.jsonl", "e2.jsonl", "e3.jsonl", "e4.jsonl", "meta.json"]]
+    for g in ["**/r0126/**/*.json", "*r0123*", "r0123/*.json", "*.jsonl", "*meta*", "[!r]*", "*/steps/*", "?0*", "*", "a/*"]:
+        m = re.compile(fnmatch.translate(g)).match
+        assert ({f for f in K.candidates(g) if m(f[f.rfind("/") + 1:]) or m(f)}
+                == {f for f in files if m(f[f.rfind("/") + 1:]) or m(f)}), g
+    # a shell glob: looked up by name or walked down, the files a test of every file finds
+    for p in ["**/*/made/x", "*/made/x", "**/made/*", "*/*/made/x", "**/*/*/y", "*/e1.jsonl", "r01*/meta.json",
+              "**/steps/*.json", "**/r0007/**", "r00[0-4]*/steps/s1.json", "*/*/s2.json", "**/*.json", "*", "**",
+              "**/*/steps/s0.json", "a/**/*/x"]:
+        assert K.glob(p) == {f for f in files if SH._glob_rx(p).match(f)}, p
+    # code that globs files and opens one more: the glob's set is the one Known.glob keeps, in every command
+    one, _ = SH.named("import glob, json\njson.load(open('r0001/meta.json'))\nglob.glob('*/e*.jsonl')", K, "/data")
+    two, _ = SH.named("import glob, json\njson.load(open('r0002/meta.json'))\nglob.glob('*/e*.jsonl')", K, "/data")
+    assert one.globs == two.globs and one.globs[0] is two.globs[0] is K.glob("*/e*.jsonl") and len(one.globs[0]) == 1500
+    assert one.files == {"r0001/meta.json"} and two.files == {"r0002/meta.json"}

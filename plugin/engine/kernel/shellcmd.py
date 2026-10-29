@@ -23,12 +23,13 @@ the session's commands wrote with a here-document (`cat > scan.py <<'PY'`), so a
 the files the script names.
 
 `shows_sets` gives the same entries, but the files one program searched, listed or went over whole are one entry
-whose `path` is the set of them: code that globs 15,000 files is one entry, which coverage adds in one step.
+whose `path` is a Files: code that globs 15,000 files is one entry, which coverage adds in one step.
 """
 from __future__ import annotations
 
 import bisect
 import functools
+import itertools
 import os
 import re
 from pathlib import Path
@@ -409,6 +410,36 @@ def _glob_rx(pat: str) -> re.Pattern[str]:
     return re.compile("".join(out) + r"\Z")
 
 
+def _literal_parts(pat: str) -> list[str]:
+    """The parts of a glob that every name or path it matches holds as written: the text between its wildcards, as
+    fnmatch (Grep's globs) and _glob_rx (the shell's) both read it. The `/` after `**` is no part (`**/a.json` matches
+    `a.json`). A `[` that a `]` follows opens a set up to that `]`; after a set that one of them ends elsewhere (`[]`,
+    `[!]`, a `\\` before the `]`), no part is known."""
+    out, run, i, n = [], "", 0, len(pat)
+    while i < n:
+        c = pat[i]
+        if c not in "*?[" or (c == "[" and "]" not in pat[i + 1:]):
+            run += c
+            i += 1
+            continue
+        if run:
+            out.append(run)
+            run = ""
+        if c == "[":
+            j = pat.find("]", i + 1)
+            if pat[i + 1:j] in ("", "!") or pat[j - 1] == "\\":
+                return out
+            i = j + 1
+        elif c == "?":
+            i += 1
+        else:
+            j = i
+            while j < n and pat[j] == "*":
+                j += 1
+            i = j + 1 if j - i > 1 and pat.startswith("/", j) else j
+    return out + [run] if run else out
+
+
 # a word of code: in code, braces are interpolation or a literal (`f"{d}/{x}.png"`), never part of a file's name
 _TOKEN = re.compile(r"[\w./*?\[\]~+-]+")
 _SHELL_TOKEN = re.compile(r"[\w./*?\[\]{}~+$-]+")
@@ -448,13 +479,15 @@ class Known:
     folder by folder as the shell matches a glob, and never by a pass over every file for each word of a command. A
     file named only by the end of its path (`meta.json` after a `cd` the command hid) is looked up among the files
     with its extension, which are indexed by name when a word first asks for that extension: a folder of a million
-    screenshots is not indexed by name unless a command names a screenshot."""
+    screenshots is not indexed by name unless a command names a screenshot. A glob that can match at any depth
+    (`**/*r0123*`, a Grep's) is tried only on the files that hold its literal parts (candidates)."""
 
     def __init__(self, files: list[str]):
         """`files` sorted, each once (sources.list_files gives them so)."""
         self.files = files
         self.set = set(files)
         self._globs: dict[str, frozenset[str]] = {}
+        self._sets: dict[frozenset[str], frozenset[str]] = {}  # each glob's files, one set for equal ones
         self._names: dict[str, dict[str, list[str]]] = {}
 
     @functools.cached_property
@@ -499,9 +532,65 @@ class Known:
         """The files at any depth under a folder; every file for `.`."""
         if folder in (".", ""):
             return self.files
-        lo = bisect.bisect_left(self.files, folder + "/")
-        hi = bisect.bisect_left(self.files, folder + "0")  # "0" is the character after "/"
+        lo, hi = self.span(folder)
         return self.files[lo:hi]
+
+    def span(self, folder: str) -> tuple[int, int]:
+        """Where the files under a folder are in the sorted list: files[lo:hi]; all of them for `.`."""
+        if folder in (".", ""):
+            return 0, len(self.files)
+        lo = bisect.bisect_left(self.files, folder + "/")
+        return lo, bisect.bisect_left(self.files, folder + "0", lo)  # "0" is the character after "/"
+
+    @functools.cached_property
+    def _named(self) -> tuple[dict[str, list[str]], list[str], str, list[int]]:
+        """The files by their name, and each name once, joined (_joined)."""
+        by: dict[str, list[str]] = {}
+        for f in self.files:
+            name = f[f.rfind("/") + 1:]
+            fs = by.get(name)
+            if fs is None:
+                by[name] = [f]
+            else:
+                fs.append(f)
+        names = list(by)
+        return (by, names, *_joined(names))
+
+    @functools.cached_property
+    def _folders_joined(self) -> tuple[str, list[int]]:
+        """Every folder's path, joined (_joined)."""
+        return _joined(self.folder_list)
+
+    def candidates(self, pat: str, folder: str = "", by_path: bool = True) -> Iterable[str]:
+        """The files under a folder ("" or `.` for all) that a glob can match by name, or with `by_path` by name or
+        by path. Each literal part of the glob (_literal_parts), cut at each `/`, lies in the name of a folder on the
+        path or in the file's name, so the files that can match are those under the folders whose path holds the
+        piece and those whose name holds it, for the piece the fewest files hold. The folders' paths and the names are
+        each one string for str.find, so a glob no call used before costs no test of every file; with no literal
+        part (`*`) every file can match."""
+        lo, hi = self.span(folder or ".")
+        pieces = {p for part in _literal_parts(pat) for p in part.split("/") if p}
+        if not pieces or lo >= hi:
+            return self.files[lo:hi]
+        by, names, ntext, nstarts = self._named
+        ftext, fstarts = self._folders_joined if by_path else ("", [0])
+        best: tuple[int, list[tuple[int, int]], list[str]] | None = None
+        for p in pieces:
+            spans = []
+            if by_path:
+                for d in _outermost(self.folder_list[k] for k in _holding(ftext, fstarts, p)):
+                    a, b = self.span(d)
+                    if max(a, lo) < min(b, hi):
+                        spans.append((max(a, lo), min(b, hi)))
+            ns = [names[k] for k in _holding(ntext, nstarts, p)]
+            size = sum(b - a for a, b in spans) + sum(len(by[n]) for n in ns)
+            if best is None or size < best[0]:
+                best = (size, spans, ns)
+        _, spans, ns = best
+        out = {f for a, b in spans for f in self.files[a:b]}
+        under = "" if folder in ("", ".") else folder + "/"
+        out.update(f for n in ns for f in by[n] if f.startswith(under))
+        return out
 
     def ending(self, tail: str) -> set[str]:
         """The files whose path is `tail` or ends with `/tail`, and the files whose path `tail` ends with (a path to a
@@ -546,35 +635,83 @@ class Known:
         lo = bisect.bisect_left(self.folder_list, folder + "/")
         return self.folder_list[lo:bisect.bisect_left(self.folder_list, folder + "0", lo)]
 
-    def _folders_in(self, folder: str) -> list[str]:
-        """The folders directly in a folder."""
-        return [d for d in self._folders_under(folder) if "/" not in d[len(folder) + 1 if folder else 0:]]
+    def _count_under(self, folder: str) -> int:
+        """How many folders _folders_under gives."""
+        if not folder:
+            return len(self.folder_list)
+        lo = bisect.bisect_left(self.folder_list, folder + "/")
+        return bisect.bisect_left(self.folder_list, folder + "0", lo) - lo
+
+    @functools.cached_property
+    def _folders_in(self) -> dict[str, list[str]]:
+        """The folders directly in each folder ("" for the root)."""
+        out: dict[str, list[str]] = {}
+        for d in self.folder_list:
+            out.setdefault(d[:d.rfind("/")] if "/" in d else "", []).append(d)
+        return out
+
+    @functools.cached_property
+    def _folder_names(self) -> tuple[dict[str, list[str]], list[str], str, list[int]]:
+        """The folders by their name (`steps`), and each name once, joined (_joined)."""
+        by: dict[str, list[str]] = {}
+        for d in self.folder_list:
+            by.setdefault(d[d.rfind("/") + 1:], []).append(d)
+        names = list(by)
+        return (by, names, *_joined(names))
+
+    def folders_called(self, name: str) -> list[str]:
+        """The folders at any depth with this name."""
+        return self._folder_names[0].get(name, [])
+
+    def _folders_named(self, part: str) -> list[str]:
+        """The folders at any depth whose name a part of a glob matches (`steps`, `r01*`): each name that holds the
+        part's literal pieces is tried once."""
+        if not re.search(r"[*?\[]", part):
+            return self.folders_called(part)
+        by, names, text, starts = self._folder_names
+        rx = _glob_rx(part)
+        pieces = _literal_parts(part)
+        ks = min((_holding(text, starts, p) for p in pieces), key=len) if pieces else range(len(names))
+        return [d for k in ks if rx.match(names[k]) for d in by[names[k]]]
 
     def glob(self, pat: str) -> frozenset[str]:
         """The files a glob names, matched one part of the path at a time as the shell matches it: `*`, `?` and
         `[...]` within one name, `**` alone as a part for any number of folders. Each result is kept, since a command
-        and the commands after it repeat their words."""
+        and the commands after it repeat their words, and globs that name the same files give the same set."""
         got = self._globs.get(pat)
         if got is None:
-            got = self._globs[pat] = frozenset(self._glob(pat))
+            got = frozenset(self._glob(pat))
+            got = self._globs[pat] = self._sets.setdefault(got, got)
         return got
 
     def _glob(self, pat: str) -> set[str]:
         here = [""]  # the folders the parts so far name
         parts = pat.split("/")
-        for k, part in enumerate(parts):
+        k = 0
+        while k < len(parts):
+            part = parts[k]
             last = k == len(parts) - 1
             wild = re.search(r"[*?\[]", part)
             if part == "**" and last:
                 return {f for d in here for f in self.under(d)}
             if part == "**" and k == len(parts) - 2:
-                # `**/name`: the name is matched against the files under these folders that end as it ends, of the
-                # extensions that can end so (`*.json` tries the .json files, `x*2` none of the .png files)
-                rx, end = _glob_rx(parts[-1]), re.split(r"[*?\]]", parts[-1])[-1]
-                low = end.lower()
-                return {f for e, fs in self.by_ext.items() if not e or e.endswith(low) or low.endswith(e)
-                        for f in fs if f.endswith(end) and rx.match(f, f.rfind("/") + 1)
-                        and any(not d or f.startswith(d + "/") for d in here)}
+                # `**/name`: the name is matched against the files under these folders that can match it (`*r0123*`
+                # tries the files whose path holds `r0123`)
+                rx = _glob_rx(parts[-1])
+                return {f for d in _outermost(here) for f in self.candidates(parts[-1], d, by_path=False)
+                        if rx.match(f, f.rfind("/") + 1)}
+            if part == "**" and parts[k + 1] == "**":  # `**/**` is `**`
+                k += 1
+                continue
+            if part == "**" or (wild and not last):
+                found = self._looked_up(parts, k, here)
+                if found is not None:
+                    k, got = found
+                    if k == len(parts) - 1:
+                        return got
+                    here = got
+                    k += 1
+                    continue
             if part == "**":
                 here = sorted({*here, *(d2 for d in here for d2 in self._folders_under(d))})
             elif not wild:
@@ -587,12 +724,93 @@ class Known:
                 return {f for d in here for f in self._files_in(d, part[:wild.start()]) if rx.match(f, f.rfind("/") + 1)}
             else:
                 rx = _glob_rx(part)
-                here = [d2 for d in here for d2 in self._folders_in(d) if rx.match(d2, d2.rfind("/") + 1)]
+                here = [d2 for d in here for d2 in self._folders_in.get(d, ()) if rx.match(d2, d2.rfind("/") + 1)]
+            k += 1
         return set()
+
+    def _looked_up(self, parts: list[str], k: int, here: list[str]) -> tuple[int, set[str] | list[str]] | None:
+        """Part k of a glob (`**`, or a pattern before the last part) and the parts after it up to the first that
+        names something (`made` in `*/made/x` and in `**/*/made/x`), found by that name, each then checked against the
+        parts above it, when that name gives fewer than the folders to walk through from `here`: (j, the folders
+        parts[k..j] name), or (j, the files) when part j is the last. None to walk instead."""
+        deep = parts[k] == "**"
+        j = k + 1 if deep else k
+        while j < len(parts) - 1 and parts[j] != "**" and not _literal_parts(parts[j]):
+            j += 1
+        name, last = parts[j], j == len(parts) - 1
+        if name == "**" or not _literal_parts(name):
+            return None
+        tops = set(here)
+        walk = (sum(self._count_under(d) for d in _outermost(tops)) if deep
+                else sum(len(self._folders_in.get(d, ())) for d in tops))
+        if not last:
+            found: list[str] = self._folders_named(name)
+        elif not re.search(r"[*?\[]", name):
+            found = self._named[0].get(name, [])
+        else:
+            rx = _glob_rx(name)
+            found = [f for d in _outermost(tops) for f in self.candidates(name, d, by_path=False)
+                     if rx.match(f, f.rfind("/") + 1)]
+        if len(found) > walk:
+            return None
+        above = [_glob_rx(p) for p in parts[k + 1 if deep else k:j]]
+        got = [p for p in found if _ends(p, above, tops, deep)]
+        return j, set(got) if last else got
 
 
 def as_known(known: "Known | Iterable[str]") -> Known:
     return known if isinstance(known, Known) else Known(sorted(set(known)))
+
+
+def _joined(items: list[str]) -> tuple[str, list[int]]:
+    """The items in one string, a NUL after each (no path holds one), and where each starts."""
+    return "\0".join(items) + "\0", list(itertools.accumulate((len(x) + 1 for x in items), initial=0))
+
+
+def _holding(text: str, starts: list[int], part: str) -> list[int]:
+    """Which of the joined items (_joined) hold `part`, each once, found by str.find."""
+    out, i = [], text.find(part)
+    while i >= 0:
+        k = bisect.bisect_right(starts, i) - 1
+        out.append(k)
+        i = text.find(part, starts[k + 1])
+    return out
+
+
+def _below(d: str, tops: set[str]) -> bool:
+    """Whether a folder is in one of `tops`, at any depth."""
+    at = d.find("/")
+    while at >= 0:
+        if d[:at] in tops:
+            return True
+        at = d.find("/", at + 1)
+    return False
+
+
+def _ends(path: str, above: list[re.Pattern[str]], tops: set[str], deep: bool) -> bool:
+    """Whether the folders right above `path` have names that `above` matches, in order, and the folder above those
+    is one of `tops`, or with `deep` (after a `**`) one of them or in one."""
+    names = path.split("/")
+    m = len(above)
+    if len(names) < m + 1 or not all(rx.match(n) for rx, n in zip(above, names[-1 - m:-1])):
+        return False
+    up = "/".join(names[:-1 - m])
+    return up in tops or deep and ("" in tops or _below(up, tops))
+
+
+def _outermost(folders: Iterable[str]) -> list[str]:
+    """The folders that are in none of the others ("" is the root, which holds them all)."""
+    have = set(folders)
+    if "" in have:
+        return [""]
+    out = []
+    for d in sorted(have):
+        at = d.find("/")
+        while at >= 0 and d[:at] not in have:
+            at = d.find("/", at + 1)
+        if at < 0:
+            out.append(d)
+    return out
 
 
 def _here(cwd: str | None, root: str) -> str:
@@ -606,14 +824,32 @@ def _here(cwd: str | None, root: str) -> str:
     return "\0"
 
 
+class Files:
+    """The files a command's words name: the set of each glob, as Known.glob keeps it (the same set for every word
+    that globs the same files), and the files named one by one. Kept apart, code that globs 140,000 files and opens one
+    more makes no copy of the 140,000, and coverage adds a glob's set once, however many commands name it."""
+
+    __slots__ = ("globs", "files")
+
+    def __init__(self, globs: Iterable[frozenset[str]] = (), files: Iterable[str] = ()):
+        self.globs = tuple(globs)
+        self.files = frozenset(files)
+
+    def __bool__(self) -> bool:
+        return bool(self.files) or any(self.globs)
+
+    def every(self) -> set[str]:
+        """All of them, each once."""
+        return set(self.files).union(*self.globs)
+
+
 def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None = None,
-          values: dict[str, list[str]] | None = None) -> tuple[frozenset[str], set[str]]:
+          values: dict[str, list[str]] | None = None) -> tuple[Files, set[str]]:
     """The files and the folders a command's words name: (files, folders), each a path relative to the root. A file is
     named by its path or a glob; a folder by its path, and it stands for its files without listing them. A path
     resolves from the command's folder first, so `cat x.csv` names that folder's x.csv and not every x.csv under the
     root, and `*` stays within one folder; a path that does not resolve matches by its end, as after a `cd`. A shell
-    variable takes the values the command gave it (`values`), else stands for one folder or name. The files of a lone
-    glob are the glob's own kept set (Known.glob): code that globs 15,000 files costs no copy of them."""
+    variable takes the values the command gave it (`values`), else stands for one folder or name."""
     root = root.rstrip("/")
     K = as_known(known)
     here = _here(cwd, root)
@@ -662,12 +898,8 @@ def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None 
             # ends with the file's path; and for a folder's word, a folder whose path ends with it
             files |= K.ending(tt)
             if folder_word:
-                folders.update(d for d in K.folders if d == tt or d.endswith("/" + tt))
-    if not files and len(globbed) == 1:
-        return globbed[0], folders
-    for got in globbed:
-        files |= got
-    return frozenset(files), folders
+                folders.update(d for d in K.folders_called(tt[tt.rfind("/") + 1:]) if d == tt or d.endswith("/" + tt))
+    return Files(globbed, files), folders
 
 
 # ------------------------------------------------------------------ a whole command
@@ -703,15 +935,14 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, 
     folder's path ends with `/`. `scripts` keeps the scripts the session's commands wrote, from one command to the next.
     The `thimble` command keeps its own record, so its stages and heredocs are left out here."""
     return [(f, how, span, prog) for path, how, span, prog in shows_sets(cmd, known, root, cwd, lines_of, scripts)
-            for f in ((path,) if isinstance(path, str) else sorted(path))]
+            for f in ((path,) if isinstance(path, str) else sorted(path.every()))]
 
 
 def shows_sets(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, lines_of: Callable[[str], int],
-               scripts: dict[str, str] | None = None
-               ) -> list[tuple["str | frozenset[str]", str, tuple[int, int] | None, str]]:
-    """shows, with the files one program searched, listed or went over whole as one entry: their set, in place of
-    one entry per file (shows lists the set's files in their order, where the entry stands)."""
-    out: list[tuple[str | frozenset[str], str, tuple[int, int] | None, str]] = []
+               scripts: dict[str, str] | None = None) -> list[tuple["str | Files", str, tuple[int, int] | None, str]]:
+    """shows, with the files one program searched, listed or went over whole as one entry, a Files, in place of one
+    entry per file (shows lists its files in their order, where the entry stands)."""
+    out: list[tuple[str | Files, str, tuple[int, int] | None, str]] = []
     known = as_known(known)
     scripts = {} if scripts is None else scripts
     values = variables(cmd)
@@ -786,7 +1017,7 @@ def shows_sets(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | N
                 if files:
                     out.append((files, how, None, by))
                 continue
-            for f in sorted(files):
+            for f in sorted(files.every()):
                 a, b = 1, lines_of(f) or 10 ** 9
                 for r in narrow:
                     a, b = r(a, b)

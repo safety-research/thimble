@@ -268,8 +268,8 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
     sources.Unfinished and keeps what it counted for the next count.
 
     The folder is listed once, and each call is read once, for what it did: a search of a folder or code that globs
-    thousands of files is one set of files per program, which grows by set unions, and a call done again adds nothing.
-    Each file is then gone over once: a long session over 150,000 files counts in seconds, as a short one does."""
+    thousands of files adds one set of files to its program's, and a call done again adds nothing. A glob no call used
+    before is tried only on the files that can match it (Known.candidates). Each file is then gone over once."""
     with _collector_waits():
         return _coverage(st, session, per_folder, until)
 
@@ -291,37 +291,37 @@ def _coverage(st: Store, session: str | None, per_folder: int, until: float | No
         return S.UNIT_OF_KIND.get(c["kind"] or "", "file") if c else "file"
 
     text_files: set[str] | None = None
+
+    def texts() -> set[str]:
+        """The files a search goes over: the text files, since a search skips a binary file, an image or a PDF."""
+        nonlocal text_files
+        if text_files is None:
+            text_files = {f for f, c in cnt.items() if S.UNIT_OF_KIND.get(c["kind"] or "", "file") not in ("pages", "file")}
+        return text_files
+
     searchable_in: dict[str, set[str]] = {}
 
     def searchable(folder: str) -> set[str]:
-        """The files a search into a folder (`runs/`, `./`) goes over: its text files, since a search skips a binary
-        file, an image or a PDF. The folder's files are one range of the sorted names (Known.under), found once."""
-        nonlocal text_files
+        """The files a search into a folder (`runs/`, `./`) goes over: its text files. The folder's files are one range
+        of the sorted names (Known.under), found once."""
         fs = searchable_in.get(folder)
         if fs is None:
-            if text_files is None:
-                text_files = {f for f, c in cnt.items()
-                              if S.UNIT_OF_KIND.get(c["kind"] or "", "file") not in ("pages", "file")}
             under = known.under("." if folder == "./" else folder.rstrip("/"))
-            fs = searchable_in[folder] = text_files if len(under) == len(files) else text_files.intersection(under)
+            fs = searchable_in[folder] = texts() if len(under) == len(files) else texts().intersection(under)
         return fs
-
-    grepped_in: dict[tuple[str, str], set[str]] = {}
 
     def grepped(scope: str, glob: str) -> set[str]:
-        """The files a Grep of `scope` (a file or a folder) with `glob` goes over, found once for each."""
-        fs = grepped_in.get((scope, glob))
-        if fs is None:
+        """The files a Grep of `scope` (a file or a folder) with `glob` goes over. The glob matches a file's name or its
+        path (fnmatch), and it is tried only on the files that can match it (Known.candidates): a glob no call used
+        before costs a test of the files that hold its rarest literal part, not of every file of the folder."""
+        if not glob:
             if scope in known.set:
-                fs = {scope} if unit_of(scope) not in ("pages", "file") else set()
-            else:
-                fs = searchable("./" if scope == "." else scope.rstrip("/") + "/")
-            if glob:
-                # a name or a path the glob matches ends as the glob ends (`*.json`: `.json`), so only those are tried
-                match, end = re.compile(fnmatch.translate(glob)).match, re.split(r"[*?\]]", glob)[-1]
-                fs = {f for f in fs if f.endswith(end) and (match(f[f.rfind("/") + 1:]) or match(f))}
-            grepped_in[(scope, glob)] = fs
-        return fs
+                return {scope} if unit_of(scope) not in ("pages", "file") else set()
+            return searchable("./" if scope == "." else scope.rstrip("/") + "/")
+        match = re.compile(fnmatch.translate(glob)).match
+        fs = [scope] if scope in known.set else known.candidates(glob, scope.rstrip("/"))
+        text = texts()
+        return {f for f in fs if f in text and (match(f[f.rfind("/") + 1:]) or match(f))}
 
     per: dict[str, dict[str, Any]] = {}  # what each file's own calls did
 
@@ -424,18 +424,24 @@ def _coverage(st: Store, session: str | None, per_folder: int, until: float | No
             # what reached Claude is at most the lines the command printed (a long output is cut)
             left = s.get("out_lines")
             key = (cmd, s.get("cwd"), scripts.version)
+            if (key, left) in done:
+                continue  # the same command again, with as long an output: it showed nothing new
+            done.add((key, left))
             shown = printed.get(key)
             if shown is None:
                 shown = SH.shows_sets(cmd, known, root, s.get("cwd"), lambda f: count(f).get("lines") or 0, scripts)
                 printed[key] = [x for x in shown if x[1] == "read"]
             for f, how, span, prog in shown:
                 if not isinstance(f, str):
-                    # the files one program searched, went over whole or only listed: one union, once (code that globs
-                    # the same files again names the same set)
-                    if (f, how, prog) not in done:
-                        done.add((f, how, prog))
-                        into = searched_by if how == "searched" else computed_by if how == "computed" else listed_by
-                        into.setdefault(prog, set()).update(f)
+                    # the files one program searched, went over whole or only listed: those named one by one, and the
+                    # set of each glob once (a glob's set is the one Known.glob keeps, so the key holds no copy of it)
+                    into = (searched_by if how == "searched" else computed_by if how == "computed" else listed_by
+                            ).setdefault(prog, set())
+                    into.update(f.files)
+                    for fs in f.globs:
+                        if (fs, how, prog) not in done:
+                            done.add((fs, how, prog))
+                            into.update(fs)
                     continue
                 if how != "read":
                     if (f, how, span, prog) in done:
