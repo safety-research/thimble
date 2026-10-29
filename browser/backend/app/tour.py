@@ -1,7 +1,13 @@
-"""The product tour's first-launch state: $THIMBLE_HOME/tour.json (THIMBLE_HOME, else ~/.thimble), one for every
-workspace this install opens. Each dashboard the page opens offers the tour until the analyst answers the offer, and the
-page records here that they did, whatever they chose, so a page no one looked at (one opened as the server started)
-does not use the offer up; Settings replays the tour at any time without reading this.
+"""The product tour's first-launch state: tour.json in thimble's home, one offer for the person. Each dashboard the page
+opens offers the tour until the analyst answers the offer, and the page records here that they did, whatever they chose,
+so a page no one looked at (one opened as the server started) does not use the offer up; Settings replays the tour at
+any time without reading this.
+
+The answer is written in this server's home ($THIMBLE_HOME/tour.json: THIMBLE_HOME, else ~/.thimble) and read from each
+of thimble's homes on this machine (homes): this server's, the browser workbench's (THIMBLE_BROWSER_HOME, else
+~/.thimble-browser), where thimble-browser runs its server, and the terminal plugin's (THIMBLE_PLUGIN_HOME, else
+~/.thimble), where a server started without thimble-browser runs (cli.home). So an answer given in a page of one counts
+in the pages of the others.
 
 GET /tour answers {"seen": bool}; POST /tour/seen records the answer. Nothing here touches Claude Code's files.
 """
@@ -28,17 +34,31 @@ def state_file() -> Path:
     return Path(os.environ.get("THIMBLE_HOME") or "~/.thimble").expanduser() / FILE
 
 
-def read() -> dict[str, Any]:
-    """The recorded state, {} when there is none or it does not parse."""
+def homes() -> list[Path]:
+    """thimble's homes on this machine, each once: this server's, the browser workbench's and the terminal plugin's
+    (module note), read fresh from the environment."""
+    env = os.environ.get
+    named = (env("THIMBLE_HOME") or "~/.thimble", env("THIMBLE_BROWSER_HOME") or "~/.thimble-browser",
+             env("THIMBLE_PLUGIN_HOME") or "~/.thimble")
+    return list(dict.fromkeys(Path(h).expanduser() for h in named))
+
+
+def _read(path: Path) -> dict[str, Any]:
     try:
-        data = json.loads(state_file().read_text())
+        data = json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
+def read() -> dict[str, Any]:
+    """The state recorded in this server's home, {} when there is none or it does not parse."""
+    return _read(state_file())
+
+
 def seen() -> bool:
-    return bool(read().get("seen"))
+    """Whether the person answered the offer in a page of any of thimble's homes (homes)."""
+    return any(_read(h / FILE).get("seen") for h in homes())
 
 
 def mark_seen() -> None:

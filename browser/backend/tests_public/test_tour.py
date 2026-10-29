@@ -1,5 +1,6 @@
 """The product tour's first-launch state lives in thimble's own home (THIMBLE_HOME/tour.json), never in Claude Code's
-config: unseen on a new install, seen once the page records the offer, for every workspace."""
+config: unseen on a new install, seen once the page records the offer, for every workspace and in the pages of
+thimble's other home."""
 from __future__ import annotations
 
 import json
@@ -24,6 +25,22 @@ def test_the_tour_is_offered_once_per_install_and_recorded_in_thimble_home(claud
     # a new app on the same home (a restarted server) still knows
     assert TestClient(main.create_app()).get("/api/tour").json() == {"seen": True}
     assert claude_global_config.read_text() == claude_before
+
+
+@pytest.mark.parametrize("answered_in", ["THIMBLE_BROWSER_HOME", "THIMBLE_PLUGIN_HOME"])
+def test_an_answer_given_in_a_page_of_another_of_thimble_s_homes_counts_here(monkeypatch, tmp_path, answered_in):
+    """The offer is the person's: thimble-browser runs its server in the browser workbench's home and `thimble` in the
+    terminal plugin's, and a page of either reads the answer a page of the other recorded in its own home."""
+    homes = {"THIMBLE_BROWSER_HOME": tmp_path / "browser-home", "THIMBLE_PLUGIN_HOME": tmp_path / "plugin-home"}
+    for name, home in homes.items():
+        monkeypatch.setenv(name, str(home))
+    monkeypatch.setenv("THIMBLE_HOME", str(homes[answered_in]))
+    assert TestClient(main.create_app()).get("/api/tour").json() == {"seen": False}
+    assert TestClient(main.create_app()).post("/api/tour/seen").json() == {"seen": True}
+    other = next(h for name, h in homes.items() if name != answered_in)
+    monkeypatch.setenv("THIMBLE_HOME", str(other))
+    assert TestClient(main.create_app()).get("/api/tour").json() == {"seen": True}
+    assert not (other / "tour.json").exists(), "each server records the answer in its own home"
 
 
 def test_an_unreadable_state_file_offers_the_tour_again():
