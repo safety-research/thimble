@@ -11,7 +11,8 @@ export interface UserRow {
   index: number
   text: string
   ts?: string
-  /** where the analyst typed it: the session's terminal or the browser; `main` for a message main sent the orientation */
+  /** where the analyst typed it: the session's terminal or the browser; `main` for a message main sent the orientation;
+   * `thimble` for a prompt thimble sent one of its agents (its task, a change), which no one typed */
   by?: string
   /** with `by` terminal: the analyst typed it in Claude Code's agent tray, not a prompt main's call sent */
   tray?: boolean

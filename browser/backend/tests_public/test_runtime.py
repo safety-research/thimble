@@ -877,3 +877,75 @@ async def test_a_reply_claude_s_safeguards_moved_to_another_model_is_told_in_a_n
     await main_turn("What are these episodes?")
     said = [n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
     assert said == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."]
+
+
+class ServedClient(FakeClient):
+    """The Messages API answering each request on the model its scripted reply names, (model, blocks), as sticky routing
+    answers a conversation that fell back: on the fallback model, with no `fallback` block."""
+
+    def stream(self, **body: Any) -> FakeStream:
+        self.bodies.append(json.loads(json.dumps(body, default=str)))
+        model, blocks = self.replies.pop(0) if self.replies else ("claude-opus-5-5", text("(no more)"))
+        final = Final(blocks)
+        final.model = model
+        return FakeStream(final)
+
+
+def safeguard_rows(chat: str) -> list[str]:
+    return [r["text"] for r in agents.read_events(agents.paths(CORPUS, chat)[1])
+            if r["type"] == "notice" and r.get("kind") == "safeguards"]
+
+
+async def test_a_reply_on_another_model_than_the_one_asked_for_is_told_with_it_in_main_and_in_a_side_thread(
+        on, monkeypatch):
+    """A request sticky routing sends straight to the fallback model comes back with no `fallback` block: the reply that
+    moves the composer's model to it brings the notice in main, once per switch, and a side thread's fork that answers on
+    it too is told in its own thread when it answers."""
+    from app import notices
+
+    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    client = ServedClient([("claude-opus-4-8", text("Two incidents happened.")),
+                           ("claude-opus-4-8", text("Both on Monday.")),
+                           ("claude-opus-4-8", text("Because of the deploy.")),
+                           ("claude-opus-5-5", text("Back on the model asked for.")),
+                           ("claude-opus-4-8", text("And on the fallback again."))])
+    monkeypatch.setattr(llm, "client", lambda: client)
+    await main_turn("What happened?")
+    assert client.bodies[0]["model"] == "claude-opus-5-5"
+    assert agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]["model"] == "claude-opus-4-8", "the composer's model"
+    switched = "Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."
+    assert safeguard_rows(agents.MAIN_ID) == [switched], "told in main with the reply"
+    assert [n["chat"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"] == [agents.MAIN_ID]
+    await main_turn("When?")
+    assert safeguard_rows(agents.MAIN_ID) == [switched], "a reply still on it is no new switch"
+
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    await next(c for c in runtime._spaces[CORPUS].convs.values() if c.kind == "fork").task
+    assert safeguard_rows(tid) == ['Claude\'s safeguards switched a reply of the side thread "why" from Opus 5.5 to '
+                                   'Opus 4.8.']
+
+    await main_turn("And now?")
+    await main_turn("And then?")
+    assert safeguard_rows(agents.MAIN_ID) == [switched, switched], "a reply on the model asked for ends the switch"
+
+
+async def test_on_claude_code_sign_in_a_reply_claude_code_moved_to_another_model_is_told_in_main(on, monkeypatch):
+    """Claude Code answers on its fallback model after the model asked for refused: the notice comes with that reply."""
+    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock
+
+    from app import notices
+
+    fake_sdk(monkeypatch, [
+        SystemMessage(subtype="init", data={"session_id": "sess-1"}),
+        SystemMessage(subtype="model_refusal_fallback", data={
+            "type": "system", "subtype": "model_refusal_fallback", "direction": "retry", "scope": "session",
+            "original_model": "claude-opus-5-5", "fallback_model": "claude-opus-4-8"}),
+        AssistantMessage(content=[TextBlock(text="Two incidents happened.")], model="claude-opus-4-8"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                      session_id="sess-1"),
+    ], {})
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    await main_turn("What happened?")
+    said = [(n["text"], n["chat"]) for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
+    assert said == [("Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8.", agents.MAIN_ID)]

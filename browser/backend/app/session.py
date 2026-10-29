@@ -185,10 +185,12 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
 # replies going on on another model: after a reply with stop_reason refusal (at once, or after more replies on the
 # same model), after Claude Code's meta line that a safety classifier stopped the reply (no refusal record), or as a
 # reply whose first block is a `fallback` block (workflow agents; 2.1.295-2.1.300, the view builder experiment's runs).
-# So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). Each
-# downgrade becomes a notice (notices.post) that names the chat it happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason
-# refusal), which the chat shows as its API error card; its text record carries `refusal: true`, and the failure of an
-# agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
+# So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). The server's
+# own agents (runtime.py) write the record before each reply on another model than the one asked for, main's and every
+# agent's alike (runtime.Conv.switches). Each downgrade becomes a notice (notices.post) that names the chat it happened
+# in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason refusal), which the
+# chat shows as its API error card; its text record carries `refusal: true`, and the failure of an agent it stopped is
+# told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
 FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
 AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
@@ -3044,7 +3046,7 @@ def _typed(rec: dict) -> str | None:
 def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     """One line of a subagent's transcript into its chat: tool calls and results, its text (a thread's fork's as its
     reply, without the lines only the terminal shows), the messages the analyst typed to it in the agent view, and for
-    an agent chat the prompts it was sent."""
+    an agent chat the prompts it was sent (one of thimble's agents', thimble's own: `by` agents.THIMBLE)."""
     rec = _load(line)
     n = 0
     att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else None
@@ -3087,7 +3089,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 return 0
             if sub.thimble and sub.agent_id and _sent_quietly(lv.c, str(sub.agent_id), prompt):
                 return 0  # thimble's wrapping of the person's words, which the chat shows where they were said
-            sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
+            # one of thimble's agents is sent thimble's own text (its start's task, a change), never the analyst's words,
+            # which reach its chat as their own records (views.message, _typed)
+            sub.rec.record("user", text=prompt.strip(), by=agents.THIMBLE if sub.thimble else TERMINAL)
             return 1
     if rec.get("type") == "user":
         for b in _content_list(rec):

@@ -48,6 +48,8 @@ SUITE_HOME = Path(tempfile.mkdtemp(prefix="thimble-tests-home-")).resolve()
 atexit.register(shutil.rmtree, SUITE_HOME, True)
 os.environ["THIMBLE_HOME"] = str(SUITE_HOME)
 os.environ["THIMBLE_PLUGIN_HOME"] = str(SUITE_HOME / "plugin-home")
+# the browser workbench's home, which the server reads beside its own (the tour's offer, app/tour.py)
+os.environ["THIMBLE_BROWSER_HOME"] = str(SUITE_HOME / "browser-home")
 
 
 class RealHomeWrite(PermissionError):
@@ -255,6 +257,8 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thimble-home"))
     # the terminal plugin's home, where the person's fixes are kept (app/fixes.py)
     monkeypatch.setenv("THIMBLE_PLUGIN_HOME", str(tmp_path / "plugin-home"))
+    # the browser workbench's home, read beside the server's own (app/tour.py)
+    monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp_path / "browser-home"))
 
 
 PLUGIN_TOKEN = "t0ken-of-the-test-server"
