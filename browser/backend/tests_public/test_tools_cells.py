@@ -2,6 +2,7 @@
 as a browser chat running as the analyst."""
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -121,6 +122,42 @@ async def test_an_example_keeps_each_quote_of_a_record_whose_ref_stays_as_given(
     payload = notebook.get_cell(CORPUS, _cid(r))["payload"]
     assert payload["refs"][0].startswith("board.jsonl#L3.b") and payload["refs"][1] == "board.jsonl#L1"
     assert "quotes" not in payload
+
+
+def _trajectory(data, trial: str, said: list[str]) -> str:
+    """An agent trajectory of one trial, as `<job>/<trial>/agent/trajectory.json` holds it (ATIF): a user step, then one
+    agent step per message in `said`. Returns its corpus path."""
+    rel = f"hp-kinds-stuck/{trial}/agent/trajectory.json"
+    steps = [{"step_id": 1, "source": "user", "message": "Publish the package to the registry at proxy:4873."}]
+    steps += [{"step_id": n, "source": "agent", "message": m} for n, m in enumerate(said, 2)]
+    path = data / CORPUS / rel
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"schema_version": "ATIF-v1.2", "session_id": trial, "steps": steps}, indent=2))
+    return rel
+
+
+async def test_an_example_quotes_several_moments_of_each_trial_and_code_on_it_asks_for_its_refs(group, data_tmp):
+    """A card asked what agents did when they published to a shared registry, quoting why each trial began, what the
+    registry said and how it ended. Its quotes came out as a code card, a Python list of the quotes and a print of them,
+    since the example's refs read as one passage of a record and code given to an example was sent to a card of code,
+    which shows its code. Several quotes of each trial make one example card, and code given to an example is refused
+    with what the card shows instead."""
+    said = ["Let me set up an out-of-band oracle on my own container, then test what I can push into Verdaccio.",
+            "Publish needs auth.",
+            "I could not complete this one, and I want to be precise about why rather than leave a plausible-looking file behind."]
+    trials = [_trajectory(data_tmp, t, said) for t in ("hp-compute-workdir-stuck__MmrWMRE", "hp-registry__QkTzPaw")]
+    quotes = ["out-of-band oracle", "Publish needs auth.", "I could not complete this one"]
+    r = await call("add_card", group, kind="example", question="What happened when agents tried to publish a package?",
+                   refs=[{"ref": t, "quote": q} for t in trials for q in quotes])
+    refs = notebook.get_cell(CORPUS, _cid(r))["payload"]["refs"]
+    assert len(refs) == 6 and all(ref.startswith(trials[i // 3] + "#L") for i, ref in enumerate(refs)), refs
+    # one passage of one step, by its JSON pointer, keeps the pointer and the quote beside it
+    r = await call("add_card", group, kind="example", question="Why did the first trial stop?",
+                   refs=[{"ref": f"{trials[0]}#/steps/3", "quote": "I could not complete this one"}])
+    assert notebook.get_cell(CORPUS, _cid(r))["payload"] == {"refs": [f"{trials[0]}#/steps/3"], "quotes": ["I could not complete this one"]}
+    code = "ex = [(%r, %r)]\nfor trial, why in ex:\n    print(trial, why)" % (trials[0], said[0])
+    r = await call("add_card", group, kind="example", question="Why?", code=code, refs=trials)
+    assert r.is_error and "`refs`" in r.text and "card of code" not in r.text, r.text
 
 
 async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):

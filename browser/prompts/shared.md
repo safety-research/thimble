@@ -25,7 +25,7 @@ Be creative about how you present the content, since the right form lets the ana
 
 - `plot` for a pattern, a trend or a comparison. Give it axis titles and a legend for any color.
 - `table` when exact values matter, kept to a few short columns and rows named by what they are. Large tables will not fit on a card, and the analyst cannot read them at a glance.
-- `example` for real records, since one instance makes a pattern believable. It can quote the passage of a long transcript that makes the point, or show a moment of a recording.
+- `example` for real records, since one instance makes a pattern believable. It can quote the passages of long transcripts that make the point, several from one record or one from each of several, or show a moment of a recording.
 - `timeline` for a sequence of events, a causal chain or a story, with about a dozen events at most, each named in a few words, since the card has room to label no more.
 - `diagram` for how things branch and connect, such as how the files of a corpus relate. Steps in a straight line read better as a timeline.
 - `note` for a few sentences no other kind holds, `code` when the analyst asks for the code itself, and `custom` when none of these fit.

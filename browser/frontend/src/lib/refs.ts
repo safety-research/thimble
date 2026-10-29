@@ -206,11 +206,15 @@ export function refPath(ref: string): string | null {
   return p && 'path' in p ? p.path : null
 }
 
+/** The folders that name what a file is rather than whose it is, so its run is the folder above: `agents/`, `prompts/`,
+ * and a trial's `agent/` (`<job>/<trial>/agent/trajectory.json`, whose chip would name every trial `agent`). */
+const KIND_FOLDERS = new Set(['agents', 'prompts', 'agent'])
+
 /** `batch2-x/agents/a.jsonl` -> { run: 'batch2-x', rest: 'agents/a.jsonl' }; flat paths have run ''. */
 export function splitRun(path: string): { run: string; rest: string } {
   const parts = path.split('/')
   const parent = parts.length > 1 ? parts[parts.length - 2] : ''
-  const depth = parent === 'agents' || parent === 'prompts' ? 2 : 1
+  const depth = KIND_FOLDERS.has(parent) ? 2 : 1
   if (parts.length <= depth) return { run: '', rest: path }
   return { run: parts.slice(0, parts.length - depth).join('/'), rest: parts.slice(parts.length - depth).join('/') }
 }
