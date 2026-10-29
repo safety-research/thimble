@@ -323,6 +323,45 @@ async def test_a_thread_s_label_is_the_thread_s_and_an_unknown_fork_s_card_waits
     assert notebook.get_cell(CORPUS, stranger["id"])["created_by"] == f"chat:{tid}"
 
 
+async def test_a_fork_the_mirror_does_not_follow_waits_once_and_only_to_make_a_card(fork, monkeypatch):
+    """A call of a fork whose thread the mirror does not know waits for the mirror only when the call makes a card,
+    and only the first time: the fork's later calls look its thread up without a wait, and find it once the mirror
+    follows the fork. The calls of a fork the mirror follows never wait."""
+    tid, call = fork
+    monkeypatch.setattr(investigation, "emit", lambda *a, **k: None)
+    waits: list[str] = []
+    real = session.call_holder
+
+    async def holder(c, tool_use_id, wait_s=session.CALL_WAIT_S):
+        waits.append(tool_use_id)
+        return await real(c, tool_use_id, 0.01)
+
+    monkeypatch.setattr(session, "call_holder", holder)
+    await by_fork(call, "add_card", kind="note", question="Mine?", text="x")
+    await by_fork(call, "list_cards", group="all")
+    assert waits == []
+    n = [0]
+
+    def stranger() -> str:
+        n[0] += 1
+        sf.add_caller(ws(), f"toolu_stranger{n[0]}", "fork2", sf.FORK_TYPE)
+        return f"toolu_stranger{n[0]}"
+
+    await by_fork(stranger, "list_cards", group="all")
+    assert waits == []
+    first = cid_of(await by_fork(stranger, "add_card", kind="note", question="Whose?", text="x"))
+    assert waits == ["toolu_stranger2"]
+    second = cid_of(await by_fork(stranger, "add_card", kind="note", question="And this?", text="x"))
+    await by_fork(stranger, "apply_label", scope="files", paths=["board.jsonl"], name="claims a PR",
+                  predicate={"kind": "regex", "text": "forge pr claim"})
+    await by_fork(stranger, "list_cards", group="all")
+    assert waits == ["toolu_stranger2"]
+    assert {notebook.get_cell(CORPUS, c)["created_by"] for c in (first, second)} == {tools.TERMINAL}
+    session._live[CORPUS].subs.append(session.Sub(CORPUS, tid, "toolu_forked2", "fork2", thread=True))
+    later = cid_of(await by_fork(stranger, "add_card", kind="note", question="Now?", text="x"))
+    assert notebook.get_cell(CORPUS, later)["created_by"] == f"chat:{tid}" and waits == ["toolu_stranger2"]
+
+
 async def test_the_canvas_names_the_anchor_of_each_thread_that_made_a_card_on_it(fork):
     """The canvas route gives, with the cards, the anchor of each thread that made one of them, so the page puts the
     thread's card beside the card it is about the first time it draws the canvas. Main's cards, and a chat that is no

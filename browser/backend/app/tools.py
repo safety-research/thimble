@@ -155,7 +155,8 @@ class Spec:
     """What is code about a tool: its name, the roles that get it, and its handler as `module:attr`, called as
     `handler(ctx, args)`. `sessions` names the session kinds whose shims alone list it; `aliases` are alternative
     names a
-    call still reaches but no listing shows; with `drop_stops`, a call whose request the caller drops is cancelled."""
+    call still reaches but no listing shows; with `drop_stops`, a call whose request the caller drops is cancelled.
+    `makes_cards`: the call makes a card, which a call of a thread's fork makes for the thread (call, _as_fork)."""
 
     name: str
     roles: tuple[str, ...]
@@ -163,6 +164,7 @@ class Spec:
     sessions: "tuple[str | None, ...]" = ()
     aliases: tuple[str, ...] = ()
     drop_stops: bool = False
+    makes_cards: bool = False
 
 
 _H = "app.tools:_h_"
@@ -173,10 +175,10 @@ REGISTRY: dict[str, Spec] = {
         Spec("read_ref", ANALYSIS_ROLES, _H + "read_ref"),
         # the card tools, named as the interface and the prompts name them, with their cell aliases
         Spec("list_cards", ANALYSIS_ROLES, _H + "list_cards", aliases=("list_cells",)),
-        Spec("add_card", ANALYSIS_ROLES, _H + "add_card", aliases=("add_cell",)),
+        Spec("add_card", ANALYSIS_ROLES, _H + "add_card", aliases=("add_cell",), makes_cards=True),
         Spec("edit_card", (ANALYST,), _H + "edit_card", aliases=("edit_cell",)),
         Spec("delete_card", (ANALYST,), _H + "delete_card", aliases=("delete_cell",)),
-        Spec("apply_label", (ANALYST,), _H + "apply_label"),
+        Spec("apply_label", (ANALYST,), _H + "apply_label", makes_cards=True),
         # a label over files on or off in Files and the views, which runs nothing (concepts.show_concept)
         Spec("show_label", (ANALYST,), _H + "show_label"),
         # a label deleted with its marks, its card and its filters, as the Labels pane's Delete label does; main's, as
@@ -574,10 +576,13 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     batch = None
     # a session thimble started (the orientation, a writer) owns the steps its calls make (undo, sessions)
     with undo.batching(batch), undo.acting_session(session):
-        # a thread's fork acts for its thread, whose cards are the thread's from the start (_as_fork)
-        author = (await _as_fork(Ctx(c, actor, notebook, terminal, anchor, chat, session, tool_use_id))).cell_author
+        ctx = Ctx(c, actor, notebook, terminal, anchor, chat, session, tool_use_id)
+        # the thread a call of a thread's fork is for, found once (_as_fork): a card the call makes is the thread's
+        # from the start, and the fork is told about the thread's cards
+        fork = await _as_fork(ctx, wait=spec.makes_cards)
+        author = fork.cell_author
         with canvas_history.acting(author):  # who changed a card
-            res = await _run(spec, c, name, args, actor, notebook, terminal, anchor, chat, session, tool_use_id)
+            res = await _run(spec, fork if spec.makes_cards else ctx, name, args)
         # the card check (card_check.py): a card add_card or edit_card wrote is drawn and read once it has its
         # takeaway; nothing of the check joins this result
         from . import card_check  # noqa: PLC0415 — card_check imports the harness
@@ -595,20 +600,17 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     return with_call_line(name, args, res)
 
 
-async def _run(spec: Spec, c: str, name: str, args: dict[str, Any] | None, actor: str, notebook: str | None, terminal: bool,
-               anchor: str | None, chat: str | None, session: str | None = None,
-               tool_use_id: str | None = None) -> ToolResult:
+async def _run(spec: Spec, ctx: Ctx, name: str, args: dict[str, Any] | None) -> ToolResult:
     try:
-        role = role_of(actor)
+        role = role_of(ctx.actor)
     except ValueError as e:
         return err(str(e))
     if role not in spec.roles:
-        return err(f"{name} is not available to the {actor} caller")
+        return err(f"{name} is not available to the {ctx.actor} caller")
     try:
-        config.workspace_dir(c)
+        config.workspace_dir(ctx.c)
     except ValueError as e:
         return err(f"{name}: {e}")
-    ctx = Ctx(c, actor, notebook, terminal, anchor, chat, session, tool_use_id)
     try:
         return _as_result(await _maybe_await(_resolve(spec.handler)(ctx, dict(args or {}))))
     except HTTPException as e:  # a request the backing module rejected: the model's mistake, told plainly
@@ -1329,7 +1331,6 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return err(_needs_code("add_card", kind, args))
     elif problem := _content_on_code("add_card", kind, args) or _card_installs(ctx, code, "add_card"):
         return err(problem)
-    ctx = await _as_fork(ctx)
     group = " ".join(str(args.get("group") or "").split())
     request = request_of(group)
     made: builtins.list[str] = []
@@ -2519,8 +2520,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     orienting = session_kind(ctx.session) == ORIENT_SESSION
     group = str(args.get("group") or "").strip()
     # a label's card stands loose unless the call names its group, as any card does, and a thread's fork's label and
-    # its card are the thread's (_as_fork); a card the label has already stays where it is (concepts.label_card)
-    ctx = await _as_fork(ctx)
+    # its card are the thread's (call); a card the label has already stays where it is (concepts.label_card)
     target = None if orienting else _group_id(ctx, group, []) if group else default_group(ctx)
     question = _question(args.get("question")) or None
     within = args.get("within") or None
@@ -2725,26 +2725,28 @@ async def _typed_build(ctx: Ctx, slug: str, values: dict[str, str] | None = None
     return ok(hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
 
 
-async def _fork_of(ctx: Ctx) -> dict[str, Any] | None:
+async def _fork_of(ctx: Ctx, *, wait: bool = True) -> dict[str, Any] | None:
     """For a call through main's shim that a thread's fork made: the thread's meta, with what the analyst pointed at
-    (subagents.fork_thread), or {} when the mirror does not know the fork's thread; None for any other caller's call."""
+    (subagents.fork_thread, which waits for the mirror only when `wait`), or {} when the mirror does not know the
+    fork's thread; None for any other caller's call."""
     from . import subagents  # noqa: PLC0415
 
     if not subagents.fork_call(ctx.c, ctx.tool_use_id):
         return None
-    return await subagents.fork_thread(ctx.c, ctx.tool_use_id) or {}
+    return await subagents.fork_thread(ctx.c, ctx.tool_use_id, wait=wait) or {}
 
 
-async def _as_fork(ctx: Ctx) -> Ctx:
+async def _as_fork(ctx: Ctx, *, wait: bool) -> Ctx:
     """The caller as the thread whose fork made the call (_fork_of), when it is one: a card the call makes is the
     thread's from the moment it is made (`created_by: chat:<thread>`), so the canvas puts it beside the card the thread
-    is about at once, and a note about such a card (card_size) goes with the fork's next call. `ctx` as it is for any
-    other call, and for a fork whose thread the mirror does not know yet, whose card the mirror credits to the thread
-    once it reads the call's result (agents.claim_cell)."""
+    is about at once, and a note about such a card (card_size) goes with the fork's next call. Only a call that makes a
+    card waits for the mirror to find the fork (`wait`). `ctx` as it is for any other call, and for a fork whose
+    thread the mirror does not know yet, whose card the mirror credits to the thread once it reads the call's result
+    (agents.claim_cell)."""
     if ctx.chat or ctx.session or not ctx.tool_use_id:
         return ctx
     try:
-        thread = await _fork_of(ctx)
+        thread = await _fork_of(ctx, wait=wait)
     except (OSError, ValueError):  # no such workspace, or its records cannot be read: the call runs as it came
         log.debug("the thread of call %s was not found", ctx.tool_use_id, exc_info=True)
         return ctx
