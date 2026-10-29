@@ -376,7 +376,7 @@ for (const [how, env] of [['a button', {}], ['a file link', { FORCE_HYPERLINK: '
     expect(textOf(await $.ui.render(above()))).not.toContain("didn't open here")
   })
 }
-test("a corrected citation's evidence in the side pane says corrected and what it was, as its tray does", CITES, async ($, on) => {
+test("a corrected citation's evidence in the side pane says ✓ corrected and what it was, as its tray does", CITES, async ($, on) => {
   on('ui.open', () => ({ value: { isPlaced: true } }) as never)
   on('ui.close', () => ({ value: undefined }))
   await resumed($, on, { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40' }, 's-tray-pane-corrected')
@@ -386,11 +386,11 @@ test("a corrected citation's evidence in the side pane says corrected and what i
   await ui.unmount()
   const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
   const words = textOf(pane)
-  expect(words).toContain('corrected  11 of 40')
+  expect(words).toContain('✓ corrected  11 of 40')
   expect(words).not.toContain('verified')
   expect(words).toContain('was 12 of 40')
   expect(words).not.toContain('corrected; was')
-  expect(all(pane).find(n => n.type === 'Text' && textOf(n) === 'corrected')?.props).toMatchObject({ color: 'success' })
+  for (const t of ['✓', ' corrected']) expect(all(pane).find(n => n.type === 'Text' && textOf(n) === t)?.props).toMatchObject({ color: 'success', bold: true })
 })
 
 // Claude Code places a pane at any width only for an open made while the person's press runs; an open the handler

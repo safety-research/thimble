@@ -36,7 +36,7 @@
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, inverse, part}.
 import { blocks, marksIn } from '../marks/message.js'
 import { tableLines } from '../marks/table.mjs'
-import { evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printLine } from '../tray/tray.mjs'
+import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printLine, wasLine } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
 const cut = (s, k) => (Array.from(String(s ?? '')).length <= k ? String(s ?? '') : Array.from(String(s ?? '')).slice(0, Math.max(0, k - 1)).join('') + '…')
@@ -486,17 +486,14 @@ function layOf(claims, groups, edges, W, h, cols) {
   return got
 }
 
-// a citation's check as the citation's card says it beside `cite`: the sign and word, its tone; and as a chip under a
-// claim counts it. Two outcomes: verified (a value the check corrected counts as verified; the claim says corrected),
-// and failed (the check could not confirm it, or did not run); and the states before an outcome
-const STATUS = {
-  verified: ['✓ verified', 'good'], corrected: ['✓ verified', 'good'], failed: ['× failed', 'bad'],
-  checking: ['checking', 'dim'], gone: ['no longer in the session', 'dim'],
-  // a citation that waits until the person opens it (the setting Citations, auto cite or manual): x checks it
-  deferred: ['not checked', 'dim'],
-}
-// a status without an outcome (no check of it ran) is failed
-const statusKey = s => (STATUS[s.status] ? s.status : 'failed')
+// a citation's check as the citation's card says it beside `cite`, in the tray's words (tray/tray.mjs checkStatus, as the
+// tray's header and the evidence pane say it): the sign and word, its tone. Two outcomes: verified (`✓ verified`; one
+// the check corrected `✓ corrected`, or `✓ repaired` after x, with what it was under it), and failed (the check could
+// not confirm it, or did not run); and the states before an outcome: checking, and `? not checked` for one that waits
+// until the person opens it (the setting Citations, auto cite or manual), which x checks. A drawing here has no turning
+// glyph, so checking stands alone. A citation no longer in the session says so
+const statusOf = s => (s?.status === 'gone' ? { key: 'gone', sign: '', word: 'no longer in the session', tone: 'dim' } : checkStatus(s))
+const statusWords = st => (st.sign && st.sign !== 'spin' ? `${st.sign} ${st.word}` : st.word)
 
 /** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair). */
 export const repairable = s => !!s && s.status === 'failed' && !!s.row && !!s.n
@@ -610,14 +607,16 @@ const cardLine = (ev, W) => fit([{ s: 'card ', tone: 'dim' }, { s: one(ev.title 
 /**
  * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citations' look
  * (underlined, tinted on hover; a failed one's red) and
- * its check beside them (`✓ verified · citation`); what it was, when the check corrected it, or why it failed, dim; then
+ * its check beside them (`✓ verified · citation`, as the tray's header says it); what it was, when the check corrected
+ * it (`✓ corrected · citation` over `was 15 of 40`), or why it failed, dim; then
  * its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line after a dim │, the
  * cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the output has more.
  * `whole`: the code and output whole (c). {rows, cut}: cut when the code or the line was cut.
  */
 export function cardOf(s, W, { whole = false } = {}) {
-  const key = statusKey(s)
-  const [word, tone] = STATUS[key]
+  const st = statusOf(s)
+  const key = st.key
+  const word = statusWords(st), tone = st.tone
   // the kind in the tray's words (tray/tray.ts KINDS)
   const kind = ' · citation'
   const right = [{ s: '   ' }, { s: word, tone }, { s: kind, tone: 'dim' }]
@@ -625,7 +624,7 @@ export function cardOf(s, W, { whole = false } = {}) {
   const look = key === 'failed' ? { tone: 'bad', underline: true } : { tint: true }
   const rows = [[{ s: cut(words, Math.max(8, W - 3 - len(word) - len(kind))), ...look, bold: true }, ...right]]
   const dim = t => wrap(t, W).forEach(l => rows.push([{ s: l, tone: 'dim' }]))
-  if (s.status === 'corrected' && s.was) dim(`${s.rewritten ? 'sentence rewritten' : s.narrowed ? 'narrowed' : 'corrected'}; was ${one(s.was)}`)
+  if (s.status === 'corrected' && s.was) dim(wasLine({ rewritten: s.rewritten, narrowed: s.narrowed, was: one(s.was) }))
   else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))
   if (s.status === 'checking' || s.status === 'gone' || !s.evidence) return { rows, cut: false }
   if (whole) return { rows: [...rows, ...wholeRows(s.evidence, W)], cut: true }
@@ -1003,7 +1002,8 @@ const edge = (W, tone, part, [a, b]) => [{ s: a + FRAME.h.repeat(Math.max(0, W -
 /** A citation's words and its check at the right of `inner` cells: the words bold in the look citations have in the
  *  reply (`cite`), cut to leave room for the check. */
 function citeTitle(s, inner) {
-  const [word, tone] = STATUS[statusKey(s)]
+  const st = statusOf(s)
+  const word = statusWords(st), tone = st.tone
   const words = cut(one(s.shown || s.label) || 'citation', Math.max(6, inner - len(word) - 2))
   return [{ s: words, cite: s.status || 'failed', bold: true }, { s: ' '.repeat(Math.max(2, inner - len(words) - len(word))) }, { s: word, tone }]
 }
@@ -1020,9 +1020,9 @@ const whereOf = s => {
 /** A citation on one line of `inner` cells: its words in the look citations have in the reply, and at the right its
  *  check's sign and where its evidence is (`✓ · saves.jsonl:41`). */
 function citeLine(s, inner) {
-  const key = statusKey(s)
-  const tone = STATUS[key][1]
-  const sign = { verified: '✓', corrected: '✓', failed: '×', checking: '…' }[key] ?? '·'
+  const st = statusOf(s)
+  const tone = st.tone
+  const sign = st.sign === 'spin' ? '…' : st.sign || '·'
   const where = whereOf(s)
   const right = [{ s: sign, tone }, ...(where ? [{ s: ` · ${cut(where, Math.max(8, Math.floor(inner / 2) - 4))}`, tone: 'dim' }] : [])]
   const rl = right.reduce((a, x) => a + len(x.s), 0)

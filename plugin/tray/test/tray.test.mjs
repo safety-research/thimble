@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { partsAround } from '../../core/text.js'
-import { aboutOf, back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top } from '../tray.mjs'
+import { aboutOf, back, base, checkStatus, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top, wasLine } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -54,6 +54,24 @@ test('the bar names the mark ] opens by its kind, the words that name it apart t
   assert.deepEqual(partsAround(' heads up', 'heads up'), [{ s: ' ', marked: false }, { s: 'heads up', marked: true }])
   assert.deepEqual(partsAround(' show', 'explainer'), [{ s: ' show', marked: false }])
   assert.deepEqual(partsAround(' next card', undefined), [{ s: ' next card', marked: false }])
+})
+
+test("a citation's check in the words every place that shows its card says it in (the tray's header, the evidence pane, the claims pane): the reply's sign after it, then the word; a corrected one says corrected, or repaired after x, with what it was under it", () => {
+  const word = m => { const s = checkStatus(m); return `${s.sign} ${s.word} (${s.tone})` }
+  assert.equal(word({ status: 'checking' }), 'spin checking (dim)')
+  assert.equal(word({ status: 'deferred' }), '? not checked (dim)')
+  assert.equal(word({ status: 'verified' }), '✓ verified (good)')
+  assert.equal(word({ status: 'verified', repair: true }), '✓ verified (good)')
+  assert.equal(word({ status: 'corrected', was: '15 of 40' }), '✓ corrected (good)')
+  assert.equal(word({ status: 'corrected', was: '15 of 40', repair: true }), '✓ repaired (good)')
+  assert.equal(word({ status: 'failed' }), '× failed (bad)')
+  // a status no check gave, or no citation, is failed (marks/store.ts notRun)
+  assert.equal(word({ status: 'pending' }), '× failed (bad)')
+  assert.equal(checkStatus(null).key, 'failed')
+  // under a corrected one's status: what it was, its marks gone; a rewritten sentence or a narrowed citation says which
+  assert.equal(wasLine({ was: '**15** of 40' }), 'was 15 of 40')
+  assert.equal(wasLine({ was: 'Of the runs, 15 of 40 failed.', rewritten: true }), 'sentence rewritten; was Of the runs, 15 of 40 failed.')
+  assert.equal(wasLine({ was: '15 of 40 runs', narrowed: true }), 'narrowed; was 15 of 40 runs')
 })
 
 test('a citation\'s card: why in one sentence, and the one line of evidence that holds the value, cut around it', () => {

@@ -69,7 +69,7 @@ import { explainSpans, pendingGloss, type ExplainPart, type Gloss } from '../exp
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, launchRepair, repairOf } from '../marks/checker'
-import { highlighted, wrapCode } from '../marks/evidence'
+import { highlighted, statusEls, wrapCode } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords, quietLooks } from '../marks/register'
@@ -80,8 +80,8 @@ import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
 import {
-  aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, printLine, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, top,
+  aboutOf, back, base, canRepair, checkStatus, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
+  open, printLine, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, top, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -697,31 +697,13 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
   return drawsHyperlinks(env)
 }
 
-/** A citation's status as its header says it: a sign, the word and its color. The sign is the one the reply draws after
- *  the citation's words in that status (marks/view.ts withLooks), so the tray says what it means: the turning glyph
- *  (`spin`, in thimble's color, turning with the reply's) while it is checked, × failed, ? not checked yet. A checked
- *  one has none in the reply, and ✓ here: verified, or corrected (the right words in place of the ones Claude wrote,
- *  which the line under it gives); repaired when x corrected it. */
-const STATUS: Record<string, { sign: string; word: string; color?: string; dim?: boolean }> = {
-  checking: { sign: 'spin', word: 'checking', dim: true },
-  deferred: { sign: '?', word: 'not checked', dim: true },
-  verified: { sign: '✓', word: 'verified', color: 'success' },
-  corrected: { sign: '✓', word: 'corrected', color: 'success' },
-  repaired: { sign: '✓', word: 'repaired', color: 'success' },
-  failed: { sign: '×', word: 'failed', color: 'error' },
-}
-
-/** A citation's status: the store's, and failed for one with no check (marks/store.ts notRun; one the store no longer
- *  holds, whose reply the reply draws failed too, says so under it). */
-const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status === 'corrected' && m.repair ? 'repaired' : m.status] : null) ?? STATUS.failed!
-
-/** The status as drawn: its sign and its word, the sign of a check that runs the turning glyph's frame now (`spin`). */
-function statusEls(els: Any, s: { sign: string; word: string; color?: string; dim?: boolean }, spin: string): Any[] {
-  const { Text } = els
-  const look = s.color ? { color: s.color } : { dimColor: true }
-  const sign = s.sign === 'spin' ? Text({ key: 'sg', color: accent(), children: spin }) : Text({ key: 'sg', ...look, children: s.sign })
-  return [sign, Text({ key: 's', ...look, children: ` ${s.word}` })]
-}
+/** A citation's status as its header says it, in the words the evidence pane and the claims pane say it in (tray.mjs
+ *  checkStatus): the sign the reply draws after the citation's words in that status, so the tray says what it means
+ *  (the turning glyph while it is checked, × failed, ? not checked yet; ✓ for a checked one, which has none there), and
+ *  its word: verified, or corrected (the right words in place of the ones Claude wrote, which the line under it gives),
+ *  repaired when x corrected it. Failed for one with no check (marks/store.ts notRun; one the store no longer holds,
+ *  whose reply the reply draws failed too, says so under it). */
+const statusOf = (m: MarkItem | null) => checkStatus(m)
 
 /** The color of a line of code: the theme key thimble draws inline code in (marks/view.ts), a blue Claude Code shades
  *  for the theme it draws in. */
@@ -756,10 +738,9 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const ev = m.evidence
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
-  const fixed = m.rewrite ? 'sentence rewritten; ' : m.narrowed ? 'narrowed; ' : ''
   const notFixed = m.repair ? 'not repaired: ' : ''
   // a rewrite's history is the sentence Claude wrote
-  if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}`)
+  if (m.status === 'corrected' && m.was) dim('was', wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }))
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)

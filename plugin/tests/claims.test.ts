@@ -407,6 +407,13 @@ test("a picked claim's sentences of the reply read as the reply does: a figure t
   expect(other).toContain('The admin then spent four weeks cleaning up and deleted 5,144 pages, each marked deleted.')
   // a claim whose own words the check changed is found in the words Claude wrote
   expect(textOf(await draw({ claim: 'c2' }))).toContain('The admin then spent four weeks')
+  // its citation's card says what the tray's header says: corrected where it said verified, and what it was under it
+  const card = textOf(await draw({ claim: 'c2', open: true }))
+  expect(card).toContain('deleted 5,144 pages')
+  expect(card).toContain('✓ corrected')
+  expect(card).toContain('was deleted 5,217 pages')
+  expect(card).not.toContain('verified')
+  expect(card).not.toContain('corrected; was')
 })
 
 test('w in a terminal too narrow for the pane fails in red with the click on the bar\'s count; a press opens the pane and the line goes; the next w fails again', async () => {

@@ -13,16 +13,20 @@
 //
 // Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words.
 //
-// Two outcomes, as in the reply and the tray: verified (a corrected mark, its right words in place of Claude's, says
-// corrected, or repaired after x, and what it was) and failed, which says why in red (× failed), with the evidence the check gave when it is real. The cited value is bold in the citations' look (citeWords). What the check found wrong in the rest of the
+// Its status in the tray's words (tray/tray.mjs checkStatus), with the sign the reply draws after the mark: two outcomes,
+// verified (✓ verified; a corrected mark, its right words in place of Claude's, says ✓ corrected, or ✓ repaired after x,
+// and what it was) and failed, which says why in red (× failed), with the evidence the check gave when it is real; and
+// before an outcome, ⠋ checking (the turning glyph, as after the mark) or ? not checked. The cited value is bold in the citations' look (citeWords). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
+import { spinNow } from '../bar/busy'
 import { quiet } from '../core/askcell.js'
-import { themeLast, themeNow } from '../core/theme'
+import { accent, themeLast, themeNow } from '../core/theme'
 import { explaining, explainTerm, glossFor, sessionGlosses } from '../explain/seam'
 import { markColors } from '../explain/place.mjs'
+import { checkStatus, wasLine } from '../tray/tray.mjs'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
@@ -33,13 +37,14 @@ type Any = any
 
 const OUTPUT_ROWS = 14 // output lines shown around the first highlight
 
-const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
-  checking: { word: 'checking', dim: true },
-  verified: { word: 'verified', color: 'success' },
-  corrected: { word: 'corrected', color: 'success' },
-  repaired: { word: 'repaired', color: 'success' },
-  // a check that did not run is failed too (store.ts notRun); its reason says so
-  failed: { word: '× failed', color: 'error' },
+/** A citation's status (tray/tray.mjs checkStatus) as the tray's header, this pane and the claims pane draw it: its
+ *  sign and its word in its tone's color (a checked one's success green, a failed one's error red, else dim), the
+ *  sign of a check that runs the turning glyph's frame now (`spin`), in thimble's color as the reply draws it. */
+export function statusEls(els: Any, s: { sign: string; word: string; tone: string }, spin: string, o: { bold?: boolean } = {}): Any[] {
+  const { Text } = els
+  const look = { ...(s.tone === 'good' ? { color: 'success' } : s.tone === 'bad' ? { color: 'error' } : { dimColor: true }), ...(o.bold ? { bold: true } : {}) }
+  const sign = s.sign === 'spin' ? Text({ key: 'sg', color: accent(), children: spin }) : Text({ key: 'sg', ...look, children: s.sign })
+  return [sign, Text({ key: 's', ...look, children: ` ${s.word}` })]
 }
 
 /** The cited words' look wherever their evidence shows (this pane, the tray, the claims pane): bold, in a citation's
@@ -178,17 +183,18 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const reply = row ? await rowMarks($, row) : null
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
   if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })
-  const st = STATUS[m.status === 'corrected' && m.repair ? 'repaired' : m.status] ?? STATUS.failed!
+  // a check that did not run is failed too (store.ts notRun); its reason says so
+  const st = checkStatus(m)
   // the citation's words as the reply draws them; the head joins their hover group, as they are nested in it
   const id = `evidence:${row}:${n}`
   const head = Text({ key: 'head', wrap: 'wrap', ...citeHeat(id), children: [
-    Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
+    ...statusEls(els, st, st.sign === 'spin' ? await spinNow($) : '', { bold: true }),
     '  ',
     Text({ key: 'w', ...wordsLook(m.status, id), children: m.shown.replace(/\*\*|`/g, '') }),
   ] })
   const rows: Any[] = [head]
-  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `${m.rewrite ? 'sentence rewritten; ' : m.narrowed ? 'narrowed; ' : ''}was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}` }))
-  if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: st.color } : { dimColor: true }), children: m.reason }))
+  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }) }))
+  if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: 'error' } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
   // the sentence as the person reads it (a rewrite's, once the check rewrote it), the cited words in bold
   const sentence = plainSentence(m.rewrite ?? m.sentence)

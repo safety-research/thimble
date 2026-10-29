@@ -20,6 +20,9 @@
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
 //                                          did not run: x starts it)
+//   checkStatus(item), wasLine(item)       a citation's check as each place that shows its card says it (the tray's
+//                                          header, the evidence pane, the claims pane), and what it was before the
+//                                          check corrected it
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
 //   firstSentence(s)                       a check's reason cut to its first sentence, for a citation's card
@@ -188,6 +191,33 @@ export function aboutOf(f, info = {}) {
 
 /** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run). */
 export const canRepair = m => !!m && m.status === 'failed'
+
+// a citation's check by its status: the sign the reply draws after the citation's words in that status (marks/view.ts
+// withLooks: the turning glyph, `spin`, while it is checked, × failed, ? not checked yet; a checked one has none there,
+// and ✓ here), its word, and its tone
+const CHECKS = {
+  checking: { sign: 'spin', word: 'checking', tone: 'dim' },
+  deferred: { sign: '?', word: 'not checked', tone: 'dim' },
+  verified: { sign: '✓', word: 'verified', tone: 'good' },
+  corrected: { sign: '✓', word: 'corrected', tone: 'good' },
+  repaired: { sign: '✓', word: 'repaired', tone: 'good' },
+  failed: { sign: '×', word: 'failed', tone: 'bad' },
+}
+
+/** A citation's check as every place that shows the citation's card says it: the tray's header, the evidence pane and
+ *  the claims pane, so they never disagree. {key, sign, word, tone}: a citation the check corrected (its right words in
+ *  place of the ones Claude wrote) says corrected, or repaired when x corrected it; a status no check gave (none ran) is
+ *  failed (marks/store.ts notRun). */
+export function checkStatus(m) {
+  const key = m?.status === 'corrected' && m.repair ? 'repaired' : CHECKS[m?.status] ? m.status : 'failed'
+  return { key, ...CHECKS[key] }
+}
+
+/** The line under a corrected citation's status: what it was (`was 15 of 40`). For a sentence the check rewrote, the
+ *  sentence Claude wrote, which the caller gives as `was`, and `sentence rewritten; ` before it; for a citation it
+ *  narrowed, `narrowed; `. */
+export const wasLine = ({ rewritten, narrowed, was }) =>
+  `${rewritten ? 'sentence rewritten; ' : narrowed ? 'narrowed; ' : ''}was ${String(was ?? '').replace(/\*\*|`/g, '')}`
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
  *  it mattered here. A heads-up: its title in bold, then two to four bullets. */
