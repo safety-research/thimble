@@ -1,8 +1,9 @@
 // A chart a custom card draws in SVG (src/canvas/cardBridge.ts), in a real browser that reports a Mac, on the real board:
-// a ⌘-click on one of its shapes asks about that shape by what the drawing says it is, its tooltip or its aria-label,
-// and a shape that says nothing of itself stands for the whole card, so the thread is about the card and is named by
-// its question; a label is asked about by its own text. None is named by the chart's labels run together, which is all
-// the text of the group or the drawing around a shape (an SVG element has no innerText).
+// a ⌘-click on one of its shapes asks about that shape by what the drawing says it is, its tooltip or its aria-label, or
+// by the label it is grouped with; a label is asked about by its own text, and a shape in a label of the page (a legend's
+// swatch, an icon in a list) by that label. A shape that says nothing of itself among the chart's other shapes stands for
+// the whole card, so the thread is about the card and is named by its question, not by the chart's labels run together,
+// which is all the text of the drawing around the shape (an SVG element has no innerText).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -14,20 +15,24 @@ let page: Page
 const threads: { anchor: string; anchor_text: string }[] = []
 
 // as a script draws a chart: no white space between the elements, the ticks first, a tooltip on one bar, an aria-label
-// on another (as Vega's SVG marks carry), and two bars that say nothing of themselves
+// on another (as Vega's SVG marks carry), two bars that say nothing of themselves and one grouped with its own label; a
+// legend's swatch above it and a list with an icon under it
 const CHART =
-  '<style>body{margin:0;padding:10px;font:12px sans-serif}</style>' +
-  '<svg width="360" height="190">' +
+  '<style>body{margin:0;padding:10px;font:12px sans-serif}ul{margin:4px 0;padding:0;list-style:none}</style>' +
+  '<div><span><svg width="12" height="12"><rect id="swatch" width="12" height="12" fill="#d63b6f"></rect></svg> Late</span></div>' +
+  '<svg width="420" height="190">' +
   '<g class="axis"><text x="14" y="160">0</text><text x="14" y="120">10</text><text x="14" y="80">20</text><text x="14" y="40">30</text></g>' +
   '<g class="bars"><rect id="rail" x="120" y="100" width="50" height="60" fill="#3b6fd6"></rect><rect id="road" x="260" y="80" width="50" height="80" fill="#3b6fd6"></rect></g>' +
   '<g class="tips"><rect id="bus" x="50" y="60" width="50" height="100" fill="#3b6fd6"><title>Bus: 25 late</title></rect></g>' +
   '<path id="ferry" d="M190 120h50v40h-50z" fill="#3b6fd6" aria-label="mode: Ferry; late: 10"></path>' +
   '<g class="names"><text id="rail-name" x="128" y="178">Rail</text><text x="58" y="178">Bus</text><text x="198" y="178">Ferry</text><text x="268" y="178">Road</text></g>' +
-  '</svg>'
+  '<g class="tram"><rect id="tram" x="330" y="110" width="50" height="50" fill="#3b6fd6"></rect><text x="338" y="178">Tram</text></g>' +
+  '</svg>' +
+  '<ul><li><svg width="12" height="12"><circle id="icon" cx="6" cy="6" r="6" fill="#20a040"></circle></svg> Alpha run</li></ul>'
 const QUESTION = 'Which mode ran late most?'
 const CANVAS = {
   groups: [{ id: 'g', title: 'Your work', parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst' }],
-  cells: [{ id: 'c1', notebook: 'g', kind: 'custom', title: QUESTION, takeaway: '', created_by: 'model', ts: '2026-10-10T12:00:00+00:00', payload: { html: CHART, height: 210 } }],
+  cells: [{ id: 'c1', notebook: 'g', kind: 'custom', title: QUESTION, takeaway: '', created_by: 'model', ts: '2026-10-10T12:00:00+00:00', payload: { html: CHART, height: 260 } }],
 }
 
 beforeAll(async () => {
@@ -114,4 +119,13 @@ test('a shape is asked about by its aria-label, or by its tooltip', async () => 
 
 test('a label is asked about by its own text', async () => {
   assert.deepEqual(await threadOn('rail-name'), { anchor: 'card:c1', anchor_text: 'Rail' })
+})
+
+test('a bar grouped with its own label is asked about by that label', async () => {
+  assert.deepEqual(await threadOn('tram'), { anchor: 'card:c1', anchor_text: 'Tram' })
+})
+
+test("a shape in a label of the page is asked about by that label: a legend's swatch, an icon in a list", async () => {
+  assert.deepEqual(await threadOn('swatch'), { anchor: 'card:c1', anchor_text: 'Late' })
+  assert.deepEqual(await threadOn('icon'), { anchor: 'card:c1', anchor_text: 'Alpha run' })
 })

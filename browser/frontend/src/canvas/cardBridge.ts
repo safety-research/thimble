@@ -15,11 +15,11 @@
 //   cmd {on, cursor, key}  page to frame: the page's ⌘ pointer went on or off, its arrow, and the ask key Settings pick,
 //                          as a view's frame hears it
 // A part is an element marked data-part (with data-part-text when its text is not what to quote), as on a card thimble
-// draws itself (pointer/parts.ts), else the innermost element with text in it; in a drawing (SVG), a label, or a shape
-// that says what it is (its aria-label or its tooltip), and a shape that does not stands for the whole card, since the
-// text around it is every label of the drawing run together (an SVG element has no innerText). On a Mac ⌘ points once
-// it has been held alone for HOLD_MS, as on the page, and a ⌘-click asks at once; a ⌘-press selects none of the page's
-// text.
+// draws itself (pointer/parts.ts), a label of a drawing (SVG) or a shape that says what it is (its aria-label or its
+// tooltip), else the innermost element with text in it; when that element holds more than one of a drawing's labels,
+// its text is those labels run together (an SVG element has no innerText), and the whole card stands for it. On a Mac ⌘
+// points once it has been held alone for HOLD_MS, as on the page, and a ⌘-click asks at once; a ⌘-press selects none of
+// the page's text.
 import { bus } from '../lib/bus'
 import { getAskKey, isMacPlatform, onAskKey } from '../lib/platform'
 import { token } from '../lib/vizTheme'
@@ -76,13 +76,15 @@ export function cardBridge(holdMs: number, mac: boolean): void {
   }
   // what a shape of a drawing says it is: its aria-label (Vega's marks carry one), else its tooltip (its <title>)
   const said = (el: Element) => (el.getAttribute('aria-label') || Array.from(el.children).find((c) => c.tagName.toLowerCase() === 'title')?.textContent || '').trim()
-  // the part under `t` (module note), or the root on the page's bare background and on a shape that says nothing
+  // the part under `t` (module note), or the root on the page's bare background and where the text around a shape is a
+  // drawing's labels run together
   const partAt = (t: EventTarget | null): Element => {
     const el = t instanceof Element ? t : null
     const own = el && el.closest('[data-part]')
     if (own) return own
-    if (el instanceof SVGElement) return el.closest('text') ?? (said(el) ? el : root)
-    for (let p = el; p && p !== document.body && p !== root; p = p.parentElement) if ((p.textContent || '').trim()) return p
+    const label = el instanceof SVGElement ? (el.closest('text') ?? (said(el) ? el : null)) : null
+    if (label) return label
+    for (let p = el; p && p !== document.body && p !== root; p = p.parentElement) if ((p.textContent || '').trim()) return p.querySelectorAll('text').length > 1 ? root : p
     return root
   }
   // what the pointer was last over in the page, and what ⌘ points at now
