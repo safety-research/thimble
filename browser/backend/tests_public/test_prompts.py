@@ -436,7 +436,7 @@ def test_a_card_shows_the_evidence_chosen_for_its_answer(mode, monkeypatch):
     para = next(p for p in paras if p.startswith("The content is the evidence for one answer"))
     assert "chosen and shaped for the question" in para and "at a glance" in para
     assert "only the records that answer" in para and "with the ones that answer marked" in para
-    assert "also when they asked to see every record" in para
+    assert "when they asked" not in para, "an explicit ask for every record is the analyst's own call"
     assert "Show each number once" in para and "Show numbers that the analyst compares" in para
     assert "a few numbers of different kinds, such as a month's totals, as the rows of a small table" in para
     assert "each in a box of its own, are the look of a dashboard" in para
