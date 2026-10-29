@@ -3044,7 +3044,7 @@ def _typed(rec: dict) -> str | None:
 def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     """One line of a subagent's transcript into its chat: tool calls and results, its text (a thread's fork's as its
     reply, without the lines only the terminal shows), the messages the analyst typed to it in the agent view, and for
-    an agent chat the prompts it was sent."""
+    an agent chat the prompts it was sent (one of thimble's agents', thimble's own: `by` agents.THIMBLE)."""
     rec = _load(line)
     n = 0
     att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else None
@@ -3087,7 +3087,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 return 0
             if sub.thimble and sub.agent_id and _sent_quietly(lv.c, str(sub.agent_id), prompt):
                 return 0  # thimble's wrapping of the person's words, which the chat shows where they were said
-            sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
+            # one of thimble's agents is sent thimble's own text (its start's task, a change), never the analyst's words,
+            # which reach its chat as their own records (views.message, _typed)
+            sub.rec.record("user", text=prompt.strip(), by=agents.THIMBLE if sub.thimble else TERMINAL)
             return 1
     if rec.get("type") == "user":
         for b in _content_list(rec):

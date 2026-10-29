@@ -196,6 +196,9 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
       {shown.map((r, i) => {
         switch (r.kind) {
           case 'user':
+            // a prompt thimble sent one of its agents is no one's message: the thread's own card says what it asked (a
+            // view's Proposal, a ticket's request)
+            if (r.by === 'thimble') return null
             if (r.by === 'extension') return <ExtensionLead key={r.index} name={r.extension ?? ''} text={r.text} ws={ws} />
             return (
               <div key={r.index} className="chat-msg chat-user" data-event={r.event}>

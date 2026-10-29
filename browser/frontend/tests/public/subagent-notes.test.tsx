@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 // What else the browser says about thimble's agents as subagents of main: the line on the session-gone card naming the
-// agents main's quit stopped (src/shell/SessionGone.tsx), and in a thread, where each message came from, a follow-up not
-// passed on with Send again, and the line when a typed follow-up ran on the role's current values (src/chat/Rows.tsx).
+// agents main's quit stopped (src/shell/SessionGone.tsx), and in a thread, where each message came from (a prompt
+// thimble wrote is no one's), a follow-up not passed on with Send again, and the line when a typed follow-up ran on the
+// role's current values (src/chat/Rows.tsx).
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ChipRow, byLabel, devStarted, notPassedOn } from '../../src/chat/Rows.tsx'
+import { ChipRow, Rows, byLabel, devStarted, notPassedOn } from '../../src/chat/Rows.tsx'
 import { stoppedAgentsLine } from '../../src/shell/SessionGone.tsx'
 import type { ChatMeta } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -43,6 +44,22 @@ describe('in a thread', () => {
     expect(byLabel('terminal', 'o1'), "the prompt main's Agent call sent, live check L25 (live-d)").toBeNull()
     expect(byLabel('browser', 'o1')).toBe('sent from thimble')
     expect(byLabel('browser', 'main')).toBeNull()
+  })
+
+  test("a prompt thimble sent one of its agents is no one's message: only the analyst's own words show as theirs", async () => {
+    const task = '## The view\n\nBuild the view Night Runs, whose slug is `night-runs`. Write its three files.'
+    const el = await mount(
+      <Rows
+        ws="mini"
+        chat="dev-1"
+        rows={[
+          { kind: 'user', index: 0, text: task, by: 'thimble' },
+          { kind: 'user', index: 5, text: 'Please color the failed nights red.', by: 'browser' },
+        ]}
+      />,
+    )
+    expect([...el.querySelectorAll('.chat-user .chat-message')].map((m) => m.textContent)).toEqual(['Please color the failed nights red.'])
+    expect(el.textContent).not.toContain('Build the view')
   })
 
   test('a follow-up not passed on shows why and the message, and Send again sends it to the orientation', async () => {
