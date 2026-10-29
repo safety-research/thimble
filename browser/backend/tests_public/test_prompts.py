@@ -350,18 +350,32 @@ def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
     assert "broad" not in para
 
 
+FACT_PRINCIPLE = ("A fact comes from the record that shows it, such as the code, the config, the data or the logs. A "
+                  "README, a comment or a report shows only what someone wrote about it. When it disagrees with the "
+                  "code on what the analyst asked about, tell them in one sentence.")
+
+
 @pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
-    """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
-    words, since the checker finds words copied from a README in the README; and a README or a design note only for
-    what its authors wrote, since it can be out of date. Main names a disagreement with the code in one sentence when it
-    is on what the analyst asked about; before, it named one in almost every answer, also where it did not touch the
-    question."""
+def test_main_says_once_where_a_fact_comes_from(mode, monkeypatch):
+    """Main's Citing claims in the chat says where a fact comes from as one principle, in place of a paragraph about a
+    README alone: the record that shows it, such as the code, the config, the data or the logs, while a README, a
+    comment or a report shows only what someone wrote about it. The old paragraph's last line stays, a disagreement with
+    the code on what the analyst asked about in one sentence: in live runs without it, replies told the analyst not to
+    rely on the README, and with "the records" in its place, answers that did not ask about the README named it more
+    often. The statement to cite is the one that comes from the records, the principle's word: in live runs that said
+    "the data" there, the later steps of a how-it-works answer, which come from the code, went uncited. The terminal's
+    guidance says the same principle in the same words in its Citing claims."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     section = prompts.section("main", "Citing claims in the chat", mode)
-    para = next(p for p in section.split("\n\n") if "README" in p)
-    assert "out of date" in para and "read its code" in para and "words copied from a README" in para
-    assert "disagrees with the code on what the analyst asked about, tell them in one sentence" in para
+    assert FACT_PRINCIPLE in [p.strip() for p in section.split("\n\n")]
+    assert "Cite each statement that comes from the records" in section and "the data supports" not in section
+    main = prompts.load("main", mode)
+    assert main.count("README") == 1
+    for narrow in ("read its code", "words copied from a README", "Cite a document only", "a design note"):
+        assert narrow not in main, narrow
+    guidance = (REPO.parent / "plugin" / "prompts" / "guidance.md").read_text("utf-8")
+    citing = guidance.split("\n## Citing claims\n", 1)[1].split("\n## ", 1)[0]
+    assert FACT_PRINCIPLE in [p.strip() for p in citing.split("\n\n")]
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
