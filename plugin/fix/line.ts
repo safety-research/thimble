@@ -37,7 +37,8 @@
 //   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it   (until the
 //             ◇ Claude changed no code: <title> stays as it was   (a round of a fix the person has)    next prompt)
 //   update    ↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit it · thimble reloaded   (until the next
-//             prompt: at session start, once the kernel put back the fixes an update set aside)
+//             prompt: at session start, once the kernel checked the fixes an update set aside and put back those that
+//             fit)
 //   release   ↑ thimble 0.10.3 is out (you have 0.10.2) · thimble update in a shell   (at session start)
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
 //

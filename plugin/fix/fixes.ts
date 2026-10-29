@@ -136,12 +136,17 @@ export const askedWords = (f: Pick<Fix, 'id' | 'words' | 'asked'>): string[] =>
 /** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
  *  the tests' output when they failed. */
 export type Refusal = { why: string; files: string[]; tests?: string }
-/** What the kernel did with the fixes an update set aside, as it read the list (engine/kernel/fixes.py carry, once
- *  after each update): the fixes that fit the new release (`to`) on again, or kept off as the person had every fix
- *  (off); those it has already (had); those off because they do not fit it (aside, each with why). `reload`: live
- *  changed, and Claude Code copied it. */
-export type Carried = { to: string; back: number[]; had: number[]; aside: number[]; why?: Record<string, string>; off?: boolean; reload?: boolean }
-export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number; carried?: Carried | null }
+/** What the kernel did with the fixes an update set aside (engine/kernel/fixes.py carry, `thimble fix carry --json`,
+ *  once after each update): the fixes that fit the new release (`to`: their change applies, and the release passes a
+ *  fix's checks with them) on again, or kept off as the person had every fix (off); those it has already (had); those
+ *  off because they do not fit it (aside, each with why), or because the checks could not run (unchecked: why). `reload`:
+ *  live changed, and Claude Code copied it; `browser`: stale, a fix to the page went on, which thimble-browser builds at
+ *  its next start. */
+export type Carried = { to: string; back: number[]; had: number[]; aside: number[]; why?: Record<string, string>; off?: boolean; reload?: boolean; unchecked?: string; browser?: string }
+/** The fixes an update set aside that wait for their check on the release (`to`), as the kernel's list says (carry_due):
+ *  n of them; n 0 when only Claude Code's copy of fixes put back is owed. */
+export type CarryDue = { to: string; n: number }
+export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number; due?: CarryDue | null }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
  *  u), failed (y try again · d ask Claude · n dismiss), request (no code), a new release with the fixes replayed on it
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it
@@ -363,21 +368,47 @@ export async function checkUpdate($: Engine): Promise<void> {
   if (d?.newer && d.say !== false) await setFixLine($, { id: 0, kind: 'release', said: d.line || `thimble ${d.to} is out (you have ${d.from}) · in a shell: thimble update` })
 }
 
-/** At session start, when the kernel put back the fixes an update set aside as it read the list (`carried`): one line
- *  says what came of them (`↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit it`), and the session loads
- *  them. An update by thimble 0.10.5 or before set every fix aside and stopped there; this load is the first that runs
- *  after it, from /reload-plugins or a new session. */
-export async function carriedLine($: Engine, list: FixList | null): Promise<void> {
-  const c = list?.carried
-  if (!c || !(c.back.length || c.had.length || c.aside.length)) return
+/** How long the kernel may take to check the fixes an update set aside: the quick tests of the release with their
+ *  changes, once for them all, then once for each fix when they fail together, each run twice when it fails
+ *  (engine/kernel/fixes.py _carry_check). */
+const CARRY_MS = 1_800_000
+
+/** At session start, when the fixes an update set aside wait for their check (the list's `due`): an update by thimble
+ *  0.10.5 or before set every fix aside and stopped there, and this load is the first that runs after it, from
+ *  /reload-plugins or a new session. The kernel checks them on the new release, as at a fix's end, and puts back those
+ *  that pass (`thimble fix carry`, a minute or two, a step on the bar); one line says what came of them, and the session
+ *  loads them. A carry that fails says why, and the fixes stay off. */
+export async function carryFixes($: Engine, list: FixList | null): Promise<void> {
+  const due = list?.due
+  if (!due) return
+  const r = await kernelFix($, ['carry', '--json'], { timeoutMs: CARRY_MS, doing: `checking your fixes on thimble ${due.to}` })
+    .catch((err: unknown) => ({ ok: false, out: '', err: String((err as Error)?.message || err) }))
+  await refreshFixes($)
+  if (!r.ok) {
+    await setFixLine($, { id: 0, kind: 'problem', said: `thimble ${due.to}: your fixes stay off, as thimble could not put them back (${cut(r.err || 'no answer', 160)}) · in a shell: thimble fixes` })
+    return
+  }
+  const c = jsonOf<Carried>(r.out)
+  if (c) await carriedLine($, c)
+}
+
+/** What carry did, in one line (`↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit it`), and the load of
+ *  the fixes it put back: at once, or at the end of Claude's turn while one runs (turn.complete runs reloadIfDue). */
+export async function carriedLine($: Engine, c: Carried): Promise<void> {
   const n = c.back.length
   const m = c.aside.length
-  const said = [`thimble ${c.to}`,
-    ...(n ? [`${n} fix${n === 1 ? '' : 'es'} ${c.off ? `kept, off as you had ${n === 1 ? 'it' : 'them'}` : 'on again'}`] : []),
-    ...(c.had.length ? [`${c.had.length} already in it`] : []),
-    ...(m ? [`${m} off: ${m === 1 ? 'it does' : 'they do'} not fit it`] : [])].join(' · ')
-  await setFixLine($, { id: 0, kind: 'update', said, loads: !!c.reload })
-  await load($, c)
+  if (n || c.had.length || m) {
+    const said = [`thimble ${c.to}`,
+      ...(n ? [`${n} fix${n === 1 ? '' : 'es'} ${c.off ? `kept, off as you had ${n === 1 ? 'it' : 'them'}` : 'on again'}`] : []),
+      ...(c.had.length ? [`${c.had.length} already in it`] : []),
+      ...(m && c.unchecked ? [`${m} off: thimble could not check ${m === 1 ? 'it' : 'them'} (${cut(c.unchecked, 100)})`] : []),
+      ...(m && !c.unchecked ? [`${m} off: ${m === 1 ? 'it does' : 'they do'} not fit it`] : []),
+      ...(c.browser === 'stale' ? ['restart thimble-browser'] : [])].join(' · ')
+    await setFixLine($, { id: 0, kind: 'update', said, loads: !!c.reload })
+  }
+  if (!c.reload) return
+  if (await mainRuns($)) reloadDue = true
+  else await load($, c)
 }
 
 /** Claude ran `thimble update` (the pending fixes' prompt asks for --continue): the session loads what it changed at the

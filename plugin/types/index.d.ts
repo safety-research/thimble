@@ -130,9 +130,10 @@ declare module 'claude-code' {
       threadsGen: number
 
       // ---- fixes (fix/): the person's changes to their own thimble; the kernel keeps the records (fixes.jsonl)
-      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read; what the
-       *  kernel did with the fixes an update set aside as it read them, once (fixes.ts FixList, Carried) */
-      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number; carried?: { to: string; back: number[]; had: number[]; aside: number[]; why?: Record<string, string>; off?: boolean; reload?: boolean } | null } | null
+      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read; the fixes an
+       *  update set aside that wait for their check on the release, which the session's start runs (fixes.ts FixList,
+       *  CarryDue) */
+      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number; due?: { to: string; n: number } | null } | null
       /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
        *  changed; a reload that waits for Claude's turn or a restart; for an update, whether the session loads what
        *  changed (fixes.ts FixLine) */

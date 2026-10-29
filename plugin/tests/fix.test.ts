@@ -85,17 +85,20 @@ function setup(o: { keys?: boolean } = {}) {
   // other fixes a test gives the kernel
   const others: Any[] = []
   const all = () => [...(made ? [fix] : []), ...others].filter(f => f.state !== 'removed')
-  // what the kernel's carry did as it read the list, which it says once (a test sets `listed.carried`)
-  const listed: Any = { carried: null }
-  const list = () => {
-    const carried = listed.carried
-    listed.carried = null
-    return { fixes: all(), on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: all().filter(f => f.state === 'on').length, pointed: true, carried }
-  }
+  // the fixes an update set aside that wait for their check, as the list says (a test sets `listed.due`), and what the
+  // kernel's carry does with them (`listed.carry`: its answer, or { error })
+  const listed: Any = { due: null, carry: null }
+  const list = () => ({ fixes: all(), on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: all().filter(f => f.state === 'on').length, pointed: true, due: listed.due })
   const kernel = (argv: string[], stdin?: string) => {
     const ok = (out: unknown) => ({ exitCode: 0, stdout: typeof out === 'string' ? out : JSON.stringify(out), stderr: '' })
     const verb = argv[argv.indexOf('fix') + 1]
     if (verb === 'list') return ok(list())
+    if (verb === 'carry') {
+      const c = listed.carry
+      if (c?.error) return { exitCode: 1, stdout: '', stderr: `thimble fix carry: ${c.error}` }
+      listed.due = null
+      return ok(c)
+    }
     if (verb === 'sandbox') return ok(BOX)
     // the kernel records the session whose fixer works on the fix (new, round, redo)
     const si = argv.indexOf('--session')
@@ -1355,34 +1358,94 @@ test('at session start one line says a newer release is out, once a session; /th
   expect(s.commands).toEqual([])
 })
 
-test("after an update by an older thimble, the fixes the kernel put back as it read the list get one line at session start, and the plugins load them", async () => {
+test("after an update by an older thimble, the session's start has the kernel check the fixes it set aside, a step on the bar; then one line says what came of them, and the plugins load them", async () => {
   const s = setup()
-  Object.assign(s.fix, { state: 'on', work: null, commit: 'c0ffee1' })
+  Object.assign(s.fix, { state: 'pending', work: null, commit: 'c0ffee1' })
   s.made()
-  s.others.push({ ...s.fix, id: 2, title: 'make the checks run on haiku', state: 'pending', commit: 'c0ffee2', error: 'it does not fit thimble 0.10.6' })
+  s.others.push({ ...s.fix, id: 2, title: 'make the checks run on haiku', state: 'pending', commit: 'c0ffee2' })
   s.fix.check = { from: '0.10.6', to: '0.10.6', newer: false }
-  s.listed.carried = { to: '0.10.6', back: [1], had: [], aside: [2], why: { 2: 'it does not fit thimble 0.10.6' }, off: false, reload: true }
+  s.listed.due = { to: '0.10.6', n: 2 }
+  s.listed.carry = { to: '0.10.6', back: [1], had: [], aside: [2], why: { 2: 'it does not fit thimble 0.10.6' }, off: false, reload: true }
+  // the kernel's check takes minutes (the quick tests of the release with the fixes): the bar shows it while it runs
+  const carried: { steps: string[]; timeoutMs: number }[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('carry')) {
+      carried.push({ steps: busySteps(), timeoutMs: o.timeoutMs })
+      s.fix.state = 'on'
+      s.others[0].error = 'it does not fit thimble 0.10.6'
+    }
+    return run(argv, o)
+  }
   await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
   await s.tick()
+  expect(carried).toEqual([{ steps: expect.arrayContaining(['checking your fixes on thimble 0.10.6']), timeoutMs: 1800000 }])
+  expect(busySteps()).not.toContain('checking your fixes on thimble 0.10.6')
   expect(textOf(await fixLineRows(s.$, ELS, 140))).toContain('↑ thimble 0.10.6 · 1 fix on again · 1 off: it does not fit it · thimble reloaded · thimble fix list, in a shell, lists your fixes')
   expect(s.commands).toEqual(['reload-plugins'])
-  // the reload starts the module again: the kernel says it once, so no second load, and the line stays until the prompt
+  // the reload starts the module again: no fix waits for its check now, so no second check and no second load, and the
+  // line stays until the prompt
   await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
   await s.tick()
+  expect(s.verbs().filter(v => v.startsWith('carry'))).toEqual(['carry --json'])
   expect(s.commands).toEqual(['reload-plugins'])
   expect(textOf(await fixLineRows(s.$, ELS, 140))).toContain('↑ thimble 0.10.6 · 1 fix on again')
   await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
   expect(await fixLineRows(s.$, ELS, 140)).toEqual([])
-  // fixes kept off as the person had them, and one that does not fit: a line, and nothing to load
+  // a list that says nothing waits: no check at all
+  const n = setup()
+  n.fix.check = { from: '0.10.6', to: '0.10.6', newer: false }
+  await n.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await n.tick()
+  expect(n.verbs().filter(v => v.startsWith('carry'))).toEqual([])
+})
+
+test("the fixes a check put back while Claude's turn runs load at the turn's end; a fix to the page says to restart thimble-browser", async () => {
+  const s = setup()
+  Object.assign(s.fix, { state: 'pending', work: null, commit: 'c0ffee1' })
+  s.made()
+  s.fix.check = { from: '0.10.6', to: '0.10.6', newer: false }
+  s.listed.due = { to: '0.10.6', n: 1 }
+  s.listed.carry = { to: '0.10.6', back: [1], had: [], aside: [], why: {}, off: false, reload: true, browser: 'stale' }
+  await s.$.state.set({ plugin: 'thimble', key: 'mainTurn' }, 't-1')
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.tick()
+  expect(textOf(await fixLineRows(s.$, ELS, 160))).toContain('↑ thimble 0.10.6 · 1 fix on again · restart thimble-browser')
+  expect(s.commands).toEqual([])
+  await s.call('turn.complete', { turnId: 't-1', reason: 'answer', answer: 'Done.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  expect(s.commands).toEqual(['reload-plugins'])
+})
+
+test("fixes an update set aside that thimble could not check, or could not put back, stay off, and one line says why", async () => {
+  // the checks could not run (the sandbox runtime is not installed): nothing moved, and nothing loads
   const t = setup()
-  Object.assign(t.fix, { state: 'pending', work: null, commit: 'c0ffee1', error: 'it does not fit thimble 0.10.6' })
+  Object.assign(t.fix, { state: 'pending', work: null, commit: 'c0ffee1' })
   t.made()
   t.fix.check = { from: '0.10.6', to: '0.10.6', newer: false }
-  t.listed.carried = { to: '0.10.6', back: [], had: [], aside: [1], why: { 1: 'it does not fit thimble 0.10.6' }, off: false, reload: false }
+  t.listed.due = { to: '0.10.6', n: 1 }
+  t.listed.carry = { to: '0.10.6', back: [], had: [], aside: [1], why: {}, off: false, reload: false, unchecked: 'the sandbox runtime that fixes run in is not installed' }
   await t.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
   await t.tick()
-  expect(textOf(await fixLineRows(t.$, ELS, 140))).toContain('↑ thimble 0.10.6 · 1 off: it does not fit it · thimble fix list, in a shell, lists your fixes')
+  expect(textOf(await fixLineRows(t.$, ELS, 200))).toContain('↑ thimble 0.10.6 · 1 off: thimble could not check it (the sandbox runtime that fixes run in is not installed)')
   expect(t.commands).toEqual([])
+  // the kernel's carry failed: the fixes stay off, and the line names the command that tries again
+  const u = setup()
+  Object.assign(u.fix, { state: 'pending', work: null, commit: 'c0ffee1' })
+  u.made()
+  u.fix.check = { from: '0.10.6', to: '0.10.6', newer: false }
+  u.listed.due = { to: '0.10.6', n: 1 }
+  u.listed.carry = { error: 'git checkout failed: made-up' }
+  await u.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await u.tick()
+  expect(textOf(await fixLineRows(u.$, ELS, 200))).toContain('thimble 0.10.6: your fixes stay off, as thimble could not put them back (git checkout failed: made-up) · in a shell: thimble fixes')
+  expect(u.commands).toEqual([])
 })
 
 test("on a dev install the line names the checkout's new commit, once for that commit", async () => {
