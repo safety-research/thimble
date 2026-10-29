@@ -22,7 +22,7 @@ import logging
 import re
 import secrets
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -419,7 +419,8 @@ class Ctx:
     notebook: str | None = None
     terminal: bool = True
     anchor: str | None = None  # the card a thread is on (its `card:<id>` anchor's id; agents.py): edit_card's default card
-    # the chat (agents.py) a call comes from: its cards are stamped `created_by: chat:<id>`; None from the terminal's shim
+    # the chat (agents.py) a call comes from: its cards are stamped `created_by: chat:<id>`; None from the terminal's
+    # shim, but the thread's for a call of a thread's fork that makes a card (_as_fork)
     chat: str | None = None
     session: str | None = None  # the THIMBLE_SESSION of the shim that posted the call: None for main's, `orient`, `writer:<doc>`
     # the id Claude Code gave the call (MCP `_meta` "claudecode/toolUseId"), named by the `agent` record a call writes
@@ -500,13 +501,22 @@ def session_kernel(session: str) -> str:
     return "s-" + (re.sub(r"[^A-Za-z0-9_-]+", "-", session).strip("-") or "agent")
 
 
-def _agent_fields(ctx: "Ctx", *, runs: bool) -> dict[str, str]:
-    """What a new card of one of thimble's agents (agent_session) carries: its session, and for a card that runs, the
-    session's own kernel (session_kernel). {} for a card of anyone else."""
-    if not agent_session(ctx.session):
-        return {}
-    key = str(ctx.session)
-    return {SESSION_KEY: key, **({"kernel": session_kernel(key)} if runs else {})}
+def thread_kernel(thread_id: str) -> str:
+    """The kernel a thread's cards run on, named after the thread, as its own group's kernel was when each thread had a
+    group: a fork's card never waits for one of main's cards to finish, and shares no variables with them."""
+    return f"t-{thread_id}"
+
+
+def _maker_fields(ctx: "Ctx", *, runs: bool) -> dict[str, str]:
+    """What a new card carries for the caller that made it: a card of one of thimble's agents (agent_session) its
+    session, and when it runs, the session's own kernel (session_kernel); a card that runs and that a thread's fork made
+    (_as_fork), the thread's kernel (thread_kernel). {} for a card of anyone else."""
+    if agent_session(ctx.session):
+        key = str(ctx.session)
+        return {SESSION_KEY: key, **({"kernel": session_kernel(key)} if runs else {})}
+    from . import threads  # noqa: PLC0415
+
+    return {"kernel": thread_kernel(ctx.chat)} if runs and ctx.chat and threads.is_thread(ctx.c, ctx.chat) else {}
 
 
 def _analysts(ws: Path, nb_id: str) -> bool:
@@ -564,7 +574,8 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     batch = None
     # a session thimble started (the orientation, a writer) owns the steps its calls make (undo, sessions)
     with undo.batching(batch), undo.acting_session(session):
-        author = Ctx(c, actor, notebook, terminal, anchor, chat, session).cell_author
+        # a thread's fork acts for its thread, whose cards are the thread's from the start (_as_fork)
+        author = (await _as_fork(Ctx(c, actor, notebook, terminal, anchor, chat, session, tool_use_id))).cell_author
         with canvas_history.acting(author):  # who changed a card
             res = await _run(spec, c, name, args, actor, notebook, terminal, anchor, chat, session, tool_use_id)
         # the card check (card_check.py): a card add_card or edit_card wrote is drawn and read once it has its
@@ -1315,6 +1326,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return err(_needs_code("add_card", kind, args))
     elif problem := _content_on_code("add_card", kind, args) or _card_installs(ctx, code, "add_card"):
         return err(problem)
+    ctx = await _as_fork(ctx)
     group = " ".join(str(args.get("group") or "").split())
     request = request_of(group)
     made: builtins.list[str] = []
@@ -1349,7 +1361,7 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return ok(warn + res.text + (f"\n\n{line}" if line else ""))
     cell = await notebook.run_code(ctx.c, code, created_by=ctx.cell_author, title=title, notebook=nb_id,
                                    default_timeout_s=_default_timeout(ctx), kind=kind,
-                                   fields=_agent_fields(ctx, runs=True))
+                                   fields=_maker_fields(ctx, runs=True))
     cid = str(cell.get("id") or "")
     if cid:
         _remember_cell(ctx, nb_id, cid)
@@ -1386,7 +1398,7 @@ def _add_data_cell(ctx: Ctx, nb_id: str, kind: str, title: str, payload: dict,
     from . import notebook
 
     new = notebook.new_cell(kind, ctx.cell_author, title, nb_id, payload=payload)
-    cell = notebook.insert_cell(ctx.c, nb_id, {**new, **_agent_fields(ctx, runs=False)})
+    cell = notebook.insert_cell(ctx.c, nb_id, {**new, **_maker_fields(ctx, runs=False)})
     cid = str(cell["id"])
     _remember_cell(ctx, nb_id, cid)
     return ok(f"card:{cid}" + "".join(f"\n\n{line}" for line in lines))
@@ -2501,8 +2513,9 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                         scope=concepts.SCOPE_OF_UNIT.get(prior["unit"]), new=scope))
     orienting = session_kind(ctx.session) == ORIENT_SESSION
     group = str(args.get("group") or "").strip()
-    # a label's card stands loose unless the call names its group, as any card does; a card the label has already
-    # stays where it is (concepts.label_card)
+    # a label's card stands loose unless the call names its group, as any card does, and a thread's fork's label and
+    # its card are the thread's (_as_fork); a card the label has already stays where it is (concepts.label_card)
+    ctx = await _as_fork(ctx)
     target = None if orienting else _group_id(ctx, group, []) if group else default_group(ctx)
     question = _question(args.get("question")) or None
     within = args.get("within") or None
@@ -2715,6 +2728,22 @@ async def _fork_of(ctx: Ctx) -> dict[str, Any] | None:
     if not subagents.fork_call(ctx.c, ctx.tool_use_id):
         return None
     return await subagents.fork_thread(ctx.c, ctx.tool_use_id) or {}
+
+
+async def _as_fork(ctx: Ctx) -> Ctx:
+    """The caller as the thread whose fork made the call (_fork_of), when it is one: a card the call makes is the
+    thread's from the moment it is made (`created_by: chat:<thread>`), so the canvas puts it beside the card the thread
+    is about at once, and a note about such a card (card_size) goes with the fork's next call. `ctx` as it is for any
+    other call, and for a fork whose thread the mirror does not know yet, whose card the mirror credits to the thread
+    once it reads the call's result (agents.claim_cell)."""
+    if ctx.chat or ctx.session or not ctx.tool_use_id:
+        return ctx
+    try:
+        thread = await _fork_of(ctx)
+    except (OSError, ValueError):  # no such workspace, or its records cannot be read: the call runs as it came
+        log.debug("the thread of call %s was not found", ctx.tool_use_id, exc_info=True)
+        return ctx
+    return replace(ctx, chat=str(thread["id"])) if thread and thread.get("id") else ctx
 
 
 # what a thread's anchor names (agents.new_thread), as the lines a ticket from the thread adds (_with_anchor)

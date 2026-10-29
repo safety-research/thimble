@@ -6,7 +6,8 @@ adds without a group, a label's card, a card the analyst adds on the canvas, a c
 Workspaces from before keep the groups they have.
 
 Main's calls go through tools.call as main's shim makes them (runtime.call_thimble): the analyst's caller, no notebook
-and no session of thimble's. A thread's fork calls the same way."""
+and no session of thimble's. A thread's fork calls the same way, and the caller hook's line of its call tells it apart
+(subagents.fork_call), so what it makes is the thread's from the start."""
 from __future__ import annotations
 
 import json
@@ -14,9 +15,11 @@ import re
 
 import httpx
 import pytest
+from conftest import Listener
 from fastapi import FastAPI
 
-from app import agents, concepts, config, investigation, notebook, threads, tools
+from app import agents, card_size, concepts, config, investigation, notebook, session, subagents, threads, tools
+from app import subagent_files as sf
 
 CORPUS = "mini"
 YOUR_WORK = notebook.ANALYST_NOTEBOOK_TITLE
@@ -238,6 +241,86 @@ async def test_a_thread_s_card_stands_loose_and_lists_as_the_thread_s():
     agents.update_agent(CORPUS, old, group=kept)
     assert group_of(await card("And then?", group=f"thread:{old}"))["id"] == kept
     assert [r["id"] for r in frames()] == [kept]
+
+
+@pytest.fixture()
+def fork():
+    """A side thread on a loose card of main's, answered by the fork `fork1`, which main's session (a Listener) follows
+    into the thread's chat. (the thread's id, a function that writes the caller hook's line of one of the fork's calls
+    and gives its id.)"""
+    anchor = notebook.insert_cell(CORPUS, notebook.loose_group(ws()),
+                                  notebook.new_cell("note", tools.TERMINAL, "How many runs failed?", payload={"text": "x"}))
+    tid = agents.new_thread(CORPUS, f"card:{anchor['id']}", "How many runs failed?")["id"]
+    q = Listener(CORPUS)
+    session._live[CORPUS].subs.append(session.Sub(CORPUS, tid, "toolu_forked", "fork1", thread=True))
+    n = [0]
+
+    def call() -> str:
+        n[0] += 1
+        sf.add_caller(ws(), f"toolu_fork{n[0]:04d}", "fork1", sf.FORK_TYPE)
+        return f"toolu_fork{n[0]:04d}"
+
+    yield tid, call
+    q.close()
+
+
+async def by_fork(call, tool: str, **args):
+    """One call of the thread's fork, through main's shim with the caller hook's line."""
+    r = await tools.call(CORPUS, tool, args, tool_use_id=call())
+    assert not r.is_error, r.text
+    return r
+
+
+async def test_a_thread_s_card_is_the_thread_s_from_the_moment_it_is_made(fork, monkeypatch):
+    """A card a thread's fork adds is credited to the thread as it is made, so the page, which puts what a thread made
+    beside the card the thread is about, draws it there the first time it shows it, while its code still runs. Its
+    code runs on the thread's own kernel, apart from main's loose cards. A sequence the fork names is one group, each
+    card of it the thread's from the start. Main's own card stays main's."""
+    tid, call = fork
+    said: list[dict] = []
+    monkeypatch.setattr(investigation, "emit", lambda c, inv, rec: said.append(rec))
+    await main("add_card", kind="code", question="Main's?", code="seen = 'main'")
+    r = await by_fork(call, "add_card", kind="code", question="Which stage stopped each run?",
+                      code="print(globals().get('seen', 'apart'))")
+    cell = notebook.get_cell(CORPUS, cid_of(r))
+    assert cell["created_by"] == f"chat:{tid}" and group_of(cell["id"])["kind"] == notebook.LOOSE_KIND
+    made = next(x for x in said if x.get("cell") == cell["id"] and x.get("op") == "created")
+    assert made["by"] == f"chat:{tid}", "the card's first record names the thread, before its code has run"
+    assert cell["kernel"] == tools.thread_kernel(tid)
+    assert "apart" in "".join(str(b.get("text/plain") or b.get("text") or "") for b in cell["outputs"]), cell["outputs"]
+    note = notebook.get_cell(CORPUS, cid_of(await by_fork(call, "add_card", kind="note", question="Why?", text="x")))
+    assert note["created_by"] == f"chat:{tid}" and "kernel" not in note
+    seq = [cid_of(await by_fork(call, "add_card", kind="note", question=q, text="x",
+                                group="Where did the failed runs stop?")) for q in ("Which stage?", "Which runner?")]
+    g = group_of(seq[0])
+    assert g["parent"] is None and [c["id"] for c in g["cells"]] == seq
+    assert {c["created_by"] for c in g["cells"]} == {f"chat:{tid}"}
+    mine = notebook.get_cell(CORPUS, cid_of(await main("add_card", kind="note", question="Main's again?", text="x")))
+    assert mine["created_by"] == tools.TERMINAL and "kernel" not in mine
+    # the page finds the fork's card too tall: the fork is told with its next call, and main is not
+    assert card_size.tell(CORPUS, notebook.get_cell(CORPUS, cell["id"]), 1200)
+    assert f"card:{cell['id']}'s body draws 1200 px tall" not in (await main("list_cards", group="all")).text
+    assert f"card:{cell['id']}'s body draws 1200 px tall" in (await by_fork(call, "list_cards", group="all")).text
+
+
+async def test_a_thread_s_label_is_the_thread_s_and_an_unknown_fork_s_card_waits_for_the_mirror(fork, monkeypatch):
+    """A label a thread's fork applies, and its card, are the thread's from the start. A fork whose thread the mirror
+    does not know yet adds a card stamped as main's shim stamps it, which the mirror credits to the thread later."""
+    tid, call = fork
+    monkeypatch.setattr(investigation, "emit", lambda *a, **k: None)
+    await by_fork(call, "apply_label", scope="files", paths=["board.jsonl"], name="claims a PR",
+                  predicate={"kind": "regex", "text": "forge pr claim"})
+    (_, cell), = concepts._label_cards(ws(), concepts.find_concept(ws(), "claims a PR")["id"])
+    assert cell["created_by"] == f"chat:{tid}" and group_of(cell["id"])["kind"] == notebook.LOOSE_KIND
+    monkeypatch.setattr(subagents, "CALLER_WAIT_S", 0.05)
+    sf.add_caller(ws(), "toolu_stranger", "fork2", sf.FORK_TYPE)
+    r = await tools.call(CORPUS, "add_card", {"kind": "note", "question": "Whose?", "text": "x"},
+                         tool_use_id="toolu_stranger")
+    assert not r.is_error, r.text
+    stranger = notebook.get_cell(CORPUS, cid_of(r))
+    assert stranger["created_by"] == tools.TERMINAL and "kernel" not in stranger
+    agents.claim_cell(CORPUS, stranger["id"], tid)
+    assert notebook.get_cell(CORPUS, stranger["id"])["created_by"] == f"chat:{tid}"
 
 
 async def test_a_path_of_titles_makes_one_group_never_a_chain():

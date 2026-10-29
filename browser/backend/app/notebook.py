@@ -3174,13 +3174,14 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
 
 def _kernel_for(nb: dict, kernel: str | None, cell: dict | None = None, ws: Path | None = None) -> str | None:
     """The kernel a cell of `nb` executes on: an explicit `kernel` wins; a card that names its own (`cell.kernel`) runs
-    there, as one moved from another group keeps the kernel it ran on and an agent's card the kernel of its session.
-    Otherwise exploration groups run on the shared kernel (None) and every other group on a dedicated kernel named after
-    it. The terminal's own cells run on its dedicated kernel wherever they land."""
+    there, as one moved from another group keeps the kernel it ran on, an agent's card the kernel of its session and a
+    thread's card the thread's kernel. Otherwise exploration groups run on the shared kernel (None) and every other
+    group on a dedicated kernel named after it. The terminal's own cells run on its dedicated kernel wherever they
+    land."""
     if kernel:
         return kernel
     kept = (cell or {}).get("kernel")
-    if isinstance(kept, str):  # move_cells and tools._agent_fields set it; '' is shared
+    if isinstance(kept, str):  # move_cells and tools._maker_fields set it; '' is shared
         return kept or None
     if nb.get("role", DEFAULT_ROLE) == "exploration" and nb.get("created_by") != TERMINAL_CREATOR \
             and (cell or {}).get("created_by") != TERMINAL_CREATOR:
@@ -3688,7 +3689,7 @@ async def run_code(
     its stale takeaway cleared. With no `notebook` the card stands loose on the canvas (loose_group). `created_at_event`
     is the index of the tool_use record that made the cell. `timeout_s` is stored as the cell's allowance;
     `default_timeout_s` applies when none is named and is never stored. `fields` are stored on a new cell before it
-    runs, such as the session of the agent that made it and that session's kernel (tools._agent_fields). Returns the
+    runs, such as the session of the agent that made it and that session's kernel (tools._maker_fields). Returns the
     cell with complete outputs; the group stores the bounded version."""
     _, full = await _run_code(workspace, code, created_by, title, notebook, created_at_event, replace, kernel, timeout_s,
                               default_timeout_s, kind, fields)

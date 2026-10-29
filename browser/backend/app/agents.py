@@ -505,8 +505,9 @@ CLAIM_EDIT_S = 120  # an `edited` entry this recent is the edit_card call the mi
 
 
 def claim_cell(c: str, cid: str, chat_id: str, *, edit: bool = False) -> None:
-    """Credit a card a subagent or thread fork made (add_card) or changed (edit_card) to its chat. Every card from the shared
-    shim is stamped `terminal`; the mirror knows whose transcript a call is in and replaces that stamp with `chat:<id>`."""
+    """Credit a card a subagent or thread fork made (add_card) or changed (edit_card) to its chat. A card from the shared
+    shim is stamped `terminal`, unless the call was a thread's fork's whose thread was known as the card was made
+    (tools._as_fork); the mirror knows whose transcript a call is in and replaces that stamp with `chat:<id>`."""
     if not cid or not chat_id:
         return
     try:
