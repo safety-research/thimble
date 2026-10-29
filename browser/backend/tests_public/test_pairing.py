@@ -240,6 +240,11 @@ def test_a_browser_that_is_not_signed_in_wants_a_new_link_at_most_once_a_minute(
     shot = {hook_auth.SHOT_HEADER: hook_auth.mint_shot()}
     assert client.get("/api/ui/paired", headers=shot).json()["paired"] is False
     assert hook_auth.links_wanted() == 4, "a screenshot's page wants none"
+    for site in ("cross-site", "same-site", "none"):  # another site's page, as an <img>, or a link typed or followed
+        assert client.get("/api/ui/paired", headers={"Sec-Fetch-Site": site}).json()["paired"] is False
+    assert hook_auth.links_wanted() == 4, "only the workbench's own page asks for a link"
+    assert client.get("/api/ui/paired", headers={"Sec-Fetch-Site": "same-origin"}).json()["paired"] is False
+    assert hook_auth.links_wanted() == 5, "the page's own ask counts"
 
 
 @pytest.mark.real_read_guard

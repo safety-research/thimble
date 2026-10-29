@@ -390,9 +390,12 @@ def want_link(scope: dict) -> None:
     """A browser that is not signed in asked whether it is (GET /api/ui/paired), as its page does before it shows the
     sign-in line: count it (links_wanted), so thimble-browser prints a new link in its terminal (module note). After a
     counted ask, others count again LINK_EVERY_S later, as the link printed for it still works, or once a live code was
-    spent (_spend), which may be that link's. A screenshot's page (shot_proven) wants none."""
+    spent (_spend), which may be that link's. A screenshot's page (shot_proven) wants none, and neither does a request
+    a browser marks as from another site or another page (Sec-Fetch-Site other than same-origin, as an <img> on another
+    site's page sends), since each new link ends the one before it that waits to be used."""
     global _wanted, _wanted_at
-    if shot_proven(Headers(scope=scope), scope.get("method", "")):
+    headers = Headers(scope=scope)
+    if shot_proven(headers, scope.get("method", "")) or headers.get("sec-fetch-site", "same-origin") != "same-origin":
         return
     now = _now()
     with _pair_lock:
