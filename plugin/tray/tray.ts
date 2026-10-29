@@ -7,9 +7,12 @@
 // answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
 // answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the mark it
-// opens (`] next heads up`; on a narrow bar `] next`, then `]` alone): while one of the answer's marks is not opened,
-// the first such, its words in thimble's color; once the person opened each, the first mark, drawn as the bar's other
-// keys. While it is open its keys are in its header, at the right, each where it acts (the bar keeps its own):
+// opens (`] show explainer` for the answer's first mark, `] next citation` for a later one; on a narrow bar
+// `] explainer`, then `]` alone): while one of the answer's marks is not opened, the first such, its verb in
+// thimble's color; once the person opened each, the first mark, its verb drawn as the bar's other keys' words. The
+// words that name a mark, there and in the tray's header (`] next heads up`), are in that mark's own look (kindLook:
+// an explainer's teal, a heads-up's orange, a citation's underline), so the bar shows what each look is. While it is
+// open its keys are in its header, at the right, each where it acts (the bar keeps its own):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
@@ -25,7 +28,8 @@
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
-//   ] [         the next mark or card after the one it shows, and the one before, named by what they are
+//   ] [         the next mark or card after the one it shows, and the one before, named by what they are, in their
+//               look
 //   d u         a body taller than the tray's rows: a page further down, a page back up, while no other key holder (the
 //               fix line, a card on screen) takes the letter; the row under the window names them
 //
@@ -46,6 +50,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { spinNow } from '../bar/busy'
 import { failNotice, reasonOf } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
@@ -55,7 +60,7 @@ import { openPane } from '../core/pane'
 import { controlWords } from '../core/selection'
 import { keyOwner, revealCard } from '../cards/draw'
 import { quiet } from '../core/askcell.js'
-import { textWidth } from '../core/text.js'
+import { partsAround, textWidth } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
@@ -64,7 +69,7 @@ import { explainSpans, pendingGloss, type ExplainPart, type Gloss } from '../exp
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, launchRepair, repairOf } from '../marks/checker'
-import { highlighted, wrapCode } from '../marks/evidence'
+import { highlighted, statusEls, wrapCode } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords, quietLooks } from '../marks/register'
@@ -75,8 +80,8 @@ import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
 import {
-  aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, printLine, push, refOf, restStop, rowsOf, sameRef, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  aboutOf, back, base, canRepair, checkStatus, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
+  open, printLine, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, top, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -294,13 +299,35 @@ async function stepPlace($: Engine): Promise<{ list: Stop[]; at: number }> {
   return { list, at: indexOf(list, b ?? stand) }
 }
 
-/** Whether ] and [ go anywhere from where they stand, and what each goes to. */
-export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean; nextWhat?: string; prevWhat?: string }> {
+/** Whether ] and [ go anywhere from where they stand, and what each goes to: in words, and its kind (tray.mjs
+ *  stopKind). */
+export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolean; nextWhat?: string; prevWhat?: string; nextKind?: string | null; prevKind?: string | null }> {
   const { list, at } = await stepPlace($)
   if (at < 0) return { next: true, prev: true }
   const next = stepFrom(list, at, 1)
   const prev = stepFrom(list, at, -1)
-  return { next: !!next, prev: !!prev, ...(next ? { nextWhat: stopWhat(next) } : {}), ...(prev ? { prevWhat: stopWhat(prev) } : {}) }
+  return {
+    next: !!next, prev: !!prev,
+    ...(next ? { nextWhat: stopWhat(next), nextKind: stopKind(next) } : {}), ...(prev ? { prevWhat: stopWhat(prev), prevKind: stopKind(prev) } : {}),
+  }
+}
+
+/** The look of the words that name a kind of mark (`] show explainer`, `] next citation`), on the bar and in the tray's
+ *  header: the mark's own look at rest, as the reply draws it (an explainer's teal fill and a heads-up's orange one,
+ *  explain/place.mjs markColors; a citation's underline, marks/view.ts citeLook), so the words that name a mark show
+ *  what it looks like. A card has none. In the theme set the drawing read last (themeNow). */
+function kindLook(kind: string | null | undefined): Record<string, unknown> | null {
+  const c = markColors(themeLast())
+  if (kind === 'explain') return { backgroundColor: c.glossBg }
+  if (kind === 'heads') return { backgroundColor: c.headsBg }
+  if (kind === 'citation') return { underline: true }
+  return null
+}
+
+/** A bar item's `marked`: the words `what` that name a kind of mark, in its look (kindLook); nothing for a card. */
+const markedAs = (what: string | undefined, kind: string | null | undefined): Pick<BarItem, 'marked'> => {
+  const look = kindLook(kind)
+  return what && look ? { marked: { words: what, look } } : {}
 }
 
 // ------------------------------------------------------------------------------------------------ what a mark is
@@ -576,7 +603,11 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
   if (preview) return []
   const tray = await trayNow($)
   const stand = tray ? null : await standNow($)
-  const steps = (): Promise<BarItem[]> => stepEnds($).then(ends => stepWords(ends).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, focus: true, press: () => stepMark($, s.key === ']' ? 1 : -1) })))
+  const steps = async (): Promise<BarItem[]> => {
+    const ends = await stepEnds($)
+    await themeNow($)
+    return stepWords(ends).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, ...markedAs(s.what, s.kind), focus: true, press: () => stepMark($, s.key === ']' ? 1 : -1) }))
+  }
   if (stand) {
     return [
       { id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askCard($, stand) },
@@ -588,23 +619,31 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
   return tray ? [] : restItem($)
 }
 
-/** At rest, while the answer the keys act on shows marks: ] and the mark it opens from rest (restNext), a press too; in
+/** At rest, while the answer the keys act on shows marks: ] and the mark it opens from rest (restNext), a press too:
+ *  `] show explainer` for the answer's first mark, `] next citation` for a later one, the words that name the mark in
+ *  its own look (markedAs), so the bar shows what each look is while the answer has marks. The rest of its words in
  *  thimble's color while the answer shows a mark the person has not opened (markSeen). On a narrow bar its words give
- *  way before any count does: `] next`, then `]` alone (bar/bar.tsx). */
+ *  way after coverage's file counts: the verb first (`] explainer`), and after the busy step's words the mark's name
+ *  (`]` alone) (bar/bar.tsx). */
 async function restItem($: Engine): Promise<BarItem[]> {
   const row = await actingRow($)
   const marks = row ? await answerMarks($, row) : []
   if (!marks.length) return []
   const seen = await seenNow($)
   const fresh = marks.some(p => !seen.has(seenRef(p)))
-  return [{ id: 'tray-next', key: ']', words: `next ${stopWhat(restNext(marks, seen))}`, shorter: ['next', ''], ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
+  const next = restNext(marks, seen)
+  const w = restWords(next, marks.indexOf(next!) === 0)
+  await themeNow($)
+  return [{ id: 'tray-next', key: ']', words: w.words, shorter: w.shorter, ...markedAs(w.what, w.kind), ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
 }
 
 /** An open tray's keys, in its header at the right, each a click that does what its key does: ] (or [) the next mark,
  *  h the explainer on a citation's words, a ask, 0 back or close. x repair and + expand all (− collapse) are in the
  *  citation's card, where they act, and 2–9 are its links in an explainer's words. */
 async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
-  const out: BarItem[] = (await stepEnds($).then(ends => stepWords(ends))).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, press: () => stepMark($, s.key === ']' ? 1 : -1) }))
+  const ends = await stepEnds($)
+  await themeNow($)
+  const out: BarItem[] = stepWords(ends).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, ...markedAs(s.what, s.kind), press: () => stepMark($, s.key === ']' ? 1 : -1) }))
   if (f.kind === 'citation') {
     const inner = await innerOf($, f)
     if (inner) {
@@ -658,18 +697,13 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
   return drawsHyperlinks(env)
 }
 
-/** A citation's status as its header says it, beside the kind: a sign, the word and its color. */
-const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
-  checking: { word: 'checking', dim: true },
-  deferred: { word: 'not checked', dim: true },
-  verified: { word: '✓ verified', color: 'success' },
-  corrected: { word: '✓ verified', color: 'success' },
-  failed: { word: '× failed', color: 'error' },
-}
-
-/** A citation's status: the store's, and failed for one with no check (marks/store.ts notRun; one the store no longer
- *  holds, whose reply the reply draws failed too, says so under it). */
-const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status] : null) ?? STATUS.failed!
+/** A citation's status as its header says it, in the words the evidence pane and the claims pane say it in (tray.mjs
+ *  checkStatus): the sign the reply draws after the citation's words in that status, so the tray says what it means
+ *  (the turning glyph while it is checked, × failed, ? not checked yet; ✓ for a checked one, which has none there), and
+ *  its word: verified, or corrected (the right words in place of the ones Claude wrote, which the line under it gives),
+ *  repaired when x corrected it. Failed for one with no check (marks/store.ts notRun; one the store no longer holds,
+ *  whose reply the reply draws failed too, says so under it). */
+const statusOf = (m: MarkItem | null) => checkStatus(m)
 
 /** The color of a line of code: the theme key thimble draws inline code in (marks/view.ts), a blue Claude Code shades
  *  for the theme it draws in. */
@@ -689,8 +723,9 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
   ] }) }
 }
 
-/** A citation's card under its header (the status is in the header). A corrected one says what it was; a failed one
- *  why in one sentence; after a repair (x), what it did; all dim, and under it
+/** A citation's card under its header (the status is in the header). A corrected one says what it was (`was 15 of
+ *  40`; a rewritten sentence or a narrowed citation says which, as the header says only corrected or repaired); a
+ *  failed one why in one sentence; after a repair (x) that verified it as written, why; all dim, and under it
  *  `x repair`, a press that checks it again (the ui.press hook, as x does). Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
  *  block, ended by `+ expand all`, a click that shows all the code and output (`fold`, as +); expanded, all the code
@@ -703,10 +738,9 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const ev = m.evidence
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
-  const fixed = m.rewrite ? (m.repair ? 'repaired by rewriting the sentence; ' : 'sentence rewritten; ') : m.narrowed ? (m.repair ? 'repaired by narrowing; ' : 'narrowed; ') : m.repair ? 'repaired; ' : 'corrected; '
   const notFixed = m.repair ? 'not repaired: ' : ''
   // a rewrite's history is the sentence Claude wrote
-  if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}`)
+  if (m.status === 'corrected' && m.was) dim('was', wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }))
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
@@ -964,7 +998,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   // its keys at the right, after a citation's status, each drawn as the bar draws a key and a click that presses it
   const keys = await trayKeys($, tray, f)
   const keysLen = keys.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
-  const rightLen = (status ? status.word.length + 2 : 0) + keysLen
+  // the status: its sign, a space and its word, then two cells before the keys
+  const rightLen = (status ? status.word.length + 4 : 0) + keysLen
   // the title and the keys on one row when both fit, else the title on a row of its own above them
   const oneRow = title.length + 2 + rightLen <= inner
   const roomT = oneRow ? title.length : inner
@@ -978,14 +1013,19 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     Text({ key: 't', ...look, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
   ] })
   const about = aboutOf(f, await infoOf($, f))
+  // each key's words dim, as the bar draws a key's, and the words that name a kind of mark (`] next heads up`) in that
+  // mark's look (kindLook), as the bar's ] names it
   const keyEls = keys.flatMap((k, i) => [
     ...(i ? [Text({ key: `ksep${i}`, dimColor: true, children: ' · ' })] : []),
     els.Button({ key: k.id, plain: true, label: k.key === 'a' ? `ask about ${about}` : `${k.key} ${k.words}`, hover: quiet(k.id), onPress: k.press, children: [
-      Text({ key: 'k', color: accent(), bold: true, children: k.key }), Text({ key: 'w', dimColor: true, children: ` ${k.words}` }),
+      Text({ key: 'k', color: accent(), bold: true, children: k.key }),
+      ...partsAround(` ${k.words}`, k.marked?.words).map((p: { s: string; marked: boolean }, j: number) => Text({ key: j ? `w${j}` : 'w', ...(p.marked ? k.marked!.look : { dimColor: true }), children: p.s })),
     ] }),
   ])
+  // a citation's status: the turning glyph beside `checking` turns with the one after its words in the reply
+  const spin = status?.sign === 'spin' ? await spinNow($) : ''
   const rightEl = Box({ key: 'r', flexDirection: 'row', ...(oneRow ? { flexShrink: 0 } : { flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }), children: [
-    ...(status ? [Text({ key: 's', ...(status.color ? { color: status.color } : { dimColor: true }), children: status.word }), Text({ key: 'gap', children: '  ' })] : []),
+    ...(status ? [...statusEls(els, status, spin), Text({ key: 'gap', children: '  ' })] : []),
     ...keyEls,
   ] })
   const head = oneRow

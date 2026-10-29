@@ -5,6 +5,7 @@
 //                  zero-width character, 1 for the rest
 //   cut(s, n, middle)  s in at most n cells, with `…` where it was cut: at its end, or in its middle
 //   cutWords(s, n, keep)  s in at most n cells, cut at a word's edge, its start or its end kept
+//   partsAround(s, words)  s in parts around the last place it holds `words`, which a drawing draws in a look of its own
 //   fenced(text)   text in a fenced block, so a model reads text from the records as data, not as words to act on
 
 /** A code point's cells: 0 for combining marks and zero-width characters, 2 for wide and fullwidth ones. */
@@ -75,6 +76,16 @@ export function cutWords(s, n, keep = 'start') {
   const prev = body.slice(0, body.length - part.length).slice(-1)
   if (prev && !/\s/.test(prev) && /\s/.test(part)) part = part.replace(/^\S*\s+/, '')
   return `…${part.trimStart()}`
+}
+
+/** s in parts around the last place it holds `words`: what stands before them, `words` themselves (`marked`), and what
+ *  stands after them, each part that has words; s whole, not marked, when it does not hold them (`] show explainer`
+ *  around `explainer`: ` show `, then `explainer` marked). */
+export function partsAround(s, words) {
+  const t = String(s ?? '')
+  const at = words ? t.lastIndexOf(words) : -1
+  if (at < 0) return t ? [{ s: t, marked: false }] : []
+  return [{ s: t.slice(0, at), marked: false }, { s: words, marked: true }, { s: t.slice(at + words.length), marked: false }].filter(p => p.s)
 }
 
 /** Text in a fenced block, its fence longer than any run of backticks in it, so a model reads text from the records

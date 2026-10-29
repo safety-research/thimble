@@ -15,11 +15,10 @@
 //   pending      the turn still runs: the text's own color, underlined; the citations' light purple tint on hover
 //   checking     as pending, and a turning glyph (purple) right after it, until its own verdict arrives
 //   verified     as pending
-//   corrected    the corrected words in place of the marked ones, as pending, with ` *` (purple) after them: the
-//                person may have read the words Claude wrote before the check changed them. The * is a piece of the
-//                citation's press, so a click on it opens the tray, as one on the words does, and the tray says what
-//                they were with the evidence. A narrowed one (`narrowed`) keeps its words and has no sign: only the
-//                part the check cited is the mark, the rest reads as the reply's plain words
+//   corrected    the corrected words in place of the marked ones, as verified, with no sign: a click on them opens
+//                the tray, whose status says the check corrected them, and what they were, with the evidence. A
+//                narrowed one (`narrowed`) keeps its words: only the part the check cited is the mark, the rest reads
+//                as the reply's plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
 //                did not show them), or it did not run or gave no answer: red (`error`), underlined, with ` ×`
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
@@ -29,7 +28,7 @@
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
-// The sign after a mark (the turning glyph, ×, *, ?) takes two cells, and every other mark keeps those two cells when
+// The sign after a mark (the turning glyph, ×, ?) takes two cells, and every other mark keeps those two cells when
 // the lines are cut (withLooks, a `gap` run that is not drawn), so the lines break at the same words whether a glyph
 // shows or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
@@ -208,7 +207,6 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     if (look?.quiet) { k = e; continue }
     if (look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
     else if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
-    else if (look?.status === 'corrected' && !look.narrowed) out.push({ s: ` ${FIXED_SIGN}`, mark: r.mark, tag: 'fixed' })
     else if (look?.status === 'deferred') out.push({ s: ' ?', mark: r.mark, tag: 'wait' })
     else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
     k = e
@@ -264,7 +262,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   // group of its own by its place, so the pointer over it lights it alone
   const id = look.n > 0 ? `${o.key}:${look.n}` : `${o.key}:at${r.mark as number}`
   const tint = citeHover(id, look.status)
-  if (r.tag === 'spin' || r.tag === 'fixed') p.color = accent()
+  if (r.tag === 'spin') p.color = accent()
   else if (r.tag === 'wait') p.dimColor = true
   else if (r.tag) p.color = 'error'
   else if (!look.quiet) Object.assign(p, wordsLook(look.status, id))
@@ -450,9 +448,6 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   }
   return Box({ flexDirection: 'column', marginTop: o.rule ? 0 : 1, children: rows })
 }
-
-/** The sign after a citation the check corrected (withLooks). */
-export const FIXED_SIGN = '*'
 
 /** A span the features placed on the words Claude wrote that the check of the citations changed, so it stands on no
  *  words of the reply now: its words as they were, in its look, and what it is. */

@@ -124,7 +124,9 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   // the validator read the fork's real Bash call
   expect(JSON.parse(seen.stdin[0]!).calls[0]).toEqual({ command: "python3 - <<'PY'\nprint('12 of 40')\nPY", output: '12 of 40', by: 'checker' })
   const settled = await drawn($)
-  expect(settled).toContain('merged 12 of 40 *.')
+  // the corrected words in place, with no sign after them; the failed one red, with × after it
+  expect(settled).toContain('merged 12 of 40.')
+  expect(settled).not.toContain('*')
   expect(settled).toContain('"ship it" ×')
   // once settled no footer counts the marks: each shows its own status where it stands
   expect(settled).not.toContain('citation wrong')
@@ -320,7 +322,7 @@ test('x on a wrong citation checks it again in a fork of its own; its answer cor
   expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.')
   // while it runs the citation spins; the other marks keep their results; no second repair of it starts
   expect(await drawn($)).toContain('"ship it" ⠋')
-  expect(await drawn($)).toContain('merged 12 of 40 *.')
+  expect(await drawn($)).toContain('merged 12 of 40.')
   expect(await repairOf($, 'row-1', 3)).toBe(null)
   await endCheck($, { agentId: `${FORK}1`, reason: 'answer', answer: '```json\n[]\n```' })
   const m = (await rowMarks($, 'row-1'))!.items[2]!
@@ -350,8 +352,9 @@ test("x whose check rewrites the citation's sentence: the reply shows the new se
   expect(text).toBe('Of the [40](#) pull requests, agent-07 merged [15 of 40](#).\n\nIt said ["ship it now"](#) on line 9.')
   const looks = items.map(m => ({ n: m.n, status: m.status, shown: m.shown }))
   const body = textOf(messageEl(ELS, { text, marks: marksIn(text), looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
-  expect(body).toContain('It said "ship it now" * on line 9.')
-  expect(body).toContain('merged 12 of 40 *.')
+  expect(body).toContain('It said "ship it now" on line 9.')
+  expect(body).toContain('merged 12 of 40.')
+  expect(body).not.toContain('*')
   const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
   expect(told['marks:row-1:repair:3']).toContain('- the sentence "It said "ship it"." is rewritten as "It said "ship it now" on line 9.", which cites "ship it now" (the check: "line 9 holds these words")')
 })
@@ -385,7 +388,7 @@ test("a check that fails a citation repairs it at once, with x's request: it spi
   expect(seen.spawned[1].prompt).toBe(REPAIR_3)
   expect((await rowMarks($, 'row-1'))!.items[2]).toMatchObject({ status: 'checking', repair: true })
   expect(await drawn($)).toContain('"ship it" ⠋')
-  expect(await drawn($)).toContain('merged 12 of 40 *.')
+  expect(await drawn($)).toContain('merged 12 of 40.')
   // started once: the same check's end again, or x while it runs, starts no other
   await autoRepair($, FORK)
   expect(await repairOf($, 'row-1', 3)).toBe(null)
@@ -476,7 +479,7 @@ test('with Citations auto cite, the reply\'s citations wait unchecked; opening o
     expect(seen.spawned.length).toBe(1)
     await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
     expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'corrected', 'deferred'])
-    expect(await drawn($)).toContain('merged 12 of 40 *.')
+    expect(await drawn($)).toContain('merged 12 of 40.')
     // a checked citation opened again starts nothing
     await checkOpened($, 'row-1', 2)
     expect(seen.spawned.length).toBe(1)
