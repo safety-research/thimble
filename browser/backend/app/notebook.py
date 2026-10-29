@@ -1541,6 +1541,48 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     return cell
 
 
+# what a card of code holds for its code and its last run, which a data card made of it leaves behind (to_data_cell):
+# the run's outputs and state, and the check of the takeaway's links against those outputs (verify.py)
+RUN_STATE = ("code", "previous_code", KEPT_ARGS, "outputs", "status", "exec_count", "duration_s", "started", "reads",
+             "reads_more", "label_revs", OUT_MEMO, REGENERATING_FOR, TAKEAWAY_STALE, "verification")
+
+
+@_changes
+def to_data_cell(workspace: str, cell_id: str, kind: str, payload: dict, *, title: str | None = None,
+                 by: str | None = None) -> dict:
+    """Make the card of code `cell_id` a data card of `kind` in place, for edit_card given a data kind's content (an
+    example of the quotes that a card of code printed): the payload takes the place of the code and of what it showed
+    (RUN_STATE, and the labels the code read), the takeaway written for that output is cleared, and `title` replaces
+    the question when given. The card keeps its id, group, place, size and lock. The edit is recorded with the code and
+    what it showed (stamp_edit), so its history brings them back. 404 for an unknown cell, 400 for a card without code
+    or a kind that carries no payload."""
+    ws = _ws(workspace)
+    hit = _locate(ws, cell_id)
+    if hit is None:
+        raise HTTPException(404, f"no such card: {cell_id}")
+    nb, cell = hit
+    if not runnable(cell):
+        raise HTTPException(400, f"a {cell.get('kind', DEFAULT_KIND)} card has no code")
+    if kind not in DATA_KINDS:
+        raise HTTPException(400, f"a {kind} card runs code")
+    before, shown = content_of(cell), shown_of(cell)
+    for key in RUN_STATE:
+        cell.pop(key, None)
+    cell["kind"] = kind
+    cell["payload"] = _payload_of(kind, payload)
+    if kind == "note":
+        cell["text"] = cell["payload"]["text"]
+    cell["labels"] = [cell["payload"]["concept"]] if kind == "label" and cell["payload"]["concept"] else []
+    if title is not None and title != cell.get("title", ""):
+        cell["title"] = title
+        _name_cell(ws, cell)
+    cell["takeaway"], cell["takeaway_author"] = "", None
+    stamp_edit(ws, cell, before, by, shown=shown)
+    write_notebook(ws, nb)
+    _emit(workspace, cell, what="edited")
+    return cell
+
+
 @_changes
 def drop_payload_key(workspace: str, cell_id: str, key: str) -> bool:
     """Drop `key` from a data card's payload and announce the card, with no `edited` stamp: for what the card shows
