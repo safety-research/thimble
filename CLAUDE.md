@@ -62,7 +62,7 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
      ones, and each `claude` they open in a folder of data files has it. A session keeps the PATH and the Claude Code
      it started with, so after a change to Node or Claude Code, they start `claude` in a new terminal. Claude cites
      each claim, and a second Claude checks it against the files; a click on the underlined words opens the evidence.
-     The line above the prompt shows the keys: `v` visualize, `s` rewrite, `w` evidence, `r` coverage. A click on
+     The line above the prompt shows the keys: `v` visualize, `s` rewrite, `w` claims, `r` coverage. A click on
      `thimble` in that line, or `/thimble-settings`, opens the settings; `/plugin` turns thimble off.
    - The workbench, when they want to work in a web page, with the folder's files and views of them beside the chat, a
      canvas of cards, labels and a report: run `thimble-browser` in a folder of files and open the sign-in link it

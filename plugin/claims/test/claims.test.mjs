@@ -142,7 +142,7 @@ test('the map: ten clusters of five to ten claims at the pane sizes of 160×50 a
     const tu = text(rest)
     assert.equal(mapCapacity(w, h), 3 * Math.floor(Math.floor(h * 0.4) / 4))
     assert.equal(rest.rowsView, false, `${w}×${h}: the map, not the rows`)
-    assert.match(tu, /^Evidence · 71 claims\n\n/)
+    assert.match(tu, /^Claims · 71\n\n/)
     assert.ok(rest.head[0][0].bold && !rest.head[0][0].tone)
     // at rest: no claim, nothing chosen, no detail, no caption; every cluster and every claim drawn
     assert.equal(rest.chosen, false)
@@ -441,7 +441,7 @@ test('a corrected claim: one line says so; h shows its History, one word-level d
   assert.deepEqual(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'none', reason: 'The check did not run. The reply was interrupted.' }, 60).map(rowText), ['9   × failed · citation', 'The check did not run.'])
 })
 
-test("a corrected citation's card in the Evidence pane says what the tray's header says: ✓ corrected where it said verified, or ✓ repaired after x, and what it was under it; a rewritten sentence or a narrowed citation says which; one not checked yet has the ? the reply draws after it", () => {
+test("a corrected citation's card in the Claims pane says what the tray's header says: ✓ corrected where it said verified, or ✓ repaired after x, and what it was under it; a rewritten sentence or a narrowed citation says which; one not checked yet has the ? the reply draws after it", () => {
   const quote = { kind: 'quote', file: 'runs/summary.txt', line: 4, lines: [{ n: 4, text: 'failed: 12', highlight: [8, 10] }] }
   const fixed = { ref: 'a1@3', row: 'r1', at: 3, n: 1, label: '15 of 40', shown: '12 of 40', status: 'corrected', was: '15 of 40', evidence: quote }
   const card = s => cardOf(s, 60).rows.map(rowText)
@@ -510,7 +510,7 @@ test('fourteen clusters: near clusters join, named for both; past what the map h
   const apart = paneData(build(false))
   const v = graphView(apart, {}, { w: 62, h: 12 })
   // the head counts the claims alone
-  assert.match(rowText(v.head[0]), /^Evidence · 60 claims$/)
+  assert.match(rowText(v.head[0]), /^Claims · 60$/)
   assert.deepEqual(v.data.groups.map(g => g.name), ['topic 0', 'topic 1', 'topic 2', 'topic 3', 'topic 4', 'topic 5 + 8 other clusters'])
   const onMap = new Set(v.graph.flatMap(r => r.filter(x => /^g:/.test(x.part || '') && x.s.trim()).map(x => x.part)))
   assert.equal(onMap.size, 6)

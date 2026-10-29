@@ -1,6 +1,6 @@
 {
   "name": "thimble",
-  "description": "thimble for Claude Code: select words in a reply and press c to cite them (a second Claude finds and checks their source), or set Citations to have Claude cite each claim you would check; a click on a citation opens its evidence. Claude draws interactive cards of the data, and v visualizes the last answer as a card. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s rewrites a reply shorter or longer, more novice or more expert, and b catches up on several; after each reply an observer explains terms you may not know and points out important details; w lists the session's evidence; t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read. Minimal makes everything on demand.",
+  "description": "thimble for Claude Code: select words in a reply and press c to cite them (a second Claude finds and checks their source), or set Citations to have Claude cite each claim you would check; a click on a citation opens its evidence. Claude draws interactive cards of the data, and v visualizes the last answer as a card. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s rewrites a reply shorter or longer, more novice or more expert, and b catches up on several; after each reply an observer explains terms you may not know and points out important details; w lists the session's claims; t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read. Minimal makes everything on demand.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -96,8 +96,8 @@
     },
     "claimsMode": {
       "type": "string",
-      "title": "Evidence",
-      "description": "Press w to see the conversation's claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.",
+      "title": "Claims",
+      "description": "Press w to see the conversation's claims. auto: thimble pulls them out of each answer in the background, which uses tokens. on demand: only when you press f in the pane. off: no Claims pane.",
       "options": [
         "auto",
         "on demand",
@@ -155,7 +155,7 @@
     "claims": {
       "type": "boolean",
       "title": "Claims (old setting)",
-      "description": "Replaced by Evidence, which has its modes.",
+      "description": "Replaced by Claims, which has its modes.",
       "default": true
     },
     "defaultsAt": {

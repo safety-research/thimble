@@ -258,18 +258,18 @@ export async function claimsLit($: Engine): Promise<boolean> {
  *  item, a click on which opens it. */
 export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false): Promise<void> {
   await reloadClaims($)
-  const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
+  const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
-  const words = `w ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
+  const words = `w ${await claimsBarWords($)}`
   if (byKey) failNotice($, narrowNotice('w', words), 'pane:claims')
-  else failNotice($, 'Claude Code did not open the Evidence pane here.', 'pane:claims')
+  else failNotice($, 'Claude Code did not open the Claims pane here.', 'pane:claims')
 }
 
 /** The pane shows other arguments (the person moved in it, by a key or a click), and holds the keyboard: Claude Code
  *  stops a click at the Button it lands on, so a click alone does not give the pane back the keyboard. (Claude Code
  *  leaves the keyboard at a prompt that holds typed words.) */
 export async function showClaims($: Engine, args: ClaimsArgs): Promise<void> {
-  await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true })
+  await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true })
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
