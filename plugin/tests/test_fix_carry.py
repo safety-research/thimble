@@ -1,8 +1,8 @@
 """The fixes an update set aside go back on where they still apply (fixes.py carry). thimble 0.10.5 and before ran their
 own kernel for thimble update, which set every fix aside and stopped there: this kernel puts back what still applies
-at the first command that reads or changes the fixes, says what does not fit and why, and keeps the fixes off that the
-person had turned off. The world is test_fixes.py's made-up thimble 0.10.2, a GitHub install; `claude` is a fake. All data
-here is made up."""
+at its first list of the fixes (thimble fixes, the plugin's at session start), thimble reapply or thimble update, says
+what does not fit and why, and keeps the fixes off that the person had turned off. The world is test_fixes.py's made-up
+thimble 0.10.2, a GitHub install (a clone install in the last test); `claude` is a fake. All data here is made up."""
 from __future__ import annotations
 
 import json
