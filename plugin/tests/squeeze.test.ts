@@ -211,6 +211,38 @@ test('a key pressed while a rewrite runs: the running one is not shown, the late
   expect(shown).not.toContain('now old')
 })
 
+test('s opens the chips; a level picked starts the rewrite about 1 s later; a level changed while it rewrites stops it, and it starts over at the new level about 1 s after the change', async ($, on) => {
+  const gates: ((v: string) => void)[] = []
+  const t = await setup($, on, [new Promise<string>(r => { gates.push(r) }), 'The build failed on [3 of 12](#) runs: the much longer version.'])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  expect(await t.bar()).toContain('] longer')
+  // ] picked: no call for about a second, then one, which the bar's busy step names
+  await $.prompt.edit(key(']'))
+  await t.clock.advance(900)
+  expect(t.asked.length).toBe(0)
+  await t.clock.advance(500)
+  expect(t.asked.length).toBe(1)
+  expect(String(t.asked[0].prompt)).toContain('Length: longer')
+  expect(await t.bar()).toContain('rewriting')
+  // ] again while it rewrites: that rewrite stops at once, so nothing rewrites while the new level waits its second
+  await $.prompt.edit(key(']'))
+  await t.clock.advance(400)
+  expect(await t.bar()).not.toContain('rewriting')
+  expect(t.asked.length).toBe(1)
+  // then it starts over, at the new level
+  await t.clock.advance(700)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Length: much longer')
+  // the stopped one's words, had they come, are not shown; the new level's are
+  gates.shift()!('The build failed on [3 of 12](#) runs: the longer version, now old.')
+  await t.clock.advance(5000)
+  const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(shown).toContain('the much longer version.')
+  expect(shown).not.toContain('now old')
+  expect(t.asked.length).toBe(2)
+})
+
 /** The chips' Client under a row, as the terminal would draw it: its props from the row, its elements as plain nodes. */
 const ELS = Object.fromEntries(['Box', 'Text', 'Button'].map(k => [k, (props: Any) => ({ type: k, props })]))
 const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(nodes) : [n, ...nodes(n.props?.children), ...nodes(n.children)])

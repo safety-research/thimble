@@ -13,9 +13,9 @@
 // A rewrite: one $.model.complete call (the registry's squeeze prompt, the question, the original, every chip's level),
 // recorded in the session's events with the prompt it used (telemetry `squeeze`, the bar's busy line `rewriting` or
 // `writing a catch-up`); `shown` holds the result; a state seen before comes back from the record with no call. A call
-// waits 1 s after the last change (settings.json settleMs), and one record has one call that shows at a time: a change
-// while a call runs makes its result go unshown. While a call runs the old text dims; when the new text is there it
-// writes itself in from the top at a model's pace.
+// waits 1 s after the last change (settings.json settleMs), and one record has one call at a time: a change while a
+// call runs stops that call, and the rewrite starts over at the new levels once the wait after the change ends. While a
+// call runs the old text dims; when the new text is there it writes itself in from the top at a model's pace.
 //
 // The chips belong to the whole answer, so with the squeeze switch for cards on, the request also shows the cards
 // drawn in the answer's turn (cards.ts), and a change of a card the reply asks for is made through the card runner as
@@ -68,10 +68,11 @@ const BLANK: SqzUi = { running: null, error: null }
 /** The wait before a call, when settings.json does not say (settleMs). */
 const SETTLE_MS = 1000
 
-// the module's memory: per record, the number of its latest change while one is on its way, and the change whose call
-// runs; the text writing in per record; the settings; the last screen width
+// the module's memory: per record, the number of its latest change while one is on its way, the change whose call
+// runs and what stops that call; the text writing in per record; the settings; the last screen width
 const latest = new Map<string, number>()
 const inflight = new Map<string, number>()
+const stops = new Map<string, AbortController>()
 const revealing = new Map<string, number>()
 // `key`: the key the bar names for it ([ or ]), which presses it again after a failure
 type Want = { at: At; key?: string | null }
@@ -143,11 +144,12 @@ export async function wantLevels($: Engine, id: string, at: At): Promise<void> {
 
 /** Set the chips of a record to `at` and show that version: from the record when it was written before, at once,
  *  else one call after a short wait (settings.json settleMs, 1 s). Each change restarts the wait, so keys pressed in a
- *  row are written once, at the last level; and one call at a time shows: a change that comes while a call runs makes
- *  that call's result go unshown. `key`: the key that asked for it. */
+ *  row are written once, at the last level; and one call at a time runs: a change that comes while a call runs stops
+ *  that call, so the rewrite starts over at the new levels. `key`: the key that asked for it. */
 export async function setLevels($: Engine, id: string, at: At, key: string | null = null): Promise<void> {
   const gen = (latest.get(id) ?? 0) + 1
   latest.set(id, gen)
+  stopCall(id)
   await setUi($, id, { want: at, error: null })
   if (!(await uiOf($, id)).asked) await setUi($, id, { asked: Number(await $.clock.now()) })
   const rec = await recOf($, id)
@@ -169,6 +171,22 @@ export async function setLevels($: Engine, id: string, at: At, key: string | nul
     if (inflight.get(id) === gen) inflight.delete(id)
     await done($, id, gen)
   }
+}
+
+/** The call that runs for a record, stopped: it resolves `aborted`, and its result is not shown (once). */
+function stopCall(id: string): void {
+  stops.get(id)?.abort()
+  stops.delete(id)
+}
+
+/** What a stopped call resolves, once `signal` fires: the rewrite stops waiting for it at once, so its busy step goes
+ *  as the call is cut. */
+function stopped(signal: AbortSignal): Promise<Any> {
+  const aborted = { isAnswered: false, reason: 'aborted' }
+  return new Promise(go => {
+    if (signal.aborted) go(aborted)
+    else signal.addEventListener('abort', () => go(aborted), { once: true })
+  })
 }
 
 /** The latest change of a record ended: its chips stand where it shows, and Claude hears of the version. A change
@@ -231,10 +249,16 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
     maxTokens: Number(cfg.maxTokens || DEFAULTS.maxTokens), timeoutMs: Number(cfg.timeoutMs || DEFAULTS.timeoutMs),
   })
   const keyWords = Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(',')
+  // a later change came while the request was made: no call (the latest change makes its own)
+  if (stale()) return
+  // what stops the call when a later change comes (setLevels)
+  const stop = new AbortController()
+  stops.set(id, stop)
   const t0 = Number(await $.clock.now())
-  const r = await tracked($, { feature: 'squeeze', prompt: 'squeeze', model: req.model, doing: rec.catchup ? 'writing a catch-up' : 'rewriting', extra: { row: rec.row, key: keyWords, ...(answer ? { cards: answer.cards.length } : {}) } }, () => $.model.complete(req as Any))
+  const r = await tracked($, { feature: 'squeeze', prompt: 'squeeze', model: req.model, doing: rec.catchup ? 'writing a catch-up' : 'rewriting', extra: { row: rec.row, key: keyWords, ...(answer ? { cards: answer.cards.length } : {}) } }, () => Promise.race([$.model.complete(req as Any, { signal: stop.signal }), stopped(stop.signal)]))
+  if (stops.get(id) === stop) stops.delete(id)
   const ms = Number(await $.clock.now()) - t0
-  // a later change came while it ran: its result is not shown (the latest change makes its own call)
+  // a later change came while it ran, and stopped it: its result is not shown (the latest change makes its own call)
   if (stale()) { await log($, { row: id, ok: r.isAnswered, dropped: 'a later change came', ms }); return }
   if (!r.isAnswered) {
     const why = modelWhy(r)
@@ -468,6 +492,7 @@ export async function dismissCatchUp($: Engine, id: string, o: { undo?: boolean;
 export function resetSqueeze(): void {
   latest.clear()
   inflight.clear()
+  stops.clear()
   revealing.clear()
   cfg = {}
   viewCols = 100
