@@ -453,7 +453,7 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
         <tbody ref={bodyRef}>
           {drawn.above > 0 && pad(drawn.above)}
           {records.slice(drawn.from, drawn.to).map((rec) => (
-            <TableRow key={rec.line} path={path} rec={rec} row={rowOf.get(rec.line)} cols={cols} wide={wide} dots={n} bands={colors?.get(rec.line)?.bands ?? null} target={isTargetLine(target, rec.line)} hit={hit && isTargetLine(target, rec.line)} cited={cited?.line === rec.line ? cited : null} />
+            <TableRow key={rec.line} path={path} rec={rec} row={rowOf.get(rec.line)} cols={cols} wide={wide} dots={n} bands={colors?.get(rec.line)?.bands ?? null} named={colors?.get(rec.line)?.title ?? null} target={isTargetLine(target, rec.line)} hit={hit && isTargetLine(target, rec.line)} cited={cited?.line === rec.line ? cited : null} />
           ))}
           {drawn.below > 0 && pad(drawn.below)}
         </tbody>
@@ -462,11 +462,13 @@ export function Table({ workspace, path, page, targetRef }: ViewProps) {
   )
 }
 
-/** `dots` is how many labels are on: the row's dots take room for that many. `row` is a CSV row's number, which its
- * citation names; any other record is cited by its line. `bands`: per Color by choice, the color of the row's value of
- * it, a band each on its left edge (EdgeBands). `target`: a followed ref names the row; `cited`: the cell holding the
- * words it quotes. */
-const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, bands, target, hit, cited }: { path: string; rec: SourceRecord; row?: number; cols: string[]; wide: Set<string>; dots: number; bands: readonly (string | null)[] | null; target: boolean; hit: boolean; cited: { col: string | null; at: [number, number] } | null }) {
+/** `dots` is how many labels are on: the row's dots take room for that many, each naming its label and value on hover
+ * and to a screen reader. `row` is a CSV row's number, which its citation names; any other record is cited by its
+ * line. `bands`: per Color by choice, the color of the row's value of it, a band each on its left edge (EdgeBands);
+ * `named`: what Color by's labels say of the row (ColorContext `title`), which the edge, with the bands and the row's
+ * number, names on hover and to a screen reader, as a Transcript record does. `target`: a followed ref names the row;
+ * `cited`: the cell holding the words it quotes. */
+const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, bands, named, target, hit, cited }: { path: string; rec: SourceRecord; row?: number; cols: string[]; wide: Set<string>; dots: number; bands: readonly (string | null)[] | null; named: string | null; target: boolean; hit: boolean; cited: { col: string | null; at: [number, number] } | null }) {
   const r = rec.record
   const obj = r && typeof r === 'object' && !Array.isArray(r) ? (r as Record<string, unknown>) : null
   const marks = useMarksAt(path, rec.line)
@@ -475,13 +477,13 @@ const TableRow = memo(function TableRow({ path, rec, row, cols, wide, dots, band
   const banded = !!bands?.some(Boolean)
   return (
     <tr className={['reader-card', 'reader-table-row', target && 'reader-target', hit && 'reader-hit', tint && 'has-tint', banded && 'has-cb'].filter(Boolean).join(' ')} style={tint ? ({ '--tint': tint.colour } as CSSProperties) : undefined} data-anchor={row ? `${path}#row=${row}` : `${path}#L${rec.line}`} data-line={rec.line}>
-      <td className="reader-table-gutter mono">
+      <td className="reader-table-gutter mono" data-tip={named ?? undefined} aria-description={named ?? undefined}>
         {banded && <EdgeBands bands={bands} />}
         {dots > 0 && (
           <span className="reader-table-dots" style={{ '--dots': dots } as CSSProperties}>
             {marks.cells.map((c) =>
               c.values.length ? (
-                <span key={c.id} className="reader-table-dot" style={{ background: cellFill(c.values) }} data-tip={cellTitle(c)} />
+                <span key={c.id} className="reader-table-dot" style={{ background: cellFill(c.values) }} data-tip={cellTitle(c)} role="img" aria-label={cellTitle(c)} />
               ) : (
                 <span key={c.id} className="reader-table-dot is-empty" />
               ),

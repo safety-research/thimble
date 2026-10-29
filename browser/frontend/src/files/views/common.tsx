@@ -211,13 +211,14 @@ function markStyle(marks: RecordMarks): CSSProperties | undefined {
 export const cellTitle = (c: LaneCell): string => `${c.name}${c.values.length ? `: ${c.values.map((v) => v.value).join(', ')}` : ''}`
 
 /** A record's label gutter at its left edge: a thin column per label that is on, in the order they were turned on,
- * filled with the record's class of that label, empty where it has none; each names its label and value on hover. */
+ * filled with the record's class of that label, empty where it has none; each names its label and value on hover, and
+ * to a screen reader. */
 export function LaneGutter({ cells }: { cells: readonly LaneCell[] }) {
   if (!cells.length) return null
   return (
     <span className="reader-gutter">
       {cells.map((c) => (
-        <span key={c.id} className={'reader-gutter-cell' + (c.values.length ? ' is-lit' : '')} style={c.values.length ? { background: cellFill(c.values) } : undefined} data-tip={cellTitle(c)} />
+        <span key={c.id} className={'reader-gutter-cell' + (c.values.length ? ' is-lit' : '')} style={c.values.length ? { background: cellFill(c.values) } : undefined} data-tip={cellTitle(c)} role="img" aria-label={cellTitle(c)} />
       ))}
     </span>
   )
@@ -269,7 +270,7 @@ export const LANE_GLYPH_PX = 13
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
  * with nothing to mark as a tint behind the text. In the Transcript mode, a band per Color by choice on its left edge,
  * in the color of its value of each (EdgeBands), with a label first a soft tint of its value's color across the row
- * and, on hover, the labels' names and values (the one tooltip, components/Tooltip HoverTips), none of the first while
+ * and, on hover and to a screen reader, the labels' names and values (the one tooltip, components/Tooltip HoverTips), none of the first while
  * its value is turned off in Color by, and no row while its value is turned off in Filter by, unless a ref points at it
  * (ColorContext, FilterContext). With `fold`, a click on the head folds the record to one line, the head and the summary, and a click
  * on that line opens it again (FoldContext keeps it per file); a ref's record shows open until it is folded under the
@@ -316,10 +317,10 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
   const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', tint && 'has-cb-tint', fold && 'has-fold', folded && 'is-folded'].filter(Boolean).join(' ')
   const style = tint ? ({ ...markStyle(marks), '--cb-tint': tint } as CSSProperties) : markStyle(marks)
   return (
-    <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={style} data-tip={cb?.title ?? undefined}>
+    <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={style} data-tip={cb?.title ?? undefined} aria-description={cb?.title ?? undefined}>
       {banded && <EdgeBands bands={cb!.bands} />}
       <LaneGutter cells={marks.cells} />
-      <span className="reader-lineno mono" data-tip={no != null ? `line ${line}` : undefined}>
+      <span className="reader-lineno mono" data-tip={no != null ? `line ${line}` : undefined} aria-description={no != null ? `line ${line}` : undefined}>
         {no ?? line}
       </span>
       <div className={'reader-record-main' + (folded ? ' reader-collapsed' : '')} ref={main}>

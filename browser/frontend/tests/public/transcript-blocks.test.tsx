@@ -71,6 +71,7 @@ describe('a whole-file JSON transcript’s turns', () => {
     const no = (line: string) => card(line)!.querySelector('.reader-lineno')!
     expect(['3', '9', '20'].map((l) => no(l).textContent)).toEqual(['1', '3', '3'])
     expect(no('9').getAttribute('data-tip')).toBe('line 9')
+    expect(no('9').getAttribute('aria-description')).toBe('line 9')
     expect(no('9').hasAttribute('title')).toBe(false)
     expect(card('9')!.classList.contains('is-folded')).toBe(true)
     expect(card('9')!.querySelector('.reader-fold-text')!.textContent).toBe('Listing the folder. · bash ls -la /app · total 8 hello.py')
