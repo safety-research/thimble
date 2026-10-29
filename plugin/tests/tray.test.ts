@@ -303,7 +303,9 @@ test('a repair that corrected the citation says repaired in its header and what 
   ], 's-tray-10', { text: TWO })
   await $.prompt.edit(key(']'))
   const card = textOf(await $.ui.render(above()))
-  expect(card).toContain('✓ repaired  ] next citation')
+  // ] stays on the bar while the tray is open; the header keeps the tray's own keys
+  expect(card).toContain('✓ repaired  a ask · 0 close')
+  expect(card).toContain('thimble  ] next citation')
   expect(card).toContain('closewas 12 of 40')
   expect(card).not.toContain('repaired; was')
   expect(card).not.toContain('x repair')
@@ -329,7 +331,8 @@ test('a citation whose check did not run is failed: × in the reply, × failed i
   await $.prompt.edit(key(']'))
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
-  expect(band).toContain('× failed  ] next citation · a ask · 0 close')
+  expect(band).toContain('× failed  a ask · 0 close')
+  expect(band).toContain('thimble  ] next citation')
   expect(band).not.toContain('not checked')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'The check did not run.')?.props).toMatchObject({ dimColor: true })
   expect(band).not.toContain('gave no evidence')
@@ -340,7 +343,8 @@ test('a citation whose check did not run is failed: × in the reply, × failed i
   await $.prompt.edit(key(']'))
   const ended = textOf(await $.ui.render(above()))
   expect(ended).toContain('p95 check')
-  expect(ended).toContain('× failed  [ previous citation · a ask · 0 close')
+  expect(ended).toContain('× failed  a ask · 0 close')
+  expect(ended).toContain('thimble  [ previous citation')
   expect(ended).toContain('The check did not run.')
   expect(ended).not.toContain('session ended')
   expect(ended).toContain('x repair')
@@ -700,7 +704,8 @@ test('`a ask` in the tray\'s header opens a side thread about the heads-up; a pr
   await $.prompt.edit(key(']'))
   const ui = await $.ui.mount(above(40))
   const head = all(await $.ui.render(above(40))).find(n => n.props?.key === 'tray-head')
-  expect(textOf(head)).toMatch(/] next citation · a ask · 0 close$/)
+  expect(textOf(head)).toMatch(/a ask · 0 close$/)
+  expect(textOf(head)).not.toContain(']')
   expect(all(head).find(n => n.props?.key === 'tray-a')?.props.label).toBe('ask about the heads-up "Retried runs count twice"')
   await ui.press({ key: 'tray-a' })
   await ui.unmount()
@@ -1078,12 +1083,14 @@ test("with Citations manual, ] passes the citations Claude wrote (they draw as p
   expect(textOf(await $.ui.render(above()))).toContain('failed: 12')
 })
 
-test('the header names what ] goes to from the mark the tray shows, its name in that mark\'s look: a heads-up opened with h over its citation names the citation after it, as when ] reached it, and ] goes there', CITES, async ($, on) => {
+test('while the tray is open the bar names what ] goes to from the mark the tray shows, its name in that mark\'s look: a heads-up opened with h over its citation names the citation after it, as when ] reached it, and ] goes there', CITES, async ($, on) => {
   const { clock } = await resumed($, on, QUOTED, 's-tray-steps', { parts: HEADS })
-  const head = async () => textOf(all(await $.ui.render(above(40))).find(n => n.props?.key === 'tray-head'))
-  // the look of the words that name the mark ] goes to, in the header's ] key, beside the dim `next`
+  // ] is on the bar, not in the header, while the tray is open
+  const stepKey = async () => all(await $.ui.render(above(40))).find(n => n.type === 'Button' && String(n.props?.key ?? '').endsWith('tray-]'))
+  const head = async () => textOf(await stepKey())
+  // the look of the words that name the mark ] goes to, in the bar's ] key, beside `next`
   const named = async (what: string) => {
-    const k = all(all(await $.ui.render(above(40))).find(n => n.props?.key === 'tray-head')).find(n => n.type === 'Button' && n.props?.key === 'tray-]')
+    const k = await stepKey()
     const props = (t: string) => { const n = all(k).find(x => x.type === 'Text' && textOf(x) === t); if (!n) return null; const { key: _k, children: _c, ...rest } = n.props; return rest }
     return { next: props(' next '), what: props(what) }
   }
