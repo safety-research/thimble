@@ -206,15 +206,22 @@ export function refPath(ref: string): string | null {
   return p && 'path' in p ? p.path : null
 }
 
-/** The folders that name what a file is rather than whose it is, so its run is the folder above: `agents/`, `prompts/`,
- * and a trial's `agent/` (`<job>/<trial>/agent/trajectory.json`, whose chip would name every trial `agent`). */
-const KIND_FOLDERS = new Set(['agents', 'prompts', 'agent'])
+/** The folders that name what a file is rather than whose it is, so its run is the folder above: `agents/`, `prompts/`. */
+const KIND_FOLDERS = new Set(['agents', 'prompts'])
+/** A trial's folder as a job names it, `<task>__<id>` (`picnic-lake__RvtmQxa`). */
+const TRIAL_FOLDER = /.__[A-Za-z0-9]+$/
+
+/** Whether folder `i` of `parts` names what its files are: a kind folder (KIND_FOLDERS), or a trial's `agent/`
+ * (`<job>/<trial>/agent/trajectory.json`, whose chip would name every trial `agent`). Any other folder named `agent`,
+ * such as `src/agent/`, is whose its files are. */
+function kindFolder(parts: readonly string[], i: number): boolean {
+  return KIND_FOLDERS.has(parts[i]) || (parts[i] === 'agent' && i > 0 && TRIAL_FOLDER.test(parts[i - 1]))
+}
 
 /** `batch2-x/agents/a.jsonl` -> { run: 'batch2-x', rest: 'agents/a.jsonl' }; flat paths have run ''. */
 export function splitRun(path: string): { run: string; rest: string } {
   const parts = path.split('/')
-  const parent = parts.length > 1 ? parts[parts.length - 2] : ''
-  const depth = KIND_FOLDERS.has(parent) ? 2 : 1
+  const depth = parts.length > 1 && kindFolder(parts, parts.length - 2) ? 2 : 1
   if (parts.length <= depth) return { run: '', rest: path }
   return { run: parts.slice(0, parts.length - depth).join('/'), rest: parts.slice(parts.length - depth).join('/') }
 }
@@ -376,7 +383,7 @@ export function addressLabels(refs: readonly string[]): string[] {
     const at = others.length ? folders.findIndex((f, k) => others.some((o) => o[k] !== f)) : -1
     if (at < 0) return `${a.file}${a.place}`
     // folders left out between it and the file's name, as runPrefix marks them, a kind folder over the file aside
-    const last = KIND_FOLDERS.has(folders[folders.length - 1]) ? folders.length - 2 : folders.length - 1
+    const last = kindFolder(folders, folders.length - 1) ? folders.length - 2 : folders.length - 1
     return `${folders[at]}${RUN_SEP}${at < last ? `…${RUN_SEP}` : ''}${name}${a.place}`
   })
 }

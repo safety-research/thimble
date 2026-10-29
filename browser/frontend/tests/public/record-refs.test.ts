@@ -40,6 +40,17 @@ describe('record refs', () => {
     expect(refLabel('batch2/agents/agent-03.jsonl#L412')).toBe('batch2 › agent-03.jsonl L412')
   })
 
+  test("only a trial's agent folder is left off a chip; any other folder named agent stays on it", () => {
+    expect(refLabel('picnic-runs/picnic-lake__RvtmQxa/agent/trajectory.json#L5')).toBe('picnic-lake__RvtmQxa › trajectory.json L5')
+    expect(refLabel('jobs/run-7/picnic-lake__RvtmQxa/agent/trajectory.json#L5')).toBe('run-7 › … › trajectory.json L5')
+    // a folder named agent in a source tree, at the top or under a folder that is no trial, names its files as before
+    expect(refLabel('agent/notes.md#L1')).toBe('agent › notes.md L1')
+    expect(refLabel('src/agent/main.py#L3')).toBe('agent › main.py L3')
+    expect(refLabel('harness/agent/agent.py')).toBe('agent › agent.py')
+    expect(refLabel('runs/r1/agent/log.txt#L2')).toBe('r1 › … › log.txt L2')
+    expect(addressLabel('src/agent/main.py#L3')).toBe('agent › main.py L3')
+  })
+
   test("an example's addresses tell its trials apart in a job folder named by its date", () => {
     // the date is the first folder with a digit, so each trial's quotes read `2026-05-02__09-00-00 › … ›
     // trajectory.json`; the card's addresses name the folder in which the trials' paths part
