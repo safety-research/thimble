@@ -513,9 +513,7 @@ fi
 
 if [ "$plugin" = 1 ] && [ "$web" = 1 ]; then
   say ""
-  say "Use the terminal plugin when you work in Claude Code: run claude in a folder of files, and Claude's answers about"
-  say "them come with checked citations and cards. Use the browser workbench when you want to work in a web page, with"
-  say "the folder's files and views of them beside the chat, a canvas of cards, labels and a report."
+  say "Use the terminal plugin when you work in Claude Code, and the browser workbench to work in a web page."
 fi
 if [ "$web" = 1 ]; then
   say ""

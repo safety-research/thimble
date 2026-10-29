@@ -577,19 +577,16 @@ def test_the_install_gives_the_workbench_s_claude_code_sign_in_first_and_recomme
     assert "Their Claude Code sign-in (recommended), only after they accept" in note
 
 
-def test_the_readme_and_the_install_summary_say_when_to_use_each_product(tmp_path):
-    """The README's usage, the install's last lines when it installed both products, and the reply Claude ends an install
-    with (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one
-    product has no choice to explain."""
-    plugin, web = "Use the terminal plugin when you work in Claude Code", "Use the browser workbench when you want"
-    readme = " ".join((ROOT / "README.md").read_text().replace("**", "").split())
-    usage = readme.split("## Usage", 1)[1].split(" ### ", 1)[0]
-    assert plugin in usage and web in usage, usage
-    out = " ".join(whole_install(tmp_path / "both").stdout.split())
+def test_the_install_summary_says_when_to_use_each_product(tmp_path):
+    """The install's last lines when it installed both products, in one line, and the reply Claude ends an install with
+    (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one product
+    has no choice to explain."""
+    line = "Use the terminal plugin when you work in Claude Code, and the browser workbench to work in a web page."
+    out = whole_install(tmp_path / "both").stdout
     summary = out.split("== The browser workbench", 1)[1].split("To start the browser workbench", 1)[0]
-    assert plugin in summary and web in summary, summary
+    assert line in summary.splitlines(), summary
     alone = whole_install(tmp_path / "plugin", "--no-browser").stdout
-    assert "Use the terminal plugin when" not in alone and "Use the browser workbench when" not in alone
+    assert "Use the terminal plugin when" not in alone and "the browser workbench to work in" not in alone
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
     reply = text.split(" 5. While something the user chose", 1)[1].split(" 6. ", 1)[0]
     assert "- The plugin, when they work in Claude Code:" in reply and "- The workbench, when they want" in reply, reply
