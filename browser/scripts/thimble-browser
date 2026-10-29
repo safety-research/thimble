@@ -11,7 +11,7 @@
 #   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
 #   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
-#   thimble-browser --demo [NAME...]      the demo datasets (also: thimble demo)
+#   thimble-browser --demo [NAME...]      the demo datasets
 #   thimble-browser --setup --how claude-code --yes | --key-file F | --how wif --wif-file F   the same, without asking
 #   thimble-browser --setup --find-wif    list the Workload Identity Federation config files found, by path
 #

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -142,3 +143,22 @@ def test_the_command_lists_only_what_stays(root: Path) -> None:
         assert gone not in out.stdout
     bad = run(root, "rows")
     assert bad.returncode == 2 and "thimble --help lists the commands" in bad.stderr
+
+
+def test_the_usage_line_names_only_the_commands_thimble_has(root: Path) -> None:
+    """A word that is no command gets the usage line, whose list of commands is the commands thimble has: each one of
+    them runs. thimble doctor, demo and browser are gone (thimble-browser and its --demo replace the last two)."""
+    bad = run(root, "doctor")
+    assert bad.returncode == 2 and "no command 'doctor'" in bad.stderr
+    listed = re.search(r"\{([a-z,]+)\}", bad.stderr)
+    assert listed, bad.stderr
+    for name in listed.group(1).split(","):
+        assert run(root, name, "--help").returncode == 0, f"the usage line names thimble {name}, which does not run"
+
+
+def test_the_browser_launcher_names_only_commands_thimble_has(root: Path) -> None:
+    """thimble-browser --help names a thimble command only when the terminal plugin's thimble has it."""
+    launcher = Path(__file__).resolve().parents[2] / "browser" / "scripts" / "thimble-browser"
+    help_ = "\n".join(launcher.read_text().splitlines()[1:21])
+    for name in re.findall(r"\bthimble (?!-)([a-z]+)", help_):
+        assert run(root, name, "--help").returncode == 0, f"thimble-browser --help names thimble {name}, which does not run"

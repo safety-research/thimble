@@ -591,7 +591,7 @@ def _help() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,browser,demo,doctor,label,coverage}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,label,coverage}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
