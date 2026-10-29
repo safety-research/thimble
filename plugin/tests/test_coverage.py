@@ -390,3 +390,20 @@ def test_a_search_the_session_repeats_goes_over_its_folder_once(tmp_path: Path, 
     assert gone[0] <= len(files)
     assert long["total"] == once["total"]
     assert [(o["path"], o["status"], o["said"]) for o in long["files"]] == [(o["path"], o["status"], o["said"]) for o in once["files"]]
+
+
+def test_a_long_sessions_record_in_parts_counts_the_calls_of_every_part(tmp_path: Path,
+                                                                         monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hooks module keeps a long session's calls in parts of 3.5M characters (`<session>.jsonl`, then
+    `<session>.2.jsonl` and on). Coverage read the first part alone, so what a resumed session read after it never
+    counted."""
+    d, _ = _folder(tmp_path, 4)
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    seen = tmp_path / "th" / "seen"
+    seen.mkdir(parents=True)
+    for part, name in (("", "r000.jsonl"), (".2", "r001.jsonl"), (".3", "r002.jsonl")):
+        row = {"cwd": str(d), "tool": "Read", "file": str(d / name), "from": 1, "to": 1}
+        (seen / f"s-parts{part}.jsonl").write_text(json.dumps(row) + "\n")
+    cov = CV.coverage(Store(d, session="s-parts"))
+    assert [o["path"] for o in cov["files"] if o["seen"]] == ["r000.jsonl", "r001.jsonl", "r002.jsonl"]
