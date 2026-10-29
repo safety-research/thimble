@@ -145,6 +145,17 @@ def test_the_command_lists_only_what_stays(root: Path) -> None:
     assert bad.returncode == 2 and "thimble --help lists the commands" in bad.stderr
 
 
+def test_the_help_lists_the_options_thimble_has(root: Path) -> None:
+    """thimble --help lists each option the command takes, with the commands: --version, which names the thimble that
+    runs."""
+    out = run(root, "--help")
+    assert out.returncode == 0
+    listed = [x.split()[1] for x in out.stdout.splitlines() if x.startswith("    thimble -")]
+    assert listed == ["--version"], out.stdout
+    version = run(root, "--version")
+    assert version.returncode == 0 and version.stdout.startswith("thimble "), version.stdout + version.stderr
+
+
 def test_the_usage_line_names_only_the_commands_thimble_has(root: Path) -> None:
     """A word that is no command gets the usage line, whose list of commands is the commands thimble has: each one of
     them runs. thimble doctor, demo and browser are gone (thimble-browser and its --demo replace the last two)."""

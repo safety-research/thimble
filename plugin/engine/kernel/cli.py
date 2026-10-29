@@ -17,6 +17,7 @@ In a shell:
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix remove N           fix N leaves your list (off first, when it is on)
     thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
+    thimble --version              the version of the thimble that runs (its commit, between releases)
 
 In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
 
