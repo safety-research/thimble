@@ -94,7 +94,6 @@ import {
   scopeForUnit,
   showCard,
   stepZoom,
-  threadAnchors,
   toPlane,
   UNMEASURED_H,
   unreadAnchors,
@@ -406,9 +405,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
 
   // ---- the layout ----
 
-  // what a thread made stands beside the card it is about
-  const about = useMemo(() => threadAnchors(chats), [chats])
-  const board = useMemo(() => (data ? boardOf(data, about) : null), [data, about])
+  const board = useMemo(() => (data ? boardOf(data) : null), [data])
   // a card being resized is drawn at its new size before it is written
   const shownBoard = useMemo((): Board | null => {
     if (!board || !sizing) return board

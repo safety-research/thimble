@@ -323,6 +323,23 @@ async def test_a_thread_s_label_is_the_thread_s_and_an_unknown_fork_s_card_waits
     assert notebook.get_cell(CORPUS, stranger["id"])["created_by"] == f"chat:{tid}"
 
 
+async def test_the_canvas_names_the_anchor_of_each_thread_that_made_a_card_on_it(fork):
+    """The canvas route gives, with the cards, the anchor of each thread that made one of them, so the page puts the
+    thread's card beside the card it is about the first time it draws the canvas. Main's cards, and a chat that is no
+    thread, name none."""
+    tid, call = fork
+    anchor = agents.read_meta(CORPUS, tid)["anchor"]
+    await main("add_card", kind="note", question="Main's?", text="x")
+    assert (await notebook.canvas_route(CORPUS))["threads"] == {}
+    await by_fork(call, "add_card", kind="note", question="Which stage?", text="x")
+    other = agents.new_thread(CORPUS, "report:report#p1", "A passage")["id"]
+    writer_chat = agents.new_agent(CORPUS, "writer", "Write report", doc="report", announce=False)["id"]
+    for by in (f"chat:{other}", f"chat:{writer_chat}", "chat:gone"):
+        notebook.insert_cell(CORPUS, notebook.loose_group(ws()), notebook.new_cell("note", by, by, payload={"text": "x"}))
+    served = await notebook.canvas_route(CORPUS)
+    assert served["threads"] == {tid: anchor, other: "report:report#p1"}
+
+
 async def test_an_agent_s_plan_never_follows_into_one_of_the_analyst_s_groups():
     """A plan that follows another goes into that plan's group, for main; a plan of one of thimble's agents that follows
     a plan in one of the analyst's groups stands loose instead, as any card of an agent's does."""

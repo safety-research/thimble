@@ -3,7 +3,7 @@
 // the card, so the column keeps its cards together; two such frames that would overlap stack downward, and a frame the
 // analyst moved stays where they put it.
 import { describe, expect, test } from 'vitest'
-import { boardOf, CARD_W, GAP, HEAD, layoutBoard, overlaps, PAD, ROOT_X, ROOT_Y, threadAnchors, TITLE, type Rect } from '../../src/canvas/layout.ts'
+import { boardOf, CARD_W, GAP, HEAD, layoutBoard, overlaps, PAD, ROOT_X, ROOT_Y, TITLE, type Rect } from '../../src/canvas/layout.ts'
 import type { CanvasResponse, Cell, Group, Pos } from '../../src/lib/types.ts'
 
 const group = (id: string, extra: Partial<Group> = {}): Group => ({ id, title: id, parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst', ...extra })
@@ -129,22 +129,16 @@ describe("a thread's frame about a loose card", () => {
 describe('what a thread made, with no frame of its own', () => {
   // no thread gets a group: the card its fork adds stands loose, credited to the thread's chat, and so does a sequence
   // of its cards, in a frame named by the question. What no one has placed stands beside the card the thread is about,
-  // as a thread's frame did
+  // as a thread's frame did. The canvas route names each thread's anchor with the cards (`threads`), so the board needs
+  // nothing else to put them there
   const by = (id: string, notebook: string, chat: string, extra: Partial<Cell> = {}) => ({ ...card(id, notebook), created_by: `chat:${chat}`, ...extra }) as Cell
-  const about = threadAnchors([
-    { id: 'th', kind: 'thread', anchor: 'card:a' },
-    { id: 'th2', kind: 'thread', anchor: 'card:q1' },
-    { id: 'main', kind: 'main', anchor: null },
-  ] as never)
+  const threads = { th: 'card:a', th2: 'card:q1', th3: 'report:report#p3', th4: 'card:q2' }
   const loose = (cells: Cell[], groups: Group[] = []): CanvasResponse => ({
     groups: [{ ...group('l'), kind: 'loose' }, group('q'), ...groups],
     cells: [card('q1', 'q'), card('a', 'l'), card('b', 'l'), ...cells],
+    threads,
   })
-  const layAbout = (d: CanvasResponse, open: string[]) => layoutBoard(boardOf(d, about), new Set(open), heights)
-
-  test('the threads name the card each is about', () => {
-    expect([...about]).toEqual([['th', 'a'], ['th2', 'q1']])
-  })
+  const layAbout = (d: CanvasResponse, open: string[]) => layoutBoard(boardOf(d), new Set(open), heights)
 
   test("a thread's loose card stands right of the loose card it is about, level with it, and the column stays together", () => {
     const d = loose([by('t1', 'l', 'th')])
@@ -154,8 +148,27 @@ describe('what a thread made, with no frame of its own', () => {
     expect(r.get('b')!).toMatchObject({ x: ROOT_X, y: a.y + H + GAP })
     expect(overlapping(d, r)).toEqual([])
     // without the thread's anchor it is one more card of the column
-    const plain = layoutBoard(boardOf(d), new Set(['q']), heights).rects
+    const plain = layoutBoard(boardOf({ ...d, threads: {} }), new Set(['q']), heights).rects
     expect(plain.get('t1')!.x).toBe(ROOT_X)
+  })
+
+  test('a thread on something other than a card, or one the route does not name, leaves its card in the column', () => {
+    const d = loose([by('t1', 'l', 'th3'), by('t2', 'l', 'gone')])
+    const r = layAbout(d, ['q']).rects
+    expect([r.get('t1')!.x, r.get('t2')!.x]).toEqual([ROOT_X, ROOT_X])
+    expect(overlapping(d, r)).toEqual([])
+  })
+
+  test('about a card a collapsed frame folds away, it stands right of that frame, level with its top, until the frame opens', () => {
+    const d = loose([card('q2', 'q'), by('t1', 'l', 'th4')])
+    const shut = layAbout(d, []).rects
+    const q = shut.get('q')!
+    expect(shut.has('q2')).toBe(false)
+    expect(shut.get('t1')).toMatchObject({ x: q.x + q.w + GAP, y: q.y })
+    expect(overlapping(d, shut)).toEqual([])
+    const open = layAbout(d, ['q']).rects
+    expect(open.get('t1')).toMatchObject({ x: open.get('q')!.x + open.get('q')!.w + GAP, y: open.get('q2')!.y })
+    expect(overlapping(d, open)).toEqual([])
   })
 
   test('two about one card stack downward', () => {

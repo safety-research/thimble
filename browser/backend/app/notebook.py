@@ -3821,10 +3821,15 @@ class NotebookMeta(BaseModel):
 @router.get("/ws/{c}/canvas")
 async def canvas_route(c: str) -> dict:
     """The canvas as the browser shows it, the orientation's cards among them as it adds them. A Scratch group is marked
-    first (migrate_scratch), so canvas() leaves it out."""
+    first (migrate_scratch), so canvas() leaves it out. `threads` gives the anchor of each thread that made a card
+    here (threads.anchors_of)."""
+    from . import threads  # noqa: PLC0415 — threads' modules import this one
+
     migrate_scratch(c)
     migrate_writer_groups(c)
-    return canvas(_ws(c))
+    out = canvas(_ws(c))
+    out["threads"] = threads.anchors_of(c, out["cells"])
+    return out
 
 
 # Scratch: a working group of role `working` in stored workspaces. Its cards are kept, since their ids are cited: on

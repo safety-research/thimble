@@ -167,6 +167,22 @@ def group_of(c: str, ref: str) -> str | None:
     return gid if notebook.read_notebook(config.workspace_dir(c), gid) is not None else None
 
 
+def anchors_of(c: str, cells: list[dict]) -> dict[str, str]:
+    """The anchor of each thread that made one of `cells` (`created_by: chat:<id>`), by the thread's id. The canvas
+    route gives it with the cards, so the page puts what a thread made beside the card the thread is about the first
+    time it draws it (canvas/layout.ts boardOf)."""
+    out: dict[str, str] = {}
+    for chat in sorted({str(x.get("created_by") or "")[5:] for x in cells if str(x.get("created_by") or "").startswith("chat:")}):
+        try:
+            meta = agents.meta_or_none(c, chat)
+        except ValueError:  # a meta that cannot be read: its cards stand where any card stands
+            log.debug("%s: the meta of chat %s could not be read", c, chat, exc_info=True)
+            continue
+        if meta is not None and meta.get("kind") == agents.KIND_THREAD and meta.get("anchor"):
+            out[chat] = str(meta["anchor"])
+    return out
+
+
 # --------------------------------------------------------------------------- the anchor
 
 

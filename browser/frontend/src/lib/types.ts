@@ -280,6 +280,8 @@ export interface CanvasResponse {
   cells: Cell[]
   /** the ids of the cards the route leaves out: a legacy orientation Scratch (backend notebook.canvas) */
   hidden?: string[]
+  /** the anchor of each thread that made a card here, by the thread's chat id (backend threads.anchors_of) */
+  threads?: Record<string, string>
 }
 
 export interface NewCellBody {
