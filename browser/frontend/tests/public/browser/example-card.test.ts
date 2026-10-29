@@ -42,11 +42,14 @@ const resolved = (i: number) => ({
 })
 
 const THREE = ['north gate of Willow Park', 'Priya offered to bake a lemon cake', 'start packing up at half past five']
+/** the same plan's steps as two trials' records, in a job folder named by its date */
+const trial = (t: string, i: number) => `jobs/2026-05-02__09-00-00/${t}/agent/plan.json#/steps/${i}`
 /** each card by name: its payload */
 const CARDS: Record<string, unknown> = {
   three: { refs: ['plan.json#/steps/0', 'plan.json#/steps/0', 'plan.json#/steps/0'], quotes: THREE },
   deep: { refs: ['plan.json#/steps/0'], quotes: ['start packing up at half past five'] },
   two: { refs: ['plan.json#/steps/0', 'plan.json#/steps/1'] },
+  trials: { refs: [trial('picnic-north__Hqwz', 1), trial('picnic-south__Pmrk', 1)] },
 }
 
 beforeAll(async () => {
@@ -75,8 +78,9 @@ beforeAll(async () => {
     const p = url.pathname
     if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: readFileSync(css) })
     const ref = url.searchParams.get('ref') ?? ''
-    const m = /^plan\.json#\/steps\/(\d)$/.exec(ref)
-    if (p.endsWith('/ref') && m) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(resolved(Number(m[1]))) })
+    const m = /^(?:jobs\/.+\/)?plan\.json#\/steps\/(\d)$/.exec(ref)
+    const at = ref.split('#')[0]
+    if (p.endsWith('/ref') && m) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...resolved(Number(m[1])), ref, path: at }) })
     if (p.startsWith('/api/')) return route.fulfill({ status: 404, contentType: 'application/json', body: '{"detail":"not found"}' })
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body></body></html>' })
   })
@@ -140,6 +144,14 @@ test('a quote deep in a long record opens the fold at the quote; Show all shows 
   await page.click('[data-state="deep"] .bcell-more')
   const [again] = await cardOf(page, 'deep')
   assert.ok(again.scrollTop > 0 && again.markShows, `Show less opens it at the quote again ${JSON.stringify(again)}`)
+})
+
+test("two trials' records of one name in a dated job folder have addresses that name the trials", async () => {
+  const entries = await cardOf(page, 'trials')
+  assert.deepEqual(
+    entries.map((e) => e.address),
+    ['picnic-north__Hqwz › plan.json /steps/1', 'picnic-south__Pmrk › plan.json /steps/1'],
+  )
 })
 
 test('refs of two records stay two entries, each from its start', async () => {
