@@ -2,6 +2,7 @@
 `claude plugin install` takes: a string bare, a boolean as true or false, and no empty value (Claude Code refuses one,
 and one refused value drops them all)."""
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -618,3 +619,92 @@ def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plug
     sample = text.split(" 6. When the plugin works", 1)[1].split(" ## ", 1)[0]
     when = sample.split("the line gives a command to run in a new terminal", 1)[0]
     assert "outside this session's folder" in when and "Node" in when, sample
+
+
+GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Test", "-c", "user.email=test@example.com"]
+MADE = 1767225600  # the made-up release's plugin.json was written on 2026-01-01
+
+
+def release_market(tmp_path, kind):
+    """A made-up release of thimble 0.10.6 for Claude Code's marketplace thimble, whose plugin holds the real launcher
+    and kernel and a plugin.json with no version: "tag", a checkout at the release tag v0.10.6 (GitHub's clone, or a
+    clone with --local); "branch", a checkout at a commit after it; "archive", the release's archive from GitHub, a
+    folder with no git named thimble-0.10.6."""
+    market = tmp_path / ("thimble-0.10.6" if kind == "archive" else "thimble")
+    (market / ".claude-plugin").mkdir(parents=True)
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
+    plugin = market / "plugin"
+    shutil.copytree(ROOT / "plugin" / "bin", plugin / "bin")
+    shutil.copytree(ROOT / "plugin" / "engine", plugin / "engine", ignore=shutil.ignore_patterns("__pycache__"))
+    (plugin / ".claude-plugin").mkdir()
+    (plugin / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble", "description": "made up", "userConfig": {}}, indent=2) + "\n")
+    if kind != "archive":
+        subprocess.run([*GIT, "init", "-q", "-b", "main"], cwd=market, check=True)
+        subprocess.run([*GIT, "add", "-A"], cwd=market, check=True)
+        subprocess.run([*GIT, "commit", "-q", "-m", "thimble 0.10.6"], cwd=market, check=True)
+        subprocess.run([*GIT, "tag", "v0.10.6"], cwd=market, check=True)
+    if kind == "branch":
+        (market / "made-up.md").write_text("a commit after the release\n")
+        subprocess.run([*GIT, "add", "-A"], cwd=market, check=True)
+        subprocess.run([*GIT, "commit", "-q", "-m", "after 0.10.6"], cwd=market, check=True)
+    return market
+
+
+def install_release(tmp_path, kind):
+    """scripts/install.sh --no-browser with made-up commands, whose Claude Code's marketplace thimble is a made-up
+    release (release_market). The made-up claude notes the version in the plugin.json it installs, as it installs it.
+    The marketplace, its plugin.json as it was before the install, what claude noted, and the install's environment."""
+    market = release_market(tmp_path, kind)
+    manifest = market / "plugin" / ".claude-plugin" / "plugin.json"
+    before = manifest.read_bytes()
+    os.utime(manifest, (MADE, MADE))
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"installLocation": str(market)}}))
+    log = tmp_path / "claude.log"
+    seen = tmp_path / "seen.py"
+    seen.write_text("import json, sys\nprint('installs version', json.load(open(sys.argv[1])).get('version'))\n")
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "claude", f'echo "$@" >> "{log}"\n'
+         'case "$1 $2" in "--version ") echo "2.1.311 (Claude Code)" ;; "plugin list") echo "[]" ;;\n'
+         f'"plugin install") "{sys.executable}" "{seen}" "{manifest}" >> "{log}" ;; esac\nexit 0\n')
+    stub(bin_ / "node", "echo v22.20.0\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(home / ".thimble"), "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    return market, before, [x for x in log.read_text().splitlines() if x.startswith("installs")], env
+
+
+def test_claude_code_installs_the_release_with_its_version_from_a_checkout_at_its_tag(tmp_path):
+    """A release names its version by its tag alone. The install writes it in the plugin.json Claude Code installs, so
+    that Claude Code records it and names its copy by it; once Claude Code has its copy, the checkout's plugin.json is
+    as it was, so git sees no change. A checkout at a commit after the release installs with no version: Claude Code
+    names it by its commit."""
+    market, before, seen, _ = install_release(tmp_path / "tag", "tag")
+    assert seen == ["installs version 0.10.6"]
+    manifest = market / "plugin" / ".claude-plugin" / "plugin.json"
+    assert manifest.read_bytes() == before and manifest.stat().st_mtime == MADE
+    assert subprocess.run([*GIT, "status", "--porcelain"], cwd=market, capture_output=True, text=True).stdout == ""
+    market, before, seen, _ = install_release(tmp_path / "branch", "branch")
+    assert seen == ["installs version None"]
+    assert (market / "plugin" / ".claude-plugin" / "plugin.json").read_bytes() == before
+
+
+def test_a_release_archive_installs_with_its_version_and_thimble_names_it(tmp_path):
+    """The release's archive from GitHub, a folder with no git named thimble-0.10.6: Claude Code installs it with the
+    version 0.10.6, where it would record "unknown" and name its copy unknown, and the folder keeps the version, so that
+    thimble, in a shell or in Claude's Bash tool, names its version: thimble --version, and the head of thimble fix."""
+    market, before, seen, env = install_release(tmp_path, "archive")
+    assert seen == ["installs version 0.10.6"]
+    manifest = json.loads((market / "plugin" / ".claude-plugin" / "plugin.json").read_text())
+    assert manifest == {"name": "thimble", "version": "0.10.6", **json.loads(before)}
+    thimble = tmp_path / "bin" / "thimble"
+    out = subprocess.run([str(thimble), "--version"], capture_output=True, text=True, env=env, cwd=tmp_path)
+    assert (out.returncode, out.stdout) == (0, "thimble 0.10.6\n"), out.stderr
+    out = subprocess.run([str(thimble), "fix"], capture_output=True, text=True, env=env, cwd=tmp_path)
+    assert out.stdout.splitlines()[0] == "Your thimble fixes · thimble 0.10.6 with no fixes of yours", out.stdout + out.stderr
+

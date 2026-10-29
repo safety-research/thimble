@@ -1705,3 +1705,50 @@ def test_two_sessions_check_only_their_own_fixes_and_a_copy_that_is_no_checkout_
     p = Path(again["work"]) / "plugin" / "bar" / "bar.tsx"
     p.write_text(p.read_text() + "// bold\n")
     assert FX.done(again["id"], "Bar bold", "y", session="s-made-up-a")["state"] == "ready"
+
+
+def test_thimble_version_names_the_thimble_that_runs(world, tmp_path, monkeypatch, capsys):
+    """thimble --version, in a shell or in Claude's Bash tool: the version the installed copy's plugin.json carries
+    (scripts/install.sh writes the release's there), else the release tag of the commit Claude Code installed, else that
+    commit; with fixes, the release they are on."""
+    from kernel import cli  # noqa: PLC0415
+
+    def version() -> str:
+        assert cli.main(["--version"]) == 0
+        return capsys.readouterr().out.strip()
+
+    copy = tmp_path / "copy" / "plugin"
+    (copy / ".claude-plugin").mkdir(parents=True)
+    manifest = copy / ".claude-plugin" / "plugin.json"
+    monkeypatch.setattr(FX, "PLUGIN", copy)
+    manifest.write_text(json.dumps({"name": "thimble", "version": "0.10.7"}) + "\n")
+    assert version() == "thimble 0.10.7"
+    # a copy with no version: the commit Claude Code installed, by its release tag when it has one
+    manifest.write_text(json.dumps({"name": "thimble"}) + "\n")
+    assert version() == f"thimble {world['base'][:7]}"
+    sh("git", "tag", "v0.10.6", cwd=world["rel"])
+    assert version() == "thimble 0.10.6"
+    # with fixes, Claude Code loads thimble from live: the release they are on
+    r = made(world)
+    FX.done(r["id"], "Bar says read", "")
+    FX.apply(r["id"], press(r["id"]))
+    assert version() == "thimble 0.10.6"
+
+
+def test_thimble_version_of_a_folder_with_no_git_and_no_version_says_so(tmp_path, monkeypatch, capsys):
+    """A copy whose plugin.json has no version, from a folder with no git (a release's archive that no install named):
+    nothing names it, and thimble --version says so rather than fail."""
+    from kernel import cli  # noqa: PLC0415
+
+    folder = tmp_path / "thimble-unpacked"
+    (folder / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (folder / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble"}) + "\n")
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {
+        "source": {"source": "directory", "path": str(folder)}, "installLocation": str(folder)}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cc))
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setattr(FX, "PLUGIN", folder / "plugin")
+    assert cli.main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == "thimble (version unknown)"

@@ -286,6 +286,75 @@ with tempfile.TemporaryFile() as out:
 print(paths[-1] if paths else "")
 ' "$sh" 2>/dev/null || true
 }
+# stamp_version: the plugin.json that Claude Code installs (the marketplace's) carries the version of the release it
+# holds, so that Claude Code records that version and names its copy by it, where it would name it by its commit, or
+# "unknown" in a folder with no git. A release names its version by its tag alone: vX.Y.Z at the marketplace folder's
+# commit, or, in a folder with no git, X.Y.Z in the folder's name, as GitHub names a release's archive (thimble-X.Y.Z).
+# A plugin.json that has a version keeps it. In a checkout, unstamp_version puts the file back as it was once Claude
+# Code has its copy, so that git sees no change there; a folder with no git keeps the version.
+stamped="" stamped_was=""
+stamp_version() {
+  local out
+  out="$(cd / && "$py" -I -c '
+import json, os, re, shutil, subprocess, sys, tempfile
+plugins = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "plugins")
+try:
+    market = os.path.realpath(json.load(open(os.path.join(plugins, "known_marketplaces.json")))["thimble"]["installLocation"])
+    entry = next(p for p in json.load(open(os.path.join(market, ".claude-plugin", "marketplace.json")))["plugins"]
+                 if p.get("name") == "thimble")
+    at = os.path.join(market, entry["source"], ".claude-plugin", "plugin.json")
+    with open(at, "rb") as f:
+        was = f.read()
+    manifest = json.loads(was)
+except (OSError, ValueError, KeyError, TypeError, StopIteration):
+    sys.exit(0)
+if not isinstance(manifest, dict) or manifest.get("version"):
+    sys.exit(0)
+
+def git(*args):
+    try:
+        p = subprocess.run(["git", "-C", market, *args], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return p.stdout.strip() if p.returncode == 0 else ""
+
+top = git("rev-parse", "--show-toplevel")
+checkout = bool(top) and os.path.realpath(top) == market
+if checkout:
+    names = [t[1:] for t in git("tag", "--points-at", "HEAD").split() if t.startswith("v")]
+else:
+    name = os.path.basename(market)
+    names = [name[len("thimble-"):]] if name.startswith("thimble-") else []
+found = [tuple(int(x) for x in m.groups()) for m in (re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", n) for n in names) if m]
+if not found:
+    sys.exit(0)
+version = ".".join(str(x) for x in max(found))
+d = {}
+for k, v in manifest.items():
+    d[k] = v
+    if k == "name":
+        d["version"] = version
+d.setdefault("version", version)
+if checkout:
+    # the file as it was, with its time, which unstamp_version puts back
+    fd, keep = tempfile.mkstemp(prefix="thimble-plugin-json.")
+    os.close(fd)
+    shutil.copy2(at, keep)
+with open(at, "w", encoding="utf-8") as f:
+    f.write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+if checkout:
+    print(at + "\t" + keep)
+' || true)"
+  if [ -n "$out" ]; then
+    stamped="${out%%$'\t'*}" stamped_was="${out#*$'\t'}"
+    trap unstamp_version EXIT
+  fi
+}
+unstamp_version() {
+  [ -n "$stamped" ] || return 0
+  cp -p "$stamped_was" "$stamped" && rm -f "$stamped_was"
+  stamped="" stamped_was=""
+}
 
 # ---- the terminal plugin
 
@@ -377,8 +446,13 @@ print("Removed the marketplace thimble from %s: its folder %s is gone." % (at, g
       fi
     fi
     claude plugin marketplace add "$source"
+    installed=0
     if claude plugin list --json 2>/dev/null | grep -q '"thimble@thimble"'; then
+      installed=1
       claude plugin marketplace update thimble
+    fi
+    stamp_version
+    if [ "$installed" = 1 ]; then
       claude plugin update thimble@thimble
     else
       # each feature's default, from the userConfig of the plugin this installs (the marketplace just added: GitHub's,
@@ -405,6 +479,7 @@ for k, v in (manifest.get("userConfig") or {}).items():
 ')
       claude plugin install thimble@thimble ${config[@]+"${config[@]}"}
     fi
+    unstamp_version
     # the sandbox the plugin's cards run in: Anthropic's sandbox runtime, at the version the installed plugin pins, in
     # thimble's home (the plugin's sandbox/setup.mjs, which the plugin also runs at each session start)
     at="$(cd / && "$py" -c '

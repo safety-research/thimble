@@ -683,6 +683,12 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "fixes":
         args = ["fix", "list", *args[1:]]
+    if args and args[0] == "--version":
+        from . import fixes as FX  # noqa: PLC0415
+
+        v = FX.version_name()
+        print(f"thimble {v}" if v else "thimble (version unknown)")
+        return 0
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
         print(_help())

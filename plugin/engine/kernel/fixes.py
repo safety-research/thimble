@@ -2453,9 +2453,10 @@ def release_name(rel: dict[str, Any] | None = None) -> str:
 
 
 def _own_name() -> str:
-    """The thimble that runs, as the person reads it: its plugin's own version, else the release tag of its checkout's
+    """The thimble that runs, as the person reads it: its plugin's own version, which scripts/install.sh writes in the
+    copy Claude Code installs (a release names its version by its tag alone), else the release tag of its checkout's
     commit (find_source: Claude Code's clone of the marketplace, or the person's own clone), v0.10.5 as 0.10.5; else
-    nothing, since a release's plugin.json has no version and a checkout may have no tags."""
+    nothing, since a checkout may have no tags."""
     d = read_json(PLUGIN / ".claude-plugin" / "plugin.json")
     if isinstance(d, dict) and d.get("version"):
         return str(d["version"])
@@ -2465,6 +2466,15 @@ def _own_name() -> str:
         return ""
     tag = git("describe", "--tags", "--exact-match", "--match", "v*", src["commit"], cwd=src["repo"], check=False)
     return tag[1:] if RELEASE_TAG.match(tag) else ""
+
+
+def version_name() -> str:
+    """`thimble --version`: the thimble that runs, as the person reads it (release_name), else the commit of the
+    checkout it came from; '' when nothing names it (a folder with no git whose plugin.json has no version)."""
+    try:
+        return release_name() or str(find_source()["commit"])[:7]
+    except (FixError, OSError, subprocess.SubprocessError):
+        return ""
 
 
 def _has(repo: Path, commit: str) -> bool:
