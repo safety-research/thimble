@@ -56,6 +56,9 @@ export type Fix = {
   /** the files no fix may change that its fixer could not do without, when it ended with `Cannot:`: another try fails
    *  the same way, so its failed line offers none */
   blocked?: string[]
+  /** redo's answer, for the new fixer: the earlier change's patch, when another try starts in a new copy; or that it
+   *  goes on in the fix's copy (same_copy), which holds work no check took yet, such as the change Claude made there */
+  earlier?: string; same_copy?: boolean
   /** the kinds of files it changes that the person is told of before they use it, by kind (the sandbox, dependencies…) */
   notice?: Record<string, string[]>
   /** when this round of work started, in seconds, which a refused try and a reload keep */
@@ -76,10 +79,10 @@ export const fixName = (f: Pick<Fix, 'id' | 'title'>, n = 60): string => cut(f.t
 /** Whether a fix had a version before this round: a change to a fix the person has, not a new fix. */
 export const isChange = (f: Pick<Fix, 'prev'>): boolean => !!f.prev
 
-/** Whether the fix's number alone (/thimble-fix N) tries it again, in a new copy and the person's words of before, as y
- *  on its failed line does: it failed, it no longer fits (redo), or its new version did not fit when the person pressed
- *  y (a fix changed in place that waits, whose record says why). The kernel's line for each that does not fit names
- *  /thimble-fix N. */
+/** Whether the fix's number alone (/thimble-fix N) tries it again, in the person's words of before, as y on its failed
+ *  line does (request.ts redoFix): it failed, it no longer fits (redo), or its new version did not fit when the person
+ *  pressed y (a fix changed in place that waits, whose record says why). The kernel's line for each that does not fit
+ *  names /thimble-fix N. */
 export const triesAgain = (f: Pick<Fix, 'state' | 'prev' | 'error'>): boolean =>
   f.state === 'failed' || f.state === 'redo' || (f.state === 'ready' && !!f.prev && !!f.error)
 

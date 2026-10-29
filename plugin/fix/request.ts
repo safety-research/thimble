@@ -99,7 +99,7 @@ export async function request($: Engine, form: string, asked: string): Promise<R
   if (!fix) return { text: `× thimble could not make a copy of itself to change${cur ? ` “${fixName(cur)}”` : ''}: ${cut(r.err || 'thimble fix gave nothing', 240)}`, fix: null, failed: true, round }
   if (round && (await fixLineNow($))?.id === fix.id) await setFixLine($, null)
   await refreshFixes($)
-  const bad = await startFixer($, fix, false, screen)
+  const bad = await startFixer($, fix, null, screen)
   if (bad) {
     await kernelFix($, ['done', String(fix.id), '--request', '--no-tests', '--summary', '-'], { stdin: bad })
     await refreshFixes($)
@@ -115,17 +115,19 @@ export function roundText(fix: Fix, words: string): string {
   return `The person adds to this fix (round ${fix.rounds}): ${words}`
 }
 
-/** y on a failed fix: the fix again, in a new copy cut from your thimble as it is now, with the earlier change to start
- *  from. */
+/** y on a failed fix, or /thimble-fix N alone: the fix again, in its copy while that holds work no check took (such as
+ *  the change Claude made there after d), else in a new copy cut from your thimble as it is now, with the earlier
+ *  change to start from (the kernel's redo). */
 export async function redoFix($: Engine, id: number): Promise<string | null> {
+  // as the list has it before the kernel's redo, which clears why the try before did not pass
+  const was = await fixOf($, id)
   const r = await kernelFix($, ['redo', String(id)], { timeoutMs: 180000, doing: 'making a copy of thimble' })
   const fix = r.ok ? jsonOf<Fix>(r.out) : null
-  const was = await fixOf($, id)
   if (!fix) return `${was ? `“${fixName(was)}”` : `Fix ${id}`} could not start again: ${cut(r.err || 'thimble fix redo gave nothing', 220)}`
   if ((await fixLineNow($))?.id === id) await setFixLine($, null)
   await refreshFixes($)
-  const bad = await startFixer($, fix, true)
+  const bad = await startFixer($, fix, was?.error || 'its tests failed')
   if (bad) return bad
-  $.ui.toast(`A fork of this session is ${isChange(fix) ? 'changing' : 'fixing'} “${fixName(fix)}” again, in a new copy.`)
+  $.ui.toast(`A fork of this session is ${isChange(fix) ? 'changing' : 'fixing'} “${fixName(fix)}” again, in ${fix.same_copy ? 'its' : 'a new'} copy.`)
   return null
 }

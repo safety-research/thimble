@@ -189,7 +189,13 @@ export const registerKeys: Register = on => {
     if (r === true) return { text: '', cursor: 0 }
     taken = ''
     if (!e.text && r === e.inputText) return next(e)
-    // a word whose first keys thimble had taken, or keys typed into a box that shows empty
+    // a word whose first keys thimble had taken, or keys typed into a box that shows empty. The hooks after this one do
+    // not see this edit, so what draws from the box draws again (a failed fix's keys show only at an empty prompt)
+    try {
+      $.ui.invalidate('ui.render')
+    } catch {
+      // it draws at its next change
+    }
     return { text: r, cursor: r.length }
   }).catch(($, e, next) => next(e))
 }

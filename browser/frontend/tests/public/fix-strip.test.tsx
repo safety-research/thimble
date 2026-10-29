@@ -9,7 +9,7 @@
 // quiet line of what it said.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { askClaudeText, changedLines, fixActions, fixText, fixWords, pageText, triedLines, workingText, type FixRow } from '../../src/chat/fix.ts'
+import { askClaudeText, changedLines, fixActions, fixText, fixWords, notStartedToast, pageText, triedLines, workingText, type FixRow } from '../../src/chat/fix.ts'
 import { FixPage, FixResult, FixWorking } from '../../src/chat/FixStrip.tsx'
 import { takeDrafts } from '../../src/chat/pending.ts'
 import { bus } from '../../src/lib/bus.ts'
@@ -26,6 +26,15 @@ describe('the command and the page', () => {
     expect(fixWords('/thimble-fix')).toBe('')
     expect(fixWords('/thimble-fixes')).toBeNull()
     expect(fixWords('what does /thimble-fix do?')).toBeNull()
+  })
+
+  test("a /thimble-fix the server started nothing for: its line on how to ask on its own, as the terminal says it, else why no fix started", () => {
+    const line = 'Ask for a change to thimble with /thimble-fix <what should work differently>.'
+    expect(notStartedToast(new Error(`400 ${line}`))).toEqual({ text: line })
+    expect(notStartedToast(new Error("409 thimble's fixes are off on this server (THIMBLE_FIXES=off)"))).toEqual({
+      text: "thimble fix did not start: thimble's fixes are off on this server (THIMBLE_FIXES=off)",
+      kind: 'error',
+    })
   })
 
   test('the text copy names the card open in focus, a dialog, and each pane by its surface', () => {

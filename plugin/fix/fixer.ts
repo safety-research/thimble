@@ -32,12 +32,11 @@ import type { EngineInterface } from 'claude-code'
 import { busy, busyWhile } from '../bar/busy'
 import { failNotice } from '../bar/notice'
 import { spawnFork } from '../core/forks'
-import { thimbleHome } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { sessionKey } from '../hooks/conversation'
 import { promptText } from '../prompts/prompts'
-import { type Fix, type Refusal, askedWords, fixesDir, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
+import { type Fix, type Refusal, askedWords, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
 import { screenCopy } from './screen'
 
 type Engine = EngineInterface
@@ -86,8 +85,8 @@ export function changingText(f: Fix): string {
 
 /** For the next fixer after the check did not use a change (another round in the same copy, or y on the failed line in a new one): what
  *  was refused and why, so that it puts the change elsewhere or fixes the tests, or says why it cannot. The prompt does
- *  not list the files no fix may change; this names only the ones the change touched. `earlier`: y on the failed line,
- *  whose copy is new. */
+ *  not list the files no fix may change; this names only the ones the change touched. `earlier`: another try in a new
+ *  copy. */
 export function refusedText(r: Refusal, earlier: boolean): string {
   const where = earlier ? 'The earlier change is not in your copy' : 'Your last change is in your copy'
   const fix = r.files?.length
@@ -96,10 +95,20 @@ export function refusedText(r: Refusal, earlier: boolean): string {
   return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`
 }
 
+/** For another try of a fix that did not pass (redo), what the try before left the new fixer, as the kernel's redo
+ *  says: in the fix's copy (same_copy), that try's change and the changes made there after it, such as the one Claude
+ *  made, with why it did not pass (`why`); in a new copy, the earlier change as a patch (earlier), when there is one. */
+export function beforeText(f: Pick<Fix, 'earlier' | 'same_copy'>, why: string): string | null {
+  if (f.same_copy) return `The last try did not pass: ${why.replace(/[\s.]+$/, '')}. Your copy holds the change of that try, and the changes that were made in the copy after it. Start from them.`
+  return f.earlier ? `An earlier change for this request, which thimble did not use, is in ${f.earlier}; start from it when it helps.` : null
+}
+
 /** The fixer's first message: the task (prompts/fixer.md), the person's words of each round, as they typed them after
  *  /thimble-fix (a record from before keeps them beside Claude's, without the form's head that names the fix), where it
- *  works, the fix these words change, what the check refused last time, and a text copy of what thimble shows now. */
-function firstMessage(fix: Fix, earlier: string | null, task: string, screen: string): string {
+ *  works, the fix these words change, what the try before left it (beforeText; `before` is why that try did not pass,
+ *  for another try), what the check refused last time, and a text copy of what thimble shows now. */
+function firstMessage(fix: Fix, before: string | null, task: string, screen: string): string {
+  const left = before != null ? beforeText(fix, before) : null
   const words = askedWords(fix)
   const asked = words.length > 1
     ? words.map((w, i) => `Round ${i + 1}: ${w}`).join('\n')
@@ -115,8 +124,8 @@ function firstMessage(fix: Fix, earlier: string | null, task: string, screen: st
     ...(fix.patches ?? []).map(x => `The words name fix ${x.id} ("${x.title}"): its change is in ${x.path}, as a patch.`),
     ...(fix.patches?.length ? [''] : []),
     `Your working folder is the copy: ${fix.work}.`,
-    ...(earlier ? [`An earlier change for this request, which thimble did not use, is in ${earlier}; start from it when it helps.`] : []),
-    ...(fix.refused?.why ? [refusedText(fix.refused, !!earlier)] : []),
+    ...(left ? [left] : []),
+    ...(fix.refused?.why ? [refusedText(fix.refused, before != null && !fix.same_copy)] : []),
     '',
     'What thimble shows on the person\'s screen now, as text (the conversation above does not hold it):',
     '',
@@ -133,18 +142,19 @@ export async function screenNow($: Engine): Promise<string> {
 /** The fixes whose fixer is starting: a look for fixers that ended (recoverFixers) leaves them be. */
 const starting = new Set<number>()
 
-/** Start the fixer on a fix whose copy the kernel just made (a request, a round, a redo). `screen`: the text copy of
- *  the screen, when the caller made it before the copy. */
-export async function startFixer($: Engine, fix: Fix, earlier = false, screen?: string): Promise<string | null> {
+/** Start the fixer on a fix whose copy the kernel just made (a request, a round, a redo). `before`: for another try of
+ *  a fix that did not pass (redo), why that try did not pass. `screen`: the text copy of the screen, when the caller
+ *  made it before the copy. */
+export async function startFixer($: Engine, fix: Fix, before: string | null = null, screen?: string): Promise<string | null> {
   starting.add(fix.id)
   try {
-    return await start($, fix, earlier, screen ?? (await screenNow($)))
+    return await start($, fix, before, screen ?? (await screenNow($)))
   } finally {
     starting.delete(fix.id)
   }
 }
 
-async function start($: Engine, fix: Fix, earlier: boolean, screen: string): Promise<string | null> {
+async function start($: Engine, fix: Fix, before: string | null, screen: string): Promise<string | null> {
   let task: string
   try {
     task = await promptText($, 'fixer')
@@ -155,7 +165,7 @@ async function start($: Engine, fix: Fix, earlier: boolean, screen: string): Pro
   const box = await sandboxOf($, fix.id)
   if (typeof box === 'string') return `The fixer did not start: ${box}`
   // no type: a fork of the session, which sees the conversation; named after the fix, never its number
-  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier ? `${fixesDir(await thimbleHome($))}/tmp/${fix.id}/earlier.patch` : null, task, screen), description: fixingWord(fix), cwd: fix.work || undefined, name: fixSlug(fix) })
+  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, before, task, screen), description: fixingWord(fix), cwd: fix.work || undefined, name: fixSlug(fix) })
   if (r.deny !== undefined || !r.agentId) return `The fixer did not start (${cut(String(r.deny || 'no agent started'), 200)}).`
   await $.state.set(FIXERS, { ...(await fixers($)), [r.agentId]: fix.id } as never)
   busyFixer($, fix)

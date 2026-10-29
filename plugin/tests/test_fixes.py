@@ -469,6 +469,74 @@ def test_redo_makes_a_new_copy_with_the_earlier_change(world, monkeypatch):
     r = FX.redo(r["id"], "and keep the percent")
     assert r["state"] == "working" and Path(r["work"]).is_dir() and r["words"][-1] == "and keep the percent"
     assert "read" in (FX.tmp_dir(r["id"]) / "earlier.patch").read_text()
+    # what redo gives names the earlier change, for the fixer
+    assert r["earlier"] == str(FX.tmp_dir(r["id"]) / "earlier.patch") and "same_copy" not in r
+    assert "earlier" not in FX.get(r["id"])
+
+
+def _claude_changes(rec: dict) -> Path:
+    """What Claude does in the person's session for a fix that did not pass, as d's message asks: a change in its copy."""
+    p = Path(rec["work"]) / "plugin" / "bar" / "legend.ts"
+    p.write_text("export const wrap = true\n")
+    return p
+
+
+def test_a_try_again_goes_on_in_the_copy_while_it_holds_a_change_no_check_took_and_the_check_takes_it(world, monkeypatch):
+    # the tests fail; Claude, asked with d, changes the copy; the person's /thimble-fix 1 alone (redo) goes on in that
+    # copy, as their words would, and the next check commits and tests Claude's change with the fixer's
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = made(world)
+    r = FX.done(r["id"], "Bar says read", "")
+    assert r["state"] == "failed" and r["commit"]
+    edit = _claude_changes(r)
+    (FX.tmp_dir(r["id"]) / "earlier.patch").write_text("a patch of an earlier try\n")
+    got = FX.redo(r["id"])
+    assert got["same_copy"] is True and "earlier" not in got
+    assert got["state"] == "working" and got["work"] == r["work"] and edit.exists()
+    assert got["rounds"] == r["rounds"] + 1 and got["words"] == r["words"] and got["error"] is None
+    assert not (FX.tmp_dir(r["id"]) / "earlier.patch").exists() and "same_copy" not in FX.get(r["id"])
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    done = FX.done(r["id"], "Bar says read", "The bar says read, and the legend wraps.")
+    assert done["state"] == "ready" and done["tests"] == "passed"
+    assert sorted(f["path"] for f in done["files"]) == ["plugin/bar/bar.tsx", "plugin/bar/legend.ts"]
+    # a copy that holds nothing beyond what the check took: another try starts in a new copy, as before
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    t = made(world, "make the bar bold")
+    t = FX.done(t["id"], "Bar bold", "")
+    again = FX.redo(t["id"])
+    assert "same_copy" not in again and again["earlier"] == str(FX.tmp_dir(t["id"]) / "earlier.patch")
+
+
+def test_after_cannot_a_try_again_keeps_what_claude_changed_in_the_copy_and_a_blocked_fix_may_go_on_with_it(world):
+    # the fixer could not do it and changed nothing (no commit); Claude then changes the copy: another try keeps it
+    r = made(world, edit=False)
+    r = FX.done(r["id"], cannot="it needs the legend to wrap")
+    assert r["state"] == "failed" and not r["commit"] and Path(r["work"]).is_dir()
+    edit = _claude_changes(r)
+    got = FX.redo(r["id"])
+    assert got["same_copy"] is True and got["work"] == r["work"] and edit.exists()
+    done = FX.done(r["id"], "Legend wraps", "The legend wraps.")
+    assert done["state"] == "ready" and [f["path"] for f in done["files"]] == ["plugin/bar/legend.ts"]
+    # with nothing in its copy, another try starts in a new copy, and a patch an earlier try left goes with it
+    n = made(world, "make the bar bold", edit=False)
+    n = FX.done(n["id"], cannot="it needs a newer node")
+    (FX.tmp_dir(n["id"]) / "earlier.patch").write_text("a patch of an earlier try\n")
+    again = FX.redo(n["id"])
+    assert "same_copy" not in again and "earlier" not in again
+    assert not (FX.tmp_dir(n["id"]) / "earlier.patch").exists()
+    # a fix whose fixer could not do without a file no fix may change: another try with nothing new would fail the same
+    # way, but one with Claude's change in its copy goes on there
+    b = FX.new("make the fix line blue")
+    (Path(b["work"]) / "plugin" / "fix").mkdir(parents=True)
+    (Path(b["work"]) / "plugin" / "fix" / "line.ts").write_text("const KEY_COLOR = 'blue'\n")
+    FX.done(b["id"], "Blue fix line", "")
+    FX.again(b["id"])
+    b = FX.done(b["id"], cannot="Only thimble's maintainers can change the fix line.")
+    assert b["blocked"] == ["plugin/fix/line.ts"]
+    (Path(b["work"]) / "plugin" / "fix" / "line.ts").unlink()
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `coverage ${n}` // blue\n")
+    got = FX.redo(b["id"])
+    assert got["same_copy"] is True and got["state"] == "working" and "blocked" not in got
 
 
 def test_export_saves_files_and_sends_nothing(world, tmp_path):

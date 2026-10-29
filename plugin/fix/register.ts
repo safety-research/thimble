@@ -137,8 +137,9 @@ const ASKED = { plugin: 'thimble', key: 'fixAsked' } as const
 const ASKED_WORDS = { plugin: 'thimble', key: 'fixAskedWords' } as const
 
 /** /thimble-fix with a fix's number and no words: a fix that failed or no longer fits (fixes.ts triesAgain) starts again
- *  in a new copy, in the person's words of before, a moment after the command's hook, as y on its failed line does after
- *  the key; any other gets how to ask. The command's answer, or null when there is none. */
+ *  in the person's words of before (request.ts redoFix: in its copy while that holds a change no check took, such as
+ *  Claude's after d), a moment after the command's hook, as y on its failed line does after the key; any other gets how
+ *  to ask. The command's answer, or null when there is none. */
 async function numberAlone($: Engine, n: number | null): Promise<string | null> {
   const f = n == null ? null : (await refreshFixes($))?.fixes.find(x => x.id === n)
   if (!f || !triesAgain(f)) return FIX_ALONE
@@ -153,7 +154,8 @@ async function numberAlone($: Engine, n: number | null): Promise<string | null> 
 
 /** The prompt box now holds `text`: the bar draws again when a failed fix's view shows keys the box no longer lets act,
  *  or hides keys that act again (line.ts redrawFor). Nothing is read while no such view shows, so a key typed costs
- *  nothing more, and nothing here fails the edit. */
+ *  nothing more, and nothing here fails the edit. (A word that hooks/keys.ts puts in the box itself, after it took its
+ *  first letter as a key, never comes here: keys.ts draws the bar again for it.) */
 function boxChanged($: Engine, text: unknown): void {
   try {
     if (redrawFor(String(text ?? '') === '')) $.ui.invalidate('ui.render')

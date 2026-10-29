@@ -24,15 +24,16 @@
 //             fixer could not do without the files no fix may change (blocked) offers no y: d ask Claude · n dismiss)
 //             d shows what it tried in its place, and the prompt box takes the failure as a message to Claude, which
 //             the person sends with ↵ or not: Claude, outside the fixer's sandbox, can look into it and change what the
-//             fixer could not, in the fix's copy, with its own permission prompts (/thimble-fix N <words> then goes on in
-//             that copy):
+//             fixer could not, in the fix's copy, with its own permission prompts (/thimble-fix N, with words or not, then
+//             goes on in that copy, and its check takes Claude's change):
 //             <title>
 //               You asked   <the person's words>
 //               Claude did  <what the fixer says it did>
 //               Tried       <the files it changed>
 //               Why         <why it did not pass>
 //               y try again · n dismiss   (only while the prompt box is empty: the keys type into the message d put
-//                                         there, so they show again once the person sends it or clears the box)
+//                                         there, so they show again once the person clears the box; sent, it is a
+//                                         prompt, and the line goes)
 //   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it   (until the
 //             ◇ Claude changed no code: <title> stays as it was   (a round of a fix the person has)    next prompt)
 //   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo   (until the next prompt)
@@ -40,7 +41,8 @@
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
 //
 // y applies a ready fix: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts); on a
-// failed fix, y tries it again in a new copy (request.ts redoFix). n leaves a ready
+// failed fix, y tries it again, in its copy while that holds a change no check took, else in a new copy (request.ts
+// redoFix). n leaves a ready
 // fix ready in the person's list (thimble fix list, in a shell), where thimble fix apply N turns it on later. No key sends
 // anything to Claude: the person's ↵ does.
 import type { EngineInterface } from 'claude-code'
@@ -117,8 +119,9 @@ async function pressLine($: Engine, id: number, kind: string, k: string): Promis
 
 /** The failure of a failed fix, as a message to Claude in the person's words: what they asked, what the fixer tried and
  *  why it did not pass, where its change is, and how a change Claude makes in its copy gets tested: the person's
- *  /thimble-fix N <words> goes on in that copy (a new try, y or the number alone, starts a new one). `copy`: the fix's
- *  copy of thimble as the person reads its path, or null when it has none. */
+ *  /thimble-fix N, with words or not, goes on in that copy, as y does, while it holds a change no check took (the
+ *  kernel's redo), and its check takes the change. `copy`: the fix's copy of thimble as the person reads its path, or
+ *  null when it has none. */
 export function askClaudeText(f: Fix, copy: string | null): string {
   const one = (s: string) => cut(String(s || '').replace(/\s+/g, ' ').trim(), 240).replace(/[\s.]+$/, '')
   const words = askedWords(f).filter(w => w.trim())
@@ -126,7 +129,7 @@ export function askClaudeText(f: Fix, copy: string | null): string {
   const tried = f.summary ? ` Its fixer, which works in a sandbox, tried this: ${one(f.summary)}.` : ' Its fixer works in a sandbox.'
   const where = `${copy ? ` Its copy of thimble is ${copy}, and` : ''} thimble fix diff ${f.id} shows its change.`
   const ask = copy
-    ? ` Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix ${f.id} and what you changed, so that thimble tests it.`
+    ? ` Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix ${f.id}, so that thimble tests it.`
     : ` Find why it failed, and tell me what to add with /thimble-fix ${f.id}.`
   return `My thimble fix ${f.id}, “${fixName(f)}”, did not pass: ${one(f.error || 'its tests failed')}.${asked}${tried}${where}${ask}`
 }

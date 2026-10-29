@@ -20,9 +20,9 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
                              on a fix. Main starts the fix with its fix_thimble tool (from_tool), `N` for a round of fix
                              N or `new` for a new fix, or first asks the person one short question. The fix takes the
                              person's words as they typed them, never main's, and only in the turn of main's that reads
-                             them or the next one (main_turn_ended), as in the terminal: a later call of main's own
-                             starts no fix. A fix's number alone tries a fix that failed or no longer fits again
-                             (tries_again), as its Try again does; anything else alone says how to ask (EMPTY)
+                             them or the next one (words_read, main_turn_ended), as in the terminal: a later call of
+                             main's own starts no fix. A fix's number alone tries a fix that failed or no longer fits
+                             again (tries_again), as its Try again does; anything else alone says how to ask (EMPTY)
     request(c, words, page)  a new fix (`fix new --made-in browser`) and its fixer
     change(c, fid, words)    more words for a fix the person has (fix_thimble's `N <words>`, or a message in the fix's
                              thread): a round of that fix (`fix round`), never a new fix. A fixer that still works gets
@@ -103,14 +103,17 @@ PROMPT = "thimble-fix"  # what main reads of the person's /thimble-fix (prompts/
 
 @dataclass
 class _Asking:
-    """The person's last /thimble-fix in a workspace, which main's fix_thimble may still take (from_tool)."""
+    """The person's /thimble-fix in a workspace, which main's fix_thimble may take (from_tool) once main read it."""
     words: str  # what they typed after /thimble-fix
     page: str  # the text copy of the page then
-    turns: int  # main's turn ends before the words go (main_turn_ended)
+    turns: int = ASKED_TURNS  # main's turn ends, from the turn that reads the words, before they go (main_turn_ended)
 
 
 _phase: dict[int, str] = {}  # fix id → fixing | testing | applying | restarting, while this server works on it
-_asked: dict[str, _Asking] = {}  # workspace → the person's last /thimble-fix there, while main may take it
+# workspace → the person's /thimble-fix that main's turn read, while main may take it (words_read, main_turn_ended)
+_asked: dict[str, _Asking] = {}
+# workspace → each /thimble-fix posted there that no turn of main's read yet, by the id of the event that carries it
+_waiting: dict[str, dict[str, _Asking]] = {}
 _since: dict[int, float] = {}  # fix id → when this server's work on it began (a new fix, a round, a redo)
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
 _where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
@@ -417,18 +420,23 @@ installed packages, so the browser's tests run there: `cd browser/frontend && np
 </page>"""
 EARLIER = ("\n\nAn earlier change for this request, which did not pass, is in {patch}; start from it when it helps. "
            "It did not pass because {why}.")
+# another try in the fix's copy, which held work no check took (the kernel's redo, same_copy; plugin/fix/fixer.ts
+# beforeText)
+KEPT = ("\n\nThe last try did not pass because {why}. Your copy holds the change of that try, and the changes that were "
+        "made in the copy after it. Start from them.")
 
 
 def first_message(rec: dict[str, Any], page: str, earlier: bool = False) -> str:
-    """The fixer's first message: the registry's fixer text, the person's words (each round), where it works, and the
-    page."""
+    """The fixer's first message: the registry's fixer text, the person's words (each round), where it works, what the
+    try before left it, for another try (`earlier`: the kernel's redo says where, and the record why that try did not
+    pass), and the page."""
     prompt = (plugin_dir() / "prompts" / "fixer.md").read_text("utf-8").strip()
     words = rec.get("words") or []
     asked = "\n".join(f"Round {i + 1}: {w}" for i, w in enumerate(words)) if len(words) > 1 else (
         words[0] if words else rec.get("title", ""))
-    patch = fixes_home() / "tmp" / str(rec["id"]) / "earlier.patch"
-    more = EARLIER.format(patch=patch, why=str(rec.get("error") or "its checks failed").rstrip(".")) if (
-        earlier and patch.is_file()) else ""
+    why = str(rec.get("error") or "its checks failed").rstrip(".")
+    more = "" if not earlier else KEPT.format(why=why) if rec.get("same_copy") else EARLIER.format(
+        patch=rec["earlier"], why=why) if rec.get("earlier") else ""
     return FIRST.format(prompt=prompt, id=rec["id"], asked=asked, work=rec.get("work"), earlier=more,
                         page=(page or "(nothing)").strip()[:PAGE_CHARS])
 
@@ -545,7 +553,7 @@ def fixer_chat(c: str, rec: dict[str, Any], agent_id: str, sid: str, *, asked: s
     if (asked or "").strip():
         agents.Recorder(c, chat).record("user", text=str(asked).strip(), by=agents.BROWSER)
     elif had is not None:
-        agents.Recorder(c, chat).record("text", delta="\n· Redo, in a new copy\n")
+        agents.Recorder(c, chat).record("text", delta=f"\n· Redo, in {'its' if rec.get('same_copy') else 'a new'} copy\n")
     _where[fid] = (c, chat)
     return chat
 
@@ -984,9 +992,10 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     """The person's `/thimble-fix <words>` in main's chat: the message shows there as they typed it, and main reads the
     request with their fixes beside it (prompts/thimble-fix.md), as the terminal's /thimble-fix gives Claude
     (plugin/commands/thimble-fix.md). Main starts the fix with fix_thimble in the turn that reads it or the next one
-    (main_turn_ended), which takes the words and the page as they were now. Posted as main's event, so words typed while
-    main works wait for its turn's end. A fix's number alone tries a fix that failed or no longer fits again (redo), as
-    its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a try again."""
+    (words_read, main_turn_ended), which takes the words and the page as they were now. Posted as main's event, so words
+    typed while main works wait for its turn's end. A fix's number alone tries a fix that failed or no longer fits again
+    (redo), as its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a try
+    again."""
     from . import agents, events, prompts  # noqa: PLC0415
 
     words = (words or "").strip()
@@ -1008,17 +1017,38 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     text = prompts.render(PROMPT, {"words": words, "fixes": fixes_context(await asyncio.to_thread(records))})
     said = f"{COMMAND} {words}"
     eid = secrets.token_hex(4)
-    # a turn of main's that runs now ends before main reads these words: it is not one of theirs
-    _asked[c] = _Asking(words, page or "", ASKED_TURNS + (1 if agents.running(c, agents.MAIN_ID) else 0))
+    # the words count main's turns from the turn that reads them (words_read): a turn that runs now, and the turns of
+    # messages posted before them, are not theirs
+    _waiting.setdefault(c, {})[eid] = _Asking(words, page or "")
     agents.mirror(c, "user", by=agents.BROWSER, text=said, event=eid)
-    out = events.post(c, events.MAIN, {"text": text}, mirror=False, line=said, event_id=eid)
+    try:
+        out = events.post(c, events.MAIN, {"text": text}, mirror=False, line=said, event_id=eid)
+    except HTTPException:
+        _waiting.get(c, {}).pop(eid, None)
+        raise
     return {"event": out.get("id")}
 
 
+def words_read(c: str, event_id: str) -> None:
+    """An event reached main's turn (session.py): when it carries the person's /thimble-fix, this turn reads their words,
+    and fix_thimble may take them in it and in the next one (main_turn_ended), as the terminal's /thimble-fix counts from
+    the turn its command runs in. Main reads its events in the order they were posted, so one that waited before this
+    one and was not read (a turn stopped with its queue) goes with it."""
+    waiting = _waiting.get(c)
+    if not waiting or event_id not in waiting:
+        return
+    while waiting:
+        eid, a = next(iter(waiting.items()))
+        del waiting[eid]
+        if eid == event_id:
+            _asked[c] = _Asking(a.words, a.page)
+            return
+
+
 def main_turn_ended(c: str) -> None:
-    """Main's turn ended (session.py): the person's /thimble-fix words go after ASKED_TURNS of main's turns, as the
-    terminal's do, so that fix_thimble called later on main's own (on the person's yes to main's offer, or on words
-    typed without /thimble-fix) starts no fix from them."""
+    """Main's turn ended (session.py): the person's /thimble-fix words go after ASKED_TURNS of main's turns from the turn
+    that read them, as the terminal's do, so that fix_thimble called later on main's own (on the person's yes to main's
+    offer, or on words typed without /thimble-fix) starts no fix from them."""
     a = _asked.get(c)
     if a is None:
         return
@@ -1035,8 +1065,15 @@ async def from_tool(c: str, form: str) -> dict[str, Any]:
     never main's; main's `form` names the fix they change, `N` a round of fix N (change), `new` or none a new fix
     (request), and the person's own `N …` or `new …` names it first. The page is as their /thimble-fix sent it. Main's
     chat gets the line that opens the fix's thread; main heard of it in the tool's result. With no /thimble-fix of the
-    person's to answer (none, one answered already, or one older than ASKED_TURNS of main's turns), no fix starts.
-    {fix, kind: new | round | live}."""
+    person's that main read to answer (none, one answered already, one older than ASKED_TURNS of main's turns, or one
+    still waiting for main's turn), no fix starts. {fix, kind: new | round | live}."""
+    if c not in _asked and _waiting.get(c):
+        # the record that brought the words to main's turn may be one the mirror has not read yet: it reads it now
+        from . import session  # noqa: PLC0415
+
+        lv = session.current(c)
+        if lv is not None:
+            session._read_now(lv)
     a = _asked.pop(c, None)
     if a is None or not a.words:
         raise HTTPException(409, NOT_ASKED)
@@ -1131,8 +1168,9 @@ async def undo_route(fid: int, http: Request) -> dict[str, Any]:
 
 
 async def redo(c: str, fid: int) -> dict[str, Any]:
-    """Try again on a fix that did not pass, or the person's `/thimble-fix N` alone on one (ask): a new copy, and a new
-    fixer with the earlier change, in the person's words of before. {fix}."""
+    """Try again on a fix that did not pass, or the person's `/thimble-fix N` alone on one (ask): a new fixer, in the
+    person's words of before, in the fix's copy while that holds work no check took (a change made there in the
+    terminal, after its d), else in a new copy with the earlier change (the kernel's redo). {fix}."""
     before = await asyncio.to_thread(record, fid)
     rec = _json(await asyncio.to_thread(kernel, ["redo", str(fid)], timeout=180), "redo")
     dismiss(fid)

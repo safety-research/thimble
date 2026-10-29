@@ -141,11 +141,14 @@ function setup(o: { keys?: boolean } = {}) {
       const t = argv.indexOf('--title')
       return ok({ id: ids[0], title: t > 0 ? argv[t + 1] : 'first', merged: ids.slice(1), redo: [], reload: true })
     }
-    // another try: a blocked fix only with new words, as the kernel says
+    // another try: in its copy while that holds a change no check took (a test's `unchecked`: Claude changed the copy),
+    // else in a new copy, with the earlier change's patch when the fix has a commit; a blocked fix only with new words,
+    // or with such a change, as the kernel says
     if (verb === 'redo') {
-      if (fix.blocked?.length && !stdin) return { exitCode: 1, stdout: '', stderr: 'thimble fix redo: fix 1 needs a change to plugin/engine/kernel/privacy.py, which no fix may make' }
-      Object.assign(fix, { state: 'working', refuse: null, blocked: undefined })
-      return ok(fix)
+      const same = !!fix.unchecked && fix.state === 'failed'
+      if (fix.blocked?.length && !stdin && !same) return { exitCode: 1, stdout: '', stderr: 'thimble fix redo: fix 1 needs a change to plugin/engine/kernel/privacy.py, which no fix may make' }
+      Object.assign(fix, { state: 'working', refuse: null, blocked: undefined, unchecked: undefined, error: null })
+      return ok({ ...fix, ...(same ? { same_copy: true } : fix.commit ? { earlier: `${HOME}/fixes/tmp/1/earlier.patch` } : {}) })
     }
     // u after y on a fix changed in place: its version before comes back
     if (verb === 'undo') {
@@ -904,7 +907,7 @@ test('a failed fix offers y try again and d ask Claude, never r: y, or a click o
 })
 
 /** The message d puts in the prompt box for fix 1 as the tests make it fail: Cannot after a refused try. */
-const ASK_CLAUDE = "My thimble fix 1, “make the bar say read”, did not pass: it needs the scan off. I asked: “make the bar's coverage item say read”. Its fixer, which works in a sandbox, tried this: The scan skips the notes you name. Its copy of thimble is /made-up/.thimble/fixes/work/1, and thimble fix diff 1 shows its change. Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix 1 and what you changed, so that thimble tests it."
+const ASK_CLAUDE = "My thimble fix 1, “make the bar say read”, did not pass: it needs the scan off. I asked: “make the bar's coverage item say read”. Its fixer, which works in a sandbox, tried this: The scan skips the notes you name. Its copy of thimble is /made-up/.thimble/fixes/work/1, and thimble fix diff 1 shows its change. Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix 1, so that thimble tests it."
 
 test("a failed fix's d asks Claude: what it tried shows in the line's place, and the prompt box takes the failure, for the person to send with ↵; no key sends anything, and the keys under it show only while the box is empty", async () => {
   const s = setup()
@@ -1006,14 +1009,85 @@ test("at the prompt, d on a failed fix puts its failure in the box; y and n then
   expect(s.verbs().slice(verbs)).toContain('redo 1')
 })
 
+test("a word typed at the empty prompt under a failed fix's view, which starts with one of its keys, is a word: the key acts not, and the view's keys go with that keystroke", async () => {
+  const s = setup({ keys: true })
+  s.fix.refuse = 'its tests failed in the sandbox'
+  await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  await s.end('Cannot: it needs the scan off', 'agent-fixer-2')
+  await (await fixKey(s.$, 'd'))!.later()
+  s.box.text = ''
+  await s.call('prompt.change', { text: '', cursor: 0, origin: { kind: 'clear' } })
+  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    y try again · n dismiss')
+  // the person types "ye" quickly: y opens the word window, and e makes the two a word
+  s.$.clock.now = async () => 9_000_000
+  const typed = async (e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length })
+  const press = async (k: string) => {
+    const at = s.box.text.length
+    s.box.text = (await s.call('prompt.edit', { origin: { kind: 'composer' }, key: { key: k }, text: s.box.text, cursor: at, start: at, end: at, inputText: k }, typed)).text
+  }
+  const drawn = s.redraws.length
+  await press('y')
+  expect(s.box.text).toBe('')
+  expect(s.redraws.length).toBe(drawn)
+  await press('e')
+  expect(s.box.text).toBe('ye')
+  // the box holds the word: the bar draws again at once, with no key under the view, since the keys act only at an
+  // empty prompt; and y was a letter of the word, so nothing is tried again
+  expect(s.redraws.slice(drawn)).toEqual(['ui.render'])
+  expect(textOf((await fixLineRows(s.$, ELS, 110)).at(-1))).toBe('    Why         it needs the scan off')
+  await s.tick()
+  expect(s.verbs().filter(v => /^(redo|notnow)\b/.test(v))).toEqual([])
+})
+
+test("after d, Claude changes the failed fix's copy: /thimble-fix N alone, as y and words do, goes on in that copy, whose check takes the change, and the new fixer reads that it holds the last try and what changed after it", async () => {
+  const s = setup()
+  s.fix.refuse = 'its tests failed in the sandbox'
+  await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  await s.end('Cannot: it needs the scan off', 'agent-fixer-2')
+  await (await fixKey(s.$, 'd'))!.later()
+  // the person sends the message; Claude changes the copy, as it asks: the kernel finds a change there that no check took
+  await s.call('prompt.submit', { text: s.box.text, origin: { kind: 'composer' } })
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  s.fix.unchecked = true
+  const none = async () => { throw new Error('no command runs') }
+  expect(await s.call('command.run', { command: 'thimble-fix', args: '1' }, none)).toEqual({})
+  await s.tick()
+  await until(() => s.spawns.length === 3)
+  expect(s.verbs()).toContain('redo 1')
+  expect(s.commands).toEqual([])
+  const prompt = String(s.spawns[2].prompt)
+  expect(prompt).toContain(`Your working folder is the copy: ${WORK}.\nThe last try did not pass: it needs the scan off. Your copy holds the change of that try, and the changes that were made in the copy after it. Start from them.\n`)
+  expect(prompt).not.toContain('earlier.patch')
+  expect(s.toasts).toContain('A fork of this session is fixing “make the bar say read” again, in its copy.')
+  // y on the failed line goes on in the copy the same way
+  const t = setup()
+  t.fix.refuse = 'its tests failed in the sandbox'
+  await requested(t, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  await t.end('Cannot: it needs the scan off', 'agent-fixer-2')
+  t.fix.unchecked = true
+  await (await fixKey(t.$, 'y'))!.later()
+  expect(String(t.spawns[2].prompt)).toContain('Your copy holds the change of that try')
+  expect(t.toasts).toContain('A fork of this session is fixing “make the bar say read” again, in its copy.')
+  // the person's words go on in the copy too, as a round of the fix, and the fixer reads them
+  const u = setup()
+  u.fix.refuse = 'its tests failed in the sandbox'
+  await requested(u, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  await u.end('Cannot: it needs the scan off', 'agent-fixer-2')
+  const r = await ask(u, '1 Claude made the scan skip notes')
+  expect(r.text).toContain('changes the person\'s fix "make the bar say read" in the background')
+  expect(u.verbs()).toContain('round 1')
+  expect(u.fix.work).toBe(WORK)
+  expect(String(u.spawns[2].prompt)).toContain('Round 2: Claude made the scan skip notes')
+})
+
 test("the failure Claude reads names the person's words of each round, what the fixer tried, where its change is, and how a change Claude makes there gets tested, in one paragraph", () => {
   const f = (o: Any) => ({ id: 4, title: 'Legend shows every row', words: ['the legend hides its last row'], rounds: 1, made_in: 'terminal', created: 0, state: 'failed', work: null, commit: 'c', files: [], tests: null, summary: '', error: 'its tests failed in the sandbox', ...o })
   // with no copy, there is nowhere for Claude's change: it says what to add with /thimble-fix 4
   expect(askClaudeText(f({}), null)).toBe('My thimble fix 4, “Legend shows every row”, did not pass: its tests failed in the sandbox. I asked: “the legend hides its last row”. Its fixer works in a sandbox. thimble fix diff 4 shows its change. Find why it failed, and tell me what to add with /thimble-fix 4.')
   // the rounds in turn, a summary of several lines and a reason that ends with its own stop, as one paragraph; Claude's
-  // change goes in the copy, where /thimble-fix 4 <words> goes on (y, or the number alone, would start a new copy)
+  // change goes in the copy, where /thimble-fix 4, with words or not, goes on and has it tested
   const t = askClaudeText(f({ words: ['the legend hides its last row', 'and wrap long names'], summary: 'The legend wraps.\nNames break at 40 cells.', error: 'it needs a newer node.' }), '~/.thimble/fixes/work/4')
-  expect(t).toBe('My thimble fix 4, “Legend shows every row”, did not pass: it needs a newer node. I asked: “the legend hides its last row · then and wrap long names”. Its fixer, which works in a sandbox, tried this: The legend wraps. Names break at 40 cells. Its copy of thimble is ~/.thimble/fixes/work/4, and thimble fix diff 4 shows its change. Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix 4 and what you changed, so that thimble tests it.')
+  expect(t).toBe('My thimble fix 4, “Legend shows every row”, did not pass: it needs a newer node. I asked: “the legend hides its last row · then and wrap long names”. Its fixer, which works in a sandbox, tried this: The legend wraps. Names break at 40 cells. Its copy of thimble is ~/.thimble/fixes/work/4, and thimble fix diff 4 shows its change. Find why it failed, and make the change in that copy if you can. Then I type /thimble-fix 4, so that thimble tests it.')
   expect(t).not.toContain('\n')
 })
 

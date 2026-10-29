@@ -20,6 +20,14 @@ export function fixWords(text: string): string | null {
   return m ? (m[1] ?? '').trim() : null
 }
 
+/** The toast when the server started nothing for a /thimble-fix (lib/api's `<status> <detail>`): a 400 is its line on
+ * how to ask, as the terminal answers a fix's number alone that has nothing to try again, shown on its own; anything
+ * else is why no fix started. Pure. */
+export function notStartedToast(e: Error): { text: string; kind?: 'error' } {
+  const said = e.message.replace(/^\d{3}\s+/, '')
+  return /^400\s/.test(e.message) ? { text: said } : { text: `thimble fix did not start: ${said}`, kind: 'error' }
+}
+
 /** One fix the row can show (backend fixes.status). */
 export interface FixRow {
   id: number
