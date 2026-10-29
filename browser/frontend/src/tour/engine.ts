@@ -6,11 +6,13 @@
 // the frame it names takes the pointer and the wheel; on a step marked `try`, holding ⌘ (Ctrl off a Mac) and moving
 // over its cutout highlights what is under the pointer, a ⌘-click or ⌘-drag there reaches the page, and once the ask box
 // is open, typing in it does, and Enter closes it as Esc does, sending nothing; on a step with `chips`, hovering an
-// underlined value in its card shows that value's source. Esc closes the tour; while an ask box or a source is open, Esc
-// closes only that.
+// underlined value in its card shows that value's source; on a step with `tips`, resting on a mark of its example that
+// names a value (`data-tip`, a record's label and value) shows that name, as thimble's one tooltip does
+// (components/Tooltip HoverTips). Esc closes the tour; while an ask box or a source is open, Esc closes only that.
 //
 // Examples are the tour's own markup (./examples.json, ./steps), laid over the page under the dim and removed when
 // their step ends. Nothing the tour shows reaches the server.
+import { placeAtPointer, TIP_DELAY_MS, TIP_WARM_MS } from '../components/Tooltip'
 import { askKeyLabel, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { setGuard } from './freeze'
 import './tour.css'
@@ -90,6 +92,8 @@ export interface Step {
   try?: boolean
   /** a hover on an underlined value of the example's card */
   chips?: (api: Api, chip: Element) => void
+  /** the part of the example whose marks name a value on hover (`data-tip`): the pointer resting on one shows its name */
+  tips?: (api: Api) => Element | null
   /** no Next until the try was made */
   gateNext?: boolean
   /** run when the tour moves off the step */
@@ -165,6 +169,9 @@ export interface Api {
   closeBox: () => void
   showSource: (chip: Element, opts?: { demo?: boolean }) => HTMLElement | null
   closeSource: () => void
+  /** the name a mark gives on hover (its `data-tip`), as thimble's one tooltip shows it for the pointer at (x, y) */
+  showTip: (mark: Element, x: number, y: number, opts?: { demo?: boolean }) => HTMLElement | null
+  hideTip: () => void
   type: (input: HTMLInputElement | HTMLTextAreaElement, text: string, ms?: number) => Promise<void>
   stopDemo: () => void
   /** close the tour */
@@ -492,6 +499,7 @@ export function createTour(snaps: Snaps): Tour {
         console.warn('tour cleanup', e)
       }
     }
+    hideTip()
     ex.replaceChildren()
     fx.replaceChildren()
     host.replaceChildren()
@@ -861,6 +869,8 @@ export function createTour(snaps: Snaps): Tour {
     closeBox,
     showSource: (chip, o) => showSource(chip, o),
     closeSource: () => closeSource(),
+    showTip: (mark, x, y, o) => showTip(mark, x, y, o),
+    hideTip: () => hideTip(),
     async type(input, text, ms = 55) {
       for (const ch of text) {
         input.value += ch
@@ -894,6 +904,7 @@ export function createTour(snaps: Snaps): Tour {
     window.clearTimeout(hoverT)
     window.clearTimeout(hideT)
     closeSource()
+    hideTip()
     setHot(null)
     const tab = steps[i].tab
     if (tab) opts.showTab?.(tab)
@@ -1049,6 +1060,8 @@ export function createTour(snaps: Snaps): Tour {
     shownFor: Element | null = null
   const onHover = (e: MouseEvent) => {
     const s = steps[i]
+    if (i >= 0 && s?.tips && e.isTrusted) onTip(e.clientX, e.clientY)
+    else if (tipFor) hideTip()
     if (i < 0 || !s?.chips || !e.isTrusted) {
       if (hot) setHot(null)
       return
@@ -1107,6 +1120,76 @@ export function createTour(snaps: Snaps): Tour {
     const top = below + eh > innerHeight - 12 ? Math.max(12, c.y - eh - 6) : below
     Object.assign(el.style, { left: `${left}px`, top: `${top}px` })
     return el
+  }
+
+  // ---- the marks of a `tips` step's example that name a value (`data-tip`): the one under a point (the example sits
+  // under the block, so every layer at the point is looked at), and its name as thimble's one tooltip shows it
+  // (components/Tooltip HoverTips): under the pointer where it rests, after a moment, at once when a name went a moment
+  // ago. The analyst's own name ends the demo, which shows names too (marked as the demo's, and removed with it)
+  const tipAt = (x: number, y: number): Element | null => {
+    const within = steps[i]?.tips?.(api)
+    if (!within) return null
+    const stack = document.elementsFromPoint(x, y)
+    if (stack[0] && (pop.contains(stack[0]) || fx.contains(stack[0]))) return null
+    const mark = stack.find((el) => within.contains(el))?.closest('[data-tip]')
+    return mark && within.contains(mark) ? mark : null
+  }
+  let tipFor: Element | null = null,
+    tipEl: HTMLElement | null = null,
+    tipT = 0,
+    tipGone = 0,
+    tipX = 0,
+    tipY = 0
+  const drawTip = (mark: Element, x: number, y: number): HTMLElement | null => {
+    const text = mark.getAttribute('data-tip')
+    if (!text) return null
+    const el = document.createElement('div')
+    el.className = 'tip overlay tip-lines'
+    el.setAttribute('role', 'tooltip')
+    el.textContent = text
+    Object.assign(el.style, { position: 'fixed', left: '0', top: '0', visibility: 'hidden' })
+    fx.append(el)
+    const at = placeAtPointer(x, y, el.offsetWidth, el.offsetHeight, innerWidth, innerHeight)
+    Object.assign(el.style, { left: `${at.left}px`, top: `${at.top}px`, visibility: '' })
+    return el
+  }
+  // the analyst's name, shown or waiting its moment, goes
+  const hideTip = () => {
+    window.clearTimeout(tipT)
+    tipT = 0
+    if (tipEl) tipGone = Date.now()
+    tipEl?.remove()
+    tipEl = null
+    tipFor = null
+  }
+  const showTip = (mark: Element, x: number, y: number, { demo = false } = {}): HTMLElement | null => {
+    fx.querySelectorAll('.tip[data-demo]').forEach((e) => e.remove())
+    if (!demo) hideTip()
+    const el = drawTip(mark, x, y)
+    if (!el) return null
+    if (demo) el.dataset.demo = '1'
+    else {
+      tipEl = el
+      tipFor = mark
+    }
+    return el
+  }
+  const onTip = (x: number, y: number) => {
+    tipX = x
+    tipY = y
+    const mark = tipAt(x, y)
+    if (mark === tipFor) return
+    hideTip()
+    if (!mark) return
+    tipFor = mark
+    const show = () => {
+      tipT = 0
+      if (tipFor !== mark || !mark.isConnected) return
+      if (run?.demo === 'playing') stopDemo()
+      tipEl = drawTip(mark, tipX, tipY)
+    }
+    if (Date.now() - tipGone < TIP_WARM_MS) show()
+    else tipT = window.setTimeout(show, TIP_DELAY_MS)
   }
 
   // ---- the freeze: every input the page would take is stopped at the window, before the app's own listeners
@@ -1199,6 +1282,12 @@ export function createTour(snaps: Snaps): Tour {
       if (sc && r && ev.type === 'wheel' && we.clientX >= r.x && we.clientX <= r.x + r.width && we.clientY >= r.y && we.clientY <= r.y + r.height) {
         const k = sc.getBoundingClientRect().height / (sc.clientHeight || 1) || 1
         sc.scrollBy({ top: (we.deltaY * (we.deltaMode === 1 ? 16 : we.deltaMode === 2 ? sc.clientHeight : 1)) / k })
+        // the marks move out from under a name, as a scroll takes thimble's own away, and the demo that points at them
+        // ends
+        if (s.tips) {
+          hideTip()
+          if (run?.demo === 'playing') stopDemo()
+        }
       }
       return
     }

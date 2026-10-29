@@ -13,10 +13,13 @@
 //     sits 8 px or more inside its cutout, which lies inside the chat panel; step 3, Files, says what the files browser
 //     shows;
 //   - step 4: the step opens the real Labels sidebar with the top bar's Labels button and lays the example sidebar
-//     exactly over it, beside the transcript, which opens on records lit by the example's label; the ruler's marks
-//     stand at the records' lines in the colours of their bars; the step says what the bars and the strip mean; the
-//     wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its height, the
-//     cutout and the example sidebar still and the ruler's thumb following, and the wheel over the ruler too;
+//     exactly over it, beside the transcript, which opens on a record of each of the label's values in its color; the
+//     strip's marks stand at the records' lines in the colors of their bars; the step says what a label is and no more;
+//     its demo rests the pointer on a record's bar, and the record's label and value show under it as thimble's tooltip,
+//     then on another's; the analyst's pointer resting on a record's bar shows its label and value too, a record of
+//     another value at once, and off the transcript nothing; the wheel scrolls the labels' transcript in steps with every
+//     record moving by exactly the scroll, its height, the cutout and the example sidebar still and the strip's thumb
+//     following, and the wheel over the strip too;
 //   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
 //     another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, there is no
 //     label control (the page draws its own), the line under the name starts where the name does, the unreadable line
@@ -231,6 +234,38 @@ const realOffers = (page: Page) => page.evaluate(() => [...document.querySelecto
 const next = (page: Page) => page.click('.tour-pop [data-tour="next"]')
 /** What main's composer holds. */
 const composerText = (page: Page) => page.evaluate(() => document.querySelector<HTMLTextAreaElement>('.chat-composer textarea')?.value ?? null)
+
+// in the page: the name a record of the Labels step's transcript gives on hover, as the tour shows it for the pointer at
+// `at` (else the demo's, for the demo's drawn pointer): its text, the hover of the record whose bar is under the
+// pointer and whether that record has a color, where the name stands from the pointer, and whether it lies inside the
+// transcript
+const TIPPED = (at?: { x: number; y: number } | null) => {
+  const tip = document.querySelector<HTMLElement>(at ? '.tour-fx .tip:not([data-demo])' : '.tour-fx .tip[data-demo]')
+  if (!tip) return null
+  let p = at ?? null
+  if (!p) {
+    const c = document.querySelector<HTMLElement>('.tour-cursor'),
+      m = c && /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(c.style.transform)
+    if (!m) return null
+    p = { x: +m[1] + 8, y: +m[2] + 7 }
+  }
+  const { x, y } = p
+  const row = [...document.querySelectorAll<HTMLElement>('.tour-ex-reader .reader-record[data-tip]')].find((r) => {
+    const b = r.getBoundingClientRect()
+    return y >= b.top && y <= b.bottom && x >= b.left - 0.5 && x <= b.left + 8
+  })
+  const t = tip.getBoundingClientRect(),
+    R = document.querySelector('.tour-ex-reader .reader-body')!.getBoundingClientRect()
+  return {
+    text: tip.textContent,
+    row: row?.dataset.tip ?? null,
+    line: row?.dataset.line ?? null,
+    colored: !!row?.querySelector('.reader-band'),
+    dx: Math.round((t.left - x) * 10) / 10,
+    dy: Math.round((t.top - y) * 10) / 10,
+    inside: t.left >= R.left - 0.5 && t.right <= R.right + 0.5 && t.top >= R.top - 0.5 && t.bottom <= R.bottom + 0.5,
+  }
+}
 
 // in the page: what a cutout shows lies inside it. Every element drawn in an example container (a size, visible, and
 // clipped by its ancestors' boxes) that meets the cutout must lie inside it; a container whose background only covers
@@ -658,43 +693,88 @@ async function walk(page: Page, tag: string, send = false) {
     return { open: real?.getAttribute('data-section') ?? null, same, inside, apart: rd.right <= side.left + 0.5, pressed: document.querySelector('.shell-side-btn[data-side="labels"]')?.getAttribute('aria-pressed') ?? null }
   })
   assert.ok(lay.open === 'labels' && lay.same && lay.inside && lay.apart && lay.pressed === 'true', `${tag} 3: the Labels sidebar is open with the example over it, beside the transcript ${JSON.stringify(lay)}`)
-  // the transcript opens on records the label lights: some lit bars show in the part of it on screen
-  const litShown = await page.evaluate(() => {
-    const b = document.querySelector('.tour-ex-reader .reader-body')!.getBoundingClientRect()
-    return [...document.querySelectorAll('.tour-ex-reader .reader-gutter-cell.is-lit')].filter((c) => {
-      const r = c.getBoundingClientRect()
-      return r.height > 0 && r.bottom > b.top && r.top < b.bottom
-    }).length
-  })
-  assert.ok(litShown > 0, `${tag} 3: the transcript opens on records with lit bars (${litShown})`)
-  assert.equal(
-    await body(page),
-    'A label sorts records into values, by a rule or by Claude’s reading. The bar beside a record is in the color of its value, or empty if its value has no color. The strip at the right shows where the colored bars are in the whole file. Labels, at the top, lists the labels. Open one to see its records and correct them.',
-    `${tag} 3: what a label is, and what its bars and the strip at the right mean`,
-  )
-  // the ruler shows the records' colours where they are: every lit cell of a record on line L has a mark in its lane,
-  // in the colour its bar shows, over (L − 1)/76 to L/76 of the ruler, and no mark has a colour no bar shows
-  const ruler = await page.evaluate(() => {
-    const root = document.querySelector('.tour-ex-reader')!
-    const B = root.querySelector('.reader-ruler-bar')!.getBoundingClientRect()
-    // what the ruler draws, but its lanes' stripes, which run its whole height
-    const ticks = [...root.querySelectorAll('.reader-ruler-bar > .reader-ruler-marks *')]
-      .map((m) => {
-        const r = m.getBoundingClientRect()
-        return { x: r.left - B.left, top: r.top - B.top, bottom: r.bottom - B.top, color: getComputedStyle(m).backgroundColor }
-      })
-      .filter((m) => m.bottom - m.top < B.height - 1)
-    const cells = [...root.querySelectorAll<HTMLElement>('.reader-record[data-line]')].flatMap((rec) =>
-      [...rec.querySelectorAll('.reader-gutter-cell')].flatMap((c, lane) => (c.classList.contains('is-lit') ? [{ lane, line: Number(rec.dataset.line), color: getComputedStyle(c).backgroundColor }] : [])),
+  // the transcript opens on records of every value of the label: each color the sidebar names is a record's bar on screen
+  const opening = await page.evaluate(() => {
+    const top = document.querySelector('.tour-ex-reader .reader-viewbar')!.getBoundingClientRect().bottom,
+      b = document.querySelector('.tour-ex-reader .reader-body')!.getBoundingClientRect()
+    const shown = new Set(
+      [...document.querySelectorAll<HTMLElement>('.tour-ex-reader .reader-record')]
+        .filter((r) => {
+          const q = r.getBoundingClientRect()
+          return q.top >= top - 0.5 && q.bottom <= b.bottom + 0.5
+        })
+        .flatMap((r) => [...r.querySelectorAll('.reader-band')].map((x) => getComputedStyle(x).backgroundColor)),
     )
-    const colors = new Set(cells.map((c) => c.color))
-    const at = (line: number) => (line / 76) * B.height
-    const missing = cells.filter((c) => !ticks.some((m) => Math.abs(m.x - (3 + 9 * c.lane)) < 0.5 && m.color === c.color && m.top <= at(c.line - 1) + 0.5 && m.bottom >= at(c.line) - 0.5))
-    return { cells: cells.length, ticks: ticks.length, foreign: ticks.filter((m) => !colors.has(m.color)).map((m) => m.color), missing: missing.slice(0, 3) }
+    const named = [...document.querySelectorAll('.tour-ex-side .lside-swatch:not(.is-hollow)')].map((s) => getComputedStyle(s).backgroundColor)
+    return { named, missing: named.filter((c) => !shown.has(c)) }
   })
-  assert.ok(ruler.cells > 0 && ruler.ticks > 0 && !ruler.foreign.length && !ruler.missing.length, `${tag} 3: the ruler's marks stand at the records' lines in their bars' colours ${JSON.stringify(ruler)}`)
+  assert.ok(opening.named.length >= 3 && !opening.missing.length, `${tag} 3: the transcript opens on a record of every value in its color ${JSON.stringify(opening)}`)
+  assert.equal(await body(page), 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.', `${tag} 3: what a label is`)
+  // the strip shows the records' colors where they are: every bar of a record on line L has a mark in the strip's lane,
+  // in the bar's color, over (L − 1)/76 to L/76 of the strip, and no mark has a color no bar shows
+  const strip = await page.evaluate(() => {
+    const root = document.querySelector('.tour-ex-reader')!
+    const B = root.querySelector('.track-over')!.getBoundingClientRect()
+    // what the strip draws, but its lane's stripe, which runs its whole height
+    const ticks = [...root.querySelectorAll('.track-over > .tour-strip-lane > *')].map((m) => {
+      const r = m.getBoundingClientRect()
+      return { x: r.left - B.left, w: r.width, top: r.top - B.top, bottom: r.bottom - B.top, color: getComputedStyle(m).backgroundColor }
+    })
+    const bars = [...root.querySelectorAll<HTMLElement>('.reader-record[data-line]')].flatMap((rec) => [...rec.querySelectorAll('.reader-band')].map((c) => ({ line: Number(rec.dataset.line), color: getComputedStyle(c).backgroundColor })))
+    const colors = new Set(bars.map((c) => c.color))
+    const at = (line: number) => (line / 76) * B.height
+    const missing = bars.filter((c) => !ticks.some((m) => Math.abs(m.x - 3) < 0.5 && Math.abs(m.w - 7) < 0.5 && m.color === c.color && m.top <= at(c.line - 1) + 0.5 && m.bottom >= at(c.line) - 0.5))
+    return { bars: bars.length, ticks: ticks.length, foreign: ticks.filter((m) => !colors.has(m.color)).map((m) => m.color), missing: missing.slice(0, 3) }
+  })
+  assert.ok(strip.bars > 0 && strip.ticks > 0 && !strip.foreign.length && !strip.missing.length, `${tag} 3: the strip's marks stand at the records' lines in their bars' colors ${JSON.stringify(strip)}`)
+  // the demo: the pointer rests on a record's bar, and the record's label and value show under it as thimble's tooltip,
+  // inside the transcript; then on the bar of a record of another value
+  const demoTips: string[] = []
+  for (let k = 0; k < 2; k++) {
+    await page.waitForFunction((was) => {
+      const t = document.querySelector('.tour-fx .tip[data-demo]')
+      return !!t && t.textContent !== was
+    }, demoTips[k - 1] ?? null, { timeout: 10000 })
+    const d = await page.evaluate(TIPPED, null)
+    assert.ok(d && d.text === d.row && d.colored && Math.abs(d.dx) <= 1 && Math.abs(d.dy - 20) <= 1 && d.inside, `${tag} 3: the demo's pointer rests on a record's bar and its label and value show under it ${JSON.stringify(d)}`)
+    demoTips.push(d!.text!)
+  }
+  await page.waitForFunction(() => !document.querySelector('.tour-fx .tip, .tour-fx .tour-cursor'), null, { timeout: 10000 })
+  // the analyst's pointer resting on a record's bar shows its label and value a moment later; on a record of another
+  // value, at once; off the transcript, nothing
+  const pointAt = (value: string) =>
+    page.evaluate((value) => {
+      const b = document.querySelector('.tour-ex-reader .reader-body')!.getBoundingClientRect()
+      const r = [...document.querySelectorAll<HTMLElement>('.tour-ex-reader .reader-record[data-tip]')].find((x) => {
+        const q = x.getBoundingClientRect()
+        return x.dataset.tip === value && q.top > b.top + 40 && q.bottom < b.top + b.height / 2
+      })
+      const q = r?.getBoundingClientRect()
+      return q ? { x: q.left + 2, y: q.top + Math.min(14, q.height / 2) } : null
+    }, value)
+  const ownTip = () => page.evaluate(() => [...document.querySelectorAll('.tour-fx .tip:not([data-demo])')].map((t) => t.textContent))
+  const p1 = (await pointAt('what the step does: runs tests'))!,
+    p2 = (await pointAt('what the step does: changes code'))!
+  assert.ok(p1 && p2, `${tag} 3: records to point at`)
+  await page.mouse.move(p1.x + 120, p1.y - 30)
+  await page.mouse.move(p1.x, p1.y, { steps: 5 })
+  assert.deepEqual(await ownTip(), [], `${tag} 3: nothing shows the moment the pointer arrives`)
+  await sleep(700)
+  const rested = await page.evaluate(TIPPED, p1)
+  assert.ok(rested && rested.text === 'what the step does: runs tests' && rested.text === rested.row && Math.abs(rested.dy - 20) <= 1 && rested.inside, `${tag} 3: resting on a record's bar shows its label and value ${JSON.stringify(rested)}`)
+  await measure(page, `${tag} 3 (a record's name shows)`)
+  await page.mouse.move(p2.x, p2.y, { steps: 3 })
+  await sleep(80)
+  assert.deepEqual(await ownTip(), ['what the step does: changes code'], `${tag} 3: the next record's name shows at once`)
+  const onPop = await page.evaluate(() => {
+    const b = document.querySelector('.tour-pop')!.getBoundingClientRect()
+    return { x: b.x + b.width / 2, y: b.y + 20 }
+  })
+  await page.mouse.move(onPop.x, onPop.y, { steps: 4 })
+  await sleep(200)
+  assert.deepEqual(await ownTip(), [], `${tag} 3: off the transcript the name goes`)
   // in wheel steps of 100 px down and back up, every record on screen moves by exactly the scroll, and the transcript's
-  // height, the cutout and the Labels pane hold still while the ruler's thumb follows
+  // height, the cutout and the Labels pane hold still while the strip's thumb follows
   const look5 = () =>
     page.evaluate(() => {
       const sc = document.querySelector('.tour-ex-reader .reader-body')!,
@@ -702,12 +782,12 @@ async function walk(page: Page, tag: string, send = false) {
         rows: Record<string, number> = {}
       for (const r of sc.querySelectorAll('.reader-record')) {
         const q = r.getBoundingClientRect()
-        if (q.bottom > b.top + 10 && q.top < b.bottom - 10) rows[r.querySelector('[data-line]')?.getAttribute('data-line') ?? ''] = q.top
+        if (q.bottom > b.top + 10 && q.top < b.bottom - 10) rows[r.getAttribute('data-line') ?? ''] = q.top
       }
       const L = document.querySelector('.tour-ex-side')!.getBoundingClientRect()
       const holes = (window as any).__tour().geometry().holes as { x: number; y: number; w: number; h: number }[]
       const fixed = [[L.x, L.y, L.width, L.height], ...holes.map((h) => [h.x, h.y, h.w, h.h])].map((v) => v.map(Math.round).join()).join(';')
-      return { top: sc.scrollTop, sh: sc.scrollHeight, rows, fixed, thumb: document.querySelector('.tour-ex-reader .reader-ruler-thumb')?.getBoundingClientRect().top ?? null, mid: { x: b.x + b.width / 2, y: b.y + b.height / 2 } }
+      return { top: sc.scrollTop, sh: sc.scrollHeight, rows, fixed, thumb: document.querySelector('.tour-ex-reader .track-frame-over')?.getBoundingClientRect().top ?? null, mid: { x: b.x + b.width / 2, y: b.y + b.height / 2 } }
     })
   await probe(page)
   const first5 = await look5()
@@ -726,16 +806,16 @@ async function walk(page: Page, tag: string, send = false) {
     prev5 = cur
   }
   assert.ok(worst <= 1 && !off.length, `${tag} 3: the transcript scrolls in steps with no record jumping (worst ${Math.round(worst * 10) / 10} px), its height, the cutout and the Labels pane still, the thumb following ${JSON.stringify(off.slice(0, 3))}`)
-  // the wheel over the ruler scrolls the transcript too, and a long wheel scrolls it far
+  // the wheel over the strip scrolls the transcript too, and a long wheel scrolls it far
   const rb = await page.evaluate(() => {
-    const b = document.querySelector('.tour-ex-reader .reader-ruler')!.getBoundingClientRect()
+    const b = document.querySelector('.tour-ex-reader .tracks')!.getBoundingClientRect()
     return { x: b.x + b.width / 2, y: b.y + b.height / 2, top: document.querySelector('.tour-ex-reader .reader-body')!.scrollTop }
   })
   await page.mouse.move(rb.x, rb.y)
   await page.mouse.wheel(0, 240)
   await sleep(300)
   const overRuler = (await page.evaluate(() => document.querySelector('.tour-ex-reader .reader-body')!.scrollTop)) - rb.top
-  assert.ok(overRuler >= 100, `${tag} 3: the wheel over the ruler scrolls the transcript (${overRuler})`)
+  assert.ok(overRuler >= 100, `${tag} 3: the wheel over the strip scrolls the transcript (${overRuler})`)
   await page.mouse.move(first5.mid.x, first5.mid.y)
   await page.mouse.wheel(0, 600)
   await sleep(500)
