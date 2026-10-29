@@ -45,8 +45,10 @@ fallback.
 
 thimble's code, not Claude, commits, moves mine and points Claude Code's marketplace at live. Claude Code copies the
 plugin from live into its own cache (`claude plugin update`), and the session loads it with /reload-plugins; its cache
-is never edited here. Because Claude Code names a copy by the plugin's version, live's plugin.json carries the
-release's version with the commit of mine after it (0.10.2+fix.4e1a9c2), written in live's working tree only.
+is never edited here. Claude Code names a copy by the plugin's version, else by its commit, and keeps a copy it already
+has (_stamp): when the release's plugin.json has a version, live's carries it with the commit of mine after it
+(0.10.2+fix.4e1a9c2), written in live's working tree only. A release names its version by its tag alone, so live's
+copy is named by its commit; `thimble --version` names the release (version_name).
 
 The way back from a fix runs from the release checkout, so no fix can break its own undo, not even one that changes the
 launcher or the kernel's modules: the plugin runs `thimble fix` with release/'s launcher (fix/fixes.ts kernelFix); the

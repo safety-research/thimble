@@ -708,3 +708,16 @@ def test_a_release_archive_installs_with_its_version_and_thimble_names_it(tmp_pa
     out = subprocess.run([str(thimble), "fix"], capture_output=True, text=True, env=env, cwd=tmp_path)
     assert out.stdout.splitlines()[0] == "Your thimble fixes · thimble 0.10.6 with no fixes of yours", out.stdout + out.stderr
 
+
+def test_what_claude_reads_about_the_version_says_where_it_comes_from():
+    """Asked which thimble runs, Claude has thimble --version, and the texts it may read say where the version comes
+    from, as the code does: the manifest has none, since a release names its version by its tag, which the install
+    writes in the copy Claude Code installs (CONTRIBUTING.md's row of the manifest); live's copy carries one only when
+    the release's plugin.json has one (the fix flow's account of Claude Code's copies, engine/kernel/fixes.py)."""
+    assert "version" not in json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text())
+    text = " ".join((ROOT / "CONTRIBUTING.md").read_text().split())
+    row = text.split("| the manifest:", 1)[1].split(" |", 1)[0]
+    assert "release commit adds" not in row and "by its tag" in row and "`scripts/install.sh` writes it" in row, row
+    fixes = " ".join((ROOT / "plugin" / "engine" / "kernel" / "fixes.py").read_text().split('"""', 2)[1].split())
+    assert "when the release's plugin.json has a version" in fixes and "names its version by its tag alone" in fixes
+
