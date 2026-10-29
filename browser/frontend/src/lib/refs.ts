@@ -263,15 +263,16 @@ const PART_LABEL_MAX = 20
 
 /**
  * The name a chip gives a ref into part of a card when no value is written with it: the table's cell as
- * `column · row`, printed lines as `line 8` or `lines 8–9` (a click on the chip shows them in the card's output), after
- * the card's name when the chip sits outside that card (`own` false). Null for a ref to a whole card.
+ * `column · row`, printed lines as `card output line 8` or `card output lines 8–9` (a click on the chip shows them in
+ * the card's output), after the card's name when the chip sits outside that card (`own` false). Null for a ref to a
+ * whole card.
  */
 export function cardPartLabel(p: { col?: string; row?: string; out?: number; line?: number; endLine?: number; step?: number }, name: string, own: boolean): string | null {
   let part: string | null = null
   // each label cut so the chip stays short; the hover shows the cell in its table
   const short = (s: string) => (s.length > PART_LABEL_MAX ? `${s.slice(0, PART_LABEL_MAX - 1).trimEnd()}…` : s)
   if (p.col != null && p.row != null) part = `${short(decodeLabel(p.col))} · ${short(decodeLabel(p.row))}`
-  else if (p.out != null && p.line != null) part = p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`
+  else if (p.out != null && p.line != null) part = `card output ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}`
   else if (p.step != null) part = `step ${p.step}`
   if (part == null) return null
   return own ? part : `${name} · ${part}`
