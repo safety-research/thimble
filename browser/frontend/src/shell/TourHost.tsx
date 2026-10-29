@@ -15,7 +15,7 @@ import { setTouring } from '../lib/touring'
 import type { Tour } from '../tour/engine'
 
 /** How often a welcome that waits for its answer asks whether the person answered the offer in another page. */
-export const ANSWER_CHECK_MS = 2000
+const ANSWER_CHECK_MS = 2000
 
 /** The chat column is open, not folded. */
 const chatOn = () => !!document.querySelector('.chat[data-panel="chat"]')
