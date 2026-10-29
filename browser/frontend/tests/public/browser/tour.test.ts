@@ -13,12 +13,15 @@
 //     sits 8 px or more inside its cutout, which lies inside the chat panel; step 3, Files, says what the files browser
 //     shows;
 //   - step 4: the step opens the real Labels sidebar with the top bar's Labels button and lays the example sidebar
-//     exactly over it, beside the transcript, which opens on a record of each of the label's values in its color; the
-//     strip's marks stand at the records' lines in the colors of their bars; the step says what a label is and no more;
-//     its demo rests the pointer on a record's bar, and the record's label and value show under it as thimble's tooltip,
-//     then on another's; the analyst's pointer resting on a record's bar shows its label and value too, a record of
-//     another value at once, and off the transcript nothing; the wheel scrolls the labels' transcript in steps with every
-//     record moving by exactly the scroll, its height, the cutout and the example sidebar still and the strip's thumb
+//     exactly over it, beside the transcript, which opens on a record of each of the label's values in its color, here
+//     and at 1366x768 and 1280x800; there too the Example badge shows and meets nothing of the transcript's bars and
+//     rows, Color by's chips fit their row with the rest behind "N more", and the strip's thumb frames the lines on
+//     screen; the strip's marks stand at the records' lines in the colors of their bars; the step says what a label is
+//     and no more; its demo rests the pointer on a record's bar, and the record's label and value show under it as
+//     thimble's tooltip, then on another's; the analyst's pointer resting on a record's bar shows its label and value
+//     too, a record of another value at once, off the transcript nothing, and while a button is held across the records
+//     nothing, nor on the record it is let go over; the wheel scrolls the labels' transcript in steps with every record
+//     moving by exactly the scroll, its height, the cutout and the example sidebar still and the strip's thumb
 //     following, and the wheel over the strip too;
 //   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
 //     another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, there is no
@@ -265,6 +268,74 @@ const TIPPED = (at?: { x: number; y: number } | null) => {
     dy: Math.round((t.top - y) * 10) / 10,
     inside: t.left >= R.left - 0.5 && t.right <= R.right + 0.5 && t.top >= R.top - 0.5 && t.bottom <= R.bottom + 0.5,
   }
+}
+
+// in the page: the Labels step's example transcript as the analyst finds it: what of its bars, its top row and its rows
+// the Example badge meets; Color by's values, how many show as chips and how many "N more" holds, whether the chips
+// overflow their row and whether "N more" shows whole; the label's values with a record on screen, under the top row;
+// and how far the strip's thumb stands from the marks of the first and the last record on screen, in lines of the file
+const LABELS3 = () => {
+  const root = document.querySelector<HTMLElement>('.tour-ex-reader')!
+  const tag = root.querySelector('.tour-tag')!.getBoundingClientRect()
+  const meets = (b: DOMRect) => b.width > 0 && b.height > 0 && b.right > tag.left + 0.5 && b.left < tag.right - 0.5 && b.bottom > tag.top + 0.5 && b.top < tag.bottom - 0.5
+  const top = root.querySelector('.reader-viewbar')!.getBoundingClientRect().bottom,
+    body = root.querySelector('.reader-body')!.getBoundingClientRect()
+  const parts = [...root.querySelectorAll<HTMLElement>('.reader-bar button, .reader-bar .reader-tab, .reader-colorbar button, .reader-colorbar .colorby-chips, .reader-viewbar > *, .reader-record')].filter(
+    (e) => !e.closest('.reader-tabs-measure, [hidden]') && getComputedStyle(e).visibility !== 'hidden',
+  )
+  // a record as much of it as shows: inside the transcript's body, under its top row
+  const seen = (e: HTMLElement) => {
+    const b = e.getBoundingClientRect()
+    if (!e.classList.contains('reader-record')) return b
+    const t = Math.max(b.top, top),
+      u = Math.min(b.bottom, body.bottom)
+    return new DOMRect(b.left, t, b.width, Math.max(0, u - t))
+  }
+  const met = parts.filter((e) => meets(seen(e))).map((e) => (e.getAttribute('aria-label') || e.textContent || e.className).trim().slice(0, 30))
+  const box = root.querySelector<HTMLElement>('.colorby-chips')!,
+    chips = [...box.querySelectorAll<HTMLElement>('.colorby-chip')],
+    more = box.querySelector<HTMLElement>('.colorby-more')!
+  const shown = [...root.querySelectorAll<HTMLElement>('.reader-record[data-line]')].filter((r) => {
+    const q = r.getBoundingClientRect()
+    return q.top >= top - 0.5 && q.bottom <= body.bottom + 0.5
+  })
+  const track = root.querySelector('.track-over')!.getBoundingClientRect(),
+    thumb = root.querySelector('.track-frame-over')!.getBoundingClientRect(),
+    per = track.height / 76
+  const first = Number(shown[0].dataset.line),
+    last = Number(shown[shown.length - 1].dataset.line)
+  return {
+    met,
+    chips: { values: chips.length, shown: chips.filter((c) => !c.hidden).length, more: more.hidden ? 0 : Number(/\d+/.exec(more.textContent ?? '')?.[0]), overflow: box.scrollWidth - box.clientWidth, moreWhole: more.hidden || more.scrollWidth <= more.clientWidth + 1 },
+    values: [...new Set(shown.map((r) => r.dataset.tip))],
+    lines: [first, last],
+    thumb: { top: Math.round(((thumb.top - track.top) / per - (first - 1)) * 10) / 10, bottom: Math.round(((thumb.bottom - track.top) / per - last) * 10) / 10 },
+  }
+}
+/** The Labels step's Example badge shows: the window drawn where it stands differs with it hidden. Once the demo is over,
+ * so that nothing else moves there. */
+async function badgeShows(page: Page, tag: string) {
+  await page.waitForFunction(() => !document.querySelector('.tour-fx .tip, .tour-fx .tour-cursor'), null, { timeout: 15000 })
+  const set = (v: string) => page.evaluate((v) => void (document.querySelector<HTMLElement>('.tour-ex-reader .tour-tag')!.style.visibility = v), v)
+  const clip = await page.evaluate(() => {
+    const b = document.querySelector('.tour-ex-reader .tour-tag')!.getBoundingClientRect()
+    return { x: b.x, y: b.y, width: b.width, height: b.height }
+  })
+  const shown = await page.screenshot({ clip })
+  await set('hidden')
+  const gone = await page.screenshot({ clip })
+  await set('')
+  assert.ok(!shown.equals(gone), `${tag} 3: the Example badge shows, over the transcript's own rows ${JSON.stringify(clip)}`)
+}
+/** The values of the Labels step's label that have a color. */
+const COLORED = ['reads code', 'changes code', 'runs tests', 'talks to other agents'].map((v) => `what the step does: ${v}`)
+/** The Labels step's example as LABELS3 reads it, as it should be at any size of the window. */
+async function labelsOpening(page: Page, tag: string) {
+  const l = await page.evaluate(LABELS3)
+  assert.deepEqual(l.met, [], `${tag} 3: the Example badge meets nothing of the transcript ${JSON.stringify(l)}`)
+  assert.ok(l.chips.shown + l.chips.more === l.chips.values && l.chips.overflow <= 1 && l.chips.moreWhole, `${tag} 3: Color by's chips fit their row, the rest behind "N more" ${JSON.stringify(l.chips)}`)
+  assert.deepEqual(COLORED.filter((v) => !l.values.includes(v)), [], `${tag} 3: a record of every value is on screen ${JSON.stringify(l)}`)
+  assert.ok(Math.abs(l.thumb.top) <= 1.5 && Math.abs(l.thumb.bottom) <= 1.5, `${tag} 3: the strip's thumb frames the lines on screen ${JSON.stringify(l)}`)
 }
 
 // in the page: what a cutout shows lies inside it. Every element drawn in an example container (a size, visible, and
@@ -709,6 +780,7 @@ async function walk(page: Page, tag: string, send = false) {
     return { named, missing: named.filter((c) => !shown.has(c)) }
   })
   assert.ok(opening.named.length >= 3 && !opening.missing.length, `${tag} 3: the transcript opens on a record of every value in its color ${JSON.stringify(opening)}`)
+  await labelsOpening(page, tag)
   assert.equal(await body(page), 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.', `${tag} 3: what a label is`)
   // the strip shows the records' colors where they are: every bar of a record on line L has a mark in the strip's lane,
   // in the bar's color, over (L − 1)/76 to L/76 of the strip, and no mark has a color no bar shows
@@ -740,6 +812,7 @@ async function walk(page: Page, tag: string, send = false) {
     demoTips.push(d!.text!)
   }
   await page.waitForFunction(() => !document.querySelector('.tour-fx .tip, .tour-fx .tour-cursor'), null, { timeout: 10000 })
+  await badgeShows(page, tag)
   // the analyst's pointer resting on a record's bar shows its label and value a moment later; on a record of another
   // value, at once; off the transcript, nothing
   const pointAt = (value: string) =>
@@ -754,7 +827,7 @@ async function walk(page: Page, tag: string, send = false) {
     }, value)
   const ownTip = () => page.evaluate(() => [...document.querySelectorAll('.tour-fx .tip:not([data-demo])')].map((t) => t.textContent))
   const p1 = (await pointAt('what the step does: runs tests'))!,
-    p2 = (await pointAt('what the step does: changes code'))!
+    p2 = (await pointAt('what the step does: reads code'))!
   assert.ok(p1 && p2, `${tag} 3: records to point at`)
   await page.mouse.move(p1.x + 120, p1.y - 30)
   await page.mouse.move(p1.x, p1.y, { steps: 5 })
@@ -765,7 +838,7 @@ async function walk(page: Page, tag: string, send = false) {
   await measure(page, `${tag} 3 (a record's name shows)`)
   await page.mouse.move(p2.x, p2.y, { steps: 3 })
   await sleep(80)
-  assert.deepEqual(await ownTip(), ['what the step does: changes code'], `${tag} 3: the next record's name shows at once`)
+  assert.deepEqual(await ownTip(), ['what the step does: reads code'], `${tag} 3: the next record's name shows at once`)
   const onPop = await page.evaluate(() => {
     const b = document.querySelector('.tour-pop')!.getBoundingClientRect()
     return { x: b.x + b.width / 2, y: b.y + 20 }
@@ -773,6 +846,23 @@ async function walk(page: Page, tag: string, send = false) {
   await page.mouse.move(onPop.x, onPop.y, { steps: 4 })
   await sleep(200)
   assert.deepEqual(await ownTip(), [], `${tag} 3: off the transcript the name goes`)
+  // a press on a record and a drag down the records with the button held: no name at any moment, nor on the record the
+  // button is let go over
+  await page.mouse.move(p1.x, p1.y, { steps: 4 })
+  await sleep(700)
+  assert.deepEqual(await ownTip(), ['what the step does: runs tests'], `${tag} 3: the name shows before the press`)
+  await page.mouse.down()
+  const held = new Set<string>()
+  for (let k = 1; k <= 5; k++) {
+    await page.mouse.move(p1.x, p1.y + k * 30, { steps: 3 })
+    await sleep(k === 5 ? 700 : 150)
+    for (const t of await ownTip()) held.add(String(t))
+  }
+  await page.mouse.up()
+  await page.mouse.move(p1.x + 2, p1.y + 150)
+  await sleep(700)
+  for (const t of await ownTip()) held.add(`after: ${t}`)
+  assert.deepEqual([...held], [], `${tag} 3: no name while a button is held across the records, nor on the record it is let go over`)
   // in wheel steps of 100 px down and back up, every record on screen moves by exactly the scroll, and the transcript's
   // height, the cutout and the Labels pane hold still while the strip's thumb follows
   const look5 = () =>
@@ -1279,6 +1369,30 @@ test(`every step at ${tag}: the cutouts, the popover and what they show line up,
     await close()
   }
 }, 150_000)
+
+for (const [W, H] of [
+  [1366, 768],
+  [1280, 800],
+] as const) {
+  test(`the Labels step at ${W}x${H}: the Example badge shows and meets nothing of the transcript, Color by's chips fit, a record of every value is on screen, the thumb frames the lines on screen`, async () => {
+    const { page, close } = await open({ W, H })
+    try {
+      await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+      await page.click('.tour-pop [data-tour="begin"]')
+      await onStep(page, 1, 'Your chat with Claude')
+      await next(page)
+      await onStep(page, 2, 'Files')
+      await next(page)
+      await onStep(page, 3, 'Labels')
+      await sleep(400)
+      await measure(page, `${W}x${H} 3`)
+      await labelsOpening(page, `${W}x${H}`)
+      await badgeShows(page, `${W}x${H}`)
+    } finally {
+      await close()
+    }
+  }, 60_000)
+}
 
 test('Settings’ Take the tour replays the tour from step 1, without the welcome', async () => {
   const { page, close } = await open({ W: 1440, H: 900, seen: true })

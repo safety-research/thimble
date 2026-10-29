@@ -3,6 +3,8 @@
 // (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
 // analyst to act acts only on that example, so nothing reaches the server.
 import { TIP_DELAY_MS } from '../components/Tooltip'
+import { fitChips } from '../files/ColorBy'
+import { shownIn } from '../files/Reader'
 import { TRACK_LANES } from '../files/Ruler'
 import { frameOf } from '../files/Tracks'
 import { setMarkup, type Api, type Example, type Step } from './engine'
@@ -242,14 +244,16 @@ const sideExample = (api: Api, section: SideSection) => {
 // does (reads code, changes code, runs tests, talks to other agents; other, in no color). Each record's bar and its row
 // are in its value's color, and resting on a record names its label and value, as thimble's own hover does (`tips`);
 // the strip beside the transcript shows the colors down the whole file. Captured, with the Labels sidebar that lists the
-// label, over the real one, which the step opens.
+// label, over the real one, which the step opens; what thimble fits to the window (Color by's chips, the strip's thumb)
+// the step fits as thimble does.
 
 /** the transcript's lines (agent-05.jsonl, as the Labels sidebar counts its records), which its strip stands for, the
  * records the Transcript mode hides included */
 const TX_LINES = 76
-/** the line the transcript opens at, where the agent reads the code, runs the tests, changes the code and asks the other
- * agents for a review: every value's color is on screen */
-const TX_OPEN = 20
+/** the line the transcript opens at, where the agent claims a pull request on the board the agents share, reads the
+ * code, runs the tests and changes the code: every value's color within its first ten records, so on screen in a short
+ * window too */
+const TX_OPEN = 16
 /** the values whose records the demo rests on, the first two of these with a record on screen, each its first there, in
  * the order they stand */
 const TIP_DEMO = ['what the step does: runs tests', 'what the step does: talks to other agents', 'what the step does: changes code']
@@ -283,6 +287,30 @@ function drawStrip(reader: HTMLElement, total: number): void {
   track.prepend(lane)
 }
 
+/** The example reader's badge, centered in the first free room of its rows wide enough for it: its bar's, between its
+ * tabs and its first control, as the report's badge sits in its bar's empty middle; else, in a narrow Files panel, the
+ * transcript's top row's, left of its chips. */
+function placeTag(rd: HTMLElement, tag: HTMLElement): void {
+  const box = (sel: string) => rd.querySelector(sel)?.getBoundingClientRect() ?? null
+  const bar = box('.reader-bar'),
+    tabs = box('.reader-bar > .reader-tabs-wrap > .reader-tabs'),
+    find = box('.reader-bar > .reader-find-open'),
+    row = box('.reader-viewbar'),
+    chip = box('.reader-viewbar > *')
+  const rooms: { y: number; h: number; from: number; to: number }[] = []
+  if (bar && tabs && find) rooms.push({ y: bar.top, h: bar.height, from: tabs.right, to: find.left })
+  // the row's padding and the gap before its chips (files.css .reader-viewbar)
+  if (row) rooms.push({ y: row.top, h: row.height, from: row.left + 14, to: chip ? chip.left - 10 : row.right - 14 })
+  const w = tag.offsetWidth,
+    h = tag.offsetHeight
+  const room = rooms.find((r) => r.to - r.from >= w + 16) ?? rooms[rooms.length - 1]
+  if (!room || !w) return
+  const R = rd.getBoundingClientRect()
+  const left = `${Math.round((room.from + room.to - w) / 2 - R.left)}px`,
+    top = `${Math.round(room.y + (room.h - h) / 2 - R.top)}px`
+  if (tag.style.left !== left || tag.style.top !== top) Object.assign(tag.style, { left, top, right: 'auto' })
+}
+
 const labelsExample = (api: Api): Example => {
   const realReader = () => api.q('[data-panel="files"] .reader')
   const rd = api.snap('txReader', 'tour-ex-reader')
@@ -291,7 +319,11 @@ const labelsExample = (api: Api): Example => {
   drawStrip(reader, TX_LINES)
   Object.assign(rd.style, { display: 'flex', flexDirection: 'column', background: api.groundOf(realReader() || api.q(filesPanel)) })
   Object.assign(reader.style, { flex: '1', minHeight: '0', overflow: 'hidden' })
-  Object.assign(api.tag(rd).style, { left: '50%', right: 'auto', transform: 'translateX(-50%)' })
+  const tag = api.tag(rd)
+  // the Color by row's value chips, which fit the row as thimble's do
+  const chips = reader.querySelector<HTMLElement>('.colorby-chips'),
+    more = chips?.querySelector<HTMLElement>('.colorby-more')
+  let fitAt = ''
   holdBrowser(api)
   const side = sideExample(api, 'labels')
   const putBack = holdSide('labels')
@@ -313,6 +345,12 @@ const labelsExample = (api: Api): Example => {
     }
     if (!r || !placed) return false
     Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+    const fit = `${reader.clientWidth}|${document.fonts?.status}`
+    if (chips && more && reader.clientWidth && fit !== fitAt) {
+      fitChips(chips, more, more.querySelector<HTMLElement>('.btn-label > span'))
+      fitAt = fit
+    }
+    placeTag(rd, tag)
     const sc = rd.querySelector<HTMLElement>('.reader-body')
     if (!sc || !sc.clientHeight) return
     if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
@@ -325,11 +363,12 @@ const labelsExample = (api: Api): Example => {
         setTo = sc.scrollTop
       }
     }
-    // the strip's thumb frames the span on screen, as thimble's does
+    // the strip's thumb frames the lines on screen, as thimble's does (Reader shownIn)
     const track = rd.querySelector<HTMLElement>('.track-over'),
-      thumb = rd.querySelector<HTMLElement>('.track-frame-over')
-    if (track && thumb && sc.scrollHeight) {
-      const f = frameOf({ top: sc.scrollTop / sc.scrollHeight, height: sc.clientHeight / sc.scrollHeight }, track.clientHeight)
+      thumb = rd.querySelector<HTMLElement>('.track-frame-over'),
+      shown = shownIn(sc, TX_LINES)
+    if (track && thumb && shown) {
+      const f = frameOf(shown, track.clientHeight)
       const at = `translateY(${f.top}px)`
       if (thumb.style.transform !== at || thumb.style.height !== `${f.height}px`) Object.assign(thumb.style, { height: `${f.height}px`, transform: at })
     }
@@ -627,7 +666,7 @@ export function tourSteps(key: string, chat = true): Step[] {
           // the first name waits its moment; the next, a moment after, shows at once, as thimble's own do
           if (!k) await api.sleep(TIP_DELAY_MS)
           const p = barOf(row)
-          if (p) api.showTip(row, p.x, p.y, { demo: true })
+          if (p) api.showTip(row, p.x, p.y)
           await api.sleep(2000)
         }
         api.fx.querySelectorAll('.tip[data-demo]').forEach((t) => t.remove())

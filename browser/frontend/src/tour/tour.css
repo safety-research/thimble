@@ -72,9 +72,12 @@
 .tour-checks-hidden img.reader-ruler-marks {
   visibility: hidden;
 }
+/* each example a layer of its own, so that what it holds in layers (a transcript's sticky top row) stays under the
+   block, the demo's pointer and the popover */
 .tour-host > *,
 .tour-ex > * {
   position: absolute;
+  isolation: isolate;
   pointer-events: auto;
   box-sizing: border-box;
 }
@@ -150,9 +153,10 @@
     animation: none;
   }
 }
+/* over the example it marks, its sticky rows included */
 .tour-tag {
   position: absolute;
-  z-index: 5;
+  z-index: calc(var(--z-sticky) + 1);
   top: 8px;
   right: 10px;
   padding: 0 8px;

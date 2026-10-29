@@ -104,7 +104,8 @@ test("the step's strip marks the records' colors: one lane, a mark over each run
     return Array.from({ length: end - from }, (_, i) => `${from + i}:${m.style.background}`)
   })
   const bars = records(reader).flatMap((r) => r.bars.map((c) => `${r.line}:${c}`))
-  expect(bars.length).toBe(40)
+  // a bar for each record of a value in color, as the legend counts them
+  expect(bars.length).toBe(legend().reduce((a, v) => a + (v.hollow ? 0 : v.n), 0))
   expect(covered.sort()).toEqual(bars.sort())
   // a run of records one after another in one color is one mark
   expect(marks.length).toBeLessThan(bars.length)
