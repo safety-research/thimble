@@ -700,18 +700,20 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
 /** A citation's status as its header says it: a sign, the word and its color. The sign is the one the reply draws after
  *  the citation's words in that status (marks/view.ts withLooks), so the tray says what it means: the turning glyph
  *  (`spin`, in thimble's color, turning with the reply's) while it is checked, × failed, ? not checked yet. A checked
- *  one has none in the reply, and ✓ here. */
+ *  one has none in the reply, and ✓ here: verified, or corrected (the right words in place of the ones Claude wrote,
+ *  which the line under it gives); repaired when x corrected it. */
 const STATUS: Record<string, { sign: string; word: string; color?: string; dim?: boolean }> = {
   checking: { sign: 'spin', word: 'checking', dim: true },
   deferred: { sign: '?', word: 'not checked', dim: true },
   verified: { sign: '✓', word: 'verified', color: 'success' },
-  corrected: { sign: '✓', word: 'verified', color: 'success' },
+  corrected: { sign: '✓', word: 'corrected', color: 'success' },
+  repaired: { sign: '✓', word: 'repaired', color: 'success' },
   failed: { sign: '×', word: 'failed', color: 'error' },
 }
 
 /** A citation's status: the store's, and failed for one with no check (marks/store.ts notRun; one the store no longer
  *  holds, whose reply the reply draws failed too, says so under it). */
-const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status] : null) ?? STATUS.failed!
+const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status === 'corrected' && m.repair ? 'repaired' : m.status] : null) ?? STATUS.failed!
 
 /** The status as drawn: its sign and its word, the sign of a check that runs the turning glyph's frame now (`spin`). */
 function statusEls(els: Any, s: { sign: string; word: string; color?: string; dim?: boolean }, spin: string): Any[] {
@@ -739,8 +741,9 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
   ] }) }
 }
 
-/** A citation's card under its header (the status is in the header). A corrected one says what it was; a failed one
- *  why in one sentence; after a repair (x), what it did; all dim, and under it
+/** A citation's card under its header (the status is in the header). A corrected one says what it was (`was 15 of
+ *  40`; a rewritten sentence or a narrowed citation says which, as the header says only corrected or repaired); a
+ *  failed one why in one sentence; after a repair (x) that verified it as written, why; all dim, and under it
  *  `x repair`, a press that checks it again (the ui.press hook, as x does). Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
  *  block, ended by `+ expand all`, a click that shows all the code and output (`fold`, as +); expanded, all the code
@@ -753,7 +756,7 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const ev = m.evidence
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
-  const fixed = m.rewrite ? (m.repair ? 'repaired by rewriting the sentence; ' : 'sentence rewritten; ') : m.narrowed ? (m.repair ? 'repaired by narrowing; ' : 'narrowed; ') : m.repair ? 'repaired; ' : 'corrected; '
+  const fixed = m.rewrite ? 'sentence rewritten; ' : m.narrowed ? 'narrowed; ' : ''
   const notFixed = m.repair ? 'not repaired: ' : ''
   // a rewrite's history is the sentence Claude wrote
   if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}`)

@@ -13,8 +13,8 @@
 //
 // Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words.
 //
-// Two outcomes, as in the reply and the tray: verified (a corrected mark is verified too, and says what it was) and
-// failed, which says why in red (× failed), with the evidence the check gave when it is real. The cited value is bold in the citations' look (citeWords). What the check found wrong in the rest of the
+// Two outcomes, as in the reply and the tray: verified (a corrected mark, its right words in place of Claude's, says
+// corrected, or repaired after x, and what it was) and failed, which says why in red (× failed), with the evidence the check gave when it is real. The cited value is bold in the citations' look (citeWords). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
@@ -36,7 +36,8 @@ const OUTPUT_ROWS = 14 // output lines shown around the first highlight
 const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
   checking: { word: 'checking', dim: true },
   verified: { word: 'verified', color: 'success' },
-  corrected: { word: 'verified', color: 'success' },
+  corrected: { word: 'corrected', color: 'success' },
+  repaired: { word: 'repaired', color: 'success' },
   // a check that did not run is failed too (store.ts notRun); its reason says so
   failed: { word: '× failed', color: 'error' },
 }
@@ -177,7 +178,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const reply = row ? await rowMarks($, row) : null
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
   if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })
-  const st = STATUS[m.status] ?? STATUS.failed!
+  const st = STATUS[m.status === 'corrected' && m.repair ? 'repaired' : m.status] ?? STATUS.failed!
   // the citation's words as the reply draws them; the head joins their hover group, as they are nested in it
   const id = `evidence:${row}:${n}`
   const head = Text({ key: 'head', wrap: 'wrap', ...citeHeat(id), children: [
@@ -186,7 +187,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     Text({ key: 'w', ...wordsLook(m.status, id), children: m.shown.replace(/\*\*|`/g, '') }),
   ] })
   const rows: Any[] = [head]
-  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `${m.rewrite ? 'sentence rewritten' : m.narrowed ? 'narrowed' : 'corrected'}; was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}` }))
+  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `${m.rewrite ? 'sentence rewritten; ' : m.narrowed ? 'narrowed; ' : ''}was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}` }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: st.color } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
   // the sentence as the person reads it (a rewrite's, once the check rewrote it), the cited words in bold

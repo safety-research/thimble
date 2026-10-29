@@ -147,26 +147,31 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('a ask')
 })
 
-test('a corrected value computed by code: purple in the reply; the line that printed it, then its output; + shows all the code and output; - goes back', CITES, async ($, on) => {
+test('a corrected value computed by code: drawn in the reply as a verified one, with no sign; the header says corrected, the line under it what it was, then the line that printed it and its output; + shows all the code and output; - goes back', CITES, async ($, on) => {
   const { clock } = await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11. One run was retried.',
     evidence: { kind: 'computed', by: 'checker', code: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', output: 'runs: 40\nfailed: 11\npassed: 29', highlight: [[17, 19]] },
   }, 's-tray-2')
-  // the corrected words draw as a settled citation: underlined, the purple tint on hover; a * after them. What they
-  // were shows in the tray alone
+  // the corrected words draw as a settled citation: underlined, the purple tint on hover, and no sign after them. What
+  // they were shows in the tray alone
   const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
   const corrected = drawn.find(n => n.type === 'Text' && textOf(n) === '11 of 40')
   expect(corrected?.props).toMatchObject({ underline: true })
   expect(corrected?.props?.backgroundColor).toBeUndefined()
   expect(corrected?.hover ?? corrected?.props?.hover).toMatchObject({ backgroundColor: citeTint() })
-  expect(textOf(drawn)).toContain('11 of 40 * failed')
+  expect(textOf(drawn)).toContain('11 of 40 failed')
+  expect(textOf(drawn)).not.toContain('*')
   expect(textOf(drawn)).not.toContain('12 of 40')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let drawnBand = all(await $.ui.render(above()))
   let band = textOf(drawnBand)
-  // the header's status, what it was under it (no reason), the code line that printed the value, its output line
-  expect(band).toContain('✓ verified')
-  expect(band).toContain('corrected; was 12 of 40')
+  // the header's status says corrected, in a checked one's color, what it was under it (no reason), the code line that
+  // printed the value, its output line
+  expect(band).toContain('✓ corrected  a ask · 0 close')
+  expect(band).not.toContain('verified')
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === ' corrected')?.props).toMatchObject({ color: 'success' })
+  expect(band).toContain('closewas 12 of 40')
+  expect(band).not.toContain('corrected; was')
   expect(band).not.toContain('The output says 11')
   expect(band).toContain('print(f"failed: {bad}")│failed: 11')
   // + expand all at the end of the ruled block, dim
@@ -291,14 +296,16 @@ const WRONG = { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 
 const TWO = 'Of the runs, [12 of 40](#) failed on the [p95 check](#).'
 const SECOND = { n: 2, row: 'row-t1', words: 'p95 check', start: 41, end: 55, sentence: TWO, shown: 'p95 check' }
 
-test('a repair that corrected the citation says repaired and what it was; one that still could not confirm it says not repaired and why, and offers x again', CITES, async ($, on) => {
+test('a repair that corrected the citation says repaired in its header and what it was under it; one that still could not confirm it says not repaired and why, and offers x again', CITES, async ($, on) => {
   await resumed($, on, [
     { ...WRONG, sentence: TWO, status: 'corrected', repair: true, shown: '9 of 40', was: '12 of 40' },
     { ...SECOND, status: 'failed', failedBy: 'evidence', repair: true, reason: 'No file holds a count of failed runs.' },
   ], 's-tray-10', { text: TWO })
   await $.prompt.edit(key(']'))
   const card = textOf(await $.ui.render(above()))
-  expect(card).toContain('repaired; was 12 of 40')
+  expect(card).toContain('✓ repaired  ] next citation')
+  expect(card).toContain('closewas 12 of 40')
+  expect(card).not.toContain('repaired; was')
   expect(card).not.toContain('x repair')
   await $.prompt.edit(key(']'))
   const again = textOf(await $.ui.render(above()))
@@ -369,6 +376,23 @@ for (const [how, env] of [['a button', {}], ['a file link', { FORCE_HYPERLINK: '
     expect(textOf(await $.ui.render(above()))).not.toContain("didn't open here")
   })
 }
+test("a corrected citation's evidence in the side pane says corrected and what it was, as its tray does", CITES, async ($, on) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('ui.close', () => ({ value: undefined }))
+  await resumed($, on, { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40' }, 's-tray-pane-corrected')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const ui = await $.ui.mount(above())
+  await ui.press({ key: 'tray-file' })
+  await ui.unmount()
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  const words = textOf(pane)
+  expect(words).toContain('corrected  11 of 40')
+  expect(words).not.toContain('verified')
+  expect(words).toContain('was 12 of 40')
+  expect(words).not.toContain('corrected; was')
+  expect(all(pane).find(n => n.type === 'Text' && textOf(n) === 'corrected')?.props).toMatchObject({ color: 'success' })
+})
+
 // Claude Code places a pane at any width only for an open made while the person's press runs; an open the handler
 // leaves to run after it returns is unasked and waits undrawn below 144 columns (the tray's file place showed "did not
 // open the side pane" at 118 columns). The test kit's press waits for such work too, so the handler is called here as
@@ -834,7 +858,7 @@ test("a double click on one of the bar's items selects its word, which is the ba
   selected = { text: 'as the evidence shows', requestId: 'row-t1' }
   expect(textOf(await $.ui.render(above()))).toContain('c cite')
   // the corrected words the row draws in place of the citation's
-  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.')))).toContain('11 of 40 * failed')
+  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.')))).toContain('11 of 40 failed')
   selected = { text: 'runs, 11 of 40 failed', requestId: 'row-t1' }
   band = textOf(await $.ui.render(above()))
   expect(band).toContain('c cite')
@@ -1032,8 +1056,9 @@ test('a sentence the check rewrote draws as rewritten, its citation corrected, t
   const asked = { n: 2, row: 'row-t1', words: 'failed on the p95 check', start: 27, end: 50, sentence: 'Of the runs, [12 of 40] [failed on the p95 check].', status: 'deferred', shown: 'failed on the p95 check', asked: true }
   await resumed($, on, [fixed, asked], 's-tray-rewritten')
   const drawn = textOf(await $.ui.render(answer('row-t1', TEXT)))
-  expect(drawn).toContain('Of the runs, 11 of 40 * failed on the p99 check.')
+  expect(drawn).toContain('Of the runs, 11 of 40 failed on the p99 check.')
   expect(drawn).not.toContain('×')
+  expect(drawn).not.toContain('*')
 })
 
 test("with Citations manual, ] passes the citations Claude wrote (they draw as plain words); a click on their words still opens one", { options: { citations: 'manual' } }, async ($, on) => {

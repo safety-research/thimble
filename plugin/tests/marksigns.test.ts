@@ -1,7 +1,8 @@
 // The signs after a reply's citations that say where each one stands (marks/view.ts, marks/register.ts): a citation not
-// checked yet has a dim ? after it; one the check corrected has a * after its new words, a piece of the citation's
-// press: a press on it opens the tray, which says what Claude wrote, and nothing under the row says it. On a resumed
-// session whose replies' citations are kept as their check left them. All data is made up. `claude plugin test plugin`.
+// checked yet has a dim ? after it; one the check corrected has its new words with no sign, as a verified one, and
+// nothing under the row: a press on them opens the tray, whose status says corrected and which says what Claude wrote.
+// On a resumed session whose replies' citations are kept as their check left them. All data is made up.
+// `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 import { test } from './kit'
 
@@ -88,34 +89,53 @@ test('with Citations auto cite, a citation not checked yet has a dim ? after it;
   expect(signAfter(drawn, 1).sign).toBe('')
 })
 
-test('a citation the check corrected has a * after its new words and nothing under the row; a press on the * opens the tray, which says what Claude wrote', { options: { citations: 'auto cite + verify' } }, async ($, on) => {
+test('a citation the check corrected has its new words with no sign after them, drawn as a verified one, and nothing under the row; a press on them opens the tray, whose status says corrected and which says what Claude wrote', { options: { citations: 'auto cite + verify' } }, async ($, on) => {
   await resumed($, on, [
     { n: 1, row: 'row-t1', words: '15 of 40', ...at('15 of 40'), sentence: TEXT, status: 'corrected', shown: '12 of 40', was: '15 of 40', reason: 'The summary counts 12 failed runs. It lists each run.' },
     { n: 2, row: 'row-t1', words: 'p95 check', ...at('p95 check'), sentence: TEXT, status: 'verified', shown: 'p95 check' },
   ])
   const drawn = await $.ui.render(answer)
   const words = textOf(drawn)
-  // the new words in the reply and the sign after them; the words Claude wrote and the check's reason are not in it
-  expect(words).toContain('Of the runs, 12 of 40 * failed')
-  expect(signAfter(drawn, 1).sign).toBe('*')
+  // the new words in the reply, no sign after them; the words Claude wrote and the check's reason are not in it
+  expect(words).toContain('Of the runs, 12 of 40 failed')
+  expect(words).not.toContain('*')
+  expect(signAfter(drawn, 1).sign).toBe('')
   expect(signAfter(drawn, 2).sign).toBe('')
   expect(words).not.toContain('15 of 40')
   expect(words).not.toContain('The summary counts')
-  // the * is a piece of the citation's press: a press on it opens the tray on the citation, which says what it was
-  const star = all(drawn).filter(x => x.type === 'Button' && String(x.props?.label).startsWith('citation 1:')).find(x => textOf(x) === ' *')
-  expect(star).toBeDefined()
+  // its words look as the verified citation's: underlined in the text's own color, no fill at rest
+  const look = (w: string) => { const p = all(drawn).find(x => x.type === 'Text' && textOf(x) === w)?.props ?? {}; return { underline: p.underline, color: p.color, backgroundColor: p.backgroundColor } }
+  expect(look('12 of 40')).toEqual(look('p95 check'))
+  expect(look('12 of 40')).toEqual({ underline: true, color: undefined, backgroundColor: undefined })
+  // a press on its words opens the tray on the citation: its status says corrected, in the color of a checked one, and
+  // the line under it what the words were
+  const cite = all(drawn).find(x => x.type === 'Button' && String(x.props?.label).startsWith('citation 1:') && textOf(x) === '12 of 40')
+  expect(cite).toBeDefined()
   expect(textOf(await $.ui.render(above))).not.toContain('was 15 of 40')
   const ui = await $.ui.mount(answer)
-  await ui.press({ key: star.props.key })
+  await ui.press({ key: cite.props.key })
   await ui.unmount()
-  expect(textOf(await $.ui.render(above))).toContain('corrected; was 15 of 40')
+  const tray = await $.ui.render(above)
+  const band = textOf(tray)
+  expect(band).toContain('✓ corrected')
+  expect(band).not.toContain('verified')
+  expect(band).toContain('was 15 of 40')
+  expect(band).not.toContain('corrected; was')
+  expect(all(tray).find(x => x.type === 'Text' && textOf(x) === ' corrected')?.props).toMatchObject({ color: 'success' })
 })
 
-test('a narrowed citation keeps its words and has no sign', { options: { citations: 'auto cite + verify' } }, async ($, on) => {
+test('a narrowed citation keeps its words and has no sign; its tray says corrected, and that it was narrowed from what Claude cited', { options: { citations: 'auto cite + verify' } }, async ($, on) => {
   await resumed($, on, [
     { n: 1, row: 'row-t1', words: '15 of 40', ...at('15 of 40'), sentence: TEXT, status: 'corrected', shown: '15', narrowed: true, was: '15 of 40', reason: 'The summary counts 15.' },
     { n: 2, row: 'row-t1', words: 'p95 check', ...at('p95 check'), sentence: TEXT, status: 'verified', shown: 'p95 check' },
   ])
   const drawn = await $.ui.render(answer)
   expect(signAfter(drawn, 1).sign).toBe('')
+  const cite = all(drawn).find(x => x.type === 'Button' && String(x.props?.label).startsWith('citation 1:'))
+  const ui = await $.ui.mount(answer)
+  await ui.press({ key: cite.props.key })
+  await ui.unmount()
+  const band = textOf(await $.ui.render(above))
+  expect(band).toContain('✓ corrected')
+  expect(band).toContain('narrowed; was 15 of 40')
 })
