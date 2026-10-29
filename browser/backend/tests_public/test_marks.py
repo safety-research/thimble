@@ -693,3 +693,62 @@ def test_a_takeaway_s_failed_mark_is_repaired_unless_the_takeaway_was_written_ag
             (kept,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
             assert kept["status"] == "failed", kept
     assert [(kw["card"], kw["k"], kw["auto"]) for kw in calls] == [(calls[0]["card"], 0, True)], calls
+
+
+def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder_inside_it(_fresh, monkeypatch, tmp_path):
+    """Main's session may run in a folder inside the workspace's corpus folder (claude started in one run's folder, a
+    folder of a registered one). Each file of the corpus folder is still the records: a citation of a file in a folder
+    beside main's, by its absolute path or by its path in the corpus as the cards name it, holds, and so does its
+    repair. A file outside the corpus folder stays outside."""
+    from types import SimpleNamespace
+
+    corpus = config.corpus_dir(CORPUS)
+    inner = corpus / "agents"
+    outside = tmp_path / "elsewhere" / "worker.md"
+    outside.parent.mkdir()
+    outside.write_text("# Your role\n")
+    quote = {"kind": "quote", "status": "verified", "correction": None, "reason": "the first line says it"}
+    places = {1: str(corpus / "prompts" / "worker.md"), 2: "prompts/worker.md", 3: str(outside)}
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        assert main["cwd"] == str(inner)
+        n = [int(m) for m in re.findall(r"^(\d+)\. \[", prompt, re.M)]
+        out = [{**quote, "mark": k, "evidence": {"file": places[k], "line": 1, "substring": "# Your role"}} for k in n]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    lv = SimpleNamespace(sid=SID, cwd=str(inner), config=None, config_known=False, transcript_path=None, model="",
+                         effort="", context_tokens=0, last_cut="cut-1")
+    monkeypatch.setattr(session, "current", lambda c: lv if c == CORPUS else None)
+    turn = marks.new_turn()
+    text = 'The prompt opens ["# Your role"](#), as ["# Your role"](#) says, and so does ["# Your role"](#).'
+
+    async def go():
+        main = {"sid": SID, "cwd": str(inner), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, [text], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    got = {m["n"]: m for m in marks.stored(CORPUS, turn)["items"]}
+    for k in (1, 2):
+        assert got[k]["status"] == "verified", got[k].get("reason")
+        assert got[k]["evidence"]["file"] == "prompts/worker.md", got[k]["evidence"]
+    assert got[3]["status"] == "failed" and "is outside the folder this session works in" in got[3]["reason"], got[3]
+    # the checker's shell is main's folder, and its paths are from the corpus folder, where the cards' paths start
+    assert f"Your shell is in `{inner}`." in seen[0] and f"Paths are from `{corpus}`, or absolute." in seen[0]
+
+    # a mark the old check failed as outside the folder is repaired now
+    failed = {"n": 1, "piece": 0, "k": 0, "words": "# Your role", "sentence": 'The prompt opens ["# Your role"].',
+              "status": "failed", "failedBy": "evidence", "shown": "# Your role",
+              "reason": f"{places[1]} is outside the folder this session works in."}
+    again = marks.new_turn()
+    marks._save(CORPUS, {"turn": again, "items": [failed]})
+
+    async def repair():
+        assert await marks.repair(CORPUS, turn=again, n=1, fork=fork) == ""
+        await _wait_all()
+
+    asyncio.run(repair())
+    (m,) = marks.stored(CORPUS, again)["items"]
+    assert m["status"] == "verified" and m["evidence"]["file"] == "prompts/worker.md", m
