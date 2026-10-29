@@ -192,6 +192,7 @@ class Conv:
     task: asyncio.Task | None = None
     last_text: str = ""
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
+    switched: str | None = None  # the model Claude's safeguards answer this conversation on instead (switches)
 
     @property
     def c(self) -> str:
@@ -213,7 +214,12 @@ class Conv:
         self.space.read()
         return got
 
-    def emit_assistant(self, blocks: list[dict[str, Any]], model: str, usage: dict[str, Any] | None = None) -> None:
+    def emit_assistant(self, blocks: list[dict[str, Any]], model: str, usage: dict[str, Any] | None = None, *,
+                       asked: str = "", told: list[dict[str, Any]] | None = None) -> None:
+        """A reply of `model`, after the records of a switch to it from `asked`, the model the request was for
+        (switches)."""
+        for rec in self.switches(asked, model, told or []):
+            self.emit(rec)
         if not blocks:
             return
         from . import tools  # noqa: PLC0415
@@ -228,6 +234,30 @@ class Conv:
         self.emit({"type": "assistant", "message": {"id": f"msg_{secrets.token_hex(8)}", "type": "message",
                                                      "role": "assistant", "model": model, "content": shown,
                                                      "usage": usage or {}}})
+
+    def switches(self, asked: str, model: str, told: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The records of Claude's safeguards answering this conversation on another model than the one asked for
+        (session.FALLBACK_SUBTYPE, as Claude Code writes them), which the mirror tells as a notice in its chat: the
+        reply's own (`told`: a Messages API reply's `fallback` blocks), else one for a reply of `model` when it is not
+        `asked` and the replies were not on it already, as a reply sticky routing sends straight to the fallback
+        model, and a Claude Code reply on its own fallback, come with none. A reply on the model asked for ends the
+        switch, so a later one is told again."""
+        from . import config, session  # noqa: PLC0415
+
+        got = "" if not model or model.startswith("<") else config.base_model(model)
+        if told:
+            self.switched = config.base_model(str(told[-1].get("fallbackModel") or "")) or got or None
+            return told
+        if not got or not asked:
+            return []
+        if config.same_model(got, asked):
+            self.switched = None
+            return []
+        if self.switched and config.same_model(got, self.switched):
+            return []
+        self.switched = got
+        return [{"type": "system", "subtype": session.FALLBACK_SUBTYPE, "direction": "retry",
+                 "originalModel": config.base_model(config.exact_model(asked)), "fallbackModel": got}]
 
     def live_text(self, piece: str, text: str | None) -> None:
         """Main's words while Claude writes them, to the pages that are open (investigation.push, a `chat-live`

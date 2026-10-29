@@ -287,7 +287,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                     continue
                 blocks = [b for b in (_block(x) for x in msg.content) if b is not None]
                 bash_ids.update(str(b["id"]) for b in blocks if b.get("type") == "tool_use" and b.get("name") == "Bash")
-                conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {})
+                conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {}, asked=spec.model)
                 results([r for r in (_result(x) for x in msg.content) if r is not None])
                 said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
                 reply = said or reply

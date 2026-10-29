@@ -185,10 +185,12 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
 # replies going on on another model: after a reply with stop_reason refusal (at once, or after more replies on the
 # same model), after Claude Code's meta line that a safety classifier stopped the reply (no refusal record), or as a
 # reply whose first block is a `fallback` block (workflow agents; 2.1.295-2.1.300, the view builder experiment's runs).
-# So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). Each
-# downgrade becomes a notice (notices.post) that names the chat it happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason
-# refusal), which the chat shows as its API error card; its text record carries `refusal: true`, and the failure of an
-# agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
+# So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). The server's
+# own agents (runtime.py) write the record before each reply on another model than the one asked for, main's and every
+# agent's alike (runtime.Conv.switches). Each downgrade becomes a notice (notices.post) that names the chat it happened
+# in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason refusal), which the
+# chat shows as its API error card; its text record carries `refusal: true`, and the failure of an agent it stopped is
+# told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
 FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
 AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
