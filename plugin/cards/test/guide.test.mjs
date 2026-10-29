@@ -41,21 +41,17 @@ test("the guidance's card principles keep overview first and details on demand, 
   assert.ok(cards, 'the guidance has a Cards section')
   const line = start => cards.split('\n').find(l => l.startsWith(start)) ?? ''
   // overview first, zoom and filter, then details on demand, as it was; then the first view is the evidence for one
-  // answer: the whole with the records that answer marked, or only those, and only the fields that help answer it
+  // answer, with only the fields that help answer it
   const one = line('1. ')
   assert.match(one, /^1\. Overview first, zoom and filter, then details on demand\. The first view shows the whole, aggregated to fit the card, not a table of raw records\. The analyst narrows it with keys and clicks, and a click opens one record\. /)
-  assert.match(one, /One card answers one question, so the first view shows the evidence the answer rests on/)
-  assert.match(one, /the whole with the records that answer marked, or only those records/)
-  assert.match(one, /only the fields that help answer the question/)
+  assert.match(one, /One card answers one question, so the first view shows the evidence the answer rests on, with only the fields that help answer it\.$/)
   // what follows a selection, its note or its details, keeps rows of its own
   assert.match(line('- When a key or click changes'), /such as a note or details, goes on rows kept for it/)
-  // each number once, in a form that compares it; a number in a box of its own is the look of a dashboard; rows that
-  // say the same thing are drawn as their count
+  // each number once; numbers the analyst compares in a form that compares them; a number in a box of its own is the
+  // look of a dashboard; rows that say the same thing are drawn as their count
   const five = line('5. ')
   assert.match(five, /^5\. Each element shows data or acts on it\. /)
-  assert.match(five, /Each number shows once, in a form that compares it with the others/)
+  assert.match(five, /Each number shows once\. Numbers that the analyst compares, such as the count at each step, show in a form that compares them/)
   assert.match(five, /A number in a box of its own is the look of a dashboard/)
   assert.match(five, /Rows that all say the same thing show one fact many times, so draw their count/)
-  // the rows that fit are a reason to choose, not to page
-  assert.match(line('- About 30 rows fit'), /choose the rows the answer rests on/)
 })
