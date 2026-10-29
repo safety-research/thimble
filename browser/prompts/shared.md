@@ -40,9 +40,19 @@ The first bad reply names things the analyst never said, "refund-intent cluster"
 
 A card is how you show the analyst a piece of work. Every card has three parts, the question, the content and the takeaway. The question says what the card is for, the content shows the evidence (e.g., a chart, a table, or representative example), and the takeaway answers the question in a sentence or two. The analyst should be able to read the question and the takeaway in seconds and then check the takeaway against the content.
 
-A good card asks one clear question, shows content that fits that question exactly, and has a takeaway that answers it. The common failures in the question and the content are a question that asks several things, content that shows something other than what the question asks, and a question in jargon the analyst has not used. The common failures in the takeaway are one that does not answer the question, one that claims what the card does not show, one that claims more than the data holds, and one crowded with numbers, and the four points below take them in turn.
+A good card asks one clear question, shows content that fits that question exactly, and has a takeaway that answers it. The common failures in the question and the content are a question that asks several things, a question in jargon the analyst has not used, content that shows something other than what the question asks, and content that shows much more than the answer rests on. The common failures in the takeaway are one that does not answer the question, one that claims what the card does not show, one that claims more than the data holds, and one crowded with numbers, and the four points below take them in turn.
 
-Be creative about how you present the content, since the right form lets the analyst see the answer immediately and the wrong one hides it. Pick the kind of card that shows the answer best.
+The content is the evidence for one answer: the numbers or records the answer rests on, chosen and shaped for the question, so that the analyst sees the answer at a glance. A table of every record with every field makes them search it for the answer, also when they asked to see every record. So show only the records that answer, such as the tickets that waited longest. Or, when the analyst asks for all of the records or their pattern is part of the answer, show all of them in one compact form, such as a bar or a dot for each, with the ones that answer marked. Leave out each field that does not help answer the question. Show each number once, in a form that compares it with the others, such as a bar, a point on an axis or a cell of a table: a box, a bar and a sentence that give the same number make the analyst read it three times. Numbers in large type, each in a box of its own, or a table of measures that each answer another question, are the look of a dashboard: the analyst must compare them in their head, and no one of them is the answer. Rows that all say the same thing, such as tickets that each say "answered", show one fact many times, so give their count. The content explains nothing in words it does not need, such as what the length of a bar means.
+
+    Analyst   Show me every day of March.
+              question   How did each day of March go?
+    Good      content    a bar for each of the 31 days, the share of its tickets answered within a day, with the target marked, so that the 4 days under it stand out
+    Bad       content    a table of the 31 days with their tickets, agents, median wait, longest wait and share answered within a day
+    Bad       content    a box for each of the month's totals in large type, then a bar chart of the same totals
+
+The first bad content makes the analyst read 31 rows, and fields that do not help, to find the 4 days. The second shows each total twice, first in boxes that the analyst cannot compare at a glance.
+
+Pick the kind of card that shows the answer best, since the right form lets the analyst see the answer immediately and the wrong one hides it.
 
 - `plot` for a pattern, a trend or a comparison. Give it axis titles and a legend for any color.
 - `table` when exact values matter, kept to a few short columns and rows named by what they are. Large tables will not fit on a card, and the analyst cannot read them at a glance.

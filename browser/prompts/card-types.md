@@ -9,7 +9,7 @@ When a card type fits the question, answer it with labels and a group of cards n
 1. At once, before reading the files, a regex or code label that narrows the records to those that could bear on the question. Its result quotes some it kept.
 2. Read more of what it kept, across many places, and some of what it dropped; widen it if it dropped any that bear on the question.
 3. A prompt label `within` it, with `comment` and no trial, with one value for each different way the records you read answer the question, however few use it.
-4. The type's card, with the prompt label as `labels` and the arguments its guide asks for, chosen from what you read, then any other card the answer needs, such as a table of each value's records and accounts.
+4. The type's card, with the prompt label as `labels` and the arguments its guide asks for, chosen from what you read, then any other card the answer needs, such as a table that counts the records and the accounts of each value.
 5. Read the reasons the prompt label's result quotes. If they show a way its values lack or join, give that way its own value and run it again.
 6. Answer in the chat in two sentences that name each value, with a link to the group, without waiting for the label to finish. Never wait on a label with `sleep` or poll it. A `label_done` event says when it finished; then run each card that read it again with `edit_card`, unchanged, and write its takeaway from the new listing.
 

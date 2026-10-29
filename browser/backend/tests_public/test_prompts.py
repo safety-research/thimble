@@ -411,3 +411,34 @@ def test_main_names_a_group_only_for_a_sequence_of_cards(mode, monkeypatch):
     assert own and all(re.search(r'"[^"]+\?"', ln) for ln in own), "the guidance's group is named by its question"
     single = [b for b in blocks if any(line.startswith("question") for line in b)]
     assert single and not _grouped(single), "a card that answers a question alone has no group"
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_a_card_shows_the_evidence_chosen_for_its_answer(mode, monkeypatch):
+    """The guidance's Cards section says what a card's content is: the evidence for one answer, the numbers or records
+    it rests on, chosen and shaped for the question, so that the analyst sees the answer at a glance. That is only the
+    records that answer, or all of them in one compact form with the ones that answer marked, also when the analyst asks
+    for every record; each number once, in a form that compares it, never in large type in a box of its own or in a
+    table of measures that each answer another question, the look of a dashboard; no field that does not help answer the
+    question; rows that all say the same thing as their count; and no words that explain what the content shows.
+    Its example's bad contents are a table of every record with fields that do not help, and boxes of numbers that a
+    chart then gives again. add_card's `html` names no class and gives no example, since its example was numbers in
+    boxes. Before, cards listed every run with every field, gave the same numbers in boxes, bars and a sentence, and
+    listed rows that all said "passed"."""
+    from app import tools
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    cards = prompts.section("main", "Cards", mode)
+    para = next(p for p in cards.split("\n\n") if p.startswith("The content is the evidence for one answer"))
+    assert "chosen and shaped for the question" in para and "at a glance" in para
+    assert "only the records that answer" in para and "with the ones that answer marked" in para
+    assert "also when they asked to see every record" in para
+    assert "Show each number once" in para and "box of its own, or a table of measures" in para and "the look of a dashboard" in para
+    assert "does not help answer the question" in para and "give their count" in para
+    assert "explains nothing in words it does not need" in para
+    example = next(b for b in _examples(cards) if any(line.startswith("Good") and "content" in line for line in b))
+    bad = [line for line in example if line.startswith("Bad")]
+    assert any("table" in line for line in bad) and any("box" in line for line in bad)
+    assert not any(line.startswith("group") for line in example), "the example is one card"
+    html = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["html"]["description"]
+    assert "plain HTML" in html and "class=" not in html and "tc-" not in html
