@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'vitest'
 import { viewMarks, withKeeps } from '../../src/files/labels.ts'
 import { rowsByRef } from '../../src/files/marks.tsx'
-import { addressLabel, parseRef, recordKey, recordOf, refLabel, surfaceOf } from '../../src/lib/refs.ts'
+import { addressLabel, addressLabels, parseRef, recordKey, recordOf, refLabel, surfaceOf } from '../../src/lib/refs.ts'
 import type { Concept, LabelRow, LabelsForPath } from '../../src/lib/types.ts'
 
 describe('record refs', () => {
@@ -38,6 +38,19 @@ describe('record refs', () => {
     expect(addressLabel(`${trial('picnic-lake__RvtmQxa')}#L16`)).toBe('picnic-lake__RvtmQxa › trajectory.json L16')
     expect(addressLabel(`${trial('picnic-hill__GdsaPwe')}#/steps/7`)).toBe('picnic-hill__GdsaPwe › trajectory.json /steps/7')
     expect(refLabel('batch2/agents/agent-03.jsonl#L412')).toBe('batch2 › agent-03.jsonl L412')
+  })
+
+  test("an example's addresses tell its trials apart in a job folder named by its date", () => {
+    // the date is the first folder with a digit, so each trial's quotes read `2026-05-02__09-00-00 › … ›
+    // trajectory.json`; the card's addresses name the folder in which the trials' paths part
+    const trial = (t: string) => `jobs/2026-05-02__09-00-00/${t}/agent/trajectory.json`
+    const refs = [`${trial('picnic-hill__GdsaPwe')}#/steps/3`, `${trial('picnic-lake__RvtmQxa')}#/steps/3`, `${trial('picnic-lake__RvtmQxa')}#L40`]
+    expect(refs.map(addressLabel)).toEqual(['2026-05-02__09-00-00 › … › trajectory.json /steps/3', '2026-05-02__09-00-00 › … › trajectory.json /steps/3', '2026-05-02__09-00-00 › … › trajectory.json L40'])
+    expect(addressLabels(refs)).toEqual(['picnic-hill__GdsaPwe › trajectory.json /steps/3', 'picnic-lake__RvtmQxa › trajectory.json /steps/3', 'picnic-lake__RvtmQxa › trajectory.json L40'])
+    // folders left out between the folder named and the file's name show as they do on any chip
+    expect(addressLabels(['jobs/2026-05-02/trial-a/logs/x.jsonl#L2', 'jobs/2026-05-02/trial-b/logs/x.jsonl#L2'])).toEqual(['trial-a › … › x.jsonl L2', 'trial-b › … › x.jsonl L2'])
+    // addresses that differ already, and the passages of one file, keep their own
+    expect(addressLabels(['batch2/agents/agent-03.jsonl#L412', 'batch3/agents/agent-03.jsonl#L9', 'batch3/agents/agent-03.jsonl#L12', 'notes.md'])).toEqual(['batch2 › agent-03.jsonl L412', 'batch3 › agent-03.jsonl L9', 'batch3 › agent-03.jsonl L12', 'notes.md'])
   })
 })
 

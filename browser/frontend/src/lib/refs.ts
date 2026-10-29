@@ -338,14 +338,47 @@ export function refLabel(ref: string): string {
  * characters are left out. A ref that is not a file's reads as refLabel.
  */
 export function addressLabel(ref: string): string {
+  const a = addressParts(ref)
+  return a ? `${a.file}${a.place}` : refLabel(ref)
+}
+
+/** addressLabel's parts for a file's ref: the file's path, its name on the chip (runFolder's folder, then the file's
+ * name) and the record's place after it; null for a ref that is not a file's. */
+function addressParts(ref: string): { path: string; file: string; place: string } | null {
   const p = parseRef(ref)
   if (!p || !(p.kind === 'record' || p.kind === 'range' || p.kind === 'block' || p.kind === 'span' || p.kind === 'path' || p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow'))
-    return refLabel(ref)
+    return null
   const { rest } = splitRun(p.path)
   const file = `${runPrefix(p.path)}${rest.split('/').pop() ?? rest}`
-  if (p.kind === 'path') return p.locator ? `${file} · ${locatorLabel(p.locator)}` : file
-  if (p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow') return `${file} ${recordPart(p)}`
-  return p.kind === 'range' ? `${file} L${p.line}-${p.endLine}` : `${file} L${p.line}`
+  const place =
+    p.kind === 'path' ? (p.locator ? ` · ${locatorLabel(p.locator)}` : '')
+    : p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow' ? ` ${recordPart(p)}`
+    : p.kind === 'range' ? ` L${p.line}-${p.endLine}`
+    : ` L${p.line}`
+  return { path: p.path, file, place }
+}
+
+/**
+ * The addresses of an example card's records (addressLabel), which tell its files apart: where files of the same name
+ * would read the same, as the trajectories of several trials in one dated job folder do (`<date> › … ›
+ * trajectory.json`), each names the first folder in which its path differs from theirs.
+ */
+export function addressLabels(refs: readonly string[]): string[] {
+  const parts = refs.map(addressParts)
+  const paths = new Map<string, Set<string>>()
+  for (const a of parts) if (a) paths.set(a.file, (paths.get(a.file) ?? new Set<string>()).add(a.path))
+  return refs.map((ref, i) => {
+    const a = parts[i]
+    if (!a) return refLabel(ref)
+    const others = [...(paths.get(a.file) ?? [])].filter((x) => x !== a.path).map((x) => x.split('/'))
+    const folders = a.path.split('/')
+    const name = folders.pop() ?? a.path
+    const at = others.length ? folders.findIndex((f, k) => others.some((o) => o[k] !== f)) : -1
+    if (at < 0) return `${a.file}${a.place}`
+    // folders left out between it and the file's name, as runPrefix marks them, a kind folder over the file aside
+    const last = KIND_FOLDERS.has(folders[folders.length - 1]) ? folders.length - 2 : folders.length - 1
+    return `${folders[at]}${RUN_SEP}${at < last ? `…${RUN_SEP}` : ''}${name}${a.place}`
+  })
 }
 
 /** A td span's percent-encoded column or row label as the table shows it (backend cite.decode_label). */
