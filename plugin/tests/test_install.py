@@ -598,14 +598,13 @@ def test_the_readme_and_the_install_summary_say_when_to_use_each_product(tmp_pat
 def test_the_install_summary_says_once_that_reload_plugins_loads_the_plugin_in_an_open_session(tmp_path):
     """A claude session that is already open, such as the one Claude runs the install in, loads the plugin with
     /reload-plugins. It keeps the PATH it started with, so after a change to Node, a new terminal has the plugin. The
-    plugin's summary says both, once, whichever products the install installed."""
+    plugin's summary says what to do in both cases, once, in two lines, whichever products the install installed."""
     for name, args in (("both", ()), ("plugin", ("--no-browser",))):
-        out = " ".join(whole_install(tmp_path / name, *args).stdout.split())
+        out = whole_install(tmp_path / name, *args).stdout
         assert out.count("/reload-plugins") == 1, out
-        summary = out.split("The plugin works in", 1)[1].split(" == ", 1)[0]
-        open_session = summary.split("/reload-plugins", 1)[1].split(". ", 1)[0]
-        assert "already open" in open_session, summary
-        assert "change to Node" in summary and "new terminal" in summary and "PATH" in summary, summary
+        lines = out.split("To use the plugin, ", 1)[1].split("\n")[:2]
+        assert "/reload-plugins in an open session" in lines[0], out
+        assert lines[1] == "After a change to Node, start claude in a new terminal.", out
 
 
 def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plugin_in_the_open_sessions():
