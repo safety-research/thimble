@@ -57,11 +57,7 @@ ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
 # FULL_TIME_SESSIONS keep notebook.EXEC_TIMEOUT.
 CHAT_ACTORS = (ANALYST,)
 FULL_TIME_SESSIONS = (ORIENT_SESSION, WRITER_SESSION)
-ANALYST_NOTEBOOK_TITLE = "Your work"  # notebook.ANALYST_NOTEBOOK_TITLE, repeated: notebook is imported lazily here
-TERMINAL = "terminal"  # created_by of the terminal session's cells and notebook record (notebook.TERMINAL_CREATOR)
-# Where the terminal session's cells land: the analyst's notebook, each cell stamped `created_by: terminal`. A workspace
-# holding a root notebook stamped `created_by: terminal` keeps writing into it (find_terminal_notebook). Groups the
-# session's add_card makes are not stamped `terminal` (_group_author).
+TERMINAL = "terminal"  # created_by of the terminal session's cells (notebook.TERMINAL_CREATOR); never of a group (_group_author)
 MAIN_GROUP_AUTHOR = "main"  # created_by of a group main makes for a sequence of cards, at the root (_group_author)
 BROWSER_AUTHOR = "user"  # a browser chat's comments, labels and report requests: the analyst asking through their chat
 # created_by of a cell the analyst's caller outside the terminal writes when the call names no chat (one that does
@@ -414,9 +410,9 @@ def _created_by(actor: str) -> str:
 
 @dataclass
 class Ctx:
-    """One call's caller: workspace, actor, and the notebook its cells land in (resolved lazily). `terminal` says the
-    call
-    came from the terminal session's shim; False from an in-process SDK server."""
+    """One call's caller: workspace, actor, and the notebook the caller was started with, where its cards land when a
+    call names no group (default_group). `terminal` says the call came from the terminal session's shim; False from an
+    in-process SDK server."""
 
     c: str
     actor: str
@@ -450,7 +446,7 @@ class Ctx:
         (`terminal`), else the actor's name; never the human's by-hand `user`."""
         if self.chat:
             return f"chat:{self.chat}"
-        if own_group_session(self.session):
+        if agent_session(self.session):
             run_chat = session_chat(self.c, self.session)
             if run_chat:  # a writer's card is the writer's from the start, never the analyst's `terminal`
                 return f"chat:{run_chat}"
@@ -462,23 +458,6 @@ class Ctx:
     def key(self) -> tuple[str, str, str]:
         return (self.c, self.actor, self.notebook or ("" if self.terminal else "browser"))
 
-    def nb_id(self) -> str:
-        """The caller's notebook: the explicit one when given (it must exist); else, as the analyst, the terminal
-        session's
-        (terminal_notebook) or, from a browser chat, the human's (analyst_notebook); ValueError for a worker without
-        one."""
-        from . import notebook
-
-        if self.notebook:
-            if notebook.read_notebook(self.ws, self.notebook) is None:
-                raise ValueError(f"no such notebook: {self.notebook}")
-            return self.notebook
-        if own_group_session(self.session):
-            return session_notebook(self)
-        if self.actor == ANALYST:
-            return terminal_notebook(self.c) if self.terminal else analyst_notebook(self.c)
-        raise ValueError(f"the {self.actor} caller was started without a notebook, so cards have nowhere to land")
-
 
 # The card a caller made or ran last, under (workspace, actor, notebook) and that key plus its group. From the terminal
 # main, its forks and its subagents share the first key, so the takeaway reminder looks only at the caller's group, and
@@ -487,80 +466,21 @@ _last_cell: dict[tuple[str, ...], str] = {}
 
 
 def _own_root(r: dict) -> bool:
-    """Whether a group row can be a notebook of its own (the analyst's, or the session's): a root that no thread owns.
-    A frame nested in another, a thread's frame and a question's frame hang in someone's notebook and are never one."""
+    """Whether a group row stands at the canvas root and no thread owns it. A frame nested in another, and a thread's
+    frame from a workspace where each thread had one, belong to the group or the card they stand in or beside."""
     return not r.get("parent") and not r.get("anchor") and not r.get("chat")
 
 
-def _your_work(r: dict) -> bool:
-    """Whether a group row is the analyst's Your work: a root of role analyst that no thread owns (_own_root) and no
-    session stamped (SESSION_GROUP_KEY), which analyst_notebook made (created_by BROWSER_AUTHOR), or which was stored
-    with no maker under that title or as the workspace's first group (notebook.MAIN). A frame the analyst made with
-    Group has no maker and a title of its own, so it is never Your work; nor is the loose group, a group main made for
-    a sequence of cards, or the terminal session's own group."""
-    from . import notebook
-
-    if ((r.get("role") or notebook.DEFAULT_ROLE) != "analyst" or not _own_root(r) or r.get(SESSION_GROUP_KEY)
-            or r.get("kind") == notebook.LOOSE_KIND):
-        return False
-    if r.get("created_by"):
-        return r["created_by"] == BROWSER_AUTHOR
-    return r["id"] == notebook.MAIN or str(r.get("title") or "").strip().casefold() == ANALYST_NOTEBOOK_TITLE.casefold()
+# One of thimble's agents beside main (a writer, a report check) is not the analyst. A card it adds, and a group it
+# makes, carry its THIMBLE_SESSION under SESSION_KEY, so its work is told apart from the analyst's (the report's
+# Figures) and never goes into the analyst's groups. Workspaces from before keep the agents' own groups, stamped the
+# same way. The orientation is not one of them.
+SESSION_KEY = "session"
 
 
-def analyst_notebook(c: str) -> str:
-    """The analyst's Your work (_your_work), where a card made where the analyst wrote (`request:<id>`) lands, and the
-    own group of the analyst's callers other than main (Ctx.nb_id): settings.active_notebook when it is Your work, else
-    the newest Your work with cells, else the newest, else a new one, bound as settings.active_notebook. Never a frame
-    the analyst made with Group, which with main's single cards loose is often the canvas's first frame."""
-    from . import notebook
-    from .ledger import read_json, write_json
-
-    ws = config.workspace_dir(c)
-    own = [r for r in notebook.list_notebooks(ws) if _your_work(r)]
-    settings = read_json(ws / "settings.json", {})
-    settings = settings if isinstance(settings, dict) else {}
-    active = settings.get("active_notebook")
-    pick = next((r for r in own if r["id"] == active), None)
-    if pick is None and own:
-        own.sort(key=lambda r: str(r.get("ts") or ""), reverse=True)
-        pick = next((r for r in own if r.get("n_cells")), own[0])
-    if pick is None:
-        pick = notebook.create_notebook(ws, ANALYST_NOTEBOOK_TITLE, role="analyst", created_by=BROWSER_AUTHOR)
-    elif not pick.get("created_by"):
-        with notebook.editing(ws):
-            nb = notebook.read_notebook(ws, pick["id"])
-            if nb is not None:
-                nb["created_by"] = BROWSER_AUTHOR
-                notebook.write_notebook(ws, nb)
-    if active != pick["id"]:
-        settings["active_notebook"] = pick["id"]
-        write_json(ws / "settings.json", settings)
-    return str(pick["id"])
-
-
-def find_terminal_notebook(ws: Path) -> "dict | None":
-    """The terminal session's own notebook, read-only: a root group no thread owns whose record says `created_by:
-    terminal`
-    (the newest); None otherwise, when session cells go to the analyst's notebook. Nothing is created here."""
-    from . import notebook
-
-    mine = [r for r in notebook.list_notebooks(ws) if r.get("created_by") == TERMINAL and _own_root(r)]
-    if not mine:
-        return None
-    mine.sort(key=lambda r: str(r.get("ts") or ""), reverse=True)
-    return mine[0]
-
-
-# A session thimble runs beside main (a writer, a report check, the critic) is not the analyst: its cards go to a root
-# group of its own (session_notebook) stamped with its THIMBLE_SESSION under SESSION_GROUP_KEY and credited to its chat.
-# The orientation is not one of them: its cards go to its deck (orient_deck).
-SESSION_GROUP_KEY = "session"
-
-
-def own_group_session(session: str | None) -> bool:
-    """Whether the session `session` names (a THIMBLE_SESSION) keeps its cards in a group of its own (SESSION_GROUP_KEY):
-    every session thimble runs beside main except the orientation, and never main's shim (None)."""
+def agent_session(session: str | None) -> bool:
+    """Whether the session `session` names (a THIMBLE_SESSION) is one of thimble's agents beside main: every session
+    thimble runs except the orientation, and never main's shim (None)."""
     kind = session_kind(session)
     return kind is not None and kind != ORIENT_SESSION
 
@@ -574,40 +494,25 @@ def session_chat(c: str, session: str | None) -> str | None:
     return run.chat if run is not None and run.chat else None
 
 
-def session_group_title(c: str, session: str) -> str:
-    """The title of a session's own group: `<document's name> figures` for a writer (`Report figures`), since what a
-    writer adds is the document's figures; else the kind's, such as `Check cards`."""
-    kind, _, rest = session.partition(":")
-    if kind == WRITER_SESSION:
-        from . import report_types  # noqa: PLC0415
-
-        t = report_types.read_type(c, rest) if report_types.SLUG_RE.match(rest or "") else None
-        name = str((t or {}).get("name") or rest or "document").strip()
-        return f"{name[:1].upper()}{name[1:]} figures"
-    return f"{kind.capitalize()} cards"
+def session_kernel(session: str) -> str:
+    """The kernel an agent's cards run on, named after its session: its cards stand on the canvas with the analyst's,
+    and their kernel shares nothing with others."""
+    return "s-" + (re.sub(r"[^A-Za-z0-9_-]+", "-", session).strip("-") or "agent")
 
 
-def session_notebook(ctx: "Ctx") -> str:
-    """The group of the session ctx.session: the root group stamped with it, made at the canvas root the first time the
-    session adds a card, never under the analyst's Your work. An unstamped figures group is not it."""
-    from . import notebook
-
-    key = str(ctx.session or "")
-    mine = [r for r in notebook.list_notebooks(ctx.ws, figures=False)
-            if not r.get("parent") and r.get(SESSION_GROUP_KEY) == key]  # notebook.summary carries the stamp
-    if mine:
-        return str(mine[0]["id"])
-    with notebook.editing(ctx.ws):
-        nb = notebook.create_notebook(ctx.ws, session_group_title(ctx.c, key), created_by=_group_author(ctx))
-        nb[SESSION_GROUP_KEY] = key
-        notebook.write_notebook(ctx.ws, nb)
-    return str(nb["id"])
+def _agent_fields(ctx: "Ctx", *, runs: bool) -> dict[str, str]:
+    """What a new card of one of thimble's agents (agent_session) carries: its session, and for a card that runs, the
+    session's own kernel (session_kernel). {} for a card of anyone else."""
+    if not agent_session(ctx.session):
+        return {}
+    key = str(ctx.session)
+    return {SESSION_KEY: key, **({"kernel": session_kernel(key)} if runs else {})}
 
 
 def _analysts(ws: Path, nb_id: str) -> bool:
-    """Whether group `nb_id` is the analyst's: under a root of role analyst that no session stamped
-    (SESSION_GROUP_KEY), no thread owns and is not the loose group; Your work, every frame in it and a group main made
-    at the root. The orientation's deck (role exploration) and a session's own group are not."""
+    """Whether group `nb_id` is the analyst's: under a root of role analyst that no agent stamped (SESSION_KEY), no
+    thread owns and is not the loose group, such as a frame the analyst made, a group main made for a sequence of
+    cards, and every frame in them. A group an agent made and the orientation's deck (role exploration) are not."""
     from . import notebook
 
     seen: set[str] = set()
@@ -617,17 +522,8 @@ def _analysts(ws: Path, nb_id: str) -> bool:
         cur = notebook.read_notebook(ws, str(cur["parent"]))
     if cur is None:
         return False
-    return ((cur.get("role") or notebook.DEFAULT_ROLE) == "analyst" and not cur.get(SESSION_GROUP_KEY)
+    return ((cur.get("role") or notebook.DEFAULT_ROLE) == "analyst" and not cur.get(SESSION_KEY)
             and cur.get("kind") != notebook.LOOSE_KIND and _own_root(cur))
-
-
-def terminal_notebook(c: str) -> str:
-    """The terminal session's notebook id, where its cards land and under which the groups its add_card names are made:
-    the
-    analyst's notebook (analyst_notebook) unless the workspace has one of the session's own (find_terminal_notebook)."""
-    ws = config.workspace_dir(c)
-    row = find_terminal_notebook(ws)
-    return analyst_notebook(c) if row is None else str(row["id"])
 
 
 def workspace_for_cwd(path: str | None) -> str | None:
@@ -996,9 +892,8 @@ GROUP_ROLES_BY_TITLE = {"final": "exploration", "orientation": "exploration"}
 # How the canvas writes a group under another (canvas/layout.ts) and how a caller names one. The spaces are part of it:
 # a thread's group is titled `main/<slug>`, one title with a slash in it.
 GROUP_PATH_SEP = " / "
-PARENT_KIND = "split"  # a group made above another by a path (notebook.GROUP_KINDS; every group renders as one column)
-# The `group` of a `card` event (a request sent from a document with ⌘↵, or /card): `request:<id>`. The card lands in
-# the analyst's Your work, and the stream carries `card-request {request, card}` once it is made.
+# The `group` of a `card` event (a request sent from a document with ⌘↵, or /card): `request:<id>`. It names no group:
+# the card stands loose on the canvas, and the stream carries `card-request {request, card}` once it is made.
 REQUEST_GROUP_RE = re.compile(r"^request:([A-Za-z0-9_-]{1,64})$")
 
 
@@ -1027,55 +922,56 @@ def _role_by_title(title: str) -> str:
 
 
 def group_path(ws: Path, path: str, *, created_by: str | None = None, made: "builtins.list[str] | None" = None) -> str:
-    """The group a path of titles names (`Orientation / Final`), made where missing, matched by title without case; a
-    group
-    stored under the whole path as one title is that group. Each title made is appended to `made`. Under the groups'
-    lock, so two processes that look for one path make it once."""
+    """The group a path of titles names (`Orientation / Final`, _walk_path). Where the path names none, one group is
+    made, under the deepest group the path names, with the rest of the path as its title, so a path never makes a
+    chain of empty groups around one card, and the same path finds the group again. The name made is appended to
+    `made`. Under the groups' lock, so two processes that look for one path make it once."""
     from . import notebook
 
     with notebook.editing(ws):
-        return _group_path(ws, path, created_by, made)
+        rows = notebook.list_notebooks(ws, figures=False)
+        hit, parent, rest = _walk_path(rows, path)
+        if hit is not None:
+            return str(hit["id"])
+        nb = notebook.create_notebook(ws, GROUP_PATH_SEP.join(rest), role=_role_by_title(rest[-1]), parent=parent,
+                                      created_by=created_by)
+        if made is not None:
+            row = notebook.summary(nb)
+            made.append(_group_name([*rows, row], row))
+        return str(nb["id"])
 
 
-def _group_path(ws: Path, path: str, created_by: str | None, made: "builtins.list[str] | None") -> str:
-    from . import notebook
+def _title_key(row: dict) -> str:
+    return str(row.get("title") or "").strip().casefold()
 
-    parts = [p.strip() for p in path.split(GROUP_PATH_SEP.strip()) if p.strip()]
-    rows = notebook.list_notebooks(ws, figures=False)
-    flat = " / ".join(parts).casefold()
-    legacy = next((r for r in rows if str(r.get("title") or "").strip().casefold() == flat), None)
-    if legacy is not None:
-        return str(legacy["id"])
+
+def _walk_path(rows: "builtins.list[dict]", path: str) -> "tuple[dict | None, str | None, builtins.list[str]]":
+    """(the group a path of titles names, or None; the deepest group the path names on the way, None for the root; the
+    titles under it that name no group). Each title is matched without case under the group the one before names, and
+    a group titled with the rest of the path is that group, as is a group anywhere stored under the whole path as one
+    title."""
+    parts = [p.strip() for p in " ".join(path.split()).split(GROUP_PATH_SEP) if p.strip()] or [path.strip()]
+    whole = GROUP_PATH_SEP.join(parts).casefold()
+    hit = next((r for r in rows if _title_key(r) == whole), None)
+    if hit is not None:
+        return hit, None, []
     parent: str | None = None
     for i, title in enumerate(parts):
-        key = title.casefold()
-        hit = next((r for r in rows if (r.get("parent") or None) == parent and str(r.get("title") or "").strip().casefold() == key), None)
+        under = [r for r in rows if (r.get("parent") or None) == parent]
+        rest = GROUP_PATH_SEP.join(parts[i:]).casefold()
+        hit = next((r for r in under if _title_key(r) == rest), None)
+        if hit is not None:
+            return hit, parent, []
+        hit = next((r for r in under if _title_key(r) == title.casefold()), None)
         if hit is None:
-            leaf = i == len(parts) - 1
-            hit = notebook.create_notebook(ws, title, role=_role_by_title(title), parent=parent, created_by=created_by,
-                                           kind=None if leaf else PARENT_KIND)
-            rows.append(notebook.summary(hit))
-            if made is not None:
-                made.append(GROUP_PATH_SEP.join(parts[: i + 1]))
+            return None, parent, parts[i:]
         parent = str(hit["id"])
-    return str(parent)
+    return None, parent, parts[-1:]
 
 
 def _group_at_path(rows: "builtins.list[dict]", path: str) -> dict | None:
-    """The group a path of titles names, found as group_path finds it and never made; None when a title is missing."""
-    parts = [p.strip() for p in path.split(GROUP_PATH_SEP.strip()) if p.strip()]
-    flat = " / ".join(parts).casefold()
-    hit = next((r for r in rows if str(r.get("title") or "").strip().casefold() == flat), None)
-    if hit is not None:
-        return hit
-    parent: str | None = None
-    for title in parts:
-        key = title.casefold()
-        hit = next((r for r in rows if (r.get("parent") or None) == parent and str(r.get("title") or "").strip().casefold() == key), None)
-        if hit is None:
-            return None
-        parent = str(hit["id"])
-    return hit
+    """The group a path of titles names, found as group_path finds it and never made; None when the path names none."""
+    return _walk_path(rows, path)[0]
 
 
 def _group_name(rows: "builtins.list[dict]", row: dict) -> str:
@@ -1091,9 +987,8 @@ def _group_name(rows: "builtins.list[dict]", row: dict) -> str:
 
 
 def _group_author(ctx: Ctx) -> str | None:
-    """created_by of a group a caller's add_card makes: MAIN_GROUP_AUTHOR for main's, which is never the analyst's
-    notebook (analyst_notebook); else the caller's name, but never `terminal`, which marks the session's own notebook
-    (find_terminal_notebook); the terminal's cards in it say who made them."""
+    """created_by of a group a caller's call makes: MAIN_GROUP_AUTHOR for main's, its forks' and its subagents'; else
+    the caller's name, but never `terminal`, which says who made a card and never a group."""
     if _mains(ctx):
         return MAIN_GROUP_AUTHOR
     author = ctx.cell_author
@@ -1101,41 +996,35 @@ def _group_author(ctx: Ctx) -> str | None:
 
 
 def _group_id(ctx: Ctx, group: str, made: "builtins.list[str]") -> str:
-    """The group `group` names, made when missing: the deck for the orientation's session (orient_deck); a thread's
-    group for
-    `thread:<id>`; the analyst's Your work for `request:<id>`; a path of titles (group_path); a group by id or title;
-    else a
-    new group with that title, its role by the title's last word: main's at the root, since main names a group for a
-    sequence of cards, another caller's under its own group. A session with its own group (own_group_session) never
-    reaches the analyst's groups. Titles made are appended to `made`."""
+    """The group a card goes to for the `group` its call names: a group by id, title or path of titles
+    (_find_notebook), else one made for it at the root with that title, since a call names a group for a sequence of
+    cards; a path makes one group under the deepest group it names (group_path). A request's `request:<id>` names no
+    group, and a thread's `thread:<id>` names only the group a thread got in a workspace from before threads' cards
+    stood loose: such a card stands loose on the canvas (notebook.loose_group). A card of one of thimble's agents
+    (agent_session) never goes into the analyst's groups: it stands loose instead, and a group the agent makes is
+    stamped as its own (SESSION_KEY). Titles made are appended to `made`."""
     from . import notebook, threads
 
-    if own_group_session(ctx.session):
-        # a writer's (or another session's) card never lands in the analyst's groups, whatever it names: those land
-        # in its own group, and a new title is a group under its own (session_notebook)
-        own = ctx.nb_id()
-        if group.casefold() == notebook.read_notebook(ctx.ws, own)["title"].casefold():
-            return own
-        if request_of(group) is None and threads.group_of(ctx.c, group) is None and GROUP_PATH_SEP not in group:
-            row = _find_notebook(ctx.ws, group)
-            if row is not None and not _analysts(ctx.ws, str(row["id"])):
-                return str(row["id"])
-            if row is None:
-                nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), parent=own, created_by=_group_author(ctx))
-                made.append(group)
-                return str(nb["id"])
-        return own
-    if (thread_group := threads.group_of(ctx.c, group)) is not None:
-        return thread_group
     if request_of(group) is not None:
-        return analyst_notebook(ctx.c)
+        return notebook.loose_group(ctx.ws)
+    if threads.thread_of_ref(ctx.c, group) is not None:
+        return threads.group_of(ctx.c, group) or notebook.loose_group(ctx.ws)
+    if agent_session(ctx.session):
+        row = _find_notebook(ctx.ws, group)
+        if row is not None:
+            return notebook.loose_group(ctx.ws) if _analysts(ctx.ws, str(row["id"])) else str(row["id"])
+        with notebook.editing(ctx.ws):
+            nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), created_by=_group_author(ctx))
+            nb[SESSION_KEY] = str(ctx.session)
+            notebook.write_notebook(ctx.ws, nb)
+        made.append(group)
+        return str(nb["id"])
     if GROUP_PATH_SEP in group:
         return group_path(ctx.ws, group, created_by=_group_author(ctx), made=made)
     row = _find_notebook(ctx.ws, group)
     if row is not None:
         return str(row["id"])
-    parent = None if _mains(ctx) else ctx.nb_id()
-    nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), parent=parent, created_by=_group_author(ctx))
+    nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), created_by=_group_author(ctx))
     made.append(group)
     return str(nb["id"])
 
@@ -1147,23 +1036,10 @@ def _group_role(ctx: Ctx, nb_id: str) -> str:
     return str((nb or {}).get("role") or notebook.DEFAULT_ROLE)
 
 
-# The group a card lands in when add_card or apply_label names none (default_group): none for main's card, which stands
-# loose on the canvas, since a group is for a sequence of cards and main's call names it; for another caller the group
-# it last added a card to, else its own. The group each caller last added a card to, by _caller, kept in memory:
-_last_group: dict[tuple[str, ...], str] = {}
-
-
 def _mains(ctx: Ctx) -> bool:
     """Whether a call is main's: the analyst's caller through main's shim with no notebook and no session of thimble's,
     as main's forks and subagents call too."""
     return ctx.actor == ANALYST and not ctx.notebook and not ctx.session
-
-
-def _caller(ctx: Ctx) -> tuple[str, ...]:
-    """Who a call belongs to, for _last_group: the workspace, the actor, the notebook, the shim's session (main's, the
-    orientation's, a writer's) and the chat. Main, its forks and its subagents call through main's shim, so they share
-    one entry."""
-    return (*ctx.key, ctx.session or "", ctx.chat or "")
 
 
 def _live_group(ws: Path, nb_id: object) -> str | None:
@@ -1180,30 +1056,16 @@ def _live_group(ws: Path, nb_id: object) -> str | None:
 
 
 def default_group(ctx: Ctx) -> str:
-    """The group a card lands in when the call names none. Main's card stands loose on the canvas, outside every frame
-    (notebook.loose_group), never in the analyst's Your work. A caller with a notebook of its own uses it. Otherwise:
-    the group this caller last added a card to, then the caller's own group (Ctx.nb_id)."""
+    """The group a card lands in when its call names none: the notebook the caller was started with (Ctx.notebook),
+    else none, and the card stands loose on the canvas, outside every frame (notebook.loose_group). A group holds a
+    sequence of cards that its calls name, so no caller, thread, request or document gets one of its own."""
     from . import notebook
 
-    if _mains(ctx):
-        return notebook.loose_group(ctx.ws)
-    if not ctx.notebook:
-        hit = _live_group(ctx.ws, _last_group.get(_caller(ctx)))
-        if hit:
-            return hit
-    return ctx.nb_id()
-
-
-def _note_group(ctx: Ctx, nb_id: str) -> None:
-    """Remember the group a caller added a card to, for default_group. A thread's group is not remembered, since a fork
-    calls
-    through main's shim."""
-    from . import notebook
-
-    nb = notebook.read_notebook(ctx.ws, nb_id)
-    if nb is not None and (nb.get("chat") or nb.get("anchor")):
-        return
-    _last_group[_caller(ctx)] = nb_id
+    if ctx.notebook:
+        if notebook.read_notebook(ctx.ws, ctx.notebook) is None:
+            raise ValueError(f"no such notebook: {ctx.notebook}")
+        return ctx.notebook
+    return notebook.loose_group(ctx.ws)
 
 
 # add_card's content fields beside `code`, by the data kind that shows each (notebook.PAYLOAD_KEYS)
@@ -1457,7 +1319,6 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     request = request_of(group)
     made: builtins.list[str] = []
     nb_id = _group_id(ctx, group, made) if group else _plan_group(ctx, follows) or default_group(ctx)
-    _note_group(ctx, nb_id)
     lines: builtins.list[str] = [f"made the group {t!r}" for t in made]  # what the result says after the card's result
     warn = ""
     prev = _last_cell.get((*ctx.key, nb_id))
@@ -1487,7 +1348,8 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             line = hint("takeaway-missing-shown", cid=new)
         return ok(warn + res.text + (f"\n\n{line}" if line else ""))
     cell = await notebook.run_code(ctx.c, code, created_by=ctx.cell_author, title=title, notebook=nb_id,
-                                   default_timeout_s=_default_timeout(ctx), kind=kind)
+                                   default_timeout_s=_default_timeout(ctx), kind=kind,
+                                   fields=_agent_fields(ctx, runs=True))
     cid = str(cell.get("id") or "")
     if cid:
         _remember_cell(ctx, nb_id, cid)
@@ -1523,18 +1385,19 @@ def _add_data_cell(ctx: Ctx, nb_id: str, kind: str, title: str, payload: dict,
     """A new card with a payload and no code: stored and announced."""
     from . import notebook
 
-    cell = notebook.insert_cell(ctx.c, nb_id, notebook.new_cell(kind, ctx.cell_author, title, nb_id, payload=payload))
+    new = notebook.new_cell(kind, ctx.cell_author, title, nb_id, payload=payload)
+    cell = notebook.insert_cell(ctx.c, nb_id, {**new, **_agent_fields(ctx, runs=False)})
     cid = str(cell["id"])
     _remember_cell(ctx, nb_id, cid)
     return ok(f"card:{cid}" + "".join(f"\n\n{line}" for line in lines))
 
 
 def _plan_group(ctx: Ctx, follows: str | None) -> str | None:
-    """The group of the plan a new plan follows, where the next phase lands when add_card names no group; None when the
-    caller has a group of its own (the orientation, a writer) or that group is gone."""
+    """The group of the plan a new plan follows, where the next phase lands when add_card names no group; None when
+    that plan stands loose or is gone."""
     from . import notebook
 
-    if not follows or session_kind(ctx.session) == ORIENT_SESSION or own_group_session(ctx.session):
+    if not follows:
         return None
     hit = notebook.find_cell(ctx.ws, follows)
     return _live_group(ctx.ws, hit[0]) if hit else None
@@ -2203,27 +2066,28 @@ async def _h_list_cards(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if not which:
         return err(f"list_cards: `group` is required, a group's title or id or all; the groups are {names}")
     if which.casefold() in ("all", "*"):
-        targets = [notebook.read_notebook(ctx.ws, r["id"]) for r in rows]
-    elif threads.THREAD_REF_RE.match(which) and threads.is_thread(ctx.c, which.split(":", 1)[1]):
-        # a thread's event names its group as the thread, which has no group until its first card (threads.group_of)
-        gid = threads.group_of(ctx.c, which, make=False)
-        if gid is None:
+        targets = [(nb, nb.get("cells") or []) for r in rows if (nb := notebook.read_notebook(ctx.ws, r["id"]))]
+    elif (thread := threads.thread_of_ref(ctx.c, which)) is not None:
+        # a thread's cards are the ones it made, wherever they stand (agents.claim_cell credits them to its chat), with
+        # the group a thread got in a workspace from before threads' cards stood loose
+        old = threads.group_of(ctx.c, which)
+        targets = [(nb, [c for c in nb.get("cells") or [] if nb["id"] == old or c.get("created_by") == f"chat:{thread}"])
+                   for r in rows if (nb := notebook.read_notebook(ctx.ws, r["id"]))]
+        targets = [t for t in targets if t[1]]
+        if not targets:
             return ok(f"list_cards: the thread {which} has no cards yet")
-        targets = [notebook.read_notebook(ctx.ws, gid)]
     else:
         row = _find_notebook(ctx.ws, which)
         if row is None:
             return err(f"list_cards: no group {which!r}; the groups are {names}")
-        targets = [notebook.read_notebook(ctx.ws, row["id"])]
+        nb = notebook.read_notebook(ctx.ws, row["id"])
+        targets = [(nb, nb.get("cells") or [])] if nb else []
     out: builtins.list[str] = []
     view = await asyncio.to_thread(filters.canvas_view, ctx.c)
     kept, shown = (view["kept"], {x["id"] for x in view["cards"]}) if view else (None, set())
     if view:
         out += [hint("list_cards-filter", filter=filters.describe(ctx.c, view["entry"]), kept=len(kept), total=len(shown)), ""]
-    for nb in targets:
-        if not nb:
-            continue
-        cells = nb.get("cells") or []
+    for nb, cells in targets:
         row = next((r for r in rows if r["id"] == nb["id"]), None)
         name = _group_name(rows, row) if row is not None else nb.get("title") or nb["id"]
         out.append(f'Group "{name}" ({nb["id"]}, {nb.get("role", "analyst")}, {len(cells)} card{"" if len(cells) == 1 else "s"})')
@@ -2590,9 +2454,9 @@ def _chip(c: str, kind: str, text: str, **fields: Any) -> None:
 
 async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """Define a category and apply it over one scope's units (concepts.apply_scoped): the label is a card (in `group`,
-    else for a new label a group named after it) and, when `filter` is true, the scope's filter. The orientation's
-    labels get no card. A changed label names the cards that read it before (`## apply_label-stale`)."""
-    from . import concepts, threads
+    else loose on the canvas) and, when `filter` is true, the scope's filter. The orientation's labels get no card. A
+    changed label names the cards that read it before (`## apply_label-stale`)."""
+    from . import concepts
 
     scope = str(args.get("scope") or "files").strip().lower()
     name = " ".join(str(args.get("name") or "").split())
@@ -2633,20 +2497,9 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                         scope=concepts.SCOPE_OF_UNIT.get(prior["unit"]), new=scope))
     orienting = session_kind(ctx.session) == ORIENT_SESSION
     group = str(args.get("group") or "").strip()
-    if orienting:
-        target = None
-    elif group:
-        target = _group_id(ctx, group, [])
-    elif not _mains(ctx) and (prior is None or not concepts._label_cards(ctx.ws, prior["id"])) \
-            and GROUP_PATH_SEP not in name and request_of(name) is None and threads.group_of(ctx.c, name) is None:
-        # another caller's new label with no group named gets a group of its own, named after the label (by its title
-        # alone, never read as a path or a thread), rather than the group of the last card the caller made (live check
-        # term-fix10, quirk 9: a label card landed in "Deletes per day, 18 to 26 June"); main's stands loose
-        target = _group_id(ctx, name, [])
-    else:
-        target = default_group(ctx)  # the card the label has already stays where it is (concepts.label_card)
-    if target:
-        _note_group(ctx, target)
+    # a label's card stands loose unless the call names its group, as any card does; a card the label has already
+    # stays where it is (concepts.label_card)
+    target = None if orienting else _group_id(ctx, group, []) if group else default_group(ctx)
     question = _question(args.get("question")) or None
     within = args.get("within") or None
     if isinstance(within, str):

@@ -2,8 +2,8 @@
 
 A thread starts in the browser from a ⌘-click or ⌘-drag (agents.new_thread); its meta keeps the anchor (ref, visible
 text, surface, selector, and a PNG under `anchors/`). Each message typed in it is a browser event of kind `thread`
-(`event`) naming the thread and its card group `thread:<id>`; the first one carries the anchor and what its refs
-hold.
+(`event`) naming the thread; the first one carries the anchor and what its refs hold. The fork's cards stand loose on
+the canvas, as main's do, and a card it makes about the card the thread is on stands beside that card.
 Main answers by forking with description and prompt `thread:<name>`, the thread's fork name (fork_name: its first
 question as a slug, which Claude Code's agent tray shows; in terminal mode thimble-term gives the call the question as its
 description, so the fork is known by its prompt, fork_ref; the event's line in main's terminal names the thread by its
@@ -148,26 +148,23 @@ def is_thread(c: str, chat_id: str | None) -> bool:
     return bool(meta and meta.get("kind") == agents.KIND_THREAD)
 
 
-def group_ref(thread_id: str) -> str:
-    """The `group` a thread's event names for its cards, `thread:<id>`, resolved by the card tools to the thread's
-    canvas
-    group (group_of), made with its first card."""
-    return f"thread:{thread_id}"
-
-
-def group_of(c: str, ref: str, *, make: bool = True) -> str | None:
-    """The canvas group (a notebook id) of the thread a `thread:<id>` ref names (agents.group_for), made now when it has
-    none and `make`; None when the ref names no thread, or the thread has no group and `make` is false."""
+def thread_of_ref(c: str, ref: str) -> str | None:
+    """The id of the thread a `thread:<id>` ref names, else None (no such ref, or no such thread)."""
     m = THREAD_REF_RE.match(str(ref or "").strip())
     meta = agents.meta_or_none(c, m.group(1)) if m else None
-    if meta is None or meta.get("kind") != agents.KIND_THREAD:
-        return None
-    if not make:
-        from . import notebook  # noqa: PLC0415
+    return str(meta["id"]) if meta is not None and meta.get("kind") == agents.KIND_THREAD else None
 
-        gid = str(meta.get("group") or "")
-        return gid if gid and notebook.read_notebook(config.workspace_dir(c), gid) is not None else None
-    return agents.group_for(c, meta)
+
+def group_of(c: str, ref: str) -> str | None:
+    """The canvas group (a notebook id) of the thread a `thread:<id>` ref names, kept from a workspace where each thread
+    had one, while it exists; None for any other thread or ref. No thread gets a group of its own (module note)."""
+    tid = thread_of_ref(c, ref)
+    gid = str((agents.meta_or_none(c, tid) or {}).get("group") or "") if tid else ""
+    if not gid:
+        return None
+    from . import notebook  # noqa: PLC0415
+
+    return gid if notebook.read_notebook(config.workspace_dir(c), gid) is not None else None
 
 
 # --------------------------------------------------------------------------- the anchor
@@ -313,7 +310,6 @@ def build(c: str, thread_id: str, questions: list[str]) -> tuple[str, dict[str, 
     """The event that asks the thread's questions: to its fork when it has one in the session that is main, else to
     main to fork anew, with the anchor, what its refs hold and the thread's earlier turns."""
     meta = agents.read_meta(c, thread_id)
-    group = group_ref(thread_id)
     fork = _live_fork(c, meta)
     lines = [_line("question", "\n\n".join(q.strip() for q in questions if q.strip()))]
     if not fork.get("agent_id"):
@@ -328,7 +324,7 @@ def build(c: str, thread_id: str, questions: list[str]) -> tuple[str, dict[str, 
             _line("earlier", earlier(c, thread_id, len(questions))),
         ]
         _awaiting[(c, thread_id)] = _session_id(c)
-    fields: dict[str, Any] = {"thread": thread_id, "group": group,
+    fields: dict[str, Any] = {"thread": thread_id,
                               "name": (fork.get("agent_id") and meta.get(FORK_NAME_KEY))
                               or fork_name(c, meta, questions[0] if questions else "")}
     if fork.get("agent_id"):
