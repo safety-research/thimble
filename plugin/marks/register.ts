@@ -15,8 +15,11 @@
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
 //                    autoRepair), as x does
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script
-//   agent.spawn      a repair's fork (x in the tray): waits out the key's word window, refused when a word came
-//                    (a repair thimble starts itself has no word window)
+//   turn.step        the checker's requests: the model and the effort the setting Checker names
+//   agent.spawn      a repair's fork (x in the tray), and a check y starts again: waits out the key's word window,
+//                    refused when a word came (a repair thimble starts itself has no word window)
+//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (y): Claude Code's
+//                    ask answered allow, where auto mode's classifier gives no verdict on it (checker.ts allowsCheck)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
@@ -35,7 +38,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -45,6 +48,11 @@ type Engine = EngineInterface
 type Any = any
 
 const BUSY = { plugin: 'thimble', key: 'busy' } as const
+
+/** The spawns a key started that wait out its word window: x's repair, and a check y starts again. */
+const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
+/** Why thimble answers allow to Claude Code at tool.check on a check of its own. */
+const CHECKS_ALLOWED = "thimble's check of citations, which the person allowed this session"
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
  *  words of one of the row's checked marks looks as that one does, and opens its evidence. A rewrite may word a
@@ -192,14 +200,22 @@ export const registerMarks: Register = on => {
     return yield* next({ ...e, ...(model ? { model } : {}), ...(effort ? { effort } : {}) })
   })
 
-  // x's repair waits out the word window, and is refused when a letter came in it (hooks/keys.ts undoes x)
-  on('agent.spawn', { description: REPAIR_DESCRIPTION }, async ($, e, next) => {
+  // x's repair, and a check y starts again, wait out the word window, and are refused when a letter came in it
+  // (hooks/keys.ts undoes the key)
+  on('agent.spawn', { description: HELD_SPAWN }, async ($, e, next) => {
     const h = heldRepair()
     if (next.origin.plugin !== 'thimble' || !h) return next(e)
     const left = h.until - Number(await $.clock.now())
     if (left > 0) await $.clock.sleep(left)
-    if (h.cancelled) return { deny: 'the person typed a word that starts with x' }
+    if (h.cancelled) return { deny: 'the person typed a word that starts with the key' }
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // a checker's spawn of thimble's own, once the person let thimble start its checks (y, checker.ts allowsCheck):
+  // Claude Code's ask, which auto mode's classifier would settle, is answered allow; its deny and any other verdict stand
+  on('tool.check', { tool: 'Agent' }, async ($, e, next) => {
+    const v = await next(e)
+    return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
   // fails safe (core/rowhook.ts): a throw here answers the drawing beneath, which the hooks around this one draw on

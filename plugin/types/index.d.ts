@@ -19,6 +19,12 @@ declare module 'claude-code' {
       /** the lines of checks that could not start that this session showed, so a reply's check says each once
        *  (marks/checker.ts sayCannotStart) */
       checksRefused: string[]
+      /** the person's OK (y) for thimble to start its checks of citations this session, which auto mode's classifier
+       *  gave no verdict on: thimble answers Claude Code's ask on them with allow (marks/checker.ts allowsCheck) */
+      checksAllowed: boolean | null
+      /** the check the line that offers y is about, which y starts again: { kind: 'check', whole, reply, note? } or
+       *  { kind: 'repair', repair } (marks/checker.ts Held) */
+      checksHeld: unknown
 
       // ---- cards (cards/)
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,

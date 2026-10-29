@@ -1,5 +1,8 @@
 // keys.ts: thimble's keys at an empty prompt, in one hook. A key goes to the first of these that takes it now:
 //
+//   y        marks/checker.ts checkKey   the line of a check of citations that auto mode's classifier gave no
+//                                    verdict on, while it shows: thimble's checks are allowed this session, and that
+//                                    check starts again
 //   y d n u  fix/line.ts fixKey      the line of a fix above the bar, while it shows: y use it now, d what
 //                                    changed, n later, u undo (a failed fix: y try again, d what it tried, n dismiss)
 //   v        designer/v.ts vKey      a card of the last answer
@@ -35,6 +38,7 @@ import { HEAD_KEYS, headKey } from '../cards/head'
 import { keysReady, restoredKey, restoredKeys } from '../core/answerview'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
+import { checkKey } from '../marks/checker'
 import { promptHasKeys } from '../squeeze/ui'
 
 type Engine = EngineInterface
@@ -65,7 +69,7 @@ const failed = (key: string, err: unknown) => `The ${key} key did not run: ${Str
 
 /** Who takes the key now, in the order above. */
 async function takerOf($: Engine, key: string, until: number): Promise<Take | null> {
-  return (await fixKey($, key)) ?? (await vKey($, key, until)) ?? (await restoredKey($, key, until)) ?? (await headKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key))
+  return (await checkKey($, key, until)) ?? (await fixKey($, key)) ?? (await vKey($, key, until)) ?? (await restoredKey($, key, until)) ?? (await headKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key))
 }
 
 /** A key a click pressed (a key a failure line names, bar/bar.tsx): done at once, by whoever takes it now, as if it
