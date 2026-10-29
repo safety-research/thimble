@@ -599,7 +599,7 @@ def _coverage(st: Store, session: str | None, per_folder: int, until: float | No
         if t is None:
             t = shapes[shape] = _file_record(f, c, unit, _NONE, sb, cb)
         e = t.copy()
-        slash = f.rfind("/")
+        slash = f.rfind("/")  # (type_of and folder_of, written out: they run for each of 150,000 files)
         name = f[slash + 1:]
         dot = name.rfind(".")
         e["path"] = f
