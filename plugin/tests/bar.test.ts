@@ -4,7 +4,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
-import { busyNow, busyWhile } from '../bar/busy'
+import { SPIN, busyNow, busyWhile } from '../bar/busy'
 import { recount } from '../bar/counts'
 import { noteViewport } from '../cards/draw'
 import { INTRO, INTRO_MS } from '../bar/intro'
@@ -864,6 +864,37 @@ test("once each of the answer's marks was opened, the bar's ] looks like its oth
   }
   for (const t of [100, 160]) expect(seen[t]!.it.words).toEqual(seen[t]!.v.words)
   expect(seen[160]!.named).toEqual({ backgroundColor: markColors(themeLast()).glossBg })
+})
+
+test("while the answer's citation is checked, the bar names it in a citation's look, and its tray says checking beside the turning glyph the reply draws after its words, the same frame in thimble's color", async ($, on) => {
+  const { clock } = await markedAnswer($, on)
+  const press = async (k: string) => {
+    await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never)
+    await clock.advance(1000)
+  }
+  const kids = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(kids) : [n, ...kids(n.props?.children), ...kids(n.children)])
+  const glyphs = new RegExp(`^ ?[${SPIN}]$`)
+  // the reply: the citation's words underlined, and the turning glyph after them, in thimble's color
+  const reply = kids(await $.ui.render(answerRow('row-t1', CITED)))
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === '41 of the 44 failures')?.props).toMatchObject({ underline: true })
+  const spin = reply.find(n => n.type === 'Text' && glyphs.test(textOf(n)))
+  expect(spin?.props).toMatchObject({ color: accent() })
+  // ] opens the explainer, the answer's first mark; at rest again the bar names the citation, underlined as its words
+  await press(']')
+  await press('0')
+  const bar = await $.ui.render(bandAt(140))
+  expect(textOf(byKey(bar, 'bar-tray-next'))).toBe('] next citation')
+  expect(namedLook(bar, 'tray-next', 'citation')).toEqual({ underline: true })
+  // ] opens the citation: its header says checking beside the glyph, the reply's frame, in thimble's color
+  await press(']')
+  const band = await $.ui.render(BAND)
+  const head = byKey(band, 'tray-head')
+  expect(textOf(head)).toMatch(new RegExp(`41 of the 44 failures[${SPIN}] checking {2}\\] next heads up`))
+  const sign = kids(head).find(n => n.type === 'Text' && glyphs.test(textOf(n)))
+  expect(sign?.props).toMatchObject({ color: accent() })
+  expect(textOf(sign)).toBe(textOf(spin).trim())
+  expect(kids(head).find(n => n.type === 'Text' && textOf(n) === ' checking')?.props).toMatchObject({ dimColor: true })
+  expect(textOf(band)).toContain('The check is running.')
 })
 
 test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {

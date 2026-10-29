@@ -127,6 +127,10 @@ test("auto mode refuses the check: one notice names the mode and the key that ch
   expect(spawns.length).toBe(3)
   expect(textOf(await $.ui.render(above))).toContain("Claude Code's auto mode does not let thimble start a check of citations")
   expect(signAfter(await $.ui.render(answer('row-a2')), 2).sign).toBe('?')
+  // its tray says not checked beside the dim ? the reply draws after it
+  const tray = await $.ui.render(above)
+  expect(textOf(tray)).toContain('? not checked  ')
+  expect(all(tray).find(x => x.type === 'Text' && textOf(x) === '?')?.props).toMatchObject({ dimColor: true })
 })
 
 test('a check refused for another cause: one failure line with the refusal\'s first sentence whole, and the citations wait, not checked', OPTIONS, async ($, on) => {

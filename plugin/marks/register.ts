@@ -24,7 +24,7 @@
 //                    and the margin of each passage it draws, which asks a side thread about it
 import type { EngineInterface, Register } from 'claude-code'
 
-import { SPIN } from '../bar/busy'
+import { SPIN, spinNow } from '../bar/busy'
 import { checkSpans, markFocus, markPressed, passagesFor, spansFor, textView, underText, type Span } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
@@ -43,8 +43,6 @@ import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-
-const BUSY = { plugin: 'thimble', key: 'busy' } as const
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
  *  words of one of the row's checked marks looks as that one does, and opens its evidence. A rewrite may word a
@@ -255,9 +253,9 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     return shown === raw ? below() : below({ ...e, props: { ...e.props, text: shown } })
   }
   if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) return plain()
-  // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations` runs
-  const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
-  const spin = SPIN[frame % SPIN.length]!
+  // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations`
+  // runs (the tray's `checking` turns with it)
+  const spin = reply?.checking ? await spinNow($) : SPIN[0]!
   const runs = await mainRuns($)
   // a mark of Claude's own words with no check in the store: pending while its turn runs or its check starts, else
   // failed, since its check did not run (the tray has no record of it to check)

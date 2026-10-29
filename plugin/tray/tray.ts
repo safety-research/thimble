@@ -50,6 +50,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { spinNow } from '../bar/busy'
 import { failNotice, reasonOf } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
@@ -696,18 +697,29 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
   return drawsHyperlinks(env)
 }
 
-/** A citation's status as its header says it, beside the kind: a sign, the word and its color. */
-const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
-  checking: { word: 'checking', dim: true },
-  deferred: { word: 'not checked', dim: true },
-  verified: { word: '✓ verified', color: 'success' },
-  corrected: { word: '✓ verified', color: 'success' },
-  failed: { word: '× failed', color: 'error' },
+/** A citation's status as its header says it: a sign, the word and its color. The sign is the one the reply draws after
+ *  the citation's words in that status (marks/view.ts withLooks), so the tray says what it means: the turning glyph
+ *  (`spin`, in thimble's color, turning with the reply's) while it is checked, × failed, ? not checked yet. A checked
+ *  one has none in the reply, and ✓ here. */
+const STATUS: Record<string, { sign: string; word: string; color?: string; dim?: boolean }> = {
+  checking: { sign: 'spin', word: 'checking', dim: true },
+  deferred: { sign: '?', word: 'not checked', dim: true },
+  verified: { sign: '✓', word: 'verified', color: 'success' },
+  corrected: { sign: '✓', word: 'verified', color: 'success' },
+  failed: { sign: '×', word: 'failed', color: 'error' },
 }
 
 /** A citation's status: the store's, and failed for one with no check (marks/store.ts notRun; one the store no longer
  *  holds, whose reply the reply draws failed too, says so under it). */
 const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status] : null) ?? STATUS.failed!
+
+/** The status as drawn: its sign and its word, the sign of a check that runs the turning glyph's frame now (`spin`). */
+function statusEls(els: Any, s: { sign: string; word: string; color?: string; dim?: boolean }, spin: string): Any[] {
+  const { Text } = els
+  const look = s.color ? { color: s.color } : { dimColor: true }
+  const sign = s.sign === 'spin' ? Text({ key: 'sg', color: accent(), children: spin }) : Text({ key: 'sg', ...look, children: s.sign })
+  return [sign, Text({ key: 's', ...look, children: ` ${s.word}` })]
+}
 
 /** The color of a line of code: the theme key thimble draws inline code in (marks/view.ts), a blue Claude Code shades
  *  for the theme it draws in. */
@@ -1002,7 +1014,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   // its keys at the right, after a citation's status, each drawn as the bar draws a key and a click that presses it
   const keys = await trayKeys($, tray, f)
   const keysLen = keys.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
-  const rightLen = (status ? status.word.length + 2 : 0) + keysLen
+  // the status: its sign, a space and its word, then two cells before the keys
+  const rightLen = (status ? status.word.length + 4 : 0) + keysLen
   // the title and the keys on one row when both fit, else the title on a row of its own above them
   const oneRow = title.length + 2 + rightLen <= inner
   const roomT = oneRow ? title.length : inner
@@ -1025,8 +1038,10 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
       ...partsAround(` ${k.words}`, k.marked?.words).map((p: { s: string; marked: boolean }, j: number) => Text({ key: j ? `w${j}` : 'w', ...(p.marked ? k.marked!.look : { dimColor: true }), children: p.s })),
     ] }),
   ])
+  // a citation's status: the turning glyph beside `checking` turns with the one after its words in the reply
+  const spin = status?.sign === 'spin' ? await spinNow($) : ''
   const rightEl = Box({ key: 'r', flexDirection: 'row', ...(oneRow ? { flexShrink: 0 } : { flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }), children: [
-    ...(status ? [Text({ key: 's', ...(status.color ? { color: status.color } : { dimColor: true }), children: status.word }), Text({ key: 'gap', children: '  ' })] : []),
+    ...(status ? [...statusEls(els, status, spin), Text({ key: 'gap', children: '  ' })] : []),
     ...keyEls,
   ] })
   const head = oneRow
