@@ -206,7 +206,8 @@ async def test_a_writer_s_card_stands_loose_as_its_own_on_a_kernel_of_its_own():
     assert ran[tools.SESSION_KEY] == "writer:report" and group_of(ran["id"])["kind"] == notebook.LOOSE_KIND
     assert "apart" in "".join(str(b.get("text/plain") or b.get("text") or "") for b in ran["outputs"]), ran["outputs"]
     seq = await card("When did they start?", group="Why did the runs fail?")
-    moved = cid_of(await writer("add_card", kind="note", question="Into main's?", text="x", group="Why did the runs fail?"))
+    moved = cid_of(await writer("add_card", kind="note", question="Into main's?", text="x",
+                                group="Why did the runs fail?"))
     assert group_of(moved)["kind"] == notebook.LOOSE_KIND and [c["id"] for c in group_of(seq)["cells"]] == [seq]
     own = cid_of(await writer("add_card", kind="note", question="Steps?", text="x", group="How a night runs"))
     g = group_of(own)

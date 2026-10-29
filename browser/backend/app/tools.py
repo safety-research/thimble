@@ -57,7 +57,7 @@ ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
 # FULL_TIME_SESSIONS keep notebook.EXEC_TIMEOUT.
 CHAT_ACTORS = (ANALYST,)
 FULL_TIME_SESSIONS = (ORIENT_SESSION, WRITER_SESSION)
-TERMINAL = "terminal"  # created_by of the terminal session's cells (notebook.TERMINAL_CREATOR); never of a group (_group_author)
+TERMINAL = "terminal"  # created_by of the terminal session's cells (notebook.TERMINAL_CREATOR), never of a group
 MAIN_GROUP_AUTHOR = "main"  # created_by of a group main makes for a sequence of cards, at the root (_group_author)
 BROWSER_AUTHOR = "user"  # a browser chat's comments, labels and report requests: the analyst asking through their chat
 # created_by of a cell the analyst's caller outside the terminal writes when the call names no chat (one that does

@@ -1,13 +1,13 @@
 """Canvas groups and cells: storage, kernels, execution, bounded outputs, SSE.
 
 A group is a notebook file, workspaces/<c>/notebooks/<id>.json, carrying tree fields (parent, kind, anchor, chat), its
-role and its cells. A card stands in a group only when someone put it there (a frame the analyst made, a sequence of
+role and its cards. A card stands in a group only when someone put it there (a frame the analyst made, a sequence of
 cards a call named); every other card stands loose on the board, in the loose group, which draws no frame. Runnable
 cells carry code and outputs and run on a kernel; data cells carry a payload. Kernels are detached processes the
 workspace owns (see the kernels section): one shared kernel for exploration groups, one per group for everything else,
-and one per agent session for that agent's cards (_kernel_for). Oversized stream outputs are bounded to a head and tail with the full text in a side
-file. The in-memory notebook cache is used by the event-loop thread only, and is trusted only while the file is
-unchanged (mtime_ns, size and inode).
+and one per agent session for that agent's cards (_kernel_for). Oversized stream outputs are bounded to a head and tail
+with the full text in a side file. The in-memory notebook cache is used by the event-loop thread only, and is trusted
+only while the file is unchanged (mtime_ns, size and inode).
 
 Every change holds the store's lock (editing: ledger.locked on the notebooks folder) from its read to its write, and a
 run, which cannot hold it while the code runs, saves its cell into the group as the file holds it then (_merge_cell).
@@ -1176,7 +1176,7 @@ def summary(nb: dict) -> dict:
            "order": nb.get("order")}
     if nb.get("created_by"):
         out["created_by"] = nb["created_by"]
-    if nb.get("session"):  # the THIMBLE_SESSION of the agent whose group it is (tools.SESSION_KEY), such as `writer:report`
+    if nb.get("session"):  # the THIMBLE_SESSION of the agent whose group it is (tools.SESSION_KEY): `writer:report`
         out["session"] = nb["session"]
     return out
 
