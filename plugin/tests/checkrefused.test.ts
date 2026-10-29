@@ -147,7 +147,7 @@ function signAfter(drawn: Any, n: number): { sign: string; props: Any } {
   return { sign: [...SPIN].some(g => text === ` ${g}`) ? 'spin' : '', props: null }
 }
 
-test("auto mode's classifier gave no verdict on the check: one notice says so and offers g, and the citations wait, not checked, none failed; each later reply's refusal says it again until the person gives the OK, and so does opening a citation", OPTIONS, async ($, on) => {
+test("auto mode's classifier gave no verdict on the check: one notice says so and offers g, and the citations wait, not checked, none failed; a later reply's refusal does not say it again, and opening a citation does", OPTIONS, async ($, on) => {
   const { spawns, clock } = await session($, on, AUTO)
   await reply($, clock, 't1', 'row-a1')
   const drawnBand = await $.ui.render(above)
@@ -173,18 +173,23 @@ test("auto mode's classifier gave no verdict on the check: one notice says so an
   // one spawn asked for: what refused it refuses the other shares too
   expect(spawns.length).toBe(1)
 
-  // the next reply: its check is refused too, its citations wait, and the line comes back with its key: the person's
-  // OK is what lets the checks run
+  // the next reply: its check is refused too and its citations wait, but the line does not come back after each
+  // reply: once a session, as any line of a check that could not start
   await reply($, clock, 't2', 'row-a2')
   expect(spawns.length).toBe(2)
-  expect(lineOf(await $.ui.render(above))).toBe(UNREVIEWED_LINE)
+  expect(lineOf(await $.ui.render(above))).toBe('')
   expect(signAfter(await $.ui.render(answer('row-a2')), 1).sign).toBe('?')
 
-  // opening a citation asks for its check: refused, the line answers the press
+  // once the prompt is sent the line is gone, and the next reply's refusal does not bring it back: once a session
   await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
   expect(lineOf(await $.ui.render(above))).toBe('')
+  await reply($, clock, 't3', 'row-a3')
+  expect(lineOf(await $.ui.render(above))).toBe('')
+  expect(signAfter(await $.ui.render(answer('row-a3')), 1).sign).toBe('?')
+
+  // opening a citation asks for its check: refused, the line answers the press
   await openCitation($, 'row-a2', 2)
-  expect(spawns.length).toBe(3)
+  expect(spawns.length).toBe(4)
   expect(lineOf(await $.ui.render(above))).toBe(UNREVIEWED_LINE)
   expect(signAfter(await $.ui.render(answer('row-a2')), 2).sign).toBe('?')
 })

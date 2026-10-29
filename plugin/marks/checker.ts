@@ -363,13 +363,14 @@ type Held = { kind: 'check'; whole: Check; reply: string; note?: string } | { ki
 
 /** The line of a check that could not start (cannotStart's, or thimble's own failure): a reply's check says it once a
  *  session, as the same cause stops each check after it; a check the person asked for (`asked`: opening a citation, x)
- *  says it each time, since it answers the press. A line that offers the person's OK says it each time, until they give
- *  it, and keeps the check it is about (`held`), the last one it stopped. */
+ *  says it each time, since it answers the press. A line that offers the person's OK says it on the same terms, so it
+ *  does not come back after each reply, and keeps the check it is about (`held`), the last one it stopped, which g
+ *  starts again whenever the line shows. */
 async function sayCannotStart($: Engine, line: { text: string; notice: boolean; offers?: boolean }, asked = false, held?: Held): Promise<void> {
   const said = ((await $.state.get(REFUSED)).value ?? []) as string[]
-  if (!said.includes(line.text)) await $.state.set(REFUSED, [...said, line.text])
-  else if (!asked && !line.offers) return
   if (line.offers && held) await $.state.set(HELD, held as never)
+  if (!said.includes(line.text)) await $.state.set(REFUSED, [...said, line.text])
+  else if (!asked) return
   if (line.notice) noticeLine($, line.text, START)
   else failNotice($, line.text, START)
 }

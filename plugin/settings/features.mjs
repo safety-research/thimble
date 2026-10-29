@@ -143,6 +143,8 @@ export const RENAMED = {
   // a switch until 0.10.4, now modes: on is auto, off is off
   explain: { true: 'auto', false: 'off' },
   details: { true: 'auto', false: 'off' },
+  // the 0.10.6 test branch saved a model by its alias (haiku); now by its name with the version (Haiku 5.5)
+  checkerModel: Object.fromEntries(ALIASES.map(a => [a, shownName(a)])),
 }
 
 /** A mode saved under its old name (or as the switch it was), by its new name; undefined when it has none. */

@@ -199,10 +199,10 @@ test("Checker names the models thimble keeps (core/models.js), each as Claude Co
   setOptions({ checkerModel: 'Fable 5.1', checkerEffort: 'xhigh' })
   assert.equal(checkerModel(), 'claude-fable-5-1')
   assert.equal(checkerEffort('claude-fable-5-1'), 'xhigh')
-  // an alias is no choice of Checker's (no release saved one), so it stands for the default: the conversation's model
+  // an alias, as the 0.10.6 test branch saved it, stands for that model by its name with the version
   setOptions({ checkerModel: 'haiku' })
-  assert.equal(choiceOf('checkerModel'), 'same as Claude')
-  assert.equal(checkerModel(), null)
+  assert.equal(choiceOf('checkerModel'), 'Haiku 5.5')
+  assert.equal(checkerModel(), 'claude-haiku-5-5')
   // unset, or same as Claude: the conversation's
   setOptions({ checkerModel: 'Haiku 5.5' })
   assert.equal(checkerModel(), 'claude-haiku-5-5')
