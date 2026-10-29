@@ -572,9 +572,9 @@ Both take your names, paths and the names of your data out of the text first. Ru
 UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the
 browser workbench in one go. Run it in a shell, not inside Claude Code.
 
-When you have fixes, it puts each one that still applies back on the release, as it was (fixes you turned off stay
-off), and one the release already has leaves your list. A fix that does not fit the release is set aside: it is off,
-and thimble keeps its old change. Then:
+When you have fixes, it puts each one that still fits back on the release, as it was (fixes you turned off stay off):
+its change applies, and the release passes the checks a new fix passes with it. One the release already has leaves
+your list. A fix that does not fit the release is set aside: it is off, and thimble keeps its old change. Then:
 
     thimble reapply                  Claude Code opens in ~/.thimble/fixes/live. Claude checks each set-aside fix
                                      against the release, brings back what is still needed (one commit per fix), and
@@ -583,15 +583,16 @@ and thimble keeps its old change. Then:
                                      fix with no commit is left out, because the release does it or it cannot work there
     thimble update --check           only says whether a newer release is out
 
-After an update by thimble 0.10.5 or before, which set every fix aside, thimble puts back what still applies at your
-next thimble update, thimble fixes or thimble reapply, or when a Claude Code session loads it.
+After an update by thimble 0.10.5 or before, which set every fix aside, thimble checks them and puts back what still
+fits at your next thimble update, thimble fixes or thimble reapply, at a Claude Code session's start, or when
+thimble-browser starts.
 
 Afterwards: /reload-plugins in Claude Code, and restart thimble-browser.
 
 A dev install (scripts/install.sh --local in a git clone) follows your own checkout instead of the releases: after `git pull`, thimble
 update moves thimble and your fixes onto the commit you checked out. It fetches nothing and leaves out changes you have
-not committed. Each fix that still applies cleanly is replayed onto that commit; one that does not is set aside for
-thimble reapply, as above."""
+not committed. Each fix that still fits is replayed onto that commit; one that does not is set aside for thimble
+reapply, as above."""
 
 
 def cmd_update(a: argparse.Namespace) -> int:
@@ -682,10 +683,11 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser("fix", help="your changes to thimble", description=_no_share(FIX_HELP),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
+    # the verbs after `export` are the plugin's own: a request, the fixer's end, the person's keys, and carry, which a
+    # session's start and thimble-browser's start run for the fixes an update set aside
     p.add_argument("verb", nargs="?", default="list",
                    choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "again", "done", "shown", "apply", "merge", "notnow",
-                            "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
+                            "redo", "undo", "remove", "sandbox", "draft", "keep", "send", "carry"), metavar="VERB")
     p.add_argument("id", nargs="?")
     p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
     p.add_argument("more", nargs="*", help=argparse.SUPPRESS)  # merge: the third fix and on

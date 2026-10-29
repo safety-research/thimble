@@ -72,6 +72,14 @@ quietly() {
   if "$@" >"$log" 2>&1; then rm -f "$log"; else cat "$log" >&2; rm -f "$log"; return 1; fi
 }
 
+# run from live: the fixes an update by thimble 0.10.5 or before set aside are checked on this release, as at a fix's
+# end, and those that still fit go back on before the page is built (thimble fix carry, once, which says what came of
+# them); a carry that fails leaves them off, and the workbench starts all the same
+if [ "$(cd "$fixes/live/browser" 2>/dev/null && pwd -P)" = "$root" ] && [ -x "$fixes/live/plugin/bin/thimble" ] \
+   && [ -f "$fixes/pending/current.json" ] && ! grep -q '"carried": true' "$fixes/pending/current.json"; then
+  THIMBLE_HOME="${fixes%/fixes}" "$fixes/live/plugin/bin/thimble" fix carry || true
+fi
+
 # the page is built the first time, and again when its sources are newer than the build (after a pull, say); what npm
 # and Vite print (a chunk size warning, npm's update notice) shows only when the build fails, so the link stays in view
 fe="$root/frontend"
