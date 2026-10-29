@@ -562,7 +562,7 @@ export function moveLocal(data: CanvasResponse, ids: readonly string[], group: s
     at = after === null ? mine[0] ?? rest.length : mine.length ? mine[mine.length - 1] + 1 : rest.length
   }
   if (at <= 0 && after) at = rest.length
-  return { groups, cells: [...rest.slice(0, at), ...moved, ...rest.slice(at)] }
+  return { ...data, groups, cells: [...rest.slice(0, at), ...moved, ...rest.slice(at)] }
 }
 
 /** The canvas with a group's fields changed. */
@@ -580,7 +580,7 @@ export function removeLocal(data: CanvasResponse, cells: readonly string[], grou
     for (const g of data.groups) if (g.parent === id) drop(g.id)
   }
   for (const g of groups) drop(g)
-  return { groups: data.groups.filter((g) => !gone.has(g.id)), cells: data.cells.filter((c) => !cells.includes(c.id) && !gone.has(c.notebook)) }
+  return { ...data, groups: data.groups.filter((g) => !gone.has(g.id)), cells: data.cells.filter((c) => !cells.includes(c.id) && !gone.has(c.notebook)) }
 }
 
 // ---- where a dropped card stands: cards never cover each other ----

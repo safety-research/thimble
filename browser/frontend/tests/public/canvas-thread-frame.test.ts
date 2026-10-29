@@ -3,7 +3,7 @@
 // the card, so the column keeps its cards together; two such frames that would overlap stack downward, and a frame the
 // analyst moved stays where they put it.
 import { describe, expect, test } from 'vitest'
-import { boardOf, CARD_W, GAP, HEAD, layoutBoard, overlaps, PAD, ROOT_X, ROOT_Y, TITLE, type Rect } from '../../src/canvas/layout.ts'
+import { boardOf, CARD_W, GAP, HEAD, layoutBoard, moveLocal, overlaps, PAD, removeLocal, ROOT_X, ROOT_Y, TITLE, type Rect } from '../../src/canvas/layout.ts'
 import type { CanvasResponse, Cell, Group, Pos } from '../../src/lib/types.ts'
 
 const group = (id: string, extra: Partial<Group> = {}): Group => ({ id, title: id, parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst', ...extra })
@@ -150,6 +150,15 @@ describe('what a thread made, with no frame of its own', () => {
     // without the thread's anchor it is one more card of the column
     const plain = layoutBoard(boardOf({ ...d, threads: {} }), new Set(['q']), heights).rects
     expect(plain.get('t1')!.x).toBe(ROOT_X)
+  })
+
+  test('a move or a delete drawn before the route answers keeps what the thread made beside the card', () => {
+    const d = loose([by('t1', 'l', 'th'), card('c', 'q')])
+    for (const shown of [moveLocal(d, ['b'], 'q', undefined, null), removeLocal(d, ['c'], [])]) {
+      const r = layAbout(shown, ['q']).rects
+      const a = r.get('a')!
+      expect(r.get('t1')).toMatchObject({ x: a.x + CARD_W + GAP, y: a.y })
+    }
   })
 
   test('a thread on something other than a card, or one the route does not name, leaves its card in the column', () => {
