@@ -315,14 +315,19 @@ export async function chipsHold($: Engine): Promise<boolean> {
 }
 
 /** The keys the open chips take now, which nothing else names (core/answerview.ts heldKeys): [ ] (and < > , .), 1–9,
- *  0, + and s; every key ('*') while a click gave them the keyboard. None while they are closed. Read from the state,
- *  so a drawing that asks draws again when they open or close. */
+ *  0, + and s; every key ('*') while a click gave them the keyboard. None while they are closed. A tray opened over
+ *  them takes its keys first, ] and [ among them (the bar names those, tray/tray.ts trayBar): the chips hold the rest.
+ *  Read from the state, so a drawing that asks draws again when they open or close. */
 export async function chipsHeld($: Engine): Promise<string[]> {
   if (!featureOn('squeezeAnswers')) return []
   const open = await openNow($)
   if (!open || !(await recOf($, open.id))) return []
   if (open.held || open.typing != null) return ['*']
-  return ['[', ']', '<', '>', ',', '.', '0', '+', 's', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+  const keys = ['[', ']', '<', '>', ',', '.', '0', '+', 's', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+  const tray = await trayHeld($, keys).catch(() => [] as string[])
+  if (!tray.length) return keys
+  const taken = new Set([']', '[', ...tray])
+  return keys.filter(k => !taken.has(k))
 }
 
 /** A key at an empty prompt: the chips' keys while they are open; s at rest opens them, and b writes a catch-up. */

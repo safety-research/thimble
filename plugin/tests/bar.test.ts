@@ -173,6 +173,33 @@ test("the coverage pane's r close is a click alone: an r typed while the pane ho
   expect(w.opens.length).toBe(opens)
 })
 
+test('each key shows once, where it acts: while the coverage pane shows, its key row names r close, and the bar names coverage without r, still a click; r still closes it, and closed, the bar names r again', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  const closes: string[] = []
+  on('ui.close', (_$: unknown, e: { id: string }) => { closes.push(e.id); w.opened.splice(0); return { value: undefined } })
+  const key = (k: string) => $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never) as Promise<Any>
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 43% (3/7 files)')
+  expect((await key('r')).text).toBe('')
+  await w.clock.advance(400)
+  expect(w.opened).toEqual(['thimble'])
+  expect(textOf(await $.ui.render(PANE))).toContain('r: close')
+  const beside = await $.ui.render(BAND)
+  expect(textOf(beside)).toContain('coverage 43% (3/7 files)')
+  expect(textOf(beside)).not.toContain('r coverage')
+  const walk = (n: Any): Any[] => (Array.isArray(n) ? n.flatMap(walk) : n && typeof n === 'object' ? [n, ...walk(n.props?.children), ...walk(n.children)] : [])
+  expect(walk(beside).find(n => n.type === 'Button' && n.props?.key === 'bar-coverage')?.props?.label).toBe('coverage 43% (3/7 files)')
+  // r, typed in the pane, reaches the prompt and closes it
+  expect((await key('r')).text).toBe('')
+  await w.clock.advance(400)
+  expect(closes).toEqual(['thimble'])
+  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 43% (3/7 files)')
+})
+
 test("a drawing never starts a count, since Claude Code stops a drawing's calls when a newer one replaces it; the session's start counts once", async ($, on) => {
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   const counted = () => w.ran.filter(a => a.includes('coverage')).length
@@ -247,7 +274,8 @@ test("at a load of the plugin (a reload, a setting changed, a resumed session), 
   await pane.unmount()
   ends[0]!({ code: 0, out: JSON.stringify(NEWER) })
   await w.clock.advance(100)
-  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 57% (4/7 files)')
+  // (the pane shows, and names r close: the bar names coverage without r)
+  expect(textOf(await $.ui.render(BAND))).toContain('coverage 57% (4/7 files)')
   expect(JSON.parse(disk.get(KEPT_COUNT)!)).toMatchObject({ root: '/made-up/data', coverage: '57% (4/7 files)', labels: 2, record: { total: { touched_files: 4 } } })
 })
 

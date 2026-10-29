@@ -27,7 +27,7 @@
 // and nothing gives way.
 import type { EngineInterface } from 'claude-code'
 
-import { barLeft, barRight, heldKeys, keyFree } from '../core/answerview'
+import { barLeft, barRight, heldKeys, keyFree, unlettered } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords } from '../core/selection'
 import { cutWords, partsAround, textWidth } from '../core/text.js'
@@ -130,9 +130,13 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
   const features = await barLeft($, on, preview, held)
   if (features.some(x => x.focus)) return features.filter(x => x.focus)
   const free = keyFree(held)
-  // the keys of the card on screen that takes them, each a click that presses it
+  // the keys of the card on screen that takes them, each a click that presses it: those that reach it, as what holds
+  // the keys takes the others (a fix's line its y d n)
   if (!preview && on('cards')) {
-    for (const k of await cardKeyWords($).catch(() => [])) if (free(k)) out.push({ id: `card-key-${k.key}`, key: k.key, words: k.words, ...(k.key.length === 1 ? { press: () => pressKey($, k.key) } : {}) })
+    for (const k of await cardKeyWords($).catch(() => [])) {
+      const keys = k.key.split(' ').filter(x => free({ key: x })).join(' ')
+      if (keys) out.push({ id: `card-key-${k.key}`, key: keys, words: k.words, ...(keys.length === 1 ? { press: () => pressKey($, keys) } : {}) })
+    }
   }
   // a click on `v card` starts the designer fork as v does, in the ui.press hook that answers it (designer/v.ts)
   if (on('cards') && (preview || (await vReady($))) && free({ key: 'v' })) out.push({ id: 'v', key: 'v', words: 'visualize', ...(preview ? {} : { press: () => undefined }) })
@@ -159,7 +163,8 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // the keys what holds them takes now, which the bar leaves to it: each key shows once, where it acts
   const held = preview ? new Set<string>() : await heldKeys($)
   const keys = await leftItems($, on, preview, held)
-  let right = [...(await barRight($, on, preview, held)), ...(await countItems($, on, presses, preview))]
+  // at the right what holds for the whole session: an item whose key what holds the keys takes stays, without its letter
+  let right = [...(await barRight($, on, preview, held)), ...(await countItems($, on, presses, preview)).map(unlettered(held))]
   // the presses of the bar's items by their words (`r coverage`), before any is cut: an item the failure line names
   // is a click there too
   const pressOf = new Map([...keys, ...right].filter(x => x.press && x.key).map(x => [`${x.key} ${x.words}`, x.press!] as const))
@@ -257,7 +262,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const hintRow = Box({ key: 'hint-line', flexDirection: 'row', width, children: [Text({ key: 'hint-text', wrap: 'wrap', children: [
     Text({ key: 'g', color: accent(), children: 'Hint: ' }), Text({ key: 'w', dimColor: true, children: hint }),
   ] })] })
-  const top = preview ? [] : hint && !hintIn ? [hintRow] : await lineRows($, els, width, pressOf)
+  const top = preview ? [] : hint && !hintIn ? [hintRow] : await lineRows($, els, width, pressOf, held)
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's
   const fixRows = preview ? [] : await fixLineRows($, els, width).catch(() => [])
   return [...top, ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), ...bar, ...below]
@@ -265,14 +270,17 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
 
 /** The failure line: what failed, whole, in red, or a notice. A key it names (`Press x to try again`) is a click
  *  too, which presses that key as the prompt would take it (hooks/keys.ts pressKey); esc and the keys of a pane are
- *  not, as no click at the prompt can press them. An item of the bar it quotes (`click “r coverage”`) is a click that
- *  does what a click on that item does (`named`: the bar's presses by their words). */
-async function lineRows($: Engine, els: Any, width: number, named: Map<string, () => unknown> = new Map()): Promise<Any[]> {
+ *  not, as no click at the prompt can press them. While what holds the keys names that key where it acts (`held`,
+ *  core/answerview.ts heldKeys: the open tray's `x repair`), the sentence that says to press it is left out, so each
+ *  key shows once (untold). An item of the bar it quotes (`click “r coverage”`) is a click that does what a click on
+ *  that item does (`named`: the bar's presses by their words). */
+async function lineRows($: Engine, els: Any, width: number, named: Map<string, () => unknown> = new Map(), held: Set<string> = new Set()): Promise<Any[]> {
   const { Box, Button, Text } = els
   const fail = await failLineNow($)
   if (!fail || fail.hint !== undefined) return []
   const look = fail.kind === 'failed' ? { color: 'error' } : { color: 'warning' }
-  const words = fail.kind === 'failed' ? `× ${fail.text.replace(/^[×!]\s*/, '')}` : fail.text
+  const said = untold(fail.text, held)
+  const words = fail.kind === 'failed' ? `× ${said.replace(/^[×!]\s*/, '')}` : said
   const parts = pressedWords(words, named)
   if (!parts.some(p => p.key || p.press)) return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'fail-text', ...look, wrap: 'wrap', children: words })] })]
   // with a key to press: wrapped here, word by word, so its press stands among the words (a Text holds no Button)
@@ -283,6 +291,15 @@ async function lineRows($: Engine, els: Any, width: number, named: Map<string, (
     ? Button({ key: `fail-key-${i}`, plain: true, label: `press ${p.key}`, hover: quiet(`fail-key-${i}`), onPress: () => pressKey($, p.key!), children: [Text({ ...look, bold: true, underline: true, children: w })] })
     : Text({ key: `fail-w-${i}-${j}`, ...look, children: w }))) })) })
   return [Box({ key: 'fail-line', flexDirection: 'row', width, children: [text] })]
+}
+
+/** A failure line's words less each sentence that tells the person to press a key what holds the keys names where it
+ *  acts now (`held`, a key of its own, not '*'): that place says it already. A line that is all such sentences stays
+ *  whole. */
+export function untold(text: string, held: Set<string>): string {
+  const sentences = text.split(/(?<=[.!?])\s+(?=\S)/)
+  const kept = sentences.filter(s => !keyedWords(s).some(p => p.key && held.has(p.key)))
+  return kept.length && kept.length < sentences.length ? kept.join(' ') : text
 }
 
 /** A line's parts (pressedWords) on rows of at most `width` cells, each row its words in order (`w`, the words of part

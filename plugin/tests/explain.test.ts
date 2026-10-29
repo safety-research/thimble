@@ -14,7 +14,7 @@ import { accent, resetTheme } from '../core/theme'
 import { SPIN, spinNow } from '../bar/busy'
 import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
-import { trayBand, trayNow } from '../tray/tray'
+import { trayBand, trayBar, trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
@@ -350,10 +350,10 @@ test("the box e opens while the explainer is written is an explainer's from the 
     return { frame: nodes(band).find(n => n.props?.key === 'tray'), body: nodes(band).find(n => n.props?.key === 'tray-body') }
   }
   const writing = await drawn()
-  // its header names the mark ] or [ goes to from where its words stand, as once it is written
-  const head = async () => textOf(nodes(await trayBand(s.$, els, 100, 20)).find(n => n.props?.key === 'tray-head'))
-  const named = await head()
-  expect(named).toMatch(/(\] next|\[ previous) (citation|explainer|heads up|card)/)
+  // the bar's ] (or [) names the mark it goes to from where its words stand, as once it is written
+  const step = async () => (await trayBar(s.$, () => true, false)).filter(x => x.key === ']' || x.key === '[').map(x => `${x.key} ${x.words}`).join(' · ')
+  const named = await step()
+  expect(named).toMatch(/^(\] next|\[ previous) (citation|explainer|heads up|card)$/)
   // the body: the turning glyph alone, in thimble's color, the frame of the bar's busy line (bar/busy.ts spinNow)
   const glyph = nodes(writing.body).find(n => n.props?.key === 'writing')
   expect(glyph?.props).toMatchObject({ color: accent(), children: await spinNow(s.$) })
@@ -367,7 +367,7 @@ test("the box e opens while the explainer is written is an explainer's from the 
   expect(nodes(written.body).some(n => n.props?.key === 'writing')).toBe(false)
   expect(written.frame.props.borderColor).toBe('planMode')
   expect(writing.frame.props.borderColor).toBe(written.frame.props.borderColor)
-  expect(await head()).toBe(named)
+  expect(await step()).toBe(named)
 })
 
 test('e with nothing selected says to select words with the mouse first, and how outside the fullscreen layout; nothing is written', async () => {

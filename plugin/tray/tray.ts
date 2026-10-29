@@ -18,7 +18,7 @@
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
-//   + −         a citation computed by code: all its code and output in place of the one line (+ expand all), and
+//   + −         a citation computed by code: all its code and output in place of the one line (+ show all), and
 //               the one line again (- collapse)
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   2–9         a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
@@ -35,7 +35,7 @@
 //   d u         a body taller than the tray's rows: d its rest (expand), u a page back up, while no other key holder
 //               (the fix line, a card on screen) takes the letter; the row under the window names them
 //
-// Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ expand all` (and `− collapse`)
+// Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ show all` (and `− collapse`)
 // under the evidence is + (and -); a click on the citation's words, in the tray's title as in the
 // reply, closes it, as a second click on the open mark in the reply does.
 //
@@ -152,16 +152,16 @@ export async function trayHolds($: Engine): Promise<boolean> {
   return !!k.tray || !!k.stand
 }
 
-/** The keys the tray takes now, which nothing else names (core/answerview.ts heldKeys), so each key shows once, where
- *  it acts: while it is open, its header's (] [ h a 0), its body's (x, + or −, d and u as the row under its window
- *  names them) and 1 and 2–9, unnamed; on a card ] reached, a, ] [ and 0, which the bar names. `ask`: the keys asked
- *  about, when not all (a key of a citation's body reads the citation). Read from the state, so a drawing that asks
- *  draws again when the tray opens or closes. */
+/** The keys the tray takes now and names in its own place, which nothing else names (core/answerview.ts heldKeys), so
+ *  each key shows once, where it acts: while it is open, its header's (h a 0), its body's (x, + or −, d and u as the
+ *  row under its window names them) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached,
+ *  a, ] [ and 0, which the bar names as the card's. `ask`: the keys asked about, when not all (a key of a citation's
+ *  body reads the citation). Read from the state, so a drawing that asks draws again when the tray opens or closes. */
 export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) return (await standNow($)) ? [']', '[', 'a', '0'] : []
-  const out = [']', '[', '0', 'a', '1', ...[paging.down, paging.up].filter((k): k is string => !!k)]
+  const out = ['0', 'a', '1', ...[paging.down, paging.up].filter((k): k is string => !!k)]
   if (f.kind === 'citation' && (!ask || ['h', 'x', '+', '-'].some(k => ask.includes(k)))) {
     if (await innerOf($, f)) out.push('h')
     const m = await itemOf($, f.row, f.n)
@@ -227,7 +227,7 @@ async function citesOf($: Engine, row: string, shown: { text: string; marks: { s
 
 /** The explainers and heads-ups on the row's words (explain/seam.ts), each with its kind: first the words being
  *  explained on demand, as the row draws them (core/answerview.ts spansFor), so the explainer's box shown while it is
- *  written stands where its words do, and its header names the mark after it. */
+ *  written stands where its words do, and the bar's ] names the mark after it. */
 async function spansOf($: Engine, row: string, shown: { text: string; marks: { start: number; end: number; words: string }[] }): Promise<(Span & { kind: 'explain' | 'heads' })[]> {
   let spans: Span[] = []
   try { spans = [...((await pendingSpans($, row, shown.text)) ?? []), ...((await explainSpans($, row, shown.text, shown.marks)) ?? [])] } catch { spans = [] }
@@ -312,7 +312,7 @@ async function allStops($: Engine): Promise<Stop[]> {
 }
 
 /** Where ] and [ stand now: the mark the tray shows, where ] and [ pass it (a heads-up h opened over a citation stands
- *  where it does, before that citation), so the header names what follows the mark it shows, whichever way it was
+ *  where it does, before that citation), so the bar names what follows the mark it shows, whichever way it was
  *  opened; else the tray's first mark (lines of a file an explainer cites stand on it), else the card ] reached (-1:
  *  none). */
 async function stepPlace($: Engine): Promise<{ list: Stop[]; at: number }> {
@@ -671,7 +671,7 @@ async function restItem($: Engine): Promise<BarItem[]> {
 }
 
 /** An open tray's keys, in its header at the right, each a click that does what its key does: h the explainer on a
- *  citation's words, a ask, 0 back or close (] and [ are on the bar, trayBar). x repair and + expand all (− collapse) are in the
+ *  citation's words, a ask, 0 back or close (] and [ are on the bar, trayBar). x repair and + show all (− collapse) are in the
  *  citation's card, where they act, and 2–9 are its links in an explainer's words. */
 async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
   await themeNow($)
@@ -760,7 +760,7 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
  *  failed one why in one sentence; after a repair (x) that verified it as written, why; all dim, and under it
  *  `x repair`, a press that checks it again (the ui.press hook, as x does). Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
- *  block, ended by `+ expand all`, a click that shows all the code and output (`fold`, as +); expanded, all the code
+ *  block, ended by `+ show all`, a click that shows all the code and output (`fold`, as +); expanded, all the code
  *  (as code), then all the output in the ruled block, ended by `− collapse`, a click back (as -). For a file: its place (`place`, a click opens the side pane), then the cited line in the ruled
  *  block. For a card's value: the card's title, then the header over the cited row in the ruled block; printed output
  *  that is a table shows so too. The cited words bold in the citations' look. */
@@ -821,11 +821,11 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const cut = lineWindow(line, w - 2)
   rows.push(ruled(els, cut.text, cut.spans, w, 'ev'))
   // all the code and output, at the end of the ruled block (+ shows them)
-  if (ev.kind === 'computed') rows.push(foldRow(els, '+ expand all', 'show all the code and output', () => fold(true)))
+  if (ev.kind === 'computed') rows.push(foldRow(els, '+ show all', 'show all the code and output', () => fold(true)))
   return rows
 }
 
-/** The ruled block's last line, a click that shows all the code and output (`+ expand all`) or the one line again
+/** The ruled block's last line, a click that shows all the code and output (`+ show all`) or the one line again
  *  (`− collapse`), as + and - do: dim, underlined under the pointer. */
 function foldRow(els: Any, words: string, label: string, press: () => unknown): Unit {
   const { Box, Button, Text } = els

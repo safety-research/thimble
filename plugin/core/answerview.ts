@@ -30,6 +30,7 @@ import type { BarItem } from '../bar/bar'
 import { framesIn, noteFrames } from '../cards/draw'
 import { CLAIMS_KEYS, claimsBar, claimsKey, claimsReady } from '../claims/seam'
 import { EXPLAIN_KEYS, HEADS_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, headsBar, headsKey, pendingSpans } from '../explain/seam'
+import { fixHeld } from '../fix/line'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
@@ -38,6 +39,7 @@ import { SQUEEZE_KEYS, squeezeBar, squeezeHeld, squeezeHidesCard, squeezeHolds, 
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayTight } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
+import { paneHeld } from './pane'
 import { askOnce } from './rowhook'
 
 type Engine = EngineInterface
@@ -178,12 +180,19 @@ export function aboveTight(): boolean {
   try { return trayTight() } catch { return false }
 }
 
-/** The keys taken now by what holds them, which every other surface leaves unnamed, so each key shows once, where it
- *  acts: the open tray's, or a card's ] reached (tray/seam.ts trayHeld), then the open chips' (squeeze/seam.ts
- *  squeezeHeld; '*', every key, while a click gave them the keyboard). `ask`: the keys asked about, when not all. Read
- *  from the state, so a drawing that asks draws again when what holds the keys changes. */
+/** The keys taken now by what holds them and names them in its own place, which every other surface leaves unnamed,
+ *  so each key shows once, where it acts. In the order a key at an empty prompt reaches them (hooks/keys.ts): the line
+ *  of a fix (fix/line.ts fixHeld), the open tray's, or a card's ] reached (tray/seam.ts trayHeld), then the open
+ *  chips' (squeeze/seam.ts squeezeHeld; '*', every key, while a click gave them the keyboard); and the close the side
+ *  pane's key row names (core/pane.ts paneHeld). `ask`: the keys asked about, when not all. Read from the state, so a
+ *  drawing that asks draws again when what holds the keys changes. */
 export async function heldKeys($: Engine, ask?: string[]): Promise<Set<string>> {
-  return new Set([...(await safe(trayHeld($, ask), [] as string[])), ...(await safe(squeezeHeld($), [] as string[]))])
+  return new Set([
+    ...(await safe(fixHeld($), [] as string[])),
+    ...(await safe(trayHeld($, ask), [] as string[])),
+    ...(await safe(squeezeHeld($), [] as string[])),
+    ...(await safe(paneHeld($), [] as string[])),
+  ])
 }
 
 /** Whether an item's key is free of what holds the keys (`held`, heldKeys): an item with no key always is; a key of
@@ -214,16 +223,22 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
   ]
 }
 
+/** An item of the bar's right while what holds the keys (`held`, heldKeys) takes its key: the item stays, what holds for
+ *  the whole session, a click without its letter, since the key acts where what holds it names it. */
+export const unlettered = (held: Set<string>) => <T extends { key?: string }>(x: T): T => {
+  if (keyFree(held)(x)) return x
+  const { key: _key, ...rest } = x
+  return rest as T
+}
+
 /** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
- *  claims and the side threads (the left names what acts on an answer), each while what holds the keys does not take
- *  its key (`held`, as barLeft). */
+ *  claims and the side threads (the left names what acts on an answer), each without its letter while what holds the
+ *  keys takes its key (`held`, as barLeft; unlettered). */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean, held?: Set<string>): Promise<BarItem[]> {
-  const taken = preview ? new Set<string>() : held ?? (await heldKeys($))
-  // a click that gave the chips the keyboard leaves the right as it stands: what holds for the whole session
-  const free = keyFree(new Set([...taken].filter(k => k !== '*')))
+  const letter = unlettered(preview ? new Set<string>() : held ?? (await heldKeys($)))
   return [
-    ...items(await safe(claimsBar($, on, preview), []), preview).filter(free),
-    ...items(await safe(threadsBar($, on, preview), []), preview).filter(free),
+    ...items(await safe(claimsBar($, on, preview), []), preview).map(letter),
+    ...items(await safe(threadsBar($, on, preview), []), preview).map(letter),
   ]
 }
 
