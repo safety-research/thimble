@@ -93,14 +93,29 @@ _procs: set[asyncio.subprocess.Process] = set()
 
 # ---- the terminal's texts and validator
 
-def checker_prompt(marks: str, folder: str, cards: str = "") -> str:
+def checker_prompt(marks: str, cwd: str, cards: str = "", root: str | None = None) -> str:
+    """The checker's text for `marks`: its shell in `cwd`, its paths from `root` (check_folders; `cwd` when None)."""
     text = CHECKER.read_text(encoding="utf-8")
     for old, new in CHECKER_CHANGES:
         text = text.replace(old, new)
     # REPLY: what holds the marks; the browser checks main's replies only (the terminal also a side thread's answers)
-    for slot, value in (("MARKS", marks), ("CWD", folder), ("ROOT", folder), ("CARDS", cards), ("REPLY", "your last reply")):
+    for slot, value in (("MARKS", marks), ("CWD", cwd), ("ROOT", root or cwd), ("CARDS", cards),
+                        ("REPLY", "your last reply")):
         text = text.replace("{{" + slot + "}}", value)
     return text
+
+
+def check_folders(c: str, main: dict[str, Any]) -> tuple[str, str]:
+    """(cwd, root) of a check, as the terminal's checker.ts gives them: the folder main's session runs in, where the
+    fork's shell starts, and the workspace's corpus folder, which the cards' and the refs' paths start from. Main may run
+    in a folder inside the corpus folder (claude started in one run's folder of a registered folder), and every file of
+    the corpus folder is still the records: the validator reads a cited path from either folder, and a file inside
+    neither is outside. A corpus whose folder cannot be found leaves main's folder alone."""
+    try:
+        root = str(config.corpus_dir(c))
+    except ValueError:
+        root = ""
+    return str(main.get("cwd") or root), root or str(main.get("cwd") or "")
 
 
 def session_cards(c: str) -> list[dict[str, Any]]:
@@ -424,10 +439,10 @@ async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str]
     if cut is None:
         await _give_up(c, turn, {m["n"] for m in chat}, "the reply was stopped before its citations were checked")
         return
-    folder = str(main.get("cwd") or config.corpus_dir(c))
+    folders = check_folders(c, main)
     cards, index = await _cards_and_index(c)
     try:
-        await asyncio.gather(*(_check_share(c, main, turn, cut, share, folder, fork or run_fork, cards, index)
+        await asyncio.gather(*(_check_share(c, main, turn, cut, share, folders, fork or run_fork, cards, index)
                                for share in split_marks(chat + takes)))
     finally:
         _drop_index(index)
@@ -478,12 +493,14 @@ async def _takeaways_change(c: str, takes: list[dict[str, Any]], judged: Callabl
 
 # ---- 2, 3: a fork's check, then the validator
 
-async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share: list[dict[str, Any]], folder: str,
-                       fork: Callable[..., Awaitable[dict[str, Any]]], cards: list[dict[str, Any]] | None = None,
-                       index: str = "", request: str = "", auto: bool = False) -> None:
+async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share: list[dict[str, Any]],
+                       folders: tuple[str, str], fork: Callable[..., Awaitable[dict[str, Any]]],
+                       cards: list[dict[str, Any]] | None = None, index: str = "", request: str = "",
+                       auto: bool = False) -> None:
     """One fork's check of a share of the marks. `request`: what follows the checker's text for a repair (Repair in a
     mark's label, the terminal's x, or one this check's end started, `auto`), whose end tells main how its one mark
-    ended. A check that is no repair repairs each mark it found wrong or could not confirm, as soon as it ends."""
+    ended. A check that is no repair repairs each mark it found wrong or could not confirm, as soon as it ends.
+    `folders`: the check's (cwd, root), check_folders."""
     takes = [m for m in share if m.get("card")]
     mine = {m["n"] for m in share if not m.get("card")}
     lines = "\n".join(_line(m) for m in share)
@@ -494,7 +511,8 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         await _takeaways_change(c, takes, lambda m: {**m, "status": "unchecked", "reason": why})
 
     try:
-        prompt = checker_prompt(lines, folder, index)
+        cwd, root = folders
+        prompt = checker_prompt(lines, cwd, index, root)
         got = await fork(c, main, cut, f"{prompt}\n\n{request}" if request else prompt)
         if got.get("error"):
             await give_up(f"the check ended: {got['error']}")
@@ -508,7 +526,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
-                                         answer, calls, folder, folder, str(_temp_dir(c)), cards or [])
+                                         answer, calls, cwd, root, str(_temp_dir(c)), cards or [])
         if not result["parsed"]:
             await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
@@ -753,9 +771,9 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
 
     async def run() -> None:
         cards, index = await _cards_and_index(c)
-        folder = str(main.get("cwd") or config.corpus_dir(c))
         try:
-            await _check_share(c, main, str(turn), cut, [share], folder, fork or run_fork, cards, index, request, auto)
+            await _check_share(c, main, str(turn), cut, [share], check_folders(c, main), fork or run_fork, cards, index,
+                               request, auto)
         finally:
             _drop_index(index)
 
