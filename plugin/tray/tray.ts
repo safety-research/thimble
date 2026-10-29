@@ -974,11 +974,13 @@ function scrollTray($: Engine, by: number): boolean {
 
 /** d, or a click on `expand N more lines`: the rest of the body, as many of its lines as the terminal has room for. The
  *  tray takes every row the band has over the bar, its blank rows too (`expanded`), and its window moves on to the lines
- *  after the ones shown, the last of those staying in view; the row under it says how many lines still remain. */
+ *  after the ones shown, the last of those staying in view; the row under it says how many lines still remain. A window
+ *  of one row that grows keeps its row in view: the rows it gains show the lines after it. */
 function expandTray($: Engine): void {
   if (!windowed) return
-  if (windowed.grow > 0 && !expanded) { expanded = true; $.ui.invalidate('ui.render') }
-  scrollTray($, pageOf(windowed))
+  const grows = windowed.grow > 0 && !expanded
+  if (grows) { expanded = true; $.ui.invalidate('ui.render') }
+  scrollTray($, grows ? windowed.rows - 1 : pageOf(windowed))
 }
 
 /** d or u while the row under the window names it: the rest of the body (expandTray), or the window a page back up;

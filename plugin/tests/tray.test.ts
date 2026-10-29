@@ -621,25 +621,32 @@ test('a tray cut at a short height: d expand N more lines, a click too, shows th
   expect(d.blanks).toBe(2)
   // the row under the window: its key, where it acts, then what it does
   expect(textOf(d.button('down'))).toBe(`d expand ${below} more lines`)
-  // a click on it: the tray takes the band's blank rows too, and its window moves on to the lines after the ones shown
+  // a click on it: the tray takes the band's blank rows too, and its window moves on to the lines after the ones shown,
+  // the last of those staying in view: a window of one row keeps that row, and the rows it gains show the lines after it
   await click('down')
   d = await drawn()
   fits(d)
   expect(d.blanks).toBe(0)
   expect(d.rows).toBe(first + 2)
   const moved = d.top
-  expect(moved).toBe(Math.max(1, first - 1))
-  // the lines that still remain, and those above
+  expect(moved).toBe(first - 1)
+  // the lines that still remain
   expect(d.text).toContain(`d expand ${below - 2 - moved} more line`)
-  expect(d.text).toContain(`↑ ${lines(moved)} above`)
+  // again: a page on, its last line staying in view, and the lines above are named
+  const page = first + 1
+  await click('down')
+  d = await drawn()
+  expect(d.top).toBe(moved + page)
+  expect(d.text).toContain(`d expand ${below - 2 - moved - page} more line`)
+  expect(d.text).toContain(`↑ ${lines(moved + page)} above`)
   // ↑ N lines above: a page back up; the tray keeps the rows it took
   await click('up')
   d = await drawn()
-  expect(d.top).toBe(0)
+  expect(d.top).toBe(moved)
   expect(d.rows).toBe(first + 2)
   // d at an empty prompt shows the lines after the window, u goes back up
   expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
-  expect((await drawn()).top).toBe(first + 1)
+  expect((await drawn()).top).toBe(moved + page)
   await clock.advance(2000)
   expect(await $.prompt.edit(key('u'))).toEqual({ text: '', cursor: 0 })
   expect((await drawn()).top).toBe(0)
