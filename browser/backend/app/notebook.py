@@ -3274,11 +3274,11 @@ async def _execute_cell(workspace: str, nb: dict, cell: dict, kernel: str | None
 
     # the group may have been rewritten (by this process or another) or the cell deleted meanwhile: re-read it under
     # the store's lock and update the cell where it lives now; a deleted cell gets its result returned without being
-    # resurrected
+    # resurrected, and so does a card that no longer runs code (to_data_cell made it an example while it ran)
     with editing(ws):
         current = read_notebook(ws, nb["id"])
         target = next((c for c in current["cells"] if c.get("id") == cell["id"]), None) if current else None
-        if target is None:
+        if target is None or not runnable(target):
             gone = {**cell, "outputs": outputs, "exec_count": exec_count, "status": status}
             return gone, gone
         memo = _memo_of(target)

@@ -2,6 +2,7 @@
 as a browser chat running as the analyst."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 
@@ -195,6 +196,39 @@ async def test_fix_this_on_a_card_of_code_that_printed_quotes_makes_it_an_exampl
                           code="import pandas as pd\npd.DataFrame({'trials': [2]}, index=['all'])"))
     assert _cid(await call("edit_card", group, card=f"card:{tid}", text="Two trials.")) == tid
     assert notebook.get_cell(CORPUS, tid)["payload"] == {"text": "Two trials."}
+
+
+async def test_a_run_that_ends_after_its_card_became_an_example_leaves_the_example_as_it_shows(group, data_tmp, monkeypatch):
+    """edit_card makes a card of code an example while the card's code still runs. The run that ends after it writes
+    none of what it made onto the example (its outputs, status and the labels its code read), which shows its records
+    alone; the run's result goes back to its caller, as for a card deleted while it ran."""
+    began, release = asyncio.Event(), asyncio.Event()
+
+    async def started(k, workspace, kernel=None) -> None:
+        return None
+
+    async def run(k, code, kind, timeout_s, extra_exprs=None):
+        began.set()
+        await release.wait()
+        k.last_labels, k.last_label_revs = ["weather"], {"weather": 3}
+        return [{"text/plain": "the picnic starts at one"}], 7, "ok"
+
+    monkeypatch.setattr(notebook, "_ensure_started", started)
+    monkeypatch.setattr(notebook, "_run_card_code", run)
+    lake = _trajectory(data_tmp, "picnic-lake__RvtmQxa", ["The forecast says rain until noon, so the picnic could start at one instead."])
+    adding = asyncio.create_task(call("add_card", group, kind="code", question="When does the picnic start?",
+                                      code="print('the picnic starts at one')"))
+    await asyncio.wait_for(began.wait(), 10)
+    ws = config.workspace_dir(CORPUS)
+    (cid,) = [c["id"] for c in notebook.read_notebook(ws, group)["cells"] if c.get("title") == "When does the picnic start?"]
+    assert notebook.get_cell(CORPUS, cid)["status"] == "running"
+    r = await call("edit_card", group, card=f"card:{cid}", kind="example", refs=[{"ref": lake, "quote": "start at one instead"}])
+    assert _cid(r) == cid, r.text
+    release.set()
+    await adding
+    cell = notebook.get_cell(CORPUS, cid)
+    assert cell["kind"] == "example" and [ref.split("#")[0] for ref in cell["payload"]["refs"]] == [lake], cell
+    assert not {k: cell.get(k) for k in ("outputs", "status", "exec_count", "labels", "label_revs") if cell.get(k)}, cell
 
 
 async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):
