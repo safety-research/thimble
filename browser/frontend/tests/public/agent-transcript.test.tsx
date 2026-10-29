@@ -117,6 +117,14 @@ describe('the agent transcript view', () => {
     const lit = (line: string) => !!el.querySelector(`.reader-card[data-line="${line}"] > .reader-gutter .reader-gutter-cell.is-lit`)
     expect(lit('3')).toBe(true)
     expect(lit('2')).toBe(false)
+    // each cell names its label and the record's value of it on hover (the one tooltip's data-tip, not the browser's
+    // title) and to a screen reader
+    const cell = (line: string) => el.querySelector<HTMLElement>(`.reader-card[data-line="${line}"] > .reader-gutter .reader-gutter-cell`)!
+    expect(cell('3').dataset.tip).toBe('Ran a scan: yes')
+    expect([cell('3').getAttribute('role'), cell('3').getAttribute('aria-label')]).toEqual(['img', 'Ran a scan: yes'])
+    expect(cell('2').dataset.tip).toBe('Ran a scan')
+    expect(cell('2').getAttribute('aria-label')).toBe('Ran a scan')
+    expect(el.querySelector('.reader-gutter-cell[title]')).toBeNull()
   })
   test('a Claude Code stream tool result is cleaned too, with Raw for the stored bytes, and a clean result is unchanged', async () => {
     const dirtyRec = { type: 'user', session_id: 's1', message: { role: 'user', content: [{ type: 'tool_result', content: DIRTY }] } }

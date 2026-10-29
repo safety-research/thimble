@@ -4,7 +4,10 @@
 // the first in its speaker's chip color and the second in "tactic"'s purple where the label marks it, an empty place
 // (the record's own background, not gray) where it does not; the bands stand in the left padding, so the record's
 // line number and text stand where they stood with one choice. With one choice the edge is the one 3 px band, and Off
-// draws none.
+// draws none. The pointer resting on a record's band names the label and the record's value of it in thimble's tooltip
+// (components/Tooltip HoverTips), in the Transcript mode as in the Table mode, and while a button is held across the
+// records (a selection) no name shows, nor while the ask key is held: the key going down takes a name away at once with
+// the pointer still, and a name waiting its moment as the key goes down never shows.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -23,6 +26,7 @@ beforeAll(async () => {
       `import '${src('styles/index.css')}'`,
       `import { createRoot } from 'react-dom/client'`,
       `import { Reader } from '${src('files/Reader.tsx')}'`,
+      `import { HoverTips } from '${src('components/Tooltip.tsx')}'`,
       `const w = window as any`,
       `const q = new URLSearchParams(location.search)`,
       `const MODE = q.get('mode') || 'transcript'`,
@@ -59,7 +63,7 @@ beforeAll(async () => {
       `}`,
       `const TACTIC = { id: 'a', name: 'tactic', unit: 'record', labels: ['tactic', 'other'], classes: [{ name: 'tactic', color: 15, highlight: true }, { name: 'other', color: 0, highlight: false }], trial: false, shown: true }`,
       `const labels = { all: [TACTIC], on: [TACTIC], focus: null, setFocus() {}, byId: new Map([['a', TACTIC]]), presence: new Map([['a', { 'chat.jsonl': { tactic: 20, other: 40 } }]]), toggle() {}, setClasses() {}, setColour() {}, save: async () => ({}), remove: async () => {} }`,
-      `createRoot(document.getElementById('root')!).render(<div style={{ height: 640, display: 'flex' }}><div className="files-main"><Reader workspace="ws" path="chat.jsonl" kind="events" labels={labels} lead={null} /></div></div>)`,
+      `createRoot(document.getElementById('root')!).render(<><div style={{ height: 640, display: 'flex' }}><div className="files-main"><Reader workspace="ws" path="chat.jsonl" kind="events" labels={labels} lead={null} /></div></div><HoverTips /></>)`,
     ],
     {
       loader: { '.css': 'css', '.woff2': 'file', '.woff': 'file', '.json': 'json' },
@@ -171,3 +175,120 @@ test(`Files' Transcript mode: two choices of Color by are two bands on each reco
   assert.equal(await off.locator('.has-cb').count(), 0)
   await off.close()
 }, 120_000)
+
+test(`the pointer resting on a record's band names its label and value in thimble's tooltip, in the Transcript and the Table modes; a press and a drag across the records show none`, async (ctx) => {
+  if (!browser) return ctx.skip()
+  for (const mode of ['transcript', 'table']) {
+    const page = await open(`?mode=${mode}`)
+    await page.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
+    // the middle of the second band ("tactic") of record `line`, and the rows' height
+    const band = (line: number) =>
+      page.evaluate((line) => {
+        const row = document.querySelector<HTMLElement>(`.reader-card[data-line="${line}"]`)!
+        const b = row.querySelectorAll('.reader-band')[1].getBoundingClientRect()
+        return { x: b.left + b.width / 2, y: b.top + Math.min(12, b.height / 2), h: row.getBoundingClientRect().height }
+      }, line)
+    const tips = () => page.evaluate(() => [...document.querySelectorAll('.tip')].map((t) => t.textContent))
+    const p = await band(6)
+    await page.mouse.move(p.x + 300, p.y)
+    await page.mouse.move(p.x, p.y, { steps: 4 })
+    assert.deepEqual(await tips(), [], `${mode}: nothing the moment the pointer arrives`)
+    await page.waitForTimeout(600)
+    assert.deepEqual(await tips(), ['tactic: tactic'], `${mode}: resting on a record's band names its label and value`)
+    // the next record's at once
+    const q = await band(7)
+    await page.mouse.move(q.x, q.y, { steps: 2 })
+    await page.waitForTimeout(60)
+    assert.deepEqual(await tips(), ['tactic: other'], `${mode}: the next record's name shows at once`)
+    // a press there, and a drag down the bands with the button held: no name, at any moment
+    await page.mouse.down()
+    const seen = new Set<string>()
+    for (let k = 1; k <= 6; k++) {
+      await page.mouse.move(q.x + 1, q.y + k * q.h, { steps: 3 })
+      await page.waitForTimeout(k === 6 ? 700 : 150)
+      for (const t of await tips()) seen.add(String(t))
+    }
+    assert.deepEqual([...seen], [], `${mode}: no name while the button is held across the records`)
+    // let go: the record it was let go over shows none while the pointer stays on it
+    await page.mouse.up()
+    await page.mouse.move(q.x, q.y + 6 * q.h + 2)
+    await page.waitForTimeout(700)
+    assert.deepEqual(await tips(), [], `${mode}: none on the record the button was let go over`)
+    await page.close()
+  }
+}, 120_000)
+
+test(`the ask key takes a record's name away the moment it goes down with the pointer still, and none shows while it is held, pressed as the pointer stops too, nor once it is let go`, async (ctx) => {
+  if (!browser) return ctx.skip()
+  for (const mode of ['transcript', 'table']) {
+    const page = await open(`?mode=${mode}`)
+    await page.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
+    const band = (line: number) =>
+      page.evaluate((line) => {
+        const b = document.querySelector<HTMLElement>(`.reader-card[data-line="${line}"]`)!.querySelectorAll('.reader-band')[1].getBoundingClientRect()
+        return { x: b.left + b.width / 2, y: b.top + Math.min(12, b.height / 2) }
+      }, line)
+    const tips = () => page.evaluate(() => [...document.querySelectorAll('.tip')].map((t) => String(t.textContent)))
+    // every name that shows over `ms`, looked at each 50 ms
+    const during = async (ms: number) => {
+      const seen = new Set<string>()
+      for (let t = 0; t < ms; t += 50) {
+        for (const x of await tips()) seen.add(x)
+        await page.waitForTimeout(50)
+      }
+      return [...seen]
+    }
+    // off the records, long enough that the next name waits its moment
+    const off = async () => {
+      await page.mouse.move(500, 690, { steps: 2 })
+      await page.waitForTimeout(700)
+    }
+    // the ask key off a Mac, as this page runs: ⌘ (the Windows or Super key) or Ctrl
+    for (const [k, key] of ['Meta', 'Control'].entries()) {
+      const p = await band(5 + k * 4)
+      await off()
+      await page.mouse.move(p.x, p.y, { steps: 4 })
+      await page.waitForTimeout(600)
+      assert.equal((await tips()).length, 1, `${mode} ${key}: the name shows before the key`)
+      await page.keyboard.down(key)
+      assert.deepEqual(await tips(), [], `${mode} ${key}: the key going down takes the name away, the pointer still`)
+      assert.deepEqual(await during(900), [], `${mode} ${key}: none while the key is held`)
+      await page.keyboard.up(key)
+      assert.deepEqual(await during(700), [], `${mode} ${key}: none once it is let go, the pointer still`)
+      const q = await band(7 + k * 4)
+      await off()
+      await page.mouse.move(q.x, q.y, { steps: 3 })
+      await page.keyboard.down(key)
+      assert.deepEqual(await during(900), [], `${mode} ${key}: pressed as the pointer stops, none while the key is held`)
+      await page.keyboard.up(key)
+      assert.deepEqual(await during(700), [], `${mode} ${key}: none once it is let go`)
+    }
+    await page.close()
+  }
+}, 120_000)
+
+test(`the pointer going out of the page takes a record's name with it, and back on the record the name waits its moment`, async (ctx) => {
+  if (!browser) return ctx.skip()
+  const page = await open(`?mode=transcript`)
+  await page.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
+  const p = await page.evaluate(() => {
+    const b = document.querySelector<HTMLElement>(`.reader-card[data-line="6"]`)!.querySelectorAll('.reader-band')[1].getBoundingClientRect()
+    return { x: b.left + b.width / 2, y: b.top + Math.min(12, b.height / 2) }
+  })
+  const tips = () => page.evaluate(() => [...document.querySelectorAll('.tip')].map((t) => String(t.textContent)))
+  await page.mouse.move(500, 690, { steps: 2 })
+  await page.waitForTimeout(700)
+  await page.mouse.move(p.x, p.y, { steps: 4 })
+  await page.waitForTimeout(600)
+  assert.deepEqual(await tips(), ['tactic: tactic'], 'the name shows')
+  // straight out and straight back, over nothing else on the way, so the name goes by the pointer leaving the page alone
+  await page.mouse.move(-5, p.y)
+  await page.waitForTimeout(100)
+  assert.deepEqual(await tips(), [], 'out of the page, the name goes')
+  await page.mouse.move(p.x, p.y)
+  await page.waitForTimeout(100)
+  assert.deepEqual(await tips(), [], 'back on the record, nothing at once')
+  await page.waitForTimeout(500)
+  assert.deepEqual(await tips(), ['tactic: tactic'], 'back on the record, the name after a moment')
+  await page.close()
+}, 60_000)

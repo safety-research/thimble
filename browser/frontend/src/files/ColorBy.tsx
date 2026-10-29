@@ -47,6 +47,23 @@ interface Props {
   pickedOf?: (id: string) => Readonly<Record<string, number>> | undefined
 }
 
+/** The value chips in `box` that fit its one line, the rest behind `more` ("N more", its count in `count`), the last
+ * first (viewer_colour.js fit). Reads and writes the chips' `hidden`, so a copy of the markup fits as the control does
+ * (the tour's example). */
+export function fitChips(box: HTMLElement, more: HTMLElement, count: HTMLElement | null): void {
+  const chips = box.querySelectorAll<HTMLElement>('.colorby-chip')
+  chips.forEach((c) => (c.hidden = false))
+  more.hidden = true
+  if (box.scrollWidth <= box.clientWidth + 1) return
+  more.hidden = false
+  let hid = 0
+  for (let j = chips.length - 1; j >= 0 && box.scrollWidth > box.clientWidth + 1; j--) {
+    chips[j].hidden = true
+    hid++
+    if (count) count.textContent = `${hid.toLocaleString()} more`
+  }
+}
+
 export function choiceName(c: ColorChoice, labels: readonly Concept[]): string {
   if (c.by === 'off') return 'Off'
   if (c.by === 'key') return c.key
@@ -66,22 +83,9 @@ export function ColorBy({ choice, picks: given, keys, labels, values, off, onCho
   const more = useRef<HTMLButtonElement>(null)
   const moreN = useRef<HTMLSpanElement>(null)
   const [listOpen, setListOpen] = useState(false)
-  // the chips that do not fit the line go behind "N more", the last first (viewer_colour.js fit)
+  // the chips that do not fit the line go behind "N more"
   const fit = useCallback(() => {
-    const box = chipsBox.current
-    const btn = more.current
-    if (!box || !btn) return
-    const chips = box.querySelectorAll<HTMLElement>('.colorby-chip')
-    chips.forEach((c) => (c.hidden = false))
-    btn.hidden = true
-    if (box.scrollWidth <= box.clientWidth + 1) return
-    btn.hidden = false
-    let hid = 0
-    for (let j = chips.length - 1; j >= 0 && box.scrollWidth > box.clientWidth + 1; j--) {
-      chips[j].hidden = true
-      hid++
-      if (moreN.current) moreN.current.textContent = `${hid.toLocaleString()} more`
-    }
+    if (chipsBox.current && more.current) fitChips(chipsBox.current, more.current, moreN.current)
   }, [])
   useLayoutEffect(fit, [fit, values, off, choice])
   useEffect(() => {

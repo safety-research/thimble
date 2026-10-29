@@ -170,13 +170,17 @@ test("with a label first, a record of a highlighted value takes the value's colo
   expect(got!.colors!.get(2)!.tint).toBe(PURPLE)
   expect(cards()[1].classList.contains('has-cb-tint')).toBe(true)
   expect(cards()[1].style.getPropertyValue('--cb-tint')).toBe(PURPLE)
-  expect(cards()[1].title).toBe('tactic: tactic\n“git push --force”')
+  // the hover is the one tooltip's (components/Tooltip HoverTips, which shows `data-tip`), not the browser's title; a
+  // screen reader has the same words as the record's description
+  expect(cards()[1].dataset.tip).toBe('tactic: tactic\n“git push --force”')
+  expect(cards().some((c) => c.hasAttribute('title'))).toBe(false)
+  expect(cards().map((c) => c.getAttribute('aria-description'))).toEqual(cards().map((c) => c.dataset.tip ?? null))
   // "other" is no highlighted value: no tint, but its hover still says what the label gave it
   expect(cards()[3].classList.contains('has-cb-tint')).toBe(false)
-  expect(cards()[3].title).toBe('tactic: other')
+  expect(cards()[3].dataset.tip).toBe('tactic: other')
   // a record the label never read: neither
   expect(cards()[0].classList.contains('has-cb-tint')).toBe(false)
-  expect(cards()[0].title).toBe('')
+  expect(cards()[0].dataset.tip).toBeUndefined()
   // a value turned off takes its tint off too
   await act(async () => got!.toggle('tactic', false))
   expect(cards()[1].classList.contains('has-cb-tint')).toBe(false)
