@@ -69,7 +69,7 @@ import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
-import { explainSpans, pendingGloss, type ExplainPart, type Gloss } from '../explain/seam'
+import { explainSpans, pendingGloss, pendingSpans, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, launchRepair, repairOf } from '../marks/checker'
@@ -225,10 +225,12 @@ async function citesOf($: Engine, row: string, shown: { text: string; marks: { s
   return shown.marks.map((m, k) => ({ ...m, n: looks[k]?.quiet ? 0 : looks[k]?.n ?? 0 }))
 }
 
-/** The explainers and heads-ups on the row's words (explain/seam.ts), each with its kind. */
+/** The explainers and heads-ups on the row's words (explain/seam.ts), each with its kind: first the words being
+ *  explained on demand, as the row draws them (core/answerview.ts spansFor), so the explainer's box shown while it is
+ *  written stands where its words do, and its header names the mark after it. */
 async function spansOf($: Engine, row: string, shown: { text: string; marks: { start: number; end: number; words: string }[] }): Promise<(Span & { kind: 'explain' | 'heads' })[]> {
   let spans: Span[] = []
-  try { spans = (await explainSpans($, row, shown.text, shown.marks)) ?? [] } catch { spans = [] }
+  try { spans = [...((await pendingSpans($, row, shown.text)) ?? []), ...((await explainSpans($, row, shown.text, shown.marks)) ?? [])] } catch { spans = [] }
   const part = await partOf<ExplainPart>($, row, 'explain')
   return (Array.isArray(spans) ? spans : [])
     .filter(s => s && typeof s.id === 'string' && s.end > s.start)
