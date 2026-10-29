@@ -21,6 +21,9 @@ a million screenshots is one entry, never a million. `known` is the root's files
 on the call), looked up by name and by folder, never scanned once per word of a command. `scripts` keeps the scripts
 the session's commands wrote with a here-document (`cat > scan.py <<'PY'`), so a later `python3 scan.py` goes over
 the files the script names.
+
+`shows_sets` gives the same entries, but the files one program searched, listed or went over whole are one entry
+whose `path` is the set of them: code that globs 15,000 files is one entry, which coverage adds in one step.
 """
 from __future__ import annotations
 
@@ -451,7 +454,7 @@ class Known:
         """`files` sorted, each once (sources.list_files gives them so)."""
         self.files = files
         self.set = set(files)
-        self._globs: dict[str, set[str]] = {}
+        self._globs: dict[str, frozenset[str]] = {}
         self._names: dict[str, dict[str, list[str]]] = {}
 
     @functools.cached_property
@@ -547,13 +550,13 @@ class Known:
         """The folders directly in a folder."""
         return [d for d in self._folders_under(folder) if "/" not in d[len(folder) + 1 if folder else 0:]]
 
-    def glob(self, pat: str) -> set[str]:
+    def glob(self, pat: str) -> frozenset[str]:
         """The files a glob names, matched one part of the path at a time as the shell matches it: `*`, `?` and
         `[...]` within one name, `**` alone as a part for any number of folders. Each result is kept, since a command
         and the commands after it repeat their words."""
         got = self._globs.get(pat)
         if got is None:
-            got = self._globs[pat] = self._glob(pat)
+            got = self._globs[pat] = frozenset(self._glob(pat))
         return got
 
     def _glob(self, pat: str) -> set[str]:
@@ -604,16 +607,18 @@ def _here(cwd: str | None, root: str) -> str:
 
 
 def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None = None,
-          values: dict[str, list[str]] | None = None) -> tuple[set[str], set[str]]:
+          values: dict[str, list[str]] | None = None) -> tuple[frozenset[str], set[str]]:
     """The files and the folders a command's words name: (files, folders), each a path relative to the root. A file is
     named by its path or a glob; a folder by its path, and it stands for its files without listing them. A path
     resolves from the command's folder first, so `cat x.csv` names that folder's x.csv and not every x.csv under the
     root, and `*` stays within one folder; a path that does not resolve matches by its end, as after a `cd`. A shell
-    variable takes the values the command gave it (`values`), else stands for one folder or name."""
+    variable takes the values the command gave it (`values`), else stands for one folder or name. The files of a lone
+    glob are the glob's own kept set (Known.glob): code that globs 15,000 files costs no copy of them."""
     root = root.rstrip("/")
     K = as_known(known)
     here = _here(cwd, root)
     files: set[str] = set()
+    globbed: list[frozenset[str]] = []
     folders: set[str] = set()
     tokens: set[str] = set()
     # a heredoc's body is not shell (no `values`): a `$` in it only ends a word; in code, a word right after an
@@ -633,7 +638,9 @@ def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None 
         else:
             rel = os.path.normpath(os.path.join(here, t))
         if "*" in t or "?" in t:
-            files |= K.glob(rel) or K.glob("**/" + re.sub(r"^(?:\./)+", "", t))
+            got = K.glob(rel) or K.glob("**/" + re.sub(r"^(?:\./)+", "", t))
+            if got and all(g is not got for g in globbed):
+                globbed.append(got)
         elif "." not in t and "/" not in t:
             # a bare word: a shell word names the file or the folder it is (`ls shots`, `cat Makefile`); in code it is
             # mostly a name of the code's own (`runs = []`), so code names a file only by a path or a name with a dot
@@ -656,7 +663,11 @@ def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None 
             files |= K.ending(tt)
             if folder_word:
                 folders.update(d for d in K.folders if d == tt or d.endswith("/" + tt))
-    return files, folders
+    if not files and len(globbed) == 1:
+        return globbed[0], folders
+    for got in globbed:
+        files |= got
+    return frozenset(files), folders
 
 
 # ------------------------------------------------------------------ a whole command
@@ -691,7 +702,16 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, 
     (with the lines it printed), "searched", "computed" (with the lines it went over, or None for all) or "listed"; a
     folder's path ends with `/`. `scripts` keeps the scripts the session's commands wrote, from one command to the next.
     The `thimble` command keeps its own record, so its stages and heredocs are left out here."""
-    out: list[tuple[str, str, tuple[int, int] | None, str]] = []
+    return [(f, how, span, prog) for path, how, span, prog in shows_sets(cmd, known, root, cwd, lines_of, scripts)
+            for f in ((path,) if isinstance(path, str) else sorted(path))]
+
+
+def shows_sets(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, lines_of: Callable[[str], int],
+               scripts: dict[str, str] | None = None
+               ) -> list[tuple["str | frozenset[str]", str, tuple[int, int] | None, str]]:
+    """shows, with the files one program searched, listed or went over whole as one entry: their set, in place of
+    one entry per file (shows lists the set's files in their order, where the entry stands)."""
+    out: list[tuple[str | frozenset[str], str, tuple[int, int] | None, str]] = []
     known = as_known(known)
     scripts = {} if scripts is None else scripts
     values = variables(cmd)
@@ -699,7 +719,8 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, 
     def code(text: str, prog: str) -> None:
         """Code went over the files it names; a folder it names, it only lists."""
         files, folders = named(text, known, root, None)
-        out.extend((f, "computed", None, prog) for f in sorted(files))
+        if files:
+            out.append((files, "computed", None, prog))
         out.extend((d + "/", "listed", None, prog) for d in sorted(folders))
 
     for pipe in pipelines(cmd):
@@ -723,7 +744,9 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, 
                         scripts[_script_key(to, cwd, root)] = body
                 else:
                     files, folders = named(body, known, root, None)
-                    out.extend((p, "listed", None, prog or "a heredoc") for p in sorted(files) + [d + "/" for d in sorted(folders)])
+                    if files:
+                        out.append((files, "listed", None, prog or "a heredoc"))
+                    out.extend((d + "/", "listed", None, prog or "a heredoc") for d in sorted(folders))
             script = script_of(prog, args) if computes else None
             if script:
                 code(_script_text(_script_key(script, cwd, root), scripts), prog)
@@ -759,10 +782,11 @@ def shows(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | None, 
                 how, by = "computed", f"{prog} > a file"  # it went over the lines, and its output went to a file
             # a folder stands for its files only for a search, which goes into it; any other program only lists it
             out.extend((d + "/", "searched" if how == "searched" else "listed", None, by) for d in sorted(folders))
+            if how not in ("read", "computed") or (how == "computed" and not narrow):
+                if files:
+                    out.append((files, how, None, by))
+                continue
             for f in sorted(files):
-                if how not in ("read", "computed") or (how == "computed" and not narrow):
-                    out.append((f, how, None, by))
-                    continue
                 a, b = 1, lines_of(f) or 10 ** 9
                 for r in narrow:
                     a, b = r(a, b)

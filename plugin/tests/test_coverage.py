@@ -407,3 +407,56 @@ def test_a_long_sessions_record_in_parts_counts_the_calls_of_every_part(tmp_path
         (seen / f"s-parts{part}.jsonl").write_text(json.dumps(row) + "\n")
     cov = CV.coverage(Store(d, session="s-parts"))
     assert [o["path"] for o in cov["files"] if o["seen"]] == ["r000.jsonl", "r001.jsonl", "r002.jsonl"]
+
+
+def test_a_long_session_whose_calls_each_go_over_every_file_counts_in_about_the_time_of_a_short_one(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A long session (a resumed one, compacted more than once) runs code that globs every file and searches the whole
+    folder again and again, each time in other words. Each such call went over each file it named: the count of a
+    session of a few thousand calls over 150,000 files took minutes. The files a call names are one set, added once,
+    so the count of 4,000 such calls over 5,000 files takes about as long as the count of four, and says the same."""
+    import time
+
+    from kernel import sources as S
+
+    # the files' rows counted one after another, with no worker process: the time measured is the session's pass
+    monkeypatch.setattr(S, "PARALLEL_FILES", 10 ** 9)
+    d = tmp_path / "runs"
+    for i in range(200):
+        (d / f"r{i:03d}").mkdir(parents=True)
+        for j in range(25):
+            (d / f"r{i:03d}" / f"e{j:02d}.jsonl").write_text('{"step": 1}\n' * 3)
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+
+    def calls(n: int) -> list[str]:
+        out = []
+        for i in range(n):
+            for r in (bash(f"python3 - <<'PY'\nimport glob\nfor p in glob.glob('*/*.jsonl'):\n    open(p).read()\nprint({i})\nPY", 1),
+                      bash(f"grep -rn 'step {i}' . | head -3", 3),
+                      {"tool": "Grep", "path": str(d), "glob": "*.jsonl", "mode": "content", "lines": {}},
+                      {"tool": "Read", "file": str(d / "r001" / "e01.jsonl"), "from": 1, "to": 2}):
+                out.append(json.dumps({"cwd": str(d), **r}) + "\n")
+        return out
+
+    seen = tmp_path / "th" / "seen"
+    seen.mkdir(parents=True)
+    (seen / "s-short.jsonl").write_text("".join(calls(1)))
+    long = calls(1000)
+    (seen / "s-long.jsonl").write_text("".join(long[:2000]))
+    (seen / "s-long.2.jsonl").write_text("".join(long[2000:]))
+
+    def timed(session: str) -> tuple[dict, float]:
+        took = []
+        for _ in range(2):
+            t = time.monotonic()
+            cov = CV.coverage(Store(d, session=session))
+            took.append(time.monotonic() - t)
+        return cov, min(took)
+
+    short, short_s = timed("s-short")
+    many, many_s = timed("s-long")
+    assert many["total"] == short["total"] and many["total"]["touched_files"] == 5000
+    assert [(o["path"], o["said"]) for o in many["files"]] == [(o["path"], o["said"]) for o in short["files"]]
+    # each call over every file again: the first 2,000 calls alone took 1.4 s more; now all 4,000 take 0.2 s more
+    assert many_s - short_s < 1.0, (short_s, many_s)

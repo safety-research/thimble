@@ -259,6 +259,12 @@ class Store:
 
     def rel(self, path: str) -> str | None:
         """A path relative to the root, or None when it is outside the root."""
+        root = str(self.root)
+        if isinstance(path, str) and path.startswith(root + "/"):
+            # a path in the root with no `.`, `..` or empty part is its own end (a long session's calls name thousands)
+            tail = path[len(root) + 1:]
+            if tail and tail[0] not in "./" and "/." not in tail and "//" not in tail and tail[-1] != "/":
+                return tail
         try:
             p = Path(path)
             if not p.is_absolute():
