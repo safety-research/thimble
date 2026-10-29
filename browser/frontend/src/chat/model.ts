@@ -1057,9 +1057,11 @@ export function madeCell(t: ToolRow): string | null {
   return m ? m[1] : null
 }
 
+/** A request's `request:<id>` and a thread's `thread:<id>` name no group: the card stands loose (backend tools._group_id). */
+const NO_GROUP_RE = /^(?:request|thread):[A-Za-z0-9_-]+$/
 const groupName = (g: unknown): string => {
   const s = typeof g === 'string' ? g.trim() : ''
-  return s ? (s.split('/').pop() ?? s).trim() : ''
+  return s && !NO_GROUP_RE.test(s) ? (s.split('/').pop() ?? s).trim() : ''
 }
 const groupPart = (g: unknown): string => groupName(g).toLowerCase()
 

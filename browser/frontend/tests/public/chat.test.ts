@@ -56,6 +56,16 @@ describe('the fold', () => {
   })
 })
 
+test("a request's or a thread's card stands loose, so the chat shows it alone, not in a group named after the request", () => {
+  const add = (id: string, group?: string) => [
+    { type: 'tool_use', ts: '2026-08-30T14:00:01Z', id, name: `${P}add_card`, input: { kind: 'note', question: id, text: 'x', ...(group ? { group } : {}) } },
+    { type: 'tool_result', ts: '2026-08-30T14:00:02Z', id, summary: `card:${id}`, cell_id: id },
+  ]
+  const made = madeBy(foldRecords(records([...add('r1', 'request:k2x9'), ...add('t1', 'thread:ab12'), ...add('s1', 'Why did it fail?'), ...add('n1')])))
+  expect(made.cells).toEqual([{ id: 'r1', group: '' }, { id: 't1', group: '' }, { id: 's1', group: 'why did it fail?' }, { id: 'n1', group: '' }])
+  expect(made.groupNames).toEqual({ 'why did it fail?': 'Why did it fail?' })
+})
+
 test('an extension\'s orientation instructions lead its follow-up as a line naming the extension', () => {
   const [row] = foldRecords(records([{ type: 'user', text: 'Read every record in `*.jsonl`.', by: 'extension', extension: 'swarm-orient', run: 1 }]))
   expect(leadText(row as UserRow)).toBe('swarm-orient added: its orientation instructions')
