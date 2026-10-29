@@ -710,6 +710,11 @@ def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder
     quote = {"kind": "quote", "status": "verified", "correction": None, "reason": "the first line says it"}
     places = {1: str(corpus / "prompts" / "worker.md"), 2: "prompts/worker.md", 3: str(outside)}
     seen: list[str] = []
+    # a stand-in for the terminal's checker.md with its slots, so the test tells the checker's shell folder from the
+    # folder its paths start from without pinning the terminal's sentences
+    checker = tmp_path / "checker.md"
+    checker.write_text("{{MARKS}}\nshell: {{CWD}}\npaths from: {{ROOT}}\n")
+    monkeypatch.setattr(marks, "CHECKER", checker)
 
     async def fork(c, main, cut, prompt):
         seen.append(prompt)
@@ -736,7 +741,7 @@ def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder
         assert got[k]["evidence"]["file"] == "prompts/worker.md", got[k]["evidence"]
     assert got[3]["status"] == "failed" and "is outside the folder this session works in" in got[3]["reason"], got[3]
     # the checker's shell is main's folder, and its paths are from the corpus folder, where the cards' paths start
-    assert f"Your shell is in `{inner}`." in seen[0] and f"Paths are from `{corpus}`, or absolute." in seen[0]
+    assert f"\nshell: {inner}\n" in seen[0] and f"\npaths from: {corpus}\n" in seen[0], seen[0]
 
     # a mark the old check failed as outside the folder is repaired now
     failed = {"n": 1, "piece": 0, "k": 0, "words": "# Your role", "sentence": 'The prompt opens ["# Your role"].',
@@ -752,3 +757,34 @@ def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder
     asyncio.run(repair())
     (m,) = marks.stored(CORPUS, again)["items"]
     assert m["status"] == "verified" and m["evidence"]["file"] == "prompts/worker.md", m
+
+
+def test_a_file_reached_through_a_link_into_a_folder_beside_main_s_is_evidence(_fresh, data_tmp, monkeypatch):
+    """Main runs in a folder inside the workspace's corpus folder, and a link there leads into a folder beside it, as a
+    link to a sibling run's folder does. A file read through that link lies in the corpus folder, so its citation holds,
+    and the check names the file by the path it was cited by, from the corpus folder."""
+    from types import SimpleNamespace
+
+    corpus = config.corpus_dir(CORPUS)
+    inner = corpus / "agents"
+    (inner / "peer").symlink_to("../prompts", target_is_directory=True)
+    quote = {"kind": "quote", "status": "verified", "correction": None, "reason": "the first line says it"}
+
+    async def fork(c, main, cut, prompt):
+        n = [int(m) for m in re.findall(r"^(\d+)\. \[", prompt, re.M)]
+        out = [{**quote, "mark": k, "evidence": {"file": "peer/worker.md", "line": 1, "substring": "# Your role"}} for k in n]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    lv = SimpleNamespace(sid=SID, cwd=str(inner), config=None, config_known=False, transcript_path=None, model="",
+                         effort="", context_tokens=0, last_cut="cut-1")
+    monkeypatch.setattr(session, "current", lambda c: lv if c == CORPUS else None)
+    turn = marks.new_turn()
+
+    async def go():
+        main = {"sid": SID, "cwd": str(inner), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, ['The prompt opens ["# Your role"](#).'], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "verified" and m["evidence"]["file"] == "agents/peer/worker.md", m
