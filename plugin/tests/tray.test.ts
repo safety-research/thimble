@@ -541,6 +541,54 @@ test('a heads-up on a citation\'s words is one ] away; it shows whole, with no p
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
+test('an open tray gives the screen back when the person scrolls the transcript: once the answer shows other rows of itself while the band above the prompt kept its rows, the tray closes, and ] opens it again as it stood, which the bar names; the transcript making room for the band, or the answer growing, closes nothing', CITES, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-scroll', { parts: HEADS })
+  // the answer's row as the fullscreen transcript draws it, with the rows of it that its viewport shows
+  const row = (onScreen: Any) => $.ui.render({ ...(answer('row-t1', TEXT) as Any), props: { text: TEXT, isFirstOfReply: true, onScreen } } as never)
+  const band = async () => {
+    await clock.advance(10)
+    return textOf(await $.ui.render(above(20)))
+  }
+  const isOpen = async () => (await band()).includes('a ask · 0 ')
+  // the answer at the foot of the transcript, all four of its rows on the screen, the band the bar alone
+  expect(await isOpen()).toBe(false)
+  await row({ first: 0, last: 3, of: 4 })
+  // ] twice: the heads-up on the citation's words, then the citation; the transcript makes room for the taller band,
+  // and the answer's top row goes
+  for (const k of [']', ']']) {
+    expect(await $.prompt.edit(key(k))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(1000)
+  }
+  expect(await band()).toContain('failed: 12')
+  // (a drawing asked before the band changed its rows, told after it, shows the rows it showed before)
+  await row({ first: 0, last: 3, of: 4 })
+  await row({ first: 1, last: 3, of: 4 })
+  expect(await isOpen()).toBe(true)
+  // the answer's drawing grew a row, its foot where it was: still open
+  await row({ first: 2, last: 4, of: 5 })
+  expect(await isOpen()).toBe(true)
+  // the person scrolls the transcript back: the answer shows other rows of itself, under a band of the same rows. The
+  // tray closes, and the bar names ] on the citation, which ] opens again
+  await row({ first: 0, last: 2, of: 5 })
+  const closed = await band()
+  expect(closed).not.toContain('a ask · 0 ')
+  expect(closed).toContain('] next citation')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(await band()).toContain('failed: 12')
+  // scrolled until the answer leaves the screen, it closes again; once a question is sent, ] no longer opens it again
+  // but goes on to the mark the person has not opened, the explainer
+  await row({ first: 0, last: 1, of: 5 })
+  expect(await isOpen()).toBe(true)
+  await row(null)
+  expect(await isOpen()).toBe(false)
+  await $.prompt.submit({ text: 'and the retries?', origin: { kind: 'composer' } } as never)
+  await clock.advance(1000)
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(await band()).toContain('The time that 95 of 100 checks stay under.')
+})
+
 // a value code computed, the citation's evidence ten lines of output
 const OUTPUT = ['runs: 40', ...Array.from({ length: 8 }, (_, i) => `run ${i + 1}: ok`), 'failed: 12'].join('\n')
 const TALL = {

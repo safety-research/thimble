@@ -21,13 +21,16 @@
 //                                      (a squeeze version shown, squeeze/term.ts)
 //   trayGiveWay($)                     the tray gives way to the squeeze chips, which take the keys (s): it closes, or
 //                                      a card ] reached gives its keys back; returns what puts it back (s undone)
+//   trayRowShown($, row, onScreen)     an answer's text row was drawn showing those rows of itself on the screen: the
+//                                      tray closes when the person scrolled the transcript under it
+//   trayBandDrawn(rows)                the band above the prompt drew that many rows
 //   registerTray                       its own hooks (a question asked with the tray open, ...)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { closeTray, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, trayNow, type BandRoom } from './tray'
+import { bandDrawn, closeOnRow, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, rowShown, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, type BandRoom } from './tray'
 
 export type { BandRoom }
 
@@ -64,12 +67,19 @@ export async function openTray($: Engine, mark: MarkRef): Promise<boolean> {
 }
 
 export async function trayOffRow($: Engine, row: string): Promise<void> {
-  const tray = await trayNow($)
-  if (tray?.stack[0]?.row === row) await closeTray($)
+  await closeOnRow($, row)
 }
 
 export async function trayGiveWay($: Engine): Promise<() => Promise<void>> {
   return giveWay($)
+}
+
+export function trayRowShown($: Engine, row: string, onScreen: { first: number; last: number; of: number } | null | undefined): void {
+  rowShown($, row, onScreen)
+}
+
+export function trayBandDrawn(rows: number): void {
+  bandDrawn(rows)
 }
 
 export const registerTray: Register = (on, ctx) => register(on, ctx)

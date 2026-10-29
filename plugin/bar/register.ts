@@ -12,7 +12,7 @@
 //                since
 import type { EngineInterface, Register } from 'claude-code'
 
-import { aboveBar } from '../core/answerview'
+import { aboveBar, bandDrawn } from '../core/answerview'
 import { closePane, narrowNotice, openPane, paneNow, paneShows } from '../core/pane'
 import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
@@ -128,7 +128,10 @@ export const registerBar: Register = on => {
       const above = await aboveBar($, els, width, maxRows > 0 ? { rows: maxRows - 1, at: Number(e.props.scroll?.offset) || 0, id: String(e.requestId) } : null)
       // a blank row above it too while all of it fits with the bar
       const gap = above.length > 0 && !(maxRows > 0 && treeRows(above, width) + treeRows(rows, width) + 2 > maxRows)
-      return els.Box({ flexDirection: 'column', children: [...(gap ? [els.Text({ key: 'above-gap', children: ' ' })] : []), ...above, els.Text({ key: 'gap', children: ' ' }), ...rows] })
+      const band = els.Box({ flexDirection: 'column', children: [...(gap ? [els.Text({ key: 'above-gap', children: ' ' })] : []), ...above, els.Text({ key: 'gap', children: ' ' }), ...rows] })
+      // the rows the band takes on the screen, which the transcript's window gives way to
+      bandDrawn(maxRows > 0 ? Math.min(maxRows, treeRows(band, width)) : treeRows(band, width))
+      return band
     } catch {
       // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
       return next(e)

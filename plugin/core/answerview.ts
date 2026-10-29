@@ -35,7 +35,7 @@ import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey, type BandRoom } from '../tray/seam'
+import { markPressed as trayMarkPressed, trayBand, trayBandDrawn, trayBar, trayFocus, trayHolds, trayKey, trayRowShown, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { askOnce } from './rowhook'
 
@@ -171,6 +171,12 @@ export async function aboveBar($: Engine, els: Any, width: number, room: BandRoo
   return els0(await safe(trayBand($, els, width, room), []))
 }
 
+/** The band above the prompt drew `rows` rows: what the transcript's window gives way to (the tray tells the person's
+ *  scroll of the transcript from it, tray/tray.ts rowShown). */
+export function bandDrawn(rows: number): void {
+  try { trayBandDrawn(rows) } catch { /* the band draws as it is */ }
+}
+
 /** A seam's bar items, checked; in the settings pane's preview none is a press. */
 const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ? xs : [])
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
@@ -235,6 +241,8 @@ export const registerAnswerView: Register = on => {
   // (fails safe, core/rowhook.ts: a throw here leaves the answer and its cards as drawn beneath)
   on('ui.render', { component: 'AssistantMessage', requestId: /\S/ }, async ($, e, next) => {
     const below = askOnce(e, next)
+    // which of its rows the screen shows: a scroll of the transcript under an open tray closes it
+    try { trayRowShown($, e.requestId, e.props?.onScreen) } catch { /* the row draws as it is */ }
     try {
       const r = await below()
       if (e.props.isSummary) return r
