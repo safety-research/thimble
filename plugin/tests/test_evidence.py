@@ -503,6 +503,23 @@ def test_a_reason_that_opens_with_the_cited_file_names_it_as_it_is(tmp_path: Pat
     assert check_mark(mark('"x"'), quote("nope.txt", 1, "x"), [], str(data))["reason"] == "There is no file nope.txt in this session's folder."
 
 
+def test_a_file_read_through_a_link_out_of_the_session_s_folders_is_outside_them_not_missing(tmp_path: Path):
+    """Main's shell is in a folder inside the folder its session started in, and a link there leads out of both. A
+    citation of a file read through that link fails as a file outside the session's folders, as it does with one
+    folder, not as a file that does not exist: the same path from the start folder names no file, but the file is
+    there, outside. A path that names no file anywhere is still missing."""
+    root, shared = tmp_path / "outings", tmp_path / "shared-notes"
+    (root / "run-a").mkdir(parents=True)
+    shared.mkdir()
+    (shared / "notes.md").write_text("bring the striped blanket\n")
+    (root / "run-a" / "shared").symlink_to("../../shared-notes", target_is_directory=True)
+    cwd = str(root / "run-a")
+    r = check_mark(mark('"bring the striped blanket"'), quote("shared/notes.md", 1, "bring the striped blanket"), [], cwd, str(root))
+    assert (r["status"], r["reason"]) == ("failed", "shared/notes.md is outside the folder this session works in."), r
+    gone = check_mark(mark('"x"'), quote("shared/nothing.md", 1, "x"), [], cwd, str(root))
+    assert gone["reason"] == "There is no file shared/nothing.md in this session's folder.", gone
+
+
 def test_a_path_from_the_start_folder_holds_after_main_moved_the_shell(tmp_path: Path):
     (tmp_path / "plugin" / "draw").mkdir(parents=True)
     (tmp_path / "plugin" / "draw" / "box.mjs").write_text("const a = 1\nexport function box() {}\n")
