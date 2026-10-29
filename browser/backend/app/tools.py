@@ -985,6 +985,9 @@ def _group_at_path(rows: "builtins.list[dict]", path: str) -> dict | None:
     return _walk_path(rows, path)[0]
 
 
+NO_GROUP = "Cards in no group"  # the loose cards' heading, as list_cards and context.canvas list them for a model
+
+
 def _group_name(rows: "builtins.list[dict]", row: dict) -> str:
     """A group's name as add_card and list_cards take it: its title after the titles of the groups above it, joined
     by GROUP_PATH_SEP, so `Final` under `Orientation` reads `Orientation / Final`."""
@@ -1406,13 +1409,15 @@ def _add_data_cell(ctx: Ctx, nb_id: str, kind: str, title: str, payload: dict,
 
 def _plan_group(ctx: Ctx, follows: str | None) -> str | None:
     """The group of the plan a new plan follows, where the next phase lands when add_card names no group; None when
-    that plan stands loose or is gone."""
+    that plan stands loose or is gone, and when the caller is one of thimble's agents and the group is the analyst's,
+    since an agent's card never goes into the analyst's groups (_group_id)."""
     from . import notebook
 
     if not follows:
         return None
     hit = notebook.find_cell(ctx.ws, follows)
-    return _live_group(ctx.ws, hit[0]) if hit else None
+    gid = _live_group(ctx.ws, hit[0]) if hit else None
+    return None if gid and agent_session(ctx.session) and _analysts(ctx.ws, gid) else gid
 
 
 def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, Any], group: str,
@@ -2105,7 +2110,7 @@ async def _h_list_cards(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         row = next((r for r in rows if r["id"] == nb["id"]), None)
         name = _group_name(rows, row) if row is not None else nb.get("title") or nb["id"]
         n = f'{len(cells)} card{"" if len(cells) == 1 else "s"}'
-        out.append(f"Cards in no group ({n})" if nb.get("kind") == notebook.LOOSE_KIND
+        out.append(f"{NO_GROUP} ({n})" if nb.get("kind") == notebook.LOOSE_KIND
                    else f'Group "{name}" ({nb["id"]}, {nb.get("role", "analyst")}, {n})')
         out.extend(_cell_line(cell, kept is not None and cell.get("id") in shown and cell.get("id") not in kept) for cell in cells)
         out.append("")

@@ -18,7 +18,7 @@ import pytest
 from conftest import Listener
 from fastapi import FastAPI
 
-from app import agents, card_size, concepts, config, investigation, notebook, session, subagents, threads, tools
+from app import agents, card_size, concepts, config, context, investigation, notebook, session, subagents, threads, tools
 from app import subagent_files as sf
 
 CORPUS = "mini"
@@ -323,6 +323,19 @@ async def test_a_thread_s_label_is_the_thread_s_and_an_unknown_fork_s_card_waits
     assert notebook.get_cell(CORPUS, stranger["id"])["created_by"] == f"chat:{tid}"
 
 
+async def test_an_agent_s_plan_never_follows_into_one_of_the_analyst_s_groups():
+    """A plan that follows another goes into that plan's group, for main; a plan of one of thimble's agents that follows
+    a plan in one of the analyst's groups stands loose instead, as any card of an agent's does."""
+    steps = [{"text": "Read the runs"}]
+    first = cid_of(await main("add_card", kind="plan", question="Plan: read the runs", steps=steps, group="The runs"))
+    nxt = cid_of(await main("add_card", kind="plan", question="Plan: compare them", steps=steps, follows=f"card:{first}"))
+    assert group_of(nxt)["id"] == group_of(first)["id"] and group_of(first)["title"] == "The runs"
+    theirs = cid_of(await writer("add_card", kind="plan", question="Plan: the figures", steps=steps,
+                                 follows=f"card:{first}"))
+    assert group_of(theirs)["kind"] == notebook.LOOSE_KIND
+    assert [c["id"] for c in group_of(first)["cells"]] == [first, nxt]
+
+
 async def test_a_path_of_titles_makes_one_group_never_a_chain():
     """A path that names no group makes one group, under the deepest group it names, titled with the rest of the path:
     never a frame inside a frame around one card. The same path finds it again, and a question with ` / ` in it is one
@@ -347,8 +360,8 @@ async def test_a_path_of_titles_makes_one_group_never_a_chain():
 
 async def test_the_model_reads_a_loose_card_as_in_no_group():
     """What a model reads of a loose card says it is in no group, so a thread's fork, which reads the card it is about,
-    does not name the loose group to put its card by it: read_ref's head line and list_cards' heading. A card in a
-    group keeps its group's id and name."""
+    does not name the loose group to put its card by it: read_ref's head line, and the heading list_cards and main's
+    context give the loose cards. A card in a group keeps its group's id and name."""
     loose = await card("How many runs failed?")
     seq = await card("When did they start?", group="Why did the runs fail?")
     assert f"card:{loose} (no group, note)" in (await main("read_ref", ref=f"card:{loose}")).text
@@ -356,6 +369,9 @@ async def test_the_model_reads_a_loose_card_as_in_no_group():
     listed = (await main("list_cards", group="all")).text
     assert "Cards in no group (1 card)" in listed and 'Group "Why did the runs fail?"' in listed
     assert notebook.LOOSE_TITLE not in listed
+    told = context.canvas(CORPUS)  # what main's context lists of the canvas
+    assert "### Cards in no group (1 card)" in told and "### Why did the runs fail? (1 card)" in told
+    assert notebook.LOOSE_TITLE not in told
     missing = await tools.call(CORPUS, "list_cards", {"group": "Nothing"})
     assert missing.is_error and "'Why did the runs fail?'" in missing.text and notebook.LOOSE_TITLE not in missing.text
 
