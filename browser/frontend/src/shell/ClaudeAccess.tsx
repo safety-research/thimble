@@ -4,7 +4,8 @@
 // Claude cannot be reached (bus `claudeAccess`), or from the line in Settings. Not now (or Escape) closes it, so the
 // person can still browse without access; it opens by itself again on the next start while nothing is saved. Claude
 // Code sign-in needs the person's yes to the consent text, since it launches headless Claude Code sessions in the
-// background. Saving checks the choice with one small call and says what failed in plain words.
+// background. Saving checks the choice with one small call and says what failed in plain words. The first run's step
+// stands alone: the tour's welcome (TourHost) waits until it is answered (accessAnswered).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { TextInput } from '../components/Field'
@@ -20,6 +21,13 @@ const CHOICES: { how: How; label: string; mark?: string }[] = [
   { how: 'wif', label: 'Workload Identity Federation' },
 ]
 
+let answer: () => void = () => undefined
+const answered = new Promise<void>((resolve) => (answer = resolve))
+
+/** Settles once the first run's step is answered (saved, Not now or Escape), or once the status says a way is chosen
+ * or cannot be read. */
+export const accessAnswered = (): Promise<void> => answered
+
 /** The dialog, mounted once in the shell; it opens on bus `claudeAccess`, or by itself while no way is chosen. */
 export function ClaudeAccessHost() {
   const [open, setOpen] = useState(false)
@@ -29,12 +37,13 @@ export function ClaudeAccessHost() {
     api
       .claudeAccess()
       .then((s) => {
-        if (alive && !s.how) {
+        if (s.how) answer()
+        else if (alive) {
           setFirst(true)
           setOpen(true)
         }
       })
-      .catch(() => undefined)
+      .catch(() => answer())
     const off = bus.on('claudeAccess', () => {
       setFirst(false)
       setOpen(true)
@@ -45,7 +54,15 @@ export function ClaudeAccessHost() {
     }
   }, [])
   if (!open) return null
-  return <ClaudeAccessDialog first={first} onClose={() => setOpen(false)} />
+  return (
+    <ClaudeAccessDialog
+      first={first}
+      onClose={() => {
+        setOpen(false)
+        answer()
+      }}
+    />
+  )
 }
 
 export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose: () => void }) {
