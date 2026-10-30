@@ -42,12 +42,16 @@ def _turn(text: str = ANSWER, turn: str = TURN) -> dict:
 @pytest.fixture()
 def board(workspaces_tmp, monkeypatch):
     """Settings' checks row; the built-ins as in a new workspace, Heads up on and Judgment calls off, with Explainers
-    turned off so that Heads up runs alone."""
+    turned off so that Heads up runs alone. The analyst added a sentence to the prompts of Heads up and Explainers, so
+    their runs over answers are their agents, which these tests drive; on their own prompts they are the terminal's look
+    (test_answer_look.py)."""
     rows = {"checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False}}
     real = config.models_for
     monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     checks.edit(CORPUS, "explainers", shown=False)
+    for cid in (IMPORTANT, "explainers"):
+        checks.edit(CORPUS, cid, prompt=f"{checks.builtin(cid)['prompt']}\n\nThe analyst's own sentence.")
 
 
 def _run(cid: str = IMPORTANT) -> dict:

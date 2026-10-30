@@ -1489,6 +1489,18 @@ None yet.
 
 [The {n} oldest entries are left out here, since the whole conversation is too long.]
 
+## look-keys
+
+(none)
+
+## look-no-cards
+
+No cards in these turns.
+
+## look-read
+
+The session's calls above show what it read.
+
 ## orient-no-request
 
 The analyst asked for nothing in particular, so cover the whole corpus.

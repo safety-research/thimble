@@ -50,7 +50,6 @@ import { cardText } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { CLAIMS_FIND, claimsFindEnd, claimsFindStart, claimsLookFailed, claimsMerge, claimsState, claimsUnread } from '../claims/seam'
 import { messageOf, turnOf, turnOfRow, type TurnRec } from '../core/answers'
-import { isPersonPrompt, oneLine } from '../core/answers.mjs'
 import { textView } from '../core/answerview'
 import { readKept, runThimble, writeKept } from '../core/env'
 import { modelWhy } from '../core/why.js'
@@ -61,6 +60,7 @@ import { featureOn, lensesAfterReply } from '../settings/features.mjs'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf, skeletonOf } from './compose.mjs'
 import { LENSES } from './lenses.mjs'
+import { messagesText } from './messages.mjs'
 import { jsonIn, parseAnswer } from './reply.mjs'
 
 type Engine = EngineInterface
@@ -147,34 +147,6 @@ async function coverageNow($: Engine): Promise<string> {
   } catch (err) {
     return `(thimble coverage failed: ${cut(String((err as Error)?.message || err), 200)})`
   }
-}
-
-/** What prompted a message's turn, in a clause: the analyst's question, or a report the session got. */
-function promptedBy(p: TurnPrompt): string {
-  const q = oneLine(p.text, 300)
-  if (isPersonPrompt(p.by)) return q ? `It answers the analyst's message "${q}".` : ''
-  if (/notification|peer/.test(p.by)) return "It answers a report the session got (a background task's or another agent's), not a message of the analyst's."
-  return q ? `It answers "${q}".` : ''
-}
-
-/** The messages a look reads, named so the fork finds each in the conversation: its kind, its turn, its first words. */
-export function messagesText(msgs: LookMsg[]): string {
-  const one = (m: LookMsg) => {
-    // a catch-up is not in the session above: its words stand here, and it is what the analyst reads of the replies
-    if (m.catchUp) {
-      const n = m.catchUp.split('\n').length
-      return `A catch-up thimble wrote of Claude's messages since the analyst's last prompt (${n} line${n === 1 ? '' : 's'}). The analyst reads it below those messages, in place of reading them. It is not in the session above; these are its words:\n${cut(m.catchUp, 6000)}`
-    }
-    const begins = oneLine(m.text, 140)
-    const n = m.text.split('\n').length
-    const lines = `${n} line${n === 1 ? '' : 's'}`
-    const what = m.kind === 'answer'
-      ? `Claude's answer at the end of turn ${m.turnNo}, which begins "${begins}" (${lines}). ${promptedBy(m.prompt)}`
-      : `Words Claude wrote to the analyst in the middle of turn ${m.turnNo}, before it went on working, which begin "${begins}" (${lines}).`
-    return what.trim()
-  }
-  if (msgs.length === 1) return `Read this message of Claude's, above in the session: ${one(msgs[0]!)}`
-  return [`Read these ${msgs.length} messages of Claude's, above in the session, in order. They came while you read the one before them:`, ...msgs.map((m, i) => `${i + 1}. ${one(m)}`)].join('\n')
 }
 
 /** The keys above the analyst's prompt, as the features leave them. */
