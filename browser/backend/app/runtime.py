@@ -26,7 +26,9 @@ What 0.8 did through Claude Code's interactive session and thimble's plugin, the
 - a `thread` event starts a fork of main's conversation that answers the thread, or a new turn of its fork;
 - the plugin module's ops (module_bridge.request: spawn, send, stop, abort, note) start, message and stop the agents
   and main here (module_op);
-- the notes main heard through the module (`$.session.append`) wait for main's next turn (tell).
+- the notes main heard through the module (`$.session.append`) wait for main's next turn (tell), and so do the notes
+  about the cards main or a thread's fork made that no call of theirs took yet, such as the card check's replacement
+  (card_size, Conv.take_notes).
 No plugin hook or hooks module runs, so nothing depends on hooks Claude Code may skip (an Enterprise sign-in's
 security plugin skips person-installed plugins' prompt.context and session.append hooks).
 
@@ -299,7 +301,22 @@ class Conv:
         return await tools.call(self.c, name, args, session=session, tool_use_id=tool_use_id)
 
     def take_notes(self) -> list[str]:
-        return self.space.take_notes(self.id)
+        """What waits for this conversation's next turn: the notes kept for it (Space.tell), then those about the cards
+        it made that no call of its own took yet (card_size.take)."""
+        from . import card_size  # noqa: PLC0415
+
+        author = self.card_author()
+        return [*self.space.take_notes(self.id), *(card_size.take(self.c, author) if author else [])]
+
+    def card_author(self) -> str | None:
+        """The `created_by` of the cards this conversation makes (tools.Ctx.cell_author): main's are the terminal's, a
+        thread's fork's its thread's chat. None for one of thimble's agents, whose calls alone take its notes."""
+        from . import session, tools  # noqa: PLC0415
+
+        if self.kind == "main":
+            return tools.TERMINAL
+        chat = session.chat_of_agent(self.c, self.agent_id) if self.kind == "fork" else None
+        return f"chat:{chat}" if chat else None
 
 
 # --------------------------------------------------------------------------- one workspace

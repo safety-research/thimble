@@ -17,7 +17,8 @@
 //      row a side pane breaks, a card taller than its frame shows, draw.ts CARD_ROWS, or than the screen)
 //   6. a version that does not fit (more rows than its frame shows, or lines cut at the card's edge) is held: its frame
 //      draws `drawing…` until the card check (fit.ts) has read it, and the check's replacement draws in its place. The
-//      answer says nothing of that, and gives no note on its size
+//      answer says nothing of that, and gives no note on its size; the replacement is told to the one that drew the card
+//      afterwards (core/tell.ts tellFor), with its next card call's answer or as its next turn starts
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
 // card in the card's place, under the call that first drew it or under the answer v was pressed on (its view whole, or
@@ -34,9 +35,10 @@ import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
 import { tempDir } from '../core/home'
 import { paneNow } from '../core/pane'
+import { MAIN, takeFor, tellFor } from '../core/tell'
 import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
-import { threadCardAnchor, threadQuestion } from '../threads/seam'
+import { threadAnchor, threadCardAnchor, threadQuestion } from '../threads/seam'
 import { ownKeys } from '../hooks/keys'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
@@ -187,9 +189,19 @@ function failed(id: string, r: Any, update: boolean): string {
   return `The card did not draw: ${error}.${kept}\n${fix} and call card again with id "${id}".`
 }
 
+/** One call of the card tool (drawCall), its answer followed by what thimble kept for the one that called about a card it
+ *  drew (core/tell.ts tellFor: the card check's replacement), which its turn reads now: main's, or a side thread's
+ *  fork's. */
+export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
+  const r = await drawCall($, e)
+  const to = e?.agentId ? threadAnchor(String(e.agentId)) : MAIN
+  const told = to ? Object.values(await takeFor($, to).catch(() => ({}))) : []
+  return told.length ? { ...r, result: [r.result, ...told].join('\n\n') } : r
+}
+
 /** One call of the card tool. Its line in the session's events (telemetry) says how long the call took to draw the
  *  card: `drawn_ms` from the call to the drawing in place, `ms` to the answer with its actions. */
-export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
+async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   const t0 = Date.now()
   const input = e ?? {}
   // no argument at all: the call's input did not arrive or did not parse (Claude Code says `input JSON failed to
@@ -346,10 +358,26 @@ async function checkHeld($: Engine, o: { id: string; version: number; title: str
     const meta = await metaOf($, o.id)
     if ((got.view || got.title) && meta?.held && meta.version === o.version) {
       const made = await personVersion($, { id: o.id, title: got.title || meta.title, view: got.view || o.view, rows: o.rows })
-      if (made.error === undefined) at = made.version
+      if (made.error === undefined) {
+        at = made.version
+        // the analyst sees the check's version in place of the one Claude drew, so whoever drew it hears of it: main, or
+        // the side thread whose fork drew it (its anchor)
+        const to = meta.anchorRow?.startsWith('thread:') ? meta.anchorRow : MAIN
+        await tellFor($, to, `card:${o.id}`, replacedNote(o.id, meta.title, { ...made, view: !!got.view && got.view.trim() !== o.view.trim() }))
+      }
     }
   } catch { /* the card shows as it stands */ }
   await shown($, o.id, at).catch(() => undefined)
+}
+
+/** What the one that drew card `id`, titled `was`, reads of the card check's replacement of it (core/tell.ts tellFor):
+ *  that the analyst sees the check's version, what changed, and what it draws. */
+function replacedNote(id: string, was: string, now: { title: string; view: boolean; lines: string[]; cut: number[]; width: number }): string {
+  const changed = [now.view ? 'the view' : '', now.title !== was ? `the title, now “${now.title}”` : ''].filter(Boolean).join(' and ')
+  return [
+    `thimble's card check replaced the card “${was}” (id "${id}") in place, since it did not fit on the analyst's screen, so the analyst sees its version, not yours. It changed ${changed || 'the view'}. What it draws, ${now.width} columns wide:`,
+    ...copyText(now.lines, now.cut, now.width),
+  ].join('\n')
 }
 
 /** A call with a card's `id` alone: the card main drew, as it is (its version, rows, view and the person's state), is
@@ -374,9 +402,9 @@ async function placeCard($: Engine, meta: CardMeta, toolUseId: string, t0: numbe
  * cards, or a card it adds (squeeze/cards.ts), and the card check's replacement of a version that does not fit
  * (checkHeld). The view runs over a copy of the rows file `rows`, in the runner as a call's does, and draws in the
  * card's place; a new card (`id` not drawn yet) draws under the answer `anchorRow`, as v's do. Answers the version
- * drawn, or why it did not draw (the version on screen stays).
+ * drawn, with its title and its text copy at the card's width, or why it did not draw (the version on screen stays).
  */
-export async function personVersion($: Engine, o: { id: string; title: string; view: string; rows: string; anchorRow?: string | null }): Promise<{ version: number; error?: undefined } | { error: string }> {
+export async function personVersion($: Engine, o: { id: string; title: string; view: string; rows: string; anchorRow?: string | null }): Promise<{ version: number; title: string; lines: string[]; cut: number[]; width: number; error?: undefined } | { error: string }> {
   if (!isCardId(o.id)) return { error: `"${oneLine(o.id, 40)}" is no card's id` }
   const before = await metaOf($, o.id)
   if (!before && !o.anchorRow) return { error: `there is no card ${o.id}` }
@@ -407,5 +435,5 @@ export async function personVersion($: Engine, o: { id: string; title: string; v
   await saveState($, o.id, version, r.state)
   await failCleared($, `card:${o.id}`)
   if (meta.version > 0) void $.process.run(['rm', '-rf', '--', await versionDir($, o.id, meta.version)]).catch(() => undefined)
-  return { version }
+  return { version, title, lines: Array.isArray(r.lines) ? r.lines : [], cut: Array.isArray(r.cut) ? r.cut : [], width }
 }

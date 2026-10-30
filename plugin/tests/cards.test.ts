@@ -998,6 +998,36 @@ test('a check whose call fails leaves the card as it stands, its rest under `+N 
   expect(textOf(await $.ui.render(BAND))).toContain('The card check of the card “Every run” failed: the API is overloaded.')
 })
 
+test("the check's replacement reaches main once: in its next card call's answer while its turn runs, else beside its next prompt; the call that drew the card waits for nothing", async ($, on) => {
+  world(on)
+  on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
+  checker(on, [`${VIEW}\n// ROWS 12`, `${VIEW}\n// ROWS 8`])
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_61', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  expect(String(r.result)).not.toContain('card check')
+  expect((await drawnOnce($, callRow('toolu_made_up_61', input))).tree.c).toHaveLength(12)
+  // main's turn runs on: its next card call's answer says what the analyst sees in place of the card it drew
+  const small = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const next = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_62', ...small } as never)) as Any).result)
+  expect(next).toContain(`thimble's card check replaced the card “Every run” (id "${id}") in place, since it did not fit on the analyst's screen, so the analyst sees its version, not yours. It changed the view. What it draws, 92 columns wide:\nrun 1  passed`)
+  expect(next).toContain('run 12  passed')
+  expect(next).not.toContain('run 13  passed')
+  // told once
+  const after = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_64', ...small } as never)) as Any).result)
+  expect(after).not.toContain('card check')
+  // the check of the next card ends after main's turn: main's next prompt carries it, once
+  const stages = { title: 'Every stage', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_63', ...stages } as never)
+  await drawnOnce($, callRow('toolu_made_up_63', stages))
+  const told = String((((await $.prompt.submit({ text: 'And now?', origin: { kind: 'composer' } } as never)) as Any).context ?? []).join('\n'))
+  expect(told).toContain("thimble's report")
+  expect(told).toContain('replaced the card “Every stage”')
+  expect(told).toContain('run 8  passed')
+  expect(String((((await $.prompt.submit({ text: 'And then?', origin: { kind: 'composer' } } as never)) as Any).context ?? []).join('\n'))).not.toContain('card check')
+})
+
 test('a card a resumed session finds waiting for its check draws as it stands', async ($, on) => {
   const w = world(on)
   // the card as tool.ts kept it, held, when the session ended

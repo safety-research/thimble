@@ -93,6 +93,9 @@ declare module 'claude-code' {
       forks: Record<string, 'checker' | 'designer' | 'thread' | 'fixer'>
       /** what Claude reads with the person's next prompt, by key (core/tell.ts) */
       tell: Record<string, string>
+      /** what main or a side thread's fork reads of a card it drew, with its next card call or its next turn: by whom it
+       *  is for (`main`, `thread:<key>`), then by key (core/tell.ts tellFor) */
+      tellFor: Record<string, Record<string, string>>
       /** the session's temp folder, as a real path (core/home.ts tempDir) */
       tempDir: string
       /** how far the session's change feed has been read (core/feed.ts) */

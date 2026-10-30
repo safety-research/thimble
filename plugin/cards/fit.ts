@@ -10,8 +10,9 @@
 // title, that replace it. tool.ts draws the replacement in the card's place (personVersion), and the card shows when the
 // check ends (shown): as the replacement, whatever its size, its first CARD_ROWS rows and `+N rows` under them when it
 // still does not fit, or as it stands when the check wrote none or it did not draw. A newer version Claude drew since
-// waits for its own check. The card tool's answer says nothing of it: Claude reads what it read before. A card a resumed
-// session finds held draws as it stands (store.ts restoreCards).
+// waits for its own check. The card tool's answer says nothing of it: Claude reads what it read before, and reads of the
+// replacement later, with its next card call's answer or as its next turn starts (tool.ts, core/tell.ts tellFor). A card
+// a resumed session finds held draws as it stands (store.ts restoreCards).
 import type { EngineInterface } from 'claude-code'
 
 import { modelWhy } from '../core/why.js'
