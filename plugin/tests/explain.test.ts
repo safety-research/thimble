@@ -10,10 +10,11 @@ import { spansFor } from '../core/answerview'
 import { resetEngaged } from '../core/engaged'
 import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
-import { resetTheme } from '../core/theme'
+import { accent, resetTheme } from '../core/theme'
+import { SPIN, spinNow } from '../bar/busy'
 import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, headsKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
-import { trayBand, trayNow } from '../tray/tray'
+import { trayBand, trayBar, trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
@@ -332,6 +333,41 @@ test('e opens the tray at once on the explainer being written, its words as its 
     // its words, drawn as the reply draws its words
     expect(JSON.stringify(await trayBand(s.$, els, 100, { rows: 20, at: 0, id: 'above' }))).toContain('The program that sends the uploads.')
   }
+})
+
+test("the box e opens while the explainer is written is an explainer's from the start, in its teal, with the turning glyph of the bar and of a citation being checked where its words will stand, and no words", async () => {
+  setOptions({})
+  let done: (v: Any) => void = () => undefined
+  const s = setup([LOOK], { complete: new Promise(r => { done = r }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
+  s.$.ui.selection = async () => ({ text: 'the client', requestId: 't1-row' })
+  s.$.ui.open = async () => ({ isPlaced: true })
+  void (await explainKey(s.$, 'e', 0))!.later!()
+  await settle()
+  const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(nodes) : [n, ...nodes(n.props?.children)])
+  const drawn = async () => {
+    const band = await trayBand(s.$, els, 100, { rows: 20, at: 0, id: 'above' })
+    return { frame: nodes(band).find(n => n.props?.key === 'tray'), body: nodes(band).find(n => n.props?.key === 'tray-body') }
+  }
+  const writing = await drawn()
+  // the bar's ] (or [) names the mark it goes to from where its words stand, as once it is written
+  const step = async () => (await trayBar(s.$, () => true, false)).filter(x => x.key === ']' || x.key === '[').map(x => `${x.key} ${x.words}`).join(' · ')
+  const named = await step()
+  expect(named).toMatch(/^(\] next|\[ previous) (citation|explainer|heads up|card)$/)
+  // the body: the turning glyph alone, in thimble's color, the frame of the bar's busy line (bar/busy.ts spinNow)
+  const glyph = nodes(writing.body).find(n => n.props?.key === 'writing')
+  expect(glyph?.props).toMatchObject({ color: accent(), children: await spinNow(s.$) })
+  expect(SPIN).toContain(textOf(writing.body))
+  // written: the same frame, in the explainers' teal, and its words in place of the glyph
+  done(reply({ body: 'The program that sends the uploads.', here: '' }))
+  await settle()
+  await settle()
+  const written = await drawn()
+  expect(JSON.stringify(written.body)).toContain('The program that sends the uploads.')
+  expect(nodes(written.body).some(n => n.props?.key === 'writing')).toBe(false)
+  expect(written.frame.props.borderColor).toBe('planMode')
+  expect(writing.frame.props.borderColor).toBe(written.frame.props.borderColor)
+  expect(await step()).toBe(named)
 })
 
 test('e with nothing selected says to select words with the mouse first, and how outside the fullscreen layout; nothing is written', async () => {

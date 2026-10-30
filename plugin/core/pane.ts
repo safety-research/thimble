@@ -168,6 +168,18 @@ export async function paneShows($: Engine, kind: string): Promise<boolean> {
   return (await $.ui.panes()).some(p => p.id === PANE_ID)
 }
 
+/** The key a kind's key row names that acts at the prompt too: its close, a click alone there, so the key reaches the
+ *  prompt, which closes the pane (claims/seam.ts claimsKey, bar/register.ts barKey). */
+const CLOSE_KEYS: Record<string, string> = { claims: 'w', coverage: 'r' }
+
+/** The keys the side pane names while it shows (its close, CLOSE_KEYS), which nothing else names then
+ *  (core/answerview.ts heldKeys): each key once, where it acts. */
+export async function paneHeld($: Engine): Promise<string[]> {
+  const kind = (await paneNow($))?.kind
+  const k = kind ? CLOSE_KEYS[kind] : undefined
+  return k && kind && (await paneShows($, kind)) ? [k] : []
+}
+
 /** A /clear or a /resume (hooks/turnover.ts): a pane on the earlier conversation's records closes (thimble's settings
  *  are no conversation's). */
 export async function turnPane($: Engine): Promise<void> {

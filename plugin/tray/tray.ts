@@ -13,11 +13,12 @@
 // words that name a mark, there and in the tray's header (`] next heads up`), are in that mark's own look (kindLook:
 // an explainer's teal, a heads-up's orange, a citation's underline), so the bar shows what each look is. While it is
 // open, ] and [ stay on the bar, named by the mark they reach, and its other keys are in its header, at the right, each
-// where it acts (the bar keeps its own):
+// where it acts (the bar keeps its own, less any key the tray takes, as h; a card's header names no a: core/answerview.ts
+// heldKeys):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
-//   + −         a citation computed by code: all its code and output in place of the one line (+ expand all), and
+//   + −         a citation computed by code: all its code and output in place of the one line (+ show all), and
 //               the one line again (- collapse)
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   2–9         a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
@@ -31,20 +32,23 @@
 //   0 close     back to the mark under it, or close
 //   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
 //               are, in their look
-//   d u         a body taller than the tray's rows: a page further down, a page back up, while no other key holder (the
-//               fix line, a card on screen) takes the letter; the row under the window names them
+//   d u         a body taller than the tray's rows: d its rest (expand), u a page back up, while no other key holder
+//               (the fix line, a card on screen) takes the letter; the row under the window names them
 //
-// Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ expand all` (and `− collapse`)
+// Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ show all` (and `− collapse`)
 // under the evidence is + (and -); a click on the citation's words, in the tray's title as in the
 // reply, closes it, as a second click on the open mark in the reply does.
 //
-// The tray stands in the band above the prompt, over the bar (bar/register.ts). Claude Code shows the band whole while
-// it has at most its rows, and a taller band in a window of its rows less one, under which its own row counts the rest;
-// only such a band takes the wheel, which Claude Code hands to the band's hooks first (ui.scroll). A tray taller than
-// the rows over the bar takes that window, and the bar follows below it; a body taller than the window's rows shows in a
-// window of its own, over a dim row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N
-// lines above`), each a click that moves it a page, as d and u do. The wheel moves the body's window, and past its
-// last line the band's own, which brings the bar into view (back up, the band's own first).
+// The tray stands in the band above the prompt, over the bar (bar/register.ts), in the rows the band has left over the
+// bar and two blank rows, so the bar with ] and [ stays in view under it. A body taller than that shows in a window of
+// those rows, over a dim row that says how many more lines there are below (`expand N more lines`) and above (`↑ N lines
+// above`). d, or a click on `expand N more lines`, shows the rest, as many of its lines as the terminal has room for:
+// the tray takes the band's blank row too, and its window moves on to the lines after the ones shown; while lines still
+// remain, the row says how many. u, or a click on `↑ N lines above`, moves the window a page back up. Claude Code shows
+// the band whole while it has at most its rows, and a taller band in a window of its rows less one, under which its own
+// row counts the rest; only such a band takes the wheel, which Claude Code hands to the band's hooks first (ui.scroll).
+// So while the body shows in a window, the band ends with two blank rows under the bar, out of Claude Code's window: the
+// wheel moves the body's window, and the band itself stays where it is, the bar in view.
 //
 // A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. An open tray
 // does not change what the next prompt asks: a question about the mark goes to a side thread (a). The tray closes when
@@ -71,7 +75,7 @@ import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
-import { explainSpans, pendingGloss, type ExplainPart, type Gloss } from '../explain/seam'
+import { explainSpans, pendingGloss, pendingSpans, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, launchRepair, repairOf } from '../marks/checker'
@@ -146,9 +150,10 @@ async function writeTray($: Engine, tray: Tray): Promise<void> {
   scrolledAway = null
   await $.state.set(TRAY, next as never)
   kept = { ...(await keptNow($)), tray: next }
-  // what it shows now starts at its top (fitBody), and so does the band's own window, which the wheel moved down to the
-  // bar below the tray (registerTray)
+  // what it shows now starts at its top, not expanded (fitBody); and so does the band's own window, which the wheel
+  // moves over a band Claude Code cut itself (registerTray)
   scrolled = 0
+  expanded = false
   if (bandWindow.at > 0 && bandWindow.id) {
     bandWindow = { ...bandWindow, at: 0 }
     void quietly($.ui.scroll({ to: 'start', in: bandWindow.id }))
@@ -164,6 +169,25 @@ async function writeStand($: Engine, stand: Stand): Promise<void> {
 export async function trayHolds($: Engine): Promise<boolean> {
   const k = await keptNow($)
   return !!k.tray || !!k.stand
+}
+
+/** The keys the tray takes now and names in its own place, which nothing else names (core/answerview.ts heldKeys), so
+ *  each key shows once, where it acts: while it is open, its header's (h a 0), its body's (x, + or −, d and u as the
+ *  row under its window names them) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached,
+ *  a, ] [ and 0, which the bar names as the card's. `ask`: the keys asked about, when not all (a key of a citation's
+ *  body reads the citation). Read from the state, so a drawing that asks draws again when the tray opens or closes. */
+export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
+  const tray = await trayNow($)
+  const f = top(tray) as Frame | null
+  if (!tray || !f) return (await standNow($)) ? [']', '[', 'a', '0'] : []
+  const out = ['0', 'a', '1', ...[paging.down, paging.up].filter((k): k is string => !!k)]
+  if (f.kind === 'citation' && (!ask || ['h', 'x', '+', '-'].some(k => ask.includes(k)))) {
+    if (await innerOf($, f)) out.push('h')
+    const m = await itemOf($, f.row, f.n)
+    if (m?.evidence?.kind === 'computed') out.push(f.open === 'code' ? '-' : '+')
+    if (canRepair(m)) out.push('x')
+  } else if (f.kind === 'explain' || f.kind === 'heads') out.push('2', '3', '4', '5', '6', '7', '8', '9')
+  return out
 }
 
 /** The tray as it stands now; an open tray gives back the keys of a card ] reached. */
@@ -226,10 +250,12 @@ async function citesOf($: Engine, row: string, shown: { text: string; marks: { s
   return shown.marks.map((m, k) => ({ ...m, n: looks[k]?.quiet ? 0 : looks[k]?.n ?? 0 }))
 }
 
-/** The explainers and heads-ups on the row's words (explain/seam.ts), each with its kind. */
+/** The explainers and heads-ups on the row's words (explain/seam.ts), each with its kind: first the words being
+ *  explained on demand, as the row draws them (core/answerview.ts spansFor), so the explainer's box shown while it is
+ *  written stands where its words do, and the bar's ] names the mark after it. */
 async function spansOf($: Engine, row: string, shown: { text: string; marks: { start: number; end: number; words: string }[] }): Promise<(Span & { kind: 'explain' | 'heads' })[]> {
   let spans: Span[] = []
-  try { spans = (await explainSpans($, row, shown.text, shown.marks)) ?? [] } catch { spans = [] }
+  try { spans = [...((await pendingSpans($, row, shown.text)) ?? []), ...((await explainSpans($, row, shown.text, shown.marks)) ?? [])] } catch { spans = [] }
   const part = await partOf<ExplainPart>($, row, 'explain')
   return (Array.isArray(spans) ? spans : [])
     .filter(s => s && typeof s.id === 'string' && s.end > s.start)
@@ -311,7 +337,7 @@ async function allStops($: Engine): Promise<Stop[]> {
 }
 
 /** Where ] and [ stand now: the mark the tray shows, where ] and [ pass it (a heads-up h opened over a citation stands
- *  where it does, before that citation), so the header names what follows the mark it shows, whichever way it was
+ *  where it does, before that citation), so the bar names what follows the mark it shows, whichever way it was
  *  opened; else the tray's first mark (lines of a file an explainer cites stand on it), else the card ] reached (-1:
  *  none). */
 async function stepPlace($: Engine): Promise<{ list: Stop[]; at: number }> {
@@ -368,6 +394,10 @@ async function itemOf($: Engine, row: string, n: number): Promise<MarkItem | nul
 async function glossOf($: Engine, row: string, id: string): Promise<Gloss | null> {
   return (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id] ?? pendingGloss(row, id)
 }
+
+/** Whether the frame is an explainer still being written: the tray stands on its words until it is (explain/seam.ts
+ *  pendingGloss). */
+const beingWritten = (f: Frame): boolean => f.kind === 'explain' && !!pendingGloss(f.row, f.id)
 
 /** What the tray and the side thread read of a frame. */
 async function infoOf($: Engine, f: Frame): Promise<Info> {
@@ -725,7 +755,7 @@ async function restItem($: Engine): Promise<BarItem[]> {
 }
 
 /** An open tray's keys, in its header at the right, each a click that does what its key does: h the explainer on a
- *  citation's words, a ask, 0 back or close (] and [ are on the bar, trayBar). x repair and + expand all (− collapse) are in the
+ *  citation's words, a ask, 0 back or close (] and [ are on the bar, trayBar). x repair and + show all (− collapse) are in the
  *  citation's card, where they act, and 2–9 are its links in an explainer's words. */
 async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
   await themeNow($)
@@ -814,7 +844,7 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
  *  failed one why in one sentence; after a repair (x) that verified it as written, why; all dim, and under it
  *  `x repair`, a press that checks it again (the ui.press hook, as x does). Then its evidence. For a value code computed: the
  *  one line of the code that printed the cited value, in code color, then the output line that holds it in the ruled
- *  block, ended by `+ expand all`, a click that shows all the code and output (`fold`, as +); expanded, all the code
+ *  block, ended by `+ show all`, a click that shows all the code and output (`fold`, as +); expanded, all the code
  *  (as code), then all the output in the ruled block, ended by `− collapse`, a click back (as -). For a file: its place (`place`, a click opens the side pane), then the cited line in the ruled
  *  block. For a card's value: the card's title, then the header over the cited row in the ruled block; printed output
  *  that is a table shows so too. The cited words bold in the citations' look. */
@@ -875,11 +905,11 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const cut = lineWindow(line, w - 2)
   rows.push(ruled(els, cut.text, cut.spans, w, 'ev'))
   // all the code and output, at the end of the ruled block (+ shows them)
-  if (ev.kind === 'computed') rows.push(foldRow(els, '+ expand all', 'show all the code and output', () => fold(true)))
+  if (ev.kind === 'computed') rows.push(foldRow(els, '+ show all', 'show all the code and output', () => fold(true)))
   return rows
 }
 
-/** The ruled block's last line, a click that shows all the code and output (`+ expand all`) or the one line again
+/** The ruled block's last line, a click that shows all the code and output (`+ show all`) or the one line again
  *  (`− collapse`), as + and - do: dim, underlined under the pointer. */
 function foldRow(els: Any, words: string, label: string, press: () => unknown): Unit {
   const { Box, Button, Text } = els
@@ -948,21 +978,33 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
 }
 
 /** How many rows of the tray's body its window has scrolled past, and the window as last drawn (how many rows of the
- *  body it hides, and its own rows; null when the body fits): what the wheel over the band moves (scrollTray). A change
- *  of the tray starts it at its top again (writeTray). */
+ *  body it hides, its own rows, and the rows it gains once expanded; null when the body fits): what the wheel over the
+ *  band moves (scrollTray). `expanded`: the person asked for the rest of the body (expandTray), so the window takes the
+ *  band's blank row too; `tight`, whether the tray as last drawn took it, so the band leaves it out (bar/register.ts).
+ *  A change of the tray starts it at its top again, not expanded (writeTray). */
 let scrolled = 0
-let windowed: { over: number; rows: number } | null = null
+let windowed: { over: number; rows: number; grow: number } | null = null
+let expanded = false
+let tight = false
 
-/** The window Claude Code shows the band above the prompt in once the band is taller than its rows (bar/register.ts):
- *  its rows, the most the tray takes (the bar then follows below it); where it stands over the band as Claude Code last
- *  drew the band; and the band's requestId, which `$.ui.scroll` names it by. */
-export type BandRoom = { rows: number; at: number; id: string }
+/** The rows the band above the prompt gives the tray (bar/register.ts): `rows`, those it has over the bar and its two
+ *  blank rows; `spare`, a blank row of the band the tray takes too, over it while its body fits whole, else under it
+ *  once the person asked for the rest of its body (expandTray), since a body in a window ends the band with blank rows
+ *  out of Claude Code's window, under its own row that counts them; where Claude Code's window stands over the band as
+ *  it last drew the band (`at`); and the band's requestId, which `$.ui.scroll` names it by. */
+export type BandRoom = { rows: number; spare?: number; at: number; id: string }
 
 /** Where the band's window stands, as last drawn or moved (registerTray's ui.scroll hook), and the band's requestId. */
 let bandWindow: { at: number; id: string } = { at: 0, id: '' }
 
-/** The keys that move the window a page down and up, each while no one before the tray takes it (the fix line, fix/
- *  line.ts) and no card on screen lists it (cards/draw.ts keyOwner): the tray takes a key before a card does. */
+/** The tray as last drawn: whether its body shows in a window (`windowed`: the band then ends with two blank rows under
+ *  the bar, out of Claude Code's window, so that Claude Code hands the band its wheel, which moves the body's window),
+ *  and whether that window took the band's blank row under it (`tight`: expanded, the band draws none there). */
+export const trayShape = (): { tight: boolean; windowed: boolean } => ({ tight, windowed: !!windowed })
+
+/** The keys that show the rest of the body (`down`: expand) and move the window a page back up, each while no one
+ *  before the tray takes it (the fix line, fix/line.ts) and no card on screen lists it (cards/draw.ts keyOwner): the
+ *  tray takes a key before a card does. */
 const PAGE_KEYS = { down: 'd', up: 'u' } as const
 /** The page keys the row under the window named as it was last drawn, null where none: a key reads no state. */
 let paging: { down: string | null; up: string | null } = { down: null, up: null }
@@ -977,36 +1019,36 @@ async function freePageKeys($: Engine): Promise<{ down: string | null; up: strin
 const pageOf = (w: { rows: number }) => Math.max(1, w.rows - 1)
 
 /** The tray's body in at most `fit` rows: whole when it fits; else a window of `fit` − 1 of its rows, and under it a dim
- *  row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click that
- *  moves the window a page, after the key that does the same when it is free (`keys`); in a row too narrow for both,
- *  `↓ N more` and `↑ N above`. Such a tray fills the band's window and the bar follows below it, so the band is taller
- *  than its rows and Claude Code hands its wheel over: the wheel moves the window too (registerTray's ui.scroll hook).
- *  With fewer than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls it. `words`: the
- *  words of the row under the window, as drawn, each part's with its key and without. */
-function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }): { rows: Any[]; words: string[] } {
+ *  row that says how many more lines there are below (`expand N more lines`), a click that shows them as expandTray
+ *  does, and above (`↑ N lines above`), a click that moves the window a page back up, each after the key that does the
+ *  same when it is free (`keys`); in a row too narrow for both, `expand N more` and `↑ N above`. `grow`: the rows the
+ *  window gains once expanded. Such a tray ends the band with blank rows under the bar, so the band is taller than its
+ *  rows and Claude Code hands its wheel over: the wheel moves the window too (registerTray's ui.scroll hook). With fewer
+ *  than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls it. `words`: the words of the
+ *  row under the window, as drawn, each part's with its key and without. */
+function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }, grow = 0): { rows: Any[]; words: string[] } {
   const { Box, Button, Text } = els
   const tall = treeRows(body, w)
   if (tall <= fit || fit < 2) { windowed = null; paging = { down: null, up: null }; return { rows: body, words: [] } }
   const rows = fit - 1
   const over = tall - rows
-  windowed = { over, rows }
+  windowed = { over, rows, grow }
   scrolled = Math.max(0, Math.min(over, scrolled))
   const below = over - scrolled
-  const page = pageOf(windowed)
   paging = { down: below > 0 ? keys.down : null, up: scrolled > 0 ? keys.up : null }
   const lines = (n: number) => `${n} line${n === 1 ? '' : 's'}`
-  // each part a click that moves the window a page, its key first when the key is free
-  const part = (id: string, key: string | null, label: string, words: string, by: number): Any => Button({ key: `tray-page-${id}`, plain: true, label, hover: quiet(`tray-page-${id}`), onPress: () => scrollTray($, by), children: [
+  // each part a click that does what its key does, its key first when the key is free
+  const part = (id: string, key: string | null, label: string, words: string, press: () => unknown): Any => Button({ key: `tray-page-${id}`, plain: true, label, hover: quiet(`tray-page-${id}`), onPress: press, children: [
     ...(key ? [Text({ key: 'k', color: accent(), bold: true, children: `${key} ` })] : []), Text({ key: 'w', dimColor: true, children: words }),
   ] })
   const both = [
-    ...(scrolled > 0 ? [{ id: 'up', key: paging.up, words: `↑ ${lines(scrolled)} above`, short: `↑ ${scrolled} above`, by: -page }] : []),
-    ...(below > 0 ? [{ id: 'down', key: paging.down, words: `↓ ${below} more line${below === 1 ? '' : 's'}`, short: `↓ ${below} more`, by: page }] : []),
+    ...(scrolled > 0 ? [{ id: 'up', key: paging.up, words: `↑ ${lines(scrolled)} above`, short: `↑ ${scrolled} above`, press: () => windowed && scrollTray($, -pageOf(windowed)) }] : []),
+    ...(below > 0 ? [{ id: 'down', key: paging.down, words: `expand ${below} more line${below === 1 ? '' : 's'}`, short: `expand ${below} more`, press: () => expandTray($) }] : []),
   ]
   // the row's words whole while they fit its one row, else each part without `lines` (the narrowest tray, both parts)
   const short = both.reduce((n, x, i) => n + (i ? 3 : 0) + (x.key ? textWidth(x.key) + 1 : 0) + textWidth(x.words), 0) > w
   const shown = both.map(x => ({ ...x, words: short ? x.short : x.words, label: x.words }))
-  const parts = shown.map(x => part(x.id, x.key, x.label, x.words, x.by))
+  const parts = shown.map(x => part(x.id, x.key, x.label, x.words, x.press))
   return {
     rows: [
       Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
@@ -1029,24 +1071,35 @@ function scrollTray($: Engine, by: number): boolean {
   return true
 }
 
-/** d or u while the row under the window names it: the window a page down or up, undone when a letter follows (the
- *  person types a word). Null for any other key, which reads nothing. */
+/** d, or a click on `expand N more lines`: the rest of the body, as many of its lines as the terminal has room for. The
+ *  tray takes every row the band shows over the bar, its blank row too (`expanded`), and its window moves on to the lines
+ *  after the ones shown, the last of those staying in view; the row under it says how many lines still remain. A window
+ *  of one row that grows keeps its row in view: the rows it gains show the lines after it. */
+function expandTray($: Engine): void {
+  if (!windowed) return
+  const grows = windowed.grow > 0 && !expanded
+  if (grows) { expanded = true; $.ui.invalidate('ui.render') }
+  scrollTray($, grows ? windowed.rows - 1 : pageOf(windowed))
+}
+
+/** d or u while the row under the window names it: the rest of the body (expandTray), or the window a page back up;
+ *  undone when a letter follows (the person types a word). Null for any other key, which reads nothing. */
 function pageKey($: Engine, key: string): Any | null {
   const dir = key === paging.down ? 1 : key === paging.up ? -1 : 0
   if (!dir || !windowed) return null
-  const by = dir * pageOf(windowed)
-  let was = scrolled
+  let was = { scrolled, expanded }
   return {
-    now: async () => { was = scrolled; scrollTray($, by) },
-    undo: async () => { if (scrolled !== was) { scrolled = was; $.ui.invalidate('ui.render') } },
+    now: async () => { was = { scrolled, expanded }; if (dir > 0) expandTray($); else if (windowed) scrollTray($, -pageOf(windowed)) },
+    undo: async () => { if (scrolled !== was.scrolled || expanded !== was.expanded) { scrolled = was.scrolled; expanded = was.expanded; $.ui.invalidate('ui.render') } },
   }
 }
 
 /** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, drawn and clicked as in
  *  the reply) on top, a citation's status and its keys at its right (trayKeys), then the mark's card, its rows starting where the
- *  title starts. `room`: the window Claude Code shows the band in (null: no limit), whose rows the tray takes at most;
- *  a taller body shows in a window of the rows left (fitBody). */
+ *  title starts. `room`: the rows the band gives it (BandRoom; null: no limit); a taller body shows in a window of the
+ *  rows left (fitBody), and once the person asked for the rest of it (expandTray), in the band's blank row too. */
 export async function trayBand($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
+  tight = false
   if (room) bandWindow = { at: Math.max(0, room.at), id: room.id }
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
@@ -1074,6 +1127,9 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
     const heads = f.kind === 'heads'
     title = String(g?.term || g?.title || (heads ? 'heads-up' : 'explainer'))
     if (!g) units = [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: `This ${heads ? 'heads-up' : 'explainer'} is no longer in the session.` }) }]
+    // an explainer still being written (explain/seam.ts pendingGloss): its box is an explainer's, and where its words
+    // will stand the turning glyph turns with the bar's and a citation's being checked (bar/busy.ts spinNow), no words
+    else if (beingWritten(f)) units = [{ h: 1, el: Text({ key: 'writing', color: accent(), children: await spinNow($) }) }]
     else words = { text: explainerText(g) }
   }
   let body: Any[]
@@ -1127,11 +1183,18 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   const head = oneRow
     ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
     : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
-  // of the band's window, the frame's two borders and its head take their rows, and the body what is left; a body
-  // taller than that pages with d and u while they are free
-  const fit = room ? room.rows - 2 - treeRows(head, inner) : Infinity
-  const keysFree = fit >= 2 && treeRows(body, inner) > fit ? await freePageKeys($) : { down: null, up: null }
-  const shown = fitBody($, els, body, inner, fit, keysFree)
+  // of the rows the tray may take, the frame's two borders and its head take theirs, and the body what is left. A body
+  // that fits them and the band's blank row (`spare`) shows whole, in that row too, so the band draws none over it; a
+  // taller one shows in a window of the rows left, its rest shown with d (and back up with u) while they are free.
+  // Expanded, that window takes the band's blank row under it too (`tight`)
+  const base = room ? Math.max(1, room.rows) - 2 - treeRows(head, inner) : Infinity
+  const extra = room ? Math.max(0, room.spare ?? 0) : 0
+  const tall = treeRows(body, inner)
+  const whole = tall <= base + extra
+  tight = !whole && expanded && extra > 0
+  const fit = whole || tight ? base + extra : base
+  const keysFree = fit >= 2 && tall > fit ? await freePageKeys($) : { down: null, up: null }
+  const shown = fitBody($, els, body, inner, fit, keysFree, expanded ? 0 : extra)
   // the words of its keys and of the row under its window, which a click on one leaves selected: no answer's words
   // (core/selection.ts)
   controlWords('tray', [...keys.flatMap(k => [k.words, `${k.key} ${k.words}`]), ...shown.words])
@@ -1173,12 +1236,17 @@ export const registerTray: Register = on => {
     }
   }).catch(($, e, next) => next(e))
 
-  // the person's wheel (or scroll keys) over the band above the prompt, which Claude Code hands over while the band is
-  // taller than its rows: going down, the tray's body moves in its window (fitBody) until its last line shows, then the
-  // band's own window, down to the bar; going back up, the band's own first, then the body's
+  // the person's wheel (or scroll keys) over the band above the prompt, which Claude Code hands over only while the band
+  // is taller than its rows. While the tray's body shows in a window, the band is taller for that alone (two blank rows
+  // under the bar, bar/register.ts): the wheel moves the body's window (fitBody), and the band itself stays where it is,
+  // the tray's head and the bar in view, at the body's ends too. A band Claude Code cut itself (at a short height, the
+  // body whole) scrolls as Claude Code scrolls it; going back up over a band so moved, the band's own window first
   on('ui.scroll', { component: 'AbovePrompt' }, async ($, e, next) => {
     const by = Number(e.by) || 0
-    if (e.origin?.kind === 'person' && !(by < 0 && bandWindow.at > 0) && scrollTray($, by)) return {}
+    if (e.origin?.kind === 'person' && windowed && !(by < 0 && bandWindow.at > 0)) {
+      scrollTray($, by)
+      return {}
+    }
     const r = await next(e)
     if (!r?.deny) bandWindow = { ...bandWindow, at: Math.max(0, Number(e.offset) || 0) }
     return r
