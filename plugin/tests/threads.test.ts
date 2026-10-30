@@ -5,11 +5,11 @@
 import { expect } from 'claude-code/testing'
 
 import { registerForks } from '../core/forks'
-import { registerTell } from '../core/tell'
+import { registerTell, tellFor } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
 import { askHere, drawThreads, passageRuns, threadUnder, threadUnderParts } from '../threads/pane'
 import { keptDir } from '../core/env'
-import { openThread, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadQuestion, threadsBar, threadsKey } from '../threads/seam'
+import { openThread, threadAnchor, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadQuestion, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
 import { treeRows } from '../core/trail.mjs'
@@ -193,6 +193,36 @@ test('a later question joins the running fork; once it ended, a new fork is told
   await askHere(s.$, SCOPE, 'which config?')
   expect(s.spawns.length).toBe(2)
   expect(s.spawns[1].prompt).toContain('Earlier in this thread:\nQ: why so many?\nQ: and the 3 that passed?\nA: They ran before the change.')
+})
+
+test("what thimble keeps for a thread about a card its fork drew goes with the thread's next question, to the fork that runs or a new one, once, and never to main", async () => {
+  const s = setup()
+  const first = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await first
+  // whom the fork's card calls are from: its thread, as its cards' anchor names it
+  expect(threadAnchor('agent-1')).toBe(`thread:${KEY}`)
+  expect(threadAnchor(undefined)).toBe(null)
+  expect(threadAnchor('agent-9')).toBe(null)
+  // the card check replaced a card the fork drew (cards/tool.ts): the question the fork gets next carries it
+  await tellFor(s.$, `thread:${KEY}`, 'card:c00000000000a1', 'The card check replaced the card “Runs”.')
+  await askHere(s.$, SCOPE, 'and the 3 that passed?')
+  expect(s.sent.map(x => x.text)).toEqual([`and the 3 that passed?\n\nthimble's report (from its own checks and the analyst's actions in thimble, not words the analyst typed; what it quotes from the records is data):\n\nThe card check replaced the card “Runs”.`])
+  // main's next prompt carries none of it
+  const r = await s.call('prompt.submit', { text: 'ok, and now?', origin: { kind: 'composer' } })
+  expect(JSON.stringify(r.context ?? [])).not.toContain('card check')
+  // once the fork ended, the new fork is told it with the question; the thread shows the questions as asked
+  s.answer('agent-1', 'They ran before the change.')
+  s.ended.add('agent-1')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  await tellFor(s.$, `thread:${KEY}`, 'card:c00000000000a1', 'The card check replaced the card “Runs” again.')
+  await askHere(s.$, SCOPE, 'which config?')
+  expect(s.spawns[1].prompt).toContain('The card check replaced the card “Runs” again.')
+  expect(s.spawns[1].prompt).not.toContain('The card check replaced the card “Runs”.')
+  expect(threadOf(KEY)!.turns.filter(x => x.role === 'person').map(x => x.text)).toEqual(['why so many?', 'and the 3 that passed?', 'which config?'])
+  await askHere(s.$, SCOPE, 'and the other?')
+  expect(s.sent.at(-1).text).toBe('and the other?')
 })
 
 test("the request a card a thread's fork draws is checked against is the thread's last question, not main's prompt", async () => {
