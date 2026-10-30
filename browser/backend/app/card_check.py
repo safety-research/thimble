@@ -1,9 +1,9 @@
 """The card check: once a card has its takeaway, it is drawn offscreen, one model reading of the picture assesses it
 against five criteria (prompts/card-check.md) and gives the card that replaces it, and the replacement is applied in
 place, with Undo in the card's details. The card shows the check only for a real problem: a red ✕ for numbers its code
-types in, or for a replacement that would not run. Of the check, only the drawing's size goes back to the card's
-author: a body drawn taller than the canvas shows at rest (card_size). Label cards are drawn from their label and get no
-reading.
+types in, or for a replacement that would not run. Of the check, two things go back to the card's author, with its next
+thimble call or at the start of its next turn (card_size): a body drawn taller than the canvas shows at rest, and the
+version the check put in the card's place. Label cards are drawn from their label and get no reading.
 
 tools.call hands every thimble tool result to after_tool(); an add_card or edit_card result starts a check of its card
 when wants_check() holds and the workspace's automatic check is on (auto: thimble's config `agents.cardCheck.auto`). A
@@ -18,7 +18,8 @@ new change to the card cancels a running check and starts the next. At most READ
    criterion stays as it is, unless its links check found a value its code types in and the replacement's code
    changes (_problems). New code runs on the card's kernel, and in terminal mode, where the check runs in the shim,
    through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial). A replacement that left all the
-   card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`.
+   card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`;
+   any other kept replacement is told to the card's author (card_size.tell_replaced).
 A card that does not fit on the analyst's screen is held until its check ends (card_fit): the reading assesses it
 against one more criterion, with the card guidance and the toolkit its author works from (prompts/card-check.md
 `## too-large`), its size is not told to its author, and the card shows when the check ends (card_fit.checked), as the
@@ -196,7 +197,8 @@ def wants_check(cell: dict[str, Any] | None) -> bool:
 async def after_tool(c: str, name: str, args: dict[str, Any] | None, res: Any, *, session: str | None = None,
                      anchor: str | None = None) -> Any:
     """Called by tools.call with every result: starts the check of the card an add_card or edit_card result names. The
-    result goes back unchanged, since nothing of the check reaches the card's author. Never raises."""
+    result goes back at once and unchanged: what the check does reaches the card's author later (card_size). Never
+    raises."""
     if not enabled() or name not in CHECK_TOOLS:
         return res
     try:
@@ -909,10 +911,23 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
         same = applied.get("state") == checkstore.SAME
         timing["replacement"] = "same outputs" if same else "applied"
         _end(run, "ok" if same else "fixed")
+        if not same:
+            _tell_author(run, applied)
         await _settle(c, cid, tid, keep=True)
     finally:
         if not settled and tid:  # stopped or past its time before the settle began
             _spawn(_settle_now(c, cid, tid, keep))
+
+
+def _tell_author(run: _Run, fix: dict[str, Any]) -> None:
+    """The card's author hears of the version the check put in its place, which the analyst sees instead of the
+    author's (card_size.tell_replaced). Never raises."""
+    from . import card_size  # noqa: PLC0415
+
+    try:
+        card_size.tell_replaced(run.c, notebook_cell(run.c, run.cid), fix)
+    except Exception:  # noqa: BLE001 — the card stands as the check left it either way
+        log.exception("card check: the author of card:%s was not told of its replacement", run.cid)
 
 
 async def _not_kept(run: _Run, cand: dict[str, Any] | None, typed: str = "") -> str:

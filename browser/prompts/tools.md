@@ -624,6 +624,10 @@ card:{cid}'s body draws {height} px tall at the card's width, and about {limit} 
 
 card:{cid}'s page lays out {width} px wide, and the card gives it {frame} px, so the analyst does not see all of it at the card's width.
 
+## card-replaced
+
+thimble's card check replaced card:{cid} in place, so the analyst sees its version, not yours: {what}. Its question is “{question}”, and its takeaway “{takeaway}”. It changed the {changed}{why}
+
 ## kind-mismatch
 
 card:{cid} is a `{kind}` card but its output is {shape}. Change the code or the `kind` with `edit_card`.

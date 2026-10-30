@@ -182,6 +182,75 @@ async def test_a_card_that_fits_shows_at_once_and_its_check_reads_it_as_any_card
     assert _harness["drawn"] == drawn and held(cid) is None  # the same version: not drawn again
 
 
+async def turn_text(conv, monkeypatch) -> str:
+    """What the engine is sent for a turn of `conv` that starts now (runtime._engine_turn), with the engine faked."""
+    from app import claude_access, runtime, runtime_api
+
+    sent: list[str] = []
+
+    async def turn(conv, text):
+        sent.append(text)
+        return runtime.TurnEnd("done")
+
+    monkeypatch.setattr(claude_access, "problem", lambda: None)
+    monkeypatch.setattr(runtime, "engine", lambda: "api")
+    monkeypatch.setattr(runtime_api, "turn", turn)
+    await runtime._engine_turn(conv, '<thimble-event kind="main" event="e1">\nAnd now?\n</thimble-event>')
+    return sent[0]
+
+
+async def test_the_check_s_replacement_reaches_its_author_with_its_next_call_or_as_its_next_turn_starts(
+        _harness, checking, monkeypatch):
+    """The analyst sees the check's version of a card in place of its author's, so the author hears of it once: its
+    kind, question and takeaway, and what changed. A turn that still runs reads it in its next thimble call's result,
+    else the author's next turn reads it as it starts, main's or a thread's fork's. Nothing waits for the check."""
+    from types import SimpleNamespace
+
+    from app import agents, runtime, session
+
+    checking["code"], checking["takeaway"] = "620", "4 of the 56 runs failed, all in enrich."
+    made = await call("add_card", kind="table", question="Which runs failed?", code="4068",
+                      takeaway="14 of the 56 runs failed.")
+    cid = _cid(made)
+    assert "card check" not in made.text and held(cid)
+    await checked(cid)
+    # main's turn still runs: its next thimble call reads the version the analyst sees
+    told = (await call("list_cards", group="all")).text
+    assert f"thimble's card check replaced card:{cid} in place, so the analyst sees its version, not yours" in told
+    # its kind, and what its code draws, since that is not a table (this test's kernel prints the code's last value)
+    assert "not yours: a table card that draws text. Its question is “Which runs failed?”" in told
+    assert "its takeaway “4 of the 56 runs failed, all in enrich.”" in told
+    assert "It changed the code and takeaway: The question names no runs." in told
+    assert "card check" not in (await call("list_cards", group="all")).text  # told once
+
+    # main's turn ended before the check of its next card did: its next turn reads it as it starts
+    space = SimpleNamespace(c=CORPUS, take_notes=lambda conv_id: [])
+    main = runtime.Conv(space, runtime.MAIN, "main")
+    later = _cid(await call("add_card", kind="table", question="How long did each run take?", code="3000",
+                            takeaway="Each run took 40 s."))
+    await checked(later)
+    text = await turn_text(main, monkeypatch)
+    assert text.startswith(runtime.NOTES_HEAD) and f"replaced card:{later}" in text and text.endswith("</thimble-event>")
+    assert "card check" not in (await call("list_cards", group="all")).text  # told once
+
+    # a thread's fork's card: the fork hears of it, with its next call or as its next run starts, and main does not
+    tid = agents.new_thread(CORPUS, None, None, "Which stage failed most?")["id"]
+    as_fork = dict(actor="analyst", terminal=True, chat=tid)
+    forked = _cid(await tools.call(CORPUS, "add_card", dict(kind="table", question="Which stage failed most?",
+                                                            code="2400", takeaway="Enrich failed most."), **as_fork))
+    await checked(forked)
+    assert "card check" not in (await call("list_cards", group="all")).text
+    assert f"replaced card:{forked}" in (await tools.call(CORPUS, "list_cards", {"group": "all"}, **as_fork)).text
+    again = _cid(await tools.call(CORPUS, "add_card", dict(kind="table", question="When did enrich fail?",
+                                                           code="2400", takeaway="Enrich failed on 3 nights."),
+                                  **as_fork))
+    await checked(again)
+    monkeypatch.setattr(session, "chat_of_agent", lambda c, agent_id: tid if agent_id == "a1" else None)
+    fork = runtime.Conv(space, "a1", "fork", agent_id="a1", agent_type=runtime.FORK_TYPE)
+    assert "card check" not in await turn_text(main, monkeypatch)
+    assert f"replaced card:{again}" in await turn_text(fork, monkeypatch)
+
+
 async def test_a_held_card_waits_for_its_takeaway_then_for_its_check_whatever_the_turn(_harness, checking):
     checking["gate"] = asyncio.Event()
     cid = _cid(await call("add_card", kind="table", question="Which runs failed?", code="4068"))

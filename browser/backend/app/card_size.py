@@ -1,14 +1,24 @@
-"""A card's size. About BODY_MAX px of a card's body fit on one laptop screen with its question and takeaway (frontend
+"""What a card's author is told of the card after the call that made it: its size, and the card check's replacement.
+
+A card's size. About BODY_MAX px of a card's body fit on one laptop screen with its question and takeaway (frontend
 canvas/DataViz CARD_BODY_MAX), and a custom card's page taller than that shows that much and Show all. Two places
 measure a body at the card's width: the page, when it draws a custom card's page (POST /ws/{c}/cells/{cid}/drawn), and
 the card check's render of a card of any kind (render.Rendered.body, card_check).
-A body past BODY_MAX is told to the card's author, once for each version of the card, with the author's next thimble
-tool result (tools.call, with_notes), in the words of prompts/tools.md `## card-tall`, as the terminal's card tool tells
-Claude that a card is taller than the screen. A custom card's page that lays out wider than its frame, which the page
-measures as it measures the height, is told the same way, in the words of `## card-wide`, with the page's width and the
-frame's. A note keeps the version it was measured on, and is dropped when the card is gone or is another version by
-the author's next call. The author is the card's `created_by`, which is the cell_author of the calls of the session
-that made it; a card the analyst made by hand has no author to tell."""
+A body past BODY_MAX is told to the card's author, once for each version of the card, in the words of prompts/tools.md
+`## card-tall`, as the terminal's card tool tells Claude that a card is taller than the screen. A custom card's page
+that lays out wider than its frame, which the page measures as it measures the height, is told the same way, in the
+words of `## card-wide`, with the page's width and the frame's.
+
+The card check's replacement (card_check, checkstore.apply_fix): a version the check puts in the card's place, which
+the analyst sees instead of the author's, is told in the words of `## card-replaced` (tell_replaced): its kind, and
+what its code draws when that is not what the kind says, its question and takeaway, and the parts the check changed
+with the problem it found. A later replacement of the card takes the place of one not told yet.
+
+A note waits for whichever comes first: the author's next thimble tool result (tools.call, with_notes), so a turn or
+run that still runs reads it there, or the start of the author's next turn, main's or a thread's fork's
+(runtime.Conv.take_notes). A note keeps the version it is about, and is dropped when the card is gone or is another
+version by then. The author is the card's `created_by`, which is the cell_author of the calls of the session that made
+it; a card the analyst made by hand has no author to tell."""
 from __future__ import annotations
 
 import hashlib
@@ -24,6 +34,10 @@ log = logging.getLogger("thimble.card_size")
 BODY_MAX = 800  # px of a card's body that fit on a laptop screen with its question and takeaway: DataViz CARD_BODY_MAX
 HINT = "card-tall"
 WIDE = "card-wide"
+REPLACED = "card-replaced"
+# what a card's code draws, in the words of `## card-replaced`, when its kind says another shape (tools._kind_mismatch)
+SHAPES = {"chart": "a chart", "image": "an image", "table": "a table", "text": "text", "none": "nothing"}
+CHANGED = {"title": "question", "code": "code", "takeaway": "takeaway"}  # checkstore.FIX_FIELDS, as the note names them
 BY_HAND = frozenset({"", "user"})  # created_by of a card the analyst made: no session to tell
 KEPT = 50  # notes kept for one author before its next call; the oldest go first
 
@@ -54,7 +68,7 @@ def _due(c: str, cell: dict[str, Any], kind: str) -> tuple[str, str, str] | None
 
 
 def _keep(c: str, author: str, cid: str, v: str, kind: str, note: str) -> bool:
-    """Keep `note` for `author`'s next call, in place of the card's earlier note of `kind`; False for no note."""
+    """Keep `note` for `author`'s next call or turn, in place of the card's earlier note of `kind`; False for no note."""
     if not note:
         return False
     notes = _notes.setdefault((c, author), {})
@@ -102,10 +116,36 @@ def tell_wide(c: str, cell: dict[str, Any] | None, width: float | int | None, fr
     return True
 
 
+def tell_replaced(c: str, cell: dict[str, Any] | None, fix: dict[str, Any] | None) -> bool:
+    """Keep the note for the author of `cell` that the card check put this version in its place by `fix`
+    (checkstore.apply_fix's), in the words of `## card-replaced`; True when a note was kept (not for a card made by
+    hand)."""
+    author = str((cell or {}).get("created_by") or "")
+    cid = str((cell or {}).get("id") or "")
+    if not cell or author in BY_HAND or not cid:
+        return False
+    from . import cite, notebook  # noqa: PLC0415
+    from .tools import _kind_mismatch, hint  # noqa: PLC0415 — tools imports this module
+
+    kind = str(cell.get("kind") or notebook.DEFAULT_KIND)
+    shape = _kind_mismatch(kind, cell)
+    changed = [CHANGED[f] for f in (fix or {}).get("fields") or [] if f in CHANGED] or ["card"]
+    reason = " ".join(str((fix or {}).get("reason") or "").split())
+    note = hint(REPLACED, cid=cid, what=f"a {kind} card" + (f" that draws {SHAPES.get(shape, shape)}" if shape else ""),
+                question=" ".join(str(cell.get("title") or "").split()),
+                takeaway=" ".join(cite.canon_text(str(cell.get("takeaway") or "")).split()),
+                changed=" and ".join([", ".join(changed[:-1]), changed[-1]] if len(changed) > 1 else changed),
+                why=f": {reason}" if reason.endswith((".", "!", "?")) else f": {reason}." if reason else ".")
+    if not _keep(c, author, cid, version(cell), REPLACED, note):
+        return False
+    log.info("%s: card:%s was replaced by its check; told to %s with its next call or turn", c, cid, author)
+    return True
+
+
 def take(c: str, author: str) -> list[str]:
-    """The notes waiting for `author`, and no longer waiting: each whose card is still the version it was measured on.
-    A card deleted, or changed into another version, since then is no longer what its note says, so its note is
-    dropped, and that version counts as not told (the card changed back to it is told again)."""
+    """The notes waiting for `author`, and no longer waiting: each whose card is still the version it is about. A card
+    deleted, or changed into another version, since then is no longer what its note says, so its note is dropped, and
+    that version counts as not told (the card changed back to it is told again)."""
     from . import notebook  # noqa: PLC0415
 
     out = []

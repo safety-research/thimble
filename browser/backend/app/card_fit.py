@@ -13,7 +13,8 @@ wide). No model takes part in the measure. A body past card_size.BODY_MAX, or co
    measuring), so the canvas shows no version that does not fit, even for that moment. The card check reads it with one
    more criterion (prompts/card-check.md `## too-large`), and the card shows when that check ends (checked): as the
    check's replacement, or as it stands when the check left it. A replacement that still does not fit shows as any card
-   does, its rest behind Show all. The call's result says nothing of it: the author reads what it read before.
+   does, its rest behind Show all. The call's result says nothing of it: the author reads what it read before, and
+   hears of the replacement later, as of any card the check replaces (card_size.tell_replaced).
 3. A held card whose check has not begun, such as one with no takeaway yet, shows as it stands when the turn or run of
    the one who made it ends: main's turn (session._end_turn calls turn_ended), a run of one of thimble's agents
    (subagents.run_ended calls run_ended), or a subagent of main's (session._finish_sub calls agent_ended). The record
