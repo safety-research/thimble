@@ -484,11 +484,11 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         if ask:
             choices = "run them or cancel" if ask["rest"] else f"run all, run on a random sample of {EST.SAMPLE}, or cancel"
             print(f"  Not started: the model would read {'the other ' if ask['rest'] else ''}{ask['units']:,} records in "
-                  f"{EST.calls_line(ask['calls'])}, so the analyst chooses first: {choices}. "
-                  f"`thimble label {name} --wait` waits for their choice, then for the model's reads, and prints the "
-                  f"label's counts; run it before you answer from this label. Counts from a trial are not the "
-                  f"label's. To read more records later, run this command again, and the analyst is asked again. A "
-                  f"trial (--limit N) never asks.")
+                  f"{EST.calls_line(ask['calls'])}, so the analyst chooses first: {choices}. They are asked when your "
+                  f"command ends. After their choice, `thimble label {name} --wait` waits for the model's reads and "
+                  f"prints the label's counts; run it before you answer from this label. Counts from a trial are not "
+                  f"the label's. To read more records later, run this command again, and the analyst is asked again. "
+                  f"A trial (--limit N) never asks.")
         elif s["waiting"]:
             calls = len(LB.batches(LB.waiting(st, name)["units"]))
             print(f"  The model reads them in {EST.calls_line(calls)} of up to {LB.BATCH_ITEMS} records each, which run "
@@ -503,15 +503,14 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             run = lab.get("run") or {}
             if not s["waiting"] or run.get("state") == "cancelled":
                 break
-            if run.get("state") == "ask" and time.time() - t0 > a.wait:
-                # the ask waits for the analyst while this waits; once they choose, the reads start and this waits on
-                print(f"{name}: still waiting for the analyst's choice after {a.wait:.0f}s; nothing runs "
-                      f"until then. {s['waiting']:,} records wait, and the counts so far are not the label's. Their "
-                      f"choice reaches you when they answer.")
-                return 0
             if run.get("state") == "ask":
-                time.sleep(1.0)
-                continue
+                # the analyst is asked only once Claude's command ends (labels/use.ts: Claude Code's question tool waits
+                # for the Bash call), so no choice comes while this waits: it ends at once, so that the question shows
+                print(f"{name}: waits for the analyst's choice, and nothing runs until they choose; they are asked when "
+                      f"your command ends. {s['waiting']:,} records wait, and the counts so far are not the label's. "
+                      f"After their choice, `thimble label {name} --wait` waits for the model's reads and prints the "
+                      f"counts.")
+                return 0
             if time.time() - t0 > a.wait:
                 print(f"{name}: still {s['waiting']:,} records waiting after {a.wait:.0f}s; the calls go on beside the session")
                 break
