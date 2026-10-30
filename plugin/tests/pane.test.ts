@@ -248,6 +248,8 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   expect(await scrollPane(s.$, { by: -1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
   expect(focused).toEqual(['mode-citations-auto cite + verify', 'mode-checkerModel-same as Claude', 'mode-citations-auto cite + verify'])
+  // the ring moving along the row picked (← →, tab) sets the choice it lands on; onto another row it lands on that
+  // row's choice set, picks that row and changes nothing
   const set: Any[] = []
   const rows: Record<string, unknown> = { citations: 'auto cite', claimsMode: 'on demand' }
   s.$.config = {
@@ -255,6 +257,14 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
     set: async (e: Any) => { set.push(e); rows[String(e.key).split('.').pop()!] = e.value; return {} },
   }
   s.$.ui.toast = () => undefined
+  const went: Any[] = []
+  const next = async (e: Any) => { went.push(e.element); return {} }
+  await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-citations-manual', origin: { kind: 'person' } }, next)
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
+  await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-claimsMode-auto', origin: { kind: 'person' } }, next)
+  expect(set.length).toBe(1)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('claimsMode')
+  expect(went).toEqual(['mode-citations-manual', 'mode-claimsMode-on demand'])
   // a click on a choice of another row sets it and picks that row, the ring on the choice now set: the tint and the
   // ring stand on the row that changed
   rows.labels = true
@@ -262,46 +272,6 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   expect(set.at(-1)).toMatchObject({ key: 'thimble@inline.labels', value: false })
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('labels')
   expect(focused.at(-1)).toBe('mode-labels-off')
-  setOptions({})
-})
-
-test('in the settings, the ring moving (tab, or a click before its press) sets nothing: it lands where it was moved and picks its row; ↵ on a choice sets it; the key row names only keys that act there, no ← or →', async () => {
-  const s = setup()
-  const focused: Any[] = []
-  s.$.ui.focus = async (a: Any) => { focused.push(a.key); return {} }
-  const set: Any[] = []
-  const rows: Record<string, unknown> = { citations: 'auto cite + verify', claimsMode: 'off' }
-  s.$.config = {
-    list: async () => Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })),
-    set: async (e: Any) => { set.push(e); rows[String(e.key).split('.').pop()!] = e.value; return {} },
-  }
-  s.$.ui.toast = () => undefined
-  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
-  await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'citations')
-  await draw(s)
-  const picked = async () => (await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value
-  const went: Any[] = []
-  const ring = (element: string) => s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element, origin: { kind: 'person' } }, async (e: Any) => { went.push(e.element); return {} })
-  // tab along Citations: the ring lands on each choice, and none is set
-  for (const c of ['auto cite', 'manual', 'off']) await ring(`mode-citations-${c}`)
-  expect(set).toEqual([])
-  expect(went).toEqual(['mode-citations-auto cite', 'mode-citations-manual', 'mode-citations-off'])
-  // on into another row, by its name, then a choice before the one set (every choice is reached by tab): the row is
-  // picked and the ring stays where it went; still nothing is set
-  await ring('switch-claimsMode')
-  expect(await picked()).toBe('claimsMode')
-  await ring('mode-claimsMode-auto')
-  expect(went.slice(-2)).toEqual(['switch-claimsMode', 'mode-claimsMode-auto'])
-  expect(set).toEqual([])
-  expect(rows).toMatchObject({ citations: 'auto cite + verify', claimsMode: 'off' })
-  // ↵ presses the choice under the ring: it is set, and the ring stays on it
-  await nodes(await draw(s)).find(n => n.props?.key === 'mode-claimsMode-auto').props.onPress()
-  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.claimsMode', value: 'auto' })])
-  expect(focused.at(-1)).toBe('mode-claimsMode-auto')
-  // the key row: docked, ↑ ↓ pick a setting; inline Claude Code scrolls the pane with them; tab and ↵ act in both
-  const foot = async (placement: string) => textOf(nodes(await drawPane(s.$, { requestId: 'thimble', props: { ...DOCK().props, placement } }, await paneNow(s.$), els)).find(n => n.props?.key === 'foot'))
-  expect(await foot('dock')).toBe('↑↓ setting · tab choice · ↵ set')
-  expect(await foot('inline')).toBe('tab choice · ↵ set')
   setOptions({})
 })
 

@@ -30,7 +30,7 @@ test('/thimble-settings opens the settings under their headings; a press on a ch
   expect(opened[0]).toMatchObject({ id: 'thimble', focus: true, closeOnEscape: true })
   const pane = await $.ui.mount(PANE)
   expect((await pane.find({ key: 'switch-coverage' }))?.text).toContain('Coverage')
-  for (const h of ['Settings', 'ANSWERS', 'COMMENTS', 'PANES', '↑↓ setting · tab choice · ↵ set']) expect(await pane.find({ type: 'Text', text: h })).toBeDefined()
+  for (const h of ['Settings', 'ANSWERS', 'COMMENTS', 'PANES', '↑↓ setting · ←→ choice']) expect(await pane.find({ type: 'Text', text: h })).toBeDefined()
   // every row the same: its choices, and what the one set gives under them
   expect((await pane.find({ key: 'sw-coverage' }))?.text).toMatch(/Coverage\s+on · off/)
   expect((await pane.find({ key: 'says-coverage' }))?.text).toContain('which files Claude has read')
