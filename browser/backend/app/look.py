@@ -28,7 +28,7 @@ from . import answer_comments, tools
 
 HERE = Path(__file__).resolve().parent
 LOOK_OF = HERE / "look_of.mjs"
-LENS_OF = {"heads-up": "heads", "explainers": "explain"}  # the order a look's lenses take
+LENS_OF = {"heads-up": "heads", "explainers": "explain"}  # the checks that are the terminal's lenses, each its lens
 GLOSSED_KEEP, HEADS_KEEP = 100, 20  # as the terminal's lens digests keep (plugin/explain/lens.mjs)
 # a link of the terminal's form, `[words](path#L12-20)`, in an explainer's or a heads-up's words
 _LINK_RE = re.compile(r"\[([^\[\]\n]+)\]\(([^()\s]+)\)")
@@ -98,8 +98,8 @@ async def run(c: str, lenses: list[str], cover: list[dict[str, Any]]) -> dict[st
 
     turns = {p["turn"] for p in cover}
     answers = [a for a in answer_comments.answers(c) if a["turn"] in turns]
-    if not answers:
-        return {"error": "the answer is no longer kept"}
+    if not answers:  # none of them is kept any more: nothing to mark
+        return {"items": []}
     msgs, objects = _msgs(c, answers)
     state = _state(c, {p["ref"] for p in cover})
     prompt = (await _node({"prompt": {"lenses": lenses, "msgs": msgs, "row": tools.hint("look-keys"),
