@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import itertools
 import json
 import os
 import re
@@ -22,7 +23,7 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 READ_LINES = 2000
 LINE_CHARS = 2000
@@ -152,8 +153,20 @@ def _binary(p: Path) -> bool:
         return False
 
 
-def _lines(p: Path) -> list[str]:
-    return p.read_text("utf-8", errors="replace").splitlines()
+def _lines(p: Path) -> Iterator[str]:
+    """A text file's lines, read one at a time, as the citation check reads them (the terminal's evidence.read_lines):
+    each ends at a newline alone, without it and a carriage return before it, so a U+2028 in a JSON string ends no
+    line, and the number Read or Grep gives a line is the one a citation of it names."""
+    with p.open("rb") as f:
+        for raw in f:
+            yield raw.decode("utf-8", errors="replace").removesuffix("\n").removesuffix("\r")
+
+
+def _window(p: Path, offset: int, limit: int) -> tuple[list[str], int]:
+    """Lines `offset` to `offset + limit - 1` of a text file (from 1), and how many lines follow them."""
+    lines = _lines(p)
+    shown = list(itertools.islice(lines, offset - 1, offset - 1 + limit))
+    return shown, sum(1 for _ in lines)
 
 
 def _files(base: Path) -> list[Path]:
@@ -235,9 +248,8 @@ async def _read(box: Box, a: dict[str, Any]) -> Out:
         return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
     offset = max(1, int(a.get("offset") or 1))
     limit = max(1, min(int(a.get("limit") or READ_LINES), READ_LINES))
-    lines = await asyncio.to_thread(_lines, q)
-    out = [f"{n:>6}\t{ln[:LINE_CHARS]}" for n, ln in enumerate(lines[offset - 1:offset - 1 + limit], offset)]
-    more = len(lines) - (offset - 1 + limit)
+    lines, more = await asyncio.to_thread(_window, q, offset, limit)
+    out = [f"{n:>6}\t{ln[:LINE_CHARS]}" for n, ln in enumerate(lines, offset)]
     if more > 0:
         out.append(f"[{more} more lines: read on with offset {offset + limit}]")
     return Out("\n".join(out) or "(empty file)")
