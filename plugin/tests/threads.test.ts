@@ -10,9 +10,10 @@ import { registerTell, tellFor } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
 import { askHere, drawThreads, passageRuns, threadUnder, threadUnderParts } from '../threads/pane'
 import { keptDir } from '../core/env'
+import { newReply } from '../marks/store'
 import { openThread, threadAnchor, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadQuestion, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
-import { threadKey } from '../threads/threads.mjs'
+import { answerRow, threadKey } from '../threads/threads.mjs'
 import { treeRows } from '../core/trail.mjs'
 import { promptStub } from './stubs'
 import { test } from './kit'
@@ -409,12 +410,11 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
   const tree = await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)
   const all = nodes(tree)
-  // the answer's drawing keeps the field, so Claude Code keeps those words in it (no value drawn over them), and the
-  // focus ring is asked onto it after the drawing: m, drawn above the field, does not take the ring's place (Claude
-  // Code draws a Button the ring is on inverted)
+  // the answer's drawing brings a new field, with those words, and the focus ring is asked onto it after the drawing's
+  // hook: m, drawn above the field, does not take the ring's place (Claude Code draws a Button the ring is on inverted)
   const field = all.find(n => n.type === 'Input')
-  expect(field.props.key).toBe(before.props.key)
-  expect(field.props.value).toBe(undefined)
+  expect(field.props.key).not.toBe(before.props.key)
+  expect(field.props.value).toBe('and then')
   later.splice(0).forEach(f => f())
   expect(focus).toEqual([{ requestId: 'thimble', key: field.props.key }])
   const steps = all.find(n => String(n.props?.key ?? '').endsWith('-steps'))
@@ -435,19 +435,21 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
 
 // Claude Code keeps a pane's focus ring at its place among the pane's Buttons and fields. An answer brings Buttons above
 // the input bar (its citations, the turning glyph after each while it is checked, m), which take the field's place, and
-// with the ring on one of them the person's next keys leave the pane for main's prompt
-test("the thread's input bar keeps the keys after each answer: each drawing asks the ring back onto it, until the person moves it", async () => {
+// with the ring on one of them the person's next keys leave the pane for main's prompt. The ring asked onto a field the
+// screen already shows lands before the drawing, which moves it off again; asked onto a new field, it lands once the
+// drawing that brings it is on screen
+test("the thread's input bar keeps the keys after each answer: a drawing that changes the Buttons above it brings a new field, with the words typed, and the ring is asked onto it, until the person moves it", async () => {
   const s = setup()
   const later: Array<() => void> = []
   s.$.clock.after = ((_ms: number, f: () => void) => { later.push(f); return { cancel() {} } }) as Any
   const focus: string[] = []
   s.$.ui.focus = async (a: Any) => { focus.push(a.key); return {} }
-  // one drawing of the thread, and what is asked of the ring after its hook: the field drawn, and the fields asked onto
+  // one drawing of the thread: its field, and the fields the ring is asked onto after the drawing's hook
   const draw = async () => {
     const field = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)).find(n => n.type === 'Input')
     focus.length = 0
     later.splice(0).forEach(f => f())
-    return { field: String(field.props.key), asked: [...focus] }
+    return { key: String(field.props.key), value: field.props.value, input: field.props.onInput, asked: [...focus] }
   }
   const ring = (element: string) => s.call('ui.focus', { component: 'Pane', requestId: 'thimble', plugin: 'thimble', element, origin: { kind: 'person' } }, async () => ({}))
   expect(await openThread(s.$, SCOPE)).toBe(true)
@@ -455,28 +457,52 @@ test("the thread's input bar keeps the keys after each answer: each drawing asks
   await settle()
   s.go()
   await first
+  const asking = await draw()
+  // the person types the next question while the thread answers
+  asking.input('and the')
   s.answer('agent-1', 'Most [stopped early](#), in [run 4](#).')
   await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
-  // the answer's drawing, and each one after it (its citations' checks start, turn and end): the ring onto the field
-  for (let i = 0; i < 3; i++) {
-    const d = await draw()
-    expect(d.asked).toEqual([d.field])
-  }
-  // the person moves the ring onto a citation (Tab, a click): it stays where they put it
-  await ring('row-made-up-1-a-m0-1')
-  expect((await draw()).asked).toEqual([])
-  // and back onto the field: the field holds the keys again
-  const back = (await draw()).field
-  await ring(back)
-  expect((await draw()).asked).toEqual([back])
-  // the next question: the new field takes the keys, while the thread answers and after
+  // the answer's two citations, the turning glyph after each while it is checked (the checks start as the thread's turn
+  // ends), and m, above the field: a new field, with the words typed, the ring asked onto it
+  const answered = await draw()
+  expect(answered.key).not.toBe(asking.key)
+  expect(answered.value).toBe('and the')
+  expect(answered.asked).toEqual([answered.key])
+  // a drawing that changes nothing above the field keeps it, and the ring where it is
+  const again = await draw()
+  expect(again.key).toBe(answered.key)
+  expect(again.asked).toEqual([])
+  // the checks end: the turning glyphs go
+  const t = threadOf(KEY)!
+  const row = answerRow(t, t.turns.length - 1)
+  const checked = (one: string, two: string) => newReply(s.$, { key: row, turnId: 'f1', rows: [row], startedAt: 1, settledAt: 2, items: [
+    { n: 1, row, words: 'stopped early', start: 5, end: 23, sentence: 'Most stopped early, in run 4.', status: one, shown: 'stopped early' },
+    { n: 2, row, words: 'run 4', start: 29, end: 38, sentence: 'Most stopped early, in run 4.', status: two, shown: 'run 4' },
+  ] } as Any)
+  await checked('verified', 'verified')
+  const verified = await draw()
+  expect(verified.key).not.toBe(again.key)
+  expect(verified.asked).toEqual([verified.key])
+  // the person moves the ring onto a citation (Tab, a click): it stays where they put it, as a citation's check fails
+  // after all (its × is a Button)
+  await ring('cite-made-up')
+  await checked('verified', 'failed')
+  const moved = await draw()
+  expect(moved.key).toBe(verified.key)
+  expect(moved.asked).toEqual([])
+  // back onto the field, the next question: the thread answering takes m away, and the new field takes the keys
+  await ring(moved.key)
   await askHere(s.$, SCOPE, 'and the 3 that passed?')
   const next = await draw()
-  expect(next.field).not.toBe(back)
-  expect(next.asked).toEqual([next.field])
+  expect(next.key).not.toBe(moved.key)
+  expect(next.asked).toEqual([next.key])
   // shown to be read (the tray's +), the thread's input bar waits: the ring is not asked onto it
   expect(await openThread(s.$, SCOPE, { read: true })).toBe(true)
-  expect((await draw()).asked).toEqual([])
+  s.answer('agent-1', 'They ran before the change.')
+  await s.call('turn.complete', { turnId: 'f2', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  const read = await draw()
+  expect(read.key).toBe(next.key)
+  expect(read.asked).toEqual([])
 })
 
 test("a card's thread shows the card collapsed, its title and the line asked about; e draws it whole", async () => {
