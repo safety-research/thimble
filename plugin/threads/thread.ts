@@ -42,7 +42,7 @@ import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { claudeCites } from '../settings/features.mjs'
-import { fieldSettled, fieldShown, fieldSubmitted } from './pane'
+import { fieldShown, fieldSubmitted, ringReleased } from './pane'
 import type { ThreadScope } from './seam'
 import { aboutOf, answerRow, cardPart, display, firstMessage, forkDirective, nextMessage, partAbout, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
 
@@ -165,11 +165,8 @@ export function threadsBright(): boolean {
 async function keep($: Engine, t: Thread): Promise<void> {
   if (retired.has(t)) return
   t.at = new Date().toISOString()
-  const was = threads.get(t.key)
   threads.set(t.key, t)
   if (t.agentId) byAgent.set(t.agentId, t.key)
-  // the drawing of the answer keeps the focus ring on the input bar (pane.tsx)
-  if (was?.status === 'running' && t.status !== 'running') fieldSettled($, t.key)
   try { await $.state.set({ ...THREAD, id: t.key }, { ...t }) } catch { /* drawn from the module's memory */ }
   await writeKept($, `threads/${t.id}.json`, t).catch(() => undefined)
   await bump($)
@@ -417,10 +414,8 @@ export async function sendToMain($: Engine, key: string): Promise<boolean> {
 export async function showThread($: Engine, key: string, o: { from?: string; ask?: boolean; read?: boolean } = {}): Promise<boolean> {
   const t = threads.get(key)
   if (!t) return false
-  if (o.read) { if (askNext === key) askNext = null } else {
-    if (o.ask) askNext = key
-    fieldShown($, key)
-  }
+  if (o.read) { if (askNext === key) askNext = null } else if (o.ask) askNext = key
+  fieldShown($, key, !!o.read)
   const p = t.scope.pane
   if (p && p.kind !== 'thread' && p.kind !== 'threads') return openPane($, p.kind, p.args, paneTitle(p.kind, p.args, t), { focus: true })
   // a citation's thread stands under its evidence
@@ -560,4 +555,5 @@ export function resetThreads(): void {
   poll = null
   restoredFor = ''
   askNext = null
+  ringReleased()
 }

@@ -27,6 +27,9 @@
 //                                      bar, which the docked pane keeps at its bottom (core/pane.ts); and whether the
 //                                      pane opened to ask, its input taking the keys
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
+//   threadRing(element)                the ring moved in the side pane onto `element` (core/pane.ts): a thread's input
+//                                      bar it lands on keeps it after each drawing, until the person moves it elsewhere
+//   threadsPaneClosed()                the side pane closed: no thread's input bar keeps the ring
 //   PaneEdit                           a field a pane edits in the input bar under it, in place of a question: the
 //                                      labels pane's (labels/pane.tsx labelEdit), its name, its value, what ↵ does
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
@@ -47,7 +50,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
+import { askHere, drawThreads, ringMoved, ringReleased, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadAnchor as anchorOf, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadQuestion as question, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
@@ -124,6 +127,17 @@ export async function threadUnderSplit($: Engine, e: Any, kind: string, args: un
 /** About how many rows threadUnder takes under a pane (threads/pane.tsx rowsUnder). */
 export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown): Promise<number> {
   return roomUnder($, e, kind, args)
+}
+
+/** The ring moved in the side pane onto `element` (none: one of Claude Code's own stops): onto a thread's input bar,
+ *  that field keeps it (threads/pane.tsx ringMoved). */
+export function threadRing(element: string | undefined): void {
+  ringMoved(element)
+}
+
+/** The side pane closed: no thread's input bar keeps the ring. */
+export function threadsPaneClosed(): void {
+  ringReleased()
 }
 
 /** A field a pane edits in the input bar under it (labels/pane.tsx labelEdit). */
