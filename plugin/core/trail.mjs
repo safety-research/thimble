@@ -35,7 +35,7 @@ export function crumbOf(kind, args) {
       if (a.open) return { words: 'sources', depth: 3 }
       if (a.claim) return { words: 'claim', depth: 2 }
       if (a.group != null && a.group !== '') return { words: 'cluster', depth: 1 }
-      return { words: 'evidence', depth: 0 }
+      return { words: 'claims', depth: 0 }
     // one label is one pane, whichever of its values, examples or definition shows: moving in it takes its place, so
     // esc never goes back to the label already open, only to all the labels; a field's edit stands over it, esc cancels
     case 'labels':

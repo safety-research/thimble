@@ -420,7 +420,7 @@ export function paneTitle(kind: string, args: unknown, t?: Thread | null): strin
   if (kind === 'evidence') return `citation ${a.n ?? ''}`.trim()
   if (kind === 'labels') return a.label ? `Label ${a.label}` : 'Labels'
   if (kind === 'coverage') return 'Coverage'
-  if (kind === 'claims') return 'Evidence'
+  if (kind === 'claims') return 'Claims'
   return (t?.subject || kind).slice(0, 60)
 }
 

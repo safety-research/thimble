@@ -98,12 +98,12 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
-    does: 'Press w to see the conversation\'s claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.',
+    key: 'claimsMode', title: 'Claims', group: 'Panes', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
+    does: 'Press w to see the conversation\'s claims. auto: thimble pulls them out of each answer in the background, which uses tokens. on demand: only when you press f in the pane. off: no Claims pane.',
     says: {
-      'auto': 'Press w to see the conversation\'s claims and their evidence. Claims are found after each answer.',
-      'on demand': 'Press w to see the conversation\'s claims and their evidence. Press f in the pane to find them.',
-      'off': 'No Evidence pane.',
+      'auto': 'Press w to see the claims. thimble pulls them out of each answer in the background, which uses tokens.',
+      'on demand': 'Press w to see the claims. thimble pulls them out only when you press f in the pane.',
+      'off': 'No Claims pane.',
     },
   },
   {
@@ -133,7 +133,7 @@ export const RETIRED = {
   squeeze: { type: 'boolean', title: 'Squeeze and catch-up (old setting)', description: 'Replaced by Rewrite and Catch-up.', default: true },
   counts: { type: 'boolean', title: 'Labels and coverage on the bar (old setting)', description: 'Replaced by Labels and Coverage.', default: true },
   squeezeCards: { type: 'boolean', title: 'Squeeze changes cards (old setting)', description: 'Removed: a squeeze may move or leave out a card.', default: true },
-  claims: { type: 'boolean', title: 'Claims (old setting)', description: 'Replaced by Evidence, which has its modes.', default: true },
+  claims: { type: 'boolean', title: 'Claims (old setting)', description: 'Replaced by Claims, which has its modes.', default: true },
 }
 
 /** Modes renamed since a value was saved under their old name, by feature: the old name stands for the new one, and
@@ -155,7 +155,7 @@ export const renamedTo = (key, saved) => (typeof saved === 'string' || typeof sa
  *  `DEFAULTS.at`, the first interactive session saves the new default where the old one stands and sets `defaultsAt`
  *  (term.ts); a value the person sets afterwards stays. None moves now: a value saved at an old default stays, so
  *  no one's settings change under them. `formerly`: the defaults a release had before (0.10.3: Citations auto cite,
- *  Evidence on demand), which the installer may have saved, so a value at one still counts as unset (atDefault).
+ *  Claims on demand), which the installer may have saved, so a value at one still counts as unset (atDefault).
  *  `defaultsAt` starts at `none`, no version, and not empty: the installer gives each field its default, Claude Code
  *  takes no empty value, and it says a field with no value is not set. */
 export const DEFAULTS = { at: '0.10.4', moved: {}, formerly: { citations: ['auto cite'], claimsMode: ['on demand'] } }

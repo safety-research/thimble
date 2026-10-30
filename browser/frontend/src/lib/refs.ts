@@ -262,11 +262,11 @@ export function ordinal(n: number): string {
   return `${n}${last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th'}`
 }
 
-/** `line 2 of the output`, `lines 2–3 of the 2nd output`; '' for a ref that is not an output span. */
+/** A card's printed lines as every chip and hover names them, whichever of the card's outputs holds them: `card output
+ * line 2`, `card output lines 2–3`; '' for a ref that is not an output span. */
 export function cellSpanLabel(p: { out?: number; line?: number; endLine?: number }): string {
   if (p.out == null || p.line == null) return ''
-  const lines = p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`
-  return `${lines} of the ${p.out === 0 ? 'output' : `${ordinal(p.out + 1)} output`}`
+  return `card output ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}`
 }
 
 /** the characters a column's or a row's label keeps on a chip */
@@ -274,15 +274,16 @@ const PART_LABEL_MAX = 20
 
 /**
  * The name a chip gives a ref into part of a card when no value is written with it: the table's cell as
- * `column · row`, printed lines as `line 8` or `lines 8–9` (a click on the chip shows them in the card's output), after
- * the card's name when the chip sits outside that card (`own` false). Null for a ref to a whole card.
+ * `column · row`, printed lines as `card output line 8` or `card output lines 8–9` (a click on the chip shows them in
+ * the card's output), after the card's name when the chip sits outside that card (`own` false). Null for a ref to a
+ * whole card.
  */
 export function cardPartLabel(p: { col?: string; row?: string; out?: number; line?: number; endLine?: number; step?: number }, name: string, own: boolean): string | null {
   let part: string | null = null
   // each label cut so the chip stays short; the hover shows the cell in its table
   const short = (s: string) => (s.length > PART_LABEL_MAX ? `${s.slice(0, PART_LABEL_MAX - 1).trimEnd()}…` : s)
   if (p.col != null && p.row != null) part = `${short(decodeLabel(p.col))} · ${short(decodeLabel(p.row))}`
-  else if (p.out != null && p.line != null) part = p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`
+  else if (p.out != null && p.line != null) part = cellSpanLabel(p)
   else if (p.step != null) part = `step ${p.step}`
   if (part == null) return null
   return own ? part : `${name} · ${part}`
@@ -303,7 +304,7 @@ export function refLabel(ref: string, among?: ReadonlyMap<string, string>): stri
   }
   switch (p.kind) {
     case 'cell':
-      return `card${p.col != null ? ` · ${p.col}/${p.row}` : p.out != null ? ` · ${cellSpanLabel(p)}` : p.step != null ? ` · step ${p.step}` : ''}`
+      return p.col == null && p.out != null && p.line != null ? cellSpanLabel(p) : `card${p.col != null ? ` · ${p.col}/${p.row}` : p.step != null ? ` · step ${p.step}` : ''}`
     case 'group':
       return 'group'
     case 'report':

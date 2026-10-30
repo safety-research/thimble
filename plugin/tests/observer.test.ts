@@ -103,7 +103,7 @@ test("an answer gets one look: a fork of the conversation with the lenses' secti
   const p = s.forks[0]!
   expect(p).toContain('OBSERVER\nPROMPT lens-explain\n\nPROMPT lens-heads\n\nPROMPT lens-claims')
   expect(p).toContain(`TURN Read this message of Claude's, above in the session: Claude's answer at the end of turn 1, which begins "Two runs failed, both on the p95 check." (1 line). It answers the analyst's message "How many test runs failed?".`)
-  expect(p).toContain('KEYS v visualize, s rewrite, w evidence')
+  expect(p).toContain('KEYS v visualize, s rewrite, w claims')
   expect(p).toContain('CARDS No cards in these turns.')
   expect(p).toContain('READ Claude read 3 of 7 files.')
   expect(p).toContain('REPLY {"glosses": [], "heads": null, "claims": []}')
@@ -126,7 +126,7 @@ test('with every feature it serves off, no look runs; one lens off has no sectio
   setOptions({})
 })
 
-test('with Explainers, Heads-ups and Evidence on demand (as Minimal sets them), no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
+test('with Explainers, Heads-ups and Claims on demand (as Minimal sets them), no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
   setOptions({ minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' })
   try {
     const s = setup([{ isAnswered: true, text: '{"heads": null}', usage: { input_tokens: 10, output_tokens: 5 } }])

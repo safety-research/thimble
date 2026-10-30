@@ -453,7 +453,7 @@ test('in the settings, the row picked and the line under it stay in view at any 
   await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
   const H = 16
   await draw(s, H)
-  // ↓ down to Evidence, far below the first window
+  // ↓ down to Claims, far below the first window
   while ((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value !== 'claimsMode') {
     await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })
     await draw(s, H)
@@ -469,7 +469,7 @@ test('in the settings, the row picked and the line under it stay in view at any 
   expect(top + treeRows(rows[k], 70)).toBeLessThanOrEqual(by + H - 2)
   // the line under it says what its mode gives, and nothing more for being picked
   const says = textOf(nodes(rows[k]).find(n => n.props?.key === 'says-claimsMode'))
-  expect(says).toContain('Claims are found after each answer.')
+  expect(says).toContain('thimble pulls them out of each answer in the background, which uses tokens.')
   expect(says).toBe((SWITCHES.find(x => x.key === 'claimsMode') as Any).says.auto)
   setOptions({})
 })

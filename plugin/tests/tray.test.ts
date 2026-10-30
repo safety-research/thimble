@@ -83,7 +83,7 @@ function claudeBand($: Any, scrolls: Any[], maxRows: number, cols = 100) {
 /** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item` (or whose
  *  citations, a list of items); `more`: the turn's cards, the message's parts and kept files to add (a card's meta.json
  *  under cards/<id>/). */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[]; panes?: () => Any[] } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[]; panes?: () => Any[]; deny?: string } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...(more.env ?? {}) })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
@@ -112,7 +112,8 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { c
   on('ui.panes', () => ({ value: more.panes?.() ?? [] }) as never)
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-made-up', agentId: `agent-repair-${spawns.length}` } as never })
+  // `deny`: Claude Code refuses each spawn, saying why
+  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return (more.deny ? { deny: more.deny } : { model: 'claude-made-up', agentId: `agent-repair-${spawns.length}` }) as never })
   on('agent.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('prompt.submit', (_$: unknown, e: Any) => { submitted.push(e); return { text: e.text } })
@@ -211,14 +212,15 @@ test('a corrected value computed by code: drawn in the reply as a verified one, 
   expect(band).not.toContain('corrected; was')
   expect(band).not.toContain('The output says 11')
   expect(band).toContain('print(f"failed: {bad}")│failed: 11')
-  // + expand all at the end of the ruled block, dim
-  expect(band).toContain('│failed: 11│+ expand all')
-  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ expand all')?.props?.dimColor).toBe(true)
+  // + show all at the end of the ruled block, dim: its own verb, as `d expand N more lines` under a cut tray's window
+  // shows the rest of the body
+  expect(band).toContain('│failed: 11│+ show all')
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ show all')?.props?.dimColor).toBe(true)
   expect(band).not.toContain('runs: 40')
   expect(band).not.toContain('print("runs:", n)')
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'print(f"failed: {bad}")')?.props?.color).toBe('permission')
   expect(drawnBand.some(n => n.type === 'Code')).toBe(false)
-  expect(band).toContain('+ expand all')
+  expect(band).toContain('+ show all')
   // (keys apart, so they are not a word typed)
   await clock.advance(2000)
   // +: all the code (as code), then all the output after the rule, its value still in the tint; no headings
@@ -228,7 +230,7 @@ test('a corrected value computed by code: drawn in the reply as a verified one, 
   expect(code?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
   band = textOf(open)
   expect(band).toContain('│runs: 40│failed: 11│passed: 29')
-  expect(band).not.toContain('expand all')
+  expect(band).not.toContain('show all')
   expect(band).toContain('− collapse')
   expect(band).not.toContain('Output of the code')
   expect(band).not.toContain('The code')
@@ -303,7 +305,7 @@ test('a file\'s line that holds bytes that do not print (a log\'s color codes) d
   expect(all(pane).some(n => n.type === 'Text' && n.props?.bold === true && textOf(n) === '12')).toBe(true)
 })
 
-test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', CITES, async ($, on) => {
+test('each key of the tray is a click too: + show all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', CITES, async ($, on) => {
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
     evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nprint(f"failed: {bad}")', output: 'runs: 40\nfailed: 12\npassed: 28', highlight: [[17, 19]] },
@@ -311,9 +313,9 @@ test('each key of the tray is a click too: + expand all and − collapse as + an
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('✓ verified')
-  expect(band).toContain('+ expand all')
+  expect(band).toContain('+ show all')
   expect(band).not.toContain('next prompt')
-  // + expand all: all the output, as +; − collapse: back
+  // + show all: all the output, as +; − collapse: back
   let tray = await $.ui.mount(above())
   await tray.press({ key: 'more-press' })
   await tray.unmount()
@@ -325,7 +327,7 @@ test('each key of the tray is a click too: + expand all and − collapse as + an
   await tray.unmount()
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('runs: 40')
-  expect(band).toContain('+ expand all')
+  expect(band).toContain('+ show all')
   // a click on the citation's words in the tray's title closes it, as in the reply
   tray = await $.ui.mount(above())
   await tray.press({ key: 'tray-title' })
@@ -713,7 +715,7 @@ test('a tray taller than the rows over the bar takes the window Claude Code show
   // the tray's head and its keys stay; the body shows from its top, the lines under the window counted
   expect(d.text).toContain('a ask')
   expect(d.top).toBe(0)
-  expect(Number(/↓ (\d+) more line/.exec(d.text)?.[1])).toBeGreaterThan(5)
+  expect(Number(/expand (\d+) more line/.exec(d.text)?.[1])).toBeGreaterThan(5)
   // the wheel over the band moves the tray's window, a row a tick, and not the band's own
   await band.wheel(2)
   d = await band.draw()
@@ -753,12 +755,24 @@ test('a tray taller than the rows over the bar takes the window Claude Code show
   expect(await whole.wheel(1)).toBe(false)
 })
 
-test('a tray cut at a short height pages: ↓ N more lines is a click that moves its window a page, ↑ N lines above one back, and d and u do the same; a word that starts with d is typed', CITES, async ($, on) => {
+test('a tray cut at a short height: d expand N more lines, a click too, shows the rest, as many lines as the band has room for, its blank rows too, and the row then says how many remain; ↑ N lines above and u go a page back up; a word that starts with d is typed', CITES, async ($, on) => {
   const { clock } = await resumed($, on, TALL, 's-tray-page')
+  const lines = (n: number) => `${n} line${n === 1 ? '' : 's'}`
   const drawn = async (maxRows = 8) => {
     const band = await $.ui.render(above(maxRows))
     const top = all(band).find(n => n.props?.key === 'tray-window-in')?.props?.top
-    return { band, text: textOf(band), top: typeof top === 'number' ? -top : 0, button: (id: string) => all(band).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`) }
+    const keys = kidsOf(band).map(n => String(n.props?.key))
+    // the band's blank rows: above the tray, and over the bar
+    const blanks = kidsOf(band).filter(n => n.type === 'Text' && textOf(n) === ' ').length
+    return {
+      band, keys, blanks, text: textOf(band), top: typeof top === 'number' ? -top : 0, rows: Number(all(band).find(n => n.props?.key === 'tray-window')?.props?.height),
+      button: (id: string) => all(band).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`),
+    }
+  }
+  // the band fits its rows, the bar's row last: the bar stays on screen
+  const fits = (d: Awaited<ReturnType<typeof drawn>>) => {
+    expect(treeRows(d.band, 100)).toBeLessThanOrEqual(8)
+    expect(d.keys.at(-1)).toMatch(/^bar/)
   }
   // a click on the row under the window, in the band as mounted at the same height
   const click = async (id: string) => {
@@ -779,32 +793,61 @@ test('a tray cut at a short height pages: ↓ N more lines is a click that moves
   await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
   await open()
   let d = await drawn()
-  const below = Number(/↓ (\d+) more line/.exec(d.text)?.[1])
+  fits(d)
+  const below = Number(/expand (\d+) more line/.exec(d.text)?.[1])
+  const first = d.rows
   expect(below).toBeGreaterThan(5)
   expect(d.top).toBe(0)
-  // a click on ↓ N more lines: a page further down, and ↑ N lines above under the window too
-  const down = d.button('down')
-  expect(textOf(down)).toBe(`d ↓ ${below} more lines`)
+  // the band's blank rows, above the tray and over the bar
+  expect(d.blanks).toBe(2)
+  // the row under the window: its key, where it acts, then what it does
+  expect(textOf(d.button('down'))).toBe(`d expand ${below} more lines`)
+  // a click on it: the tray takes the band's blank rows too, and its window moves on to the lines after the ones shown,
+  // the last of those staying in view: a window of one row keeps that row, and the rows it gains show the lines after it
   await click('down')
   d = await drawn()
-  const page = d.top
-  expect(page).toBeGreaterThan(0)
-  expect(d.text).toContain(`↑ ${page} line${page === 1 ? '' : 's'} above`)
-  // ↑ N lines above: a page back up
+  fits(d)
+  expect(d.blanks).toBe(0)
+  expect(d.rows).toBe(first + 2)
+  const moved = d.top
+  expect(moved).toBe(first - 1)
+  // the lines that still remain
+  expect(d.text).toContain(`d expand ${below - 2 - moved} more line`)
+  // again: a page on, its last line staying in view, and the lines above are named
+  const page = first + 1
+  await click('down')
+  d = await drawn()
+  expect(d.top).toBe(moved + page)
+  expect(d.text).toContain(`d expand ${below - 2 - moved - page} more line`)
+  expect(d.text).toContain(`↑ ${lines(moved + page)} above`)
+  // ↑ N lines above: a page back up; the tray keeps the rows it took
   await click('up')
-  expect((await drawn()).top).toBe(0)
-  // d at an empty prompt pages down, u back up
+  d = await drawn()
+  expect(d.top).toBe(moved)
+  expect(d.rows).toBe(first + 2)
+  // d at an empty prompt shows the lines after the window, u goes back up
   expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
-  expect((await drawn()).top).toBe(page)
+  expect((await drawn()).top).toBe(moved + page)
   await clock.advance(2000)
   expect(await $.prompt.edit(key('u'))).toEqual({ text: '', cursor: 0 })
   expect((await drawn()).top).toBe(0)
   await clock.advance(2000)
-  // a word that starts with d: the page goes back, and the word is typed
+  // another mark, or the same one opened again, starts in the rows over the bar
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  await open()
+  d = await drawn()
+  expect(d.rows).toBe(first)
+  expect(d.blanks).toBe(2)
+  // a word that starts with d: the tray goes back as it was, and the word is typed
   expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
+  expect((await drawn()).rows).toBe(first + 2)
   const word = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'o' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'o' } as never) as Any
   expect(word.text).toBe('do')
-  expect((await drawn()).top).toBe(0)
+  d = await drawn()
+  expect(d.top).toBe(0)
+  expect(d.rows).toBe(first)
+  expect(d.blanks).toBe(2)
 })
 
 // a value code computed, the citation's evidence three hundred lines of output
@@ -834,14 +877,14 @@ test('at the narrowest tray, with lines above and below in the hundreds, the row
   const text = textOf(row)
   // both parts, each with its key, in the row's 36 columns
   expect(text.length).toBeLessThanOrEqual(36)
-  const [, above_, below_] = /^u ↑ (\d+) above · d ↓ (\d+) more$/.exec(text) ?? []
+  const [, above_, below_] = /^u ↑ (\d+) above · d expand (\d+) more$/.exec(text) ?? []
   expect(Number(above_)).toBeGreaterThanOrEqual(100)
   expect(Number(below_)).toBeGreaterThanOrEqual(100)
   // each part still a click named by its whole words
-  expect(all(row).filter(n => n.type === 'Button').map(n => n.props.label)).toEqual([`↑ ${above_} lines above`, `↓ ${below_} more lines`])
+  expect(all(row).filter(n => n.type === 'Button').map(n => n.props.label)).toEqual([`↑ ${above_} lines above`, `expand ${below_} more lines`])
   // a wider tray keeps the whole words
   const wide = textOf(all(await $.ui.render(above(8))).find(n => n.props?.key === 'tray-scroll'))
-  expect(wide).toMatch(/^u ↑ \d+ lines above · d ↓ \d+ more lines$/)
+  expect(wide).toMatch(/^u ↑ \d+ lines above · d expand \d+ more lines$/)
 })
 
 // a heads-up whose words are a citation's words, or hold them
@@ -930,7 +973,7 @@ test("an explainer's or a heads-up's links to a file's lines draw as the answer'
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
-test('c cites the selected words in auto cite + verify too: while they wait the bar says c cite beside the claims\' w evidence, and c opens their citation in the tray; with none selected, c is a letter of the prompt, and w opens Evidence', CITES, async ($, on) => {
+test('c cites the selected words in auto cite + verify too: while they wait the bar says c cite beside the claims\' w claims, and c opens their citation in the tray; with none selected, c is a letter of the prompt, and w opens Claims', CITES, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
@@ -942,7 +985,7 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   // the claims keep their item on the bar while words wait: c and w each name one thing
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('c cite')
-  expect(band).toContain('w evidence')
+  expect(band).toContain('w claims')
   expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
   // the words are a citation of their own, open in the tray, and its check started; the selection no longer waits
@@ -951,7 +994,7 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   expect(band).toContain('a ask · 0 close')
   expect(spawns.length).toBe(1)
   expect(band).not.toContain('c cite')
-  expect(band).toContain('w evidence')
+  expect(band).toContain('w claims')
   // with nothing selected, c is typed and opens nothing, as q, a letter no one takes (the first such letter reads what
   // the cards' keys need, once); at the key c reads the selection and none of the state: the open tray's citation,
   // which c does not act on, is not read for it
@@ -962,13 +1005,13 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   expect(gets).toBe(0)
   await clock.advance(1000)
   expect(opens).toEqual([])
-  // w opens Evidence
+  // w opens Claims
   expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
-  expect(opens).toEqual(['Evidence'])
+  expect(opens).toEqual(['Claims'])
 })
 
-test('with Evidence off, c cites the selected words, and with none selected c is a letter of the prompt, since nothing on the bar names it', { options: { citations: 'auto cite + verify', claimsMode: 'off' } }, async ($, on) => {
+test('with Claims off, c cites the selected words, and with none selected c is a letter of the prompt, since nothing on the bar names it', { options: { citations: 'auto cite + verify', claimsMode: 'off' } }, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
@@ -1033,18 +1076,18 @@ test("c with words selected reads the selection once and no state at the key, ho
 test("a double click on one of the bar's items selects its word, which is the bar's, not the answer's that also has it: the bar names neither c nor e; the answer's words, as its row draws them, still count", CITES, async ($, on) => {
   let selected: Any
   on('ui.selection', () => ({ value: selected }))
-  await resumed($, on, { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40' }, 's-tray-control', { text: 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.' })
-  expect(textOf(await $.ui.render(above()))).toContain('w evidence')
-  // `evidence`, as a double click on the bar's `w evidence` selects it
-  selected = { text: 'evidence' }
+  await resumed($, on, { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40' }, 's-tray-control', { text: 'Of the runs, [12 of 40](#) failed on the p95 check, as the claims show.' })
+  expect(textOf(await $.ui.render(above()))).toContain('w claims')
+  // `claims`, as a double click on the bar's `w claims` selects it
+  selected = { text: 'claims' }
   let band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('c cite')
   expect(band).not.toContain('e explain')
   // the same word in the answer, among others
-  selected = { text: 'as the evidence shows', requestId: 'row-t1' }
+  selected = { text: 'as the claims show', requestId: 'row-t1' }
   expect(textOf(await $.ui.render(above()))).toContain('c cite')
   // the corrected words the row draws in place of the citation's
-  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.')))).toContain('11 of 40 failed')
+  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the claims show.')))).toContain('11 of 40 failed')
   selected = { text: 'runs, 11 of 40 failed', requestId: 'row-t1' }
   band = textOf(await $.ui.render(above()))
   expect(band).toContain('c cite')
@@ -1122,11 +1165,11 @@ test("a click that slid a cell on the row under a paged tray's window leaves a p
   await open()
   await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
   await open()
-  expect(textOf(await $.ui.render(above(8)))).toMatch(/d ↓ \d+ more lines/)
+  expect(textOf(await $.ui.render(above(8)))).toMatch(/d expand \d+ more lines/)
   // a click on it that slid a cell: its words, with its key and without
   expect(await counts({ text: 'more' }, 8)).toBe(false)
   expect(await counts({ text: 'lines' }, 8)).toBe(false)
-  expect(await counts({ text: 'd ↓' }, 8)).toBe(false)
+  expect(await counts({ text: 'd expand' }, 8)).toBe(false)
   // the answer's own words still count
   expect(await counts({ text: 'failed on the p95 check', requestId: 'row-t1' }, 8)).toBe(true)
 })
@@ -1201,7 +1244,7 @@ test("c on words selected since the bar last drew reads a few states at most, ho
   expect(spawns.length).toBe(2)
 })
 
-test("the Evidence pane's w close is a click alone: a w typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed, and a question that starts with w is typed whole", CITES, async ($, on) => {
+test("the Claims pane's w close is a click alone: a w typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed, and a question that starts with w is typed whole", CITES, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   on('ui.selection', () => ({ value: undefined }))
   // the side pane as Claude Code keeps it: up from an open until a close
@@ -1210,14 +1253,14 @@ test("the Evidence pane's w close is a click alone: a w typed while the pane hol
   const closes: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); up = true; return { value: { isPlaced: true } } as never })
   on('ui.close', (_$: unknown, e: Any) => { closes.push(e.id); up = false; return { value: undefined } as never })
-  const { clock } = await resumed($, on, QUOTED, 's-tray-wclose', { panes: () => (up ? [{ id: 'thimble', title: 'Evidence' }] : []) })
-  expect(textOf(await $.ui.render(above()))).toContain('w evidence')
+  const { clock } = await resumed($, on, QUOTED, 's-tray-wclose', { panes: () => (up ? [{ id: 'thimble', title: 'Claims' }] : []) })
+  expect(textOf(await $.ui.render(above()))).toContain('w claims')
   expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
-  expect(opens).toEqual(['Evidence'])
+  expect(opens).toEqual(['Claims'])
   // the pane's key row ends with w close, a click alone: no Button of the pane takes w, so Claude Code types a w typed
   // in the pane into the prompt
-  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Evidence', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Claims', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
   const buttons = all(pane).filter(n => n.type === 'Button')
   expect(buttons.filter(b => b.props.hotkey === 'w')).toEqual([])
   const close = buttons.find(b => String(b.key ?? b.props.key) === 'key-w')
@@ -1229,7 +1272,7 @@ test("the Evidence pane's w close is a click alone: a w typed while the pane hol
   // open again: a question that starts with w, typed on, is a word, whole in the prompt, and the pane stays
   expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
-  expect(opens).toEqual(['Evidence', 'Evidence'])
+  expect(opens).toEqual(['Claims', 'Claims'])
   expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   expect(await $.prompt.edit(key('h'))).toEqual({ text: 'wh', cursor: 2 })
   expect(await $.prompt.edit({ ...(key('y') as Any), text: 'wh', cursor: 2, start: 2, end: 2 } as never)).toEqual({ text: 'why', cursor: 3 })
@@ -1379,6 +1422,144 @@ test("while the bar's ] is lit, ] from rest opens the first of the answer's mark
   expect(await rest()).toBe('] show heads up')
   await press(']')
   expect(await shows()).toContain('Retried runs count twice')
+})
+
+test('each key shows once, where it acts: a card on screen names a in its header only while a reaches it; the open tray names a in its header, and on a card ] reached the bar names it', CITES, async ($, on) => {
+  const id = 'c0123456789af'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_7', agentId: 'a-made-up', anchorRow: 'row-t1', keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_7: { version: 1 } }, at: 1 }
+  const { clock } = await resumed($, on, QUOTED, 's-tray-head-a', { kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  // the card's Client says it is on screen, as it does once drawn
+  const shown = await $.ui.mount(answer('row-t1', TEXT))
+  await shown.unmount()
+  const head = async () => textOf(all(await $.ui.render(answer('row-t1', TEXT))).find(n => n.props?.key === 'head-keys'))
+  const band = async () => textOf(await $.ui.render(above(40)))
+  expect(await head()).toBe('a ask · p artifact')
+  // ]: the tray on the citation names a in its header, and a goes there, so the card's header names ask without it;
+  // the bar names ] and the card it goes to
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const open = await band()
+  expect(open).toContain('a ask · 0 close')
+  expect(open.match(/a ask/g)).toEqual(['a ask'])
+  expect(open).toContain('] next card')
+  expect(await head()).toBe('ask · p artifact')
+  // ] again reaches the card: the bar names a, which asks about it, and the card's header still names ask without it
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const stand = await band()
+  expect(stand).toContain('a ask · [ previous citation · 0 back')
+  expect(stand.match(/a ask/g)).toEqual(['a ask'])
+  expect(await head()).toBe('ask · p artifact')
+  // 0 gives the keys back: a reaches the card again, and its header names it
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).not.toContain('a ask')
+  expect(await head()).toBe('a ask · p artifact')
+})
+
+test('each key shows once, where it acts: with Heads-ups on demand, the tray on a citation with a heads-up on its words names h in its header, and the bar leaves its h heads-ups out until the tray closes', { options: { citations: 'auto cite + verify', details: 'on demand' } }, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-h-once', { parts: HEADS })
+  const band = async () => textOf(await $.ui.render(above(40)))
+  expect(await band()).toContain('h heads-ups')
+  // ] reaches the heads-up on the citation's words, and ] again the citation: h opens that heads-up over it, which the
+  // tray's header names alone
+  for (const k of [']', ']']) {
+    expect(await $.prompt.edit(key(k))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  const open = await band()
+  expect(open).toContain('failed: 12')
+  expect(open.match(/h heads-ups?/g)).toEqual(['h heads-up'])
+  // closed: h asks for heads-ups on the answer again, and the bar names it
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).toContain('h heads-ups')
+})
+
+test("each key shows once, where it acts: while a fix's line names y, d and n, which go to it, the bar names a card's own keys less those", CITES, async ($, on) => {
+  const id = 'c0123456789af'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_7', agentId: 'a-made-up', anchorRow: 'row-t1', keys: ['n', 'd', 'o'], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_7: { version: 1 } }, at: 1 }
+  // the fixes as the kernel keeps them, and a fix's line once one is ready
+  const fix = { id: 1, title: 'Bar says read', words: ['make the bar say read'], rounds: 1, made_in: 's-tray-fix-keys', created: 0, state: 'ready', work: null, commit: null, files: [], tests: 'passed', summary: '', error: null }
+  const fixes = { fixes: [fix], on: false, live: '/made-up/live', version: '0.10.7', count_on: 0, pointed: false, gen: 1 }
+  let ready = false
+  on('state.get', async (_$: unknown, e: Any, next: Any) => (ready && e?.key === 'fixLine' ? { value: { value: { id: 1, kind: 'ready' }, version: 1 } } : ready && e?.key === 'fixes' ? { value: { value: fixes, version: 1 } } : next(e)))
+  await resumed($, on, QUOTED, 's-tray-fix-keys', { kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  // the card's Client says it is on screen, as it does once drawn
+  const shown = await $.ui.mount(answer('row-t1', TEXT))
+  await shown.unmount()
+  const band = async () => textOf(await $.ui.render(above(20)))
+  expect(await band()).toContain('n d o card keys')
+  // a fix ready, its line above the bar
+  ready = true
+  const now = await band()
+  expect(now).toContain('y use it now · d what changed · n later')
+  expect(now).toContain('o card keys')
+  expect(now).not.toContain('n d o card keys')
+  expect(now.match(/\bd what changed|\bd o\b|\bn d\b/g)).toEqual(['d what changed'])
+})
+
+test("a repair that did not start: its line says what failed and why; while the tray shows x repair on that citation, the line leaves out the sentence that says to press x, and says it again once the tray closes", CITES, async ($, on) => {
+  const failed = { ...QUOTED, status: 'failed', shown: '12 of 40', reason: 'Line 4 says 11 failed.' }
+  const { clock } = await resumed($, on, failed, 's-tray-repair-line', { deny: 'a made-up refusal' })
+  const band = async () => textOf(await $.ui.render(above(20)))
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).toContain('x repair')
+  expect(await $.prompt.edit(key('x'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  // the tray shows x repair on the citation: the line says what failed, and x once, in the tray
+  const open = await band()
+  expect(open).toContain('The repair did not start (a made-up refusal).')
+  expect(open).not.toContain('Press x')
+  expect(open.match(/x repair/g)).toEqual(['x repair'])
+  // closed: x repair shows nowhere, so the line says how to try again
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const closed = await band()
+  expect(closed).not.toContain('x repair')
+  expect(closed).toContain('The repair did not start (a made-up refusal). Press x on the citation to try again.')
+})
+
+test('each key shows once, where it acts: while the Claims pane shows, its key row names w close, and the bar names the claims without w; w still closes it, and closed, the bar names w again', CITES, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  on('ui.selection', () => ({ value: undefined }))
+  let up = false
+  const closes: Any[] = []
+  on('ui.open', () => { up = true; return { value: { isPlaced: true } } as never })
+  on('ui.close', (_$: unknown, e: Any) => { closes.push(e.id); up = false; return { value: undefined } as never })
+  const { clock } = await resumed($, on, QUOTED, 's-tray-w-once', { panes: () => (up ? [{ id: 'thimble', title: 'Claims' }] : []) })
+  const band = async () => textOf(await $.ui.render(above()))
+  expect(await band()).toContain('w claims')
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(up).toBe(true)
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Claims', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  expect(textOf(pane)).toContain('w: close')
+  const beside = await band()
+  expect(beside).toContain('claims')
+  expect(beside).not.toContain('w claims')
+  // w, typed in the pane, reaches the prompt and closes it
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(closes).toEqual(['thimble'])
+  expect(await band()).toContain('w claims')
+})
+
+test("each key shows once, where it acts: while a click gave the squeeze chips the keyboard, every key goes to them, so the bar's right names its items without their letters, each still a click", CITES, async ($, on) => {
+  await resumed($, on, QUOTED, 's-tray-chips-held')
+  const band = async () => textOf(await $.ui.render(above()))
+  expect(await band()).toContain('w claims')
+  expect(await $.prompt.edit(key('s'))).toEqual({ text: '', cursor: 0 })
+  const ui = await $.ui.mount(answer('row-t1', TEXT))
+  await ui.press({ key: 'lvl-length-1' })
+  await ui.key({ key: 'return' })
+  await ui.unmount()
+  const held = await band()
+  expect(held).toContain('claims')
+  expect(held).not.toContain('w claims')
+  const press = all(await $.ui.render(above())).find(n => n.type === 'Button' && n.props?.key === 'bar-claims')
+  expect(press?.props?.label).toBe('claims')
 })
 
 test('an answer that shows no marks: the bar names no ]', CITES, async ($, on) => {

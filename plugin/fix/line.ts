@@ -77,6 +77,13 @@ export async function fixKey($: Engine, k: string): Promise<{ later: () => Promi
   return { later: () => pressLine($, l.id, l.kind, k) }
 }
 
+/** The keys the line takes now, while it shows, which it names itself: nothing else names them (core/answerview.ts
+ *  heldKeys), as a key at an empty prompt reaches the line before the tray or a card (hooks/keys.ts). */
+export async function fixHeld($: Engine): Promise<string[]> {
+  const l = await fixLineNow($)
+  return l ? keysOf(l, l.kind === 'failed' ? await fixOf($, l.id) : null) : []
+}
+
 /** A failed fix's view after d as the bar last drew it: whether its keys showed, which they do only while the prompt box
  *  is empty, as they act only there; null while no such view shows. The drawing keeps it (fixLineRows). */
 let keysShown: boolean | null = null

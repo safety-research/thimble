@@ -8,8 +8,12 @@
 //                                      explainers at rest; while it is open, its own (a taker as hooks/keys.ts takes it)
 //   trayHolds($)                       whether it holds the keys now (open, or a card ] reached stands): its keys then
 //                                      come before every other feature's
-//   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most the rows of the
-//                                      window Claude Code shows the band in (`room`)
+//   trayHeld($, ask)                   the keys it takes now, which nothing else names (core/answerview.ts heldKeys)
+//   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most the rows the band gives
+//                                      it (`room`: those over the bar; once the person asked for the rest of its body,
+//                                      the band's blank rows too)
+//   trayShape()                        the tray as last drawn: whether it took those blank rows (the band leaves them
+//                                      out), and whether its body shows in a window (the band then takes the wheel)
 //   trayBar($, on, preview)            its items at the bar's left while a card ] reached holds the keys (an open
 //                                      tray's keys are in its header); at rest, ] while the answer shows marks
 //   trayFocus($, row)                  what the tray shows on this row, so the row draws it in focus: a citation by its
@@ -30,7 +34,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { bandDrawn, closeOnRow, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, rowShown, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, type BandRoom } from './tray'
+import { bandDrawn, closeOnRow, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, rowShown, trayBand as band, trayBar as bar, trayFocus as focus, trayHeld as held, trayHolds as holds, trayKey as key, trayShape as shapeNow, type BandRoom } from './tray'
 
 export type { BandRoom }
 
@@ -46,8 +50,16 @@ export async function trayHolds($: Engine): Promise<boolean> {
   return holds($)
 }
 
+export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
+  return held($, ask)
+}
+
 export async function trayBand($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
   return band($, els, width, room)
+}
+
+export function trayShape(): { tight: boolean; windowed: boolean } {
+  return shapeNow()
 }
 
 export async function trayBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {

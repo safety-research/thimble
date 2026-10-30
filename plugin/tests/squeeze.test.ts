@@ -6,6 +6,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
+import { layoutLines } from '../cards/layout.js'
 import { accent } from '../core/theme'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
@@ -23,6 +24,9 @@ function textOf(n: Any): string {
   if (Array.isArray(n)) return n.map(textOf).join('')
   return textOf(n.props?.children) + (n.type === 'Markdown' ? String(n.props.text) : '') + textOf(n.children)
 }
+
+/** Words as read, the spaces that keep the chips' columns as one. */
+const flat = (s: string) => s.replace(/\s+/g, ' ')
 
 const VIEW = { columns: 100, rows: 40, isFullscreen: true }
 const answer = (requestId: string, text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId, viewport: VIEW, props: { text, isFirstOfReply: true } }) as never
@@ -55,7 +59,8 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
   on('command.register', () => ({ value: { command: 'x' } }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.scroll', () => ({ value: undefined }))
-  on('prompt.fill', () => ({ isFilled: true }) as never)
+  const fills: Any[] = []
+  on('prompt.fill', (_$: unknown, e: Any) => { fills.push(e); return { isFilled: true } as never })
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   on('prompt.change', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   const forks: Any[] = []
@@ -79,7 +84,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, forks, ask, say, turn, press, bar, files }
+  return { clock, asked, forks, ask, say, turn, press, bar, files, fills }
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
@@ -89,12 +94,11 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   await t.turn('t1', LONG)
   expect(await t.bar()).toContain('s rewrite')
   expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
+  // the chips name their keys, each where it acts, and the bar none of them: each key shows once
+  const chips = textOf((await chipsDrawn($, 'row-t1', LONG)).tree)
+  for (const k of ['1 Length', '[ shorter', '] longer', '2 Background', '+ your own', 's close']) expect(chips).toContain(k)
   const open = await t.bar()
-  expect(open).toContain('[ shorter · ] longer')
-  // leaving comes first: `s close` is the bar's first item while the chips are open
-  expect(open).toContain('thimble  s close · ')
-  expect(open).not.toContain('s done')
-  expect(open).toContain('+ your own')
+  for (const k of ['s close', 'shorter', 'longer', 'chip', 'your own', 's done']) expect(open).not.toContain(k)
   const under = textOf(await $.ui.render(answer('row-t1', LONG)))
   expect(under).toContain(LONG.slice(0, 20))
   await t.press(']')
@@ -130,8 +134,10 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   await t.press('s')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(0)
-  expect(await t.bar()).toContain('1–2 chip')
-  expect(textOf((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).tree)).not.toContain('atch up')
+  const under = textOf((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).tree)
+  expect(under).toContain('2 Background')
+  expect(under).not.toContain('atch up')
+  expect(await t.bar()).not.toContain('chip')
   await t.press('s')
   // b writes the catch-up
   await t.press('b')
@@ -177,7 +183,7 @@ test('keys pressed in a row make one rewrite, at the last level, 1 s after the l
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('the much longer version.')
 })
 
-test("a bar narrower than the open chips' items lays them on more rows, each whole on one row and none wider than the bar, the line that says a chip goes no further too", async ($, on) => {
+test("with the chips open, a bar narrower than its items lays them on more rows, each whole on one row and none wider than the bar, the line that says a chip goes no further too; the chips' keys stand in the chips", async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
   await t.press('s')
@@ -188,7 +194,11 @@ test("a bar narrower than the open chips' items lays them on more rows, each who
   const rows = kids(band).filter(n => /^bar/.test(String(n.props?.key))).map(textOf)
   expect(rows.length).toBeGreaterThan(1)
   for (const r of rows) expect(textWidth(r)).toBeLessThanOrEqual(60)
-  for (const item of ['s close', 'Background goes no further than novice', '[ more novice', '] more expert', '+ your own']) expect(rows.some(r => r.includes(item))).toBe(true)
+  expect(rows.some(r => r.includes('Background goes no further than novice'))).toBe(true)
+  // the keys that move the picked chip are on its ends, in the chips
+  const chips = flat(textOf((await chipsDrawn($, 'row-t1', LONG)).tree))
+  for (const item of ['2 Background [ novice ●○○○ ] expert', '+ your own', '0 revert', 's close']) expect(chips).toContain(item)
+  for (const item of ['s close', '[ ', '] ', '+ your own', '0 revert']) expect(rows.some(r => r.includes(item))).toBe(false)
 })
 
 test('a key pressed while a rewrite runs: the running one is not shown, the latest one is', async ($, on) => {
@@ -209,6 +219,38 @@ test('a key pressed while a rewrite runs: the running one is not shown, the late
   const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
   expect(shown).toContain('the much longer version.')
   expect(shown).not.toContain('now old')
+})
+
+test('s opens the chips; a level picked starts the rewrite about 1 s later; a level changed while it rewrites stops it, and it starts over at the new level about 1 s after the change', async ($, on) => {
+  const gates: ((v: string) => void)[] = []
+  const t = await setup($, on, [new Promise<string>(r => { gates.push(r) }), 'The build failed on [3 of 12](#) runs: the much longer version.'])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  expect(textOf((await chipsDrawn($, 'row-t1', LONG)).tree)).toContain('] longer')
+  // ] picked: no call for about a second, then one, which the bar's busy step names
+  await $.prompt.edit(key(']'))
+  await t.clock.advance(900)
+  expect(t.asked.length).toBe(0)
+  await t.clock.advance(500)
+  expect(t.asked.length).toBe(1)
+  expect(String(t.asked[0].prompt)).toContain('Length: longer')
+  expect(await t.bar()).toContain('rewriting')
+  // ] again while it rewrites: that rewrite stops at once, so nothing rewrites while the new level waits its second
+  await $.prompt.edit(key(']'))
+  await t.clock.advance(400)
+  expect(await t.bar()).not.toContain('rewriting')
+  expect(t.asked.length).toBe(1)
+  // then it starts over, at the new level
+  await t.clock.advance(700)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Length: much longer')
+  // the stopped one's words, had they come, are not shown; the new level's are
+  gates.shift()!('The build failed on [3 of 12](#) runs: the longer version, now old.')
+  await t.clock.advance(5000)
+  const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(shown).toContain('the much longer version.')
+  expect(shown).not.toContain('now old')
+  expect(t.asked.length).toBe(2)
 })
 
 /** The chips' Client under a row, as the terminal would draw it: its props from the row, its elements as plain nodes. */
@@ -233,16 +275,19 @@ test('a citation opened over the open chips takes the keys: the bar names 0 once
   const ui = await $.ui.mount(answer('row-t1', text))
   await ui.press({ key: cite.props.key })
   await ui.unmount()
-  // the tray is open over the chips: its keys in its header, and the bar names none of the chips' keys, each key once
+  // the tray is open over the chips: its keys in its header, and the chips name none of theirs, each key once
   const open = await t.bar()
   expect(open).toContain('3 failed')
   expect(open.match(/0 (close|back|revert)/g)).toEqual(['0 close'])
-  expect(open).not.toContain('] longer')
+  const over = textOf((await chipsDrawn($, 'row-t1', text)).tree)
+  expect(over).toContain('revert')
+  for (const k of ['0 revert', '] longer', '1 Length', 's close']) expect(over).not.toContain(k)
   // 0 closes the tray; the longer version stays, and the chips hold the keys again
   await t.press('0')
   expect(await t.bar()).not.toContain('0 close')
   expect(textOf(await $.ui.render(answer('row-t1', text)))).toContain('slow package mirror')
-  expect(await t.bar()).toContain('0 revert')
+  expect(textOf((await chipsDrawn($, 'row-t1', text)).tree)).toContain('0 revert')
+  expect(await t.bar()).not.toContain('revert')
   await t.press('0')
   expect(textOf(await $.ui.render(answer('row-t1', text)))).not.toContain('slow package mirror')
 })
@@ -394,15 +439,18 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   await t.press('s')
   const at0 = await chipsDrawn($, 'row-t1', LONG)
   expect(at0.client.props.props.items.map((c: Any) => c.ends)).toEqual([['shorter', 'longer'], ['novice', 'expert']])
-  expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
-  expect(textOf(at0.tree)).toContain('2 Background novice ○○●○ expert')
+  // the picked chip's ends name the keys that move it, [ and ]
+  expect(flat(textOf(at0.tree))).toContain('1 Length [ shorter ○●○○ ] longer · as written')
+  expect(flat(textOf(at0.tree))).toContain('2 Background novice ○○●○ expert')
   expect(textOf(at0.tree)).not.toContain('Interpretation')
-  // each of the bar's keys is a press: [ and ] each one way, and 1–2 picks the next chip
-  const bar = nodes(await $.ui.render(above)).filter(n => n.type === 'Button').map(n => String(n.props.label))
-  expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–2 chip', '+ your own']))
-  const pressBar = async (k: string) => { const ui = await $.ui.mount(above); await ui.press({ key: k }); await ui.unmount() }
-  await pressBar('bar-sq-pick')
-  expect(await t.bar()).toContain('[ more novice · ] more expert')
+  // each key the chips name is a press there: a chip's digit and name pick it, its ends move it, + adds one, s closes
+  const presses = nodes(at0.tree).filter(n => n.type === 'Button').map(n => String(n.props.key))
+  expect(presses).toEqual(expect.arrayContaining(['chip-length', 'chip-familiarity', 'step-length-down', 'step-length-up', 'add', 'close']))
+  // a press on Background's name picks it: its ends name [ and ] now
+  const pick = await $.ui.mount(answer('row-t1', LONG))
+  await pick.press({ key: 'chip-familiarity' })
+  await pick.unmount()
+  expect(flat(textOf((await chipsDrawn($, 'row-t1', LONG)).tree))).toContain('2 Background [ novice ○○●○ ] expert')
   await t.press('2')
   await t.press('[')
   await t.press('[')
@@ -488,6 +536,212 @@ test('while a click holds the keys in the chips, ↵ keeps them open, and s clos
   await ui.unmount()
 })
 
+test('each key shows once, where it acts: the open chips name theirs and the bar none of them; once a click gave the chips the keyboard, they name the same keys and esc, and the bar names no key at its left', async ($, on) => {
+  const t = await setup($, on, ['The nightly build failed on [3 of 12](#) runs, in more words.'])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const chips = async () => flat(textOf((await chipsDrawn($, 'row-t1', LONG)).tree))
+  const left = async () => textOf(nodes(await $.ui.render(above)).find(n => n.props?.key === 'bar-left'))
+  // at the prompt: a digit before each chip, [ and ] on the picked chip's ends, + your own and s close in the chips
+  expect(await chips()).toContain('1 Length [ shorter ○●○○ ] longer · as written')
+  expect(await chips()).toContain('2 Background novice ○○●○ expert')
+  expect(await chips()).toContain('+ your own')
+  expect(await chips()).toContain('s close')
+  // 0 revert once there is a version to take back
+  expect(await chips()).not.toContain('revert')
+  await t.press(']')
+  expect(await chips()).toContain('0 revert')
+  await t.clock.advance(3000)
+  // the bar names none of the chips' keys
+  for (const k of ['s close', '[ ', '] ', '1–', 'chip', 'your own', 'revert']) expect(await t.bar()).not.toContain(k)
+  // a click on a dot of Background, then a key in the chips: the chips hold the keyboard, and name the keys that act
+  // there, the same as at the prompt, and esc; every key goes to the chips, so the bar's left names no key
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  await ui.press({ key: 'lvl-familiarity-2' })
+  await ui.key({ key: 'return' })
+  await ui.unmount()
+  const held = await chips()
+  for (const k of ['2 Background [ novice ○○●○ ] expert', 'esc back to the prompt', 's close']) expect(held).toContain(k)
+  expect(await left()).toBe('thimble')
+  // a press on esc back to the prompt: the keys are the prompt's again
+  const esc = await $.ui.mount(answer('row-t1', LONG))
+  await esc.press({ key: 'esc' })
+  await esc.unmount()
+  expect(await chips()).toContain('2 Background [ novice ○○●○ ] expert')
+  expect(await chips()).not.toContain('esc back to the prompt')
+  await t.clock.advance(5000)
+})
+
+test("a key in the chips that Claude Code also takes at the prompt, an arrow or tab, changes nothing, and nothing in the chips names one; thimble's own keys act there as at the prompt", async ($, on) => {
+  const t = await setup($, on, ['The nightly build failed on [3 of 12](#) runs, in more words.'])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const props = async () => (await chipsDrawn($, 'row-t1', LONG)).client?.props.props
+  const levels = async () => Object.fromEntries((await props()).items.map((c: Any) => [c.id, c.level]))
+  const picked = async () => (await props()).items.find((c: Any) => c.picked)?.id
+  // a click on the dot where Length stands gives the chips the keyboard
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  await ui.press({ key: 'lvl-length-1' })
+  const was = await levels()
+  // each arrow and tab: no level moves, no chip is picked, nothing is asked
+  for (const k of [{ key: 'left' }, { key: 'right' }, { key: 'tab' }, { key: 'tab', shift: true }, { key: 'up' }, { key: 'down' }]) {
+    await ui.key(k as never)
+    await t.clock.advance(400)
+    expect([k, await levels(), await picked()]).toEqual([k, was, 'length'])
+  }
+  await t.clock.advance(3000)
+  expect(t.asked.length).toBe(0)
+  // nothing in the chips names an arrow or tab, held or not
+  const words = flat(textOf((await chipsDrawn($, 'row-t1', LONG)).tree))
+  for (const k of ['←', '→', '↑', '↓', 'tab']) expect(words).not.toContain(k)
+  expect(words).toContain('1 Length [ shorter ○●○○ ] longer')
+  // thimble's own keys act in the chips as at the prompt: 2 picks Background, ] moves it a level, and the rewrite runs
+  await ui.key({ key: '2' })
+  await ui.key({ key: ']' })
+  await ui.unmount()
+  expect(await picked()).toBe('familiarity')
+  expect((await levels()).familiarity).toBe(was.familiarity + 1)
+  await t.clock.advance(3000)
+  expect(t.asked.length).toBe(1)
+  // the chips still hold the keyboard after those keys: esc is still named
+  expect(flat(textOf((await chipsDrawn($, 'row-t1', LONG)).tree))).toContain('esc back to the prompt')
+})
+
+/** Where each press of a drawing stands as the terminal lays it out at `width` (the card runner's layout, as Claude Code
+ *  lays out the same tree): each press's address and the cells it takes (`x,y` from the top left: each press laid out
+ *  with its words marked), and the drawing's rows. */
+function placesOf(tree: Any, width: number): { at: Map<string, string[]>; rows: number } {
+  const MARK = '¤'
+  const conv = (n: Any, mark: string | null, inMark = false): Any => {
+    if (n == null || n === false) return null
+    if (typeof n === 'string' || typeof n === 'number') return inMark ? MARK.repeat([...String(n)].length) : String(n)
+    if (Array.isArray(n)) return n.map(x => conv(x, mark, inMark)).filter((x: Any) => x != null)
+    const marked = inMark || (n.type === 'Button' && String(n.props?.key) === mark)
+    const kids = conv([n.props?.children].flat(), mark, marked)
+    const { children: _c, key: _k, onPress: _o, label: _l, plain: _p, hover: _h, ...p } = n.props ?? {}
+    return n.type === 'Button' ? { t: 'Box', p: { flexDirection: 'row', flexShrink: 0, alignSelf: 'flex-start' }, c: kids } : { t: n.type, p, c: kids }
+  }
+  const presses = nodes(tree).filter(n => n.type === 'Button').map(n => String(n.props.key))
+  const plain = layoutLines(conv(tree, null), width).lines
+  const at = new Map<string, string[]>()
+  for (const id of presses) {
+    const lines = layoutLines(conv(tree, id), width).lines
+    const cells: string[] = []
+    lines.forEach((l, y) => [...l].forEach((ch, x) => { if (ch === MARK && [...(plain[y] ?? '')][x] !== MARK) cells.push(`${x},${y}`) }))
+    at.set(id, cells)
+  }
+  return { at, rows: plain.length }
+}
+
+test("the chips' parts keep their places while they are open, so a click lands where it was aimed: a level, its words, a rewrite on its way, a version to take back, the keyboard given to them, another chip picked, a tray over them; close is named once", { options: { citations: 'auto cite' } }, async ($, on) => {
+  const gates: ((v: string) => void)[] = []
+  const t = await setup($, on, [new Promise<string>(r => { gates.push(r) }), new Promise<string>(r => { gates.push(r) })])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const shots: { what: string; at: Map<string, string[]>; rows: number }[] = []
+  const shot = async (what: string) => {
+    const { client, tree } = await chipsDrawn($, 'row-t1', LONG)
+    shots.push({ what, ...placesOf(tree, Number(client.props.props.width)) })
+    // close is named once: in the chips, and not on the bar
+    expect([...shots.at(-1)!.at.keys()].filter(k => k === 'close')).toEqual(['close'])
+    expect(await t.bar()).not.toContain('s close')
+  }
+  await shot('opened')
+  await $.prompt.edit(key(']'))
+  await shot('a level picked, its words longer')
+  await t.clock.advance(1500)
+  expect(await t.bar()).toContain('rewriting')
+  await shot('rewriting')
+  await $.prompt.edit(key(']'))
+  // the call it stopped answers late; its words are not shown
+  gates.shift()!('The build failed on [3 of 12](#) runs: the longer version, now old.')
+  await t.clock.advance(300)
+  await shot('a level further, its words longer still')
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  await ui.press({ key: 'lvl-length-3' })
+  await ui.key({ key: 'return' })
+  await shot('the keyboard given to the chips')
+  await ui.key({ key: '2' })
+  await shot('Background picked')
+  await ui.key({ key: '0' })
+  await t.clock.advance(300)
+  await shot('the original again, nothing to take back')
+  await ui.key({ key: '1' })
+  await ui.key({ key: ']' })
+  await ui.unmount()
+  await t.clock.advance(1500)
+  for (const g of gates) g('The build failed on [3 of 12](#) runs: the longer version.')
+  await t.clock.advance(5000)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('the longer version.')
+  await shot('a version written')
+  // a citation opened over the chips: the tray holds the keys, and the chips name none of theirs
+  const cite = nodes(await $.ui.render(answer('row-t1', LONG))).find(n => n.type === 'Button' && /^citation 1/.test(String(n.props.label)))
+  const reply = await $.ui.mount(answer('row-t1', LONG))
+  await reply.press({ key: cite.props.key })
+  await reply.unmount()
+  expect(await t.bar()).toContain('0 close')
+  await shot('a tray over the chips')
+  // every part stands where it stood in the drawing before: the same cells (a level's words, which end their row, where
+  // they start), and the chips take the same rows
+  for (let i = 1; i < shots.length; i++) {
+    const [a, b] = [shots[i - 1]!, shots[i]!]
+    expect([b.what, b.rows]).toEqual([b.what, a.rows])
+    for (const [id, cells] of b.at) {
+      const was = a.at.get(id)
+      if (!was) continue
+      expect([b.what, id, id.startsWith('word-') ? cells[0] : cells.join(' ')]).toEqual([b.what, id, id.startsWith('word-') ? was[0] : was.join(' ')])
+    }
+  }
+})
+
+test('closing the chips keeps the version the answer shows and starts nothing: a level asked for and still waiting, or a rewrite running, stops, by s or a press on close', async ($, on) => {
+  const gates: ((v: string) => void)[] = []
+  const t = await setup($, on, [new Promise<string>(r => { gates.push(r) }), 'The build failed on [3 of 12](#) runs: the much longer version.'])
+  await t.turn('t1', LONG)
+  const shown = async () => textOf(await $.ui.render(answer('row-t1', LONG)))
+  const dim = async () => nodes(await $.ui.render(answer('row-t1', LONG))).some(n => n.props?.dimColor && textOf(n).includes('nightly build'))
+  // ] asked for a longer version, then s within its wait (after the word window of ]): no call, the answer as written
+  // and not dim
+  await t.press('s')
+  await $.prompt.edit(key(']'))
+  await t.clock.advance(400)
+  expect(await dim()).toBe(true)
+  await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(0)
+  expect(await dim()).toBe(false)
+  expect(await shown()).toContain('The nightly build failed on')
+  expect(await t.bar()).not.toContain('rewriting')
+  // opened again: the chips stand where the answer does, as written
+  await t.press('s')
+  expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.items.find((c: Any) => c.id === 'length').level).toBe(1)
+  // ] again, its rewrite running, then a press on close: the call stops, and its words, had they come, are not shown
+  await $.prompt.edit(key(']'))
+  await t.clock.advance(1500)
+  expect(t.asked.length).toBe(1)
+  expect(await t.bar()).toContain('rewriting')
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  await ui.press({ key: 'close' })
+  await ui.unmount()
+  expect(await t.bar()).not.toContain('rewriting')
+  gates.shift()!('The build failed on [3 of 12](#) runs: the longer version, too late.')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  expect(await shown()).not.toContain('too late')
+  expect(await shown()).toContain('The nightly build failed on')
+  expect(await dim()).toBe(false)
+  // s that starts a word (a letter right after it) opens the chips again, and the level asked for is asked again
+  await t.press('s')
+  await $.prompt.edit(key(']'))
+  await t.clock.advance(400)
+  await $.prompt.edit(key('s'))
+  await $.prompt.edit({ ...(key('o') as Any), text: 's', cursor: 1, start: 1, end: 1 } as never)
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Length: longer')
+  expect(await shown()).toContain('the much longer version.')
+})
+
 test("a click that slid a cell on the chips leaves a piece of what they draw selected in the answer's row, a chip's digit, its dots, its level words or +: no c cite or e explain, once s closed them too; words of the answer selected after count", { options: { citations: 'manual' } }, async ($, on) => {
   let selected: Any
   on('ui.selection', () => ({ value: selected }))
@@ -538,17 +792,26 @@ test('the rewrite starts from the corrected citations: the request holds the cor
   expect(prompt).not.toContain('Corrections in the original')
 })
 
-test('+ in the chips types a chip, and a key at the prompt (esc gave it the keys) or esc esc clearing it lets the words go', async ($, on) => {
+test('a click on + your own does what + does at the prompt: the prompt box takes the words, and nothing names ↵ or tab; + typed while the chips hold the keyboard types a chip in them, and a key at the prompt (esc gave it the keys) or esc esc clearing it lets the words go', async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
   await t.press('s')
   const ui = await $.ui.mount(answer('row-t1', LONG))
   await ui.press({ key: 'add' })
+  // the box takes /rewrite, which the person's words follow, and the bar asks what for; the chips name no ↵ or tab
+  expect(t.fills.map((f: Any) => f.text)).toEqual(['/rewrite '])
+  expect(await t.bar()).toContain('rewrite for…')
+  const asked = await chipsDrawn($, 'row-t1', LONG)
+  expect(asked.client.props.props.plus).toBe(null)
+  for (const k of ['↵', 'tab']) expect(textOf(asked.tree)).not.toContain(k)
+  // + typed in the chips, where a key reached them: the words are typed in the chips
+  await ui.key({ key: '+' })
   await ui.unmount()
   const typing = await chipsDrawn($, 'row-t1', LONG)
   expect(typing.client.props.props.plus).toBe('')
-  expect(textOf(typing.tree)).toContain('+ ▏')
-  expect(await t.bar()).toContain('+ ▏ ↵ adds it · tab lets it go')
+  // the chips say what ↵ and tab do there; the bar does not
+  expect(textOf(typing.tree)).toContain('+ ▏ ↵ adds it · tab lets it go')
+  expect(await t.bar()).not.toContain('adds it')
   await $.prompt.edit({ origin: { kind: 'composer' }, text: 'h', cursor: 1, start: 0, end: 0, inputText: 'h', key: { key: 'h' } } as never)
   expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.plus).toBe(null)
   // + at the prompt: /rewrite in the box, and the bar asks what for; esc esc clears the box, and the bar lets it go
@@ -581,19 +844,19 @@ test('s with the tray open closes it and opens the chips with their keys; over o
   const openCite = async () => { const ui = await $.ui.mount(answer('row-t1', text)); await ui.press({ key: cite.props.key }); await ui.unmount() }
   await openCite()
   expect(await t.bar()).toContain('0 close')
-  // s: the tray closes, and the chips open under the answer with their keys on the bar
+  // s: the tray closes, and the chips open under the answer, their keys in them
   await t.press('s')
-  const chips = await t.bar()
-  expect(chips).not.toContain('0 close')
-  expect(chips).toContain('thimble  s close · ')
-  expect(chips).toContain('] longer')
-  // a citation opened over the open chips takes the keys; s gives them back to the chips, which stay open
+  const drawn = async () => textOf((await chipsDrawn($, 'row-t1', text)).tree)
+  expect(await t.bar()).not.toContain('0 close')
+  expect(await drawn()).toContain('s close')
+  expect(await drawn()).toContain('] longer')
+  // a citation opened over the open chips takes the keys, which the chips no longer name; s gives them back to the
+  // chips, which stay open
   await openCite()
-  expect(await t.bar()).not.toContain('] longer')
+  expect(await drawn()).not.toContain('] longer')
   await t.press('s')
-  const back = await t.bar()
-  expect(back).not.toContain('0 close')
-  expect(back).toContain('] longer')
+  expect(await t.bar()).not.toContain('0 close')
+  expect(await drawn()).toContain('] longer')
   // s typed as the first letter of a word: the word goes into the box, the tray stands open, the chips stay closed
   await t.press('s')
   await openCite()
@@ -640,5 +903,5 @@ test('s while an answer is being written waits for it, `s rewrite` lit on the ba
   await $.turn.complete({ turnId: 't2', reason: 'answer', answer: two, durationMs: 10, isAborted: false } as never)
   expect((await chipsDrawn($, 'row-t2', two)).client).toBeTruthy()
   expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
-  expect(await t.bar()).toContain('s close')
+  expect(textOf((await chipsDrawn($, 'row-t2', two)).tree)).toContain('s close')
 })

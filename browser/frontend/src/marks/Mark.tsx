@@ -361,8 +361,8 @@ export const CHANGED_READ = 'The card changed after the check. The check read th
 
 /** A value a card shows: the card's chip, by the card's title now, over the table around the cited cell, or the
  * printed lines around the cited one, as the card shows them now (api.resolveRef, as RefChip reads them). A line of the
- * printed output is named as the citation's chip names it (lib/refs cardPartLabel): `line 8` in the card, after the
- * card's title elsewhere; a click on the chip shows the line in the card's output. The check's own copy shows while the
+ * printed output is named as the citation's chip names it (lib/refs cardPartLabel): `card output line 8` in the card,
+ * after the card's title elsewhere; a click on the chip shows the line in the card's output. The check's own copy shows while the
  * card is read and stays when the card still shows the same (sameAsChecked). When the card changed, a note says so over
  * the cell as it is now, or over the copy when the place no longer holds what the check read. */
 function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
