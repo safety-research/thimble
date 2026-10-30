@@ -41,10 +41,11 @@ export const NEXT_LAUNCH = 'Main uses it from your next message'
 /** The model main runs on when neither its menu nor the settings chose one (backend runtime.MAIN_MODEL). */
 export const MAIN_DEFAULT_MODEL = 'claude-opus-5-5'
 
-/** Main's model as its line shows it: the menu's choice; else the one the settings keep for main (models.main); else
- * the model its replies came from; else the default. Pure. */
+/** Main's model as its line shows it: the model its replies come from, which may not be the one it asks for (Claude's
+ * safeguards can move a conversation to another model: backend session.FALLBACK_TEXT); before its first reply, the
+ * menu's choice; else the one the settings keep for main (models.main); else the default. Pure. */
 export function mainModel(a: Attached | null | undefined, kept?: string | null): string {
-  return a?.model_choice || kept || a?.model || MAIN_DEFAULT_MODEL
+  return a?.model || a?.model_choice || kept || MAIN_DEFAULT_MODEL
 }
 
 /** Why a model's bolt cannot switch: it has no fast mode. */
@@ -142,7 +143,8 @@ export function ModelLine({ model, modelTip, models, onModel, effort, efforts = 
     label: modelLabel(m),
     note: m,
     checked: sameModel(m, model),
-    onSelect: () => !sameModel(m, model) && onModel?.(m),
+    // the model shown goes on too when picked: the session may ask for another one than its replies come from
+    onSelect: () => onModel?.(m),
   }))
   const effortItems: MenuItem[] = efforts.map((e) => ({ id: e || 'session', label: effortWord(e), checked: e === effort, onSelect: () => e !== effort && onEffort?.(e) }))
   return (

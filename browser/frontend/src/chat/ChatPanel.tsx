@@ -520,7 +520,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   )
 
   // main and every thread run on the session's model, which main's meta carries once the mirror has read it
-  // the model main keeps in the settings (models.main), which its line shows until the menu picks one (mainModel)
+  // the model main keeps in the settings (models.main), which its line shows until main replies or the menu picks one
+  // (mainModel)
   const [mainKept, setMainKept] = useState<Settings | null>(null)
   useEffect(() => {
     let alive = true
