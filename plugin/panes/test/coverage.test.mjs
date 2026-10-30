@@ -109,6 +109,21 @@ test('step 3, a file picked: its detail in its own unit, the tree scrolled to ke
 })
 
 
+test('a big folder, whose record names only some files: the files it does not name are said to be untouched only when none was touched', () => {
+  // the kernel counted each run's trial folders into the run and named none of their files: 3 of a/'s 6 were touched
+  const cov = { root: '/made-up/data', total: { files: 13, touched_files: 4, seen_files: 1 },
+    groups: [{ folder: 'runs/a/', files: 6, touched: 3, seen_files: 0 }, { folder: 'runs/b/', files: 6, touched: 0, seen_files: 0 }, { folder: './', files: 1, touched: 1, seen_files: 1 }],
+    files: [{ path: 'README.md', unit: 'lines', units: 3, seen: true, seen_units: 3, status: 'seen' }],
+    untouched: { path: [], unit: [], units: [], by: [] } }
+  const v = coverageView(cov, { open: ['runs/', 'runs/a/', 'runs/b/'] }, DIMS)
+  show('a big folder', v)
+  const t = textOf(v).split('\n')
+  const after = name => t[t.findIndex(l => l.includes(`▾ ${name}`)) + 1]
+  assert.match(after('a/'), /^ +… 6 more files$/)
+  assert.match(after('b/'), /^ +… 6 more files, none touched$/)
+  fits(v, 66)
+})
+
 test('a folder with no files: the head says so, and nothing else', () => {
   const v = coverageView({ root: '/made-up/empty', total: { files: 0, touched_files: 0, seen_files: 0 }, groups: [], files: [], untouched: {} }, null, DIMS)
   const t = textOf(v).split('\n')

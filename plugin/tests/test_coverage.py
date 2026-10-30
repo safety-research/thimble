@@ -287,6 +287,50 @@ def test_a_corpus_of_thousands_of_folders_keeps_its_record_under_claude_codes_ou
     assert len(out) < len(groups) and all(g["folder"].count("/") < 5 for g in out if not g["touched"])
 
 
+@pytest.mark.parametrize("shape", ["every folder touched", "every folder at the top"])
+def test_a_folder_of_70000_folders_gives_a_record_claude_code_reads_whole(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                          capsys: pytest.CaptureFixture[str], shape: str) -> None:
+    """A trace corpus of 210,000 files in 70,000 small folders gave a --json record of 5.7 MB, past the 4 MiB Claude
+    Code reads, so the bar's count failed: the folders Claude touched never folded, nor did the folders at the top. The
+    record keeps the folders the pane needs most, each counting every file in it, and names the files of those it keeps.
+    (The folder is made up, one file in each of its 70,000 folders, listed and counted in memory.)"""
+    from kernel import cli as CLI
+    from kernel import sources as S
+
+    if shape == "every folder touched":
+        folders = [f"runs/run-{r:02d}/task-{t:04d}/trial-{k}/" for r in range(1, 11) for t in range(1, 3501) for k in (1, 2)]
+    else:
+        folders = [f"trial-{i:06d}/" for i in range(1, 70001)]
+    files = sorted([f + "stdout.log" for f in folders] + ["README.md"])
+    monkeypatch.setattr(S, "list_files", lambda root: files)
+    monkeypatch.setattr(S, "counts", lambda root, rels, cache, until=None: {f: {"kind": "jsonl", "rows": 3, "lines": 3} for f in rels})
+    d = tmp_path / "evals"
+    d.mkdir()
+    for k, v in {"THIMBLE_HOME": str(tmp_path / "th"), "THIMBLE_ROOT": str(d), "THIMBLE_SESSION": "s-wide"}.items():
+        monkeypatch.setenv(k, v)
+    read = folders[4321] + "stdout.log"
+    calls = [{"tool": "Read", "file": str(d / read), "from": 1, "to": 3}, {"tool": "Read", "file": str(d / "README.md"), "from": 1, "to": 3}]
+    if shape == "every folder touched":
+        calls.append({"tool": "Grep", "path": None, "glob": None, "mode": "files_with_matches"})
+    seen = tmp_path / "th" / "seen"
+    seen.mkdir(parents=True)
+    (seen / "s-wide.jsonl").write_text("".join(json.dumps({"cwd": str(d), **c}) + "\n" for c in calls))
+    assert CLI.main(["coverage", "--json"]) == 0
+    out = capsys.readouterr().out
+    assert len(out.encode()) <= 4 * 1024 * 1024
+    cov = json.loads(out)
+    t = cov["total"]
+    assert (t["files"], t["touched_files"]) == (len(files), len(files) if shape == "every folder touched" else 2)
+    # every file is counted in one folder, and each file named is in a folder the record keeps: the pane's tree adds up
+    assert sum(g["files"] for g in cov["groups"]) == len(files)
+    assert sum(g["touched"] for g in cov["groups"]) == t["touched_files"]
+    kept = {g["folder"] for g in cov["groups"]}
+    assert all(o["folder"] in kept for o in cov["files"])
+    assert all(CV.folder_of(p) in kept for p in cov["untouched"]["path"])
+    # the files Claude read are named, with the folders they are in
+    assert {"README.md", read} <= {o["path"] for o in cov["files"] if o["seen"]}
+
+
 def _folder(tmp_path: Path, n: int) -> tuple[Path, list[str]]:
     """A made-up folder of n small record files of different sizes."""
     d = tmp_path / "many"

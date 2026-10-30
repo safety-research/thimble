@@ -72,30 +72,66 @@ def out_json(v: Any) -> None:
 
 # ------------------------------------------------------------------ coverage
 
-# Claude Code reads the first 4 MiB of a command's output, so the --json record keeps to COVER_BYTES
+# Claude Code reads the first 4 MiB of a command's output, so the --json record keeps to COVER_BYTES: the folders to
+# half of it and the file types to an eighth, whatever their number, and the files named to what is left
 COVER_BYTES = 3 << 20
 COVER_PER_FOLDER = 200  # untouched files named of each folder, at most
 COVER_GROUP_KEYS = ("folder", "files", "touched", "seen_files")  # what the coverage pane reads of a folder
 
 
+def _size(v: Any) -> int:
+    """A value's bytes in the --json record, and one more for the comma after it."""
+    return len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1
+
+
+def _up(folder: str) -> str:
+    """The folder a folder is in: `runs/` of `runs/r1/`, `./` of `runs/`."""
+    t = folder.rstrip("/")
+    return t.rsplit("/", 1)[0] + "/" if "/" in t else "./"
+
+
 def cover_groups(groups: list[dict[str, Any]], room: int) -> list[dict[str, Any]]:
-    """The folders of the --json record: each with what the pane reads of it, in at most `room` bytes. While they take
-    more, the deepest folders Claude touched no file of fold into their parent folder, which then counts their files
-    (the pane counts a folder's files into every folder above it, so each folder's count stays whole). A trace corpus
-    can hold tens of thousands of folders of one or two files."""
-    size = lambda v: len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1  # noqa: E731
-    out = {g["folder"]: {k: g.get(k, 0) for k in COVER_GROUP_KEYS} for g in groups}
-    depth = lambda f: 0 if f == "./" else f.rstrip("/").count("/") + 1  # noqa: E731
-    while out and size(list(out.values())) > room:
-        deep = max(depth(f) for f, g in out.items() if not g["touched"]) if any(not g["touched"] for g in out.values()) else 0
-        if deep <= 1:
-            break
-        for f in [f for f, g in out.items() if not g["touched"] and depth(f) == deep]:
-            g = out.pop(f)
-            up = f.rstrip("/").rsplit("/", 1)[0] + "/" if deep > 1 else "./"
-            into = out.setdefault(up, {"folder": up, "files": 0, "touched": 0, "seen_files": 0})
-            into["files"] += g["files"]
-    return sorted(out.values(), key=lambda g: (-g["touched"], -g["files"], g["folder"]))
+    """The folders of the --json record: each with what the pane reads of it, in at most `room` bytes, whatever the
+    number of folders. A trace corpus can hold tens of thousands of folders of one or two files, all of which Claude
+    may touch, or all at the top. While they take more, the folders are kept in the order the pane needs them: those
+    that hold a file Claude read, then the top folders, then those that hold a file Claude touched, then the rest; of
+    each, the folders higher up first (a folder is kept only with the one it is in), then the ones the pane lists
+    first. A folder not kept counts into the nearest kept folder above it (the pane counts a folder's files into every
+    folder above it, so each folder's count stays whole)."""
+    order = lambda g: (-g["touched"], -g["files"], g["folder"])  # noqa: E731 — the pane's order
+    own = {g["folder"]: {k: g.get(k, 0) for k in COVER_GROUP_KEYS} for g in groups}
+    if _size(list(own.values())) <= room:
+        return sorted(own.values(), key=order)
+    # every folder that holds files, and each folder above one: its files, touched and read, its own and those under it
+    under: dict[str, list[int]] = {"./": [0, 0, 0]}
+    for f, g in own.items():
+        while True:
+            s = under.setdefault(f, [0, 0, 0])
+            s[0] += g["files"]
+            s[1] += g["touched"]
+            s[2] += g["seen_files"]
+            if f == "./":
+                break
+            f = _up(f)
+    rank = lambda f: (0 if under[f][2] else 1 if f.count("/") == 1 else 2 if under[f][1] else 3,  # noqa: E731
+                      f.count("/"), -under[f][1], -under[f][0], f)
+    # a folder's entry at its longest: each count as long as the count of every file
+    digits = len(str(under["./"][0]))
+    cost = lambda f: _size({"folder": f, "files": 0, "touched": 0, "seen_files": 0}) + 3 * (digits - 1)  # noqa: E731
+    kept = {"./"}
+    left = room - 2 - cost("./")  # (and the list's brackets)
+    for f in sorted(under, key=rank):
+        if f not in kept and _up(f) in kept and cost(f) <= left:
+            kept.add(f)
+            left -= cost(f)
+    out: dict[str, dict[str, Any]] = {}
+    for f, g in own.items():
+        while f not in kept:
+            f = _up(f)
+        o = out.setdefault(f, {"folder": f, "files": 0, "touched": 0, "seen_files": 0})
+        for k in ("files", "touched", "seen_files"):
+            o[k] += g[k]
+    return sorted(out.values(), key=order)
 
 
 def cmd_coverage(a: argparse.Namespace) -> int:
@@ -112,33 +148,45 @@ def cmd_coverage(a: argparse.Namespace) -> int:
             print(f"Still counting the folder's files: {u.done:,} of {u.total:,} counted. Run it again to go on.")
         return 0
     if a.json:
-        # The totals, groups and types count every file and always print (the folders as cover_groups keeps them);
-        # then the touched files by status, then the untouched files coverage named (a few of each folder), while the
-        # record keeps to COVER_BYTES. `cut` says how many of each are left out.
-        size = lambda v: len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1  # noqa: E731
+        # The totals count every file and always print; the folders as cover_groups keeps them, each counting every
+        # file in it, and the file types with the most rows, while they keep to their part of COVER_BYTES. Then the
+        # touched files by status, then the untouched files coverage named (a few of each folder), of the folders the
+        # record keeps, while the whole keeps to COVER_BYTES. `cut` says how many of each are left out.
         cov["groups"] = cover_groups(cov["groups"], COVER_BYTES // 2)
+        shown = {g["folder"] for g in cov["groups"]}
+        types, room = [], COVER_BYTES // 8
+        for t in cov["types"]:
+            room -= _size(t)
+            if room < 0:
+                break
+            types.append(t)
+        n_types, cov["types"] = len(cov["types"]), types
         quiet = cov["untouched"]
         n_quiet = cov["total"]["files"] - cov["total"]["touched_files"]
         cols = list(quiet)
-        most = {"files": len(cov["files"]), "untouched": n_quiet}  # `cut` at its longest
-        room = COVER_BYTES - size({**cov, "files": [], "untouched": {k: [] for k in cols}, "cut": most})
+        most = {"files": len(cov["files"]), "untouched": n_quiet, "types": n_types}  # `cut` at its longest
+        room = COVER_BYTES - _size({**cov, "files": [], "untouched": {k: [] for k in cols}, "cut": most})
         files = []
         for o in sorted(cov["files"], key=lambda o: CV.ORDER.index(o["status"])):
-            room -= size(o)
+            if o["folder"] not in shown:
+                continue
+            room -= _size(o)
             if room < 0:
                 break
             files.append(o)
-        kept = 0
-        for i in range(len(quiet["path"])):
-            room -= sum(size(quiet[k][i]) for k in cols)
+        named = []
+        for i, p in enumerate(quiet["path"]):
+            if CV.folder_of(p) not in shown:
+                continue
+            room -= sum(_size(quiet[k][i]) for k in cols)
             if room < 0:
                 break
-            kept = i + 1
-        cut = {"files": len(cov["files"]) - len(files), "untouched": n_quiet - kept}
-        if cut["files"] or cut["untouched"]:
-            cov["cut"] = cut
+            named.append(i)
+        cut = {"files": len(cov["files"]) - len(files), "untouched": n_quiet - len(named), "types": n_types - len(types)}
+        if any(cut.values()):
+            cov["cut"] = {k: n for k, n in cut.items() if n or k != "types"}
         cov["files"] = files
-        cov["untouched"] = {k: v[:kept] for k, v in quiet.items()}
+        cov["untouched"] = {k: [v[i] for i in named] for k, v in quiet.items()}
         print(json.dumps(cov, ensure_ascii=False, separators=(",", ":"), default=str))
         return 0
     print(CV.coverage_text(cov))
