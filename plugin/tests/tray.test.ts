@@ -660,7 +660,7 @@ const TALL = {
   evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nfor i, r in enumerate(runs):\n    print(f"run {i + 1}: {r}")\nprint(f"failed: {bad}")', output: OUTPUT, highlight: [[OUTPUT.length - 2, OUTPUT.length]] },
 }
 
-test('a tray taller than the rows over the bar takes the window Claude Code shows the band in, the bar below it: Claude Code hands that band the wheel, which moves the tray\'s window a row a tick and, past its last line, the band down to the bar, its failure line too; back up, the band first', CITES, async ($, on) => {
+test('a tray taller than the rows over the bar shows its body in a window of them, the bar under it, its failure line too, in the window Claude Code shows the band in: two blank rows under the bar, out of that window, make the band taller than its rows, so Claude Code hands it the wheel, which moves the tray\'s window a row a tick and never the band; a band Claude Code cuts itself, at a short height, scrolls as it scrolls it', CITES, async ($, on) => {
   const scrolls: Any[] = []
   const { clock } = await resumed($, on, TALL, 's-tray-tall', { scrolls })
   // ] then +: all the code and its ten lines of output
@@ -670,23 +670,37 @@ test('a tray taller than the rows over the bar takes the window Claude Code show
     expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
     await clock.advance(2000)
   }
+  // the bar is the last row of the window Claude Code shows the band in, and two blank rows under it stay out of it
+  const barLast = (d: Any) => {
+    const bar = d.at('bar')
+    expect(bar).not.toBeNull()
+    expect(bar.row + bar.rows).toBe(d.windowRows)
+    expect(d.rows).toBe(d.windowRows + 2)
+  }
+  // the band's moves that reached Claude Code's own scroll of it
+  const bandScrolls = () => scrolls.filter(e => e?.component === 'AbovePrompt').length
   await open()
-  // the session's start said the card sandbox cannot start here, a failure line that wraps above the bar: the band is
-  // taller than its ten rows, the tray fills its window, its head and the row under its body's window in view, and the
-  // bar with that line follows below, where Claude Code's own row counts them
+  // the session's start said the card sandbox cannot start here, a failure line that wraps above the bar: the tray
+  // takes the rows over all of it, its body in a window; the band is taller than its ten rows by the blank rows under
+  // the bar, and Claude Code's window shows the tray's head, the row under its body's window, the line and the bar
   let band = claudeBand($, scrolls, 10)
   let d = await band.draw()
   expect(d.cut).toBe(true)
-  expect(d.at('tray-band')).toEqual({ row: 0, rows: d.windowRows })
-  for (const k of ['tray-head', 'tray-scroll']) expect(d.shows(k)).toBe(true)
-  for (const k of ['fail-line', 'bar']) expect(d.shows(k)).toBe(false)
-  // the wheel to the tray's last line and on: the band's own window, down to the bar and its failure line
+  expect(d.hasWindow).toBe(true)
+  expect(d.offset).toBe(0)
+  barLast(d)
+  for (const k of ['tray-head', 'tray-scroll', 'fail-line', 'bar']) expect(d.shows(k)).toBe(true)
+  // the wheel to the tray's last line and on: the tray's window moves, the band's own stays, all of it in view
   for (let i = 0; i < 12; i++) await band.wheel(3)
   d = await band.draw()
-  expect(d.offset).toBe(d.maxOffset)
-  for (const k of ['tray-scroll', 'fail-line', 'bar']) expect(d.shows(k)).toBe(true)
+  expect(d.top).toBeGreaterThan(0)
+  expect(d.text).not.toMatch(/expand \d+ more/)
+  expect(d.offset).toBe(0)
+  for (const k of ['tray-head', 'tray-scroll', 'fail-line', 'bar']) expect(d.shows(k)).toBe(true)
+  expect(bandScrolls()).toBe(0)
   // the next prompt takes that line and closes the tray. ] again, its one line of evidence: in a band of eight rows it
-  // fits over the bar; in seven, it fills the band's window whole, and the wheel moves the band down to the bar
+  // fits over the bar, whole; in seven, Claude Code cuts the band itself, the tray whole in its window, and its wheel
+  // moves the band down to the bar
   await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(2000)
@@ -711,7 +725,10 @@ test('a tray taller than the rows over the bar takes the window Claude Code show
   d = await band.draw()
   expect(d.cut).toBe(true)
   expect(d.offset).toBe(0)
-  expect(d.at('tray-band')).toEqual({ row: 0, rows: 7 })
+  barLast(d)
+  // the tray in the rows over the bar, a blank row between them
+  expect(d.at('tray-band')).toEqual({ row: 0, rows: d.at('bar')!.row - 1 })
+  const moves = bandScrolls()
   // the tray's head and its keys stay; the body shows from its top, the lines under the window counted
   expect(d.text).toContain('a ask')
   expect(d.top).toBe(0)
@@ -721,31 +738,31 @@ test('a tray taller than the rows over the bar takes the window Claude Code show
   d = await band.draw()
   expect(d.top).toBe(2)
   expect(d.offset).toBe(0)
-  // at the tray's last lines the row under the window counts the lines above; the wheel on brings the bar into view
+  // at the tray's last lines the row under the window counts the lines above; the wheel on moves nothing, the bar
+  // still in view
   await band.wheel(100)
   d = await band.draw()
   const above8 = Number(/↑ (\d+) line/.exec(d.text)?.[1])
   expect(above8).toBeGreaterThan(5)
   expect(d.top).toBe(above8)
-  expect(d.shows('bar')).toBe(false)
   await band.wheel(1)
   await band.wheel(1)
-  d = await band.draw()
-  expect(d.offset).toBe(d.maxOffset)
-  expect(d.shows('bar')).toBe(true)
-  expect(d.top).toBe(above8)
-  // back up: the band's own window first, then the tray's
-  await band.wheel(-1)
-  d = await band.draw()
-  expect(d.offset).toBe(d.maxOffset - 1)
-  expect(d.top).toBe(above8)
-  await band.wheel(-100)
   d = await band.draw()
   expect(d.offset).toBe(0)
   expect(d.top).toBe(above8)
+  for (const k of ['tray-head', 'tray-scroll', 'bar']) expect(d.shows(k)).toBe(true)
+  // back up: the tray's window, a row a tick, to its top; the band's own window stays
+  await band.wheel(-1)
+  d = await band.draw()
+  expect(d.top).toBe(above8 - 1)
   await band.wheel(-100)
   d = await band.draw()
   expect(d.top).toBe(0)
+  await band.wheel(-1)
+  d = await band.draw()
+  expect(d.top).toBe(0)
+  expect(d.offset).toBe(0)
+  expect(bandScrolls()).toBe(moves)
   // a band with the rows for all of it shows it whole, with no window, and Claude Code hands it no wheel
   const whole = claudeBand($, scrolls, 40)
   d = await whole.draw()
@@ -755,24 +772,31 @@ test('a tray taller than the rows over the bar takes the window Claude Code show
   expect(await whole.wheel(1)).toBe(false)
 })
 
-test('a tray cut at a short height: d expand N more lines, a click too, shows the rest, as many lines as the band has room for, its blank rows too, and the row then says how many remain; ↑ N lines above and u go a page back up; a word that starts with d is typed', CITES, async ($, on) => {
-  const { clock } = await resumed($, on, TALL, 's-tray-page')
+test('a tray cut at a short height: d expand N more lines, a click too, shows the rest, as many lines as the band shows over the bar, its blank row too, and the row then says how many remain; ↑ N lines above and u go a page back up; a word that starts with d is typed; the bar stays in view under it throughout', CITES, async ($, on) => {
+  const scrolls: Any[] = []
+  const { clock } = await resumed($, on, TALL, 's-tray-page', { scrolls })
   const lines = (n: number) => `${n} line${n === 1 ? '' : 's'}`
+  // the band as Claude Code shows it at eight rows (claudeBand), with the rows of the tray's window and the band's blank
+  // rows that Claude Code's window shows
   const drawn = async (maxRows = 8) => {
-    const band = await $.ui.render(above(maxRows))
-    const top = all(band).find(n => n.props?.key === 'tray-window-in')?.props?.top
-    const keys = kidsOf(band).map(n => String(n.props?.key))
-    // the band's blank rows: above the tray, and over the bar
-    const blanks = kidsOf(band).filter(n => n.type === 'Text' && textOf(n) === ' ').length
+    const d = await claudeBand($, scrolls, maxRows).draw()
+    let row = 0
+    const blanks = kidsOf(d.tree).filter(n => {
+      const at = row
+      row += treeRows(n, 100)
+      return n.type === 'Text' && textOf(n) === ' ' && at >= d.offset && at < d.offset + d.windowRows
+    }).length
     return {
-      band, keys, blanks, text: textOf(band), top: typeof top === 'number' ? -top : 0, rows: Number(all(band).find(n => n.props?.key === 'tray-window')?.props?.height),
-      button: (id: string) => all(band).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`),
+      ...d, blanks, win: Number(all(d.tree).find(n => n.props?.key === 'tray-window')?.props?.height),
+      button: (id: string) => all(d.tree).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`),
     }
   }
-  // the band fits its rows, the bar's row last: the bar stays on screen
+  // the bar stays on screen: the last row of the window Claude Code shows the band in is the bar's
   const fits = (d: Awaited<ReturnType<typeof drawn>>) => {
-    expect(treeRows(d.band, 100)).toBeLessThanOrEqual(8)
-    expect(d.keys.at(-1)).toMatch(/^bar/)
+    const bar = d.at('bar')
+    expect(bar).not.toBeNull()
+    expect(bar!.row + bar!.rows).toBe(d.windowRows)
+    expect(d.offset).toBe(0)
   }
   // a click on the row under the window, in the band as mounted at the same height
   const click = async (id: string) => {
@@ -795,36 +819,37 @@ test('a tray cut at a short height: d expand N more lines, a click too, shows th
   let d = await drawn()
   fits(d)
   const below = Number(/expand (\d+) more line/.exec(d.text)?.[1])
-  const first = d.rows
+  const first = d.win
   expect(below).toBeGreaterThan(5)
   expect(d.top).toBe(0)
-  // the band's blank rows, above the tray and over the bar
-  expect(d.blanks).toBe(2)
+  // the band's blank row in Claude Code's window, over the bar
+  expect(d.blanks).toBe(1)
   // the row under the window: its key, where it acts, then what it does
   expect(textOf(d.button('down'))).toBe(`d expand ${below} more lines`)
-  // a click on it: the tray takes the band's blank rows too, and its window moves on to the lines after the ones shown,
-  // the last of those staying in view: a window of one row keeps that row, and the rows it gains show the lines after it
+  // a click on it: the tray takes the band's blank row too, and its window moves on to the lines after the ones shown,
+  // the last of those staying in view: a window of one row keeps that row, and the row it gains shows the line after it
   await click('down')
   d = await drawn()
   fits(d)
   expect(d.blanks).toBe(0)
-  expect(d.rows).toBe(first + 2)
+  expect(d.win).toBe(first + 1)
   const moved = d.top
   expect(moved).toBe(first - 1)
   // the lines that still remain
-  expect(d.text).toContain(`d expand ${below - 2 - moved} more line`)
+  expect(d.text).toContain(`d expand ${below - 1 - moved} more line`)
   // again: a page on, its last line staying in view, and the lines above are named
-  const page = first + 1
+  const page = first
   await click('down')
   d = await drawn()
+  fits(d)
   expect(d.top).toBe(moved + page)
-  expect(d.text).toContain(`d expand ${below - 2 - moved - page} more line`)
+  expect(d.text).toContain(`d expand ${below - 1 - moved - page} more line`)
   expect(d.text).toContain(`↑ ${lines(moved + page)} above`)
   // ↑ N lines above: a page back up; the tray keeps the rows it took
   await click('up')
   d = await drawn()
   expect(d.top).toBe(moved)
-  expect(d.rows).toBe(first + 2)
+  expect(d.win).toBe(first + 1)
   // d at an empty prompt shows the lines after the window, u goes back up
   expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
   expect((await drawn()).top).toBe(moved + page)
@@ -837,17 +862,19 @@ test('a tray cut at a short height: d expand N more lines, a click too, shows th
   await clock.advance(2000)
   await open()
   d = await drawn()
-  expect(d.rows).toBe(first)
-  expect(d.blanks).toBe(2)
+  fits(d)
+  expect(d.win).toBe(first)
+  expect(d.blanks).toBe(1)
   // a word that starts with d: the tray goes back as it was, and the word is typed
   expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
-  expect((await drawn()).rows).toBe(first + 2)
+  expect((await drawn()).win).toBe(first + 1)
   const word = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'o' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'o' } as never) as Any
   expect(word.text).toBe('do')
   d = await drawn()
+  fits(d)
   expect(d.top).toBe(0)
-  expect(d.rows).toBe(first)
-  expect(d.blanks).toBe(2)
+  expect(d.win).toBe(first)
+  expect(d.blanks).toBe(1)
 })
 
 // a value code computed, the citation's evidence three hundred lines of output
