@@ -1184,12 +1184,15 @@ def _cancel_grace(c: str) -> None:
 
 def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
     """events.post logged event `event_id` as it posted it: the mirror skips its record, and main runs until the turn
-    ends. A
-    thread's event is remembered with its thread (thread_for)."""
+    ends. A thread's event is remembered with its thread (thread_for); when the server runs main (runtime.py), it starts
+    the thread's fork and no turn of main's (runtime.deliver), so main does not run for it."""
+    from . import runtime  # noqa: PLC0415
+
     _expected.add(event_id)
     if thread:
         _event_threads[event_id] = thread
-    agents.set_running(c, agents.MAIN_ID, True)
+    if not (thread and runtime.enabled()):
+        agents.set_running(c, agents.MAIN_ID, True)
     lv = _live.get(c)
     if lv is not None:
         lv.wake.set()
@@ -2538,16 +2541,29 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
         result = _workflow_value(result)
     sub.done = True
     sub.finish = None
+    turn = marks.new_turn() if sub.thread else ""  # what a thread's run's `done` record names, as main's turn's does
     try:
         if sub.thread:
-            threads.fork_finished(lv.c, sub.chat, status, kind=kind, tool_use_id=sub.tool_use_id, agent_id=sub.agent_id)
+            threads.fork_finished(lv.c, sub.chat, status, kind=kind, tool_use_id=sub.tool_use_id, agent_id=sub.agent_id,
+                                  turn=turn)
         else:
             agents.finish_agent(lv.c, sub.chat, status, (sub.report or result or "")[:RESULT_LIMIT] or None)
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
         log.debug("%s: subagent chat %s could not be finished", lv.c, sub.chat, exc_info=True)
+    if sub.thread:
+        _thread_marks(lv, sub, turn)
     if sub.thread and kind is None and status in ("done", "completed") and not sub.api_error:
         _thread_answered(lv, sub.chat)
         _proposer_after_thread(lv, sub.chat)
+
+
+def _thread_marks(lv: Live, sub: Sub, turn: str) -> None:
+    """A side thread's run ended under `turn`: the marks of its answer are checked, as the terminal checks them
+    (marks.answer_ended), the calls of its fork's transcript standing for main's."""
+    try:
+        marks.answer_ended(lv.c, sub.chat, turn, threads.answer(lv.c, sub.chat, turn), str(sub.path or ""))
+    except Exception:  # noqa: BLE001 — a check that does not start is no reason to fail the mirror
+        log.exception("%s: the check of the citations did not start at the end of thread %s's run", lv.c, sub.chat)
 
 
 def _thread_answered(lv: Live, chat: str) -> None:

@@ -523,6 +523,21 @@ def replied_since_question(c: str, thread_id: str) -> bool:
     return any(r.get("type") == "text" and r.get("reply") for r in records[last_user + 1:])
 
 
+def answer(c: str, thread_id: str, turn: str) -> list[str]:
+    """The texts of the thread's run whose `done` record names `turn` (fork_finished), its answer, as the page shows
+    them as that run's rows: each text record after the run before it but an API error's line; [] when no run ended
+    under `turn`."""
+    texts: list[str] = []
+    for r in agents.read_events(agents.paths(c, thread_id)[1]):
+        if r.get("type") == "done":
+            if r.get("turn") == turn:
+                return texts
+            texts = []
+        elif r.get("type") == "text" and not r.get("api_error") and str(r.get("delta") or "").strip():
+            texts.append(str(r["delta"]))
+    return []
+
+
 def _stop(c: str, thread_id: str, kind: str, detail: str | None = None) -> None:
     """Say in the thread why its run ended without a reply the analyst can read (STOP_TEXT)."""
     _, log_path = agents.paths(c, thread_id)
@@ -534,9 +549,11 @@ def _stop(c: str, thread_id: str, kind: str, detail: str | None = None) -> None:
 
 
 def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | None = None,
-                  tool_use_id: str | None = None, agent_id: str | None = None, refused: bool = False) -> None:
+                  tool_use_id: str | None = None, agent_id: str | None = None, refused: bool = False,
+                  turn: str | None = None) -> None:
     """The fork stopped: the thread stops running, the run ends in its chat with `done` or why it did not finish, and a
-    run with no reply leaves a chip in main pointing at the anchor. Waiting messages go to the fork now.
+    run with no reply leaves a chip in main pointing at the anchor. Waiting messages go to the fork now. The `done`
+    record names `turn`, the id the marks records of the run's answer name (answer, marks.answer_ended).
 
     The end of an Agent call that never ran (`refused`: a hook denied it, such as fork_check's second fork of a thread)
     or that is not the thread's fork (its `tool_use_id` and `agent_id` are not those the meta's fork records) changes
@@ -561,23 +578,24 @@ def fork_finished(c: str, thread_id: str, status: str = "done", *, kind: str | N
     if meta is None:
         return
     _, log_path = agents.paths(c, thread_id)
+    done = {"type": "done", "ts": _now(), "result": None, **({"turn": turn} if turn else {})}
     if status in ("done", "completed"):
         if not replied_since_question(c, thread_id):
             question = next((str(r.get("text") or "") for r in reversed(agents.read_events(log_path)) if r.get("type") == "user"), "")
             anchors = _anchors(meta)
             agents.chip(c, CHIP_KIND, " ".join(question.split())[:CHIP_CHARS] or str(meta.get("title") or thread_id),
                         ref=anchors[0] if anchors else None, chat=thread_id)
-        agents.append(log_path, {"type": "done", "ts": _now(), "result": None})
+        agents.append(log_path, done)
         log.info("%s: thread %s: its fork finished", c, thread_id)
     elif kind and replied_since_question(c, thread_id):
         # the fork had answered and was still at work when it was cut: the answer stands, and nothing asks again
-        agents.append(log_path, {"type": "done", "ts": _now(), "result": None})
+        agents.append(log_path, done)
         log.info("%s: thread %s: its fork was cut after its reply (%s)", c, thread_id, kind)
     elif kind:
         _stop(c, thread_id, kind)
     elif replied_since_question(c, thread_id):
         # the fork answered and then failed: the answer stands, and the run ends as done
-        agents.append(log_path, {"type": "done", "ts": _now(), "result": None})
+        agents.append(log_path, done)
         log.info("%s: thread %s: its fork ended %s after its reply", c, thread_id, status)
     else:
         agents.append(log_path, {"type": "error", "ts": _now(), "message": status, "kind": status})

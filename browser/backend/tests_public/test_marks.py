@@ -1023,3 +1023,53 @@ def test_of_the_workspace_only_its_labels_definitions_are_evidence(_fresh, monke
     assert len(items) == 4
     for m in items:
         assert m["status"] == "failed" and "is outside the folder this session works in" in m["reason"], m
+
+
+def test_a_side_thread_s_answer_is_checked_with_its_fork_s_calls_and_main_hears_nothing_of_it(_fresh, monkeypatch,
+                                                                                              tmp_path):
+    """The terminal checks a side thread's answer as it checks a reply (plugin/marks/checker.ts checkAnswer): a fork of
+    main, which never read the answer, reads in the terminal's words what holds the marks (threadAnswer), and the Bash
+    calls of the thread's fork are evidence as main's are for a reply. The marks records go to the thread's chat, and
+    main hears nothing of the check, nor of the repair it starts for the mark it found wrong."""
+    terminal = (marks.PLUGIN / "marks" / "checker.ts").read_text(encoding="utf-8")
+    for part in (f"'{marks.LAST_REPLY}'", *marks.THREAD_ANSWER.split("{about}")):
+        assert part in terminal, f"the terminal's checker.ts no longer says {part!r}: look at marks.THREAD_ANSWER"
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    code = "runs = ['failed', 'passed', 'failed', 'passed', 'passed', 'failed', 'passed', 'passed']\n" \
+           "print(f\"{runs.count('failed')} of {len(runs)}\")"
+    calls = tmp_path / "agent-a0f.jsonl"  # the transcript of the thread's fork, which counted the runs
+    calls.write_text("".join(json.dumps(r) + "\n" for r in (
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash",
+                                                       "input": {"command": f"python3 - <<'PY'\n{code}\nPY"}}]}},
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "3 of 8\n"}]}})))
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+    found = {1: {"status": "verified", "correction": None, "reason": "3 of the 8 runs failed"},
+             2: {"status": "wrong", "correction": None, "reason": "5 of the 8 runs passed"}}
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        out = [{"mark": n, "kind": "computed", "evidence": {"output": "3 of 8"}, **found[n]}
+               for n in map(int, re.findall(r"^(\d+)\. \[", prompt, re.M))]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    monkeypatch.setattr(marks, "run_fork", fork)
+    turn = marks.new_turn()
+
+    async def go():
+        marks.answer_ended(CORPUS, tid, turn, ["Of the runs, [3 of 8](#) failed and [all the rest](#) passed."],
+                           str(calls))
+        while [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]:
+            await _wait_all()
+
+    asyncio.run(go())
+    assert len(seen) == 2, seen  # the check, then the repair of the mark it found wrong
+    holds = marks.THREAD_ANSWER.format(about='"why"')
+    assert all(f"Your task now is to check {holds}." in p for p in seen), seen[0]
+    got = {m["n"]: m for m in marks.stored(CORPUS, turn)["items"]}
+    assert got[1]["status"] == "verified" and got[1]["evidence"]["by"] == "main", got[1]
+    assert got[2]["status"] == "failed" and got[2].get("repair") is True, got[2]
+    records = [r for r in agents.read_events(agents.paths(CORPUS, tid)[1]) if r["type"] == "marks"]
+    assert {r["turn"] for r in records} == {turn} and records[-1]["items"] == marks.stored(CORPUS, turn)["items"]
+    assert not [r for r in _log() if r["type"] == "marks"]
+    assert _fresh == [], "main was told of the thread's check"

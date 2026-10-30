@@ -2,6 +2,9 @@
 // A reply's marks drawn by what the check found (marks/Mark.tsx), as a card's citations are drawn: two looks, verified
 // (a correction shows its new words and looks verified) and failed (a wrong mark, one the check could not confirm, one
 // no check could run: a red × after the words, as the terminal draws it), and a click opens the evidence in the citation's label.
+// A mark no check has said anything of yet is drawn as not checked.
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
@@ -190,6 +193,24 @@ test('a line short enough to read whole is shown whole, and a long one cut at wo
 test('while the reply streams its marks wait, whatever an earlier check said', async () => {
   const el = await mount(<ChatMarkdown text="[12](#) runs" streaming checks={[item(0, '12', { status: 'failed' })]} />)
   expect(el.querySelector('.mark')?.getAttribute('data-mark-look')).toBe('pending')
+})
+
+test('a mark no check has said anything of yet draws as not checked, its underline dotted, never as a checked one', async () => {
+  // a side thread's answer whose check has not begun, or one from before side threads' answers were checked: no record
+  // of its marks
+  const el = await mount(<ChatMarkdown text="It is [302 of 439](#) runs." />)
+  expect(el.querySelector('.mark')?.getAttribute('data-mark-look')).toBe('pending')
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  expect(document.querySelector('.mark-pop .mark-pop-state')?.textContent?.trim()).toBe('not checked yet')
+  const css = readFileSync(path.resolve(__dirname, '../../src/styles/marks.css'), 'utf8')
+  const rule = (selector: string) => {
+    const at = css.indexOf(`\n${selector} {`)
+    expect(at, selector).toBeGreaterThanOrEqual(0)
+    return css.slice(at, css.indexOf('}', at))
+  }
+  expect(rule('.mark-words')).toMatch(/text-decoration-style: solid;/)
+  expect(rule('.mark.is-pending .mark-words')).toMatch(/text-decoration-style: dotted;/)
 })
 
 test("a turn's marks go to its own text rows in order, and its reply gets the footer", async () => {
