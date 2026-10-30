@@ -552,6 +552,15 @@ def test_install_md_says_how_a_plugin_without_a_clone_updates_after_its_first_fi
     assert (ROOT / "plugin" / "bin" / "thimble").is_file()
 
 
+def test_the_update_help_and_install_md_s_update_section_keep_the_width_of_the_text_around_them():
+    """thimble update --help (cli.py's UPDATE_HELP, which it prints as written) and INSTALL.md's update section wrap at
+    120 columns: a paragraph that an edit made longer is wrapped again, not left with one long line."""
+    helps = re.search(r'UPDATE_HELP = """(.*?)"""', (ROOT / "plugin" / "engine" / "kernel" / "cli.py").read_text(), re.S)
+    update = (ROOT / "INSTALL.md").read_text().split("## Update and uninstall", 1)[1].split("\n## ", 1)[0]
+    for text in (helps.group(1), update):
+        assert [line for line in text.splitlines() if len(line) > 120] == []
+
+
 def whole_install(tmp_path, *args):
     """scripts/install.sh with made-up commands, both products, no terminal and no question how the workbench reaches
     Claude (--no-setup, as Claude runs it): the run. The made-up claude installs a plugin with no sandbox to check."""
