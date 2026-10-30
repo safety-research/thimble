@@ -390,6 +390,24 @@ def mark_open(home: Path, folder: Path | str) -> None:
         (d / path.replace("/", "%")).touch()
 
 
+def code_project(folder: Path) -> None:
+    """`folder` made a git repository of its files and of a Python package, `tool` (tool.rows.N is 3), with the file
+    times git's index keeps behind the files' own, as after a copy or a checkout: then `git status` and `git diff`
+    rewrite the index unasked."""
+    import subprocess  # noqa: PLC0415
+
+    (folder / "tool").mkdir()
+    (folder / "tool" / "__init__.py").write_text("")
+    (folder / "tool" / "rows.py").write_text("N = 3\n")
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "files"]):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null",
+                        *args], cwd=folder, check=True, capture_output=True)
+    later = time.time() + 5
+    for p in folder.rglob("*"):
+        if ".git" not in p.relative_to(folder).parts:
+            os.utime(p, (later, later))
+
+
 def earlier_orientation_proposal(c: str, name: str, description: str, claims: list[str], arrangement: str = "") -> str:
     """A proposal as an orientation from before 0.8.0 stored it (views.propose with `orientation`, which 0.8.0 took out),
     for the tests of what thimble still does with such a row: `orientation` and `held`, a follow-on start, announced as

@@ -6,11 +6,13 @@ Both engines honor the switch: the Messages API's tools (runtime_tools.Box, its 
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from app import config, ledger, runtime, runtime_api, runtime_cc, runtime_tools
+from conftest import code_project
 
 CORPUS = "mini"
 SWITCH = "Claude can edit files in this folder"
@@ -117,6 +119,41 @@ async def test_the_api_engine_s_bash_writes_the_corpus_only_while_the_switch_is_
     ledger.put_settings_route(CORPUS, analyst, {"corpus_edits": False})
     out = await runtime_tools.call(box(space.spec_of(space.main)), "Bash", cmd)
     assert out.text.strip() == "refused" and not (corpus / "made.txt").exists(), out.text
+
+
+def _state(root: Path) -> dict[str, tuple[int, int]]:
+    """Every entry under `root`, git's own files among them: its size and modification time, 0 and 0 for a folder."""
+    return {str(p.relative_to(root)): (0, 0) if p.is_dir() else (p.lstat().st_size, p.lstat().st_mtime_ns)
+            for p in sorted(root.rglob("*"))}
+
+
+async def test_a_command_main_s_bash_runs_writes_nothing_beside_what_it_reads(space):
+    """While the switch is on main's Bash writes the corpus, yet a command that only reads it leaves it as it was:
+    `git status` refreshes no index, and Python writes no bytecode cache beside a module it imports
+    (kernel_wrap.NO_SIDE_WRITES). What a command writes on purpose, as `git add` does, still goes through."""
+    if why := runtime_tools.sandbox_reason():
+        pytest.skip(why)
+    if not shutil.which("git"):
+        pytest.skip("needs git")
+    corpus = space.corpus
+    code_project(corpus)
+    before = _state(corpus)
+    main = box(space.spec_of(space.main))
+    out = await runtime_tools.call(main, "Bash", {"command": "git status --short; git log --oneline | wc -l; "
+                                                          "python3 -c 'import tool.rows; print(tool.rows.N)'"})
+    assert out.text.split() == ["1", "3"], out.text
+    after = _state(corpus)
+    assert after == before, sorted(k for k in {*before, *after} if before.get(k) != after.get(k))
+    out = await runtime_tools.call(main, "Bash", {"command": "echo x > new.txt; git add new.txt; git status --short"})
+    assert out.text.strip() == "A  new.txt", out.text
+
+
+def test_claude_code_s_bash_gets_what_keeps_its_programs_from_writing_beside_what_they_read(space, tmp_path):
+    """A headless Claude Code session's commands get what keeps those on the Messages API from writing caches beside
+    the files they read (kernel_wrap.NO_SIDE_WRITES): main's and its forks' may write the corpus."""
+    for who, spec in specs(space).items():
+        env = runtime_cc.settings(spec, True, tmp_path)["env"]
+        assert (env.get("PYTHONDONTWRITEBYTECODE"), env.get("GIT_OPTIONAL_LOCKS")) == ("1", "0"), who
 
 
 def test_the_checker_s_fork_never_writes_the_corpus(space, monkeypatch):
