@@ -285,6 +285,21 @@ test('a file\'s line that holds bytes that do not print (a log\'s color codes) d
   expect(all(pane).some(n => n.type === 'Text' && n.props?.bold === true && textOf(n) === '12')).toBe(true)
 })
 
+test("Claude's own words in a reply with a citation draw as Claude Code draws them, escaped nowhere: a no-break space, an emoji of parts joined by zero-width joiners, a Persian word's zero-width non-joiner, the tabs of a recipe and of a table in code blocks", CITES, async ($, on) => {
+  const sentence = 'Of the 40 nightly runs, [12 of 40](#) failed 👩‍💻, a failure rate of 30 %.'
+  const text = `${sentence}\n\nThe make target the runs call:\n\n\`\`\`make\ntest:\n\tpytest -q\n\tpython3 report.py\n\`\`\`\n\nColumns of runs.tsv:\n\n\`\`\`\nrun\tstatus\tminutes\nnightly-004\tfailed\t18.7\n\`\`\`\n\nIn Persian: می‌خواهم (one word).`
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 24, end: 37, sentence, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'print(len(runs))\nprint(n_failed)', output: '40\n12', highlight: [[3, 5]] },
+  }, 's-tray-own-words', { text })
+  const drawn = await $.ui.render(answer('row-t1', text))
+  // the citation draws, so these are thimble's drawing of the reply, not Claude Code's own
+  expect(all(drawn).some(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))).toBe(true)
+  const words = textOf(drawn)
+  for (const own of [' failed 👩‍💻, a failure rate of 30 %.', 'test:\n\tpytest -q\n\tpython3 report.py', 'run\tstatus\tminutes\nnightly-004\tfailed\t18.7', 'می‌خواهم']) expect(words).toContain(own)
+  expect(words).not.toMatch(/\\x|\\u/)
+})
+
 test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', CITES, async ($, on) => {
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',

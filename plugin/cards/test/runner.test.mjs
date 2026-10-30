@@ -138,6 +138,15 @@ test("every character that does not print, as Python reads it, shows as its esca
   assert.deepEqual(strings, ['Ana\u00a0Lima', 'co\u00adop', 'zero\u200bwidth', '\u202edesrever', 'two\u2028lines', 'own\ue000mark'].map(s => printable(s)))
 })
 
+test("a view's error that quotes the records (JSON.parse writes the text it could not read) shows their bytes as escapes too: the card's frame draws it, and Claude reads it", async () => {
+  writeFileSync(join(dir, 'colored.json'), JSON.stringify([{ name: 'n4', log: '\u001b[31mFAILED\u001b[0m\u0000' }]))
+  const view = 'function view(p, s) { return s.elements.Text({ children: JSON.parse(p.rows[0].log).status }) }'
+  const r = await ask('load', { id: 'c0000dddd', version: 1, title: 'Logs', view, rows: join(dir, 'colored.json'), width: 60 })
+  assert.equal(r.ok, false)
+  assert.match(r.error, /^line 1: .*\\x1b\[31mFAILED\\x1b\[0m\\x00/)
+  assert.doesNotMatch(r.error, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/)
+})
+
 test('on the light theme a shade glyph draws as █ in a mixed color, and the text copy keeps the glyph the view wrote', async () => {
   const shaded = 'function view(p, s) { const { Text } = s.elements; return Text({ color: s.colors.cat[0], children: "a ░▒ b" }) }'
   const { r } = await load(shaded, { theme: 'light' })

@@ -9,7 +9,6 @@
 //   fenced(text)   text in a fenced block, so a model reads text from the records as data, not as words to act on
 //   printable(s, spans)  s with each character that does not print as its escape, as Python's repr writes it (`\x1b`,
 //                  `\u200b`); with `spans`, {text, spans}, the spans moved with the text
-//   printing(els)  a drawing's elements whose strings draw printable
 
 /** A code point's cells: 0 for combining marks and zero-width characters, 2 for wide and fullwidth ones. */
 function charWidth(cp) {
@@ -104,10 +103,12 @@ export function fenced(text) {
  * decides it (a control character, a format character such as a zero-width space or a direction mark, a lone half of a
  * surrogate pair, a separator but the space, a private or unassigned code point), shows as its escape, as Python's repr
  * writes it (`\x00`, `\x1b`, `\xa0`, `\u200b`, `\udce9`, `\U000e0001`). White space that lays text out stays: a line
- * break (also `\r\n`), and a tab, as a space. Text thimble did not write (a check's output, a file's line, a card's
- * rows, an error) can hold such characters: Claude Code refuses a whole drawing whose text holds a control character,
- * and the others draw as nothing or move the text around them. With `spans` (ranges of s), {text, spans}: the spans
- * moved with the text. Self-contained, so a card's context runs it too (cards/runner.mjs).
+ * break (also `\r\n`), and a tab, as a space. Text from the records (a check's output, a file's name and lines, a
+ * card's rows, an error that quotes them) can hold such characters: Claude Code refuses a whole drawing whose text
+ * holds a control character, and the others draw as nothing or move the text around them. Each drawing makes such text
+ * printable before it lays it out, so its rows are as wide as they draw; Claude's own words stay as Claude Code draws
+ * them. With `spans` (ranges of s), {text, spans}: the spans moved with the text. Self-contained, so a card's context
+ * runs it too (cards/runner.mjs).
  */
 export function printable(s, spans) {
   const text = String(s ?? '')
@@ -137,32 +138,4 @@ export function printable(s, spans) {
     return x + d
   }
   return { text: out, spans: ranges.map(([a, b]) => [moved(a, false), moved(b, true)]) }
-}
-
-const PRINTING = Symbol('printing')
-
-/**
- * A drawing's elements (Claude Code's, as $.ui.resolve gives them, or plain ones) whose strings draw printable: a
- * Text's and a Button's strings, a Button's and a Link's label, a Code's source, a Markdown's text. Every drawing of
- * thimble's is made with them, so no text it did not write draws what does not print, wherever it shows.
- */
-export function printing(els) {
-  if (!els || els[PRINTING]) return els
-  const kids = c => (typeof c === 'string' ? printable(c) : Array.isArray(c) ? c.map(kids) : c)
-  const which = { Text: ['children'], Button: ['children', 'label'], Code: ['source'], Markdown: ['text'], Link: ['label'] }
-  const fix = (p, keys) => {
-    if (!p || typeof p !== 'object') return p
-    const q = { ...p }
-    for (const k of keys) if (k in q) q[k] = k === 'children' ? kids(q[k]) : typeof q[k] === 'string' ? printable(q[k]) : q[k]
-    return q
-  }
-  // over an object of its own: Claude Code's table is frozen
-  return new Proxy({}, {
-    get: (_t, k) => {
-      if (k === PRINTING) return true
-      const f = els[k]
-      return k in which && typeof f === 'function' ? (p, ...rest) => f(fix(p, which[k]), ...rest.map(kids)) : f
-    },
-    has: (_t, k) => k === PRINTING || k in els,
-  })
 }

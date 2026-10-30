@@ -14,7 +14,6 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { aboveBar } from '../core/answerview'
 import { closePane, narrowNotice, openPane, paneNow, paneShows } from '../core/pane'
-import { printing } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
@@ -113,7 +112,7 @@ export const registerBar: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     try {
       if (e.props.hasSurvey) return next(e)
-      const els = printing($.ui.resolve(e)) as Any
+      const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
       const shows = (await paneNow($).catch(() => null))?.kind ?? null
       drawnPane = shows && (await paneShows($, shows).catch(() => false)) ? shows : null
