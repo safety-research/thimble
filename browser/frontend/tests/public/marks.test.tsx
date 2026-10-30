@@ -3,7 +3,7 @@
 // (a correction shows its new words and looks verified) and failed (a wrong mark, one the check could not confirm, one
 // no check could run: a red × after the words, as the terminal draws it), and a click opens the evidence in the citation's label.
 import { act } from 'react'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { MarksFooter } from '../../src/marks/MarksFooter.tsx'
@@ -134,6 +134,25 @@ test("a computed mark's label holds every line of the output and of the code, ea
   expect(box.querySelector('[data-key]')?.textContent).toBe('print(f"failed: {len(bad)} of {len(rows)}")')
   expect(box.querySelector('[data-key]')?.classList.contains('mark-ev-said')).toBe(true)
   expect(document.querySelector('.mark-pop')?.textContent).not.toContain('…')
+})
+
+test("a computed mark's label draws its code in the file reader's colors for Python, as the terminal draws it in Claude Code's: each line in its place, the line that printed the value keyed, and the value in the output still marked", async () => {
+  const output = 'runs: 40\nfailed: 12'
+  const at = output.lastIndexOf('12')
+  const lines = ['import csv', 'rows = list(csv.DictReader(open("runs.csv")))', '', 'print(f"runs: {len(rows)}")', 'print(f"failed: {sum(r[\'status\'] == \'failed\' for r in rows)}")']
+  const checks = [item(0, '12', { evidence: { kind: 'computed', code: lines.join('\n'), output, highlight: [[at, at + 2]], by: 'checker' } })]
+  const el = await mount(<ChatMarkdown text="[12](#) failed" checks={checks} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  const box = document.querySelector<HTMLElement>('.mark-pop .mark-ev-code')!
+  // the highlighter loads once, when code is first drawn
+  await vi.waitFor(async () => {
+    await settle()
+    expect(box.querySelector('.tok-keyword')?.textContent).toBe('import')
+  })
+  expect(box.querySelector('.tok-string')?.textContent).toBe('"runs.csv"')
+  expect([...box.querySelectorAll('.refchip-line')].map((l) => l.textContent)).toEqual([...lines.slice(0, 2), ' ', ...lines.slice(3)])
+  expect(box.querySelector('[data-key]')?.textContent).toBe(lines[4])
+  expect(document.querySelector('.mark-pop .mark-ev-out .cite-cell')?.textContent).toBe('12')
 })
 
 test('a line short enough to read whole is shown whole, and a long one cut at words on both sides', () => {

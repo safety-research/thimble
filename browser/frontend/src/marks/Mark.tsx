@@ -3,7 +3,8 @@
 // them. A mark the check could not confirm is red and underlined, with `×` after the words, its tint a soft red.
 // Hovering opens its evidence in the citation's label (RefChip's .refchip-pop), and a click keeps it open:
 //
-//   computed   the head names the code that ran; its real output, the marked words highlighted, then the code
+//   computed   the head names the code that ran; its real output, the marked words highlighted, then the code in the
+//              file reader's colors for Python
 //   quote      each cited place: its `path:line` chip (a click opens the file there) over the cited lines and the lines
 //   code       around them that hold text, the words highlighted
 //   card       a value a card shows: the card's chip (a click opens it) over the table around the cited cell, the cell
@@ -20,18 +21,19 @@
 // many as fit in view and the rest a scroll away, by the wheel or, once Tab gives the box the focus, the arrow keys. A
 // box opens with its key line in its middle: the output's line that holds the value, the code's line that printed it
 // (the terminal's rule, plugin/tray/printed.mjs printIndex: only a line the code shows printed it), that line in the
-// text's own ink and the code's other lines quieter, as the terminal's tray draws them.
+// text's own ink and the code's other lines quieter.
 //
 // A failed mark's label says why in one line first, with Repair, which checks it again and makes it correct (the
 // terminal's x); a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
 // each: their cells are marked in one table, their lines in one output. Escape, a press outside, or a second click
 // closes it.
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { citedTable, placePop, printedTable, TablePreview, useRefLabel } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
+import { highlightLines, renderTokens, useHljs } from '../files/highlight'
 import { api, marksApi } from '../lib/api'
 import { glyphOf } from '../lib/fileGlyph'
 import { wordsSpanRef } from '../lib/quoteFind'
@@ -478,15 +480,19 @@ function hitLine(output: string, spans: readonly [number, number][]): number {
   return 0
 }
 
-/** The code, a line each, in its box: the line that printed the output's line that holds the value keyed, in the text's
- * own ink (printIndex); none when the code does not show for sure which line printed it. */
+/** The code, a line each, in its box, in the file reader's colors for Python (files/highlight.ts; plain until
+ * highlight.js has loaded), as the terminal draws it in Claude Code's: the line that printed the output's line that
+ * holds the value keyed, in the text's own ink (printIndex); none when the code does not show for sure which line
+ * printed it. */
 function CodeBox({ code, output, spans }: { code: string; output: string; spans: [number, number][] }) {
   const said = printIndex(code, output, hitLine(output, spans))
+  const hl = useHljs(true)
+  const colored = useMemo(() => (hl ? highlightLines(hl, code, 'python') : null), [hl, code])
   return (
     <KeyBox className="refchip-lines mono mark-ev-code" label="code">
       {code.split('\n').map((l, i) => (
         <div key={i} className={i === said ? 'refchip-line mark-ev-said' : 'refchip-line'} {...(i === said ? { 'data-key': '' } : {})}>
-          {l || ' '}
+          {l ? (colored?.[i] ? renderTokens(colored[i]) : l) : ' '}
         </div>
       ))}
     </KeyBox>
