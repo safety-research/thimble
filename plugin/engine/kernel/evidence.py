@@ -199,11 +199,15 @@ def short(s: str, n: int) -> str:
 # missing, never the whole cited words again.
 
 def sentence(clause: str) -> str:
-    """A clause of a reason as the sentence the person reads: its first letter capital, a stop at its end."""
+    """A clause of a reason as the sentence the person reads: a stop at its end, and a capital first letter unless its
+    first word is a name, whose case is its own, as check_reason keeps it: a file's path or name (`peer/run.log is
+    outside …`), or a word with a digit, a dash or a capital in it."""
     s = norm_ws(clause)
     if not s:
         return s
-    s = s[0].upper() + s[1:]
+    first = re.match(r"[^\s,;:]+", s)
+    if first and re.fullmatch(r"[a-z]+", first.group(0)):
+        s = s[0].upper() + s[1:]
     return s if s[-1] in ".!?" else s + "."
 
 
@@ -1233,12 +1237,10 @@ def inside(path: str, folders: list[str]) -> bool:
 LEADING_CD = re.compile(r"\s*cd\s+(\S+)\s*(?:&&|;|\n)")
 
 
-def paths_of(file: str, cwd: str, root: str | None, tmp: str | None, calls: list[dict[str, Any]] = ()) -> list[str]:
-    """The paths a cited file may name inside the session's folders (absolute, links not followed): an absolute path
-    as it is; a relative one from the folder the session started in, from the shell's folder (where main's `cd` left
-    it), and from each folder a call of the session moved to with a leading `cd`, since the check may have named the
-    file from there. A file in `tmp` counts when `tmp` is given."""
-    folders = [f for f in (root, cwd, tmp) if f]
+def named_paths(file: str, cwd: str, root: str | None, calls: list[dict[str, Any]] = ()) -> list[str]:
+    """The paths a cited file may name (absolute, links not followed): an absolute path as it is; a relative one from
+    the folder the session started in, from the shell's folder (where main's `cd` left it), and from each folder a call
+    of the session moved to with a leading `cd`, since the check may have named the file from there."""
     if os.path.isabs(file):
         bases = [""]
     else:
@@ -1247,7 +1249,14 @@ def paths_of(file: str, cwd: str, root: str | None, tmp: str | None, calls: list
             m = LEADING_CD.match(str(c.get("command") or ""))
             d = m.group(1).strip("'\"") if m else ""
             bases += [d] if os.path.isabs(d) else [os.path.join(b, d) for b in (root, cwd) if b and d]
-    return [p for p in dict.fromkeys(os.path.abspath(os.path.join(b, file)) for b in bases) if inside(p, folders)]
+    return list(dict.fromkeys(os.path.abspath(os.path.join(b, file)) for b in bases))
+
+
+def paths_of(file: str, cwd: str, root: str | None, tmp: str | None, calls: list[dict[str, Any]] = ()) -> list[str]:
+    """The paths a cited file may name (named_paths) that lie inside the session's folders. A file in `tmp` counts when
+    `tmp` is given."""
+    folders = [f for f in (root, cwd, tmp) if f]
+    return [p for p in named_paths(file, cwd, root, calls) if inside(p, folders)]
 
 
 ADJACENT = re.compile(r"([\"'])\s+\1")
@@ -1279,9 +1288,10 @@ def place(ev: dict[str, Any], cwd: str, root: str | None, tmp: str | None = None
     if not file or line is None or not sub:
         return ["the check named no line of a file to look at"], None, []
     paths = paths_of(str(file), cwd, root, tmp, calls)
-    if not paths:
-        return [f"{file} is outside the folder this session works in"], None, []
     files = [p for p in paths if os.path.isfile(p)]
+    # a path that names a file only through a link out of the session's folders names a file outside them, not none
+    if not paths or (not files and any(os.path.isfile(p) for p in named_paths(str(file), cwd, root, calls))):
+        return [f"{file} is outside the folder this session works in"], None, []
     if not files:
         return [f"there is no file {file} in this session's folder"], None, []
     looks = [look(p, str(file), line, str(sub), cwd, root) for p in files]

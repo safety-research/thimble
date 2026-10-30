@@ -206,11 +206,22 @@ export function refPath(ref: string): string | null {
   return p && 'path' in p ? p.path : null
 }
 
+/** The folders that name what a file is rather than whose it is, so its run is the folder above: `agents/`, `prompts/`. */
+const KIND_FOLDERS = new Set(['agents', 'prompts'])
+/** A trial's folder as a job names it, `<task>__<id>` (`picnic-lake__RvtmQxa`). */
+const TRIAL_FOLDER = /.__[A-Za-z0-9]+$/
+
+/** Whether folder `i` of `parts` names what its files are: a kind folder (KIND_FOLDERS), or a trial's `agent/`
+ * (`<job>/<trial>/agent/trajectory.json`, whose chip would name every trial `agent`). Any other folder named `agent`,
+ * such as `src/agent/`, is whose its files are. */
+function kindFolder(parts: readonly string[], i: number): boolean {
+  return KIND_FOLDERS.has(parts[i]) || (parts[i] === 'agent' && i > 0 && TRIAL_FOLDER.test(parts[i - 1]))
+}
+
 /** `batch2-x/agents/a.jsonl` -> { run: 'batch2-x', rest: 'agents/a.jsonl' }; flat paths have run ''. */
 export function splitRun(path: string): { run: string; rest: string } {
   const parts = path.split('/')
-  const parent = parts.length > 1 ? parts[parts.length - 2] : ''
-  const depth = parent === 'agents' || parent === 'prompts' ? 2 : 1
+  const depth = parts.length > 1 && kindFolder(parts, parts.length - 2) ? 2 : 1
   if (parts.length <= depth) return { run: '', rest: path }
   return { run: parts.slice(0, parts.length - depth).join('/'), rest: parts.slice(parts.length - depth).join('/') }
 }
@@ -279,17 +290,17 @@ export function cardPartLabel(p: { col?: string; row?: string; out?: number; lin
 
 /** A short label for a chip. Nested paths carry one folder as a prefix (runFolder): `batch2 › agent-03.jsonl L412`,
  * `team-6 › … › notes.json L2`. A file keeps its extension wherever its name shows (`events.jsonl`, never
- * `events`). */
-export function refLabel(ref: string): string {
+ * `events`). `among`: the prefixes of the files shown with it (prefixesAmong), so files of one name read apart. */
+export function refLabel(ref: string, among?: ReadonlyMap<string, string>): string {
   const p = parseRef(ref)
   if (!p) return ref
   // one folder, not every folder a file sits in, so a chip stays short where a paragraph cites several records of one
   // run, and the one that tells same-named files apart
+  const runOf = (path: string) => among?.get(path) ?? runPrefix(path)
   const base = (path: string) => {
     const { rest } = splitRun(path)
-    return `${runPrefix(path)}${rest.split('/').pop() ?? rest}`
+    return `${runOf(path)}${rest.split('/').pop() ?? rest}`
   }
-  const runOf = runPrefix
   switch (p.kind) {
     case 'cell':
       return `card${p.col != null ? ` · ${p.col}/${p.row}` : p.out != null ? ` · ${cellSpanLabel(p)}` : p.step != null ? ` · step ${p.step}` : ''}`
@@ -331,17 +342,57 @@ export function refLabel(ref: string): string {
 /**
  * The address an example card shows over each record it quotes (canvas/bodies ExampleBody): the file and the record's
  * line, as in `notes.jsonl L5371`, after its run's folder for a nested path (runFolder). A passage's block and
- * characters are left out. A ref that is not a file's reads as refLabel.
+ * characters are left out. A ref that is not a file's reads as refLabel. `among` as refLabel's.
  */
-export function addressLabel(ref: string): string {
+export function addressLabel(ref: string, among?: ReadonlyMap<string, string>): string {
   const p = parseRef(ref)
   if (!p || !(p.kind === 'record' || p.kind === 'range' || p.kind === 'block' || p.kind === 'span' || p.kind === 'path' || p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow'))
-    return refLabel(ref)
+    return refLabel(ref, among)
   const { rest } = splitRun(p.path)
-  const file = `${runPrefix(p.path)}${rest.split('/').pop() ?? rest}`
-  if (p.kind === 'path') return p.locator ? `${file} · ${locatorLabel(p.locator)}` : file
-  if (p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow') return `${file} ${recordPart(p)}`
-  return p.kind === 'range' ? `${file} L${p.line}-${p.endLine}` : `${file} L${p.line}`
+  const file = `${among?.get(p.path) ?? runPrefix(p.path)}${rest.split('/').pop() ?? rest}`
+  const place =
+    p.kind === 'path' ? (p.locator ? ` · ${locatorLabel(p.locator)}` : '')
+    : p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow' ? ` ${recordPart(p)}`
+    : p.kind === 'range' ? ` L${p.line}-${p.endLine}`
+    : ` L${p.line}`
+  return `${file}${place}`
+}
+
+/**
+ * The prefixes that tell apart the chips of files shown together (an example card's records, the citations of a reply
+ * or of a takeaway): where files of the same name would read the same, as the trajectories of several trials in one
+ * dated job folder do (`<date> › … › trajectory.json`), each names the first folder in which its path differs from
+ * theirs. Only the paths that need it are in the map, for refLabel's and addressLabel's `among`.
+ */
+export function prefixesAmong(refs: readonly string[]): Map<string, string> {
+  // the paths of the files whose chips read the same, by that chip's prefix and name
+  const same = new Map<string, Set<string>>()
+  for (const ref of refs) {
+    const path = refPath(ref)
+    if (path) {
+      const chip = `${runPrefix(path)}${path.split('/').pop()}`
+      same.set(chip, (same.get(chip) ?? new Set<string>()).add(path))
+    }
+  }
+  const out = new Map<string, string>()
+  for (const paths of same.values()) {
+    for (const path of paths) {
+      const others = [...paths].filter((x) => x !== path).map((x) => x.split('/'))
+      const folders = path.split('/').slice(0, -1)
+      const at = others.length ? folders.findIndex((f, k) => others.some((o) => o[k] !== f)) : -1
+      if (at < 0) continue
+      // folders left out between it and the file's name, as runPrefix marks them, a kind folder over the file aside
+      const last = kindFolder(folders, folders.length - 1) ? folders.length - 2 : folders.length - 1
+      out.set(path, `${folders[at]}${RUN_SEP}${at < last ? `…${RUN_SEP}` : ''}`)
+    }
+  }
+  return out
+}
+
+/** The addresses of an example card's records (addressLabel), told apart from each other (prefixesAmong). */
+export function addressLabels(refs: readonly string[]): string[] {
+  const among = prefixesAmong(refs)
+  return refs.map((ref) => addressLabel(ref, among))
 }
 
 /** A td span's percent-encoded column or row label as the table shows it (backend cite.decode_label). */

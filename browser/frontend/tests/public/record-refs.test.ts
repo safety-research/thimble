@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'vitest'
 import { viewMarks, withKeeps } from '../../src/files/labels.ts'
 import { rowsByRef } from '../../src/files/marks.tsx'
-import { addressLabel, parseRef, recordKey, recordOf, refLabel, surfaceOf } from '../../src/lib/refs.ts'
+import { addressLabel, addressLabels, parseRef, prefixesAmong, recordKey, recordOf, refLabel, surfaceOf } from '../../src/lib/refs.ts'
 import type { Concept, LabelRow, LabelsForPath } from '../../src/lib/types.ts'
 
 describe('record refs', () => {
@@ -29,6 +29,48 @@ describe('record refs', () => {
     expect(recordOf('a.jsonl')).toBeNull()
     expect(recordOf('budget.xlsx#Q3!B2')).toEqual({ path: 'budget.xlsx' })
     expect(recordOf('pandas-dev/pandas#57012')).toBeNull()
+  })
+
+  test("an example's address names the trial a trajectory belongs to, not the trial's agent folder", () => {
+    // `<job>/<trial>/agent/trajectory.json` with no digit in any folder, so the quotes of several trials all read
+    // `agent › trajectory.json` and the card could not say whose each quote was
+    const trial = (t: string) => `picnic-runs/${t}/agent/trajectory.json`
+    expect(addressLabel(`${trial('picnic-lake__RvtmQxa')}#L16`)).toBe('picnic-lake__RvtmQxa › trajectory.json L16')
+    expect(addressLabel(`${trial('picnic-hill__GdsaPwe')}#/steps/7`)).toBe('picnic-hill__GdsaPwe › trajectory.json /steps/7')
+    expect(refLabel('batch2/agents/agent-03.jsonl#L412')).toBe('batch2 › agent-03.jsonl L412')
+  })
+
+  test("only a trial's agent folder is left off a chip; any other folder named agent stays on it", () => {
+    expect(refLabel('picnic-runs/picnic-lake__RvtmQxa/agent/trajectory.json#L5')).toBe('picnic-lake__RvtmQxa › trajectory.json L5')
+    expect(refLabel('jobs/run-7/picnic-lake__RvtmQxa/agent/trajectory.json#L5')).toBe('run-7 › … › trajectory.json L5')
+    // a folder named agent in a source tree, at the top or under a folder that is no trial, names its files as before
+    expect(refLabel('agent/notes.md#L1')).toBe('agent › notes.md L1')
+    expect(refLabel('src/agent/main.py#L3')).toBe('agent › main.py L3')
+    expect(refLabel('harness/agent/agent.py')).toBe('agent › agent.py')
+    expect(refLabel('runs/r1/agent/log.txt#L2')).toBe('r1 › … › log.txt L2')
+    expect(addressLabel('src/agent/main.py#L3')).toBe('agent › main.py L3')
+  })
+
+  test("an example's addresses tell its trials apart in a job folder named by its date", () => {
+    // the date is the first folder with a digit, so each trial's quotes read `2026-05-02__09-00-00 › … ›
+    // trajectory.json`; the card's addresses name the folder in which the trials' paths part
+    const trial = (t: string) => `jobs/2026-05-02__09-00-00/${t}/agent/trajectory.json`
+    const refs = [`${trial('picnic-hill__GdsaPwe')}#/steps/3`, `${trial('picnic-lake__RvtmQxa')}#/steps/3`, `${trial('picnic-lake__RvtmQxa')}#L40`]
+    expect(refs.map((r) => addressLabel(r))).toEqual(['2026-05-02__09-00-00 › … › trajectory.json /steps/3', '2026-05-02__09-00-00 › … › trajectory.json /steps/3', '2026-05-02__09-00-00 › … › trajectory.json L40'])
+    expect(addressLabels(refs)).toEqual(['picnic-hill__GdsaPwe › trajectory.json /steps/3', 'picnic-lake__RvtmQxa › trajectory.json /steps/3', 'picnic-lake__RvtmQxa › trajectory.json L40'])
+    // folders left out between the folder named and the file's name show as they do on any chip
+    expect(addressLabels(['jobs/2026-05-02/trial-a/logs/x.jsonl#L2', 'jobs/2026-05-02/trial-b/logs/x.jsonl#L2'])).toEqual(['trial-a › … › x.jsonl L2', 'trial-b › … › x.jsonl L2'])
+    // addresses that differ already, and the passages of one file, keep their own
+    expect(addressLabels(['batch2/agents/agent-03.jsonl#L412', 'batch3/agents/agent-03.jsonl#L9', 'batch3/agents/agent-03.jsonl#L12', 'notes.md'])).toEqual(['batch2 › agent-03.jsonl L412', 'batch3 › agent-03.jsonl L9', 'batch3 › agent-03.jsonl L12', 'notes.md'])
+  })
+
+  test("a chip among others shown with it tells the trials of a dated job folder apart, as an example's addresses do", () => {
+    const trial = (t: string, at: string) => `jobs/2026-05-02__09-00-00/${t}/agent/trajectory.json#${at}`
+    const refs = [trial('picnic-hill__GdsaPwe', 'L66'), trial('picnic-lake__RvtmQxa', 'L66'), trial('picnic-lake__RvtmQxa', 'L40.b0'), 'notes.md#L2']
+    expect(refs.map((r) => refLabel(r))).toEqual(['2026-05-02__09-00-00 › … › trajectory.json L66', '2026-05-02__09-00-00 › … › trajectory.json L66', '2026-05-02__09-00-00 › … › trajectory.json L40.b0', 'notes.md L2'])
+    const among = prefixesAmong(refs)
+    expect(refs.map((r) => refLabel(r, among))).toEqual(['picnic-hill__GdsaPwe › trajectory.json L66', 'picnic-lake__RvtmQxa › trajectory.json L66', 'picnic-lake__RvtmQxa › trajectory.json L40.b0', 'notes.md L2'])
+    expect(refs.map((r) => addressLabel(r, among))).toEqual(addressLabels(refs))
   })
 })
 

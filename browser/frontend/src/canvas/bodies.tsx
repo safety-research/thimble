@@ -17,7 +17,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
-import { addressLabel, hiddenPath } from '../lib/refs'
+import { addressLabel, addressLabels, hiddenPath } from '../lib/refs'
 import { teleport } from '../lib/teleport'
 import { wordsSpanRef } from '../lib/quoteFind'
 import { track } from '../lib/telemetry'
@@ -35,6 +35,13 @@ import { TypeCard } from './TypeCard'
 import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
+
+/** The records an example card quotes, as its payload holds them, which the citations of its takeaway are told apart
+ * from (chat/markdown ChatMarkdown `among`); none for any other card. */
+export function exampleRefs(cell: Cell): readonly unknown[] | undefined {
+  const refs = kindOf(cell) === 'example' ? (cell.payload as Record<string, unknown> | undefined)?.refs : undefined
+  return Array.isArray(refs) ? refs : undefined
+}
 
 export function CardBody({ cell, width, label, big = false }: { cell: Cell; width: number; label: ConceptDetailState; big?: boolean }) {
   const { ws, concepts, drawn } = useContext(CanvasContext)
@@ -196,6 +203,8 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
     }
   }, [ws, refs])
   const entries = useMemo(() => exampleEntries(refs, quotes), [refs, quotes])
+  // each record's address, told apart from the others' (addressLabels)
+  const labels = useMemo(() => new Map(addressLabels(entries.map((e) => e.ref)).map((l, i) => [entries[i].ref, l])), [entries])
   if (!entries.length) return null
   // an entry's address opens its record at the passage the example quotes (wordsSpanRef), highlighted there
   const open = (r: string) => {
@@ -204,7 +213,7 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
     const res = got[r]
     teleport((res && quote ? wordsSpanRef(res, quote) : null) ?? r, { browser: true })
   }
-  const address = (r: string) => <Address r={r} onOpen={open} />
+  const address = (r: string) => <Address r={r} label={labels.get(r) ?? addressLabel(r)} onOpen={open} />
   const lookup = (r: string) => (r in got ? got[r] : undefined)
   // under the address, one record's facts (time, author, page; canvas/facts); a range spans several records and shows none
   const facts = (e: ExampleEntry) => {
@@ -259,11 +268,11 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
 
 /** Where an example's record is: the evidence chip with the file's glyph and the record's full address, which opens it
  * in Files at the quoted passage. Unlike other links inside a card, an example keeps its full address. */
-function Address({ r, onOpen }: { r: string; onOpen: (r: string) => void }) {
+function Address({ r, label, onOpen }: { r: string; label: string; onOpen: (r: string) => void }) {
   const { props, tip } = useTooltip(hiddenPath(r))
   return (
-    <Chip kind="ref" tone={refTone(r)} icon={refIcon(r)} className="bcell-address" data-anchor={r} aria-label={`Open ${addressLabel(r)} in Files`} onMouseDown={(e) => e.stopPropagation()} onClick={() => onOpen(r)} {...props}>
-      {addressLabel(r)}
+    <Chip kind="ref" tone={refTone(r)} icon={refIcon(r)} className="bcell-address" data-anchor={r} aria-label={`Open ${label} in Files`} onMouseDown={(e) => e.stopPropagation()} onClick={() => onOpen(r)} {...props}>
+      {label}
       {tip}
     </Chip>
   )

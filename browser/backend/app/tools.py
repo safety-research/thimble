@@ -1109,14 +1109,16 @@ def _needs_code(tool: str, kind: str, args: dict[str, Any] | None = None) -> str
 
 
 def _code_on_data(tool: str, kind: str, args: dict[str, Any]) -> str:
-    """The error line for `code` given to a card of a data kind, which would drop it without running it."""
+    """The error line for `code` given to a card of a data kind, which would drop it without running it. It names the
+    field the card shows rather than a code card, which shows its code: code that printed an example's quotes made a
+    card of Python source, not of quotes."""
     from . import notebook
 
     if not _given(args, "code"):
         return ""
     a = "an" if kind[:1] in "aeiou" else "a"
-    return (f"{tool}: {a} {kind} card shows `{notebook.PAYLOAD_KEYS.get(kind, 'content')}` and runs no `code`, so leave "
-            f"`code` out, or add a card of code for what it computes")
+    key = notebook.PAYLOAD_KEYS.get(kind, "content")
+    return f"{tool}: {a} {kind} card shows `{key}` and runs no `code`, so leave `code` out and give what it shows as `{key}`"
 
 
 def _content_on_code(tool: str, kind: str, args: dict[str, Any]) -> str:
@@ -1463,6 +1465,45 @@ def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, 
               + "".join(f"\n\n{line}" for line in lines))
 
 
+# the kinds a card of code becomes in place when edit_card gives their content: the data kinds add_card makes from it
+CODE_TO_DATA = ("example", "note", "custom")
+
+
+async def _edit_code_to_data(ctx: Ctx, nb_id: str, cid: str, cell: dict, kind: str, args: dict[str, Any],
+                             title: str | None, group: str, place: "tuple[str, str | None] | None",
+                             takeaway: str | None, kept: "builtins.list[str]") -> ToolResult:
+    """edit_card on a card of code given a data kind or that kind's content (an example's `refs`, a note's `text`, a
+    custom card's `html`): the card becomes that kind in place (notebook.to_data_cell), as "fix this" on a card whose
+    code printed quotes asks, its question kept unless the call gives one. The content is checked as add_card checks
+    it, and `group` and `place` move the card once the call is known to be good. The takeaway was written for what the
+    code showed, so the result asks for a new one unless the call gives it."""
+    from . import notebook
+
+    if kind not in CODE_TO_DATA:
+        return err(hint("edit_card-kind", cid=cid, kind=cell.get("kind") or notebook.DEFAULT_KIND, new=kind))
+    await _warm_view_refs(ctx.c, args)
+    payload, problem = _payload_args(kind, args, "edit_card", ctx.c)
+    problem = problem or _code_on_data("edit_card", kind, args)
+    if not problem and kind == "custom" and (payload or {}).get("libs"):
+        from . import card_libs  # noqa: PLC0415
+
+        problem = "; ".join(f"edit_card: {p}" for p in await card_libs.ensure(ctx.c, (payload or {})["libs"]))
+    if problem or payload is None:
+        return err(problem)
+    lines: builtins.list[str] = builtins.list(kept)
+    if group:
+        nb_id = _move_to_group(ctx, cid, nb_id, group, lines)
+    if place:
+        _place(ctx, cid, place[0], place[1], lines)
+        nb_id = place[0]
+    updated = notebook.to_data_cell(ctx.c, cid, kind, payload, title=title, by=ctx.cell_author)
+    _remember_cell(ctx, nb_id, cid)
+    line = (_takeaway_after(ctx, cid, takeaway, None)[0] if takeaway is not None
+            else hint("takeaway-missing-shown", cid=cid))
+    shown = "\n".join(_payload_lines(kind, updated.get("payload") or {}))
+    return ok("\n\n".join([f"card:{cid}", shown, *lines, *([line] if line else [])]))
+
+
 def _edit_plan(ctx: Ctx, cid: str, steps: "builtins.list[dict]", title: str | None) -> dict:
     """edit_card's new `steps` for plan `cid`, at any time: merged with the steps the card holds under the groups' lock
     (plans.merge_steps), so each step it replaces keeps its id, its clock while its text is unchanged and what the edit
@@ -1566,7 +1607,8 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     the change runs first and the takeaway is resolved against the new outputs. `group` moves the card and `after`
     places
     it. The card is `card`, else the thread's anchor, and for a takeaway alone from a browser chat the caller's last
-    card."""
+    card. A card of code given an example's, a note's or a custom card's content becomes that card (_edit_code_to_data).
+    """
     from . import notebook
 
     raw_takeaway = args.get("takeaway")
@@ -1636,11 +1678,12 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             return res
         tail = [*kept, *([_takeaway_after(ctx, cid, takeaway, None)[0]] if takeaway is not None else [])]
         return ok("\n\n".join([res.text, *tail])) if tail else res
-    if kind is not None and kind not in RUN_KINDS:
-        return err(hint("edit_card-kind", cid=cid, kind=cell.get("kind") or notebook.DEFAULT_KIND, new=kind))
     field = next((f for f in CONTENT_FIELDS if _given(args, f)), None)
-    if field:  # a note's `text` or an example's `refs` on a card of code, which would be dropped and the code run again
-        return err(hint("edit_card-kind", cid=cid, kind=cell.get("kind") or notebook.DEFAULT_KIND, new=FIELD_KINDS[field]))
+    if kind in RUN_KINDS and field:  # an example's `refs` or a note's `text` beside a kind that shows what code makes
+        return err(_content_on_code("edit_card", str(kind), args))
+    if (kind is not None and kind not in RUN_KINDS) or field:  # the card shows that content in place of its code
+        return await _edit_code_to_data(ctx, nb_id, cid, cell, kind or FIELD_KINDS[str(field)], args, title, group,
+                                        place, takeaway, kept)
     if problem := _card_installs(ctx, str(args.get("code") or ""), "edit_card"):
         return err(problem)
     # the card moves only once the call is known to be good, so a refused call leaves it where it was

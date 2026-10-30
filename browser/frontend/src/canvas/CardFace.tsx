@@ -26,7 +26,7 @@ import { checkOf, checkProblem } from '../lib/cardCheck'
 import { conceptLabel, ensureConceptName, hasConceptName, onCellNames } from '../lib/cellName'
 import { teleport } from '../lib/teleport'
 import type { Cell, Concept } from '../lib/types'
-import { CardBody, LabelHead, LabelKindTag, LabelMeta, asksQuestion } from './bodies'
+import { CardBody, LabelHead, LabelKindTag, LabelMeta, asksQuestion, exampleRefs } from './bodies'
 import { conceptName, labelsShown, staleLabels, type ConceptDetailState } from './concepts'
 import { CanvasContext } from './context'
 import { editedLabels, labelDraft, setLabelDraft, useLabelDrafts } from './labelDrafts'
@@ -144,7 +144,7 @@ function Face(p: CardFaceProps) {
       ) : takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} />
+            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} />
           </div>
           {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
         </div>
