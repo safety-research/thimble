@@ -4,7 +4,6 @@
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
-import { failLineNow } from '../bar/notice'
 import Card from '../cards/client'
 import { cardWidth, rowsCut, rowsWord } from '../cards/draw'
 import { callLine } from '../cards/register'
@@ -998,7 +997,7 @@ test('a check whose call fails leaves the card as it stands, its rest under `+N 
   const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_59', ...input } as never)
   expect((await drawnOnce($, callRow('toolu_made_up_59', input))).cap).toBe(30)
-  expect((await failLineNow($))?.text).toBe('The card check of the card “Every run” failed: the API is overloaded.')
+  expect(textOf(await $.ui.render(BAND))).toContain('The card check of the card “Every run” failed: the API is overloaded.')
 })
 
 test('a card a resumed session finds waiting for its check draws as it stands', async ($, on) => {
