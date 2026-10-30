@@ -578,6 +578,65 @@ def test_a_total_of_a_card_s_lines_fails_in_plain_words_and_its_repair_can_verif
     assert m["status"] == "verified" and m["evidence"]["kind"] == "computed" and m.get("repair") is True, m
 
 
+def _label_card(takeaway: str) -> str:
+    """A made-up prompt label, what the person asked for, over 72 messages, 33 of which ask to investigate the agents, and
+    its card with `takeaway`; the card's id."""
+    from app import concepts, notebook
+
+    ws = config.workspace_dir(CORPUS)
+    k = concepts.define_concept(CORPUS, "what the person asked for", "what the message asks thimble to do",
+                                unit="record", labels=["investigate the agents", "other"], created_by="main")
+    lf = concepts.labels_file(ws, k["id"])
+    lf.parent.mkdir(parents=True, exist_ok=True)
+    rows = [{"ref": f"messages.jsonl#L{n}", "label": "investigate the agents" if n <= 33 else "other", "confidence": 0.9,
+             "source": "prompt", "ts": "t"} for n in range(1, 73)]
+    lf.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    nb = notebook.create_notebook(ws, "Board", role="exploration")
+    cell = notebook.new_cell("label", "main", "What did the people ask for?", nb["id"], payload={"concept": k["id"]})
+    cell.update(takeaway=takeaway)
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    return cell["id"]
+
+
+def test_a_label_card_s_values_are_places_its_takeaway_s_count_is_checked_against(_fresh):
+    """B13: a label card draws its values from its label, not from outputs, so the cards' index listed none of its places,
+    and the check of its takeaway's "[33 of the 72]" named no value or line of a card. Each value it lists, with its
+    count and share under the card's headers, and the units the label labeled are its places now: the index lists them,
+    the validator reads them, and the page reads a cited one back from the card."""
+    from app import notebook, refs
+
+    cid = _label_card("[33 of the 72](#) messages ask about the agents' behavior.")
+    count, total = f"card:{cid}#records/investigate%20the%20agents", f"card:{cid}#records/all"
+    listed: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        index = next(w for w in prompt.split("`") if w.endswith("cards-index.tsv"))
+        listed.append(Path(index).read_text(encoding="utf-8"))
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": [count, total]}, "status": "verified",
+                "correction": None, "reason": "the card shows 33 of its 72 records"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    asyncio.run(marks.start_check(CORPUS, main, marks.new_turn(), [], "cut", fork=fork, cards={cid}))
+    assert f"# card:{cid} What did the people ask for?\n" in listed[0]
+    for place in (f"{count}\t33", f"card:{cid}#share/investigate%20the%20agents\t46%", f"card:{cid}#records/other\t39",
+                  f"card:{cid}#share/other\t54%", f"{total}\t72"):
+        assert place + "\n" in listed[0], place
+    (m,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert m["status"] == "verified", m
+    t = m["evidence"]["table"]
+    assert t["corner"] == "value" and t["cols"] == ["records", "share"]
+    assert [r["label"] for r in t["rows"]] == ["investigate the agents", "other", "all"]
+    # a place that shows another value fails as a table card's does
+    wrong = marks.evidence().check_mark({"n": 1, "words": "34"}, {"kind": "card", "status": "verified", "evidence": {"ref": count}},
+                                        [], "/", cards=marks.session_cards(CORPUS))
+    assert wrong["status"] == "failed" and wrong["reason"] == "The card's records for investigate the agents shows 33, not 34."
+    # the page reads the cited place back from the card, as a table card's cell
+    got = refs.resolve(config.corpus_dir(CORPUS), count)
+    assert got["meta"]["span"]["value"] == "33" and "<th>all</th><td>72</td>" in got["meta"]["table_html"]
+
+
 def test_a_repair_that_fails_again_starts_no_other_and_repair_asks_again(_fresh, monkeypatch):
     place = _runs_card()
     _main_at(monkeypatch, "cut-1")

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import html
 import itertools
 import json
 import logging
@@ -4089,6 +4090,87 @@ def _drop_label_cards(c: str, concept_id: str) -> None:
             _emit(c, {"type": "cell", "notebook": nb["id"], "cell": cell["id"], "kind": "note", "op": "deleted"})
 
 
+def card_stats(ws: Path, concept: dict) -> dict:
+    """The concept card (with_stats) with its counts as thimble.labels() and apply_label's result give them: each record
+    the analyst set to another value counted under that value, and `verdicts` {counts, set} when there is one (live
+    check term-fix6, new quirk 1: `[32](concept:<id>/yes)` after one verdict was judged against the label's own 33)."""
+    card = with_stats(ws, concept)
+    applied, moved = verdicts_applied(ws, card["id"], dict(card.get("counts") or {}))
+    return {**card, "counts": applied, "verdicts": {"counts": applied, "set": moved}} if moved else card
+
+
+# the row under a label card's values in card_output: the units the label labeled, which the card's label row states
+CARD_ALL_ROW = "all"
+# a unit's word over a label card's counts (the frontend's canvas/details unitWord, plural)
+CARD_UNIT_WORDS = {"record": "records", "cell": "cards", "span": "sentences", "agent": "files", "run": "runs"}
+
+
+def card_share(count: int, total: int) -> str:
+    """A value's share of all the units a label labeled, as a label card's table writes it (the frontend's
+    canvas/details labelShare): whole percents, one decimal under 1%, `<0.1%` below that, and `>99%` for a part that
+    rounds to the whole; '' with no total."""
+    if total <= 0 or count < 0:
+        return ""
+    if not count:
+        return "0%"
+    p = count / total * 100
+    if p < 0.1:
+        return "<0.1%"
+    if p < 1:
+        return f"{p:.1f}%"
+    r = int(Decimal(p).quantize(Decimal(1), rounding=ROUND_HALF_UP))
+    return ">99%" if r >= 100 and count < total else f"{r}%"
+
+
+def card_shares(values: list[str], counts: dict[str, int], total: int) -> dict[str, str]:
+    """Each value's share as a label card's table shows it (the frontend's canvas/details labelShares): every value's
+    share of the same total (card_share), in whole percents rounded so that they add up to 100% when the values' counts
+    make the total (largest remainders), unless one is under 1% or over 99%."""
+    parts = [int(counts.get(v) or 0) for v in values]
+    out = {v: card_share(n, total) for v, n in zip(values, parts)}
+    if total <= 0 or sum(parts) != total:
+        return out
+    ps = [n / total * 100 for n in parts]
+    if any(p > 0 and (p < 1 or p >= 99.5) for p in ps):
+        return out
+    whole = [int(p) for p in ps]
+    rests = sorted((i for i, p in enumerate(ps) if p > whole[i]), key=lambda i: whole[i] - ps[i])
+    for i in rests[:max(0, 100 - sum(whole))]:
+        whole[i] += 1
+    return {**out, **{v: f"{whole[i]}%" for i, v in enumerate(values) if ps[i] > 0}}
+
+
+def card_output(ws: Path, cell: dict) -> dict | None:
+    """What a label card shows, as a card's html table output, so a citation of it reads as one of a table card's does
+    (the citation check's cards, marks.session_cards; a place's ref, refs._resolve_cell): under the card's headers
+    (value, the unit's word, share) each value the card lists (the frontend's canvas/details shownValues: those with
+    units, or every value while the label runs or before any has one) with its count and share (card_shares), then the
+    row CARD_ALL_ROW with the units the label labeled, which the card's label row states. The counts are those a
+    `concept:<id>/<value>` ref reads, the analyst's verdicts counted (card_stats). None for another card, or a label
+    that is gone."""
+    payload = cell.get("payload") if cell.get("kind") == "label" else None
+    concept_id = str(payload.get("concept") or "") if isinstance(payload, dict) else ""
+    concept = read_concept(ws, concept_id) if ID_RE.match(concept_id) else None
+    if concept is None:
+        return None
+    card = card_stats(ws, concept)
+    counts = {str(k): int(v or 0) for k, v in (card.get("counts") or {}).items()}
+    total = int(card.get("n_labeled") or 0)
+    values = list(dict.fromkeys(str(v) for v in concept.get("labels") or [] if v))
+    values += sorted((v for v in counts if v and v not in values), key=lambda v: (-counts[v], v))
+    some = [v for v in values if counts.get(v, 0) > 0]
+    if some and not _applying(ws.name, concept["id"]):
+        values = some
+    shares = card_shares(values, counts, total)
+    rows = [(v, f"{counts.get(v, 0):,}", shares[v]) for v in values]
+    if CARD_ALL_ROW not in values:
+        rows.append((CARD_ALL_ROW, f"{total:,}", ""))
+    unit = CARD_UNIT_WORDS.get(concept["unit"], f"{concept['unit']}s")
+    body = "".join(f"<tr><th>{html.escape(v)}</th><td>{n}</td><td>{s}</td></tr>" for v, n, s in rows)
+    return {"text/html": f"<table><thead><tr><th>value</th><th>{html.escape(unit)}</th><th>share</th></tr></thead>"
+                         f"<tbody>{body}</tbody></table>"}
+
+
 # --------------------------------------------------------------------------- refs hook
 
 
@@ -4104,13 +4186,8 @@ def resolve_concept_ref(corpus: Path | str, ref: str) -> dict:
     concept = read_concept(ws, m[1]) if ws.is_dir() else None
     if concept is None:
         raise refs.RefError(f"no concept {m[1]!r}", 404)
-    card = with_stats(ws, concept)
-    # the counts as thimble.labels(), the label's panel and its card read the rows: each record the analyst set to
-    # another value counted under that value (live check term-fix6, new quirk 1: `[32](concept:<id>/yes)` after one
-    # verdict was judged against the label's own 33)
-    applied, moved = verdicts_applied(ws, card["id"], dict(card.get("counts") or {}))
-    if moved:
-        card = {**card, "counts": applied, "verdicts": {"counts": applied, "set": moved}}
+    card = card_stats(ws, concept)
+    moved = int((card.get("verdicts") or {}).get("set") or 0)
     if m[2] and m[2].strip():
         return _resolve_value(name, card, cite.decode_label(m[2].strip()), ref)
     cal = card["calibration"]

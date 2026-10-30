@@ -16,7 +16,8 @@
     <csv>#row=<n>                 row n (1-based, after the header line) of a file ending in .csv or .tsv
     card:<cell_id>[@<exec>]       a card (searched across every group of the workspace); `cell:` is read the same
                                   way (cite.CARD_PREFIXES), and format_ref writes `card:`
-    card:<cell_id>#<col>/<row>    the <td> at column header <col> / row label <row> of a text/html table output of the card;
+    card:<cell_id>#<col>/<row>    the <td> at column header <col> / row label <row> of a text/html table output of the card,
+                                  or of a label card's table of its values (concepts.card_output);
                                   the labels are written through cite.encode_label (whitespace, `/`, `|`, `[`, `]`, `*`,
                                   `_`, `~`, backtick, `%`, `#`, `<`, `>`, `&` as %XX) and parse_ref returns them decoded
     card:<cell_id>@out<i>#L<n>    line <n> (1-based) of the text/plain of the card's output bundle with index <i>: the
@@ -1013,6 +1014,17 @@ def _cell_excerpt(cell: dict[str, Any]) -> str:
     return "\n".join(parts) if parts else _text(cell.get("code"))
 
 
+def _td_outputs(ws: Path, cell: dict[str, Any]) -> list | None:
+    """The outputs a card's `#<col>/<row>` ref reads: the card's own, and for a label card the table of its values,
+    which it draws from its label (concepts.card_output)."""
+    if cell.get("kind") == "label":
+        from . import concepts  # lazy: concepts imports refs
+
+        label = concepts.card_output(ws, cell)
+        return [label] if label else None
+    return cell.get("outputs")
+
+
 def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     """Cell ids are random, hence unique across a workspace's notebooks: search them all."""
     from . import notebook  # storage helpers; lazy: no kernel deps at import
@@ -1045,7 +1057,7 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
             excerpt = "\n".join([line, *(ln.strip() for ln in notebook.step_extra_lines(steps[n - 1]))])
             meta["span"] = {"step": n, "id": steps[n - 1]["id"], "text": line}
     elif p.get("col") is not None and p.get("row") is not None:
-        hit = cite.find_td(cell.get("outputs"), p["col"], p["row"])
+        hit = cite.find_td(_td_outputs(ws, cell), p["col"], p["row"])
         if hit is None:
             meta["span_missing"] = True
         else:
