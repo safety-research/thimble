@@ -271,7 +271,10 @@ function topRow($: Engine, els: Any, now: PaneNow, W: number, cue = ''): Any[] {
     ...key, Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: words }),
   ] })
   return [Box({ key: 'pane-top', flexDirection: 'row', flexShrink: 0, justifyContent: name || cue ? 'space-between' : 'flex-end', width: W, children: [
-    ...(name ? [Text({ key: 'pane-name', bold: true, children: name })] : cue ? [Box({ key: 'pane-more', flexShrink: 1, children: [Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: cue })] })] : []),
+    ...(name || cue ? [Box({ key: 'pane-top-left', flexDirection: 'row', flexShrink: 1, children: [
+      ...(name ? [Text({ key: 'pane-name', bold: true, children: name })] : []),
+      ...(cue ? [Box({ key: 'pane-more', flexShrink: 1, ...(name ? { marginLeft: 2 } : {}), children: [Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: cue })] })] : []),
+    ] })] : []),
     Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 1, children: [btn] }),
   ] })]
 }
