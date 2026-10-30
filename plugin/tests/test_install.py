@@ -494,6 +494,26 @@ def test_a_failure_of_the_remove_other_than_not_found_stops_the_install(tmp_path
     assert settings == {"extraKnownMarketplaces": {"thimble": {"source": {"source": "directory", "path": str(live)}}}}
 
 
+@pytest.mark.parametrize("folder", ["Downloads/thimble-0.10.6", "code/thimble"])
+def test_an_install_from_github_after_one_with_local_moves_the_marketplace_to_github(tmp_path, folder):
+    """An install with --local, from a release's zip unpacked in Downloads or from a clone, left Claude Code's
+    marketplace thimble at that folder, in its list and in its user settings, and Claude Code refuses GitHub's source for
+    the name while its settings name a folder. The install without --local, from a new release's zip or a clone, as an
+    older thimble's refusal and INSTALL.md say, takes thimble out of the settings, and the add moves the marketplace to
+    GitHub. The plugin's options and the other settings stay, with the file's mode."""
+    (tmp_path / folder).mkdir(parents=True)
+    others = {"pluginConfigs": {"thimble@thimble": {"options": {"minimal": True, "citations": "manual"}}},
+              "env": {"MADE_UP_NAME": "été"}}
+    p, calls = plugin_install(tmp_path, tmp_path / folder, settings=others)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert calls[:2] == ["plugin marketplace add safety-research/thimble", "plugin list --json"]
+    github = {"source": "github", "repo": "safety-research/thimble"}
+    settings = tmp_path / "cc" / "settings.json"
+    assert json.loads(settings.read_text(encoding="utf-8")) == {**others, "extraKnownMarketplaces": {"thimble": {"source": github}}}
+    assert settings.stat().st_mode & 0o777 == 0o640
+    assert json.loads((tmp_path / "cc" / "plugins" / "known_marketplaces.json").read_text())["thimble"]["source"] == github
+
+
 def test_install_md_updates_with_thimble_update():
     """INSTALL.md's update is the shell's thimble update, which updates both products and keeps the fixes; no line says
     that 0.10 has no thimble command, or that another command replaces thimble update."""
@@ -531,6 +551,15 @@ def test_install_md_says_how_a_plugin_without_a_clone_updates_after_its_first_fi
             "`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of "
             "`~/.thimble`).") in update
     assert (ROOT / "plugin" / "bin" / "thimble").is_file()
+
+
+def test_the_update_help_and_install_md_s_update_section_keep_the_width_of_the_text_around_them():
+    """thimble update --help (cli.py's UPDATE_HELP, which it prints as written) and INSTALL.md's update section wrap at
+    120 columns: a paragraph that an edit made longer is wrapped again, not left with one long line."""
+    helps = re.search(r'UPDATE_HELP = """(.*?)"""', (ROOT / "plugin" / "engine" / "kernel" / "cli.py").read_text(), re.S)
+    update = (ROOT / "INSTALL.md").read_text().split("## Update and uninstall", 1)[1].split("\n## ", 1)[0]
+    for text in (helps.group(1), update):
+        assert [line for line in text.splitlines() if len(line) > 120] == []
 
 
 def whole_install(tmp_path, *args):
