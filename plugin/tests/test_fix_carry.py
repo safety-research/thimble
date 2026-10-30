@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, calls, commit_in_checkout, fake, live_file, made, on_fix, press, sh, three_fixes, upstream, world  # noqa: E402, F401
+from test_fixes import FX, calls, commit_in_checkout, fake, live_file, made, on_fix, press, release_with, sh, three_fixes, upstream, world  # noqa: E402, F401
 
 LAUNCHER = Path(__file__).resolve().parents[2] / "browser" / "scripts" / "thimble-browser"
 
@@ -208,11 +208,11 @@ def test_when_the_checks_cannot_run_nothing_moves_and_the_next_carry_checks_agai
     before = len(calls(world))
     why = "the sandbox runtime that fixes run in is not installed"
 
-    def no_sandbox(paths, page):
+    def no_sandbox(fid, paths, base):
         raise FX.FixError(why)
 
     with monkeypatch.context() as m:
-        m.setattr(FX, "_carry_argv", no_sandbox)
+        m.setattr(FX, "_checks_argv", no_sandbox)
         rows = FX.list_lines(120)
         assert " ".join(rows[:rows.index("")]) == f"Your 3 fixes stay off: thimble could not check them on thimble 0.10.3 ({why})."
         assert [FX.get(i)["state"] for i in (a, b, c)] == ["pending"] * 3
@@ -483,33 +483,116 @@ def test_a_list_that_cannot_put_fixes_back_still_lists_them_and_says_why(world, 
         FX.carry()
 
 
-def test_the_checks_are_a_fixs_quick_tests_and_the_pages_build_for_a_fix_to_the_page(world, monkeypatch, tmp_path):
+def made_up_venv(root: Path) -> Path:
+    """A made-up Python environment for the browser workbench's server in `root` (its bin/python runs this Python)."""
+    py = root / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    py.chmod(0o755)
+    return root
+
+
+def test_the_checks_follow_the_parts_a_change_touches_and_borrow_the_workbenchs_packages(world, monkeypatch, tmp_path):
     monkeypatch.delenv("THIMBLE_FIX_TESTS")
     monkeypatch.setattr(FX, "_has_pytest", lambda py: False)
     seen: list = []
     monkeypatch.setattr(FX, "sandbox_argv", lambda fid, **kw: seen.append((fid, kw)) or ["box"])
     quick = f"{FX.LAUNCHER_SMOKE} && {FX.QUICK_TESTS}"
-    assert FX._carry_argv(["plugin/bar/bar.tsx"], []) == ["box", quick] and seen[-1] == ("carry", {})
-    # the page: its build, reading its packages, once the workbench is installed; nothing else to check without it
-    assert FX._carry_argv(["browser/frontend/src/App.tsx"], ["/made-up/node_modules"]) == ["box", FX.PAGE_BUILD]
-    assert seen[-1] == ("carry", {"reads": ["/made-up/node_modules"]})
-    assert FX._carry_argv(["browser/frontend/src/App.tsx"], []) == ["box", "true"]
-    assert FX._carry_argv(["plugin/x.ts", "browser/frontend/src/App.tsx"], ["/p"]) == ["box", f"{quick} && {FX.PAGE_BUILD}"]
-    # live's page packages, lent to the copy as a folder of links that leaves out the page's temp files
+    page = FX.PAGE_CHECKS.format(base="v0.10.3")
     FX.ensure_live()
-    assert FX._page_packages() == []
-    nm = FX.live_dir() / "browser" / "frontend" / "node_modules"
-    (nm / "react").mkdir(parents=True)
-    (nm / ".vite").mkdir()
-    (nm / ".bin").mkdir()
+    copy = tmp_path / "copy"
+    (copy / "browser" / "frontend").mkdir(parents=True)
+    (copy / "browser" / "backend").mkdir()
+    # without the workbench's packages, the terminal plugin's checks alone, and nothing for the page or the server
+    assert FX._checks(copy, ["plugin/bar/bar.tsx", "browser/frontend/src/App.tsx"], "v0.10.3") == (quick, [])
+    assert FX._checks(copy, ["browser/backend/app/errors.py", "browser/scripts/thimble-browser"], "v0.10.3") == ("true", [])
+    # the workbench on live: its page packages and its server's Python environment, which the copy borrows, the page's
+    # as a folder of links that leaves out its tools' temp files
+    b = FX.live_dir() / "browser"
+    for name in ("react", ".vite", ".bin"):
+        (b / "frontend" / "node_modules" / name).mkdir(parents=True)
+    venv = made_up_venv(b / "backend" / ".venv")
+    cmd, reads = FX._checks(copy, ["browser/frontend/src/App.tsx", "browser/prompts/main.md", "plugin/x.ts"], "v0.10.3")
+    assert cmd == f"{quick} && {page} && {FX.SERVER_CHECKS}"
+    lent = copy / "browser" / "frontend" / "node_modules"
+    assert sorted(x.name for x in lent.iterdir()) == [".bin", "react"] and (lent / "react").is_symlink()
+    assert (lent / "react").resolve() == (b / "frontend" / "node_modules" / "react").resolve()
+    assert (copy / "browser" / "backend" / ".venv").resolve() == venv.resolve()
+    assert {str((b / "frontend" / "node_modules").resolve()), str(venv.resolve()),
+            *FX._py_dirs(str(venv / "bin" / "python"))} <= set(reads)
+    # the command done and carry run in a copy: the checks, in the sandbox that reads the packages
+    (FX.home() / "work" / "carry" / "browser" / "backend").mkdir(parents=True)
+    assert FX._checks_argv("carry", ["browser/backend/app/errors.py"], "v0.10.3") == ["box", FX.SERVER_CHECKS]
+    assert seen[-1][0] == "carry" and str(venv.resolve()) in seen[-1][1]["reads"]
+    # before the workbench runs from live, the copy borrows the packages of the checkout it was installed in
+    seed = tmp_path / "checkout" / "browser"
+    (seed / "frontend" / "node_modules" / "vite").mkdir(parents=True)
+    made_up_venv(seed / "backend" / ".venv")
     (tmp_path / "browser-home").mkdir()
+    (tmp_path / "browser-home" / "checkout").write_text(f"{seed}\n")
     monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp_path / "browser-home"))
-    assert FX._page_packages() == [str(nm.resolve())]
-    wt = tmp_path / "copy"
-    FX._lend_page(wt)
-    lent = wt / "browser" / "frontend" / "node_modules"
-    assert sorted(x.name for x in lent.iterdir()) == [".bin", "react"]
-    assert (lent / "react").resolve() == (nm / "react").resolve() and (lent / "react").is_symlink()
+    shutil.rmtree(b / "frontend" / "node_modules")
+    shutil.rmtree(b / "backend" / ".venv")
+    other = tmp_path / "other"
+    (other / "browser" / "frontend").mkdir(parents=True)
+    (other / "browser" / "backend").mkdir()
+    assert FX._checks(other, ["browser/frontend/src/App.tsx"], "v0.10.3")[0] == page
+    assert [x.name for x in (other / "browser" / "frontend" / "node_modules").iterdir()] == ["vite"]
+    assert (other / "browser" / "backend" / ".venv").resolve() == (seed / "backend" / ".venv").resolve()
+
+
+def test_the_python_the_sandbox_reads_includes_each_link_on_the_way_to_it(tmp_path):
+    """A uv environment's python names uv's folder of its minor version, itself a link to the folder of the patch: the
+    sandbox reads the link's folder by its own name, or the program is not there."""
+    real = tmp_path / "uv" / "cpython-3.14.6-made-up"
+    (real / "bin").mkdir(parents=True)
+    os.symlink(sys.executable, real / "bin" / "python3.14")
+    (tmp_path / "uv" / "cpython-3.14-made-up").symlink_to(real, target_is_directory=True)
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to(tmp_path / "uv" / "cpython-3.14-made-up" / "bin" / "python3.14")
+    assert str(tmp_path / "uv" / "cpython-3.14-made-up") in FX._py_dirs(str(venv / "bin" / "python"))
+
+
+# a made-up server of the browser workbench: its start (app.main) loads the error log, and its checks' tests pass
+SERVER = {
+    "browser/backend/app/__init__.py": "",
+    "browser/backend/app/notebook.py": "def active_notebook_id() -> str:\n    return 'made-up'\n",
+    "browser/backend/app/errors.py": "def error_line(text: str) -> str:\n    return text\n",
+    "browser/backend/app/main.py": "from . import errors, notebook  # noqa: F401\n",
+    "browser/backend/tests_public/test_prompts.py": "def test_made_up_prompts():\n    assert True\n",
+    "browser/backend/tests_public/test_american_names.py": "def test_made_up_names():\n    assert True\n",
+}
+NAMES_THE_NOTEBOOK = ("from .notebook import active_notebook_id\n\n\ndef error_line(text: str) -> str:\n"
+                      "    return f'{active_notebook_id()}: {text}'\n")
+
+
+def test_a_fix_to_the_server_that_breaks_it_on_the_new_release_stays_off_and_done_checks_it_alike(world, monkeypatch):
+    """A fix made in the workbench changes the server's error log to name the notebook; the next commit renames what it
+    calls, in another file, so its change still applies, and the server no longer starts with it. carry checks it as
+    done checks a fix to the server: it stays off, and the release runs."""
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.setattr(FX, "sandbox_argv", lambda fid, **kw: ["/bin/bash", "-c"])
+    release_with(world, SERVER)
+    r = FX.new("say which notebook an error came from", made_in="browser")
+    made_up_venv(FX.live_dir() / "browser" / "backend" / ".venv")
+    (Path(r["work"]) / "browser" / "backend" / "app" / "errors.py").write_text(NAMES_THE_NOTEBOOK)
+    assert FX.done(r["id"], "Error log names the notebook", "")["state"] == "ready"
+    FX.apply(r["id"], press(r["id"]))
+    # from now on the checks are thimble's own
+    monkeypatch.delenv("THIMBLE_FIX_TESTS")
+    # the person pulls a commit that renames the notebook's id: the fix's change applies, and app.main no longer loads
+    new = commit_in_checkout(world, {"browser/backend/app/notebook.py": "def notebook_id() -> str:\n    return 'made-up'\n"},
+                             "made-up work")
+    out = FX.update()
+    assert (out["back"], out["aside"]) == ([], [r["id"]])
+    assert (FX.get(r["id"])["state"], FX.get(r["id"])["error"]) == ("pending", f"it does not fit thimble main at {new[:7]}")
+    assert "active_notebook_id" not in live_file("browser/backend/app/errors.py")
+    # the same change made as a fix on the new release fails done's checks, with the server's own words
+    s = FX.new("say which notebook an error came from, again")
+    (Path(s["work"]) / "browser" / "backend" / "app" / "errors.py").write_text(NAMES_THE_NOTEBOOK)
+    s = FX.done(s["id"], "Error log names the notebook", "")
+    assert s["state"] == "failed" and "cannot import name 'active_notebook_id'" in s["tests_tail"]
 
 
 def test_thimble_browser_puts_back_the_fixes_an_update_set_aside_before_it_builds_the_page(tmp_path):

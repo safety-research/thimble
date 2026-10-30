@@ -840,9 +840,19 @@ def _python() -> str:
 
 
 def _py_dirs(py: str) -> list[str]:
+    """The folders the Python `py` runs from, which the sandbox reads: its prefix and base prefix, and the folder of each
+    link on the way to its program, by the link's own name (a uv environment's python names uv's folder of its minor
+    version, cpython-3.14-…, itself a link to the folder of the patch, cpython-3.14.6-…), so that the sandbox finds the
+    program by the names that lead to it."""
     p = run([py, "-c", "import sys; print(sys.prefix); print(sys.base_prefix)"], check=False)
     dirs = [x for x in p.stdout.split() if x.startswith("/")]
-    real = os.path.realpath(shutil.which(py) or py)
+    at = shutil.which(py) or py
+    real = os.path.realpath(at)
+    for _ in range(40):
+        if not os.path.islink(at):
+            break
+        at = os.path.join(os.path.dirname(at), os.readlink(at))
+        dirs.append(str(Path(os.path.normpath(at)).parent.parent))
     return sorted({*dirs, str(Path(real).parent.parent)})
 
 
@@ -945,6 +955,7 @@ def _has_pytest(py: str) -> bool:
 
 
 QUICK_TESTS = "claude plugin test plugin"
+PYTESTS = '"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider'
 # the copy's own launcher and the kernel's command start (thimble --help reads cli.py and the modules it needs) and say
 # no traceback: the launcher, and the kernel run directly, since a launcher that answers --help itself would hide a dead
 # kernel. Each has SMOKE_LIMIT seconds, and then its processes are stopped (exit 124), so that one that hangs does not
@@ -962,14 +973,24 @@ LAUNCHER_SMOKE = ("(lim() { \"$THIMBLE_PYTHON\" -c 'import os,signal,subprocess 
                   "printf \"%s\\n%s --help: exit %s\\n\" \"$o\" \"$n\" \"$s\"; return 1;; esac; }\n"
                   "chk plugin/bin/thimble plugin/bin/thimble && "
                   "chk plugin/engine/thimble.py \"$THIMBLE_PYTHON\" plugin/engine/thimble.py)")
+# the page's checks, in its folder: its type check and its build, as its package.json runs them (the build into the
+# sandbox's temp folder), then the unit tests of what changed since the commit the change was made on ({base})
+PAGE_CHECKS = ('(cd browser/frontend && node_modules/.bin/tsc -b && node_modules/.bin/vite build --logLevel warn '
+               '--outDir "$TMPDIR/page" --emptyOutDir && node_modules/.bin/vitest run --changed {base} --passWithNoTests)')
+# the server's checks, in its folder: its code loads (app.main imports the module of each of its routes, as the server's
+# start does), and its prompts render and name only the hints its code has (scripts/check.sh's parity). Its whole suite
+# needs what the sandbox does not give (a browser, the network, many minutes): CI runs it
+SERVER_CHECKS = ('(cd browser/backend && .venv/bin/python -c "import app.main" && THIMBLE_SKIP_KEY=1 .venv/bin/python -m '
+                 'pytest -q -x -p no:cacheprovider tests_public/test_prompts.py tests_public/test_american_names.py)')
+# the browser workbench's packages, as its install puts them in browser/: (part, folder of packages)
+WORKBENCH_PACKAGES = (("frontend", "node_modules"), ("backend", ".venv"))
 
 
 def run_tests(fid: int | str) -> tuple[bool, str]:
-    """The quick tests in the copy, in the sandbox, with no network: the copy's launcher (LAUNCHER_SMOKE), the hooks
-    tests, and the kernel's when this Python has pytest (THIMBLE_FIX_TESTS, a shell command, replaces them). They run
-    for one fix at a time, since two runs at once make the hooks tests run out of time, and a run that fails runs once
-    more before the tests count as failed. (passed, the log's last lines, which say when they passed only the second
-    time)."""
+    """The quick tests in the copy, in the sandbox, with no network, as for a change to the terminal plugin (_checks).
+    They run for one fix at a time, since two runs at once make the hooks tests run out of time, and a run that fails
+    runs once more before the tests count as failed. (passed, the log's last lines, which say when they passed only the
+    second time)."""
     try:
         argv = _tests_argv(fid)
     except FixError as e:
@@ -978,14 +999,82 @@ def run_tests(fid: int | str) -> tuple[bool, str]:
 
 
 def _tests_argv(fid: int | str) -> list[str]:
-    """The command that runs the quick tests (run_tests) in the copy, in the sandbox."""
+    """The command that runs the quick tests (run_tests) in the copy, in the sandbox, as for a change to the terminal
+    plugin. done makes it before its guard, since making it may install the sandbox runtime, which takes minutes; once it
+    committed the change, it runs the checks of what the change touched (_checks_argv)."""
+    return _checks_argv(fid, ["plugin/"], "HEAD")
+
+
+def _checks_argv(fid: int | str, paths: list[str], base: str) -> list[str]:
+    """The command that runs the checks of a change to `paths`, made on commit `base`, in the copy of `fid` (a fix's
+    id, or carry), in the sandbox (_checks)."""
+    cmd, reads = _checks(home() / "work" / str(fid), paths, base)
+    return [*(sandbox_argv(fid, reads=reads) if reads else sandbox_argv(fid)), cmd]
+
+
+def _checks(wt: Path, paths: list[str], base: str) -> tuple[str, list[str]]:
+    """The checks of a change to `paths`, made in the copy `wt` on commit `base`, as one shell command that runs in the
+    copy, in the sandbox, and the folders that the sandbox reads for them besides: done checks a fix with them, and
+    carry the fixes it puts back, so that the two check alike. By the part of thimble a path is in: outside browser/,
+    the terminal plugin's (the copy's launcher and the kernel's command, LAUNCHER_SMOKE; the hooks tests when Claude
+    Code is installed; the kernel's tests when this Python has pytest); browser/frontend/, the page's (PAGE_CHECKS);
+    browser/backend/ and browser/prompts/, the server's (SERVER_CHECKS); the rest of browser/, none. The page's and the
+    server's run with the browser workbench's packages, which the copy borrows (_borrow): with none (the workbench is
+    not installed), they are left out. THIMBLE_FIX_TESTS, a shell command, replaces them all."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
-    if not cmd:
-        parts = [LAUNCHER_SMOKE, QUICK_TESTS]
+    if cmd:
+        return cmd, []
+    parts: list[str] = []
+    reads: list[str] = []
+    if any(not p.startswith("browser/") for p in paths):
+        parts.append(LAUNCHER_SMOKE)
+        if shutil.which(claude()):
+            parts.append(QUICK_TESTS)
         if _has_pytest(_python()):
-            parts.append('"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider')
-        cmd = " && ".join(parts)
-    return sandbox_argv(fid) + [cmd]
+            parts.append(PYTESTS)
+    page = any(p.startswith("browser/frontend/") for p in paths)
+    server = any(p.startswith(("browser/backend/", "browser/prompts/")) for p in paths)
+    lent = _borrow(wt) if page or server else {}
+    if page and "frontend" in lent:
+        parts.append(PAGE_CHECKS.format(base=shlex.quote(base)))
+        reads += lent["frontend"]
+    if server and "backend" in lent:
+        parts.append(SERVER_CHECKS)
+        reads += lent["backend"]
+    return " && ".join(parts) or "true", reads
+
+
+def _borrow(wt: Path) -> dict[str, list[str]]:
+    """The browser workbench's packages (WORKBENCH_PACKAGES) in the copy `wt`, for the checks of its page and its
+    server. Where the copy has none of a part's (the workbench lends its own to the copy of a fix made there), it
+    borrows live's, else those of the checkout the workbench was installed in (_browser_seed), as the workbench lends
+    them (app/fixes.py lend), where git ignores them (browser/.gitignore): the page's as a folder of links, in which its
+    tools write their temp files, and the server's Python environment as one link. For each part whose packages the
+    copy has then: the folders the sandbox reads for them (the packages' own, and those of the Python the environment
+    runs on)."""
+    if not (wt / "browser").is_dir():
+        return {}
+    seed = _browser_seed()
+    out: dict[str, list[str]] = {}
+    for part, name in WORKBENCH_PACKAGES:
+        have = wt / "browser" / part / name
+        if not have.exists() and not have.is_symlink() and have.parent.is_dir():
+            src = next((s / part / name for s in (live_dir() / "browser", seed) if s and (s / part / name).is_dir()), None)
+            if src is not None:
+                real = Path(os.path.realpath(src))
+                if name == ".venv":
+                    have.symlink_to(real, target_is_directory=True)
+                else:
+                    have.mkdir()
+                    for e in real.iterdir():
+                        if not e.name.startswith(".vite"):
+                            (have / e.name).symlink_to(os.path.realpath(e), target_is_directory=e.is_dir())
+        if name == ".venv" and (have / "bin" / "python").exists():
+            out[part] = [os.path.realpath(have), *_py_dirs(str(have / "bin" / "python"))]
+        elif name != ".venv" and have.is_dir():
+            out[part] = sorted({os.path.realpath(have), *(str(Path(os.path.realpath(e)).parent) for e in have.iterdir()
+                                                         if e.is_symlink())})
+    return out
 
 
 def _run_tests(argv: list[str], fid: int | str) -> tuple[bool, str]:
@@ -1598,8 +1687,9 @@ def _gitlinks(wt: Path, env: dict[str, str], base: str) -> list[str]:
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
          tests: bool = True, session: str | None = None, cannot: str | None = None,
          within: float | None = None) -> dict[str, Any]:
-    """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the quick tests in
-    the sandbox. ready, failed (with the reason), or a request with no code. A round of a fix changed in place (prev):
+    """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the checks of the parts
+    of thimble it changed in the sandbox (_checks, as carry runs them for the fixes an update set aside). ready, failed
+    (with the reason), or a request with no code. A round of a fix changed in place (prev):
     a ready change becomes the fix's new version, the fix's change and the round's in one commit (settle), which waits
     for the person's y while the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
@@ -1766,6 +1856,11 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
         return put(rec)
     if isinstance(argv, FixError):
         return put(_tested(rec, False, str(argv), named))
+    # the checks of what the change touched, as carry checks the fixes it puts back
+    try:
+        argv = _checks_argv(rec["id"], [f["path"] for f in files], rec["base"])
+    except (FixError, OSError) as e:
+        return put(_tested(rec, False, str(e), named))
     return _start_tests(rec, named, argv, read)
 
 
@@ -2916,9 +3011,6 @@ def _came_detached(live: Path, tip: str) -> bool:
 
 # the copy in which carry checks the fixes an update set aside (work/carry, tmp/carry), as done checks a fix in its own
 CARRY = "carry"
-# the page's build as its package.json runs it (the type check, then Vite), in the copy, into the sandbox's temp folder
-PAGE_BUILD = ('(cd browser/frontend && node_modules/.bin/tsc -b && node_modules/.bin/vite build --logLevel warn '
-              '--outDir "$TMPDIR/page" --emptyOutDir)')
 
 
 def _carry_due() -> tuple[dict[str, Any], list[int]] | None:
@@ -2958,58 +3050,6 @@ def carry_due() -> dict[str, Any] | None:
     return {"to": release_name(), "n": 0} if _sync_owed().exists() else None
 
 
-def _page_packages() -> list[str]:
-    """The folders the page's packages are in once the browser workbench is installed on live: live's
-    browser/frontend/node_modules, and the folder its links point into when it is a folder of links (the workbench
-    lends the install's packages so). [] when it has none."""
-    nm = live_dir() / "browser" / "frontend" / "node_modules"
-    if not browser_home().is_dir() or not nm.is_dir():
-        return []
-    real = Path(os.path.realpath(nm))
-    out = {str(real)}
-    try:
-        for e in real.iterdir():
-            if e.is_symlink():
-                out.add(str(Path(os.path.realpath(e)).parent))
-    except OSError:
-        return []
-    return sorted(out)
-
-
-def _lend_page(wt: Path) -> None:
-    """The copy's page gets live's packages as a folder of links, as the workbench lends them to a fix's copy: the
-    page's tools write their temp files in it (.vite, .vite-temp), and the packages stay as they are."""
-    src = Path(os.path.realpath(live_dir() / "browser" / "frontend" / "node_modules"))
-    nm = wt / "browser" / "frontend" / "node_modules"
-    nm.mkdir(parents=True, exist_ok=True)
-    for e in src.iterdir():
-        if not e.name.startswith(".vite") and not (nm / e.name).is_symlink():
-            (nm / e.name).symlink_to(os.path.realpath(e), target_is_directory=e.is_dir())
-
-
-def _carry_argv(paths: list[str], page: list[str]) -> list[str]:
-    """The command that checks the fixes carry puts back, whose changes touch `paths`, in work/carry, in the sandbox, as
-    done checks a fix: the copy's launcher, the hooks tests (when Claude Code is installed) and the kernel's (when this
-    Python has pytest) for a change outside browser/; the page's build for a change to the page, with its packages
-    (`page`: the folders they are in, which the sandbox reads; [] when the workbench is not installed).
-    THIMBLE_FIX_TESTS replaces them all."""
-    cmd = os.environ.get("THIMBLE_FIX_TESTS")
-    if cmd:
-        page = []
-    else:
-        parts: list[str] = []
-        if any(not p.startswith("browser/") for p in paths):
-            parts.append(LAUNCHER_SMOKE)
-            if shutil.which(claude()):
-                parts.append(QUICK_TESTS)
-            if _has_pytest(_python()):
-                parts.append('"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider')
-        if page and any(p.startswith("browser/frontend/") for p in paths):
-            parts.append(PAGE_BUILD)
-        cmd = " && ".join(parts) or "true"
-    return [*(sandbox_argv(CARRY, reads=page) if page else sandbox_argv(CARRY)), cmd]
-
-
 def _carry_trial(tip: str, ids: list[int]) -> tuple[list[tuple[int, str]], list[int], list[int]]:
     """work/carry, made anew at `tip` (the plain release), with each fix of `ids` cherry-picked on it in that order:
     (back: each fix whose change applies, with its commit there; had: those whose change the release has already;
@@ -3042,16 +3082,13 @@ def _carry_paths(back: list[tuple[int, str]]) -> list[str]:
     return sorted({str(f["path"]) for _, c in back for f in _numstat(live_dir(), f"{c}^", c)})
 
 
-def _carry_tests(back: list[tuple[int, str]], paths: list[str] | None = None) -> tuple[bool | None, str]:
-    """The checks of work/carry as `back` left it (_carry_argv), for the files its fixes change, or for `paths`, after
-    which no git runs in the copy: (True, the log's last lines) passed, (False, the same) failed, (None, why) could not
-    run (the sandbox runtime is missing, say)."""
+def _carry_tests(back: list[tuple[int, str]], tip: str, paths: list[str] | None = None) -> tuple[bool | None, str]:
+    """The checks of work/carry as `back` left it on the release (`tip`), for the files its fixes change, or for
+    `paths`, as done checks a fix (_checks), after which no git runs in the copy: (True, the log's last lines) passed,
+    (False, the same) failed, (None, why) could not run (the sandbox runtime is missing, say)."""
     paths = _carry_paths(back) if paths is None else paths
     try:
-        page = _page_packages() if any(p.startswith("browser/frontend/") for p in paths) else []
-        if page and not os.environ.get("THIMBLE_FIX_TESTS"):
-            _lend_page(home() / "work" / CARRY)
-        argv = _carry_argv(paths, page)
+        argv = _checks_argv(CARRY, paths, tip)
     except (FixError, OSError) as e:
         return None, str(e)
     return _run_tests(argv, CARRY)
@@ -3070,7 +3107,7 @@ def _carry_check(tip: str, ids: list[int], to: str, say) -> dict[str, Any]:
     k = len(back)
     if say:
         say(f"Checking {'your fix' if k == 1 else f'your {k} fixes'} on thimble {to} (a minute or two)...")
-    ok, tail = _carry_tests(back)
+    ok, tail = _carry_tests(back, tip)
     if ok is None:
         return {"unchecked": tail}
     if ok:
@@ -3079,7 +3116,7 @@ def _carry_check(tip: str, ids: list[int], to: str, say) -> dict[str, Any]:
     # say), they say nothing of the fixes
     paths = _carry_paths(back)
     _carry_trial(tip, [])
-    ok, tail = _carry_tests([], paths)
+    ok, tail = _carry_tests([], tip, paths)
     if not ok:
         return {"unchecked": tail if ok is None else "the checks fail without them too"}
     order = [f for f, _ in back]
@@ -3100,7 +3137,7 @@ def _carry_check(tip: str, ids: list[int], to: str, say) -> dict[str, Any]:
             # it does not apply, or has nothing to add, without a fix that was left out
             failed.append(fid)
             continue
-        ok, tail = _carry_tests(b)
+        ok, tail = _carry_tests(b, tip)
         if ok is None:
             return {"unchecked": tail}
         if ok:
