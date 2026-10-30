@@ -7,7 +7,7 @@ import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
 import './styles/index.css'
 import { ChipContext } from './chat/markdown'
-import { bodyHeight, bodyInner, bodyWidth } from './canvas/bodyHeight'
+import { bodyHeight, bodyWidth } from './canvas/bodyHeight'
 import { CardFace } from './canvas/CardFace'
 import { CARD_PAD_X } from './canvas/Cell'
 import { CanvasContext, type CanvasCtx } from './canvas/context'
@@ -56,8 +56,6 @@ export interface RenderResult {
   /** the widest content of the body that lays out wider than its room, px, and that room (bodyWidth); none when all of
    * it fits */
   wide?: { width: number; frame: number }
-  /** of `body`, what a custom card's page holds in scroll boxes of its own past their height, px (bodyInner) */
-  inner?: number
   fonts: boolean
   requests: string[]
   error?: string
@@ -211,8 +209,7 @@ async function render(req: RenderRequest): Promise<RenderResult> {
   const fonts = await fontsLoaded()
   const frames = Array.from(card.querySelectorAll('iframe.viewer-frame'), boxOf)
   const wide = bodyWidth(card)
-  const inner = bodyInner(card)
-  return { box: boxOf(card), frames, body: bodyHeight(card), ...(wide ? { wide } : {}), ...(inner ? { inner } : {}), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
+  return { box: boxOf(card), frames, body: bodyHeight(card), ...(wide ? { wide } : {}), fonts, requests: [...unanswered], ms: { settle: Math.round(now() - t0) } }
 }
 
 declare global {

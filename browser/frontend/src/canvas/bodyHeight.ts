@@ -1,6 +1,6 @@
 // The size a card's body draws at its width, which the card harness (render.tsx) gives the server with each picture,
 // so a card whose body draws taller than the canvas shows at rest (DataViz CARD_BODY_MAX), or whose content lays out
-// wider than its room, is told to its author before the analyst sees it (backend card_fit, card_size).
+// wider than its room, waits for the card check before the analyst sees it (backend card_fit, card_size).
 
 /** The body of `card` (an article.canvas-card) as laid out, px, whole: each custom card's page whole (its frame's
  * `data-height`, DataViz CustomFrame) in place of the part shown before Show all, with what its own scroll boxes hold

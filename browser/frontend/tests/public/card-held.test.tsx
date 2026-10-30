@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// A card that does not fit on the analyst's screen while its author makes a version that fits (`held`, backend
-// card_fit.py) shows on the board as a card that still runs: its question and the running line, not its content or its
+// A card that does not fit on the analyst's screen, while the card check reads it (`held`, backend card_fit.py),
+// shows on the board as a card that still runs: its question and the running line, not its content or its
 // takeaway (src/canvas/CardFace.tsx). The card harness measures a card whole for that (src/canvas/bodyHeight.ts): a
 // table's rows behind Show all, and the rows pandas left out of a DataFrame it cut, count at the height of the rows it
 // shows, and a custom card's page or a table that lays out wider than its room gives its width and the room's.

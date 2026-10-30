@@ -1368,9 +1368,9 @@ def _answer_checked(lv: Live, turn: str) -> None:
 
 
 def _cards_shown(lv: Live, sub: Sub | None = None) -> None:
-    """The cards that still wait for a version that fits show as they stand: those main's own calls hold, at main's
-    turn end (card_fit.turn_ended), or those subagent `sub` holds, at its end (card_fit.agent_ended). One of thimble's
-    agents shows its own at its run's end (subagents.run_ended)."""
+    """The held cards that no card check reads show as they stand: those main's own calls hold, at main's turn end
+    (card_fit.turn_ended), or those subagent `sub` holds, at its end (card_fit.agent_ended). One of thimble's agents
+    shows its own at its run's end (subagents.run_ended)."""
     from . import card_fit  # noqa: PLC0415 — card_fit imports the harness
 
     if sub is None:

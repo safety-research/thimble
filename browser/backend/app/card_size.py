@@ -8,8 +8,7 @@ Claude that a card is taller than the screen. A custom card's page that lays out
 measures as it measures the height, is told the same way, in the words of `## card-wide`, with the page's width and the
 frame's. A note keeps the version it was measured on, and is dropped when the card is gone or is another version by
 the author's next call. The author is the card's `created_by`, which is the cell_author of the calls of the session
-that made it; a card the analyst made by hand has no author to tell. A version card_fit measured is told in the result
-of the call that made it, so neither note comes for it (told)."""
+that made it; a card the analyst made by hand has no author to tell."""
 from __future__ import annotations
 
 import hashlib
@@ -64,16 +63,6 @@ def _keep(c: str, author: str, cid: str, v: str, kind: str, note: str) -> bool:
     while len(notes) > KEPT:
         notes.pop(next(iter(notes)))
     return True
-
-
-def told(c: str, cell: dict[str, Any] | None) -> None:
-    """Count the version `cell` stands at as told both notes, so neither comes for it: card_fit measured it and told its
-    author in the result of the call that made it."""
-    cid = str((cell or {}).get("id") or "")
-    if cell and cid:
-        v = version(cell)
-        for kind in (HINT, WIDE):
-            _told[(c, cid, kind)] = v
 
 
 def tell(c: str, cell: dict[str, Any] | None, height: float | int | None) -> bool:
