@@ -4,6 +4,7 @@
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
+import { failLineNow } from '../bar/notice'
 import Card from '../cards/client'
 import { cardWidth, rowsCut, rowsWord } from '../cards/draw'
 import { callLine } from '../cards/register'
@@ -931,8 +932,10 @@ test('a card taller than its frame waits for the card check: its frame draws `dr
   // one model call: the card check, which reads the card as drawn and its view
   await settle()
   expect(asked).toHaveLength(1)
-  expect(String(asked[0].prompt)).toContain('run 42  passed')
+  expect(String(asked[0].prompt)).toContain('run 30  passed')
   expect(String(asked[0].prompt)).toContain('// TALL')
+  // with the note on its size that Claude reads of a card that fits its frame and not the screen
+  expect(String(asked[0].prompt)).toContain('Note: the card is up to 42 rows tall, and its frame shows its first 30 rows with "+12 rows" under them')
   expect(JSON.stringify(asked[0].system)).toContain('PROMPT card-check')
   go()
   const props = await drawnOnce($, row)
@@ -986,6 +989,16 @@ test('a version Claude draws while the check reads the one before waits for its 
   expect(props.tree.c).toHaveLength(20)
   expect(asked).toHaveLength(2)
   expect(Object.values(w.files).some(v => String(v).includes('// first check'))).toBe(false)
+})
+
+test('a check whose call fails leaves the card as it stands, its rest under `+N rows`, and says so on the failure line', async ($, on) => {
+  world(on)
+  on('model.complete', () => ({ value: { isAnswered: false, reason: 'api-error', status: 529, usage: {} } }))
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_59', ...input } as never)
+  expect((await drawnOnce($, callRow('toolu_made_up_59', input))).cap).toBe(30)
+  expect((await failLineNow($))?.text).toBe('The card check of the card “Every run” failed: the API is overloaded.')
 })
 
 test('a card a resumed session finds waiting for its check draws as it stands', async ($, on) => {

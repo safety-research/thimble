@@ -11,9 +11,10 @@ wide). No model takes part in the measure. A body past card_size.BODY_MAX, or co
    runs, with its question and the running line and without its content or its takeaway. It is held from the moment the
    call stores its content until the measure ends (notebook.MEASURING, which tools.call sets around the call:
    measuring), so the canvas shows no version that does not fit, even for that moment. The card check reads it with one
-   more criterion (prompts/card-check.md `## too-large`), and the card shows when that check ends (checked): as the
-   check's replacement, or as it stands when the check left it. A replacement that still does not fit shows as any card
-   does, its rest behind Show all. The call's result says nothing of it: the author reads what it read before.
+   more criterion (prompts/card-check.md `## too-large`) and its size, in the words card_size tells an author
+   (size_note), and the card shows when that check ends (checked): as the check's replacement, or as it stands when the
+   check left it. A replacement that still does not fit shows as any card does, its rest behind Show all. The call's
+   result says nothing of it: the author reads what it read before.
 3. A held card whose check has not begun, such as one with no takeaway yet, shows as it stands when the turn or run of
    the one who made it ends: main's turn (session._end_turn calls turn_ended), a run of one of thimble's agents
    (subagents.run_ended calls run_ended), or a subagent of main's (session._finish_sub calls agent_ended). The record
@@ -55,11 +56,18 @@ class Size:
     frame: float = 0.0
 
     @property
-    def fits(self) -> bool:
+    def tall(self) -> bool:
         from .card_size import BODY_MAX  # noqa: PLC0415
 
-        # as the page measures a width: a px of rounding is no overflow
-        return self.body <= BODY_MAX and not (self.frame > 0 and self.width > self.frame + 1)
+        return self.body > BODY_MAX
+
+    @property
+    def wide(self) -> bool:
+        return self.frame > 0 and self.width > self.frame + 1  # as the page measures it: a px of rounding is no overflow
+
+    @property
+    def fits(self) -> bool:
+        return not self.tall and not self.wide
 
 
 def size_of(drawn: render.Rendered) -> Size:
@@ -96,6 +104,22 @@ def too_large(cell: dict[str, Any] | None) -> bool:
     """Whether a card is held as one that does not fit on the analyst's screen, as measured: the card check reads it
     with one more criterion (card_check)."""
     return held(cell) and not cell[HELD].get("measuring")
+
+
+def size_note(cell: dict[str, Any] | None) -> str:
+    """What the card check of a card held as one that does not fit reads of its size (card_check): the notes card_size
+    gives an author for a body taller than the screen and a page wider than its card (prompts/tools.md `## card-tall`,
+    `## card-wide`), from the measure the card was held on; '' for any other card."""
+    if not too_large(cell):
+        return ""
+    from .card_size import BODY_MAX, HINT, WIDE  # noqa: PLC0415
+    from .tools import hint  # noqa: PLC0415 — tools imports this module
+
+    rec, cid = cell[HELD], str(cell.get("id") or "")
+    size = Size(body=float(rec.get("body") or 0), width=float(rec.get("width") or 0), frame=float(rec.get("frame") or 0))
+    notes = ([hint(HINT, cid=cid, height=round(size.body), limit=BODY_MAX)] if size.tall else []) + (
+        [hint(WIDE, cid=cid, width=round(size.width), frame=round(size.frame))] if size.wide else [])
+    return " ".join(n for n in notes if n)
 
 
 def holds_here(c: str) -> bool:

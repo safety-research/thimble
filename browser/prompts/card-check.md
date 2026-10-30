@@ -54,7 +54,7 @@ The analyst reshaped this card in its graphic and pressed Keep, which set {{kept
 
 ## too-large
 
-The card does not fit on the analyst's screen, so the analyst sees it only after this check, as your replacement. Assess it against one more criterion, the sixth:
+The card does not fit on the analyst's screen: {{size}} The analyst sees it only after this check, as your replacement. Assess it against one more criterion, the sixth:
 
 - Does the graphic show only what the question needs, in a form that fits on the screen?
 

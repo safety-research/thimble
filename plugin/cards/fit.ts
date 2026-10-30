@@ -5,9 +5,10 @@
 // draws its title and `drawing…` (client.tsx) in place of the card, and it takes no keys. One model call, the card check
 // (prompts/card-check.md, the criteria of the workbench's card check that a card of the terminal has, with the one for
 // a card that does not fit), reads the analyst's question (for a thread's fork's card, the question asked in that
-// thread: threads/seam.ts threadQuestion), the card's title, columns, first row, text copy and view, by the card guide
-// (tool.ts cardGuide) and the guidance's `## Cards` (guidance/guidance.ts cardsGuidance), and writes the view, and the
-// title, that replace it. tool.ts draws the replacement in the card's place (personVersion), and the card shows when the
+// thread: threads/seam.ts threadQuestion), the card's title, columns, first row, text copy and view, and the note on its
+// size that Claude reads of a card that fits its frame but not the screen (tool.ts), by the card guide (tool.ts
+// cardGuide) and the guidance's `## Cards` (guidance/guidance.ts cardsGuidance), and writes the view, and the title,
+// that replace it. tool.ts draws the replacement in the card's place (personVersion), and the card shows when the
 // check ends (shown): as the replacement, whatever its size, its first CARD_ROWS rows and `+N rows` under them when it
 // still does not fit, or as it stands when the check wrote none or it did not draw. A newer version Claude drew since
 // waits for its own check. The card tool's answer says nothing of it: Claude reads what it read before. A card a resumed
@@ -27,7 +28,6 @@ type Engine = EngineInterface
 type Any = any
 
 const MODEL = { model: 'opus', effort: 'low', maxTokens: 8000, timeoutMs: 180000 }
-const COPY_LINES = 120 // of the card's text copy the check reads
 
 /** Whether a version `lines` rows tall at the card's width, `cut` of them cut at its edge, fits: its frame shows it
  *  whole and no line is cut. */
@@ -42,15 +42,15 @@ function field(text: string, name: string): string {
 }
 
 /** The card check of a version that does not fit: one model call over the analyst's question and the card as drawn,
- *  `width` columns wide. {view, title}, each '' when the check keeps it, or {why} when the call failed. */
-export async function checkCard($: Engine, o: { id: string; title: string; question: string; columns: string[]; first: string; lines: string[]; width: number; view: string; guide: string }): Promise<{ view: string; title: string; why?: string }> {
+ *  its text copy `copy` `width` columns wide (tool.ts copyText) and the note on its size, '' for none. {view, title},
+ *  each '' when the check keeps it, or {why} when the call failed. */
+export async function checkCard($: Engine, o: { id: string; title: string; question: string; columns: string[]; first: string; copy: string[]; note: string; width: number; view: string; guide: string }): Promise<{ view: string; title: string; why?: string }> {
   let system = ''
   try {
     system = fill(await promptText($, 'card-check'), { GUIDE: o.guide, GUIDANCE: await cardsGuidance($) })
   } catch (err) {
     return { view: '', title: '', why: `its text could not be read (${String((err as Error)?.message || err).slice(0, 120)})` }
   }
-  const copy = o.lines.slice(0, COPY_LINES)
   const prompt = [
     `The analyst's question: ${o.question.trim().slice(0, 2000) || '(not known)'}`,
     '',
@@ -58,9 +58,10 @@ export async function checkCard($: Engine, o: { id: string; title: string; quest
     `<title>${o.title}</title>`,
     `<columns>${o.columns.join(', ')}</columns>`,
     `<first-row>${o.first}</first-row>`,
-    `<draws width="${o.width}">`, ...copy, ...(o.lines.length > copy.length ? [`(${o.lines.length - copy.length} more lines)`] : []), '</draws>',
+    `<draws width="${o.width}">`, ...o.copy, '</draws>',
     '<view>', o.view.trim(), '</view>',
     '</card>',
+    ...(o.note ? ['', o.note] : []),
   ].join('\n')
   const req = { ...MODEL, system: [{ text: system, cache: true }], prompt }
   let r: Any

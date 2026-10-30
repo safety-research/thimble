@@ -20,8 +20,9 @@ new change to the card cancels a running check and starts the next. At most READ
    through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial). A replacement that left all the
    card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`.
 A card that does not fit on the analyst's screen is held until its check ends (card_fit): the reading assesses it
-against one more criterion (prompts/card-check.md `## too-large`), its size is not told to its author, and the card
-shows when the check ends (card_fit.checked), as the check left it, whatever its size.
+against one more criterion (prompts/card-check.md `## too-large`), with its size as card_size words it
+(card_fit.size_note), which is not told to its author, and the card shows when the check ends (card_fit.checked), as
+the check left it, whatever its size.
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -1015,7 +1016,7 @@ def _tool(secs: dict[str, str], name: str, criteria: int = CRITERIA) -> Any:
 def _criteria(card: dict[str, Any]) -> int:
     """How many criteria the reading of a card assesses: one more for a card that does not fit on the analyst's
     screen (card_input's `too_large`)."""
-    return CRITERIA + 1 if card.get("too_large") else CRITERIA
+    return CRITERIA + 1 if str(card.get("too_large") or "").strip() else CRITERIA
 
 
 def fit_image(png: bytes, max_edge: int = MAX_EDGE) -> bytes:
@@ -1199,8 +1200,8 @@ async def card_input(c: str, cell: dict[str, Any], run: _Run, picture: str | Non
                      secs: dict[str, str]) -> dict[str, Any]:
     """The card-check task's input (tasks.py): the card's id, kind, question, takeaway, citations, code and the
     context it was made in, each '' for none; the `typed` and `kept` parts of the reading's card (_typed_text,
-    _kept_text); `too_large`, whether it does not fit on the analyst's screen (card_fit.too_large); the path of its
-    picture, None when it was not drawn; and the effort the check reads at."""
+    _kept_text); `too_large`, for a card that does not fit on the analyst's screen, its size (card_fit.size_note), ''
+    for one that fits; the path of its picture, None when it was not drawn; and the effort the check reads at."""
     from . import card_fit  # noqa: PLC0415
 
     code = str(cell.get("code") or "").strip()
@@ -1209,7 +1210,7 @@ async def card_input(c: str, cell: dict[str, Any], run: _Run, picture: str | Non
                      "citations": await asyncio.to_thread(_citations_text, c, cell) or "",
                      "code": code[:CODE_CHARS], "context": await asyncio.to_thread(_context_text, c, cell, run.author) or "",
                      "typed": _typed_text(c, cell, secs), "kept": await asyncio.to_thread(_kept_text, c, cell, secs),
-                     "too_large": card_fit.too_large(cell)},
+                     "too_large": card_fit.size_note(cell)},
             "picture": picture, "effort": run.effort or await asyncio.to_thread(read_effort, c)}
 
 
@@ -1233,8 +1234,8 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -
         "context": str(card.get("context") or "") or none,
         "typed": str(card.get("typed") or ""), "kept": str(card.get("kept") or ""),
     })
-    if card.get("too_large"):
-        user += "\n\n" + _fill(secs["too-large"], {}).strip()
+    if str(card.get("too_large") or "").strip():
+        user += "\n\n" + _fill(secs["too-large"], {"size": str(card["too_large"]).strip()}).strip()
     images = []
     if isinstance(inp.get("picture"), str) and inp["picture"]:
         try:
