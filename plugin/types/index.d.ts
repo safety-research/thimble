@@ -41,8 +41,6 @@ declare module 'claude-code' {
       cardsAt: Record<string, string[]>
       /** the card a call of the card tool drew or changed, by the call's tool_use_id: { id } */
       cardCall: StateFamily<unknown>
-      /** the cards that wait for a version that fits on the screen, oldest first (cards/fit.ts) */
-      cardsHeld: string[]
 
       // ---- a card's header (cards/head.ts)
       /** a card's artifact, by card id: { card, status, agentId, until, url?, error? } */

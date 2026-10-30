@@ -52,7 +52,7 @@ export function modesNow(): string[] {
   return [`${minimalOn() ? 'Minimal mode is on: nothing runs after your replies. ' : ''}These come only when the analyst asks: ${list}.`]
 }
 
-/** The guidance's `## Cards` section, its temp folder filled in: what the critique of a card that does not fit holds
+/** The guidance's `## Cards` section, its temp folder filled in: what the card check of a card that does not fit holds
  *  the card to (cards/fit.ts). */
 export async function cardsGuidance($: Engine): Promise<string> {
   const text = fill(await promptText($, 'guidance'), { TMPDIR: await tempDir($) })

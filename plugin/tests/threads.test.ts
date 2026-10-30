@@ -195,7 +195,7 @@ test('a later question joins the running fork; once it ended, a new fork is told
   expect(s.spawns[1].prompt).toContain('Earlier in this thread:\nQ: why so many?\nQ: and the 3 that passed?\nA: They ran before the change.')
 })
 
-test("the request a card a thread's fork draws is critiqued against is the thread's last question, not main's prompt", async () => {
+test("the request a card a thread's fork draws is checked against is the thread's last question, not main's prompt", async () => {
   const s = setup()
   const first = askHere(s.$, SCOPE, 'why so many?')
   await settle()

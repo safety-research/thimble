@@ -37,8 +37,8 @@
 //                                      (`element`); each part has a thread of its own
 //   threadCardAnchor($, agentId, id)   where a card a thread's fork drew stands: `thread:<key>`, drawn under its answer
 //                                      in the thread's pane; null for any other agent (cards/tool.ts)
-//   threadQuestion(agentId)            the question a thread's fork answers, which the critique of a card it drew reads
-//                                      as the request; null for any other agent (cards/tool.ts)
+//   threadQuestion(agentId)            the question a thread's fork answers, which the card check of a card it drew
+//                                      reads as the request; null for any other agent (cards/tool.ts)
 //   registerThreads                    its own hooks (the forks' ends, ...)
 import type { EngineInterface, Register } from 'claude-code'
 
