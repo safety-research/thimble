@@ -376,7 +376,7 @@ const CARRY_MS = 1_800_000
 /** At session start, when the fixes an update set aside wait for their check (the list's `due`): an update by thimble
  *  0.10.5 or before set every fix aside and stopped there, and this load is the first that runs after it, from
  *  /reload-plugins or a new session. The kernel checks them on the new release, as at a fix's end, and puts back those
- *  that pass (`thimble fix carry`, a minute or two, a step on the bar); one line says what came of them, and the session
+ *  that pass (`thimble fix carry`, a few minutes, a step on the bar); one line says what came of them, and the session
  *  loads them. A carry that fails says why, and the fixes stay off. */
 export async function carryFixes($: Engine, list: FixList | null): Promise<void> {
   const due = list?.due

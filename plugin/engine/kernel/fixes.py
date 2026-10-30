@@ -3166,7 +3166,7 @@ def _carry_check(tip: str, ids: list[int], to: str, say) -> dict[str, Any]:
         return out
     k = len(back)
     if say:
-        say(f"Checking {'your fix' if k == 1 else f'your {k} fixes'} on thimble {to} (a minute or two)...")
+        say(f"Checking {'your fix' if k == 1 else f'your {k} fixes'} on thimble {to} (a few minutes)...")
     ok, tail = _carry_tests(back, tip)
     if ok is None:
         return {"unchecked": tail}

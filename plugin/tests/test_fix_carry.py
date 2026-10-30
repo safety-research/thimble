@@ -142,7 +142,7 @@ def test_the_first_list_after_an_older_update_puts_back_what_fits_and_says_what_
     # thimble fixes, the person's next look: the bar's word fits 0.10.3 and is on again, the note is 0.10.3's own, and
     # the legend does not fit it: the line under the table says so, once, for thimble reapply
     rows = FX.list_lines(120)
-    assert capsys.readouterr().err.splitlines() == ["Checking your fix on thimble 0.10.3 (a minute or two)..."]
+    assert capsys.readouterr().err.splitlines() == ["Checking your fix on thimble 0.10.3 (a few minutes)..."]
     assert rows[:5] == [
         f"Fix {a} fits thimble 0.10.3 and is on again.",
         "Already in thimble 0.10.3, so it leaves thimble fixes: A note.",
@@ -192,7 +192,7 @@ def test_a_fix_whose_change_applies_but_fails_the_checks_on_the_release_stays_of
     live = FX.live_dir()
     capsys.readouterr()
     rows = FX.list_lines(120)
-    assert capsys.readouterr().err.splitlines() == ["Checking your 3 fixes on thimble 0.10.3 (a minute or two)...",
+    assert capsys.readouterr().err.splitlines() == ["Checking your 3 fixes on thimble 0.10.3 (a few minutes)...",
                                                     "They do not pass together: checking them one at a time..."]
     assert rows[:4] == [f"Fixes {a} and {c} fit thimble 0.10.3 and are on again.",
                         "In Claude Code, type /reload-plugins to load them.", "",
@@ -359,7 +359,7 @@ def test_thimble_update_after_an_older_update_puts_back_what_fits(world, upstrea
     assert got.out.splitlines() == [
         "thimble 0.10.3 is the newest release.", "Your fix fits thimble 0.10.3 and is on again: Bar says read.",
         "In Claude Code, type /reload-plugins to load them."]
-    assert got.err.splitlines() == ["Checking your fix on thimble 0.10.3 (a minute or two)..."]
+    assert got.err.splitlines() == ["Checking your fix on thimble 0.10.3 (a few minutes)..."]
     assert FX.get(a)["state"] == "on" and not (FX.home() / "pending" / "current.json").exists()
     assert cli.main(["update"]) == 0 and capsys.readouterr().out.splitlines() == ["thimble 0.10.3 is the newest release."]
 
@@ -396,7 +396,7 @@ def test_reapply_after_an_older_update_puts_back_what_fits_and_opens_claude_for_
     got = capsys.readouterr()
     # what carry did goes to stderr, and says nothing of thimble reapply, which runs now; the prompt alone to stdout
     assert got.err.splitlines() == [
-        "Checking your 2 fixes on thimble 0.10.3 (a minute or two)...",
+        "Checking your 2 fixes on thimble 0.10.3 (a few minutes)...",
         "Your 2 fixes fit thimble 0.10.3 and are on again: Bar says read; A note.",
         "Off, as it does not fit thimble 0.10.3: Legend counts untouched.",
         "In Claude Code, type /reload-plugins to load them."]
@@ -889,7 +889,7 @@ def test_a_dev_update_by_an_older_thimble_that_replayed_every_fix_is_checked_by_
     log = checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/rule.md && grep -qs 'read ' plugin/bar/bar.tsx")
     capsys.readouterr()
     rows = FX.list_lines(120)
-    assert capsys.readouterr().err.splitlines() == ["Checking your 2 fixes on thimble main at " + new[:7] + " (a minute or two)...",
+    assert capsys.readouterr().err.splitlines() == ["Checking your 2 fixes on thimble main at " + new[:7] + " (a few minutes)...",
                                                     "They do not pass together: checking them one at a time..."]
     assert rows[0] == f"Fix {b} fits thimble main at {new[:7]} and is on again."
     assert f"  fix {a} is off: it does not fit thimble main at {new[:7]}" in rows
