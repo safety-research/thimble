@@ -41,7 +41,7 @@ import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawSettings, settingsFocus } from '../panes/settings'
-import { drawThreadsPane, threadKnown, threadPaneParts, threadUnderSplit } from '../threads/seam'
+import { drawThreadsPane, threadKnown, threadPaneParts, threadRing, threadsPaneClosed, threadUnderSplit } from '../threads/seam'
 import { quiet } from './askcell.js'
 import { dropSelection } from './selection'
 import { cut } from './text.js'
@@ -429,17 +429,22 @@ export const registerPanes: Register = on => {
     // words selected in the pane stay Claude Code's selection after it closes; e and c no longer take them
     await dropSelection($)
     const r = await next(e)
-    // closed, though the bar may not draw again: the next w, r or l opens its pane (claims/seam.ts, bar/register.ts)
+    // closed, though the bar may not draw again: the next w, r or l opens its pane (claims/seam.ts, bar/register.ts),
+    // and no side thread's input bar keeps the ring (threads/seam.ts)
     claimsPaneClosed()
     barPaneClosed()
+    threadsPaneClosed()
     return r
   }).catch(($, e, next) => next(e))
 
-  // the ring moving in the settings pane: within a row it picks that choice, onto another row it lands on its choice set
+  // the ring moving in the pane: in the settings pane, within a row it picks that choice, onto another row it lands on
+  // its choice set; onto a side thread's input bar, that field keeps it after each drawing, and anywhere else no field
+  // does (threads/seam.ts threadRing)
   on('ui.focus', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
     const now = await paneNow($)
-    if (now?.kind !== 'settings') return next(e)
-    return settingsFocus($, e as Any, next as Any)
+    const r = now?.kind === 'settings' ? await settingsFocus($, e as Any, next as Any) : await next(e)
+    if (!r?.deny) threadRing((e as Any).element)
+    return r
   }).catch(($, e, next) => next(e))
   on('ui.scroll', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
     if (await scrollPane($, e as Any)) return {}

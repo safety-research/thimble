@@ -5,6 +5,7 @@
 import { expect } from 'claude-code/testing'
 
 import { registerForks } from '../core/forks'
+import { registerPanes } from '../core/pane'
 import { registerTell, tellFor } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
 import { askHere, drawThreads, passageRuns, threadUnder, threadUnderParts } from '../threads/pane'
@@ -29,6 +30,7 @@ function setup(o: { denyFork?: boolean } = {}) {
   const on: Any = (event: string, a: Any, b?: Any) => { (hooks[event] ??= []).push(typeof a === 'function' ? a : b); return { catch: () => undefined } }
   registerForks(on, {} as never)
   registerTell(on, {} as never)
+  registerPanes(on, {} as never)
   registerThreads(on, {} as never)
   const state = new Map<string, { value: unknown; version: number }>()
   const files: Record<string, string> = {}
@@ -193,6 +195,34 @@ test('a later question joins the running fork; once it ended, a new fork is told
   await askHere(s.$, SCOPE, 'which config?')
   expect(s.spawns.length).toBe(2)
   expect(s.spawns[1].prompt).toContain('Earlier in this thread:\nQ: why so many?\nQ: and the 3 that passed?\nA: They ran before the change.')
+})
+
+// Claude Code runs an Input's own onSubmit beneath every hook, on no hook's behalf: a fork started there has the whole
+// plugin as its caller, so none of the plugin's hooks hear its calls, and each of its card calls fails (core/forks.ts).
+// So ↵ in a thread's input bar asks the thread in thimble's ui.input hook, which takes the submit
+test("↵ in a thread's input bar asks the thread in the ui.input hook, so its fork starts inside a hook; the field's own onSubmit asks nothing more", async () => {
+  const s = setup()
+  expect(await openThread(s.$, SCOPE)).toBe(true)
+  const field = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)).find(n => n.type === 'Input')
+  // what Claude Code runs beneath the hooks: the field's own onSubmit
+  const beneath: string[] = []
+  const submit = (element: string, value: string) => s.call('ui.input', { plugin: 'thimble', element, component: 'Pane', requestId: 'thimble', surface: 'terminal', kind: 'submit', value }, async (e: Any) => {
+    beneath.push(e.element)
+    if (e.element === field.props.key) field.props.onSubmit(e.value, e)
+    return { element: e.element, value: e.value }
+  })
+  const asked = submit(field.props.key, 'why so many?')
+  await settle()
+  s.go()
+  expect(await asked).toEqual({ element: field.props.key, value: 'why so many?' })
+  expect(beneath).toEqual([])
+  expect(s.spawns.length).toBe(1)
+  expect(s.spawns[0].prompt).toContain('why so many?')
+  expect(threadOf(KEY)!.asks.map(a => a.text)).toEqual(['why so many?'])
+  // the submit of a field that is no thread's (the labels pane's edit) goes on beneath, to that field's own onSubmit
+  await submit('edit-made-up', 'run 4')
+  expect(beneath).toEqual(['edit-made-up'])
+  expect(s.spawns.length).toBe(1)
 })
 
 test("what thimble keeps for a thread about a card its fork drew goes with the thread's next question, to the fork that runs or a new one, once, and never to main", async () => {
@@ -374,14 +404,18 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   before.props.onInput('and then')
   const focus: Any[] = []
   s.$.ui.focus = async (a: Any) => { focus.push(a); return {} }
+  const later: Array<() => void> = []
+  s.$.clock.after = ((_ms: number, f: () => void) => { later.push(f); return { cancel() {} } }) as Any
   await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
   const tree = await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)
   const all = nodes(tree)
-  // the answer's drawing brings a new field, with those words, and the focus ring is asked onto it before: m, drawn
-  // above the field, does not take the ring's place (Claude Code draws a Button the ring is on inverted)
+  // the answer's drawing keeps the field, so Claude Code keeps those words in it (no value drawn over them), and the
+  // focus ring is asked onto it after the drawing: m, drawn above the field, does not take the ring's place (Claude
+  // Code draws a Button the ring is on inverted)
   const field = all.find(n => n.type === 'Input')
-  expect(field.props.key).not.toBe(before.props.key)
-  expect(field.props.value).toBe('and then')
+  expect(field.props.key).toBe(before.props.key)
+  expect(field.props.value).toBe(undefined)
+  later.splice(0).forEach(f => f())
   expect(focus).toEqual([{ requestId: 'thimble', key: field.props.key }])
   const steps = all.find(n => String(n.props?.key ?? '').endsWith('-steps'))
   expect(textOf(steps)).toBe('● 1 step · python3 count.py')
@@ -397,6 +431,52 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   expect(m.props.hover?.inverse).toBe(false)
   const kids = tree.props.children as Any[]
   expect(kids.indexOf(all.find(n => n.props?.key === 'thread-keys'))).toBe(kids.findIndex((n: Any) => n.props?.key === 'entry-gap') - 1)
+})
+
+// Claude Code keeps a pane's focus ring at its place among the pane's Buttons and fields. An answer brings Buttons above
+// the input bar (its citations, the turning glyph after each while it is checked, m), which take the field's place, and
+// with the ring on one of them the person's next keys leave the pane for main's prompt
+test("the thread's input bar keeps the keys after each answer: each drawing asks the ring back onto it, until the person moves it", async () => {
+  const s = setup()
+  const later: Array<() => void> = []
+  s.$.clock.after = ((_ms: number, f: () => void) => { later.push(f); return { cancel() {} } }) as Any
+  const focus: string[] = []
+  s.$.ui.focus = async (a: Any) => { focus.push(a.key); return {} }
+  // one drawing of the thread, and what is asked of the ring after its hook: the field drawn, and the fields asked onto
+  const draw = async () => {
+    const field = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)).find(n => n.type === 'Input')
+    focus.length = 0
+    later.splice(0).forEach(f => f())
+    return { field: String(field.props.key), asked: [...focus] }
+  }
+  const ring = (element: string) => s.call('ui.focus', { component: 'Pane', requestId: 'thimble', plugin: 'thimble', element, origin: { kind: 'person' } }, async () => ({}))
+  expect(await openThread(s.$, SCOPE)).toBe(true)
+  const first = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await first
+  s.answer('agent-1', 'Most [stopped early](#), in [run 4](#).')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  // the answer's drawing, and each one after it (its citations' checks start, turn and end): the ring onto the field
+  for (let i = 0; i < 3; i++) {
+    const d = await draw()
+    expect(d.asked).toEqual([d.field])
+  }
+  // the person moves the ring onto a citation (Tab, a click): it stays where they put it
+  await ring('row-made-up-1-a-m0-1')
+  expect((await draw()).asked).toEqual([])
+  // and back onto the field: the field holds the keys again
+  const back = (await draw()).field
+  await ring(back)
+  expect((await draw()).asked).toEqual([back])
+  // the next question: the new field takes the keys, while the thread answers and after
+  await askHere(s.$, SCOPE, 'and the 3 that passed?')
+  const next = await draw()
+  expect(next.field).not.toBe(back)
+  expect(next.asked).toEqual([next.field])
+  // shown to be read (the tray's +), the thread's input bar waits: the ring is not asked onto it
+  expect(await openThread(s.$, SCOPE, { read: true })).toBe(true)
+  expect((await draw()).asked).toEqual([])
 })
 
 test("a card's thread shows the card collapsed, its title and the line asked about; e draws it whole", async () => {

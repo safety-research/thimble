@@ -66,47 +66,62 @@ const BUSY = { plugin: 'thimble', key: 'busy' } as const
 const fieldGen = new Map<string, number>()
 /** The thread's input bar's key, as entry draws it. */
 const fieldKey = (key: string) => `ask-${key}-${fieldGen.get(key) ?? 0}`.slice(0, 120)
-// the words typed in each input bar now, and the words a new field starts with (one drawn for an answer)
+// the words typed in each input bar now
 const typed = new Map<string, string>()
-const carried = new Map<string, string>()
-// the threads asked from their input bar whose answer is still to come, and those whose answer's field the ring is
-// asked onto again once the pane drew it
-const askedHere = new Set<string>()
-const ringAfterDraw = new Set<string>()
+// the thread each input bar drawn asks, by its field's key: what ↵ there asks (fieldSubmitted), and whether the ring is
+// on a thread's input bar (ringMoved)
+const fields = new Map<string, ThreadScope>()
+// the thread whose input bar holds the keys, or null
+let holding: string | null = null
 
-// The focus ring stays on the thread's input bar. Claude Code keeps a pane's ring at its place among the pane's Buttons
-// and fields, and draws a Button the ring is on inverted: the m Button an answer brings above the input bar would take
-// the place, and so the ring, the field held. thread.ts calls these before it has the thread drawn again; a pane that
-// does not hold the keys denies the move, and the ring stays where the person put it.
+// The focus ring stays on the thread's input bar while the person asks there. Claude Code keeps a pane's ring at its
+// place among the pane's Buttons and fields, and draws a Button the ring is on inverted: what a drawing brings above the
+// input bar (an answer's citations, the turning glyph after each while its check runs, the m Button) takes the place,
+// and so the ring, the field held, and the person's next keys leave the pane for main's prompt. So each drawing of the
+// field asks the ring onto it again (ringDrawn), from the moment the thread is shown to be asked or the person puts the
+// ring on the field, until they move it elsewhere in the pane (ringMoved) or the pane closes; a pane that does not hold
+// the keys denies the move, and the ring stays where the person put it.
 
+/** The ring asked onto the thread's field; once it is there, the field holds the keys. */
 function ringOnField($: Engine, key: string): void {
-  try { void $.ui.focus({ requestId: PANE_ID, key: fieldKey(key) }).catch(() => undefined) } catch { /* a surface without a ring */ }
+  try {
+    void $.ui.focus({ requestId: PANE_ID, key: fieldKey(key) }).then(r => { if (!r?.deny) holding = key }, () => undefined)
+  } catch { /* a surface without a ring */ }
 }
 
-/** A question asked in the input bar stopped running (answered or stopped): its drawing brings a new field, with the
- *  words typed in the old one, and the ring is asked onto that field before the drawing, which places it there. Claude
- *  Code waits only so long for the field: a drawing slower than that (a card in the answer) asks again (ringDrawn). */
-export function fieldSettled($: Engine, key: string): void {
-  if (!askedHere.delete(key)) return
-  fieldGen.set(key, (fieldGen.get(key) ?? 0) + 1)
-  const text = typed.get(key)
-  if (text) carried.set(key, text)
-  else carried.delete(key)
-  ringOnField($, key)
-  ringAfterDraw.add(key)
-}
-
-/** The pane drew the thread's field: the ring asked onto it again, once, after the drawing's hook (which cannot wait on
- *  its own drawing). */
+/** The pane drew the thread's field: while it holds the keys, the ring asked onto it, after the drawing's hook (which
+ *  cannot wait on its own drawing). */
 function ringDrawn($: Engine, key: string): void {
-  if (!ringAfterDraw.delete(key)) return
-  $.clock.after(0, () => ringOnField($, key))
+  if (holding === key) $.clock.after(0, () => { if (holding === key) ringOnField($, key) })
 }
 
 /** The side pane is about to show the thread (a row of the list, a key): the ring on its input bar, not at the place
- *  the pane's last drawing had it. */
-export function fieldShown($: Engine, key: string): void {
-  ringOnField($, key)
+ *  the pane's last drawing had it; shown to be read (`read`, the tray's +), its input bar waits, and no field holds the
+ *  keys. */
+export function fieldShown($: Engine, key: string, read = false): void {
+  holding = read ? null : key
+  if (!read) ringOnField($, key)
+}
+
+/** The ring moved in the side pane (core/pane.ts: the person's Tab, arrows or click, or a field that takes it as the pane
+ *  takes the keys): onto a thread's input bar, that field holds the keys; anywhere else, none does. */
+export function ringMoved(element: string | undefined): void {
+  const scope = element ? fields.get(element) : undefined
+  holding = scope ? threadKey(scope) : null
+}
+
+/** The side pane closed: no field holds the keys. */
+export function ringReleased(): void {
+  holding = null
+}
+
+/** ↵ in an input bar: the thread its field asks is asked `text` (thread.ts asks it in its ui.input hook). False when the
+ *  field `element` is no thread's. */
+export async function fieldSubmitted($: Engine, element: string, text: string): Promise<boolean> {
+  const scope = fields.get(element)
+  if (!scope) return false
+  await askHere($, scope, text)
+  return true
 }
 // the card threads whose card the pane draws whole (e); else its title and the line asked about
 const cardOpen = new Set<string>()
@@ -239,7 +254,7 @@ function paneKeys($: Engine, t: Thread | null, more: PaneKey[] = []): PaneKey[] 
 
 /** The keys' row above the input bar, ` · ` between keys, as the other panes draw theirs: each a plain Button its key
  *  presses, drawn dim at rest (Claude Code draws its key, lit, then a colon, and the label). The ring stays on the
- *  input bar as m comes (fieldSettled), so a key typed there presses it too (keyTyped). */
+ *  input bar as m comes (ringDrawn), so a key typed there presses it too (keyTyped). */
 function keysRow(els: Any, keys: PaneKey[], short = false): Any[] {
   const { Box, Button, Text } = els
   if (!keys.length) return []
@@ -263,9 +278,7 @@ function keyTyped($: Engine, key: string, v: string, keys: PaneKey[]): void {
   $.clock.after(WORD_MS, () => {
     if ((typed.get(key) ?? '') !== v) return
     typed.delete(key)
-    carried.delete(key)
     fieldGen.set(key, (fieldGen.get(key) ?? 0) + 1)
-    ringAfterDraw.add(key)
     void Promise.resolve(k.onPress()).catch(() => undefined)
     $.ui.invalidate('ui.render')
   })
@@ -279,14 +292,16 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
   const key = threadKey(scope)
   const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
   const what = cut(askWords(scope), Math.max(20, w - 24))
+  fields.set(fieldKey(key), scope)
   const row = Box({ key: 'entry-row', flexDirection: 'row', children: [
     Box({ width: 2, flexShrink: 0, children: [Text({ color: 'text', children: '❯ ' })] }),
     Box({ flexGrow: 1, flexShrink: 1, children: [Input({
       key: fieldKey(key), placeholder: ask ? cut(ask, Math.max(20, w - 12)) : `Ask about ${what}${what.endsWith('…') ? '' : '…'}`, submitLabel: 'ask',
       ...(focus ? { autoFocus: true } : {}),
-      ...(carried.has(key) ? { value: carried.get(key) } : {}),
       onInput: (v: string) => { const was = typed.get(key) ?? ''; typed.set(key, v); if (!was) keyTyped($, key, v, keys) },
-      // the question stays in the field while its thread's fork starts: a second ↵ then asks nothing more
+      // ↵ is asked in thread.ts's ui.input hook, which takes it, so the plugin's other hooks serve the fork it starts;
+      // this runs only where that hook did not answer. The question stays in the field while its thread's fork starts:
+      // a second ↵ then asks nothing more
       onSubmit: (v: string) => { void askHere($, scope, v) },
     })] }),
   ] })
@@ -325,8 +340,8 @@ export async function askHere($: Engine, scope: ThreadScope, text: string): Prom
   if (r.problem) { failNotice($, r.problem, 'thread'); return }
   fieldGen.set(key, (fieldGen.get(key) ?? 0) + 1)
   typed.delete(key)
-  carried.delete(key)
-  askedHere.add(key)
+  // the new field keeps the keys while the thread answers, and after
+  holding = key
   $.ui.invalidate('ui.render')
 }
 
@@ -519,7 +534,6 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   const claims = kind === 'claims' ? await claimsThreadScope($, args).catch(() => null) : null
   // two fifths of the pane for the conversation, as 0.10's panel gave it
   const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4)), claims?.quote ?? '') : []
-  ringDrawn($, key)
   const pk = paneKeys($, t)
   // the blank row under the pane's drawing stands with the conversation when there is one, else with the input bar: a
   // pane with no conversation opens at its top (core/pane.ts scrolls a conversation to its end); a short pane has none
@@ -530,6 +544,7 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   // a pane editing one of its fields: the field takes the input bar, and the thread's keys wait
   const edit = kind === 'labels' ? await labelEdit($, args).catch(() => null) : null
   if (edit) return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...editEntry(els, edit, W - 1)], asking: false }
+  ringDrawn($, key)
   const asking = takeAskNext(key)
   return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...keysRow(els, pk, short), ...entry($, els, scope, W - 1, asking, pk, claims?.ask ?? '', short)], asking }
 }

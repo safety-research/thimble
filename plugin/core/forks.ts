@@ -7,10 +7,12 @@
 //   spawnFork($, {kind, prompt, description, type?, cwd?})  $.agent.spawn with subagentType 'fork' (or `type`: a side
 //                                thread's own agent type, where no fork starts; the fixer's, thimble:fixer, in its
 //                                copy of thimble, `cwd`), in the background: {agentId}, or
-//                                {deny} with the reason. Call it inside a hook, never from a timer: Claude Code skips
-//                                only the hook that spawned the fork for the fork's own events, so this plugin's other
-//                                hooks serve it (its tool calls, its steps, its end); a fork spawned from a timer has
-//                                the whole plugin as its caller, and none of the plugin's hooks would see it.
+//                                {deny} with the reason. Call it inside a hook, never from a timer or an element's own
+//                                handler (a Button's onPress, an Input's onSubmit, which Claude Code runs beneath every
+//                                hook): Claude Code skips only the hook that spawned the fork for the fork's own events,
+//                                so this plugin's other hooks serve it (its tool calls, its steps, its end); a fork
+//                                spawned from a timer or a handler has the whole plugin as its caller, and none of the
+//                                plugin's hooks would see its calls.
 //   forkOf(agentId)              {kind, agentId} of a fork thimble started, or null (main, or another agent)
 //
 // A module hears its fork's end in its own `turn.complete` hook ({agentId, reason, answer, refusal}), where

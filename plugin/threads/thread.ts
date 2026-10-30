@@ -5,7 +5,7 @@
 // and no answer unless the person sends it there (m in the pane), which starts a turn of main's on it.
 //
 // The mechanism: one fork of main per thread (core/forks.ts spawnFork, kind `thread`), started inside the hook of the
-// person's ↵, no turn of main.
+// person's ↵ (the ui.input hook, registerThreads), no turn of main.
 //   - A fork has main's conversation as context and main's tools (Bash, Read, the card tool), and its calls go through
 //     the same permission checks as main's: Manual mode asks, auto mode classifies.
 //   - Its end never reaches main: its task notification or hand-back is dropped (core/forks.ts). Where no fork starts,
@@ -42,7 +42,7 @@ import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { claudeCites } from '../settings/features.mjs'
-import { fieldSettled, fieldShown } from './pane'
+import { fieldShown, fieldSubmitted, ringReleased } from './pane'
 import type { ThreadScope } from './seam'
 import { aboutOf, answerRow, cardPart, display, firstMessage, forkDirective, nextMessage, partAbout, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
 
@@ -165,11 +165,8 @@ export function threadsBright(): boolean {
 async function keep($: Engine, t: Thread): Promise<void> {
   if (retired.has(t)) return
   t.at = new Date().toISOString()
-  const was = threads.get(t.key)
   threads.set(t.key, t)
   if (t.agentId) byAgent.set(t.agentId, t.key)
-  // the drawing of the answer keeps the focus ring on the input bar (pane.tsx)
-  if (was?.status === 'running' && t.status !== 'running') fieldSettled($, t.key)
   try { await $.state.set({ ...THREAD, id: t.key }, { ...t }) } catch { /* drawn from the module's memory */ }
   await writeKept($, `threads/${t.id}.json`, t).catch(() => undefined)
   await bump($)
@@ -417,10 +414,8 @@ export async function sendToMain($: Engine, key: string): Promise<boolean> {
 export async function showThread($: Engine, key: string, o: { from?: string; ask?: boolean; read?: boolean } = {}): Promise<boolean> {
   const t = threads.get(key)
   if (!t) return false
-  if (o.read) { if (askNext === key) askNext = null } else {
-    if (o.ask) askNext = key
-    fieldShown($, key)
-  }
+  if (o.read) { if (askNext === key) askNext = null } else if (o.ask) askNext = key
+  fieldShown($, key, !!o.read)
   const p = t.scope.pane
   if (p && p.kind !== 'thread' && p.kind !== 'threads') return openPane($, p.kind, p.args, paneTitle(p.kind, p.args, t), { focus: true })
   // a citation's thread stands under its evidence
@@ -504,6 +499,15 @@ export const registerThreads: Register = on => {
   // the thread's own type is offered only while a question is asked (a resume checks the offer again)
   on('agent.offer', { agent: TYPE }, async () => ({ isOffered: inFlight > 0 })).catch(($, e, next) => next(e))
 
+  // ↵ in a thread's input bar: the question is asked in this hook, so the plugin's other hooks serve the fork it starts
+  // (core/forks.ts): its tool calls, the card tool's too, its steps and its end. The field's own onSubmit runs beneath
+  // every hook, in no hook, and a fork it started would have the whole plugin as its caller: no hook of the plugin would
+  // hear its calls, and each of its card calls would fail
+  on('ui.input', { kind: 'submit', element: /^ask-/ }, async ($, e, next) => {
+    if (e.plugin !== 'thimble' || !(await fieldSubmitted($, String(e.element), String(e.value ?? '')))) return next(e)
+    return { element: e.element, value: e.value }
+  }).catch(($, e, next) => next(e))
+
   on('turn.start', { agentId: /./ }, async ($, e, next) => {
     const r = await next(e)
     try {
@@ -551,4 +555,5 @@ export function resetThreads(): void {
   poll = null
   restoredFor = ''
   askNext = null
+  ringReleased()
 }
