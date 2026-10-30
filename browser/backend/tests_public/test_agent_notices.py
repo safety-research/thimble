@@ -236,6 +236,32 @@ async def test_a_label_run_that_left_units_unlabeled_is_told_and_one_that_did_no
     assert s["text"] == "Claude's safeguards switched 8 of the label claims a PR's calls from Opus 5.5 to Opus 4.8."
 
 
+async def test_a_label_run_whose_unit_the_safeguards_stopped_tells_it_as_skipped_and_a_clean_run_clears_it(monkeypatch):
+    """The item a batch's call left out is asked alone; Claude's safeguards stop it there too: the run is done, and the
+    notice says the record was skipped, with no fix to try, rather than that the label failed."""
+    monkeypatch.setattr(concepts, "RETRY_DELAYS", ())
+    stop = {"on": True}
+
+    async def call(c, concept, items, comment=True, on_retry=None):
+        if stop["on"] and len(items) == 1:
+            return model_mod.CallResult(status="refused", detail="the model's safeguards declined the call")
+        return model_mod.CallResult(status="ok", output={"labels": [
+            {"i": n, "label": "no", "confidence": 0.7, "rationale": "r"}
+            for n in range(1, len(items) + 1) if not (stop["on"] and n == 3)]})
+
+    monkeypatch.setattr(concepts, "classify_structured", call)
+    k = concepts.define_concept(CORPUS, "claims a PR", "a board post that claims a PR", "prompt")
+    s = await concepts.run_apply(CORPUS, k["id"], ["board.jsonl"])
+    assert s["status"] == "done" and s["labeled"] == 7 and s["failed"] == 0 and s["blocked"] == 1
+    n = _open(f"label:{k['id']}")
+    assert n["text"] == ("The label claims a PR skipped 1 of 8 records: Claude's safeguards stopped the classifier on "
+                         "it.")
+    assert n["kind"] == "safeguards" and n["action"] is None
+    stop["on"] = False
+    await concepts.run_apply(CORPUS, k["id"], ["board.jsonl"])
+    assert _open(f"label:{k['id']}") is None
+
+
 def test_units_with_no_text_are_counted_in_the_count_s_own_form():
     assert concepts.blank_text_cause(1, "record", "runs/a/board.jsonl#L3") == (
         "1 record has no readable text (e.g. runs/a/board.jsonl#L3), so it was not labeled")
