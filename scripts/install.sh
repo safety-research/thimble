@@ -286,6 +286,148 @@ with tempfile.TemporaryFile() as out:
 print(paths[-1] if paths else "")
 ' "$sh" 2>/dev/null || true
 }
+# stamp_version: the plugin.json that Claude Code installs (the marketplace's) carries the version of the release it
+# holds, so that Claude Code records that version and names its copy by it, where it would name it by its commit, or
+# "unknown" in a folder with no git. A release names its version by its tag alone: vX.Y.Z at the marketplace folder's
+# commit, or, in a folder with no git, X.Y.Z in the folder's name, as GitHub names a release's archive (thimble-X.Y.Z).
+# A plugin.json that has a version keeps it. The version stays where Claude Code reads it again, so that it never takes
+# its copy for an older one: in its own clone of the marketplace (a GitHub install), and in a folder with no git. Only
+# the person's own checkout (--local) gets plugin.json back as it was once Claude Code has its copy (unstamp_version),
+# so that git sees no change there; until then the file as it was keeps a second name in the checkout's git folder. The
+# new plugin.json is written beside the old one and then takes its name, so that a write that fails changes nothing; a
+# plugin.json the install cannot write keeps no version, and a note says how to change that.
+stamped="" stamped_was=""
+stamp_version() {
+  local out kind a b
+  out="$(cd / && "$py" -I -c '
+import json, os, re, shlex, subprocess, sys, tempfile
+plugins = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "plugins")
+try:
+    known = json.load(open(os.path.join(plugins, "known_marketplaces.json")))["thimble"]
+    market = os.path.realpath(known["installLocation"])
+    entry = next(p for p in json.load(open(os.path.join(market, ".claude-plugin", "marketplace.json")))["plugins"]
+                 if p.get("name") == "thimble")
+    at = os.path.normpath(os.path.join(market, entry["source"], ".claude-plugin", "plugin.json"))
+except (OSError, ValueError, KeyError, TypeError, AttributeError, StopIteration):
+    sys.exit(0)
+
+def git(*args):
+    try:
+        p = subprocess.run(["git", "-C", market, *args], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return p.stdout.strip() if p.returncode == 0 else ""
+
+def load(p):
+    try:
+        with open(p, "rb") as f:
+            return json.loads(f.read())
+    except (OSError, ValueError):
+        return None
+
+top = git("rev-parse", "--show-toplevel")
+checkout = bool(top) and os.path.realpath(top) == market
+src = known.get("source")
+# the checkout of the person (--local): a marketplace folder that is a checkout and not the clone Claude Code made of
+# a GitHub or git marketplace
+mine = checkout and not (isinstance(src, dict) and src.get("source") in ("github", "git"))
+gitdir = git("rev-parse", "--absolute-git-dir") if mine else ""
+keep = os.path.join(gitdir, "thimble-plugin.json") if gitdir else ""
+if keep and os.path.lexists(keep):
+    # left by an install that stopped before it put plugin.json back: plugin.json as it was, put back while plugin.json
+    # is still its stamp
+    try:
+        was, now = load(keep), load(at)
+        if os.path.exists(at) and os.path.samefile(keep, at):
+            os.unlink(keep)
+        elif (isinstance(was, dict) and isinstance(now, dict) and "version" not in was
+              and {k: v for k, v in now.items() if k != "version"} == was):
+            os.replace(keep, at)
+        else:
+            os.unlink(keep)
+    except OSError:
+        pass
+manifest = load(at)
+if not isinstance(manifest, dict) or manifest.get("version") or (mine and not keep):
+    sys.exit(0)
+if checkout:
+    names = [t[1:] for t in git("tag", "--points-at", "HEAD").split() if t.startswith("v")]
+else:
+    name = os.path.basename(market)
+    names = [name[len("thimble-"):]] if name.startswith("thimble-") else []
+found = [tuple(int(x) for x in m.groups()) for m in (re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", n) for n in names) if m]
+if not found:
+    sys.exit(0)
+version = ".".join(str(x) for x in max(found))
+d = {}
+for k, v in manifest.items():
+    d[k] = v
+    if k == "name":
+        d["version"] = version
+d.setdefault("version", version)
+folder = os.path.dirname(at)
+shown = "Claude Code shows the version of thimble as " + ("its commit" if checkout else "\"unknown\"")
+locked = [p for p, ok in ((folder, os.access(folder, os.W_OK | os.X_OK)), (at, os.access(at, os.W_OK))) if not ok]
+if locked:
+    print("note\t%s: the install could not write the version, %s, in %s, which is read-only. To have it shown, run this, "
+          "then scripts/install.sh again: chmod u+w %s" % (shown, version, at, " ".join(shlex.quote(p) for p in locked)))
+    sys.exit(0)
+if keep:
+    # plugin.json as it was, by a second name, until unstamp_version gives it its own name back; said before the write,
+    # so that the install puts it back whatever happens next
+    try:
+        os.link(at, keep)
+    except OSError:
+        sys.exit(0)  # no second name for it there: the checkout stays as it is, and Claude Code names it by its commit
+    print("stamped\t%s\t%s" % (at, keep), flush=True)
+tmp = ""
+try:
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".plugin.json.")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    os.chmod(tmp, os.stat(at).st_mode & 0o7777)
+    os.replace(tmp, at)
+    tmp = ""
+except OSError as e:
+    if keep:
+        try:
+            os.unlink(keep)  # plugin.json is as it was
+        except OSError:
+            pass
+    print("note\t%s: the install could not write the version, %s, in %s (%s). Fix that, then run scripts/install.sh "
+          "again" % (shown, version, at, e.strerror or e))
+finally:
+    if tmp:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+' || true)"
+  while IFS=$'\t' read -r kind a b; do
+    case "$kind" in
+      stamped) stamped="$a" stamped_was="$b"; trap unstamp_version EXIT ;;
+      note) notes+=("$a") ;;
+    esac
+  done <<< "$out"
+}
+unstamp_version() {
+  [ -n "$stamped" ] || return 0
+  local at="$stamped" keep="$stamped_was"
+  stamped="" stamped_was=""
+  (cd / && "$py" -I -c '
+import os, shlex, sys
+at, keep = sys.argv[1:3]
+try:
+    if os.path.lexists(keep):
+        if os.path.exists(at) and os.path.samefile(keep, at):
+            os.unlink(keep)
+        else:
+            os.replace(keep, at)
+except OSError as e:
+    sys.exit("install.sh: %s keeps the version the install wrote in it (%s). This puts it back as it was: mv %s %s"
+             % (at, e.strerror or e, shlex.quote(keep), shlex.quote(at)))
+' "$at" "$keep") || true
+}
 
 # ---- the terminal plugin
 
@@ -377,8 +519,13 @@ print("Removed the marketplace thimble from %s: its folder %s is gone." % (at, g
       fi
     fi
     claude plugin marketplace add "$source"
+    installed=0
     if claude plugin list --json 2>/dev/null | grep -q '"thimble@thimble"'; then
+      installed=1
       claude plugin marketplace update thimble
+    fi
+    stamp_version
+    if [ "$installed" = 1 ]; then
       claude plugin update thimble@thimble
     else
       # each feature's default, from the userConfig of the plugin this installs (the marketplace just added: GitHub's,
@@ -405,6 +552,7 @@ for k, v in (manifest.get("userConfig") or {}).items():
 ')
       claude plugin install thimble@thimble ${config[@]+"${config[@]}"}
     fi
+    unstamp_version
     # the sandbox the plugin's cards run in: Anthropic's sandbox runtime, at the version the installed plugin pins, in
     # thimble's home (the plugin's sandbox/setup.mjs, which the plugin also runs at each session start)
     at="$(cd / && "$py" -c '

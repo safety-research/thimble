@@ -16,8 +16,8 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
      workbench does the same work in a web page on this machine. The workbench takes about 1 GB of disk and needs
      access to the Claude API: an API key, Workload Identity Federation, or their Claude Code sign-in.
    - **The terminal plugin alone**: only the Claude Code part. It needs Node.js and Python, and no other access.
-2. thimble 0.9 is here when `~/.local/bin/thimble` or `~/.thimble/app` exists, or when `scripts/install.sh` (step 3)
-   stops with what it found and the commands that remove it. 0.10 does not load while 0.9's plugin is installed.
+2. thimble 0.9 is here when `scripts/install.sh` (step 3) stops with what it found and the commands that remove it.
+   0.10 does not load while 0.9's plugin is installed.
    Before you remove anything, tell the user plainly that removing 0.9 deletes its workspaces (cards, notebooks,
    labels, reports), which 0.10 cannot open, and offer to move them aside first (`mv ~/.thimble/app/workspaces
    ~/thimble-0.9-workspaces`; a 0.9 clone keeps them in its own `workspaces/`, which removal leaves alone). Remove 0.9

@@ -47,8 +47,10 @@ fallback.
 
 thimble's code, not Claude, commits, moves mine and points Claude Code's marketplace at live. Claude Code copies the
 plugin from live into its own cache (`claude plugin update`), and the session loads it with /reload-plugins; its cache
-is never edited here. Because Claude Code names a copy by the plugin's version, live's plugin.json carries the
-release's version with the commit of mine after it (0.10.2+fix.4e1a9c2), written in live's working tree only.
+is never edited here. Claude Code names a copy by the plugin's version, else by its commit, and keeps a copy it already
+has (_stamp): when the release's plugin.json has a version, live's carries it with the commit of mine after it
+(0.10.2+fix.4e1a9c2), written in live's working tree only. A release names its version by its tag alone, so live's
+copy is named by its commit; `thimble --version` names the release (version_name).
 
 The way back from a fix runs from the release checkout, so no fix can break its own undo, not even one that changes the
 launcher or the kernel's modules: the plugin runs `thimble fix` with release/'s launcher (fix/fixes.ts kernelFix); the
@@ -2584,9 +2586,10 @@ def release_name(rel: dict[str, Any] | None = None) -> str:
 
 
 def _own_name() -> str:
-    """The thimble that runs, as the person reads it: its plugin's own version, else the release tag of its checkout's
+    """The thimble that runs, as the person reads it: its plugin's own version, which scripts/install.sh writes in the
+    copy Claude Code installs (a release names its version by its tag alone), else the release tag of its checkout's
     commit (find_source: Claude Code's clone of the marketplace, or the person's own clone), v0.10.5 as 0.10.5; else
-    nothing, since a release's plugin.json has no version and a checkout may have no tags."""
+    nothing, since a checkout may have no tags."""
     d = read_json(PLUGIN / ".claude-plugin" / "plugin.json")
     if isinstance(d, dict) and d.get("version"):
         return str(d["version"])
@@ -2598,6 +2601,24 @@ def _own_name() -> str:
         return ""  # a release's zip: its release is known once live is made from it
     tag = git("describe", "--tags", "--exact-match", "--match", "v*", src["commit"], cwd=src["repo"], check=False)
     return tag[1:] if RELEASE_TAG.match(tag) else ""
+
+
+def running_name(rel: dict[str, Any] | None = None) -> str:
+    """The thimble that runs, as the person reads it. Claude Code loads thimble from live only once release.json says
+    pointed (the first fix that went on pointed its marketplace there): then the release live is on (release_name).
+    Before that, the copy Claude Code installed (_own_name), also when a request made live already: live's release
+    can be older than that copy (thimble was installed again since)."""
+    rel = release() if rel is None else rel
+    return release_name(rel) if rel.get("pointed") else _own_name()
+
+
+def version_name() -> str:
+    """`thimble --version`: the thimble that runs (running_name), else the commit Claude Code installed; '' when
+    nothing names it (a folder with no git whose plugin.json has no version)."""
+    try:
+        return running_name() or str(find_source()["commit"])[:7]
+    except (FixError, OSError, subprocess.SubprocessError):
+        return ""
 
 
 def _has(repo: Path, commit: str) -> bool:
@@ -3412,7 +3433,9 @@ def listing() -> dict[str, Any]:
     recs.sort(key=lambda r: (ORDER.get(str(r.get("state")), 6), r["id"]))
     rel = release()
     on = is_on()
-    return {"fixes": recs, "on": on, "live": str(live_dir()), "version": release_name(rel),
+    # the thimble that runs; when nothing names it, live's release
+    version = running_name(rel) or (release_name(rel) if rel else "")
+    return {"fixes": recs, "on": on, "live": str(live_dir()), "version": version,
             "base": rel.get("base") or "", "kind": rel.get("kind") or "", "pointed": bool(rel.get("pointed")),
             "count_on": sum(r.get("state") == "on" for r in recs),
             "aside": [r["id"] for r in recs if r.get("state") == "pending"], "folded": folded, "carried": carried}

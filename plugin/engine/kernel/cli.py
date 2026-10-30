@@ -17,6 +17,7 @@ In a shell:
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix remove N           fix N leaves your list (off first, when it is on)
     thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
+    thimble --version              the version of the thimble that runs (its commit, between releases)
 
 In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
 
@@ -639,7 +640,7 @@ def _help() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,browser,demo,doctor,label,coverage}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,label,coverage}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -731,6 +732,12 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "fixes":
         args = ["fix", "list", *args[1:]]
+    if args and args[0] == "--version":
+        from . import fixes as FX  # noqa: PLC0415
+
+        v = FX.version_name()
+        print(f"thimble {v}" if v else "thimble (version unknown)")
+        return 0
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
         print(_help())
