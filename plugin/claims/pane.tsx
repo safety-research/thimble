@@ -49,6 +49,7 @@ import { citeHeat, wordsLook, type MarkStatus } from '../marks/view'
 import { plainSentence } from '../marks/message.js'
 import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
 import { markColors } from '../explain/place.mjs'
+import { printableEvidence } from '../tray/tray.mjs'
 import { checkable, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
 import { claimsBright, claimsStore, claimsToFind, placeText, showClaims, type ClaimsArgs } from './term'
 
@@ -144,7 +145,7 @@ function rowEls(els: Any, rows: Run[][], prefix: string, press: (part: string) =
 
 /** Where `path:line` a mark's evidence shows, and its first highlighted line. */
 function placeOf(m: MarkItem): { place?: string; line?: string } {
-  const ev = m.evidence
+  const ev = printableEvidence(m.evidence)
   if (!ev) return {}
   if (ev.kind === 'computed') return { place: 'computed', line: ev.output.split('\n')[0] }
   if (ev.kind === 'card') return { place: `card ${ev.title || ev.card}`, line: ev.value }
@@ -167,7 +168,7 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
       if (!m) return { ...s, status: 'gone' }
       return {
         ...s, n: m.n, status: m.status, failedBy: m.failedBy, shown: m.shown.replace(/\*\*|`/g, ''), ...placeOf(m),
-        ...(m.was ? { was: m.was.replace(/\*\*|`/g, '') } : {}), ...(m.narrowed ? { narrowed: true } : {}), ...(m.rewrite ? { was: plainSentence(m.sentence), now: plainSentence(m.rewrite), rewritten: true } : {}), ...(m.reason ? { reason: m.reason } : {}), ...(m.evidence ? { evidence: m.evidence } : {}),
+        ...(m.was ? { was: m.was.replace(/\*\*|`/g, '') } : {}), ...(m.narrowed ? { narrowed: true } : {}), ...(m.rewrite ? { was: plainSentence(m.sentence), now: plainSentence(m.rewrite), rewritten: true } : {}), ...(m.reason ? { reason: m.reason } : {}), ...(m.evidence ? { evidence: printableEvidence(m.evidence) } : {}),
         ...(m.repair ? { repair: true } : {}),
       }
     }))

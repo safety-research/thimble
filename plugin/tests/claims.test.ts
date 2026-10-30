@@ -12,6 +12,7 @@ import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/
 import { claimsStore, claimsToFind, openClaims } from '../claims/term'
 import { registerPanes } from '../core/pane'
 import { failLineNow } from '../bar/notice'
+import { newReply } from '../marks/store'
 import { resetPrompts } from '../prompts/prompts'
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
@@ -361,6 +362,22 @@ test('a claim with several citations: e shows them; k j make the next one curren
   expect(after.trimStart().startsWith('failures')).toBe(true)
   await buttons(tight).find(b => b.hotkey === 'u').onPress()
   expect(textOf(await draw({ claim: 'c1', open: true, cite: 0 }, 12))).toBe(before)
+})
+
+test("a claim's citation whose check printed bytes that do not print shows them as their escapes in the claims pane, the value marked", async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([reply([{ claim: '12 of 40 runs failed.', quote: '12 of 40', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'How many runs failed?', rows: ['Of the 40 nightly runs, [12 of 40](#) failed.'] })
+  const output = '\u001b[31m12 failed\u001b[0m, 28 passed\u0000'
+  // the reply's citation as its check left it
+  const sentence = 'Of the 40 nightly runs, [12 of 40](#) failed.'
+  await newReply(s.$, { key: 't1-row-0', turnId: 't1', rows: ['t1-row-0'], startedAt: 0, settledAt: 1, items: [{ n: 1, row: 't1-row-0', words: '12 of 40', start: 24, end: 37, sentence, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'print(r.stdout)', output, highlight: [[output.indexOf('12'), output.indexOf('12') + 9]] } }] })
+  const pane = await drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 40 } } }, { claim: 'c1', open: true }, els)
+  const t = textOf(pane)
+  expect(t).toContain('\\x1b[31m12 failed\\x1b[0m, 28 passed\\x00')
+  expect(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(t)).toBe(false)
 })
 
 test("a narrow pane whose keys wrap: the map and the claim's detail keep to the rows the pane gives, keys included", async () => {

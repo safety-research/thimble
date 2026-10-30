@@ -26,8 +26,16 @@
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
 //   firstSentence(s)                       a check's reason cut to its first sentence, for a citation's card
+//   printableEvidence(ev)                  a citation's evidence as the terminal draws it: each text of the records in
+//                                          it printable (core/text.js)
 //   evidenceLine(ev)                       the one line of a citation's evidence that holds the cited value
 //   lineWindow(line, room)                 that line cut to `room` characters around the value
+//   printLine(code, out, at), printedBy(ev) the line of a check's code that printed the output's line `at`
+//                                          (printed.mjs)
+import { printable } from '../core/text.js'
+import { printLine } from './printed.mjs'
+
+export { printLine }
 
 export const sameRef = (a, b) => !!a && !!b && a.row === b.row && a.kind === b.kind && (a.kind === 'citation' ? a.n === b.n : a.id === b.id)
 
@@ -262,7 +270,8 @@ export function drawsHyperlinks(env = {}) {
 /** A file's address, `file:///…/runs.jsonl#L41`, which a ctrl or cmd click opens on this machine. */
 export function fileHref(abs, line) {
   const n = /^(\d+)/.exec(String(line || ''))
-  return `file://${encodeURI(String(abs)).replace(/#/g, '%23').replace(/\?/g, '%3F')}${n ? `#L${n[1]}` : ''}`
+  // a name with a lone half of a surrogate pair (bytes that are no UTF-8) cannot be put in a link: it takes U+FFFD
+  return `file://${encodeURI(String(abs).toWellFormed()).replace(/#/g, '%23').replace(/\?/g, '%3F')}${n ? `#L${n[1]}` : ''}`
 }
 
 /** A check's reason, its first sentence only: a citation's card says why in one sentence (a decimal point or an
@@ -280,6 +289,39 @@ function inRange(n, line) {
 }
 
 /**
+ * A citation's evidence as the terminal draws it (the tray, the evidence pane, the claims pane): each text of the
+ * records in it printable (core/text.js: what does not print as its escape), its highlights moved to match, so the
+ * lines are laid out and cut as they draw. A check's output, a file's line, a card's rows and a file's name are text
+ * thimble did not write; a byte that does not print among them would make Claude Code refuse the whole drawing.
+ */
+export function printableEvidence(ev) {
+  if (!ev || typeof ev !== 'object') return ev
+  const p = v => (typeof v === 'string' ? printable(v) : v)
+  const out = { ...ev }
+  for (const k of ['code', 'file', 'title', 'card', 'value']) if (typeof ev[k] === 'string') out[k] = printable(ev[k])
+  if (typeof ev.output === 'string') {
+    const o = printable(ev.output, Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h)) : [])
+    out.output = o.text
+    if (Array.isArray(ev.highlight)) out.highlight = o.spans
+  }
+  const t = ev.table
+  if (t && typeof t === 'object') {
+    out.table = { ...t, corner: p(t.corner), cols: Array.isArray(t.cols) ? t.cols.map(p) : t.cols,
+      rows: Array.isArray(t.rows) ? t.rows.map(r => (r && typeof r === 'object' ? { ...r, label: p(r.label), values: Array.isArray(r.values) ? r.values.map(p) : r.values } : r)) : t.rows }
+  }
+  if (Array.isArray(ev.lines)) {
+    out.lines = ev.lines.map(l => {
+      if (!l || typeof l !== 'object') return l
+      if (!Array.isArray(l.highlight)) return { ...l, text: printable(String(l.text ?? '')) }
+      const o = printable(String(l.text ?? ''), [l.highlight])
+      return { ...l, text: o.text, highlight: o.spans[0] }
+    })
+  }
+  if (Array.isArray(ev.more)) out.more = ev.more.map(printableEvidence)
+  return out
+}
+
+/**
  * The one line of a citation's evidence that holds the cited value, with the value's spans in it: for code that
  * computed it, the output line where the first highlight starts (else its first line with words); for a file, the
  * cited line that holds the highlight (else the first cited line). `n`: the file's line number. Null without one.
@@ -291,23 +333,29 @@ export function evidenceLine(ev) {
     return { text, spans: text ? [[0, text.length]] : [] }
   }
   if (ev.kind === 'computed' || ev.kind === 'card') {
-    const out = String(ev.output || '')
-    const lines = out.split('\n')
-    const spans = Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h) && h[1] > h[0]) : []
-    let at = 0
-    for (const text of lines) {
-      const end = at + text.length
-      if (spans.length ? spans[0][0] >= at && spans[0][0] <= end : text.trim()) {
-        const mine = spans.map(([a, b]) => [Math.max(a, at) - at, Math.min(b, end) - at]).filter(([a, b]) => b > a)
-        return { text, spans: mine }
-      }
-      at = end + 1
-    }
-    return lines.length && out ? { text: lines[0], spans: [] } : null
+    const hit = outputHit(ev)
+    return hit ? { text: hit.text, spans: hit.spans } : null
   }
   const lines = Array.isArray(ev.lines) ? ev.lines : []
   const l = lines.find(x => x && x.highlight && inRange(x.n, ev.line)) || lines.find(x => x && x.highlight) || lines.find(x => x && inRange(x.n, ev.line)) || lines[0]
   return l ? { n: l.n, text: String(l.text ?? ''), spans: l.highlight ? [l.highlight] : [] } : null
+}
+
+/** The output line evidenceLine gives for printed output, with its number among the output's lines (`i`). */
+function outputHit(ev) {
+  const out = String(ev.output || '')
+  const lines = out.split('\n')
+  const spans = Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h) && h[1] > h[0]) : []
+  let at = 0
+  for (const [i, text] of lines.entries()) {
+    const end = at + text.length
+    if (spans.length ? spans[0][0] >= at && spans[0][0] <= end : text.trim()) {
+      const mine = spans.map(([a, b]) => [Math.max(a, at) - at, Math.min(b, end) - at]).filter(([a, b]) => b > a)
+      return { i, text, spans: mine }
+    }
+    at = end + 1
+  }
+  return lines.length && out ? { i: 0, text: lines[0], spans: [] } : null
 }
 
 /** The output lines a citation's one-line card leaves out: the lines the code printed (a trailing newline ends the
@@ -352,42 +400,18 @@ export function lineWindow(line, room) {
   return { ...line, text: head + text.slice(from, to) + tail, spans: moved }
 }
 
-// a line that prints: Python's print, a shell's echo or printf, JavaScript's console.log, a write to stdout
-const PRINTS = /\b(print|printf|println|puts|echo)\b|console\.log|\.write\s*\(/
+// the line printedBy gave for a cited output line, by its line, code and output: the tray and the claims pane draw it
+// again with each frame, and reading a long output takes a while
+const printed = new Map()
 
-/** The words a line of code writes out as they are: its string literals, without what f-strings, `{}`, %, a shell's
- *  `$name` and a template's `${}` fill in. */
-function literalBits(line) {
-  const bits = []
-  for (const m of String(line).matchAll(/(["'])((?:\\.|(?!\1).)*)\1/g)) {
-    for (const part of m[2].split(/\$\{[^{}]*\}|\{[^{}]*\}|\$\w+|%[-+ #0]*\d*(?:\.\d+)?[sdifrxXeEgGc%]|\\[ntr]/)) {
-      const t = part.trim()
-      if (t.length >= 2) bits.push(t)
-    }
+/** The line of a computed citation's code that printed the output line that holds the value (evidenceLine), or ''. */
+export function printedBy(ev) {
+  if (!ev || ev.kind !== 'computed') return ''
+  const at = outputHit(ev)?.i ?? 0
+  const key = `${at}\u0000${ev.code}\u0000${ev.output}`
+  if (!printed.has(key)) {
+    if (printed.size >= 64) printed.delete(printed.keys().next().value)
+    printed.set(key, printLine(ev.code, ev.output, at))
   }
-  return bits
-}
-
-/**
- * The one line of a check's code that printed an output line: of the lines that print, the one with the most of its own
- * words in that output line (the later one on a tie); else, when no such line's words stand there, the last line that
- * prints values alone (`print(n)`, `echo $x`), which may have printed it; else ''. A line whose own words are not in
- * the output did not print it, so it is never shown above that output (a script's `print("totals")` above another
- * print's line, a trailing `echo $TMPDIR` above the script's output).
- */
-export function printLine(code, out) {
-  const lines = String(code || '').split('\n')
-  const said = String(out || '')
-  let best = -1
-  let most = 0
-  let bare = -1
-  lines.forEach((l, i) => {
-    if (!l.trim() || /^\s*(#|\/\/)/.test(l) || !PRINTS.test(l)) return
-    const bits = literalBits(l)
-    if (!bits.length) { bare = i; return }
-    const n = bits.filter(b => said.includes(b)).reduce((a, b) => a + b.length, 0)
-    if (n > 0 && n >= most) { best = i; most = n }
-  })
-  const i = best >= 0 ? best : bare
-  return i >= 0 ? lines[i].trim() : ''
+  return printed.get(key)
 }

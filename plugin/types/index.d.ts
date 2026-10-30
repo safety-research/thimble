@@ -80,7 +80,7 @@ declare module 'claude-code' {
 
       // ---- core (core/)
       /** what the side pane shows, and the trail of panes it showed before, to go back to (core/pane.ts) */
-      pane: { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: { kind: string; args: unknown; title: string; rows?: number }[] } | null
+      pane: { kind: string; args: unknown; title?: string; rows?: number; trail?: { kind: string; args: unknown; title: string; rows?: number }[] } | null
       /** the row the settings pane picked (panes/settings.tsx), by its feature's key */
       settingsRow: string
       /** the selection the pane held when it closed, and the ones e and c took, by row and words (core/selection.ts) */

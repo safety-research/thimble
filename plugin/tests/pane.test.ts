@@ -204,6 +204,34 @@ test('docked, a drawing far taller than the pane (the settings) leaves the top r
   expect(parts.some(n => n.props?.key === 'pane-more')).toBe(true)
 })
 
+test('inline, a drawing taller than the pane\'s rows (the settings in a narrow window) is framed as docked: the wheel moves its body, and the top row with its esc close stays', async () => {
+  const s = setup()
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const INLINE = { requestId: 'thimble', props: { title: 'Settings', isFocused: true, bodyColumns: 70, placement: 'inline', scroll: { offset: 0, bodyRows: 12 }, view: {} } }
+  const tops = async () => {
+    const tree = await drawPane(s.$, INLINE, await paneNow(s.$), els)
+    const frame = nodes(tree).find(n => n.props?.key === 'pane-frame')
+    return { frame, top: textOf(nodes(tree).find(n => n.props?.key === 'pane-top')), by: nodes(tree).find(n => n.props?.key === 'pane-body-in')?.props?.top ?? 0 }
+  }
+  const was = await tops()
+  expect(was.frame?.props.height).toBe(12)
+  expect(was.top).toContain('esc close')
+  // the wheel: the pane's own scroll, which moves the body under the top row
+  expect(await scrollPane(s.$, { by: 2, origin: { kind: 'person' }, pointer: { x: 10, y: 5 } })).toBe(true)
+  const now = await tops()
+  expect(now.by).toBe(-2)
+  expect(now.top).toContain('esc close')
+})
+
+test('every pane closes on esc and its top row says so: one a click opened, which does not take the keyboard, too', async () => {
+  const s = setup()
+  // the tray's file place opens the citation's evidence with no keyboard (tray.ts evidenceOpener)
+  await openPane(s.$, 'evidence', { row: 'r1', n: 1 }, 'citation 1')
+  expect(s.opens.at(-1)).toMatchObject({ id: 'thimble', closeOnEscape: true })
+  expect(s.opens.at(-1).focus).toBeUndefined()
+  expect(textOf(nodes(await draw(s)).find(n => n.props?.key === 'pane-top'))).toBe('esc close')
+})
+
 test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below, and the ring lands on its choice set', async () => {
   const s = setup()
   const focused: Any[] = []

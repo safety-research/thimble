@@ -34,6 +34,7 @@ import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
 import { shownWords } from '../core/selection'
+import { printing } from '../core/text.js'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
@@ -238,7 +239,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
   // the text this row shows (a squeezed version in place of Claude's words)
   const view = await textView($, row, raw)
-  const els = $.ui.resolve(e) as Any
+  const els = printing($.ui.resolve(e)) as Any
   if (view.hidden) return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [] })
   const marksOn = featureOn('citations')
   const written = marksOn ? view.text : withoutMarks(view.text)

@@ -66,7 +66,7 @@ import { openPane } from '../core/pane'
 import { controlWords } from '../core/selection'
 import { keyOwner, revealCard } from '../cards/draw'
 import { quiet } from '../core/askcell.js'
-import { partsAround, textWidth } from '../core/text.js'
+import { partsAround, printable, textWidth } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
@@ -87,7 +87,7 @@ import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../sque
 import { openThread } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, checkStatus, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  open, printLine, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, top, wasLine,
+  open, printableEvidence, printedBy, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, top, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -821,7 +821,7 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
 function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: Any | null, fold: (all: boolean) => unknown = () => undefined): Unit[] {
   const { Text } = els
   if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
-  const ev = m.evidence
+  const ev = printableEvidence(m.evidence)
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
   const notFixed = m.repair ? 'not repaired: ' : ''
@@ -863,13 +863,13 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const line = evidenceLine(ev)
   if (!line) return rows
   if (ev.kind === 'computed' && tl) {
-    const said = printLine(ev.code, line.text)
+    const said = printedBy(ev)
     if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK, wrap: 'truncate-end', children: said }) })
     rows.push(ruled(els, tl[0]!.text, [], w, 'th'), ...tl.slice(1).map((l, i) => ruled(els, l.text, l.spans as [number, number][], w, i ? `tr${i}` : 'tr')))
     return rows
   }
   if (ev.kind === 'computed') {
-    const said = printLine(ev.code, line.text)
+    const said = printedBy(ev)
     if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK, wrap: 'truncate-end', children: said }) })
   } else if (place) rows.push({ h: 1, el: place })
   const cut = lineWindow(line, w - 2)
@@ -926,7 +926,7 @@ export function evidenceOpener($: Engine, f: { row: string; n: number }): () => 
 async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Promise<Any | null> {
   const ev = m?.evidence
   if (!ev || ev.kind === 'computed' || ev.kind === 'card' || f.kind !== 'citation') return null
-  const label = `${ev.file}:${evidenceLine(ev)?.n ?? ev.line}`
+  const label = printable(`${ev.file}:${evidenceLine(ev)?.n ?? ev.line}`)
   const openIt = evidenceOpener($, f)
   if (els.Markdown && (await hyperlinksHere($))) {
     const start = await startDir($)
@@ -944,7 +944,7 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
   const from = m[2] ? Number(m[2]) : null
   const got = await placeLines($, m[1]!, from, m[3] ? Number(m[3]) : from)
   if (typeof got === 'string') return [{ h: rowsOf(got, w), el: els.Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: got }) }]
-  return got.map((l, i) => ruled(els, cutTitle(`${l.n}  ${l.text}`.replace(/\t/g, '  '), w - 2), [], w, `pl${i}`))
+  return got.map((l, i) => ruled(els, cutTitle(printable(`${l.n}  ${l.text}`.replace(/\t/g, '  ')), w - 2), [], w, `pl${i}`))
 }
 
 /** How many rows of the tray's body its window has scrolled past, and the window as last drawn (how many rows of the
