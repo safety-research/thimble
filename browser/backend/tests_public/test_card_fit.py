@@ -179,9 +179,9 @@ async def test_the_first_version_comes_back_whole_when_it_comes_closest(_harness
     assert cell["takeaway_author"] == tools.TAKEAWAY_AUTHOR
 
 
-async def test_a_held_card_of_code_s_next_version_can_be_any_kind_through_edit_card(_harness, monkeypatch):
-    """edit_card turns a card of code into any kind, one that runs code or an example, a note or a custom card (N40), so
-    a held card of code's result asks for its next version through edit_card, and no new card is needed."""
+async def test_a_held_card_of_code_s_result_names_a_new_card_for_a_kind_edit_card_cannot_give_it(_harness, monkeypatch):
+    """edit_card turns a card of code into any kind that runs code, and not into a custom card or a note, so the result
+    names add_card and delete_card for those."""
     async def ran(*a, **k):
         made = notebook.new_cell("table", k["created_by"], k["title"], k["notebook"], code="runs")
         return notebook.insert_cell(CORPUS, k["notebook"], {**made, "status": "ok"})
@@ -193,10 +193,10 @@ async def test_a_held_card_of_code_s_next_version_can_be_any_kind_through_edit_c
     monkeypatch.setattr(card_fit, "_measure", tall)
     res = await call("add_card", kind="table", question="What did each stage of each run do?", code="runs")
     cid = _cid(res)
-    assert held(cid) and "Make the next version with `edit_card`, in whatever kind fits it." in res.text
-    assert "delete_card" not in res.text  # the call itself is echoed as `$ add_card ...`
-    made = await call("edit_card", card=cid, kind="custom", html="<p>4 failed</p>")
-    assert not made.is_error, made.text
+    assert held(cid) and "`edit_card`, as a table, plot, diagram, timeline or code card" in res.text
+    assert "a custom card, is a new card" in res.text and f"delete card:{cid} with `delete_card`" in res.text
+    refused = await call("edit_card", card=cid, kind="custom", html="<p>4 failed</p>")
+    assert refused.is_error and "Add a new card instead" in refused.text  # what edit_card itself says of that kind
 
 
 async def test_a_card_that_fits_shows_once_measured_and_its_result_says_nothing_more(_harness):

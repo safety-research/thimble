@@ -17,7 +17,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
-import { addressLabel, addressLabels, hiddenPath } from '../lib/refs'
+import { addressLabel, hiddenPath, refPaths } from '../lib/refs'
 import { teleport } from '../lib/teleport'
 import { wordsSpanRef } from '../lib/quoteFind'
 import { track } from '../lib/telemetry'
@@ -203,8 +203,8 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
     }
   }, [ws, refs])
   const entries = useMemo(() => exampleEntries(refs, quotes), [refs, quotes])
-  // each record's address, told apart from the others' (addressLabels)
-  const labels = useMemo(() => new Map(addressLabels(entries.map((e) => e.ref)).map((l, i) => [entries[i].ref, l])), [entries])
+  // the records' files, which each address is told apart from (lib/refs runFolder)
+  const paths = useMemo(() => refPaths(entries.map((e) => e.ref)), [entries])
   if (!entries.length) return null
   // an entry's address opens its record at the passage the example quotes (wordsSpanRef), highlighted there
   const open = (r: string) => {
@@ -213,7 +213,7 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
     const res = got[r]
     teleport((res && quote ? wordsSpanRef(res, quote) : null) ?? r, { browser: true })
   }
-  const address = (r: string) => <Address r={r} label={labels.get(r) ?? addressLabel(r)} onOpen={open} />
+  const address = (r: string) => <Address r={r} label={addressLabel(r, paths)} onOpen={open} />
   const lookup = (r: string) => (r in got ? got[r] : undefined)
   // under the address, one record's facts (time, author, page; canvas/facts); a range spans several records and shows none
   const facts = (e: ExampleEntry) => {

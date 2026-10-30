@@ -63,9 +63,9 @@ export { decodeLabel }
  * the link's text, and a whole card's citation its chip with the card's short name. */
 export const GlyphCites = createContext(false)
 
-/** The prefixes of the file chips shown together (lib/refs prefixesAmong): a reply's or a takeaway's citations, with the
+/** The paths of the file chips shown together (lib/refs runFolder): a reply's or a takeaway's citations, with the
  * records of the example card a takeaway is on, so files of one name read apart as the card's addresses do. */
-export const ShownTogether = createContext<ReadonlyMap<string, string>>(new Map())
+export const ShownTogether = createContext<readonly string[]>([])
 
 const ID_TOKEN = /\b(cell|concept|chat|group|report|view|call)[:]([A-Za-z0-9_-]{4,})(?:\/\d+)?(?:#[A-Za-z0-9_@.-]*)?/g
 /** An id-looking `kind:<id>` replaced by its kind word, so a chip never shows a hash. */
@@ -73,7 +73,7 @@ export function scrubIds(s: string): string {
   return s.replace(ID_TOKEN, '$1')
 }
 
-export function compactLabel(ref: string, among?: ReadonlyMap<string, string>): string {
+export function compactLabel(ref: string, among?: readonly string[]): string {
   const p = parseRef(ref)
   if (!p) return scrubIds(ref.trim()) || 'reference'
   if (p.kind === 'cell') {
@@ -90,7 +90,7 @@ export function compactLabel(ref: string, among?: ReadonlyMap<string, string>): 
 /** A chip's name: a cell's or view's name alone, and for a ref into part of a card its table cell or lines (lib/refs
  * cardPartLabel), without the card's name when the chip sits in that card (`home`). Other refs read as compactLabel,
  * a file's told apart from the files shown with it (`among`, ShownTogether). */
-export function chipLabel(ref: string, home?: string | null, ws = '', among?: ReadonlyMap<string, string>): string {
+export function chipLabel(ref: string, home?: string | null, ws = '', among?: readonly string[]): string {
   const p = parseRef(ref)
   if (p?.kind === 'call') {
     // what the call points at in plain words, once a thread or a read registered it; its step number until then

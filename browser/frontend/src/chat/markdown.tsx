@@ -15,7 +15,7 @@ import { plainQuote, type AnswerMark } from './answerComments'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip, ShownTogether } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
-import { parseRef, prefixesAmong, shownValue, splitValueRef } from '../lib/refs'
+import { parseRef, refPaths, shownValue, splitValueRef } from '../lib/refs'
 import { Mark, MarkItems } from '../marks/Mark'
 import { asChecked, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
@@ -292,9 +292,9 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks
   if (streaming && !chunked) setChunked(true)
   // once checked, the text reads as the check left it: its rewritten sentences and corrected words in place
   const read = useMemo(() => (checks && !streaming ? asChecked(text, checks) : { text, checks: checks ?? [] }), [text, checks, streaming])
-  // the refs shown together, one per line (no ref holds a line break), so the prefixes change only when they do
-  const shown = [...(among ?? []).filter((r): r is string => typeof r === 'string'), ...tokenRefs(read.text)].join('\n')
-  const together = useMemo(() => prefixesAmong(shown ? shown.split('\n') : []), [shown])
+  // the files shown together, one per line (no path holds a line break), so the chips change only when they do
+  const shown = refPaths([...(among ?? []), ...tokenRefs(read.text)]).join('\n')
+  const together = useMemo(() => (shown ? shown.split('\n') : []), [shown])
   // each mark's href names its order in the whole text, so a block cut from it still finds its check
   const marked = withMarkHrefs(read.text)
   return (
@@ -317,7 +317,7 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks
   )
 })
 
-/** The refs of the `[[…]]` citations in `text`, whose file chips are told apart (lib/refs prefixesAmong). */
+/** The refs of the `[[…]]` citations in `text`, whose file chips are told apart (lib/refs runFolder). */
 function tokenRefs(text: string): string[] {
   return text.includes('[[') ? [...text.matchAll(BRACKET_RE)].map((m) => splitValueRef(m[1].trim()).ref) : []
 }
@@ -371,7 +371,7 @@ export function splitMarkdownBlocks(text: string): string[] {
  * (ChatMarkdown). */
 export function RefText({ text, workspace, cite = false }: { text: string; workspace: string; cite?: boolean }): ReactNode {
   const ctx = useContext(ChipContext)
-  const together = useMemo(() => prefixesAmong(tokenRefs(text)), [text])
+  const together = useMemo(() => refPaths(tokenRefs(text)), [text])
   const parts: (string | { ref: string; value?: string })[] = []
   let last = 0
   for (const m of text.matchAll(TOKEN_RE)) {
