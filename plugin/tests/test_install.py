@@ -906,8 +906,9 @@ def test_every_path_the_install_docs_name_is_in_the_repository():
     names = {doc: named_paths(doc) for doc in INSTALL_DOCS}
     assert "examples/sample/runs.csv" in names["CLAUDE.md"] and "INSTALL.md" in names["README.md"]
     assert "docs/assets/thimble-banner.svg" in names["README.md"] and "engine/thimble.py" in names["INSTALL.md"]
-    assert {doc: missing(doc) for doc in INSTALL_DOCS} == {doc: [] for doc in INSTALL_DOCS}
-    made_up = ("Run `plugins/bin/thimble`, read [the notes](INSTAL.md#update) and `pyproject.toml`, and see\n"
+    gone = {doc: missing(doc) for doc in INSTALL_DOCS}
+    assert not any(gone.values()), "; ".join(f"{doc} names {', '.join(ps)}, not in the repository" for doc, ps in gone.items() if ps)
+    made_up =("Run `plugins/bin/thimble`, read [the notes](INSTAL.md#update) and `pyproject.toml`, and see\n"
                "docs/missing.png, then [the steps](INSTALL.md#update) and `refs/thimble/` and path/to/folder.\n")
     assert sorted(missing("CLAUDE.md", made_up)) == ["INSTAL.md", "docs/missing.png", "plugins/bin/thimble", "pyproject.toml"]
 
