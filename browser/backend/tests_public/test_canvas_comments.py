@@ -243,7 +243,7 @@ async def test_add_comment_takes_a_covered_card_or_step_and_stores_its_statement
 
 def test_add_comment_names_its_statement_and_its_details():
     desc, schema = tools.tool_sections(("add_comment",))["add_comment"]
-    assert set(schema["properties"]) == {"ref", "text", "details"} and schema["required"] == ["ref", "text"]
+    assert set(schema["properties"]) == {"ref", "words", "text", "details"} and schema["required"] == ["ref", "text"]
     assert "`text` first" in desc and "`details`" in desc
 
 

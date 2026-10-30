@@ -205,8 +205,9 @@ function wrapPieces(pieces: Piece[], at: number, end: number, m: AnswerMark): vo
   }
 }
 
-/** rehype plugin: each passage of `marks` (a check's comment on this answer) found in the drawn words of one block is
- * wrapped in <mark class="answer-tint"> in its check's color; a passage not found draws nothing. */
+/** rehype plugin: each passage of `marks` (a check's comment on this answer) found in the drawn words of one block has
+ * its words, or all of it when the mark names none, wrapped in <mark class="answer-tint"> in its check's color; a
+ * passage not found draws nothing. */
 export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {}) {
   return (tree: Root) => {
     const marks = options.marks ?? []
@@ -216,9 +217,11 @@ export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {
       if (!q) continue
       for (const b of blocksOf(tree)) {
         const pieces = piecesOf(b)
-        const at = findQuote(pieces.map((p) => p.text).join(''), q)
+        const text = pieces.map((p) => p.text).join('')
+        const at = findQuote(text, q)
         if (!at) continue
-        wrapPieces(pieces, at[0], at[1], m)
+        const words = m.words ? findQuote(text.slice(at[0], at[1]), plainQuote(m.words)) : null
+        wrapPieces(pieces, at[0] + (words?.[0] ?? 0), words ? at[0] + words[1] : at[1], m)
         break
       }
     }

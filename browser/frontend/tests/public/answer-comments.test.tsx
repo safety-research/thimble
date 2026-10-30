@@ -142,7 +142,22 @@ describe("a check's comment on Claude's answer, in main's chat", () => {
     expect(document.querySelector('.answer-cm-pop')).toBeNull()
   })
 
-  test('an explainer and a heads-up never share a sentence: the one there first keeps it, and each tint opens the pop-up of its own kind', async () => {
+  test('each comment tints the words it names, so an explainer and a heads-up on one sentence each stand on their own words and open the pop-up of their own kind', async () => {
+    const heads = comment({ id: 'h1', check: 'heads-up', check_name: 'Heads up', color: 2, words: '0 new messages' })
+    const gloss = comment({ id: 'g1', check: 'explainers', check_name: 'Explainers', color: 6, words: 'other agents', text: 'agents: the programs that post on the board.' })
+    const el = await chat('main', records, [heads, gloss])
+    const tinted = (id: string) => [...el.querySelectorAll<HTMLElement>(`mark.answer-tint[data-answer-comment="${id}"]`)].map((m) => m.textContent).join('')
+    expect([tinted('h1'), tinted('g1')]).toEqual(['0 new messages', 'other agents'])
+    expect(el.querySelector('mark.answer-tint mark.answer-tint')).toBeNull()
+    for (const [id, name] of [['h1', 'Heads up'], ['g1', 'Explainers']]) {
+      await click(el.querySelector(`mark.answer-tint[data-answer-comment="${id}"]`))
+      const pop = document.querySelector<HTMLElement>('.answer-cm-pop')!
+      expect([pop.dataset.answerCommentPop, pop.querySelector('.wu-cm-name')?.textContent]).toEqual([id, name])
+      await act(async () => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    }
+  })
+
+  test('an explainer and a heads-up never share words, and one that names none is on its whole sentence: the one there first keeps it, and each tint opens the pop-up of its own kind', async () => {
     // stored on one sentence, the heads-up first, as a store from before the backend kept the two apart may hold them
     const heads = comment({ id: 'h1', check: 'heads-up', check_name: 'Heads up', color: 2 })
     const gloss = comment({ id: 'g1', check: 'explainers', check_name: 'Explainers', color: 6, text: 'agents: the programs that post on the board.' })
