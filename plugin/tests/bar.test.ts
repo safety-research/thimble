@@ -206,6 +206,18 @@ test('an empty folder: the count ends well with nothing to count, so the bar nam
   expect(line).not.toContain('could not be counted')
 })
 
+test('a count that fails says why and what to do, and promises no count that may fail again', async ($, on) => {
+  const w = world(on, { ok: false, out: 'made-up: the kernel stopped' })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(100)
+  // the count after Claude's reply, the newest failure
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  const line = textOf(await $.ui.render(BAND))
+  expect(line).toContain('Coverage could not be counted: made-up: the kernel stopped. Type /thimble-fix to ask for a fix.')
+  expect(line).not.toContain('counted again')
+})
+
 /** The made-up folder after Claude touched one more file. */
 const NEWER = { ...COVERAGE, total: { files: 7, touched_files: 4, seen_files: 2 } }
 /** Where the conversation's last count is kept (core/layout.mjs). */

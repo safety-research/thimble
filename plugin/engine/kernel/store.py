@@ -154,6 +154,13 @@ def session_id() -> str:
     return os.environ.get("THIMBLE_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "cli"
 
 
+def _part_order(p: Path) -> tuple[str, int]:
+    """Where a seen file goes among every session's: with its session's first part (`s.jsonl`, the sessions in the
+    order of those names), as its part (`s.2.jsonl` is part 2). A session's name has no dot (safe_name)."""
+    name, _, part = p.stem.partition(".")
+    return f"{name}.jsonl", int(part) if part.isdigit() else 1
+
+
 class Store:
     """A root's records as one conversation has them. `session` is who acts (coverage counts what Claude's own session
     did; the plugin's own reads run as `person-…`), `conversation` whose labels they are: given, else
@@ -221,10 +228,18 @@ class Store:
 
     def seen(self, session: str | None = "") -> list[dict[str, Any]]:
         """The Read, Grep and Bash calls the hooks module kept for this session (or `session`, or every session when
-        None) whose working folder is under the root, with absolute paths."""
+        None) whose working folder is under the root, with absolute paths. A long session's record is in parts
+        (`<session>.jsonl`, then `<session>.2.jsonl` and on: hooks/watch.ts starts a part at 3.5M characters), read in
+        their order."""
         d = thimble_home() / "seen"
         want = self.session if session == "" else session
-        files = sorted(d.glob("*.jsonl")) if want is None else [d / f"{safe_name(want)}.jsonl"]
+        if want is None:
+            files = sorted(d.glob("*.jsonl"), key=_part_order)
+        else:
+            name = safe_name(want)
+            files = [d / f"{name}.jsonl"]
+            while (more := d / f"{name}.{len(files) + 1}.jsonl").exists():
+                files.append(more)
         out = []
         root = str(self.root)
         for f in files:
@@ -244,6 +259,12 @@ class Store:
 
     def rel(self, path: str) -> str | None:
         """A path relative to the root, or None when it is outside the root."""
+        root = str(self.root)
+        if isinstance(path, str) and path.startswith(root + "/"):
+            # a path in the root with no `.`, `..` or empty part is its own end (a long session's calls name thousands)
+            tail = path[len(root) + 1:]
+            if tail and tail[0] not in "./" and "/." not in tail and "//" not in tail and tail[-1] != "/":
+                return tail
         try:
             p = Path(path)
             if not p.is_absolute():

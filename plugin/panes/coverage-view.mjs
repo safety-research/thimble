@@ -57,11 +57,12 @@ const folderOf = p => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '.
 const nameOf = p => { const t = p.replace(/\/$/, ''); return t.slice(t.lastIndexOf('/') + 1) + (p.endsWith('/') ? '/' : '') }
 const extOf = p => { const n = nameOf(p); const d = n.lastIndexOf('.'); return d > 0 ? n.slice(d + 1).toLowerCase() : '' }
 
-const node = path => ({ path, files: 0, touched: 0, seen: 0, kids: new Map(), own: [], more: 0 })
+const node = path => ({ path, files: 0, touched: 0, seen: 0, kids: new Map(), own: [], more: 0, moreTouched: 0 })
 
 /** The folder tree of the kernel's groups (one per folder that holds files), each folder with its files, files
  *  touched and files read, its own and those of the folders under it; and each folder's own files: those touched
- *  (`files`), those not touched the kernel named (`untouched`), and how many more it did not name. */
+ *  (`files`), those not touched the kernel named (`untouched`), and how many more it did not name, of which how many
+ *  were touched (a big folder's record names only some of them). */
 export function folderTree(cov) {
   const root = node('')
   const at = new Map([['./', root]])
@@ -95,6 +96,7 @@ export function folderTree(cov) {
   for (const g of cov?.groups || []) {
     const n = folder(String(g.folder || './'))
     n.more = Math.max(0, n0(g.files) - n.own.length)
+    n.moreTouched = Math.max(0, n0(g.touched) - n.own.filter(f => f.touched).length)
   }
   return root
 }
@@ -118,7 +120,7 @@ export function treeRows(tree, open) {
       if (open.has(k.path)) walk(k, depth + 1)
     }
     for (const f of [...n.own].sort(byFile)) rows.push({ key: `file:${f.path}`, kind: 'file', file: f, depth })
-    if (n.more) rows.push({ key: `more:${n.path || './'}`, kind: 'more', count: n.more, depth })
+    if (n.more) rows.push({ key: `more:${n.path || './'}`, kind: 'more', count: n.more, touched: n.moreTouched, depth })
   }
   walk(tree, 0)
   return rows
@@ -255,7 +257,7 @@ export function coverageView(cov, view, { W, H, under = 0 }) {
   if (bars) head.push([{ s: `${' '.repeat(nameW + 1 + ROW_BAR + 2)}touched`, tone: 'dim' }])
   const line = (r, i) => {
     const ind = '  '.repeat(r.depth)
-    if (r.kind === 'more') return { key: r.key, runs: [{ s: cut(`${ind}  … ${num(r.count)} more ${r.count === 1 ? 'file' : 'files'}, none touched`, W), tone: 'dim' }] }
+    if (r.kind === 'more') return { key: r.key, runs: [{ s: cut(`${ind}  … ${num(r.count)} more ${r.count === 1 ? 'file' : 'files'}${r.touched ? '' : ', none touched'}`, W), tone: 'dim' }] }
     const name = r.kind === 'dir' ? nameOf(r.node.path) : nameOf(r.file.path)
     const mark = r.kind === 'dir' ? (r.open ? '▾ ' : '▸ ') : '  '
     const lead = `${ind}${mark}`
