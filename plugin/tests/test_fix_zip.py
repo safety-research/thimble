@@ -204,7 +204,8 @@ def test_update_takes_the_browser_of_a_zip_with_the_plugin_from_github_to_the_re
     monkeypatch.delenv("CLAUDECODE", raising=False)
     from_github(world, zipped, tmp_path, monkeypatch, zipped["folder"])
     out = FX.update()
-    assert out["lines"][0] == "Updated thimble 0.10.2 → 0.10.3 (terminal plugin and browser)"
+    # the plugin from GitHub had 0.10.3 already: the browser alone moved from 0.10.2
+    assert out["lines"][0] == "Updated thimble 0.10.2 → 0.10.3 (browser)"
     assert out["lines"][-1] == "Then  Terminal: /reload-plugins in Claude Code · Browser: restart thimble-browser"
     b = FX.live_dir() / "browser"
     assert (FX.home() / "browser-ready").read_text().strip() == str(b)
@@ -214,17 +215,40 @@ def test_update_takes_the_browser_of_a_zip_with_the_plugin_from_github_to_the_re
     assert FX.update()["lines"] == ["thimble 0.10.3 is the newest release."]
 
 
-def test_update_leaves_a_clones_browser_with_the_release_or_with_changes_of_its_own_as_it_is(world, zipped, tmp_path, monkeypatch):
+def test_update_leaves_a_clones_browser_as_it_is_at_any_release(world, zipped, tmp_path, monkeypatch):
+    """A git install with the plugin from GitHub at the newest release: thimble update behaves as before zips updated,
+    whichever commit the person's clone, where the browser workbench runs, is at. The clone is theirs to pull."""
     monkeypatch.delenv("CLAUDECODE", raising=False)
     clone = tmp_path / "code" / "thimble"
     sh("git", "clone", "-q", str(zipped["bare"]), str(clone))
     from_github(world, zipped, tmp_path, monkeypatch, clone)
     assert FX.update()["lines"] == ["thimble 0.10.3 is the newest release."]
-    # a clone at 0.10.2 with a change of its own: the person's work, which thimble leaves as it is
+    # a clone at an older release, not pulled since
     sh("git", "checkout", "-q", "v0.10.2", cwd=clone)
+    assert FX.update()["lines"] == ["thimble 0.10.3 is the newest release."]
+    # and with a change of its own: the person's work
     (clone / "browser" / "backend" / "uv.lock").write_text("made-up uv.lock, changed\n")
     assert FX.update()["lines"] == ["thimble 0.10.3 is the newest release."]
     assert not FX.live_dir().exists() and not (FX.home() / "browser-ready").exists()
+
+
+def test_a_check_on_a_zip_install_says_whether_a_newer_release_is_out_and_changes_nothing(world, zipped, tmp_path, monkeypatch,
+                                                                                           capsys):
+    """thimble update --check on a zip installed with --local: it reads which release the folder holds in a scratch
+    repository that goes after, so it makes no live, no release checkout and no record, as on a GitHub install."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    before = files_of(zipped["folder"])
+    assert cli.main(["update", "--check"]) == 0
+    assert capsys.readouterr().out == "thimble 0.10.3 is out (you have 0.10.2): thimble update in a shell\n"
+    assert files_of(zipped["folder"]) == before and not FX.home().exists()
+    newest = unzip(zipped["bare"], "v0.10.3", tmp_path / "elsewhere")
+    install(world, newest)
+    monkeypatch.setattr(FX, "PLUGIN", newest / "plugin")
+    assert cli.main(["update", "--check"]) == 0
+    assert capsys.readouterr().out == "thimble 0.10.3 is the newest release.\n"
+    assert not FX.home().exists()
 
 
 def test_a_newer_zip_installed_before_the_first_fix_goes_on_moves_the_release(world, zipped, tmp_path, monkeypatch):
