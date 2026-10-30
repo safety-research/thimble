@@ -677,6 +677,7 @@ def _no_live_server_probe(monkeypatch):
         return probe
 
     monkeypatch.setattr(cli, "healthy", guarded(cli.healthy, cli.port, False))
+    monkeypatch.setattr(cli, "health_leader", guarded(cli.health_leader, cli.port, None))  # cli.own_server's probe
     monkeypatch.setattr(feedback, "server_answers", guarded(feedback.server_answers, lambda: DEFAULT_PORT, False))
     monkeypatch.setattr(dev, "_health", guarded(dev._health, dev.config_port, None))
 
@@ -719,8 +720,9 @@ def data_tmp(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
-    """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no adoption of a real server: the
-    default port may be a live server's. `up` runs as in a session the launcher started."""
+    """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no server that names its leader
+    (cli.health_leader), so none is taken for this install's own (cli.own_server): the default port may be a live
+    server's. `up` runs as in a session the launcher started."""
     from app import cli, config
 
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))

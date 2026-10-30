@@ -2,11 +2,14 @@
 holds is passed over for a free one, which server.json records and every reader finds there (this CLI, the launcher,
 the browser link, the plugin's shim, watcher, statusline and permission hook). With THIMBLE_PORT that port alone is
 used, and a taken one gets today's answer: FOREIGN_LINE for another install's server, the port line for another
-program. Two THIMBLE_HOMEs side by side each start and find their own server. A real listener stands in for the program
-that holds a port; the integration test starts two real uvicorns on free ports, never on the default port."""
+program. A thimble server that server.json does not record is not this install's own: thimble-browser links to its own
+server alone and stops it alone. Two THIMBLE_HOMEs side by side each start and find their own server. A real listener
+stands in for the program that holds a port, and a small HTTP server for a thimble server; the integration test starts
+two real uvicorns on free ports, never on the default port."""
 from __future__ import annotations
 
 import contextlib
+import errno
 import importlib.machinery
 import importlib.util
 import json
@@ -20,11 +23,12 @@ import urllib.request
 from pathlib import Path
 
 import pytest
-from conftest import bound_port
+from conftest import bound_port, free_port
 
-from app import cli, config, hook_auth, permission_hook, procs
+from app import cli, config, hook_auth, llm, permission_hook, procs
 
 PORT_FREE = cli.port_free  # before the home fixture stands it in
+HEALTH_LEADER, FOREIGN_HOME = cli.health_leader, cli.foreign_home  # the same
 SERVER_FOR_LAUNCH = cli.server_for_launch  # before conftest's autouse fixture stands it in
 BACKEND = Path(__file__).resolve().parents[1]
 PLUGIN_BIN = config.REPO_ROOT / "plugin" / "bin"
@@ -74,12 +78,14 @@ class FakeServer:
 
 @pytest.fixture()
 def server(home, monkeypatch):
-    """The supervisor with FakeServer for spawn, the real port probes, and health answered where it runs."""
+    """The supervisor with FakeServer for spawn, the real port probes, and health answered where it runs, where the
+    server names the last spawn's pid as its leader."""
     sp = FakeServer()
     monkeypatch.setattr(cli, "spawn", sp)
     monkeypatch.setattr(cli, "port_free", PORT_FREE)
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: bool(sp.port) and
                         (url or cli.api_url()) == f"http://127.0.0.1:{sp.port}")
+    monkeypatch.setattr(cli, "health_leader", lambda url=None: 40000 + len(sp.calls) if cli.healthy(url) else None)
     monkeypatch.setattr(cli, "pid_alive", lambda pid: pid == 40000 + len(sp.calls))
     monkeypatch.setattr(cli, "spawned_exited", lambda pid: False)
     monkeypatch.setattr(cli, "is_server", lambda pid, p, repo=None: pid == 40000 + len(sp.calls) and p == sp.port)
@@ -198,6 +204,121 @@ def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed
         assert "start thimble-browser on a free port with `thimble-browser --port <port>`" in out
     finally:
         held.close()
+
+
+# A thimble server as `start` spawns one, as far as the supervisor can tell: its command line names uvicorn,
+# app.main:app and --port, it runs in the backend's folder, and it answers /api/health with the leader of its process
+# session and its THIMBLE_HOME, as a server that holds the token does, registers a folder and makes sign-in codes that
+# name it. Where another process holds its port it exits with uvicorn's line.
+STAND_IN = """
+import http.server, json, os, sys
+port = int(sys.argv[sys.argv.index("--port") + 1])
+class Handler(http.server.BaseHTTPRequestHandler):
+    def answer(self, status, body):
+        out = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+    def do_GET(self):
+        if self.path != "/api/health":
+            return self.answer(404, {"detail": "Not Found"})
+        self.answer(200, {"ok": True, "boot": "stand-in", "ui": None, "leader": os.getsid(0),
+                          "home": os.environ["THIMBLE_HOME"], "app": os.getcwd()})
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path == "/api/corpora/register":
+            return self.answer(201, {"name": "mini"})
+        if self.path == "/api/ui/pair":
+            return self.answer(200, {"code": f"code-of-{os.getpid()}", "expires_s": 300})
+        self.answer(404, {"detail": "Not Found"})
+    def log_message(self, *a):
+        pass
+try:
+    server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+except OSError as e:
+    print(f"ERROR: [Errno {e.errno}] error while attempting to bind on address ('127.0.0.1', {port}): "
+          f"{e.strerror.lower()}", flush=True)
+    sys.exit(1)
+server.serve_forever()
+"""
+
+
+def _stand_in_cmd(p: int, dev: bool = False) -> list[str]:
+    """cli.backend_cmd's stand-in: STAND_IN on port `p`."""
+    return [sys.executable, "-c", STAND_IN, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(p)]
+
+
+def _left_running(p: int, home: Path, monkeypatch) -> subprocess.Popen:
+    """A thimble server of this checkout on port `p` that server.json does not record (STAND_IN), as one left running
+    when its home was deleted under it: it names `home` and reads the token of the new server.json. The supervisor's
+    real probes, which ask it, stand in again for the home fixture's."""
+    monkeypatch.setattr(cli, "port_free", PORT_FREE)
+    monkeypatch.setattr(cli, "health_leader", HEALTH_LEADER)
+    monkeypatch.setattr(cli, "foreign_home", FOREIGN_HOME)
+    old = subprocess.Popen(_stand_in_cmd(p), cwd=cli.BACKEND_DIR, env={**os.environ, "THIMBLE_HOME": str(home)},
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 10
+    while HEALTH_LEADER(f"http://127.0.0.1:{p}") != old.pid and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return old
+
+
+def test_the_launcher_links_to_and_stops_its_own_server_alone_beside_a_thimble_server_on_the_default_port(
+        home, data, monkeypatch, capsys):
+    """B1: a thimble server that server.json does not record holds the default port. thimble-browser starts its own
+    server on a free port, prints a link to that server alone, with its code, and Ctrl-C stops that server alone. With
+    THIMBLE_PORT naming the held port, the start fails with the server's error, and no link is printed."""
+    monkeypatch.setattr(cli, "backend_cmd", _stand_in_cmd)
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)  # the launcher's terminal, which gets a code
+    monkeypatch.setattr(llm, "scrub_env", lambda: [])  # the launcher's own scrub stays out of the test's process
+    taken = free_port()
+    monkeypatch.setattr(cli, "DEFAULT_PORT", taken)
+    cli.ensure_home()
+    old = _left_running(taken, home, monkeypatch)
+    own = None
+    try:
+        assert cli.main(["browser", "--cwd", str(data / "mini"), "--detach"]) == 0
+        lines = capsys.readouterr().out.splitlines()
+        assert not any(f":{taken}/" in ln for ln in lines), lines
+        st = cli.read_state()
+        own, port = st["pid"], st["port"]
+        assert own != old.pid and taken < port <= taken + cli.PORT_SCAN
+        assert lines[0] == f"thimble browser: http://127.0.0.1:{port}/?ws=mini#p=code-of-{own}", lines
+        assert cli.stop() == ["kernels: none running", f"server: pid {own} stopped"], "Ctrl-C's stop"
+        assert old.poll() is None and HEALTH_LEADER(f"http://127.0.0.1:{taken}") == old.pid, "left running"
+
+        monkeypatch.setenv("THIMBLE_PORT", str(taken))
+        assert cli.main(["browser", "--cwd", str(data / "mini"), "--detach"]) == 1
+        out = capsys.readouterr().out
+        assert out == ("thimble browser: the server did not start: the server exited while starting: ERROR: "
+                       f"[Errno {errno.EADDRINUSE}] error while attempting to bind on address ('127.0.0.1', {taken}): "
+                       "address already in use\n"), out
+        assert cli.read_state()["pid"] is None and old.poll() is None
+    finally:
+        old.kill()
+        old.wait(5)
+        if own and cli.pid_alive(own):
+            os.kill(own, 9)
+
+
+def test_a_stop_ends_the_server_server_json_records_alone_never_one_found_on_its_port(home, monkeypatch):
+    """B1: server.json records a server that has exited, as one that could not bind its port does, and a thimble server
+    it does not record answers on that port: the stop says the recorded server is not running, and leaves the other
+    one running."""
+    p = free_port()
+    exited = subprocess.Popen([sys.executable, "-c", "pass"])
+    exited.wait(10)
+    old = _left_running(p, home, monkeypatch)
+    try:
+        cli.write_state({"port": p, "pid": exited.pid, "repo": str(config.REPO_ROOT)})
+        assert cli.stop() == ["kernels: none running", "server: not running",
+                              f"port {p} is still in use by a process thimble did not start; not touching it"]
+        assert old.poll() is None and HEALTH_LEADER(f"http://127.0.0.1:{p}") == old.pid
+    finally:
+        old.kill()
+        old.wait(5)
 
 
 def _clean_env(env: dict[str, str]) -> dict[str, str]:

@@ -28,11 +28,13 @@ pytestmark = pytest.mark.usefixtures("named_sessions")
 
 
 class FakeSpawn:
-    """Records spawns; the first backend spawn flips `up` after `delay` so health probes start succeeding."""
+    """Records spawns; the first backend spawn flips `up` after `delay` so health probes start succeeding, and is the
+    server that answers then, whose pid it names as its leader (`leader`)."""
 
     def __init__(self, delay: float = 0.3):
         self.calls: list[dict] = []
         self.up = False
+        self.leader: int | None = None
         self.delay = delay
         self.lock = threading.Lock()
 
@@ -41,6 +43,8 @@ class FakeSpawn:
             self.calls.append({"cmd": cmd, "cwd": str(cwd), "env": dict(env), "log": str(log_file)})
             n = len(self.calls)
         if "uvicorn" in cmd:
+            self.leader = self.leader or 40000 + n
+
             def flip():
                 time.sleep(self.delay)
                 self.up = True
@@ -53,6 +57,7 @@ def fake(monkeypatch, home):
     sp = FakeSpawn()
     monkeypatch.setattr(cli, "spawn", sp)
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: sp.up)
+    monkeypatch.setattr(cli, "health_leader", lambda url=None: sp.leader if cli.healthy(url) else None)
     monkeypatch.setattr(cli, "pid_alive", lambda pid: False)
     monkeypatch.setattr(cli, "spawned_exited", lambda pid: False)  # its made-up pids run until they answer
     monkeypatch.setattr(cli, "listening", lambda p: False)
