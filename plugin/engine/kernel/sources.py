@@ -13,7 +13,8 @@
     text        code, logs, config, .txt              one line                          <path>#L<n>
 
 Coverage also counts the files that have no rows, each in its own unit: a PDF by its pages, and an image, a sound, a
-video or any other file as one whole file (`file_kind`, `list_files`).
+video or any other file as one whole file (`file_kind`, `list_files`). An archive (a zip, a tar) is a whole file whose
+count keeps the files it holds (`archive_members`), so coverage can tell a copy of the folder's files.
 
 A ref stays the same when the analysis runs again on the same file. Files under the thimble/ record folder, version
 control and dependency folders are never sources.
@@ -55,6 +56,11 @@ MEDIA_KIND = {".pdf": "pdf",
               **{e: "audio" for e in (".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus")},
               **{e: "video" for e in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")}}
 PDF_MAX_BYTES = 256 * 1024 * 1024
+# a compressed copy of one file: `runs.csv.gz` holds what `runs.csv` holds
+COMPRESSED = {".gz", ".bz2", ".xz", ".zst", ".zstd", ".lz4", ".lzma", ".br", ".z"}
+# archives of files, by the end of their names: a zip's directory and a tar's headers name the files they hold
+ARCHIVE_ENDS = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tbz", ".tar.xz", ".txz")
+ARCHIVE_MAX_BYTES = 1 << 30  # a compressed tar is read through to list it: past this many bytes of it, it is not listed
 
 
 @dataclass
@@ -471,8 +477,11 @@ class Unfinished(Exception):
 
 def _entry(root: Path, rel: str, size: int, mtime_ns: int) -> dict[str, Any]:
     """One file's counts as the cache keeps them, by the size and the time of change it had when it was looked at. A
-    file that cannot be read has no rows and no lines."""
+    file that cannot be read has no rows and no lines. An archive is one whole file, and keeps the files it holds."""
     p = root / rel
+    if is_archive(rel):
+        return {"key": f"{size}:{mtime_ns}", "kind": "archive", "rows": 1, "lines": 0, "size": size,
+                "members": archive_members(p)}
     kind = kind_of_file(root, rel) or file_kind(p)
     rows = count_rows(root, rel)
     lines = 0
@@ -544,9 +553,47 @@ def _count_many(root: Path, todo: list[tuple[str, int, int]], until: float | Non
 
 
 def counted(name: str) -> bool:
-    """Whether a file is counted by its rows (a source) or its pages (a PDF), by its name alone. Any other file (an
-    image, a sound, a binary) is one whole file (`whole_file`)."""
-    return kind_of_name(name) is not None or MEDIA_KIND.get(ext_of(name.rsplit("/", 1)[-1])) == "pdf"
+    """Whether a file is counted by its rows (a source) or its pages (a PDF), or is an archive whose files are listed,
+    by its name alone. Any other file (an image, a sound, a binary) is one whole file (`whole_file`)."""
+    return kind_of_name(name) is not None or MEDIA_KIND.get(ext_of(name.rsplit("/", 1)[-1])) == "pdf" or is_archive(name)
+
+
+def is_archive(name: str) -> bool:
+    """Whether a file is an archive of files (a zip, a tar), by its name."""
+    return name.rsplit("/", 1)[-1].lower().endswith(ARCHIVE_ENDS)
+
+
+
+def archive_members(p: Path) -> list[str]:
+    """The files an archive holds, by their paths in it, as list_files would count them: no folder or link, no hidden
+    file, nothing in a folder list_files skips, nor a Mac's __MACOSX/. [] for an archive that cannot be read, or a
+    compressed tar longer than ARCHIVE_MAX_BYTES."""
+    import tarfile
+    import zipfile
+
+    names: list[str] = []
+    try:
+        if p.name.lower().endswith(".zip"):
+            with zipfile.ZipFile(p) as z:
+                names = [i.filename for i in z.infolist() if not i.is_dir()]
+        else:
+            whole = p.name.lower().endswith(".tar")  # a plain tar is listed by its headers, a compressed one read through
+            with tarfile.open(p) as t:
+                for m in t:
+                    if not whole and t.offset > ARCHIVE_MAX_BYTES:
+                        return []
+                    if m.isfile():
+                        names.append(m.name)
+    except Exception:  # noqa: BLE001 — an archive that cannot be read holds no file coverage can tell
+        return []
+    out = []
+    for m in names:
+        m = re.sub(r"^(?:\.?/)+", "", m.replace("\\", "/"))
+        parts = m.split("/")
+        if parts[-1] and not (parts[-1].startswith(".") and not kind_of(Path(parts[-1]))) \
+                and not any(d in SKIP_DIRS or d.startswith(".") or d == "__MACOSX" for d in parts[:-1]):
+            out.append(m)
+    return out
 
 
 def whole_file(rel: str) -> dict[str, Any]:

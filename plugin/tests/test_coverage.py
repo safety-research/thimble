@@ -287,6 +287,50 @@ def test_a_corpus_of_thousands_of_folders_keeps_its_record_under_claude_codes_ou
     assert len(out) < len(groups) and all(g["folder"].count("/") < 5 for g in out if not g["touched"])
 
 
+def test_a_compressed_or_archived_copy_of_the_files_claude_read_counts_as_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A folder held each file beside its .gz and a .zip of them all: coverage said a third of it was touched though
+    Claude had read every file, since it took each copy for a file no call touched. A copy holds what its files hold, so
+    it is touched as they are: a compressed file as the file it holds (what touched either touched both), an archive
+    of the folder's files as those files; an archive that holds a file the folder does not is a file of its own."""
+    import gzip
+    import tarfile
+    import zipfile
+
+    d = tmp_path / "evals"
+    (d / "logs").mkdir(parents=True)
+    for i in range(3):
+        text = "".join(json.dumps({"run": i, "step": j}) + "\n" for j in range(10))
+        (d / "logs" / f"run{i}.jsonl").write_text(text)
+        (d / "logs" / f"run{i}.jsonl.gz").write_bytes(gzip.compress(text.encode()))
+    with zipfile.ZipFile(d / "logs" / "all.zip", "w") as z:
+        for i in range(3):
+            z.write(d / "logs" / f"run{i}.jsonl", f"run{i}.jsonl")
+        z.writestr("__MACOSX/._run0.jsonl", "made-up resource fork")
+    with tarfile.open(d / "logs.tar.gz", "w:gz") as t:
+        t.add(d / "logs" / "run0.jsonl", "logs/run0.jsonl")
+    with zipfile.ZipFile(d / "other.zip", "w") as z:
+        z.writestr("elsewhere.jsonl", "{}\n")
+    (d / "notes.md").write_text("# Notes\n\nA made-up line.\n")
+    (d / "notes.md.gz").write_bytes(gzip.compress((d / "notes.md").read_bytes()))
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    saw(tmp_path, d, [{"tool": "Read", "file": str(d / "logs" / f"run{i}.jsonl"), "from": 1, "to": 10} for i in range(3)]
+        + [bash("python3 -c \"import gzip; print(len(gzip.open('notes.md.gz').read()))\"", 1)])
+    cov = CV.coverage(Store(d))
+    by = {o["path"]: o for o in cov["files"]}
+    for i in range(3):
+        # the copy is counted as the file it holds, and read as it was
+        o = by[f"logs/run{i}.jsonl.gz"]
+        assert (o["status"], o["unit"], o["units"], o["seen_units"]) == ("seen", "records", 10, 10)
+    assert by["logs/all.zip"]["status"] == by["logs.tar.gz"]["status"] == "seen"
+    # code went over the compressed notes, so over the notes
+    assert by["notes.md"]["status"] == by["notes.md.gz"]["status"] == "computed"
+    assert "other.zip" not in by
+    t = cov["total"]
+    assert (t["files"], t["touched_files"], t["seen_files"]) == (11, 10, 8)
+
+
 @pytest.mark.parametrize("shape", ["every folder touched", "every folder at the top"])
 def test_a_folder_of_70000_folders_gives_a_record_claude_code_reads_whole(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                                           capsys: pytest.CaptureFixture[str], shape: str) -> None:
