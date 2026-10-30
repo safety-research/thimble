@@ -32,8 +32,9 @@ card runs on POST .../regenerate.
 The ask: a prompt label over more than label_asks.SAMPLE units does not start until the person chooses, in the page, to
 run it on all of them, on a sample, or not at all (ask_first, label_asks.py), whoever started it.
 Notices: a run that fails, or that leaves units it could not label, is told in the foreground (notices.post, under
-`label:<id>`), and so are classifier calls Claude's safeguards switched to the fallback model; a run with no failure
-clears the first (_label_notice).
+`label:<id>`), and so are classifier calls Claude's safeguards switched to the fallback model. A batch the safeguards
+stop is asked again in halves, and a unit they stop even alone is left unlabeled as `blocked`, not failed, and told
+under `label:<id>` as skipped; a run with no failure and none blocked clears it (_label_notice).
 """
 from __future__ import annotations
 
@@ -1893,7 +1894,7 @@ _pool_workers = 1
 
 RUN_FIELDS: dict[str, Any] = {
     "run_id": None, "status": "running", "started": None, "created_by": None, "paths": None,
-    "total": None, "matched_total": None, "done": 0, "labeled": 0, "failed": 0, "matches": 0,
+    "total": None, "matched_total": None, "done": 0, "labeled": 0, "failed": 0, "blocked": 0, "matches": 0,
     "files_total": None, "files_done": 0, "files_indexed": 0, "file": None, "bytes_total": None, "bytes_done": 0,
     "eta_s": None, "message": None, "phase": None, "examples": 0, "cut": None,
 }
@@ -2282,30 +2283,44 @@ FALLBACK_MESSAGE = "Downgrading {model} to {fallback}"
 LABEL_FAILED_TEXT = "The label {name} failed: {why}."
 LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: {why}."
 LABEL_FALLBACK_TEXT = "Claude's safeguards switched {n} of the label {name}'s calls from {model} to {fallback}."
+UNIT_NOUNS = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}  # a unit as a notice names it
+# units Claude's safeguards stopped the classifier on even alone and on the refusal row's model: left unlabeled and
+# told, not counted as failed, so the rest of the run stands
+BLOCKED_MESSAGE = "Claude's safeguards stopped the classifier on {n} {noun}{s}, so {they_are} left unlabeled"
+LABEL_UNITS_BLOCKED_TEXT = ("The label {name} skipped {blocked} of {total}: Claude's safeguards stopped the classifier "
+                            "on {them}.")
 
 
 def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, total: Any = None,
-                  message: str | None = None) -> None:
+                  message: str | None = None, blocked: int = 0) -> None:
     """A run of the label ended: an `error`, or `failed` units it could not label, is told in the foreground under
-    `label:<id>`, and a run with neither clears it. Never raises."""
+    `label:<id>`; `blocked` units alone (BLOCKED_MESSAGE) are told there as skipped, with no fix; and a run with none
+    of them clears it. Never raises."""
     from . import notices  # noqa: PLC0415
 
     key, name = f"label:{concept['id']}", str(concept.get("name") or concept["id"])
     try:
-        if error is None and not failed:
+        if error is None and not failed and not blocked:
             notices.clear(c, key)
             return
+        noun = UNIT_NOUNS.get(str(concept.get("unit")), "record")
+        of = f"{int(total):,} {noun}s" if isinstance(total, int) and total else f"its {noun}s"
+        kind = "label"
         if error is not None:
             why, fix = notices.reason(error, server=True)
             text = LABEL_FAILED_TEXT.format(name=name, why=why)
-        else:
-            problems = [m for m in str(message or "").split("; ") if m and not m.startswith("Downgrading ")]
+        elif failed:
+            problems = [m for m in str(message or "").split("; ")
+                        if m and not m.startswith(("Downgrading ", "Claude's safeguards stopped the classifier"))]
             why, fix = notices.reason("; ".join(problems) or "the classifier gave no label for them", server=True)
-            noun = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}.get(str(concept.get("unit")),
-                                                                                         "record")
-            of = f"{int(total):,} {noun}s" if isinstance(total, int) and total else f"its {noun}s"
             text = LABEL_UNITS_FAILED_TEXT.format(name=name, failed=f"{failed:,}", total=of, why=why)
-        notices.post(c, kind="label", text=text, agent=f"Label: {name}", action=fix, key=key)
+            if blocked:
+                text += f" Claude's safeguards stopped the classifier on {blocked:,} more, which it skipped."
+        else:
+            kind, fix = "safeguards", None
+            text = LABEL_UNITS_BLOCKED_TEXT.format(name=name, blocked=f"{blocked:,}", total=of,
+                                                   them="it" if blocked == 1 else "them")
+        notices.post(c, kind=kind, text=text, agent=f"Label: {name}", action=fix, key=key)
     except Exception:  # noqa: BLE001 — the run has ended either way
         log.exception("the end of a run of the label %s was not told", key)
 
@@ -2380,15 +2395,16 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     """The classifier calls of a prompt label, BATCH_ITEMS units per call and up to CONCURRENCY calls running: a 429 or
     529 halves the calls let run, and each round of answered calls lets one more run again. Rows are committed in the
     units' order. `cancel` stops new calls; a rate-limited call is retried with backoff; a batch that keeps ending without a
-    usable tool call is asked in halves; calls that ran on the fallback model are counted in the run's message. A whole
-    file or run is read to `cap` characters (whole_read_chars), and the units read in part are the run record's `cut`
-    (read_cut)."""
+    usable tool call, or that Claude's safeguards stopped, is asked in halves, and a unit they stop even alone is left
+    unlabeled as `blocked` rather than failed; calls that ran on the fallback model are counted in the run's message. A
+    whole file or run is read to `cap` characters (whole_read_chars), and the units read in part are the run record's
+    `cut` (read_cut)."""
     await asyncio.to_thread(_require_model_access)
     unit = concept["unit"]
     per_call, in_flight = BATCH_ITEMS, CONCURRENCY
     allowed = float(in_flight)  # the calls let run now
     slowdowns = 0  # a call started before the last slowdown does not slow the run again
-    labeled = failed = matches = cut = short = 0
+    labeled = failed = blocked = matches = cut = short = 0
     labels = concept["labels"]
     pos_label = labels[0]
     spans = concept.get("marks") == "span"
@@ -2411,6 +2427,10 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
 
     def message() -> str | None:
         lines = [_fallback_message(n, *pair) for pair, n in fell_back.items()] + messages
+        if blocked:
+            single = blocked == 1
+            lines.insert(0, BLOCKED_MESSAGE.format(n=f"{blocked:,}", noun=UNIT_NOUNS.get(unit, unit), s="" if single else "s",
+                                                   they_are="it is" if single else "they are"))
         return "; ".join(lines) or None
 
     def slow(since: int) -> None:
@@ -2452,26 +2472,36 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 return {}, failure, call.status
         return parse_labels(call.output, concept, len(items), comment), None, call.status
 
-    async def halving(items: list[tuple[str, str]], nums: list[int]) -> tuple[dict[int, dict], str | None]:
-        """The answers to the items numbered `nums` (1-based in `items`) by item number, and why a call failed (None when
-        none did). When the call ends without a usable tool call (no_tool_call or truncated), its items are asked again
-        in two halves, and so on down to single items, so only an item no call can label fails."""
-        got, failure, status = await ask([items[i - 1] for i in nums])
+    async def halving(items: list[tuple[str, str]], nums: list[int],
+                      first: tuple[dict[int, dict], str | None, str] | None = None,
+                      ) -> tuple[dict[int, dict], str | None, set[int]]:
+        """The answers to the items numbered `nums` (1-based in `items`) by item number, why a call failed (None when
+        none did), and the items Claude's safeguards stopped alone; `first` is ask's answer for those items when it was
+        already asked. When the call ends without a usable tool call (no_tool_call or truncated) or is refused, its
+        items are asked again in two halves, and so on down to single items, so only an item no call can label fails,
+        and only an item the safeguards stop alone is blocked."""
+        got, failure, status = first or await ask([items[i - 1] for i in nums])
         res = {nums[j - 1]: r for j, r in got.items()}
         left = [i for i in nums if i not in res]
-        if len(left) > 1 and status in ("no_tool_call", "truncated") and not cancel.is_set():
+        if status == "refused" and len(nums) == 1:
+            return res, None, set(left)
+        stopped: set[int] = set()
+        if len(left) > 1 and status in ("no_tool_call", "truncated", "refused") and not cancel.is_set():
             mid = len(left) // 2
             halves = await asyncio.gather(halving(items, left[:mid]), halving(items, left[mid:]))
-            for more, _f in halves:
+            for more, _f, b in halves:
                 res.update(more)
-            failure = next((f for _r, f in halves if f), None)
-        return res, failure
+                stopped |= b
+            failure = next((f for _r, f, _b in halves if f), None)
+        return res, failure, stopped
 
-    async def one(batch: list[_Item]) -> tuple[list[dict | None], str | None]:
-        """Each item's answer ({label, confidence, rationale, spans}; None where it got none) and the problem, if any. The
-        items a call left out, and all of them after a call that ended without a usable tool call (no_tool_call or
-        truncated), are asked once more, in halves (halving) if that call too makes no usable tool call; a call that
-        failed otherwise has had its retries."""
+    async def one(batch: list[_Item]) -> tuple[list[dict | None], str | None, set[int]]:
+        """Each item's answer ({label, confidence, rationale, spans}; None where it got none), the problem, if any, and
+        the items (by index in `batch`) Claude's safeguards stopped alone. The items a call left out, and all of them
+        after a call that ended without a usable tool call (no_tool_call or truncated), are asked once more, in halves
+        (halving) if that call too makes no usable tool call; a refused call's items are asked in halves at once, as
+        model.structured has already run it again on the refusal row's model, and a single item refused is blocked; a
+        call that failed otherwise has had its retries."""
         answers: list[dict | None] = [None] * len(batch)
         live = [n for n, it in enumerate(batch) if (it.text or "").strip()]
         cause = None
@@ -2479,33 +2509,40 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             blank = next(it.unit.ref for it in batch if not (it.text or "").strip())
             cause = blank_text_cause(len(batch) - len(live), unit, blank)
             if not live:
-                return answers, cause
+                return answers, cause, set()
         items = [(batch[n].unit.ref, batch[n].text) for n in live]
         res, failure, status = await ask(items)
         missing = [i for i in range(1, len(items) + 1) if i not in res]
-        if missing and status in ("ok", "no_tool_call", "truncated") and not cancel.is_set():
-            again, failure = await halving(items, missing)
+        stopped: set[int] = set()
+        if status == "refused":
+            res, failure, stopped = await halving(items, missing, (res, failure, status))
+        elif missing and status in ("ok", "no_tool_call", "truncated") and not cancel.is_set():
+            again, failure, stopped = await halving(items, missing)
             res.update(again)
         for i, n in enumerate(live, 1):
             if (r := res.get(i)) is not None:
                 answers[n] = {**r, "spans": quoted_span(batch[n].text, r.get("quote", "")) if spans else None}
-        msg = failure or (None if res else "classifier returned no usable labels")
+        msg = failure or (None if res or stopped else "classifier returned no usable labels")
         if cause:
             msg = cause if msg is None else f"{cause}; {msg}"
-        return answers, msg
+        return answers, msg, {live[i - 1] for i in stopped}
 
     batches = _batches(units, unit, per_call, cap)
     windows: list[dict | None] = []  # the answers so far of the unit whose windows are being read
+    window_stopped = False  # Claude's safeguards stopped one of those windows
 
-    def settle(b: list[_Item], answers: list[dict | None]) -> tuple[list[dict], int]:
-        """The rows of the units whose last item is in `b`, and how many of those units failed."""
-        nonlocal cut, short, cut_short
+    def settle(b: list[_Item], answers: list[dict | None], stopped: set[int]) -> tuple[list[dict], int, int]:
+        """The rows of the units whose last item is in `b`, how many of those units failed, and how many got no row
+        because Claude's safeguards stopped one of their items (`stopped`, by index in `b`)."""
+        nonlocal cut, short, cut_short, window_stopped
         rows: list[dict] = []
-        n_failed = 0
-        for it, a in zip(b, answers):
+        n_failed = n_blocked = 0
+        for n, (it, a) in enumerate(zip(b, answers)):
             if it.part == 0:
                 windows.clear()
+                window_stopped = False
             windows.append(a)
+            window_stopped |= n in stopped
             if it.part < it.parts - 1:
                 continue
             r = merge_windows(labels, windows) if it.parts > 1 else a
@@ -2515,11 +2552,13 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 cut_refs.append(it.unit.ref)
                 cut_tokens.append(sent.pop(it.unit.ref, 0) or -(-len(it.text) // CHARS_PER_TOKEN))
                 cut_short += it.short and not it.cut
-            if r is None:
+            if r is None and window_stopped:
+                n_blocked += 1
+            elif r is None:
                 n_failed += 1
             else:
                 rows.append(_row(it.unit.ref, r["label"], r["confidence"], "model", r["rationale"] or None, r.get("spans"), it.unit.line))
-        return rows, n_failed
+        return rows, n_failed, n_blocked
 
     def take(n: int) -> list[list[_Item]]:
         got: list[list[_Item]] = []
@@ -2535,8 +2574,8 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             return
         last_emit = time.monotonic()
         current = b[-1].unit.paths[0] if b and b[-1].unit.paths else None
-        _progress(c, concept["id"], done=done, labeled=labeled, failed=failed, matches=matches, file=current,
-                  files_done=order.get(current, 0), eta_s=_eta(t0, done, _runs[key].get("total")),
+        _progress(c, concept["id"], done=done, labeled=labeled, failed=failed, blocked=blocked, matches=matches,
+                  file=current, files_done=order.get(current, 0), eta_s=_eta(t0, done, _runs[key].get("total")),
                   message=message())
 
     writer = _LabelsWriter(out).start()
@@ -2563,15 +2602,16 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 await asyncio.wait([task for task, _b in pending if not task.done()], return_when=asyncio.FIRST_COMPLETED)
                 continue
             pending.popleft()
-            answers, msg = head.result()
-            rows, n_failed = settle(b, answers)
+            answers, msg, stopped = head.result()
+            rows, n_failed, n_blocked = settle(b, answers, stopped)
             if rows:
                 # counted once in the store, where the run so far that apply_scoped answers with reads its counts
                 await asyncio.to_thread(partial(writer.put, written=True), concept_scan.jsonl_bytes(rows), rows)
             labeled += len(rows)
             failed += n_failed
+            blocked += n_blocked
             matches += sum(1 for r in rows if r["label"] == pos_label)
-            done += len(rows) + n_failed
+            done += len(rows) + n_failed + n_blocked
             note(msg)
             emit(b, force=not pending)
         # the whole files or runs read in part are the run's `cut`, the cards cut its message
@@ -3438,6 +3478,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             calibration, stats, file_key, taught = await asyncio.to_thread(_labels_summary, ws, concept_id, concept["labels"],
                                                                            shown, started)
             state = _runs.get(key) or {}
+            blocked = int(state.get("blocked") or 0)  # the units Claude's safeguards stopped the classifier on
             # `matches` (the units this run gave the first value) is kept on the application, so the Files pane's
             # label row can say "468 of 2,392,002 records" after a restart, when the run record is gone.
             # `limit` and `stopped` say what the run covered, which an apply of the same predicate reads (covered)
@@ -3445,7 +3486,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             app = {"ts": started, "paths": patterns, "total": total, "matched_total": matched, "labeled": labeled, "failed": failed,
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
                    "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
-                   "within": within, "within_rev": within_rev, **({"cut": state["cut"]} if state.get("cut") else {})}
+                   "within": within, "within_rev": within_rev, "blocked": blocked, **({"cut": state["cut"]} if state.get("cut") else {})}
             concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats), taught)
                        or {**concept, "calibration": calibration})
             summary = {**app, "run_id": run_id, "concept": concept_id, "name": concept["name"], "unit": concept["unit"],
@@ -3454,9 +3495,10 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             if not out.exists():
                 labels_store.remove(out)
             whole = not cancel.is_set() and not limit and not failed and state.get("files_total") is not None
-            _progress(c, concept_id, status="done", done=labeled + failed, labeled=labeled, failed=failed, message=message,
+            _progress(c, concept_id, status="done", done=labeled + failed + blocked, labeled=labeled, failed=failed, message=message,
                       eta_s=None, phase=None, files_done=state["files_total"] if whole else state.get("files_done", 0), summary=summary)
-            _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=total, message=message)
+            _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=total, message=message,
+                          blocked=blocked if not cancel.is_set() else 0)
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
             raise
@@ -4373,6 +4415,7 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
     return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": result.get("total"), "counts": counts or {},
             "failed": result.get("failed") or 0, "message": result.get("message"), "partial": partial,
+            "blocked": result.get("blocked") or 0,
             "cell": made["id"] if made else None, "filter": chosen, "labels_path": str(labels_file(ws, concept["id"])),
             "unchanged": unchanged, "stale": [x["id"] for x in stale], "cut": None if partial else result.get("cut")}
 
