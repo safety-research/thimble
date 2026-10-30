@@ -3,10 +3,12 @@
 // them. A mark the check could not confirm is red and underlined, with `×` after the words, its tint a soft red.
 // Hovering opens its evidence in the citation's label (RefChip's .refchip-pop), and a click keeps it open:
 //
-//   computed   the head names the code that ran; its real output, the marked words highlighted, then the code in the
-//              file reader's colors for Python
-//   quote      each cited place: its `path:line` chip (a click opens the file there) over the cited lines and the lines
-//   code       around them that hold text, the words highlighted
+//   computed   the head names the code that ran; then the code in the file reader's colors for Python, then its real
+//              output, the marked words highlighted, each under its label as the terminal labels it
+//              (plugin/tray/tray.mjs partLabel: `code · 7 lines`, `output · 62 lines`)
+//   quote      each cited place: its chip, named as the terminal names it (`changes.log · line 3`, plugin/tray/tray.mjs
+//   code       placeLabel; a click opens the file there), over the cited lines and the lines around them that hold
+//              text, the words highlighted
 //   card       a value a card shows: the card's chip (a click opens it) over the table around the cited cell, the cell
 //              marked, as a card's citation shows it (components/RefChip); a line of its printed output shows as the
 //              computed output does, its chip naming the line as the citation's chip does (lib/refs cardPartLabel),
@@ -14,14 +16,17 @@
 //              changed after the check (the card check rewrote it, say), the label shows it as it is now, or says the
 //              place is gone and shows what the check read.
 //
-// Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked. The lines wrap;
-// a long one shows only the words around its highlighted ones, cut at words (lineWindow).
+// Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked, under `output ·
+// table`. The lines wrap; a long one shows only the words around its highlighted ones, cut at words (lineWindow). The
+// marked words stand on the citations' purple tint, in the text's own weight, as the terminal marks them.
 //
-// The output and the code each stand in a box as tall as the label lets it be (KeyBox, marks.css): all their lines, as
+// The code and the output each stand in a box as tall as the label lets it be (KeyBox, marks.css): all their lines, as
 // many as fit in view and the rest a scroll away, by the wheel or, once Tab gives the box the focus, the arrow keys. A
 // box opens with its key line in its middle: the output's line that holds the value, the code's line that printed it
 // (the terminal's rule, plugin/tray/printed.mjs printIndex: only a line the code shows printed it), that line in the
-// text's own ink and the code's other lines quieter.
+// text's own ink and the code's other lines quieter. While a box holds more lines than it shows, its edges say how many
+// are out of view there, as the terminal's tray marks the lines it leaves out (`⋯ 44 lines above`, `⋯ 13 lines
+// below`), and follow it as it scrolls.
 //
 // A failed mark's label says why in one line first, with Repair, which checks it again and makes it correct (the
 // terminal's x); a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
@@ -42,6 +47,7 @@ import { CITED, citedLines, type At, type Grid } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { workspaceFromUrl } from '../lib/workspace'
 import { printIndex } from '../../../../plugin/tray/printed.mjs'
+import { cutWords, evidenceLine, partLabel, placeLabel, TABLE_LABEL } from '../../../../plugin/tray/tray.mjs'
 import { canRepair, failedWhy, LOOK_WORD, lookOf, wasLine, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
@@ -272,8 +278,9 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
           </Chip>
           <span className="refchip-pop-value">{value}</span>
         </div>
-        <TablePreview grid={printed.grid} at={printed.at} also={printed.also} />
         {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
+        <div className="mark-ev-label mono">{TABLE_LABEL}</div>
+        <TablePreview grid={printed.grid} at={printed.at} also={printed.also} />
       </div>
     )
   if (ev.kind === 'computed')
@@ -285,10 +292,11 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
           </Chip>
           <span className="refchip-pop-value">{value}</span>
         </div>
+        {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
+        <div className="mark-ev-label mono">{partLabel('output', (ev.output ?? '').replace(/\n+$/, '').split('\n').length)}</div>
         <KeyBox className="refchip-lines mono mark-ev-out" label="output">
           {outputLines(ev.output ?? '', ev.highlight ?? [])}
         </KeyBox>
-        {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
       </div>
     )
   const places = [ev, ...((ev as Evidence & { more?: Evidence[] }).more ?? [])]
@@ -306,7 +314,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
           <div key={i} className="mark-ev">
             <div className="refchip-pop-head">
               <Chip kind="ref" tone="evidence" icon={glyphOf(String(p.file ?? ''))} className="refchip-pop-chip" onClick={() => void quotedPlace(at, words).then(open)}>
-                {`${p.file}:${p.line}`}
+                {placeLabel(p.file, evidenceLine(p)?.n ?? p.line)}
               </Chip>
               {i === 0 && <span className="refchip-pop-value">{value}</span>}
             </div>
@@ -451,22 +459,58 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
 }
 
 /** A box of evidence lines (its children, one element a line), opened with its line marked `data-key` in its middle when
- * it holds more lines than it shows: the wheel scrolls the rest, and the arrow keys once Tab gave it the focus. */
+ * it holds more lines than it shows: the wheel scrolls the rest, and the arrow keys once Tab gave it the focus. A row
+ * at each of its edges says how many lines are out of view there (outOfView), as it scrolls; an edge with none has no
+ * row. */
 function KeyBox({ className, label, children }: { className: string; label: string; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null)
+  const [out, setOut] = useState<{ above: number; below: number } | null>(null)
+  const count = () => {
+    const el = box.current
+    if (!el) return
+    const now = outOfView(el)
+    setOut((was) => (was?.above === now?.above && was?.below === now?.below ? was : now))
+  }
   useLayoutEffect(() => {
     const el = box.current
     const line = el?.querySelector<HTMLElement>('[data-key]')
-    if (!el || !line || el.scrollHeight <= el.clientHeight) return
-    const b = el.getBoundingClientRect()
-    const l = line.getBoundingClientRect()
-    el.scrollTop += l.top + l.height / 2 - (b.top + b.height / 2)
+    if (el && line && el.scrollHeight > el.clientHeight) {
+      const b = el.getBoundingClientRect()
+      const l = line.getBoundingClientRect()
+      el.scrollTop += l.top + l.height / 2 - (b.top + b.height / 2)
+    }
+    count()
+    // its lines reflow as the label settles its width and the code takes its colors
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(count)
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [])
+  const edge = (n: number | undefined, where: 'above' | 'below') => (n ? <div className={`mark-ev-edge mono is-${where}`}>{cutWords(n, where)}</div> : null)
   return (
-    <div ref={box} className={className} tabIndex={0} role="region" aria-label={label}>
-      {children}
-    </div>
+    <>
+      {edge(out?.above, 'above')}
+      <div ref={box} className={className} tabIndex={0} role="region" aria-label={label} onScroll={count}>
+        {children}
+      </div>
+      {edge(out?.below, 'below')}
+    </>
   )
+}
+
+/** How many of a box's lines (its children) are out of view above and below where it is scrolled to, a line that shows
+ * in part counting as in view; null when the box holds no more than it shows. Reads the layout only. */
+export function outOfView(box: { scrollTop: number; scrollHeight: number; clientHeight: number; children: ArrayLike<Element> }): { above: number; below: number } | null {
+  if (box.scrollHeight <= box.clientHeight + 1) return null
+  const top = box.scrollTop
+  const bottom = top + box.clientHeight
+  let above = 0
+  let below = 0
+  for (const line of Array.from(box.children) as HTMLElement[]) {
+    if (line.offsetTop + line.offsetHeight <= top + 1) above++
+    else if (line.offsetTop >= bottom - 1) below++
+  }
+  return { above, below }
 }
 
 /** Which line of printed output holds the first highlight; with none, its first line with words (the terminal's
@@ -480,22 +524,27 @@ function hitLine(output: string, spans: readonly [number, number][]): number {
   return 0
 }
 
-/** The code, a line each, in its box, in the file reader's colors for Python (files/highlight.ts; plain until
- * highlight.js has loaded), as the terminal draws it in Claude Code's: the line that printed the output's line that
- * holds the value keyed, in the text's own ink (printIndex); none when the code does not show for sure which line
- * printed it. */
-function CodeBox({ code, output, spans }: { code: string; output: string; spans: [number, number][] }) {
+/** The code under its label (`code · 7 lines`), a line each, in its box, in the file reader's colors for Python
+ * (files/highlight.ts; plain until highlight.js has loaded), as the terminal draws it in Claude Code's: the line that
+ * printed the output's line that holds the value keyed, in the text's own ink (printIndex); none when the code does not
+ * show for sure which line printed it. A last newline ends the last line and starts none. */
+function CodeBox({ code: given, output, spans }: { code: string; output: string; spans: [number, number][] }) {
+  const code = given.replace(/\n+$/, '')
   const said = printIndex(code, output, hitLine(output, spans))
   const hl = useHljs(true)
   const colored = useMemo(() => (hl ? highlightLines(hl, code, 'python') : null), [hl, code])
+  const lines = code.split('\n')
   return (
-    <KeyBox className="refchip-lines mono mark-ev-code" label="code">
-      {code.split('\n').map((l, i) => (
-        <div key={i} className={i === said ? 'refchip-line mark-ev-said' : 'refchip-line'} {...(i === said ? { 'data-key': '' } : {})}>
-          {l ? (colored?.[i] ? renderTokens(colored[i]) : l) : ' '}
-        </div>
-      ))}
-    </KeyBox>
+    <>
+      <div className="mark-ev-label mono">{partLabel('code', lines.length)}</div>
+      <KeyBox className="refchip-lines mono mark-ev-code" label="code">
+        {lines.map((l, i) => (
+          <div key={i} className={i === said ? 'refchip-line mark-ev-said' : 'refchip-line'} {...(i === said ? { 'data-key': '' } : {})}>
+            {l ? (colored?.[i] ? renderTokens(colored[i]) : l) : ' '}
+          </div>
+        ))}
+      </KeyBox>
+    </>
   )
 }
 

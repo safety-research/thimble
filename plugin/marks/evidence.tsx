@@ -1,26 +1,29 @@
 // evidence.tsx: the side pane of one mark (core/pane.ts kind `evidence`, args {row, n}): its status and, once the check
-// gave it, its evidence.
+// gave it, its evidence, in the parts the tray shows (tray/tray.ts citationParts), in the same order, each under the
+// same label (tray/tray.mjs partLabel, placeLabel, cardLabel), dim. Nothing is cut: the pane scrolls.
 //
-//   computed   that call's real output, all of it, the marked words on the citations' purple tint, first; then, after a
-//              blank row, the code the check ran, in Claude Code's colors for Python
-//   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
-//   code       the substring highlighted
+//   computed   the code the check ran, all of it (`code · 7 lines`), in Claude Code's colors for Python; a blank row;
+//              then that call's real output, all of it (`output · 62 lines`)
+//   quote      each cited place under its label (`changes.log · line 3`): the cited lines with a line around them, the
+//   code       cited words marked
+//   card       under the card (`card · Runs by status`), the header over the cited row, the cited cell marked (or the
+//              card's printed lines around the words)
 //
 // Under the sentence, `w` (or a click) explains the cited words in place: the session's explainer of them, else one
 // written now (explain/seam.ts explainTerm), which their reply then shows too.
-//   card       the card's title, then the header over the cited row, the cited cell marked (or the card's printed
-//              lines around the words)
 //
-// Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words.
+// Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words, under
+// `output · table`.
 //
 // Its status in the tray's words (tray/tray.mjs checkStatus), with the sign the reply draws after the mark: two outcomes,
 // verified (✓ verified; a corrected mark, its right words in place of Claude's, says ✓ corrected, or ✓ repaired after x,
 // and what it was) and failed, which says why in red (× failed), with the evidence the check gave when it is real; and
-// before an outcome, ⠋ checking (the turning glyph, as after the mark) or ? not checked. The cited value is bold in the citations' look (citeWords), and in printed output on their purple tint too (outputWords). What the check found wrong in the rest of the
-// sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
-// pane shows all of the evidence, the line that holds the value in view when it opens (core/pane.ts keepsInView), and
-// scrolls the rest with the wheel and ↑ ↓. It reads the reply's marks in the state, so it draws again when the check
-// settles.
+// before an outcome, ⠋ checking (the turning glyph, as after the mark) or ? not checked. The cited words in the
+// evidence stand on the citations' purple tint (evidenceWords), as in the tray. What the check found wrong in the rest
+// of the sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane.
+// The pane shows all of the evidence, the line that holds the value in view when it opens (core/pane.ts keepsInView),
+// and scrolls the rest with the wheel and ↑ ↓. It reads the reply's marks in the state, so it draws again when the
+// check settles.
 import type { EngineInterface } from 'claude-code'
 
 import { spinNow } from '../bar/busy'
@@ -30,7 +33,7 @@ import { accent, themeLast, themeNow } from '../core/theme'
 import { rowsAt, treeRows } from '../core/trail.mjs'
 import { explaining, explainTerm, glossFor, sessionGlosses } from '../explain/seam'
 import { markColors } from '../explain/place.mjs'
-import { checkStatus, printableEvidence, wasLine } from '../tray/tray.mjs'
+import { cardLabel, checkStatus, evidenceLine, partLabel, placeLabel, printableEvidence, TABLE_LABEL, wasLine } from '../tray/tray.mjs'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
@@ -49,32 +52,27 @@ export function statusEls(els: Any, s: { sign: string; word: string; tone: strin
   return [sign, Text({ key: 's', ...look, children: ` ${s.word}` })]
 }
 
-/** The cited words' look wherever their evidence shows (this pane, the tray, the claims pane): bold, in a citation's
- *  look in the reply (view.ts citeLook: the text's color, underlined; the citations' purple tint on hover of `id`'s
- *  group). */
+/** The cited words' look in the claims pane's evidence: bold, in a citation's look in the reply (view.ts citeLook: the
+ *  text's color, underlined; the citations' purple tint on hover of `id`'s group). */
 export const citeWords = (id: string) => ({ ...citeLook(id), bold: true })
 
-/** The cited words in printed output (a computed value's, a card's), here and in the tray: citeWords on the citations'
- *  purple tint, as the tray's title and the reply draw the citation the tray shows, so the value stands out of the
- *  lines around it. */
-export const outputWords = (id: string) => ({ ...citeWords(id), backgroundColor: citeTint() })
+/** The cited words wherever this pane and the tray show a citation's evidence (printed output, a file's lines, a
+ *  table's cited cell): on the citations' purple tint alone, in the text's own weight and color, so every citation's
+ *  evidence marks its words one way, and they stand out of the lines around them. */
+export const evidenceWords = () => ({ backgroundColor: citeTint() })
 
-/** A line of text with spans of it highlighted (the cited words in citeWords; `tint`, a line of printed output, in
- *  outputWords), as Text runs. The cited words are Texts nested in the line's, which alone can heat a hover group on
- *  the terminal: the line joins their group, so the pointer over the line lights them. */
-export function highlighted(els: Any, text: string, spans: [number, number][], key: string, o: { tint?: boolean } = {}): Any {
-  const id = `ev:${key}:${text}`
-  const look = o.tint ? outputWords(id) : citeWords(id)
+/** A line of text with spans of it highlighted, the cited words in evidenceWords, as Text runs. */
+export function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
   const parts: Any[] = []
   let at = 0
   spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b], k) => {
     if (a < at) return
     if (a > at) parts.push(text.slice(at, a))
-    parts.push(els.Text({ key: `h${k}`, ...look, children: text.slice(a, b) }))
+    parts.push(els.Text({ key: `h${k}`, ...evidenceWords(), children: text.slice(a, b) }))
     at = b
   })
   if (at < text.length) parts.push(text.slice(at))
-  return els.Text({ key, wrap: 'wrap', ...(parts.some(x => typeof x !== 'string') ? citeHeat(id) : {}), children: parts.length ? parts : ' ' })
+  return els.Text({ key, wrap: 'wrap', children: parts.length ? parts : ' ' })
 }
 
 /** The key of the output line that holds the first highlight, which the pane keeps in view when it opens. */
@@ -92,7 +90,7 @@ export function outputRows(els: Any, output: string, spans: [number, number][]):
   return lines.map((line, i) => {
     const s = starts[i]!
     const mine = spans.map(([a, b]) => [Math.max(a, s) - s, Math.min(b, s + line.length) - s] as [number, number]).filter(([a, b]) => b > a)
-    const el = highlighted(els, line, mine, `o${i}`, { tint: true })
+    const el = highlighted(els, line, mine, `o${i}`)
     return i === first ? els.Box({ key: HIT, flexDirection: 'column', children: [el] }) : el
   })
 }
@@ -125,15 +123,15 @@ export function wrapCode(code: string, width: number): string {
   }).join('\n')
 }
 
-/** One cited place: `path:line` of the line that holds the words (the terminal opens it there), with the cited
- *  range when it is wider, then its lines, the cited ones in full color. */
+/** One cited place under its label, as the tray labels it (tray/tray.mjs placeLabel): the file and the line that holds
+ *  the words (`changes.log · line 3`), dim, with the cited range when it is wider; then its lines, numbered, the cited
+ *  ones in full color. */
 export function placeRows(els: Any, p: Place, key: string): Any[] {
   const { Box, Text } = els
   const gutter = Math.max(...p.lines.map(l => String(l.n).length))
-  const hit = p.lines.find(l => l.highlight && inRange(l.n, p.line))?.n
-  const at = hit !== undefined && String(hit) !== p.line ? `${p.file}:${hit}` : `${p.file}:${p.line}`
+  const at = evidenceLine(p)?.n ?? p.line
   return [
-    Text({ key: `${key}at`, wrap: 'wrap', children: [Text({ key: 'a', bold: true, children: at }), ...(at.endsWith(`:${p.line}`) ? [] : [Text({ key: 'r', dimColor: true, children: `  (cited lines ${p.line})` })])] }),
+    Text({ key: `${key}at`, dimColor: true, wrap: 'wrap', children: [placeLabel(p.file, at), ...(String(at) === String(p.line) ? [] : [`  (cited lines ${p.line})`])] }),
     ...p.lines.map(l => Box({ key: `${key}l${l.n}`, flexDirection: 'row', children: [
       // the gap after the gutter is the box's margin: a trailing space of a Text is lost when the line beside it wraps
       Text({ dimColor: true, children: `${String(l.n).padStart(gutter)} ${l.decoded ? '›' : '│'}` }),
@@ -149,30 +147,37 @@ export function tableRows(els: Any, t: EvidenceTable, width: number, key = 'tb')
   return [
     els.Text({ key: `${key}h`, dimColor: true, wrap: 'truncate-end', children: lines[0]!.text }),
     // the cited row, and the other cited rows of words that hold several values (a range, a pair)
-    ...lines.slice(1).map((l, i) => highlighted(els, l.text, l.spans as [number, number][], i ? `${key}r${i}` : `${key}r`, { tint: true })),
+    ...lines.slice(1).map((l, i) => highlighted(els, l.text, l.spans as [number, number][], i ? `${key}r${i}` : `${key}r`)),
   ]
 }
 
 // the citations whose cited words' explainer shows
 const explainShown = new Set<string>()
 
+/** A citation's evidence in parts, each under its label, as the tray shows them: a computed value's code, a blank row,
+ *  then its output; a file's places; a card's value under the card. */
 function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
+  const label = (key: string, words: string) => Text({ key, dimColor: true, wrap: 'wrap', children: words })
   if (ev.kind === 'card') {
     return [
-      Text({ key: 'ct', wrap: 'wrap', children: [Text({ key: 'k', dimColor: true, children: 'card  ' }), Text({ key: 't', bold: true, children: ev.title || ev.card })] }),
+      label('ct', cardLabel(ev.title || ev.card)),
       Box({ key: 'cv', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output ?? ev.value, ev.highlight ?? []) }),
       // the places of another card or output that the words' other values stand in
       ...(ev.more ?? []).flatMap((p: Evidence, k: number) => [Text({ key: `mg${k}`, children: ' ' }), ...evidenceRows(els, p, width).map((x: Any, j: number) => Box({ key: `m${k}-${j}`, flexDirection: 'column', children: [x] }))]),
     ]
   }
   if (ev.kind === 'computed') {
+    // a last newline ends the last line and starts none
+    const code = ev.code.replace(/\n+$/, '')
     return [
-      Text({ key: 'oh', bold: true, children: ev.by === 'main' ? 'Output of the code Claude ran for the reply' : 'Output of the code the check ran' }),
+      ...(code.trim() ? [
+        label('ch', partLabel('code', code.split('\n').length)),
+        Code({ key: 'code', source: wrapCode(code, width), language: 'python' }),
+        Text({ key: 'gap', children: ' ' }),
+      ] : []),
+      label('oh', ev.table ? TABLE_LABEL : partLabel('output', ev.output.replace(/\n+$/, '').split('\n').length)),
       Box({ key: 'out', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output, ev.highlight) }),
-      Text({ key: 'ch', bold: true, children: ' ' }),
-      Text({ key: 'ch2', bold: true, children: 'The code' }),
-      Code({ key: 'code', source: wrapCode(ev.code, width), language: 'python' }),
     ]
   }
   const places = [ev, ...(ev.more ?? [])]

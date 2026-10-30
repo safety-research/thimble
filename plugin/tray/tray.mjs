@@ -33,7 +33,14 @@
 //                                          line `at`, and its index in the code (printed.mjs)
 //   outputAt(ev)                           which line of a check's output holds the value
 //   around(n, k, size)                     the window of `size` of `n` lines that keeps line `k` in its middle
-//   moreLines(n)                           what the row under a cut tray says of the lines it leaves out
+//   partLabel(part, n), TABLE_LABEL, placeLabel(file, line), cardLabel(title)
+//                                          the label over each part of a citation's evidence, in the tray, the side pane
+//                                          and the workbench's evidence label: `code · 7 lines`, `output · 62 lines`,
+//                                          `changes.log · line 3`, `card · Runs by status`
+//   cutWords(n, where), SHOW_ALL           the marker where a drawing leaves lines out: `⋯ 5 lines above`, `⋯ 1 line
+//                                          below`; the tray's last one names + after it (`· + show all`)
+//   moreLines(n)                           what the claims pane says under a citation's one line of the lines it leaves
+//                                          out
 import { printable } from '../core/text.js'
 import { printIndex, printLine } from './printed.mjs'
 
@@ -368,9 +375,35 @@ export function hiddenOutput(ev, shown = 1) {
   return out ? Math.max(0, out.split('\n').length - shown) : 0
 }
 
-/** What a cut card says of the lines it leaves out (a tray cut to its rows, where + shows them in the side pane; a
- *  citation's one-line card in the claims pane): `+ 3 more lines`, `+ 1 more line`. */
+/** What a citation's one-line card in the claims pane says of the output lines it leaves out: `+ 3 more lines`, `+ 1
+ *  more line`. */
 export const moreLines = n => `+ ${n} more line${n === 1 ? '' : 's'}`
+
+/** `7 lines`, `1 line`. */
+const lineCount = n => `${n} line${n === 1 ? '' : 's'}`
+
+/** The label over a part of a citation's evidence, its whole size after what it is: `code · 7 lines`, `output · 62
+ *  lines`. The tray, the side pane and the workbench's evidence label each draw it over the part. */
+export const partLabel = (part, n) => `${part} · ${lineCount(n)}`
+
+/** The label over printed output that shows as a table, its header over the cited row (marks/table.mjs): the table is
+ *  all of it that shows, in the side pane too. */
+export const TABLE_LABEL = 'output · table'
+
+/** The label over a file's lines: the file, and the line that holds the cited words (`changes.log · line 3`), or the
+ *  cited lines (`lines 8-11`). */
+export const placeLabel = (file, line) => `${file} · ${/\D/.test(String(line)) ? 'lines' : 'line'} ${line}`
+
+/** The label over a value a card shows: the card, by its title. */
+export const cardLabel = title => `card · ${title}`
+
+/** The marker where a drawing leaves `n` lines out, `above` or `below` the lines it shows beside them: `⋯ 5 lines
+ *  above`, `⋯ 1 line below`. */
+export const cutWords = (n, where) => `⋯ ${lineCount(n)} ${where}`
+
+/** What the tray's last marker names after it, as the tray draws a key: + and its words, all of the mark in the side
+ *  pane (`⋯ 13 lines below · + show all`). */
+export const SHOW_ALL = { key: '+', words: 'show all' }
 
 /** A line cut to `room` characters around its first span when it is longer: the span with as much of the line on each
  *  side as fits, cut between words (inside a word only when no space is left between the cut and the span), with `… ` or ` …` only
