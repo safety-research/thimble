@@ -16,6 +16,7 @@ import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, headsKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayBand, trayBar, trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
+import { citeTint } from '../marks/view'
 import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
 import { noteRow, startCheck } from '../marks/checker'
@@ -239,7 +240,7 @@ test("words asked for an explainer draw teal at once, before it is written; a fa
   }
 })
 
-test("a quote of a JSON line shows the line as the file holds it, the cited words highlighted in it; w explains the cited words in place", async () => {
+test("a quote of a JSON line shows the line as the file holds it under its place, the cited words on the citations' purple tint in it; w explains the cited words in place", async () => {
   setOptions({})
   const s = setup([LOOK], { complete: reply({ body: 'A page anyone can bump to leave a number for the next copy.', here: '' }) })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
@@ -250,14 +251,15 @@ test("a quote of a JSON line shows the line as the file holds it, the cited word
   const e = { props: { bodyColumns: 80 } }
   const pane = await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els)
   const t = textOf(pane)
-  expect(t).toContain('revisions.jsonl:2')
+  expect(t).toContain('revisions.jsonl · line 2')
   expect(t).toContain('{"rev_id": 3}')
   expect(t).toContain("the line's JSON text, decoded")
-  // the quoted words are in the cited line, in the citations' look (bold)
-  const bold: string[] = []
-  const walk = (n: Any): void => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { if (n.type === 'Text' && n.props?.bold) bold.push(textOf(n)); walk(n.props?.children) } }
+  // the quoted words are in the cited line, on the citations' purple tint alone, as the tray marks them
+  const tinted: Any[] = []
+  const walk = (n: Any): void => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { if (n.type === 'Text' && n.props?.backgroundColor === citeTint()) tinted.push(n); walk(n.props?.children) } }
   walk(pane)
-  expect(bold).toContain('Paste it fast')
+  expect(tinted.map(textOf)).toEqual(['Paste it fast'])
+  for (const look of ['bold', 'underline']) expect(tinted[0].props[look]).toBeUndefined()
   expect(buttonsOf(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])).toEqual([['e', 'explain these words']])
   // w: the cited words' explainer, written now, shows in the pane
   buttonsOf(pane).find(b => b.hotkey === 'e').onPress()

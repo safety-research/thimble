@@ -18,8 +18,8 @@
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread), its input taking the keys; 1 too,
 //               unnamed. With a thread about it already, a opens that thread
-//   +           under a cut card (`+ N more lines`): all of the mark in the side pane, the same pane a opens, to read
-//               (showAll)
+//   +           on a cut card, named by its last marker (`⋯ 13 lines below · + show all`): all of the mark in the side
+//               pane, the same pane a opens, to read (showAll)
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   2–9         a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
 //               links to a file's lines are citations too, drawn as the answer's: the answer's own citation of those
@@ -33,17 +33,21 @@
 //   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
 //               are, in their look
 //
-// Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ N more lines` under a cut
+// Each key's words in the tray are a click too: the header's keys, `x repair` in the card, and each marker of a cut
 // card is +; a click on the citation's words, in the tray's title as in the reply, closes it, as a second click on the
 // open mark in the reply does.
 //
 // The tray stands in the band above the prompt, over the bar (bar/register.ts), so the bar with ] and [ stays in view
 // under it. It is a summary of the mark: as much of it as fits in the rows the band has over the bar, whole when it
-// fits. A taller one is cut to those rows: a citation keeps the line of code that printed its value and the output line
-// that holds it in view, with what fits around them; an explainer, a heads-up or a file's lines show from their start.
-// The row under a cut card says how many lines it leaves out, `+ N more lines`, and + or a click on it shows all of the
-// mark in the side pane (core/pane.ts), whole, where the wheel and ↑ ↓ scroll it and the side thread about the mark
-// has its conversation and its input under it.
+// fits. A citation's evidence shows in parts, each under its label, dim: the code (`code · 7 lines`, its whole size),
+// a blank row, then its printed output (`output · 62 lines`); a file's lines under their place (`changes.log · line
+// 3`); a card's value under the card. A taller card is cut to those rows: a citation keeps the line of code that
+// printed its value and the output line that holds it in view, with what fits around them; an explainer, a heads-up or
+// a file's lines show from their start. Where it leaves lines out a marker says how many, dim (`⋯ 5 lines above`,
+// `⋯ 13 lines below`), and the last ends with `· + show all`: + or a click on any marker shows all of the mark in the
+// side pane (core/pane.ts), whole, in the same parts, where the wheel and ↑ ↓ scroll it and the side thread about the
+// mark has its conversation and its input under it. No line is left out without its marker: a band too short for the
+// lines around the key ones and the labels drops them first.
 //
 // A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. An open tray
 // does not change what the next prompt asks: a question about the mark goes to a side thread (a). The tray closes when
@@ -84,9 +88,9 @@ import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
 import {
-  aboutOf, around, back, base, canRepair, checkStatus, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
-  moreLines, open, outputAt, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow,
-  stopsOfTurn, top, wasLine,
+  aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
+  indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
+  stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -151,8 +155,8 @@ export async function trayHolds($: Engine): Promise<boolean> {
 }
 
 /** The keys the tray takes now and names in its own place, which nothing else names (core/answerview.ts heldKeys), so
- *  each key shows once, where it acts: while it is open, its header's (h a 0), its body's (x, and + under a cut card)
- *  and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which the bar names
+ *  each key shows once, where it acts: while it is open, its header's (h a 0), its body's (x, and + on a cut card's
+ *  last marker) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which the bar names
  *  as the card's. `ask`: the keys asked about, when not all (a key of a citation's body reads the citation). Read from
  *  the state, so a drawing that asks draws again when the tray opens or closes. */
 export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
@@ -491,16 +495,16 @@ async function pressedAgain($: Engine, f: Frame): Promise<boolean> {
   return true
 }
 
-/** +, or a click on `+ N more lines` under a cut card: all of the mark in the side pane, the pane a opens on it
+/** +, or a click on a marker of a cut card: all of the mark in the side pane, the pane a opens on it
  *  (threads/seam.ts openThread): a citation's whole evidence (marks/evidence.tsx: what the check found, the sentence,
- *  all the output and the code), an explainer's or a heads-up's words, a file's lines, with the side thread about it
+ *  all the code and the output), an explainer's or a heads-up's words, a file's lines, with the side thread about it
  *  under them. It opens to be read: the pane takes the keys, so ↑ ↓ and the page keys scroll it as the wheel does, and
  *  its input waits for a click or tab. `byKey`: + at the prompt, which Claude Code lets open no pane in a narrow
- *  terminal; the line then says to click `+ N more lines`. The tray gives way to the pane once it opened. */
+ *  terminal; the line then says to click `show all`. The tray gives way to the pane once it opened. */
 async function showAll($: Engine, f: Frame, byKey = false): Promise<void> {
   const info = await infoOf($, f)
-  // the words of the row to click, whose count the line, which takes rows of the band, may change
-  const more = byKey ? { key: '+', click: 'more lines', where: 'in the tray' } : {}
+  // the words of the marker to click, not its count, which the line, taking rows of the band, may change
+  const more = byKey ? { key: SHOW_ALL.key, click: SHOW_ALL.words, where: 'in the tray' } : {}
   const placed = await openThread($, { about: aboutOf(f, info), mark: refOf(f) as MarkRef }, { read: true, ...more })
   if (placed) await setTray($, null)
 }
@@ -594,7 +598,7 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   if (key === '0') return { now: () => goBack($) }
   if (key === 'a') return { later: () => askAbout($, f, true) }
   if (key === '1') return { now: () => askAbout($, f, true) }
-  // under a cut card: all of the mark in the side pane, once the + is out of the prompt box, which gives the pane the
+  // on a cut card: all of the mark in the side pane, once the + is out of the prompt box, which gives the pane the
   // keyboard only over an empty box
   if (key === '+' && cutNow?.ref === frameKey(f)) return { later: () => showAll($, f, true) }
   if (f.kind === 'citation') {
@@ -674,7 +678,7 @@ async function restItem($: Engine): Promise<BarItem[]> {
 
 /** An open tray's keys, in its header at the right, each a click that does what its key does: h the explainer on a
  *  citation's words, a ask, 0 back or close (] and [ are on the bar, trayBar). x repair is in the citation's card and
- *  + under a cut card, where they act, and 2–9 are its links in an explainer's words. */
+ *  + on a cut card's last marker, where they act, and 2–9 are its links in an explainer's words. */
 async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
   await themeNow($)
   const out: BarItem[] = []
@@ -740,8 +744,10 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
 const statusOf = (m: MarkItem | null) => checkStatus(m)
 
 /** A part of the tray's body and the rows it takes; `short`, the same on one row, which a cut card shows (fitCitation);
- *  `code`, in place of `el`, a line of code, which unitEls draws with the lines of code beside it. */
-type Unit = { h: number; el?: Any; code?: string; short?: Unit }
+ *  `code`, in place of `el`, a line of code, which unitEls draws with the lines of code beside it; `cut`, in place of
+ *  `el`, a marker where the card leaves lines out: how many, and whether they stand above or below the lines it shows
+ *  (cutRow draws it). */
+type Unit = { h: number; el?: Any; code?: string; short?: Unit; cut?: { n: number; where: 'above' | 'below' } }
 
 /** A card's units as elements: lines of code next to each other as one Code, which Claude Code draws in its own colors
  *  for Python, as the side pane draws the code (marks/evidence.tsx), each line on one row. */
@@ -759,17 +765,21 @@ function unitEls(els: Any, units: Unit[]): Any[] {
   return out
 }
 
-/** A line of evidence in the ruled block under the code or the file's place: a dim rule on the left, so code and
- *  output read apart, and the line, the cited words bold in the citations' look (marks/evidence.tsx citeWords); `dim`,
- *  a line around the cited one; `tint`, a line of printed output, whose cited words stand on the citations' purple
- *  tint too (marks/evidence.tsx outputWords). */
-function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string, dim = false, tint = false): Unit {
+/** A line of evidence in the ruled block under its label: a dim rule on the left, so code and output read apart, and
+ *  the line, the cited words on the citations' purple tint (marks/evidence.tsx evidenceWords); `dim`, a line around
+ *  the cited one. */
+function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string, dim = false): Unit {
   const { Box, Text } = els
   const h = rowsOf(text, w - 2)
   return { h, el: Box({ key, flexDirection: 'row', children: [
     Text({ key: 'rule', dimColor: true, children: Array(h).fill('│').join('\n') }),
-    Box({ key: 'l', flexShrink: 1, marginLeft: 1, children: [dim ? Text({ key: 't', dimColor: true, wrap: 'wrap', children: text || ' ' }) : highlighted(els, text, spans, 't', { tint })] }),
+    Box({ key: 'l', flexShrink: 1, marginLeft: 1, children: [dim ? Text({ key: 't', dimColor: true, wrap: 'wrap', children: text || ' ' }) : highlighted(els, text, spans, 't')] }),
   ] }) }
+}
+
+/** The label over a part of a citation's evidence (tray.mjs partLabel, TABLE_LABEL, cardLabel), dim, on one row. */
+function labelRow(els: Any, key: string, words: string): Unit {
+  return { h: 1, el: els.Text({ key, dimColor: true, wrap: 'truncate-end', children: words }) }
 }
 
 /** `x repair`, a press that checks a failed citation again (this module's ui.press hook, as x does); for one whose
@@ -782,23 +792,24 @@ function repairRow(els: Any, m: MarkItem): Unit {
   ] }) }
 }
 
-/** Lines of a citation's evidence, one row each, of which a cut card shows a window around the line it keeps in view
- *  (`key`): the code around the line that printed the value, the printed output around the line that holds it, a file's
- *  lines around the cited one, a table's header over its cited row. `draw(i)`: line i, the lines around the cited ones
- *  dim. `lead`: a row over them, the file's place or the card's title. `gap`: a blank row over the block, between it and
- *  the block above it (the output's, under the code). */
+/** A part of a citation's evidence: its lines, one row each, of which a cut card shows a window around the line it
+ *  keeps in view (`key`): the code around the line that printed the value, the printed output around the line that
+ *  holds it, a file's lines around the cited one, a table's header over its cited row. `draw(i)`: line i, the lines
+ *  around the cited ones dim. `lead`: its label, the row over it (labelRow; a file's place). `gap`: a blank row over the
+ *  part, between it and the part above it (the output's, under the code). */
 type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit; gap?: Unit }
 
 /** A citation's card under its header (the status is in the header): what it says over its evidence (`top`), then its
- *  evidence (Block). A corrected one says what it was (`was 15 of 40`; a rewritten sentence or a narrowed citation says
- *  which, as the header says only corrected or repaired); a failed one why in one sentence; after a repair (x) that
- *  verified it as written, why; all dim, and under it `x repair` (repairRow). For a value code computed: the code, in
- *  Claude Code's colors for Python (unitEls), around the line that printed the value (tray.mjs printedAt: only a line
- *  the code shows printed it, else no code), a blank row, then the printed output around the line that holds it in the
- *  ruled block; printed output that is a table shows as its header over the cited row. For a file: its place (`place`,
- *  a click opens the side pane), then its lines around the cited one in the ruled block. For a card's value: the card's
- *  title, then the header over the cited row, or its printed lines around the cited one. The cited words bold in the
- *  citations' look; in printed output (a computed value's, a card's), on the citations' purple tint too. */
+ *  evidence in parts (Block), each under its label. A corrected one says what it was (`was 15 of 40`; a rewritten
+ *  sentence or a narrowed citation says which, as the header says only corrected or repaired); a failed one why in one
+ *  sentence; after a repair (x) that verified it as written, why; all dim, and under it `x repair` (repairRow). For a
+ *  value code computed: the code under `code · 7 lines`, in Claude Code's colors for Python (unitEls), around the line
+ *  that printed the value (tray.mjs printedAt; from its start when the code does not show which line printed it), a
+ *  blank row, then under `output · 62 lines` the printed output around the line that holds it in the ruled block;
+ *  printed output that is a table shows as its header over the cited row, under `output · table`. For a file: its
+ *  place (`place`, a click opens the side pane), then its lines around the cited one in the ruled block. For a card's
+ *  value: the card, then the header over the cited row, or its printed lines around the cited one. The cited words
+ *  stand on the citations' purple tint. */
 function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null): { top: Unit[]; blocks: Block[] } {
   const { Text } = els
   if (!m) return { top: [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }], blocks: [] }
@@ -825,12 +836,12 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
   const table = ev.kind === 'card' || ev.kind === 'computed' ? ev.table : undefined
   const tl = table ? tableLines(table, w - 2) : null
   // a table: its header over the cited rows, the first cited row kept in view
-  const tableBlock = (rows: { text: string; spans: [number, number][] }[], lead?: Unit): Block => ({
-    n: rows.length, key: Math.min(1, rows.length - 1), ...(lead ? { lead } : {}),
-    draw: i => ruled(els, rows[i]!.text, i ? rows[i]!.spans : [], w, i ? `tr${i}` : 'th', false, true),
+  const tableBlock = (rows: { text: string; spans: [number, number][] }[], lead: Unit): Block => ({
+    n: rows.length, key: Math.min(1, rows.length - 1), lead,
+    draw: i => ruled(els, rows[i]!.text, i ? rows[i]!.spans : [], w, i ? `tr${i}` : 'th'),
   })
-  // printed output, one row a line: the line that holds the value (its words in the citations' look, on their tint), the
-  // others dim
+  // printed output, one row a line: the line that holds the value (its words on the citations' tint), the others dim;
+  // `lead` its label, or the label of the output's own size
   const outputBlock = (lead?: Unit): Block => {
     const out = String(ev.kind === 'card' && ev.output == null ? ev.value ?? '' : ev.output ?? '').replace(/\n+$/, '')
     const lines = out.split('\n')
@@ -838,27 +849,27 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
     const starts: number[] = []
     lines.reduce((at, l) => { starts.push(at); return at + l.length + 1 }, 0)
     const key = Math.max(0, ev.kind === 'card' && ev.output == null ? 0 : outputAt(ev))
-    return { n: lines.length, key, ...(lead ? { lead } : {}), draw: i => {
+    return { n: lines.length, key, lead: lead ?? labelRow(els, 'out-label', partLabel('output', lines.length)), draw: i => {
       const s = starts[i]!
       const mine = spans.map(([a, b]) => [Math.max(a, s) - s, Math.min(b, s + lines[i]!.length) - s] as [number, number]).filter(([a, b]) => b > a)
       const cut = lineWindow({ text: lines[i]!, spans: mine }, w - 2) as { text: string; spans: [number, number][] }
-      return ruled(els, cut.text, cut.spans, w, i === key ? 'ev' : `o${i}`, i !== key, true)
+      return ruled(els, cut.text, cut.spans, w, i === key ? 'ev' : `o${i}`, i !== key)
     } }
   }
   if (ev.kind === 'card') {
-    const lead: Unit = { h: 1, el: Text({ key: 'card', wrap: 'truncate-end', children: [Text({ key: 'k', dimColor: true, children: 'card ' }), Text({ key: 't', bold: true, children: ev.title || ev.card })] }) }
+    const lead = labelRow(els, 'card', cardLabel(ev.title || ev.card))
     return { top, blocks: [tl ? tableBlock(tl as { text: string; spans: [number, number][] }[], lead) : outputBlock(lead)] }
   }
   if (ev.kind === 'computed') {
     const blocks: Block[] = []
-    const p = printedAt(ev)
-    if (p >= 0) {
-      // its lines, without the empty one a last newline leaves; an empty line as a space, so Claude Code gives it its
-      // row at the end of the window too
-      const code = String(ev.code ?? '').replace(/\n+$/, '').split('\n')
-      blocks.push({ n: code.length, key: p, draw: i => ({ h: 1, code: code[i] || ' ' }) })
+    // its lines, without the empty one a last newline leaves; an empty line as a space, so Claude Code gives it its row
+    // at the end of the window too
+    const code = String(ev.code ?? '').replace(/\n+$/, '').split('\n')
+    if (code.some(l => l.trim())) {
+      const p = printedAt(ev)
+      blocks.push({ n: code.length, key: Math.max(0, p), lead: labelRow(els, 'code-label', partLabel('code', code.length)), draw: i => ({ h: 1, code: code[i] || ' ' }) })
     }
-    const out = tl ? tableBlock(tl as { text: string; spans: [number, number][] }[]) : outputBlock()
+    const out = tl ? tableBlock(tl as { text: string; spans: [number, number][] }[], labelRow(els, 'out-label', TABLE_LABEL)) : outputBlock()
     // under the code, a blank row before its output
     blocks.push(blocks.length ? { ...out, gap: { h: 1, el: Text({ key: 'gap', children: ' ' }) } } : out)
     return { top, blocks }
@@ -876,50 +887,84 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
   } }] }
 }
 
-/** A citation's card in at most `rows` rows: whole when it fits. Else cut: what it says over its evidence on a row
- *  each, and of each block a window around its key line (tray.mjs around), the key lines first (the value's line, then
- *  the line that printed it), then the blank row between the code and its output, then the place or title over them,
- *  then a line more to each in turn, as rows allow; `hidden`, how many lines that leaves out, which the row under it
- *  says (moreRow), the side pane showing them all. */
-function fitCitation(parts: { top: Unit[]; blocks: Block[] }, rows: number): { units: Unit[]; hidden: number } {
-  const sum = (us: Unit[]) => us.reduce((n, u) => n + u.h, 0)
-  const all = [...parts.top, ...parts.blocks.flatMap(b => [...(b.gap ? [b.gap] : []), ...(b.lead ? [b.lead] : []), ...Array.from({ length: b.n }, (_, i) => b.draw(i))])]
-  if (sum(all) <= rows) return { units: all, hidden: 0 }
-  const top = parts.top.map(u => u.short ?? u)
-  let hidden = parts.top.reduce((n, u) => n + (u.short ? u.h - u.short.h : 0), 0)
-  // the row under the card takes one
-  let room = rows - 1 - sum(top)
-  while (room < 0 && top.length) { const u = top.pop()!; room += u.h; hidden += u.h }
-  const order = parts.blocks.map((_, i) => i).reverse()
-  const size = parts.blocks.map(() => 0)
-  const lead = parts.blocks.map(() => false)
-  const gap = parts.blocks.map(() => false)
-  for (const i of order) if (room > 0 && parts.blocks[i]!.n) { size[i] = 1; room-- }
-  // a blank row stands between two blocks only while both show
-  for (const i of order) { const g = parts.blocks[i]!.gap; if (g && size[i] && size[i - 1] && room >= g.h) { gap[i] = true; room -= g.h } }
-  for (const i of order) { const l = parts.blocks[i]!.lead; if (l && room >= l.h) { lead[i] = true; room -= l.h } }
-  for (let grew = true; grew && room > 0;) {
-    grew = false
-    for (const i of order) if (room > 0 && size[i]! < parts.blocks[i]!.n) { size[i]!++; room--; grew = true }
-  }
-  const units = [...top]
-  parts.blocks.forEach((b, i) => {
-    if (gap[i]) units.push(b.gap!)
-    if (lead[i]) units.push(b.lead!)
-    const [from, to] = around(b.n, b.key, size[i]!) as [number, number]
-    for (let j = from; j < to; j++) units.push(b.draw(j))
-    hidden += b.n - size[i]!
+/** What shows of a citation's evidence (fitCitation): of each part, the blank row over it and its label where they
+ *  show, then its window of lines (tray.mjs around), with a marker over the window when it starts after the part's
+ *  first line and one under it when it ends before its last (Unit `cut`). A part that shows no line shows nothing, and
+ *  its lines join the marker beside them: the next part's over its window, else one under the part before. `line(i,
+ *  j)`: line j of part i. */
+function cutUnits(blocks: Block[], show: { size: number[]; lead: boolean[]; gap: boolean[] }, line: (i: number, j: number) => Unit): Unit[] {
+  const out: Unit[] = []
+  const cut = (n: number, where: 'above' | 'below'): Unit => ({ h: 1, cut: { n, where } })
+  // the lines of the parts before that show none
+  let left = 0
+  blocks.forEach((b, i) => {
+    if (!show.size[i]) { left += b.n; return }
+    const [from, to] = around(b.n, b.key, show.size[i]!) as [number, number]
+    if (show.gap[i]) out.push(b.gap!)
+    if (show.lead[i]) out.push(b.lead!)
+    if (left + from) out.push(cut(left + from, 'above'))
+    left = 0
+    for (let j = from; j < to; j++) out.push(line(i, j))
+    if (to < b.n) out.push(cut(b.n - to, 'below'))
   })
-  return { units, hidden }
+  const last = out[out.length - 1]
+  if (left && last?.cut) last.cut.n += left
+  else if (left) out.push(cut(left, 'below'))
+  return out
 }
 
-/** The row under a cut tray, `+ N more lines` (tray.mjs moreLines): a click that shows all of the mark in the side
- *  pane, as + does (showAll). Its key as the header draws a key, its words dim, underlined under the pointer. */
-function moreRow(els: Any, n: number, press: () => unknown): Unit {
+/** A citation's card in at most `rows` rows: whole when it fits, with no marker. Else cut: what it says over its
+ *  evidence on a row each, then its parts (cutUnits), a marker at each place it leaves lines out, which says how many.
+ *  A marker shows before anything that may be left out, so no line is left out without one: first the key lines (the
+ *  value's line, then the line that printed it), with their markers; then, while each part shows a line, the blank row
+ *  between the code and its output, then the parts' labels; then a line more to each part in turn, as rows allow. */
+function fitCitation(parts: { top: Unit[]; blocks: Block[] }, rows: number): Unit[] {
+  const sum = (us: Unit[]) => us.reduce((n, u) => n + u.h, 0)
+  const blocks = parts.blocks
+  const all = [...parts.top, ...blocks.flatMap(b => [...(b.gap ? [b.gap] : []), ...(b.lead ? [b.lead] : []), ...Array.from({ length: b.n }, (_, i) => b.draw(i))])]
+  if (sum(all) <= rows) return all
+  const top = parts.top.map(u => u.short ?? u)
+  // a row at least for the evidence: its marker, when no line of it fits
+  while (top.length && rows - sum(top) < 1) top.pop()
+  const room = rows - sum(top)
+  // each line drawn once, however often the card is laid out
+  const drawn = blocks.map(() => new Map<number, Unit>())
+  const line = (i: number, j: number): Unit => drawn[i]!.get(j) ?? drawn[i]!.set(j, blocks[i]!.draw(j)).get(j)!
+  const show = { size: blocks.map(() => 0), lead: blocks.map(() => false), gap: blocks.map(() => false) }
+  // a change of what shows, kept while the card fits in its rows (a line more may take a marker's row)
+  const fits = (change: () => void, undo: () => void): boolean => {
+    change()
+    if (sum(cutUnits(blocks, show, line)) <= room) return true
+    undo()
+    return false
+  }
+  // the output's part first, then the code's
+  const order = blocks.map((_, i) => i).reverse()
+  for (const i of order) if (blocks[i]!.n) fits(() => { show.size[i] = 1 }, () => { show.size[i] = 0 })
+  // the blank row between two parts, and a part's label, only while each part shows a line
+  if (blocks.every((b, i) => show.size[i] || !b.n)) {
+    for (const i of order) if (blocks[i]!.gap && i > 0) fits(() => { show.gap[i] = true }, () => { show.gap[i] = false })
+    for (const i of order) if (blocks[i]!.lead) fits(() => { show.lead[i] = true }, () => { show.lead[i] = false })
+  }
+  for (let grew = true; grew;) {
+    grew = false
+    for (const i of order) if (show.size[i] && show.size[i]! < blocks[i]!.n && fits(() => { show.size[i]!++ }, () => { show.size[i]!-- })) grew = true
+  }
+  return [...top, ...cutUnits(blocks, show, line)]
+}
+
+/** A marker where the tray leaves lines out, dim: how many, and where (tray.mjs cutWords: `⋯ 5 lines above`), a click
+ *  that shows all of the mark in the side pane, as + does (showAll); `last`, the tray's last marker, which names + after
+ *  its words (`· + show all`), its key as the header draws a key. Underlined under the pointer. */
+function cutRow(els: Any, cut: { n: number; where: 'above' | 'below' }, last: boolean, key: string, press: () => unknown): Unit {
   const { Button, Text } = els
-  return { h: 1, el: Button({ key: 'tray-more', plain: true, label: 'show all of it in the side pane', hover: quiet('tray-more'), onPress: press, children: [
-    Text({ key: 'k', color: accent(), bold: true, children: '+' }),
-    Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: moreLines(n).slice(1) }),
+  return { h: 1, el: Button({ key, plain: true, label: 'show all of it in the side pane', hover: quiet(key), onPress: press, children: [
+    Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: cutWords(cut.n, cut.where) }),
+    ...(last ? [
+      Text({ key: 's', dimColor: true, children: ' · ' }),
+      Text({ key: 'k', color: accent(), bold: true, children: SHOW_ALL.key }),
+      Text({ key: 'a', dimColor: true, children: ` ${SHOW_ALL.words}` }),
+    ] : []),
   ] }) }
 }
 
@@ -935,13 +980,13 @@ export function evidenceOpener($: Engine, f: { row: string; n: number }): () => 
   }
 }
 
-/** In a citation of a file's lines, the file's place (`runs.jsonl:41`), dim: a click opens the citation's whole
- *  evidence in the side pane, which works over ssh too. Where Claude Code draws OSC 8 hyperlinks it is also a link to the file,
- *  which a ctrl or cmd click opens on this machine. */
+/** In a citation of a file's lines, the label over them: the file's place (tray.mjs placeLabel, `runs.jsonl · line
+ *  41`), dim, a click that opens the citation's whole evidence in the side pane, which works over ssh too. Where Claude
+ *  Code draws OSC 8 hyperlinks it is also a link to the file, which a ctrl or cmd click opens on this machine. */
 async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Promise<Any | null> {
   const ev = m?.evidence
   if (!ev || ev.kind === 'computed' || ev.kind === 'card' || f.kind !== 'citation') return null
-  const label = printable(`${ev.file}:${evidenceLine(ev)?.n ?? ev.line}`)
+  const label = printable(placeLabel(ev.file, evidenceLine(ev)?.n ?? ev.line))
   const openIt = evidenceOpener($, f)
   if (els.Markdown && (await hyperlinksHere($))) {
     const start = await startDir($)
@@ -966,8 +1011,8 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
  *  takes it (bar/register.ts). */
 let gapRow = true
 
-/** What the tray as last drawn left out (the frame it showed, and how many lines): + shows it all in the side pane
- *  while the row under the tray names it (showAll). */
+/** What the tray as last drawn left out (the frame it showed, and how many lines in all): + shows it all in the side
+ *  pane while the tray's last marker names it (showAll). */
 let cutNow: { ref: string; n: number } | null = null
 const frameKey = (f: Frame) => `${f.row}|${f.kind}|${f.kind === 'citation' ? f.n : f.id}`
 
@@ -983,7 +1028,8 @@ export const trayShape = (): { gap: boolean } => ({ gap: gapRow })
  *  limit), so the bar with ] and [ stays in view under it; the band's blank row over the bar stays while the whole card
  *  fits with it. A taller card is cut to those rows: a citation keeps the line that printed its value and the line that
  *  holds it in view, with what fits around them (fitCitation); an explainer, a heads-up or a file's lines show from
- *  their start. Under a cut card, `+ N more lines` (moreRow): + or a click shows all of it in the side pane (showAll). */
+ *  their start, a marker under them (`⋯ 9 lines below`). Each marker is a click, and the last names + (cutRow): either
+ *  shows all of it in the side pane (showAll). */
 export async function trayBand($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
@@ -1073,29 +1119,31 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   // the rows the card may take: the band's rows over the bar, less the frame's two borders and its head
   const fixed = 2 + treeRows(head, inner)
   const rows = room ? Math.max(1, room.rows - fixed) : Infinity
-  let shown: Any[] = body
-  let hidden = 0
-  if (parts) {
-    const fit = fitCitation(parts, rows)
-    shown = unitEls(els, fit.units)
-    hidden = fit.hidden
-  } else if (treeRows(body, inner) > rows) {
-    // from its start: a window of the rows left over the row that says how much more there is
+  // the card in units: a citation's fit to its rows (fitCitation); other words taller than the rows, from their start, a
+  // window of the rows left over the marker under it, which says how many it leaves out
+  let laid: Unit[] | null = parts ? fitCitation(parts, rows) : null
+  if (!laid && treeRows(body, inner) > rows) {
     const keep = Math.max(0, rows - 1)
-    hidden = treeRows(body, inner) - keep
-    shown = keep ? [Box({ key: 'tray-window', flexDirection: 'column', height: keep, overflow: 'hidden', children: [
-      Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, children: body }),
-    ] })] : []
+    laid = [
+      ...(keep ? [{ h: keep, el: Box({ key: 'tray-window', flexDirection: 'column', height: keep, overflow: 'hidden', children: [
+        Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, children: body }),
+      ] }) }] : []),
+      { h: 1, cut: { n: treeRows(body, inner) - keep, where: 'below' as const } },
+    ]
   }
-  const more = hidden > 0 ? moreRow(els, hidden, () => showAll($, f)) : null
-  if (more) cutNow = { ref: frameKey(f), n: hidden }
-  gapRow = !room || fixed + treeRows(shown, inner) + (more ? more.h : 0) < room.rows
-  // the words of its keys and of the row under it, which a click on one leaves selected: no answer's words
+  // each marker a click that shows all of it in the side pane, the last naming + too
+  const marks = (laid ?? []).filter(u => u.cut)
+  const lastMark = marks[marks.length - 1]
+  const shown: Any[] = laid ? unitEls(els, laid.map((u, k) => (u.cut ? cutRow(els, u.cut, u === lastMark, `tray-cut-${k}`, () => showAll($, f)) : u))) : body
+  if (lastMark) cutNow = { ref: frameKey(f), n: marks.reduce((n, u) => n + u.cut!.n, 0) }
+  gapRow = !room || fixed + treeRows(shown, inner) < room.rows
+  // the words of its keys and of its markers, which a click on one leaves selected: no answer's words
   // (core/selection.ts)
-  controlWords('tray', [...keys.flatMap(k => [k.words, `${k.key} ${k.words}`]), ...(more ? [moreLines(hidden), moreLines(hidden).slice(2)] : [])])
+  const markWords = (u: Unit) => `${cutWords(u.cut!.n, u.cut!.where)}${u === lastMark ? ` · ${SHOW_ALL.key} ${SHOW_ALL.words}` : ''}`
+  controlWords('tray', [...keys.flatMap(k => [k.words, `${k.key} ${k.words}`]), ...marks.map(markWords)])
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [
     head,
-    Box({ key: 'tray-body', flexDirection: 'column', children: [...shown, ...(more ? [more.el] : [])] }),
+    Box({ key: 'tray-body', flexDirection: 'column', children: shown }),
   ] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }
