@@ -10,10 +10,9 @@
 //                                      come before every other feature's
 //   trayHeld($, ask)                   the keys it takes now, which nothing else names (core/answerview.ts heldKeys)
 //   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most the rows the band has
-//                                      over the bar (`room`)
+//                                      over the bar (`room`): as much of the mark as fits, the rest in the side pane
 //   trayShape()                        the tray as last drawn: whether the band's blank row stands between it and the
-//                                      bar, whether its body shows in a window (the band then takes the wheel), and the
-//                                      blank rows the band then draws under the bar (the body's rows under that window)
+//                                      bar
 //   trayBar($, on, preview)            its items at the bar's left while a card ] reached holds the keys (an open
 //                                      tray's keys are in its header); at rest, ] while the answer shows marks
 //   trayFocus($, row)                  what the tray shows on this row, so the row draws it in focus: a citation by its
@@ -55,7 +54,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   return band($, els, width, room)
 }
 
-export function trayShape(): { gap: boolean; windowed: boolean; below: number } {
+export function trayShape(): { gap: boolean } {
   return shapeNow()
 }
 

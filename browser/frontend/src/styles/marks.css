@@ -81,9 +81,12 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* the output in a box of its own as tall as ten of its lines, the rest a scroll away (Mark.tsx KeyBox) */
+.mark-pop .mark-ev-out { max-height: 16em; overflow-y: auto; }
+/* the code's line that printed the value, in the text's own ink */
+.mark-pop .mark-ev-code .mark-ev-said { color: var(--text-primary); }
 /* the marked words: the accent's wash a cited table cell takes (refchip.css .cite-cell) */
 .mark-pop .refchip-lines .cite-cell { border-radius: 2px; }
-.mark-ev-more { color: var(--text-tertiary); }
 /* a cited place's row: its line number, then its text, which wraps beside the number */
 .mark-ev-line { display: flex; }
 .mark-ev-text { flex: 1 1 auto; min-width: 0; }

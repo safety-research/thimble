@@ -12,6 +12,7 @@
 // print in a function's body leaves the order unknown.
 //
 //   printLine(code, out, at)   the line of `code` that printed line `at` of the output `out`, or ''
+//   printIndex(code, out, at)  that line's index in `code`, or -1
 
 // a statement that prints: Python's print, a shell's echo or printf, JavaScript's console.log, a write to stdout
 const PRINTS = /\b(?:print|printf|println|puts|echo)\b|\bconsole\.log\b|\bstdout\.write\s*\(/
@@ -500,9 +501,15 @@ function readers(steps, said, may, own, free, stopped, k) {
   return [...out]
 }
 
+/** The line of a check's code that printed the output's line `at`, as written (printIndex), or ''. */
+export function printLine(code, out, at = 0) {
+  const i = printIndex(code, out, at)
+  return i < 0 ? '' : String(code || '').split('\n')[i].trim()
+}
+
 /**
- * The line of a check's code that printed the output's line `at` (`out` is the whole output; a single line is its
- * line 0), or '' when the code does not show it for sure: a line that did not print the value is worse than none.
+ * Which line of a check's code (its index) printed the output's line `at` (`out` is the whole output; a single line is
+ * its line 0), or -1 when the code does not show it for sure: a line that did not print the value is worse than none.
  * It is the print whose own words stand in that line, the one with the most of them (`print("failed:", n)`); else, in
  * code where every statement that may print is a print, the one print that could have written that line: by what
  * each print can write (`print(df)` under `print("Failures by day:")`, which writes only its words; a print of a value
@@ -510,17 +517,16 @@ function readers(steps, said, may, own, free, stopped, k) {
  * reading of the whole output in that order (`print(len(runs))` then `print(sum(...))`, a loop's prints). A line
  * Python wrote itself (a warning, a traceback) is no print's.
  */
-export function printLine(code, out, at = 0) {
-  const lines = String(code || '').split('\n')
+export function printIndex(code, out, at = 0) {
   const read = readCode(code)
   const units = read.units
-  if (!units.length) return ''
+  if (!units.length) return -1
   let said = String(out ?? '').split('\n')
   if (said.length > 1 && said[said.length - 1] === '') said = said.slice(0, -1)
   const k = Math.max(0, Math.min(said.length - 1, Math.trunc(Number(at)) || 0))
   const norm = s => s.replace(/\s+/g, '')
   const python = pythonsLines(said)
-  if (python.own[k]) return ''
+  if (python.own[k]) return -1
   // the prints whose own words stand in each line, the most of them (a print that writes only its words: exactly them)
   const best = said.map((line, j) => {
     let most = 0
@@ -535,18 +541,18 @@ export function printLine(code, out, at = 0) {
   })
   const one = list => {
     const at = new Set(list.map(u => u.i))
-    return at.size === 1 ? lines[[...at][0]].trim() : ''
+    return at.size === 1 ? [...at][0] : -1
   }
-  if (best[k].length && one(best[k])) return one(best[k])
-  if (read.blind) return ''
+  if (best[k].length && one(best[k]) >= 0) return one(best[k])
+  if (read.blind) return -1
   // the output cut by its window (`…` at an end): its first or last line may be a part of another print's
   const cut = (k === 0 && said[0].startsWith('…')) || (k === said.length - 1 && said[k].endsWith('…'))
-  if (cut) return ''
+  if (cut) return -1
   // the lines a print may write: none Python wrote, none that holds another print's words, only its own words when it
   // writes them exactly, a line of numbers when it prints numbers alone
   const may = (u, j) => !python.own[j] && (!best[j].length || best[j].includes(u)) && (u.exact == null || norm(said[j]) === u.exact) && (!u.digits || numbers(said[j]))
   const could = units.filter(u => may(u, k))
-  if (!could.length) return ''
+  if (!could.length) return -1
   // where the code does not show the order its prints run in, or the window cut the output: what each print may write
   if (read.unordered || units.some(u => !u.ends) || said[0].startsWith('…') || said[said.length - 1].endsWith('…')) return one(could)
   // else the readings of the whole output in that order: a line that no print wrote in any of them is none's (the

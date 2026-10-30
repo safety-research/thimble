@@ -14,7 +14,7 @@
 //   cards/draw.ts      a card's frame     underCard: lines under one card (its label row); cardAsk (what its
 //                                         margin asks: a side thread about it)
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the band
-//                                         has over the bar; aboveShape: how it was drawn (the band's blank rows)
+//                                         has over the bar; aboveShape: how it was drawn (the band's blank row)
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
 //                                         `c cite`); heldKeys: the keys what holds them takes now, which the bar and a
 //                                         card's header leave unnamed (cards/draw.ts too)
@@ -175,11 +175,9 @@ export async function aboveBar($: Engine, els: Any, width: number, room: BandRoo
 }
 
 /** What stands above the bar as last drawn: whether the band's blank row stands between it and the bar (`gap`; a
- *  tray the band has no row to spare for takes it), and whether its body shows in a window of its own (`windowed`: the
- *  band then ends with `below` blank rows under the bar, one for each row of the body under that window and at least
- *  two, so that Claude Code hands it the wheel and its row under its window counts them). */
-export function aboveShape(): { gap: boolean; windowed: boolean; below: number } {
-  try { return trayShape() } catch { return { gap: true, windowed: false, below: 0 } }
+ *  tray that does not fit with it takes it). */
+export function aboveShape(): { gap: boolean } {
+  try { return trayShape() } catch { return { gap: true } }
 }
 
 /** The keys taken now by what holds them and names them in its own place, which every other surface leaves unnamed,

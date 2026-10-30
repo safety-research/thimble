@@ -5,8 +5,7 @@
 // explainer or a heads-up. What it shows is the top of a stack, so a citation inside an explainer
 // opens over it, and 0 returns to the one under it; 0 on the first closes the tray.
 //
-//   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}), with `open: 'code'` while
-//             a citation's whole code and output show in place of its one line of evidence
+//   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id})
 //   a tray    {stack: [frame, ...]} or null
 //   a stop    what ] and [ move through, in reading order: a mark of a row ({row, kind, n | id, at}) or a card ({row,
 //             card}): drawn under a row (v's), or drawn inline at a call of Claude's, with the row next to it
@@ -30,10 +29,13 @@
 //                                          it printable (core/text.js)
 //   evidenceLine(ev)                       the one line of a citation's evidence that holds the cited value
 //   lineWindow(line, room)                 that line cut to `room` characters around the value
-//   printLine(code, out, at), printedBy(ev) the line of a check's code that printed the output's line `at`
-//                                          (printed.mjs)
+//   printLine(code, out, at), printedBy(ev), printedAt(ev)   the line of a check's code that printed the output's
+//                                          line `at`, and its index in the code (printed.mjs)
+//   outputAt(ev)                           which line of a check's output holds the value
+//   around(n, k, size)                     the window of `size` of `n` lines that keeps line `k` in its middle
+//   moreLines(n)                           what the row under a cut tray says of the lines it leaves out
 import { printable } from '../core/text.js'
-import { printLine } from './printed.mjs'
+import { printIndex, printLine } from './printed.mjs'
 
 export { printLine }
 
@@ -366,7 +368,8 @@ export function hiddenOutput(ev, shown = 1) {
   return out ? Math.max(0, out.split('\n').length - shown) : 0
 }
 
-/** What a citation's one-line card says of the output lines it leaves out: `+ 3 more lines`, `+ 1 more line`. */
+/** What a cut card says of the lines it leaves out (a tray cut to its rows, where + shows them in the side pane; a
+ *  citation's one-line card in the claims pane): `+ 3 more lines`, `+ 1 more line`. */
 export const moreLines = n => `+ ${n} more line${n === 1 ? '' : 's'}`
 
 /** A line cut to `room` characters around its first span when it is longer: the span with as much of the line on each
@@ -400,18 +403,36 @@ export function lineWindow(line, room) {
   return { ...line, text: head + text.slice(from, to) + tail, spans: moved }
 }
 
-// the line printedBy gave for a cited output line, by its line, code and output: the tray and the claims pane draw it
+// the index printedAt gave for a cited output line, by its line, code and output: the tray and the claims pane draw it
 // again with each frame, and reading a long output takes a while
 const printed = new Map()
 
-/** The line of a computed citation's code that printed the output line that holds the value (evidenceLine), or ''. */
-export function printedBy(ev) {
-  if (!ev || ev.kind !== 'computed') return ''
+/** Which line of a computed citation's code (its index) printed the output line that holds the value (outputAt), or
+ *  -1 (printed.mjs printIndex). */
+export function printedAt(ev) {
+  if (!ev || ev.kind !== 'computed') return -1
   const at = outputHit(ev)?.i ?? 0
   const key = `${at}\u0000${ev.code}\u0000${ev.output}`
   if (!printed.has(key)) {
     if (printed.size >= 64) printed.delete(printed.keys().next().value)
-    printed.set(key, printLine(ev.code, ev.output, at))
+    printed.set(key, printIndex(ev.code, ev.output, at))
   }
   return printed.get(key)
+}
+
+/** That line of the code as written, or ''. */
+export function printedBy(ev) {
+  const i = printedAt(ev)
+  return i < 0 ? '' : String(ev.code).split('\n')[i].trim()
+}
+
+/** Which line of a citation's printed output (its index) holds the value, as evidenceLine finds it; -1 without one. */
+export const outputAt = ev => outputHit(ev)?.i ?? -1
+
+/** The window of `size` of `n` lines around line `k`, as [from, to): `k` in its middle (a line more before it than
+ *  after when the size is even), moved in from the ends. */
+export function around(n, k, size) {
+  const s = Math.max(0, Math.min(n, size))
+  const from = Math.max(0, Math.min(Math.max(0, k) - Math.floor(s / 2), n - s))
+  return [from, from + s]
 }

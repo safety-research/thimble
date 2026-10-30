@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { partsAround } from '../../core/text.js'
-import { aboutOf, back, base, checkStatus, evidenceLine, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printableEvidence, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top, wasLine } from '../tray.mjs'
+import { aboutOf, around, back, base, checkStatus, evidenceLine, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, outputAt, printableEvidence, printedAt, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top, wasLine } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -113,6 +113,20 @@ test('a citation\'s card: why in one sentence, and the one line of evidence that
   assert.equal(lineWindow({ text: said, spans: [[0, 4]] }, 30).text, 'Each open ticket waits for a …')
 })
 
+
+test("a cut card keeps a citation's key lines in the middle of what it shows: the window around a line, moved in from the ends, and the lines of code and output it keeps", () => {
+  assert.deepEqual(around(10, 5, 3), [4, 7])
+  assert.deepEqual(around(10, 5, 4), [3, 7])
+  assert.deepEqual(around(10, 9, 3), [7, 10])
+  assert.deepEqual(around(10, 0, 3), [0, 3])
+  assert.deepEqual(around(2, 1, 5), [0, 2])
+  assert.deepEqual(around(4, 2, 0), [2, 2])
+  // the line of code that printed the value, by its index, as printLine names it; none where the code does not show it
+  const ev = { kind: 'computed', code: 'import json\nprint(len(runs))\nprint(f"failed: {bad}")', output: '40\nfailed: 12', highlight: [[11, 13]] }
+  assert.equal(outputAt(ev), 1)
+  assert.equal(printedAt(ev), 2)
+  assert.equal(printedAt({ ...ev, code: 'head -3 runs.csv\npython3 report.py' }), -1)
+})
 
 test('what a side thread is about quotes the words once: words that open with a quote keep their own', () => {
   assert.equal(aboutOf({ kind: 'heads', row: 'r1', id: 'h1' }, { gloss: { title: '"Cheated" is their own word' } }), 'the heads-up "Cheated" is their own word')

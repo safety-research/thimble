@@ -3,8 +3,7 @@
 // them. A mark the check could not confirm is red and underlined, with `×` after the words, its tint a soft red.
 // Hovering opens its evidence in the citation's label (RefChip's .refchip-pop), and a click keeps it open:
 //
-//   computed   the head names the code that ran; the lines of its real output around the marked words, the words
-//              highlighted, then the code
+//   computed   the head names the code that ran; its real output, the marked words highlighted, then the code
 //   quote      each cited place: its `path:line` chip (a click opens the file there) over the cited lines and the lines
 //   code       around them that hold text, the words highlighted
 //   card       a value a card shows: the card's chip (a click opens it) over the table around the cited cell, the cell
@@ -16,6 +15,12 @@
 //
 // Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked. The lines wrap;
 // a long one shows only the words around its highlighted ones, cut at words (lineWindow).
+//
+// The output and the code each stand in a box as tall as the label lets it be (KeyBox, marks.css): all their lines, as
+// many as fit in view and the rest a scroll away, by the wheel or, once Tab gives the box the focus, the arrow keys. A
+// box opens with its key line in its middle: the output's line that holds the value, the code's line that printed it
+// (the terminal's rule, plugin/tray/printed.mjs printIndex: only a line the code shows printed it), that line in the
+// text's own ink and the code's other lines quieter, as the terminal's tray draws them.
 //
 // A failed mark's label says why in one line first, with Repair, which checks it again and makes it correct (the
 // terminal's x); a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
@@ -34,14 +39,12 @@ import { cardPartLabel, parseRef } from '../lib/refs'
 import { CITED, citedLines, type At, type Grid } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { workspaceFromUrl } from '../lib/workspace'
+import { printIndex } from '../../../../plugin/tray/printed.mjs'
 import { canRepair, failedWhy, LOOK_WORD, lookOf, wasLine, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
 export const MarkItems = createContext<{ items: readonly (MarkItem | undefined)[]; streaming: boolean }>({ items: [], streaming: false })
 
-/** output lines shown around the first highlight: this many before it, and up to OUTPUT_LINES in all */
-const OUTPUT_BEFORE = 2
-const OUTPUT_LINES = 7
 /** a line longer than LINE_SHOWN characters shows only the words around its marked ones: up to LINE_BEFORE characters
  * before them and LINE_AFTER after (lineWindow) */
 const LINE_SHOWN = 240
@@ -268,7 +271,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
           <span className="refchip-pop-value">{value}</span>
         </div>
         <TablePreview grid={printed.grid} at={printed.at} also={printed.also} />
-        {ev.code ? <pre className="refchip-lines mono mark-ev-code">{ev.code}</pre> : null}
+        {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
       </div>
     )
   if (ev.kind === 'computed')
@@ -280,8 +283,10 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
           </Chip>
           <span className="refchip-pop-value">{value}</span>
         </div>
-        <div className="refchip-lines mono">{outputLines(ev.output ?? '', ev.highlight ?? [])}</div>
-        {ev.code ? <pre className="refchip-lines mono mark-ev-code">{ev.code}</pre> : null}
+        <KeyBox className="refchip-lines mono mark-ev-out" label="output">
+          {outputLines(ev.output ?? '', ev.highlight ?? [])}
+        </KeyBox>
+        {ev.code ? <CodeBox code={ev.code} output={ev.output ?? ''} spans={ev.highlight ?? []} /> : null}
       </div>
     )
   const places = [ev, ...((ev as Evidence & { more?: Evidence[] }).more ?? [])]
@@ -421,7 +426,9 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
       {table ? (
         <TablePreview grid={table.grid} at={table.at} also={'also' in table ? table.also : undefined} />
       ) : (checked || reread) && ev.output != null ? (
-        <div className="refchip-lines mono">{outputLines(ev.output, ev.highlight ?? [])}</div>
+        <KeyBox className="refchip-lines mono mark-ev-out" label="output">
+          {outputLines(ev.output, ev.highlight ?? [])}
+        </KeyBox>
       ) : got.state === 'lines' ? (
         <div className="refchip-lines mono">
           {got.lines.map((l, i) => (
@@ -441,22 +448,65 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
   )
 }
 
-/** The output's lines around its first highlight, one element each, the highlighted spans marked. */
+/** A box of evidence lines (its children, one element a line), opened with its line marked `data-key` in its middle when
+ * it holds more lines than it shows: the wheel scrolls the rest, and the arrow keys once Tab gave it the focus. */
+function KeyBox({ className, label, children }: { className: string; label: string; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const el = box.current
+    const line = el?.querySelector<HTMLElement>('[data-key]')
+    if (!el || !line || el.scrollHeight <= el.clientHeight) return
+    const b = el.getBoundingClientRect()
+    const l = line.getBoundingClientRect()
+    el.scrollTop += l.top + l.height / 2 - (b.top + b.height / 2)
+  }, [])
+  return (
+    <div ref={box} className={className} tabIndex={0} role="region" aria-label={label}>
+      {children}
+    </div>
+  )
+}
+
+/** Which line of printed output holds the first highlight; with none, its first line with words (the terminal's
+ * evidenceLine). */
+function hitLine(output: string, spans: readonly [number, number][]): number {
+  let at = 0
+  for (const [i, l] of output.split('\n').entries()) {
+    if (spans.length ? spans[0][0] >= at && spans[0][0] <= at + l.length : l.trim()) return i
+    at += l.length + 1
+  }
+  return 0
+}
+
+/** The code, a line each, in its box: the line that printed the output's line that holds the value keyed, in the text's
+ * own ink (printIndex); none when the code does not show for sure which line printed it. */
+function CodeBox({ code, output, spans }: { code: string; output: string; spans: [number, number][] }) {
+  const said = printIndex(code, output, hitLine(output, spans))
+  return (
+    <KeyBox className="refchip-lines mono mark-ev-code" label="code">
+      {code.split('\n').map((l, i) => (
+        <div key={i} className={i === said ? 'refchip-line mark-ev-said' : 'refchip-line'} {...(i === said ? { 'data-key': '' } : {})}>
+          {l || ' '}
+        </div>
+      ))}
+    </KeyBox>
+  )
+}
+
+/** The output's lines, all of them, one element each, the highlighted spans marked; the line that holds the first
+ * highlight keyed `data-key` (KeyBox). A trailing newline ends the last line and starts none. */
 export function outputLines(output: string, spans: [number, number][]): ReactNode[] {
-  const first = spans.length ? spans[0][0] : 0
-  const lines = output.split('\n')
+  const lines = output.replace(/\n+$/, '').split('\n')
+  const hit = hitLine(output, spans)
   let at = 0
   const starts = lines.map((l) => {
     const s = at
     at += l.length + 1
     return s
   })
-  const hit = Math.max(0, starts.findIndex((s, i) => first >= s && first <= s + lines[i].length))
-  const from = Math.max(0, hit - OUTPUT_BEFORE)
-  const to = Math.min(lines.length, from + OUTPUT_LINES)
-  const out: ReactNode[] = from > 0 ? [<div key="above" className="refchip-line mark-ev-more">…</div>] : []
+  const out: ReactNode[] = []
   const sorted = [...spans].sort((p, q) => p[0] - q[0])
-  for (let i = from; i < to; i++) {
+  for (let i = 0; i < lines.length; i++) {
     // of a long line, the words around its first highlighted span (lineWindow)
     const start = starts[i]
     const mark = sorted.find(([x, y]) => y > start && x < start + lines[i].length)
@@ -481,12 +531,11 @@ export function outputLines(output: string, spans: [number, number][]): ReactNod
     parts.push(output.slice(pos, b))
     if (cut.tail) parts.push('…')
     out.push(
-      <div key={i} className="refchip-line">
+      <div key={i} className="refchip-line" {...(i === hit ? { 'data-key': '' } : {})}>
         {lines[i] ? parts : ' '}
       </div>,
     )
   }
-  if (to < lines.length) out.push(<div key="below" className="refchip-line mark-ev-more">…</div>)
   return out
 }
 
