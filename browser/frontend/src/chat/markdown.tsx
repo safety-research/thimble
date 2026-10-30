@@ -25,7 +25,8 @@ export interface ChipCtx {
   broken: ReadonlySet<string>
   /** the failure per broken ref */
   why?: ReadonlyMap<string, string>
-  /** the chips carry `data-anchor` (chat prose, where a ⌘-click may start a thread from a chip) */
+  /** the chips and the marks' words carry `data-anchor` (chat prose, where a ⌘-click may start a thread from a chip or a
+   * citation) */
   anchor?: boolean
 }
 
@@ -142,7 +143,7 @@ function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
   const value = (props as Record<string, unknown>)['data-value']
   if (typeof ref === 'string' && typeof value === 'string') {
     const item = cardCitationMark(ref, value, ctx.broken.has(ref) ? (ctx.why?.get(ref) ?? '') : null)
-    if (item) return <Mark k={-1} item={item}>{shownValue(value)}</Mark>
+    if (item) return <Mark k={-1} item={item} anchor={ctx.anchor}>{shownValue(value)}</Mark>
   }
   if (typeof ref === 'string') {
     const broken = ctx.broken.has(ref)
@@ -258,8 +259,9 @@ function MdMark(props: JSX.IntrinsicElements['mark'] & ExtraProps) {
 }
 
 function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
+  const ctx = useContext(ChipContext)
   const mark = MARK_HREF.exec(props.href ?? '')
-  if (mark) return <Mark k={Number(mark[1])}>{props.children}</Mark>
+  if (mark) return <Mark k={Number(mark[1])} anchor={ctx.anchor}>{props.children}</Mark>
   const { node: _node, ...rest } = props
   return <a {...rest} target="_blank" rel="noreferrer" />
 }

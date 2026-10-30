@@ -32,6 +32,11 @@
 // terminal's x); a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
 // each: their cells are marked in one table, their lines in one output. Escape, a press outside, or a second click
 // closes it.
+//
+// Where the chips of its text carry the ⌘ pointer's anchor (chat/markdown ChipContext), the words carry it as a card's
+// citation does (components/RefChip): the card place the mark cites, else the ref of the text it stands in (a reply, a
+// takeaway's card), with the words it shows as the anchor's text. A ⌘-click on them asks about the citation, as the
+// terminal's a on a citation does, never about the whole text: the words are a control, where the pointer finds no text.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
@@ -68,8 +73,9 @@ const OpenPlace = createContext<(ref: string) => void>(teleport)
  * (RefChip): the label of a value of that card's printed output names the line without the card's title */
 const CiteHome = createContext<string | null>(null)
 
-/** A mark: the k-th of its text's marks (MarkItems), or `item` when the caller has it (an old card citation). */
-export function Mark({ k, item: given, children }: { k: number; item?: MarkItem; children: ReactNode }) {
+/** A mark: the k-th of its text's marks (MarkItems), or `item` when the caller has it (an old card citation). With
+ * `anchor`, its words carry the ⌘ pointer's anchor, so a ⌘-click on them asks about the citation. */
+export function Mark({ k, item: given, anchor, children }: { k: number; item?: MarkItem; anchor?: boolean; children: ReactNode }) {
   const { items, streaming } = useContext(MarkItems)
   const item = given ?? items[k]
   const look: MarkLook = streaming ? 'pending' : lookOf(item)
@@ -80,6 +86,9 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
   const hideTimer = useRef<number | undefined>(undefined)
   const [home, setHome] = useState<string | null>(null)
   useLayoutEffect(() => setHome(words.current?.closest<HTMLElement>('[data-cite-home]')?.dataset.citeHome ?? null), [])
+  // the ref of the text the words stand in, its nearest anchor (a reply's `chat:<id>#<index>`, a takeaway's card)
+  const [host, setHost] = useState<string | null>(null)
+  useLayoutEffect(() => setHost(words.current?.parentElement?.closest<HTMLElement>('[data-anchor]')?.dataset.anchor ?? null), [])
   useEffect(
     () => () => {
       window.clearTimeout(showTimer.current)
@@ -148,6 +157,10 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
   const whole = item?.words != null ? plain(item.words) : ''
   const part = corrected && item.narrowed ? whole.indexOf(plain(item.shown!)) : -1
   const [before, after] = part >= 0 ? [whole.slice(0, part), whole.slice(part + plain(item!.shown!).length)] : ['', '']
+  // the ⌘ pointer's anchor (module note), its text the words shown; before any check a mark has no item, and the
+  // pointer reads its words from the page
+  const at = anchor ? (cardRef(item) ?? host) : null
+  const anchorAttrs = at ? { 'data-anchor': at, 'data-anchor-text': (corrected ? plain(item.shown!) : whole) || undefined } : {}
   return (
     <>
     {before}
@@ -158,6 +171,7 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
         role="button"
         tabIndex={0}
         className="mark-words"
+        {...anchorAttrs}
         aria-expanded={!!pop}
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
@@ -190,7 +204,7 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
   )
 }
 
-/** The card place a mark's evidence names, for the mark's `data-ref`: what a card's citation carries. */
+/** The card place a mark's evidence names, for the mark's `data-ref` and its anchor: what a card's citation carries. */
 const cardRef = (item: MarkItem | undefined): string | undefined => {
   const ev = Array.isArray(item?.evidence) ? item?.evidence[0] : item?.evidence
   return ev?.kind === 'card' ? ev.ref : undefined
