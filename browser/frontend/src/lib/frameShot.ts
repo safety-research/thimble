@@ -5,10 +5,12 @@
 // page: its document as an SVG image, its canvases as pictures of themselves, without its scripts, which a picture never
 // runs. A picture loads nothing by URL, and the frame cannot read an image it loads by URL (its origin is its own), so
 // the frame names each such image by the page's token and its number, and the page puts the image in, fetched as the
-// frame fetched it (same origin, no cookie), before it draws the picture.
-//   shot {id, scale, token}  page to frame: the picture of what the frame shows, at `scale` device pixels per CSS pixel
-//   shot {id, svg, urls}     frame to page: the picture as an SVG image, or null when it could not be made, and the URL
-//                            of each image it names `token` and its number
+// frame fetched it (same origin, no cookie), before it draws the picture. The SVG image is as large as the frame in CSS
+// pixels, since the page in it is laid out for the image's size (its vw and vh units, its width media queries); the
+// page draws it at the screen's device pixels.
+//   shot {id, token}      page to frame: the picture of what the frame shows
+//   shot {id, svg, urls}  frame to page: the picture as an SVG image, or null when it could not be made, and the URL of
+//                         each image it names `token` and its number
 
 const SHOT = 'thimble:shot'
 /** How long a frame has to give its picture, drawn: less than the picture's own limit (pointer/capture.ts
@@ -34,7 +36,6 @@ export function frameShot(): void {
       const root = document.documentElement
       const w = root.clientWidth
       const h = innerHeight
-      const k = Math.min(4, Math.max(1, Number(d.scale) || 1))
       if (w < 1 || h < 1) return answer(null)
       const copy = root.cloneNode(true) as HTMLElement
       for (const s of Array.from(copy.querySelectorAll('script'))) s.remove()
@@ -78,7 +79,8 @@ export function frameShot(): void {
       // the part of the page the frame shows, when it has scrolled
       if (scrollX || scrollY) copy.style.transform = `translate(${-scrollX}px, ${-scrollY}px)`
       const xml = new XMLSerializer().serializeToString(copy)
-      answer(`<svg xmlns="http://www.w3.org/2000/svg" width="${w * k}" height="${h * k}" viewBox="0 0 ${w} ${h}"><foreignObject x="0" y="0" width="${w}" height="${h}">${xml}</foreignObject></svg>`, urls)
+      // as large as the frame, for the page's layout (module note)
+      answer(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><foreignObject x="0" y="0" width="${w}" height="${h}">${xml}</foreignObject></svg>`, urls)
     } catch {
       answer(null)
     }
@@ -105,18 +107,18 @@ async function inlined(url: string): Promise<string> {
   }
 }
 
-/** The frame's picture `svg` drawn as a PNG, with the images it names by `token` put in (module note); null when it
- * cannot be drawn. */
-async function drawn(svg: string, token: string, urls: readonly string[]): Promise<string | null> {
+/** The frame's picture `svg` drawn as a PNG at `scale` device pixels per CSS pixel, with the images it names by `token`
+ * put in (module note); null when it cannot be drawn. */
+async function drawn(svg: string, token: string, urls: readonly string[], scale: number): Promise<string | null> {
   const images = await Promise.all(urls.map(inlined))
   const pic = new Image()
   pic.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg.replace(new RegExp(`${token}(\\d+)`, 'g'), (_, n: string) => images[Number(n)] ?? ''))}`
   try {
     await pic.decode()
     const c = document.createElement('canvas')
-    c.width = pic.naturalWidth
-    c.height = pic.naturalHeight
-    c.getContext('2d')!.drawImage(pic, 0, 0)
+    c.width = pic.naturalWidth * scale
+    c.height = pic.naturalHeight * scale
+    c.getContext('2d')!.drawImage(pic, 0, 0, c.width, c.height)
     return c.toDataURL('image/png')
   } catch {
     return null
@@ -143,10 +145,10 @@ export function framePicture(frame: HTMLIFrameElement, scale: number, ms = FRAME
       if (e.source !== win || !d || d.type !== SHOT || d.id !== id) return
       window.removeEventListener('message', onMessage)
       if (typeof d.svg !== 'string') return done(null)
-      void drawn(d.svg, token, Array.isArray(d.urls) ? d.urls.map(String) : []).then(done)
+      void drawn(d.svg, token, Array.isArray(d.urls) ? d.urls.map(String) : [], Math.min(4, Math.max(1, scale))).then(done)
     }
     const late = window.setTimeout(() => done(null), ms)
     window.addEventListener('message', onMessage)
-    win.postMessage({ type: SHOT, id, scale, token }, '*')
+    win.postMessage({ type: SHOT, id, token }, '*')
   })
 }
