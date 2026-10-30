@@ -542,7 +542,7 @@ def ensure_live() -> dict[str, Any]:
     # the release's tag when the commit has one (v0.10.2), for its name in the list and in thimble update
     tag = git("describe", "--tags", "--exact-match", "--match", "v*", commit, cwd=live, check=False)
     rel = {"kind": src["kind"], "source": src["url"], "repo": str(repo), "entry": src.get("entry"), "base": commit,
-           "version": _version_at(live, commit), "pointed": False, "created": time.time(),
+           "version": _version_at(live, commit), "pointed": False, "created": time.time(), "checked": commit,
            **({"tag": tag} if RELEASE_TAG.match(tag) else {})}
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
@@ -655,6 +655,8 @@ def _follow(rel: dict[str, Any]) -> dict[str, Any]:
         else:
             git("branch", "-f", "mine", new, cwd=live)
             git("checkout", "-q", "--detach", new, cwd=live, hooks=False)
+        # mine holds no fix on the new release, so none waits for a check there (_unchecked_on)
+        rel["checked"] = new
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
     return rel
@@ -3032,6 +3034,54 @@ def _carry_due() -> tuple[dict[str, Any], list[int]] | None:
     return cur, ids
 
 
+def _unchecked_on() -> list[int]:
+    """The fixes in mine that an update by an older thimble put back on the release live is on with none of these
+    checks: 0.10.6's update put back each fix whose change applied, and a dev install's update by 0.10.5 or 0.10.6 each
+    one. release.json's `checked` names the release commit whose fixes this kernel checked (by an update or a carry of
+    its own, or as live was made there with no fix), and an older thimble's update moves base and leaves it. [] once
+    they are checked, when mine holds no fix, and while live is not as such an update left it (a file changed, or mine
+    holds a commit that is no fix's: a reapply session works there)."""
+    rel, live = release(), live_dir()
+    base = str(rel.get("base") or "")
+    if not base or rel.get("checked") == base or not (live / ".git").exists():
+        return []
+    commits = git("rev-list", f"{base}..mine", cwd=live, check=False).split()
+    fixes = set(git("for-each-ref", "--format=%(objectname)", "refs/thimble/fixes/", cwd=live).split())
+    if not commits or not set(commits) <= fixes:
+        return []
+    changed = run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=live).stdout.splitlines()
+    if any(x[3:] != PLUGIN_JSON for x in changed):
+        return []
+    return _replay_order(records())
+
+
+def _aside_unchecked(ids: list[int]) -> None:
+    """The fixes of `ids` (_unchecked_on), and any an update set aside before, set aside as this kernel's update sets
+    aside the fixes in mine (pending, their change in pending/<release>/fix-<id>.patch), on the plain release, with the
+    record of what was set aside (pending/current.json): carry then checks them as it checks the fixes an update set
+    aside, and each that fits goes back on as it was, while each that does not stays off, saying why."""
+    live, rel, recs = live_dir(), release(), records()
+    base, version = str(rel["base"]), release_name(rel)
+    ids = list(dict.fromkeys([*ids, *[i for i, r in sorted(recs.items()) if r.get("state") == "pending"]]))
+    was_on = is_on()
+    _set_aside(ids, recs, version, str(rel.get("tag") or "").removeprefix("v") or base[:7], "")
+    _unstamp()
+    git("checkout", "-q", "-B", "mine", base, cwd=live, hooks=False)
+    if not was_on:
+        git("checkout", "-q", "--detach", base, cwd=live, hooks=False)
+    d = home() / "pending"
+    d.mkdir(parents=True, exist_ok=True)
+    write_json(d / "current.json", {"version": version, "from": "", "from_commit": "", "to_commit": base, "ids": ids,
+                                    "tip": head(), "made": time.time(), "off": not was_on})
+
+
+def _mark_checked() -> None:
+    """release.json says that this kernel checked the fixes in mine on the release live is on (_unchecked_on)."""
+    rel = release()
+    if rel and rel.get("checked") != rel.get("base"):
+        write_json(home() / "release.json", {**rel, "checked": rel["base"]})
+
+
 def _sync_owed() -> Path:
     """pending/sync-owed: carry put fixes back on in live, and Claude Code has not copied live since (the copy failed, or
     the call that carried stopped first). The next carry has it copy live."""
@@ -3039,14 +3089,18 @@ def _sync_owed() -> Path:
 
 
 def carry_due() -> dict[str, Any] | None:
-    """What carry does next, for the plugin's list: {to, n}, the release and how many set-aside fixes it checks on it;
+    """What carry does next, for the plugin's list: {to, n}, the release and how many fixes it checks on it (those an
+    update set aside, or those an update by an older thimble put back with no check, which then say on: _unchecked_on);
     n 0 when only Claude Code's copy of fixes it put back is owed (_sync_owed). None: nothing."""
     try:
         due = _carry_due()
+        unchecked = [] if due else _unchecked_on()
     except FixError:
         return None
     if due:
         return {"to": release_name() or str(due[0].get("version") or ""), "n": len(due[1])}
+    if unchecked:
+        return {"to": release_name(), "n": len(unchecked), "on": True}
     return {"to": release_name(), "n": 0} if _sync_owed().exists() else None
 
 
@@ -3152,6 +3206,12 @@ def _carry(sync: bool = True, say=None) -> dict[str, Any] | None:
     tells the person that the checks run (a line each)."""
     owed = _sync_owed()
     due = _carry_due()
+    unchecked = [] if due else _unchecked_on()
+    if unchecked:
+        # an update by an older thimble put them back with no check: they are set aside, then checked, as this kernel's
+        # update does it
+        _aside_unchecked(unchecked)
+        due = _carry_due()
     if due is None:
         if not (sync and owed.exists()):
             return None
@@ -3216,6 +3276,8 @@ def _carry(sync: bool = True, say=None) -> dict[str, Any] | None:
         write_json(home() / "state.json", {"on": False})
     # the way back from the release checkout, which an update by a thimble from before it did not make
     _way_back()
+    # every fix in mine passed the checks on this release: none waits for them there (_unchecked_on)
+    _mark_checked()
     recs = records()
     out = {"to": version, "back": [f for f, _ in back], "had": had, "aside": aside, "why": why, "off": off,
            "titles": {i: recs[i]["title"] for i in [*(f for f, _ in back), *had, *aside]}, "reload": False}
@@ -3223,8 +3285,9 @@ def _carry(sync: bool = True, say=None) -> dict[str, Any] | None:
         # the browser workbench's page is built again from it: at once by thimble update and thimble reapply (carry), else
         # when thimble-browser starts next
         out["browser"] = "stale"
-    if sync and back and not off:
-        # owed until Claude Code copied live, so that a copy that fails, or a call stopped before it, is made later
+    if sync and (back or unchecked) and not off:
+        # Claude Code copies live: the fixes put back, or the fixes an older thimble put back taken off. Owed until it
+        # did, so that a copy that fails, or a call stopped before it, is made later
         owed.parent.mkdir(parents=True, exist_ok=True)
         owed.write_text(f"{head()}\n")
         try:
@@ -3244,28 +3307,44 @@ def _tell(line: str) -> None:
 def carry(browser: bool = False, say=None) -> dict[str, Any] | None:
     """The fixes an update set aside that still fit the new release, on again, with no key press, as they were before it
     (on, sent, or the version a fix changed in place had). Each is cherry-picked onto the release in the order mine had
-    them, in a copy (work/carry), and the copy is checked as done checks a fix (the launcher, the hooks tests, the page's
-    build when a fix changes it) before anything goes on: fixes that fail together are tried one at a time
+    them, in a copy (work/carry), and the copy is checked as done checks a fix (_checks: the checks of the parts of
+    thimble their changes touch) before anything goes on: fixes that fail together are tried one at a time
     (_carry_check). One the release already has leaves the list (released); one that does not apply, or fails the
     checks, stays set aside, its record saying that it does not fit the release (error), for thimble reapply. Fixes the
     person had turned off stay off. When the checks cannot run, nothing moves, and the next carry tries again.
 
-    thimble update carries at once. An update by thimble 0.10.5 or before set every fix aside and stopped there: this
-    kernel carries them at the next step that may take the minutes the checks need: thimble fixes, thimble reapply or
-    thimble update in a shell, thimble-browser's start (its launcher runs thimble fix carry), and a Claude Code
-    session's start (the plugin runs it as a step on its bar, when its list says that it is due: carry_due). A list
-    for the plugin or the workbench never carries. Nothing happens once carried, or while live is not as the update left
-    it (mine moved on from the update's tip, or a file changed: a reapply session works there). browser: build the
-    browser workbench's page again (and install its packages when their lock files changed) when a fix that went on
-    changes it, as thimble update and thimble reapply do; the others leave that to thimble-browser's next start, which
-    builds the page. say: what tells the person that the checks run. What it did, or None."""
+    thimble update carries at once. An update by thimble 0.10.5 or before set every fix aside and stopped there, and one
+    by 0.10.6 put back each fix whose change applied with no check (as a dev install's update by 0.10.5 or 0.10.6 put
+    back each one): this kernel checks them, once on each release, as its own update would have (_unchecked_on), at the
+    next step that may take the minutes the checks need: thimble fixes, thimble reapply or thimble update in a shell,
+    thimble-browser's start (its launcher runs thimble fix carry), and a Claude Code session's start (the plugin runs it
+    as a step on its bar, when its list says that it is due: carry_due). A list for the plugin or the workbench never
+    carries. Nothing happens once carried, or while live is not as the update left it (mine moved on from the update's
+    tip, or a file changed: a reapply session works there). browser: build the browser workbench's page again (and
+    install its packages when their lock files changed) when a fix that went on changes it, as thimble update and
+    thimble reapply do; the others leave that to thimble-browser's next start, which builds the page. say: what tells
+    the person that the checks run. What it did, or None."""
     if carry_due() is None:
+        _checked_with_none()
         return None
     with Lock():
         out = _carry(say=say)
     if out and browser and out.get("browser") == "stale" and not out.get("off"):
         out.update(browser_on_live())
     return out
+
+
+def _checked_with_none() -> None:
+    """A release with no fix in mine has none to check: release.json says so once (_mark_checked), when an older
+    thimble made live or moved it there, so that thimble-browser's launcher, which asks carry while it does not, stops
+    asking."""
+    rel, live = release(), live_dir()
+    if not rel.get("base") or rel.get("checked") == rel["base"] or not (live / ".git").exists():
+        return
+    with Lock():
+        rel = release()
+        if not git("rev-list", f"{rel['base']}..mine", cwd=live, check=False):
+            _mark_checked()
 
 
 def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
@@ -3355,6 +3434,9 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
         else:
             git("checkout", "-q", "--detach", new, cwd=live)
         rel.update(base=new, version=_version_at(live, new), tag=latest["tag"], updated=time.time())
+        if not aside:
+            # no fix to check on the new release (_unchecked_on); else carry checks them, and says so
+            rel["checked"] = new
         write_json(home() / "release.json", rel)
         _write_off_sh(rel)
         place_release(new)
@@ -3452,6 +3534,8 @@ def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[s
         _unstamp()
         git("checkout", "-q", "-B", "mine", new, cwd=live)
         rel.update(base=new, version=_version_at(live, new), checkout=to, updated=time.time(), told=new)
+        if not aside:
+            rel["checked"] = new
         tag = git("describe", "--tags", "--exact-match", "--match", "v*", new, cwd=live, check=False)
         if RELEASE_TAG.match(tag):
             rel["tag"] = tag
@@ -3778,6 +3862,11 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     said = _carried_lines(d["carried"], "list") if d.get("carried") else []
     if d.get("carry_error"):
         said = [f"thimble could not put back the fixes the update set aside: {d['carry_error']}"]
+    elif (d.get("due") or {}).get("n") and d["due"].get("on"):
+        # an update by an older thimble put them back with no check (_unchecked_on)
+        k = d["due"]["n"]
+        said = [f"{'Your fix is' if k == 1 else f'Your {k} fixes are'} on with no check on thimble {d['due']['to']} yet: "
+                f"thimble fixes, in a shell, checks {'it' if k == 1 else 'them'}."]
     elif (d.get("due") or {}).get("n"):
         k = d["due"]["n"]
         said = [f"{'Your fix waits' if k == 1 else f'Your {k} fixes wait'} for a check on thimble {d['due']['to']}: "

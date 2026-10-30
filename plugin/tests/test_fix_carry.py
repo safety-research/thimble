@@ -55,6 +55,56 @@ def update_as_before() -> list[int]:
     return aside
 
 
+def put_back_unchecked(ids: list[int]) -> tuple[list[int], list[int]]:
+    """What thimble 0.10.6's update did after it set the fixes aside on the new release (its carry), and what a dev
+    install's update by 0.10.5 or 0.10.6 did after it moved mine (its replay): each fix of `ids` cherry-picked back onto
+    mine in turn, on again with no check; one whose change does not apply is left out. (back, missed)."""
+    live = FX.live_dir()
+    back: list[int] = []
+    missed: list[int] = []
+    for fid in ids:
+        p = subprocess.run(["git", "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{fid}"], cwd=live,
+                           capture_output=True, text=True)
+        if p.returncode != 0:
+            subprocess.run(["git", "cherry-pick", "--abort"], cwd=live, capture_output=True)
+            missed.append(fid)
+            continue
+        c = sh("git", "rev-parse", "HEAD", cwd=live)
+        sh("git", "update-ref", f"refs/thimble/fixes/{fid}", c, cwd=live)
+        r = FX.records()[fid]
+        r.update(state="on", commit=c, error=None, pending=None, files=FX._numstat(live, f"{c}^", c))
+        FX.put(r)
+        back.append(fid)
+    return back, missed
+
+
+def update_as_0_10_6() -> list[int]:
+    """thimble update as thimble 0.10.6 ran it, with its own kernel: every fix in mine set aside, mine the plain release,
+    then each fix whose change applies put back on with no check (put_back_unchecked), and the record of what was set
+    aside gone; release.json keeps what it had, with the new release. Then Claude Code copies live. The fixes put back."""
+    latest = FX.latest_release()
+    with FX.Lock():
+        FX.ensure_live()
+        live, rel = FX.live_dir(), FX.release()
+        now = FX.release_name(rel)
+        ref = f"refs/thimble/releases/{latest['tag']}"
+        sh("git", "fetch", "-q", "--no-tags", latest["url"], f"+refs/tags/{latest['tag']}:{ref}", cwd=live)
+        new = sh("git", "rev-parse", f"{ref}^{{commit}}", cwd=live)
+        recs = FX.records()
+        aside = list(dict.fromkeys(FX._replay_order(recs)))
+        FX._set_aside(aside, recs, latest["version"], latest["version"], now)
+        FX._unstamp()
+        sh("git", "checkout", "-q", "-B", "mine", new, cwd=live)
+        rel.update(base=new, version=FX._version_at(live, new), tag=latest["tag"], updated=time.time())
+        FX.write_json(FX.home() / "release.json", rel)
+        FX.place_release(new)
+        back, missed = put_back_unchecked(aside)
+        assert not missed
+        FX._repoint()
+        FX._sync()
+    return back
+
+
 def fix_of(words: str, path: str, text: str, title: str) -> int:
     """A fix that is on: `text` written to `path` in its copy."""
     r = FX.new(words)
@@ -635,6 +685,16 @@ def test_thimble_browser_puts_back_the_fixes_an_update_set_aside_before_it_build
     log.write_text("")
     subprocess.run(["bash", str(b / "scripts" / "thimble-browser"), str(data)], capture_output=True, text=True, env=env, cwd=data)
     assert [x.split()[0] for x in log.read_text().splitlines()] == ["server"]
+    # an update by an older thimble put fixes back with no check (release.json's checked is not its base): the carry
+    # checks them, once
+    rel = th / "fixes" / "release.json"
+    for checked, steps in (("b" * 40, ["kernel", "server"]), ("a" * 40, ["server"])):
+        rel.write_text(json.dumps({"kind": "github", "base": "a" * 40, "checked": checked}, indent=1) + "\n")
+        log.write_text("")
+        p = subprocess.run(["bash", str(b / "scripts" / "thimble-browser"), str(data)], capture_output=True, text=True,
+                           env=env, cwd=data)
+        assert p.returncode == 0, p.stderr
+        assert [x.split()[0] for x in log.read_text().splitlines()] == steps
 
 
 def browser_fix(world, publish, monkeypatch, tmp_path) -> tuple[int, Path]:
@@ -760,3 +820,101 @@ def test_thimble_update_installs_the_workbench_of_the_new_release_before_it_chec
     # the page's packages and its build for 0.10.3 come first, then the fix's check, then the build with the fix
     assert steps == [f"--prefix {fe} ci --no-audit --no-fund", f"--prefix {fe} run build", "check", f"--prefix {fe} run build"]
     assert out["back"] == [a] and out["browser"] == "ready" and FX.get(a)["state"] == "on"
+
+
+def test_fixes_an_update_by_0_10_6_put_back_with_no_check_are_checked_once_and_one_that_breaks_the_release_goes_off(world, upstream, monkeypatch, tmp_path, capsys):
+    """thimble 0.10.6's update put back each fix whose change applied, with no check: the first carry of this kernel
+    (here the plugin's step at a session's start) checks them on the release as its own update would have, once."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a = made(world)["id"]
+    FX.done(a, "Bar says read", "")
+    FX.apply(a, press(a))
+    # fix b calls what 0.10.3 takes away (made-up-old-api), and its change applies all the same
+    b = fix_of("say who asked", "plugin/hints.ts", "import { askerOf } from 'made-up-old-api'\n", "Hints say who asked")
+    c = fix_of("count the untouched files", "plugin/legend.ts", "const legend = `untouched ${n}`\n", "Legend counts untouched")
+    assert FX.listing()["due"] is None
+    new = upstream({"plugin/api.ts": "export const gone = 'made-up-old-api'\n"}, "v0.10.3")
+    assert update_as_0_10_6() == [a, b, c]
+    live = FX.live_dir()
+    assert [FX.get(i)["state"] for i in (a, b, c)] == ["on"] * 3 and "askerOf" in live_file("plugin/hints.ts")
+    log = checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/api.ts && grep -qs made-up-old-api plugin/hints.ts")
+    # the plugin's list at the session's start says that they wait for a check, and moves nothing
+    assert cli.main(["fix", "list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["due"] == {"to": "0.10.3", "n": 3, "on": True} and runs(log) == 0
+    # inside Claude Code, thimble fixes says so too
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert FX.list_lines(120)[0] == "Your 3 fixes are on with no check on thimble 0.10.3 yet: thimble fixes, in a shell, checks them."
+    monkeypatch.delenv("CLAUDECODE")
+    # its carry, a step on its bar: fix b does not fit 0.10.3 and is off, saying why; the others stay on
+    assert cli.main(["fix", "carry", "--json"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert (got["to"], got["back"], got["aside"], got["why"], got["reload"]) == (
+        "0.10.3", [a, c], [b], {str(b): "it does not fit thimble 0.10.3"}, True)
+    assert [FX.get(i)["state"] for i in (a, b, c)] == ["on", "pending", "on"] and FX.is_on()
+    assert not (live / "plugin" / "hints.ts").exists() and "read ${n}" in live_file("plugin/bar/bar.tsx")
+    assert sh("git", "log", "--format=%s", f"{new}..mine", cwd=live).splitlines() == ["Legend counts untouched", "Bar says read"]
+    assert FX.get(a)["note"] == FX._aside_before(a)["note"]
+    assert "  Set aside     it does not fit thimble 0.10.3" in FX.show_lines(b, 120)
+    assert f"  fix {b} is off: it does not fit thimble 0.10.3" in FX.list_lines(120)
+    # once on each release: nothing waits, and nothing runs the checks again
+    n = runs(log)
+    assert FX.listing()["due"] is None and FX.carry() is None and runs(log) == n
+    assert FX.release()["checked"] == new
+    # thimble reapply has Claude fit fix b alone
+    text = FX.reapply_argv()["argv"][1]
+    assert "Hints say who asked" in text and "Bar says read" not in text and "Legend counts untouched" not in text
+
+
+def test_a_dev_update_by_an_older_thimble_that_replayed_every_fix_is_checked_by_the_next_thimble_fixes(world, monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a = on_fix(world)["id"]
+    b = fix_of("a note", "plugin/notes.md", "made-up note\n", "A note")
+    # the person pulls a commit whose new rule the bar's word breaks, though the fix's change applies; 0.10.6's dev
+    # update moved mine to it and replayed each fix, with no check
+    new = commit_in_checkout(world, {"plugin/rule.md": "the bar says coverage\n"}, "made-up work")
+    live, rel = FX.live_dir(), FX.release()
+    order = FX._replay_order(FX.records())
+    FX._unstamp()
+    sh("git", "checkout", "-q", "-B", "mine", new, cwd=live)
+    rel.update(base=new, version=FX._version_at(live, new), checkout=f"main at {new[:7]}", updated=time.time(), told=new)
+    FX.write_json(FX.home() / "release.json", rel)
+    FX.place_release(new)
+    assert put_back_unchecked(order) == ([a, b], [])
+    log = checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/rule.md && grep -qs 'read ' plugin/bar/bar.tsx")
+    capsys.readouterr()
+    rows = FX.list_lines(120)
+    assert capsys.readouterr().err.splitlines() == ["Checking your 2 fixes on thimble main at " + new[:7] + " (a minute or two)...",
+                                                    "They do not pass together: checking them one at a time..."]
+    assert rows[0] == f"Fix {b} fits thimble main at {new[:7]} and is on again."
+    assert f"  fix {a} is off: it does not fit thimble main at {new[:7]}" in rows
+    assert [FX.get(i)["state"] for i in (a, b)] == ["pending", "on"] and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
+    assert FX.carry() is None and FX.release()["checked"] == new
+
+
+def test_an_update_of_this_kernels_own_marks_its_release_checked_and_live_made_with_no_fix_is_too(world, upstream, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    FX.ensure_live()
+    assert FX.release()["checked"] == FX.release()["base"]
+    a = on_fix(world)["id"]
+    new = upstream({"plugin/notes.md": "made-up note\n"}, "v0.10.3")
+    out = FX.update()
+    assert out["back"] == [a] and FX.release()["checked"] == new and FX.listing()["due"] is None
+    # a home an older thimble made, with no fix on its release: carry has nothing to check, and says so once
+    FX.one_off(a)
+    FX.write_json(FX.home() / "release.json", {**FX.release(), "checked": "made-up"})
+    assert FX.listing()["due"] is None and FX.carry() is None and FX.release()["checked"] == new
+
+
+def test_when_every_fix_an_older_update_put_back_goes_off_claude_code_copies_the_plain_release(world, upstream, monkeypatch, tmp_path):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    b = fix_of("say who asked", "plugin/hints.ts", "import { askerOf } from 'made-up-old-api'\n", "Hints say who asked")
+    new = upstream({"plugin/api.ts": "export const gone = 'made-up-old-api'\n"}, "v0.10.3")
+    assert update_as_0_10_6() == [b]
+    checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/api.ts && grep -qs made-up-old-api plugin/hints.ts")
+    before = len(calls(world))
+    out = FX.carry()
+    assert (out["back"], out["aside"], out["reload"]) == ([], [b], True)
+    assert calls(world)[before:] == ["plugin update thimble@thimble"]
+    assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == new and FX.get(b)["state"] == "pending"
