@@ -346,7 +346,7 @@ test("the box e opens while the explainer is written is an explainer's from the 
   await settle()
   const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(nodes) : [n, ...nodes(n.props?.children)])
   const drawn = async () => {
-    const band = await trayBand(s.$, els, 100, 20)
+    const band = await trayBand(s.$, els, 100, { rows: 20, at: 0, id: 'above' })
     return { frame: nodes(band).find(n => n.props?.key === 'tray'), body: nodes(band).find(n => n.props?.key === 'tray-body') }
   }
   const writing = await drawn()
