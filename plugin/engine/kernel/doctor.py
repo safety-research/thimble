@@ -1,5 +1,6 @@
 """thimble doctor: a checklist, for a person in a shell, of what thimble needs. One line per part: ✓ when it works, ×
-when it does not, with the step that fixes it on the line below. A fix that needs no one's choice it makes itself: the
+when it does not, with the step that fixes it on the line below, and – for a part the person chose not to install, with
+the step that adds it. A fix that needs no one's choice it makes itself: the
 card sandbox, when its own files are missing or broken, is installed again, as scripts/install.sh does (setup.mjs
 --repair). It looks for a newer release as thimble update --check does, unless --offline."""
 from __future__ import annotations
@@ -17,7 +18,7 @@ from .store import thimble_home
 NODE_MIN = (22, 18)  # the terminal plugin's, as scripts/install.sh and sandbox/setup.mjs name it
 CLAUDE_CODE_MIN = (2, 1, 307)  # as scripts/install.sh, INSTALL.md and CI name it
 
-Row = tuple[bool, str, str]  # works, what, and the fix ('' when it works)
+Row = tuple[bool | None, str, str]  # works (None: not installed, by choice), what, and the fix or the step that adds it
 
 
 def _run(argv: list[str], timeout: float = 60) -> subprocess.CompletedProcess | None:
@@ -111,7 +112,8 @@ def browser() -> Row:
     found = shutil.which("thimble-browser")
     if found:
         return True, f"the browser workbench: {FX._tilde(found)}", ""
-    return False, "the browser workbench is not installed", "Install it from a thimble checkout: scripts/install.sh"
+    # a terminal-only install (scripts/install.sh --no-browser) is a choice, not a problem
+    return None, "the browser workbench is not installed", "To add it, from a thimble checkout: scripts/install.sh"
 
 
 def on_path() -> Row:
@@ -173,7 +175,7 @@ def cmd(a: Any) -> int:
     c = FX.Paint()
     rows = checks(getattr(a, "offline", False))
     for ok, what, fix in rows:
-        print(f"  {c('green', '✓') if ok else c('bold', '×')} {what}")
+        print(f"  {c('green', '✓') if ok else '–' if ok is None else c('bold', '×')} {what}")
         if not ok:
             print(f"      {c('cmd', fix)}")
-    return 0 if all(ok for ok, _, _ in rows) else 1
+    return 0 if all(ok is not False for ok, _, _ in rows) else 1

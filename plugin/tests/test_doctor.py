@@ -69,13 +69,15 @@ def test_each_problem_the_doctor_finds_says_how_to_fix_it(world, upstream, monke
             "      Install Node 22.18 or later, from your system's packages or https://nodejs.org",
         "  × the sandbox that cards run in does not work: the card runner did not answer in 15 s":
             f"      See its whole message: node {FX._tilde(str(setup))} --probe",
-        "  × the browser workbench is not installed": "      Install it from a thimble checkout: scripts/install.sh",
         f"  × the thimble command ({FX._tilde(str(link))}) is not on PATH":
             "      Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): "
             f"export PATH=\"{link.parent}:$PATH\"",
         "  × 1 of your fixes is set aside since thimble update": "      Bring it back: thimble reapply",
         "  × thimble 0.10.3 is out (you have 0.10.2)": "      Get it: thimble update",
     }
+    # a terminal-only install is a choice, not a problem: a – line, with the step that adds the workbench
+    i = out.index("  – the browser workbench is not installed")
+    assert out[i + 1] == "      To add it, from a thimble checkout: scripts/install.sh"
     assert f"{setup} --json --probe --repair" in world["log"].read_text().splitlines()
     # the fix the sandbox's check gives is the one the doctor says
     fake(bin_ / "node", world["log"], answers("v22.20.0", {
@@ -87,6 +89,18 @@ def test_each_problem_the_doctor_finds_says_how_to_fix_it(world, upstream, monke
                   "bubblewrap (bwrap) not installed")
     assert out[i + 1] == "      Install it: sudo apt-get install bubblewrap"
     assert "  ✓ Node 22.20.0" in out
+
+
+def test_a_terminal_only_install_is_a_choice_not_a_problem(world, monkeypatch, capsys):
+    """Installed without the browser workbench (scripts/install.sh --no-browser), and everything else works: the
+    workbench's line is a – with the step that adds it, and the exit code is 0."""
+    bin_ = doctor_world(world, monkeypatch)
+    fake(bin_ / "thimble", world["log"])
+    assert cli.main(["doctor", "--offline"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    i = out.index("  – the browser workbench is not installed")
+    assert out[i + 1] == "      To add it, from a thimble checkout: scripts/install.sh"
+    assert not [line for line in out if line.startswith("  × ")]
 
 
 def test_the_doctor_says_each_part_that_works(world, monkeypatch, capsys):
