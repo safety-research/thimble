@@ -3,7 +3,7 @@
 // Claude a text copy of what it drew. The cards' keys at an empty prompt reach them through hooks/keys.ts.
 //
 //   tool.ts      the card tool: one call draws a card, or a new version of one, and answers its text copy
-//   fit.ts       a version that does not fit on the screen: held, with a critique for Claude, until one that fits
+//   fit.ts       a version that does not fit on the screen: held until the card check, whose replacement draws
 //   runner.mjs   the runner, one Node process per session in Anthropic's sandbox runtime: each card's view in a context
 //                of its own, its state and handlers
 //   argv.mjs     the command that starts the runner, and the sandbox's rules for it
@@ -26,7 +26,6 @@ import { noteCode, sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
 import { cardOfKey, cardPost, clientFault, firstWaits, frame, framesUnder, noteRun, noteShown, noteViewport, runFolded } from './draw'
 import { cardRef } from '../marks/message.js'
 import { registerCardCopy } from './copy'
-import { releaseHeld } from './fit'
 import { callOf, cardIdOf, metaOf, restoreCards, saveMeta } from './store'
 import { cardCall, registerCardTool } from './tool'
 
@@ -100,11 +99,9 @@ export const registerCards: Register = (on, options) => {
     }
     return yield* next(e)
   })
-  // the turn that drew a card that waits for a version that fits ended: the card draws as it stands (fit.ts)
   on('turn.complete', { turnId: /\S/ }, async ($, e, next) => {
     const r = await next(e)
     if (e.agentId === undefined) runFolded($, true)
-    await releaseHeld($, e.agentId === undefined ? null : String(e.agentId)).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 

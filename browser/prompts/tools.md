@@ -624,46 +624,6 @@ card:{cid}'s body draws {height} px tall at the card's width, and about {limit} 
 
 card:{cid}'s page lays out {width} px wide, and the card gives it {frame} px, so the analyst does not see all of it at the card's width.
 
-## card-held
-
-The analyst does not see card:{cid} yet, since it shows more than the evidence for its answer:
-
-{critique}
-
-{how}
-
-## card-held-again
-
-The analyst still does not see card:{cid}, since it still shows more than the evidence for its answer:
-
-{critique}
-
-{how}
-
-## card-waits
-
-The analyst does not see card:{cid} yet, since it shows more than the evidence for its answer. {how}
-
-## card-revise-code
-
-Make the next version with `edit_card`, as a table, plot, diagram, timeline or code card. A card of another kind, such as a custom card, is a new card: add it with `add_card`, then delete card:{cid} with `delete_card`.
-
-## card-revise-data
-
-Make the next version of this {kind} card with `edit_card`. A card of another kind is a new card: add it with `add_card`, then delete card:{cid} with `delete_card`.
-
-## card-cut
-
-The analyst sees card:{cid} now, as {which}.
-
-## card-fits
-
-The analyst sees card:{cid} now.
-
-## card-critique-failed
-
-The critique of the card could not be written ({why}).
-
 ## kind-mismatch
 
 card:{cid} is a `{kind}` card but its output is {shape}. Change the code or the `kind` with `edit_card`.

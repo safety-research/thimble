@@ -243,8 +243,8 @@ export interface Cell {
   check?: unknown
   /** the changes checks made to the card, oldest first (lib/cardCheck) */
   fixes?: unknown[]
-  /** set while the card does not fit on the analyst's screen and its author makes a version that fits (backend
-   * card_fit.py): the card shows as one that still runs */
+  /** set while the card waits for its measure, or does not fit on the analyst's screen and waits for its check
+   * (backend card_fit.py): the card shows as one that still runs */
   held?: Record<string, unknown> | null
 }
 

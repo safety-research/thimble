@@ -12,7 +12,7 @@
 //                 opens the rest), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
-//                 cardHidden); for a card that waits for a version that fits (cards/fit.ts), its title and the Client's
+//                 cardHidden); for a card that waits for the card check (cards/fit.ts), its title and the Client's
 //                 `drawing…` alone, and no keys
 //   framesUnder   the frames of the cards drawn under an answer
 //   askCard       a request to the runner about a card; a card the runner does not hold is loaded from its copy first
@@ -289,7 +289,7 @@ function cardKeys(m: CardMeta, own: string[]): string[] {
 /** The card a key at an empty prompt goes to: among the cards on screen, the focused card when it lists the key, else
  *  the newest that lists it; null when no card does, and the key is typed. A card is on screen when its frame was
  *  drawn since the plugin loaded and the screen shows it now (noteShown), so a card scrolled out of view, and one a
- *  resumed session no longer shows, takes no keys, nor does one that waits for a version that fits (cards/fit.ts). No
+ *  resumed session no longer shows, takes no keys, nor does one that waits for the card check (cards/fit.ts). No
  *  card gets one of thimble's own keys (cardKeys). */
 export async function keyOwner($: Engine, key: string): Promise<CardMeta | null> {
   const own = ownKeys()
@@ -407,7 +407,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // the line a click or a key selected (`▸`, the card guide's marker): `ask` asks about that part of
   // the card, so a click on a bar and then on those words start a thread about the bar
   const sel = fault || meta.held ? null : selectedLine(current?.tree, width)
-  // a card that waits for a version that fits has nothing to ask about or make an artifact of yet
+  // a card that waits for the card check has nothing to ask about or make an artifact of yet
   const ask = meta.held ? null : await cardAsk($, meta.id, meta.title, sel?.text ?? '')
   // the title asks about the whole card when clicked, its words underlined under the pointer
   const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
@@ -671,7 +671,7 @@ function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: The
 /** A Client's props in a frame `room` columns wide: the drawing laid out at that width, or none and the drawing it
  *  needs; `cap`, the rows it shows of a drawing taller than CARD_ROWS whose rest the person has not opened (0: all). */
 function propsAt(meta: CardMeta, t: CardTree | null | undefined, room: number, theme: Theme): Any {
-  // a card that waits for a version that fits: the Client draws `drawing…`, and asks for no drawing
+  // a card that waits for the card check: the Client draws `drawing…`, and asks for no drawing
   if (meta.held) return { tree: null, width: room, need: '', tint: citeTint('verified', theme), accent: accent(), theme, cap: 0 }
   const d = drawingAt(t, meta.gen, room, theme)
   const cap = rowsMore(meta, d?.tree, room) ? CARD_ROWS : 0

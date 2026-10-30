@@ -15,9 +15,9 @@
 //      width a side pane leaves it when a row that fits at the card's width wraps there, and the copy after each
 //      action. Nothing in it asks for a new version: notes come only for what is wrong (a key the card cannot get, a
 //      row a side pane breaks, a card taller than its frame shows, draw.ts CARD_ROWS, or than the screen)
-//   6. a version that does not fit (more rows than its frame shows, or lines cut at the card's edge) waits for one that
-//      does (fit.ts): its frame draws `drawing…`, and the answer carries a critique of it. After MAX_TRIES new versions
-//      that do not fit, the one that comes closest draws, with `+N rows` under its first rows
+//   6. a version that does not fit (more rows than its frame shows, or lines cut at the card's edge) is held: its frame
+//      draws `drawing…` until the card check (fit.ts) has read it, and the check's replacement draws in its place. The
+//      answer says nothing of that, and gives no note on its size
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
 // card in the card's place, under the call that first drew it or under the answer v was pressed on (its view whole, or
@@ -28,7 +28,7 @@
 // which it reads in its copy of the conversation) draws a new card of its own from that card's view and rows.
 import type { EngineInterface } from 'claude-code'
 
-import { failCleared } from '../bar/notice'
+import { failCleared, failNotice } from '../bar/notice'
 import { sinceLast } from '../core/answers'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
@@ -43,8 +43,8 @@ import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask, sandboxNotice } from './ask'
 import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidth, cardWidthBesidePane, rowsCut, rowsWord, screenRows } from './draw'
-import { MAX_TRIES, critique, noteHeld, sizeOf } from './fit'
-import { type CardCall, type CardMeta, type HeldVersion, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
+import { checkCard, fits, shown } from './fit'
+import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -276,75 +276,42 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // once main's turn that drew it ended), main's version stands at its own call
   const stays = meta.version > 0 && (!!fork || (await canRedraw($, meta.turn)))
   const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn, inRow: meta.inRow ?? null } : { toolUseId, anchorRow, turn: fork ? meta.turn : await mainTurn($), inRow: null }
-  // the version as the runner laid it out: one that does not fit waits for a version that does (fit.ts), and after
-  // MAX_TRIES new versions that do not fit, the one that comes closest draws
-  const size = sizeOf(r.lines.length, Array.isArray(r.cut) ? r.cut.length : 0)
-  const was = meta.held ?? null
-  const versions: HeldVersion[] = size.fits ? [] : [...(was?.versions ?? []), { version, excess: size.excess, title, keys, read: String(r.summary.read), columns: r.summary.columns, file }]
-  const hold = !size.fits && versions.length - 1 < MAX_TRIES
-  const closest = !size.fits && !hold ? versions.reduce((a, b) => (b.excess <= a.excess ? b : a)) : null
-  // the version that comes closest is an earlier one: it draws again as a version of its own, after this one
-  const back = closest && closest.version !== version ? await drawAgain($, id, closest, version + 1, width) : null
-  const shown = back ? back.r : r
-  const at = back ? { version: version + 1, title: closest!.title, keys: closest!.keys, read: closest!.read, columns: closest!.columns, file: closest!.file } : { version, title, keys, read: String(r.summary.read), columns: r.summary.columns, file }
+  // a version that does not fit waits for the card check, which draws its replacement in its place (fit.ts)
+  const hold = !fits(r.lines.length, Array.isArray(r.cut) ? r.cut.length : 0)
   const next: CardMeta = {
-    ...meta, ...home, version: at.version, last: at.version, lastFile: at.file, title: at.title, keys: at.keys, read: at.read, columns: at.columns, file: at.file,
+    ...meta, ...home, version, last: version, lastFile: file, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
     gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
-    held: hold ? { since: was?.since ?? Date.now(), versions } : null,
+    held: hold ? { since: Date.now() } : null,
   }
-  await remember(next, { version: at.version, title: at.title, file: at.file, read: at.read })
-  await noteHeld($, id, hold)
-  await setTree($, id, { gen: next.gen, width, tree: shown.tree, seq: Number(shown.seq) || 0 })
+  await remember(next, { version, title, file, read: next.read })
+  await setTree($, id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
   await setFocus($, id)
   await failCleared($, `card:${id}`)
   await failCleared($, 'sandbox')
   const drawnMs = Date.now() - t0
-  await saveState($, id, at.version, shown.state)
-  // the folder of the version before goes, but a held version's stays while the card waits: it may come closest
-  const gone = hold ? [] : [...(was ? was.versions.map(v => v.version) : meta.version > 0 ? [meta.version] : []), ...(back ? [version] : [])]
-  if (hold && meta.version > 0 && !was) gone.push(meta.version)
-  for (const v of gone.filter(v => v !== at.version)) void $.process.run(['rm', '-rf', '--', await versionDir($, id, v)]).catch(() => undefined)
+  await saveState($, id, version, r.state)
+  if (meta.version > 0) void $.process.run(['rm', '-rf', '--', await versionDir($, id, meta.version)]).catch(() => undefined)
 
-  const placed = stays
-    ? `Version ${at.version} of “${at.title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? placeWords(next.anchorRow) : 'under the call that first drew the card'}.`
-    : meta.version > 0
-      ? `Version ${at.version} of “${at.title}” is drawn where this call stands, since the terminal cannot draw the earlier place again; the earlier call shows one line that points here.`
-      : `“${at.title}” is drawn ${next.anchorRow ? placeWords(next.anchorRow) : 'where this call stands, above the words you write after it'}. Its id is "${id}".`
   const out: string[] = [
     ...(borrowed ? [`Card "${borrowed.id}" is ${borrowed.anchorRow ? 'a card under another answer' : "the main conversation's card"}, so this call did not change it: it drew a new card of your own from that card's view and rows.`] : []),
+    stays
+      ? `Version ${version} of “${title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? placeWords(next.anchorRow) : 'under the call that first drew the card'}.`
+      : meta.version > 0
+        ? `Version ${version} of “${title}” is drawn where this call stands, since the terminal cannot draw the earlier place again; the earlier call shows one line that points here.`
+        : `“${title}” is drawn ${next.anchorRow ? placeWords(next.anchorRow) : 'where this call stands, above the words you write after it'}. Its id is "${id}".`,
+    `It read ${r.summary.read} from ${baseName(file)}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
-  let critiqueMs = 0
-  if (hold) {
-    // the request the version answers: a thread's fork answers the question asked in its thread, main its last prompt
-    const question = threadQuestion(input.agentId) ?? (await sinceLast($).catch(() => null))?.prompt?.text ?? ''
-    const t1 = Date.now()
-    const c = await critique($, { title, question, lines: r.lines, size, width })
-    critiqueMs = Date.now() - t1
-    const said = c.text || `The critique of the card could not be written (${c.why}).`
-    // what Claude needs for the next version: what the card shows beyond its question, by the guidance's purpose, and
-    // no measure, which came back in the replies as the reason for a card the analyst sees
-    out.push(versions.length === 1
-      ? `The analyst does not see “${title}” yet, since it shows more than the evidence for its answer. Its id is "${id}".`
-      : `The analyst still does not see “${title}”, since it still shows more than the evidence for its answer:`,
-    '', said, '', 'Draw the next version with its `id` and `edits`, and it draws in its place.')
-  } else {
-    out.push(placed)
-    // the version that comes closest, or this one when the earlier one did not draw again: which one the analyst sees
-    if (closest) out.push(`The analyst sees “${at.title}” now, as ${back ? `your ${ORDINALS[Math.min(versions.indexOf(closest), ORDINALS.length - 1)]} version` : 'this version'}.`)
-    else if (was) out.push('The analyst sees it now.')
-  }
-  out.push(`It read ${shown.summary.read} from ${baseName(at.file)}${shown.summary.columns.length ? `, with the columns ${shown.summary.columns.join(', ')}` : ''}.`)
-  if (shown.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(shown.summary.other as string[]).join(', ')}, and props.rows its "rows" list${shown.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)
-  if (shown.summary.first) out.push(`The first row: ${shown.summary.first}`)
-  for (const note of (shown.notes ?? []) as string[]) out.push(`Note: ${note}.`)
+  if (r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)
+  if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
+  for (const note of (r.notes ?? []) as string[]) out.push(`Note: ${note}.`)
   const own = asked.filter(k => ownKeys().includes(k))
   if (own.length) out.push(`Note on the view: ${own.join(' ')} ${own.length > 1 ? 'are' : 'is'} thimble's own, so the card does not get ${own.length > 1 ? 'them' : 'it'}; give the card other keys. The analyst has not seen ${own.length > 1 ? 'these keys' : 'this key'} on the card.`)
   const other = asked.filter(k => !/^\p{L}$/u.test(k))
   if (other.length) out.push(`Note on the view: a card takes letters only, so it does not get ${other.join(' ')}. The analyst has not seen ${other.length > 1 ? 'these keys' : 'this key'} on the card.`)
-  out.push('', `What it draws, ${width} columns wide:`, ...copyText(shown.lines, shown.cut, width))
-  out.push(...besidePane(shown.beside, width))
+  out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
+  out.push(...besidePane(r.beside, width))
 
-  let tallest = shown.lines.length
+  let tallest = r.lines.length
   const actions = Array.isArray(input.actions) ? input.actions : []
   if (actions.length) {
     const a = await askCard($, next, 'act', { actions, width })
@@ -358,34 +325,31 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
       for (const c of a.copies as Any[]) if (!c.error) tallest = Math.max(tallest, c.lines.length)
     } else out.push('', `The actions did not run: ${a?.error ?? 'no answer'}`)
   }
-  // a version that waits, or that comes closest, is said above; this says what a key or a click makes taller
+  // the size of a version the check reads is the check's, not Claude's: the analyst sees the check's replacement
   const screen = screenRows()
-  if (!hold && !closest) {
-    if (rowsCut(tallest)) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(tallest))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
-    else if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
-  }
-  void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0, ...(size.fits ? {} : { lines: r.lines.length, cut: size.cut, held: hold, tries: versions.length - 1, critique_ms: critiqueMs, ...(closest ? { shown: at.version } : {}) }), ...(was && size.fits ? { fits_after_ms: Date.now() - was.since } : {}) })
+  if (hold) void checkHeld($, { id, version, title, question: threadQuestion(input.agentId) ?? (await sinceLast($).catch(() => null))?.prompt?.text ?? '', columns: r.summary.columns, first: String(r.summary.first ?? ''), copy: copyText(r.lines, r.cut, width), width, view: view.text!, rows: `${dir}/rows.json` })
+  else if (rowsCut(tallest)) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(tallest))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
+  else if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
+  void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0, ...(hold ? { held: true } : {}) })
   return { result: out.join('\n') }
 }
 
-/** The versions of a card, in the order its author made them. */
-const ORDINALS = ['first', 'second', 'third', 'fourth']
-
-/** An earlier version of card `id` drawn again as version `to`: its view and rows copied into that version's folder and
- *  loaded in the runner. The runner's answer, or null when it did not draw (the newest version then stays). */
-async function drawAgain($: Engine, id: string, from: HeldVersion, to: number, width: number): Promise<{ r: Any } | null> {
-  const src = await versionDir($, id, from.version)
-  const dir = await versionDir($, id, to)
+/** The card check of a version that does not fit (fit.ts), after the call's answer: its replacement drawn in the card's
+ *  place as a version of thimble's (personVersion), and the card shown, as the replacement or as it stands, unless
+ *  Claude drew a newer version meanwhile, which waits for its own check. A check whose call failed is told on the
+ *  failure line, as the workbench tells a check that failed by itself. Never throws. */
+async function checkHeld($: Engine, o: { id: string; version: number; title: string; question: string; columns: string[]; first: string; copy: string[]; width: number; view: string; rows: string }): Promise<void> {
+  let at = o.version
   try {
-    const view = String(await $.fs.read(`${src}/view.js`))
-    await $.fs.write(`${dir}/view.js`, view)
-    const copied = await $.process.run(['cp', '--', `${src}/rows.json`, `${dir}/rows.json`])
-    if (copied.exitCode !== 0) return null
-    const r = await ask($, 'load', { id, version: to, title: from.title, view, rows: `${dir}/rows.json`, state: null, width, beside: 0 })
-    return r?.ok ? { r } : null
-  } catch {
-    return null
-  }
+    const got = await checkCard($, { ...o, guide: await cardGuide($) })
+    if (got.why) failNotice($, `The card check of the card “${oneLine(o.title, 80)}” failed: ${got.why}.`, `card:${o.id}`)
+    const meta = await metaOf($, o.id)
+    if ((got.view || got.title) && meta?.held && meta.version === o.version) {
+      const made = await personVersion($, { id: o.id, title: got.title || meta.title, view: got.view || o.view, rows: o.rows })
+      if (made.error === undefined) at = made.version
+    }
+  } catch { /* the card shows as it stands */ }
+  await shown($, o.id, at).catch(() => undefined)
 }
 
 /** A call with a card's `id` alone: the card main drew, as it is (its version, rows, view and the person's state), is
@@ -402,16 +366,15 @@ async function placeCard($: Engine, meta: CardMeta, toolUseId: string, t0: numbe
   await saveMeta($, next)
   await setFocus($, meta.id)
   void record($, { kind: 'card', feature: 'main', card: meta.id, version: meta.version, placed: true, ms: Date.now() - t0 })
-  // a card that waits for a version that fits (fit.ts) stands here too, and the answer says again that it waits
-  if (meta.held) return { result: `“${meta.title}” stands here now, where this call stands. Its earlier place shows one line that points here. The analyst does not see it yet, since it shows more than the evidence for its answer. Draw the next version with its \`id\` and \`edits\`, and it draws in its place.` }
   return { result: `“${meta.title}” (version ${meta.version}) is drawn here now, where this call stands, above the words you write after it. Its earlier place shows one line that points here.` }
 }
 
 /**
  * A version of a card that the person's action makes, not a call of Claude's: a squeeze's version of one of the answer's
- * cards, or a card it adds (squeeze/cards.ts). The view runs over a copy of the rows file `rows`, in the runner as a
- * call's does, and draws in the card's place; a new card (`id` not drawn yet) draws under the answer `anchorRow`, as
- * v's do. Answers the version drawn, or why it did not draw (the version on screen stays).
+ * cards, or a card it adds (squeeze/cards.ts), and the card check's replacement of a version that does not fit
+ * (checkHeld). The view runs over a copy of the rows file `rows`, in the runner as a call's does, and draws in the
+ * card's place; a new card (`id` not drawn yet) draws under the answer `anchorRow`, as v's do. Answers the version
+ * drawn, or why it did not draw (the version on screen stays).
  */
 export async function personVersion($: Engine, o: { id: string; title: string; view: string; rows: string; anchorRow?: string | null }): Promise<{ version: number; error?: undefined } | { error: string }> {
   if (!isCardId(o.id)) return { error: `"${oneLine(o.id, 40)}" is no card's id` }

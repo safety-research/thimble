@@ -362,7 +362,7 @@ export async function threadCardAnchor($: Engine, agentId: string | undefined, c
 }
 
 /** The question a thread's fork answers, the person's last in its thread, with what they asked it about: what the
- *  critique of a card the fork drew reads as the request (cards/tool.ts), since the fork does not answer main's last
+ *  card check of a card the fork drew reads as the request (cards/tool.ts), since the fork does not answer main's last
  *  prompt. null when the agent is no thread's. */
 export function threadQuestion(agentId: string | undefined): string | null {
   if (!agentId || forkOf(agentId)?.kind !== 'thread') return null

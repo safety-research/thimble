@@ -14,7 +14,7 @@ Assess the card against these criteria. The graphic is the card's content as the
 - Does the takeaway actually answer the question?
 - Is the takeaway related to the graphic?
 
-Judge the card by what the analyst asked for in the work that led to it, which comes with the card, and when the question and the graphic disagree, the replacement follows their request. The analyst sees a card only when it fits on their screen, so a look they asked for is not poor formatting when it fits there. When they asked for more than fits, such as a table of every field of every record, one compact form of all the records, with the ones that answer marked, meets their request. thimble keeps a replacement only when it fits there too. A question that asks two separate things, such as how many X there are and which Y did the most, is not atomic even when the analyst asked both at once, since one graphic and one takeaway answer one question clearly, so the replacement keeps the part its graphic answers.
+Judge the card by what the analyst asked for in the work that led to it, which comes with the card. A look they asked for, such as a table wider than the card, is not poor formatting, and when the question and the graphic disagree, the replacement follows their request. A question that asks two separate things, such as how many X there are and which Y did the most, is not atomic even when the analyst asked both at once, since one graphic and one takeaway answer one question clearly, so the replacement keeps the part its graphic answers.
 
 Then output the card that will replace it in place, with its question, its code and its takeaway. Change what fails a criterion and give back the rest word for word, since the analyst gains nothing from a rewrite of a part that works and loses the author's words. The code is the card's whole code and runs in place of the old, with a chart's colors left to thimble's theme. A card without code, such as an example or a note, can change only its question and its takeaway, so give its code empty. In a takeaway, mark each claim the card shows as `[words](#)`, as in the chat, with the whole quantity inside the mark: `[31 of the 40](#) runs`. thimble checks it against the card's output. A rewritten takeaway keeps every link that is right.
 
@@ -54,11 +54,19 @@ The analyst reshaped this card in its graphic and pressed Keep, which set {{kept
 
 ## too-large
 
-Your replacement of this card did not fit on the analyst's screen, so thimble did not keep it. What it showed beyond the evidence for its answer:
+The card does not fit on the analyst's screen, so the analyst sees it only after this check, as your replacement. Assess it against one more criterion, the sixth:
 
-{{critique}}
+- Does the graphic show only what the question needs, in a form that fits on the screen?
 
-Give the replacement card again. Fix what fails a criterion in a form that fits on the screen, or give back the card as it is.
+This holds for a look the analyst asked for too: when they asked for more than fits, such as a table of every field of every record, one compact form of all the records, with the ones that answer marked, meets their request. The card's author works from the card guidance and writes a card's code as the toolkit says, and so does its replacement.
+
+The card guidance
+
+{{guidance}}
+
+The toolkit
+
+{{toolkit}}
 
 ## critique
 

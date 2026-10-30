@@ -17,8 +17,8 @@ export const TEXTS = {
     reader: 'cards/tool.ts',
     use: 'the description of the card tool',
   },
-  'card-critique': {
-    about: "what a card that does not fit on the analyst's screen shows beyond what its answer rests on, held to the guidance's Cards section",
+  'card-check': {
+    about: "the card check of a card that does not fit on the analyst's screen: the view and title that replace it, by the card guide and the guidance's Cards section",
     reader: 'cards/fit.ts',
     use: 'one model call when a version the card tool drew does not fit, before the analyst sees it',
   },

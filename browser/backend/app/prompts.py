@@ -32,17 +32,16 @@ PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR") or REPO_ROOT / "prompts
 
 # The files a model call sends as they are rendered: main (the analyst session's system-prompt append), shared (rules
 # main's and the orientation's prompts include), tools, dev, labels (the label classifier's system prompt), context
-# (what the context engine renders for writers, checks and critiques), card-check (card_check.py's calls), card-fit (the
-# critique of a card that does not fit on the analyst's screen, card_fit.py), view-review
+# (what the context engine renders for writers, checks and critiques), card-check (card_check.py's calls), view-review
 # (the view reviewer's registered prompt, its `review` section), dev-view-review (a review run's prompt), dev-view-task
 # (a view build's prompt), dev-view-repair (what a repair's builder gets besides it), dev-view-change (a change to a
 # view, sent to its builder), dev-view-message (a message about a built view from its thread, sent to its builder),
 # dev-ticket-task (a code ticket's agent's prompt), file-viewer (the proposal of a viewer for a file type,
 # views.suggest), view-fit (whether an extension's view fits a corpus, view_fit.py) and thimble-fix (what main reads of
 # the person's /thimble-fix, fixes.ask).
-PROMPT_NAMES = ("main", "shared", "tools", "dev", "labels", "context", "card-check", "card-fit", "view-review",
-                "dev-view-review", "dev-view-task", "dev-view-repair", "dev-view-change", "dev-view-message",
-                "dev-ticket-task", "file-viewer", "view-fit", "thimble-fix")
+PROMPT_NAMES = ("main", "shared", "tools", "dev", "labels", "context", "card-check", "view-review", "dev-view-review",
+                "dev-view-task", "dev-view-repair", "dev-view-change", "dev-view-message", "dev-ticket-task",
+                "file-viewer", "view-fit", "thimble-fix")
 # Agent definitions, in a plugin agent's form, that Claude Code gets with --agents instead of from plugin/agents/, where
 # main would also see them: the writer and the report check.
 AGENT_FILES = ("writer", "check")
