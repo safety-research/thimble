@@ -38,13 +38,18 @@
 // under the evidence is + (and -); a click on the citation's words, in the tray's title as in the
 // reply, closes it, as a second click on the open mark in the reply does.
 //
-// The tray takes only the rows the band above the prompt has over the bar (bar/register.ts), so the bar stays on
-// screen: a body taller than that shows in a window of those rows, which the wheel over the band scrolls, over a dim
-// row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click
-// that moves the window a page, as d and u do. A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks
-// about it and 0 gives the keys back. An open tray does not change what the next prompt asks: a question about the
-// mark goes to a side thread (a). The tray closes when the person sends a prompt. What the person opens reaches main
-// through core/engaged.ts.
+// The tray stands in the band above the prompt, over the bar (bar/register.ts). Claude Code shows the band whole while
+// it has at most its rows, and a taller band in a window of its rows less one, under which its own row counts the rest;
+// only such a band takes the wheel, which Claude Code hands to the band's hooks first (ui.scroll). A tray taller than
+// the rows over the bar takes that window, and the bar follows below it; a body taller than the window's rows shows in a
+// window of its own, over a dim row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N
+// lines above`), each a click that moves it a page, as d and u do. The wheel moves the body's window, and past its
+// last line the band's own, which brings the bar into view (back up, the band's own first).
+//
+// A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. An open tray
+// does not change what the next prompt asks: a question about the mark goes to a side thread (a). The tray closes when
+// the person sends a prompt, and when they scroll the transcript under it (rowShown), so it never stands over what they
+// read; ] then opens it again as it stood. What the person opens reaches main through core/engaged.ts.
 //
 //   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks the person opened:
 //   `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a heads-up)
@@ -112,8 +117,15 @@ const quietly = (p: Promise<unknown> | unknown) => Promise.resolve(p).catch(() =
 
 export async function trayNow($: Engine): Promise<Tray> {
   const t = (await $.state.get(TRAY)).value as Tray | undefined
-  return t && Array.isArray(t.stack) && t.stack.length ? t : null
+  const tray = t && Array.isArray(t.stack) && t.stack.length ? t : null
+  // closed by the person's scroll of the transcript, until the tray is next written (scrolledAway)
+  return tray && scrolledAway && JSON.stringify(tray) === JSON.stringify(scrolledAway) ? null : tray
 }
+
+/** The tray as it stood when the person scrolled the transcript under it (rowShown), which closed it: ] opens it
+ *  again. A drawing writes no state (Claude Code keeps drawing pure), so until the tray is next written, what thimble
+ *  draws and the keys read take it as closed (trayNow, kept). */
+let scrolledAway: Tray = null
 
 async function standNow($: Engine): Promise<Stand> {
   return ((await $.state.get(STAND)).value ?? null) as Stand
@@ -131,10 +143,16 @@ async function keptNow($: Engine): Promise<{ tray: Tray; stand: Stand }> {
 
 async function writeTray($: Engine, tray: Tray): Promise<void> {
   const next = tray && Array.isArray(tray.stack) && tray.stack.length ? tray : null
+  scrolledAway = null
   await $.state.set(TRAY, next as never)
   kept = { ...(await keptNow($)), tray: next }
-  // what it shows now starts at its top (fitBody)
+  // what it shows now starts at its top (fitBody), and so does the band's own window, which the wheel moved down to the
+  // bar below the tray (registerTray)
   scrolled = 0
+  if (bandWindow.at > 0 && bandWindow.id) {
+    bandWindow = { ...bandWindow, at: 0 }
+    void quietly($.ui.scroll({ to: 'start', in: bandWindow.id }))
+  }
 }
 
 async function writeStand($: Engine, stand: Stand): Promise<void> {
@@ -157,6 +175,12 @@ async function setTray($: Engine, tray: Tray): Promise<void> {
 
 export async function closeTray($: Engine): Promise<void> {
   await setTray($, null)
+}
+
+/** Close the tray when it stands on this row, or stood there when a scroll closed it (] would open it again). */
+export async function closeOnRow($: Engine, row: string): Promise<void> {
+  const tray = scrolledAway ?? (await trayNow($))
+  if (tray?.stack[0]?.row === row) await closeTray($)
 }
 
 /** The tray gives way to what takes the keys from it (the squeeze chips, s): it closes, and a card ] reached gives its
@@ -419,10 +443,57 @@ async function linksOf($: Engine, f: Frame, raw: string): Promise<{ text: string
 // ------------------------------------------------------------------------------------------------ what the person does
 
 /** Bring a mark into view where the chat draws it (a press on the bar's ] may open one in a reply above the screen): a
- *  card by the row it is drawn in (cards/draw.ts revealCard). Claude Code moves the chat for a press, not for a key. */
+ *  card by the row it is drawn in (cards/draw.ts revealCard). Claude Code moves the chat for a press, not for a key. The
+ *  chat moving so is no scroll of the person's (rowShown). */
 async function reveal($: Engine, at: { row: string; card?: string }): Promise<void> {
+  shownGen++
   if (at.card) await quietly(revealCard($, at.card))
   else await quietly($.ui.scroll({ to: { requestId: at.row }, block: 'nearest' }))
+}
+
+/** The rows of each answer's text row the transcript's viewport showed when its drawing was last asked (its
+ *  `onScreen`), and what `shownGen` stood at then; at most SHOWN_KEEP rows, the newest drawn. */
+const shownRows = new Map<string, { rows: string; gen: number }>()
+const SHOWN_KEEP = 500
+/** The band above the prompt's rows as last drawn, and a count that goes up when they change, or when thimble itself
+ *  moves the chat (reveal): what moves the transcript's rows on the screen other than the person's scroll. */
+let bandRows = -1
+let shownGen = 0
+
+/** The band above the prompt drew `rows` rows (bar/register.ts). */
+export function bandDrawn(rows: number): void {
+  if (rows === bandRows) return
+  bandRows = rows
+  shownGen++
+}
+
+/** An answer's text row was drawn showing the rows `onScreen` of itself in the transcript's viewport (null: none;
+ *  undefined: the surface does not say). A row that now shows other rows of itself, at the height it had, while the band
+ *  above the prompt kept its rows and thimble did not move the chat, moved because the person scrolled the transcript:
+ *  an open tray closes then, so it no longer stands over what the person reads; ] opens it again as it stood, and a
+ *  click on a mark opens that one. A drawing writes no state, so the tray closes in what thimble draws and reads
+ *  (scrolledAway) until it is next written. */
+export function rowShown($: Engine, row: string, onScreen: { first: number; last: number; of: number } | null | undefined): void {
+  if (onScreen === undefined || !row) return
+  const rows = onScreen ? `${onScreen.first}-${onScreen.last}/${onScreen.of}` : 'off'
+  const was = shownRows.get(row)
+  // the same rows again keep what the count stood at when they first showed: a drawing asked before the band changed
+  // its rows can be told after it
+  const now = was && was.rows === rows ? was : { rows, gen: shownGen }
+  shownRows.delete(row)
+  shownRows.set(row, now)
+  // the rows drawn last are kept, the oldest go
+  for (const k of shownRows.keys()) { if (shownRows.size <= SHOWN_KEEP) break; shownRows.delete(k) }
+  if (!was || was === now || was.gen !== shownGen) return
+  // the row itself grew or shrank: no scroll
+  const of = (r: string) => r.split('/')[1]
+  if (was.rows !== 'off' && rows !== 'off' && of(was.rows) !== of(rows)) return
+  if (!kept?.tray) return
+  scrolledAway = kept.tray
+  kept = { ...kept, tray: null }
+  windowed = null
+  paging = { down: null, up: null }
+  $.clock.after(0, () => $.ui.invalidate('ui.render'))
 }
 
 /** Open the tray on a mark (a press on it, ] and [): its answer becomes the one the keys act on. */
@@ -483,8 +554,18 @@ async function standOn($: Engine, row: string, card: string): Promise<void> {
 
 /** ] and [: the next mark or card in reading order, and the one before. From rest, the answer the keys act on (else
  *  the newest answer's): ] the first of its marks the person has not opened, else its first mark (restNext), [ its last
- *  stop (restStop). At the newest reply's last stop, ] stays. */
+ *  stop (restStop); ] after the person's scroll of the transcript closed the tray, the tray again as it stood. At the
+ *  newest reply's last stop, ] stays. */
 export async function stepMark($: Engine, dir: number): Promise<void> {
+  const away = scrolledAway
+  if (dir > 0 && away) {
+    await setTray($, away)
+    const f = top(away) as Frame | null
+    const t = f ? await turnOfRow($, f.row) : null
+    if (t?.answer) await pickAnswer($, t.answer)
+    if (f) await reveal($, f)
+    return
+  }
   const { list, at } = await stepPlace($)
   let next: Stop | null = null
   if (at >= 0) { next = stepFrom(list, at, dir) as Stop | null; if (!next) return }
@@ -635,7 +716,9 @@ async function restItem($: Engine): Promise<BarItem[]> {
   if (!marks.length) return []
   const seen = await seenNow($)
   const fresh = marks.some(p => !seen.has(seenRef(p)))
-  const next = restNext(marks, seen)
+  // the mark the person scrolled the transcript away from, which ] opens again (stepMark)
+  const away = scrolledAway ? [top(scrolledAway), base(scrolledAway)].map(f => indexOf(marks, f)).find(i => i >= 0) ?? -1 : -1
+  const next = away >= 0 ? marks[away]! : restNext(marks, seen)
   const w = restWords(next, marks.indexOf(next!) === 0)
   await themeNow($)
   return [{ id: 'tray-next', key: ']', words: w.words, shorter: w.shorter, ...markedAs(w.what, w.kind), ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
@@ -870,6 +953,14 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
 let scrolled = 0
 let windowed: { over: number; rows: number } | null = null
 
+/** The window Claude Code shows the band above the prompt in once the band is taller than its rows (bar/register.ts):
+ *  its rows, the most the tray takes (the bar then follows below it); where it stands over the band as Claude Code last
+ *  drew the band; and the band's requestId, which `$.ui.scroll` names it by. */
+export type BandRoom = { rows: number; at: number; id: string }
+
+/** Where the band's window stands, as last drawn or moved (registerTray's ui.scroll hook), and the band's requestId. */
+let bandWindow: { at: number; id: string } = { at: 0, id: '' }
+
 /** The keys that move the window a page down and up, each while no one before the tray takes it (the fix line, fix/
  *  line.ts) and no card on screen lists it (cards/draw.ts keyOwner): the tray takes a key before a card does. */
 const PAGE_KEYS = { down: 'd', up: 'u' } as const
@@ -888,10 +979,10 @@ const pageOf = (w: { rows: number }) => Math.max(1, w.rows - 1)
 /** The tray's body in at most `fit` rows: whole when it fits; else a window of `fit` − 1 of its rows, and under it a dim
  *  row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click that
  *  moves the window a page, after the key that does the same when it is free (`keys`); in a row too narrow for both,
- *  `↓ N more` and `↑ N above`. Claude Code scrolls the band only when its whole tree is taller than its rows, so the
- *  wheel over the band moves the window too (registerTray's ui.scroll hook). With fewer than two rows for the body, it
- *  shows whole, and the band scrolls as Claude Code scrolls it. `words`: the words of the row under the window, as
- *  drawn, each part's with its key and without. */
+ *  `↓ N more` and `↑ N above`. Such a tray fills the band's window and the bar follows below it, so the band is taller
+ *  than its rows and Claude Code hands its wheel over: the wheel moves the window too (registerTray's ui.scroll hook).
+ *  With fewer than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls it. `words`: the
+ *  words of the row under the window, as drawn, each part's with its key and without. */
 function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }): { rows: Any[]; words: string[] } {
   const { Box, Button, Text } = els
   const tall = treeRows(body, w)
@@ -928,12 +1019,13 @@ function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys:
 }
 
 /** The tray's body `by` rows further on in its window (back toward its top when negative), within its ends; false when
- *  the body has no window. */
+ *  it did not move: the body has no window, or the window stands at that end already. */
 function scrollTray($: Engine, by: number): boolean {
   if (!windowed) return false
   const was = scrolled
   scrolled = Math.max(0, Math.min(windowed.over, scrolled + by))
-  if (scrolled !== was) $.ui.invalidate('ui.render')
+  if (scrolled === was) return false
+  $.ui.invalidate('ui.render')
   return true
 }
 
@@ -952,9 +1044,10 @@ function pageKey($: Engine, key: string): Any | null {
 
 /** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, drawn and clicked as in
  *  the reply) on top, a citation's status and its keys at its right (trayKeys), then the mark's card, its rows starting where the
- *  title starts. `room`: the rows it may take, so the bar under it stays on screen (0: no limit); a taller body shows
- *  in a window of the rows left (fitBody). */
-export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
+ *  title starts. `room`: the window Claude Code shows the band in (null: no limit), whose rows the tray takes at most;
+ *  a taller body shows in a window of the rows left (fitBody). */
+export async function trayBand($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
+  if (room) bandWindow = { at: Math.max(0, room.at), id: room.id }
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) { windowed = null; paging = { down: null, up: null }; controlWords('tray', []); return [] }
@@ -1034,9 +1127,9 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const head = oneRow
     ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
     : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
-  // of the rows the tray may take, the frame's two borders and its head take theirs, and the body what is left; a body
+  // of the band's window, the frame's two borders and its head take their rows, and the body what is left; a body
   // taller than that pages with d and u while they are free
-  const fit = room > 0 ? room - 2 - treeRows(head, inner) : Infinity
+  const fit = room ? room.rows - 2 - treeRows(head, inner) : Infinity
   const keysFree = fit >= 2 && treeRows(body, inner) > fit ? await freePageKeys($) : { down: null, up: null }
   const shown = fitBody($, els, body, inner, fit, keysFree)
   // the words of its keys and of the row under its window, which a click on one leaves selected: no answer's words
@@ -1059,7 +1152,7 @@ export const registerTray: Register = on => {
   // side thread (a)
   on('prompt.submit', { origin: { kind: /^(composer|bridge)$/ } }, async ($, e, next) => {
     try {
-      if (!e.command && !e.isMeta && (await trayNow($))) await writeTray($, null)
+      if (!e.command && !e.isMeta && (scrolledAway || (await trayNow($)))) await writeTray($, null)
     } catch {
       // the tray stays open
     }
@@ -1080,10 +1173,14 @@ export const registerTray: Register = on => {
     }
   }).catch(($, e, next) => next(e))
 
-  // the wheel over the band above the prompt: the tray's body moves in its window while it is taller than its rows
-  // (fitBody); else the band scrolls as Claude Code scrolls it
+  // the person's wheel (or scroll keys) over the band above the prompt, which Claude Code hands over while the band is
+  // taller than its rows: going down, the tray's body moves in its window (fitBody) until its last line shows, then the
+  // band's own window, down to the bar; going back up, the band's own first, then the body's
   on('ui.scroll', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (scrollTray($, Number(e.by) || 0)) return {}
-    return next(e)
+    const by = Number(e.by) || 0
+    if (e.origin?.kind === 'person' && !(by < 0 && bandWindow.at > 0) && scrollTray($, by)) return {}
+    const r = await next(e)
+    if (!r?.deny) bandWindow = { ...bandWindow, at: Math.max(0, Number(e.offset) || 0) }
+    return r
   }).catch(($, e, next) => next(e))
 }

@@ -319,7 +319,7 @@ test('e opens the tray at once on the explainer being written, its words as its 
     await settle()
     // the call has not answered: the tray stands on the words, its title, with nothing else to read yet
     expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain' })
-    const band = textOf(await trayBand(s.$, els, 100, 20))
+    const band = textOf(await trayBand(s.$, els, 100, { rows: 20, at: 0, id: 'above' }))
     expect(band).toContain('the client')
     expect(band).not.toContain('no longer in the session')
     done(ok ? reply({ body: 'The program that sends the uploads.', here: '' }) : { isAnswered: false, reason: 'aborted' })
@@ -330,7 +330,7 @@ test('e opens the tray at once on the explainer being written, its words as its 
     const id = part.order.find(x => part.items[x]!.term === 'the client')!
     expect((await trayNow(s.$))!.stack).toEqual([{ row: 't1-row', kind: 'explain', id }])
     // its words, drawn as the reply draws its words
-    expect(JSON.stringify(await trayBand(s.$, els, 100, 20))).toContain('The program that sends the uploads.')
+    expect(JSON.stringify(await trayBand(s.$, els, 100, { rows: 20, at: 0, id: 'above' }))).toContain('The program that sends the uploads.')
   }
 })
 
