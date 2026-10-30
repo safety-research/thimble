@@ -137,6 +137,10 @@ async function countLabels($: Engine, root: string): Promise<number> {
   return Array.isArray(v) ? v.length : 0
 }
 
+/** What the person can do about a count that failed. Each of Claude's replies counts again, and the failure line goes
+ *  once a count works, so a failure that stays is thimble's to fix. */
+const FIX = 'Type /thimble-fix to ask for a fix.'
+
 /** Count again: the bar's coverage and labels, while Coverage or Labels is on, each on its own. A count that fails
  *  says so on the failure line, and the pane shows its reason above the last count until a count works. */
 export async function recount($: Engine): Promise<void> {
@@ -149,19 +153,19 @@ export async function recount($: Engine): Promise<void> {
   let coverage = was.coverage
   let labels = was.labels
   let error: string | null = null
-  const why = (err: unknown) => String((err as Error)?.message || err).slice(0, 200)
+  const why = (err: unknown) => String((err as Error)?.message || err).slice(0, 200).replace(/\.$/, '')
   let got: Any = null
   try {
     got = record(await busy($, 'counting coverage', () => coverageOf($, root, session), was.since ?? undefined), 'thimble coverage', EMPTY_COVERAGE)
     const files = Number(got.total?.files) || 0
     coverage = files ? shareOfFiles(Number(got.total?.touched_files) || 0, files) : null
   } catch (err) {
-    error = `Coverage could not be counted: ${why(err)}. It is counted again after Claude's next reply.`
+    error = `Coverage could not be counted: ${why(err)}. ${FIX}`
   }
   try {
     labels = await countLabels($, root)
   } catch (err) {
-    error ??= `The labels could not be counted: ${why(err)}.`
+    error ??= `The labels could not be counted: ${why(err)}. ${FIX}`
   }
   // a count of a conversation the session left (a /clear, a /resume) while it ran: the new one counts its own
   if (session !== (await sessionKey($))) return
