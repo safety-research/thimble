@@ -209,6 +209,8 @@ checkout.
 
 ## When something does not work
 
+Run `thimble doctor` in a shell: it checks each part thimble needs, and gives the fix for each problem it finds.
+
 The install:
 
 - **Claude Code is older than 2.1.307, and `claude update` says updates are disabled.** A package manager installed

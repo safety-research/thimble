@@ -17,6 +17,7 @@ In a shell:
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix remove N           fix N leaves your list (off first, when it is on)
     thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
+    thimble doctor                 a checklist of what works, with the fix for each problem
     thimble --version              the version of the thimble that runs (its commit, between releases)
 
 In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
@@ -620,6 +621,12 @@ def cmd_reapply(a: argparse.Namespace) -> int:
     return FX.cmd_reapply(a)
 
 
+def cmd_doctor(a: argparse.Namespace) -> int:
+    from . import doctor as DR  # noqa: PLC0415
+
+    return DR.cmd(a)
+
+
 def _shares(line: str) -> bool:
     """A help line of share.py's commands (thimble file issue, thimble file pr), or the line that goes on from one."""
     return "thimble file " in line or "needs gh, GitHub's" in line
@@ -641,7 +648,7 @@ def _help() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,label,coverage}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,doctor,label,coverage}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -731,6 +738,11 @@ def main(argv: list[str] | None = None) -> int:
                        "back what is still needed, and runs thimble update --continue. Run it in a shell.")
     p.add_argument("--print", action="store_true", help="print Claude's first message, and open nothing")
     p.set_defaults(fn=cmd_reapply)
+    p = sub.add_parser("doctor", help="a checklist of what works, with the fix for each problem",
+                       description="thimble doctor: a checklist of what thimble needs, one line each: ✓ when it works, "
+                       "× when it does not, with the step that fixes it on the line below. Run it in a shell.")
+    p.add_argument("--offline", action="store_true", help="do not look for a newer release")
+    p.set_defaults(fn=cmd_doctor)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "fixes":
         args = ["fix", "list", *args[1:]]
