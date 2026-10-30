@@ -842,6 +842,35 @@ def test_words_that_hold_a_range_or_a_pair_cite_a_place_for_each_value():
     assert fixed["status"] == "corrected" and fixed["shown"] == "243 against 104"
 
 
+def test_words_no_cited_place_shows_are_said_of_the_places_together_never_with_one_line_under_another_s_number():
+    """B12: a total of a card's seven printed lines (made up), cited as the seven lines. No line shows the total, and the
+    reason says so of the seven together, where it named each line with "and" and then quoted the line nearest the
+    words under the last line's number. A wrong pair of cells, a place of each kind and a correction no cited place shows
+    say it of their places alike."""
+    groups = [{"id": "g7r2m4", "title": "Remarks per group", "outputs": [
+        {"out": 0, "lines": [[i, f"G{i}: {n} remarks"] for i, n in enumerate((57, 85, 96, 97, 148, 84, 75), 1)]}]}]
+    seven = {**card(""), "evidence": {"ref": [f"card:g7r2m4@out0#L{i}" for i in range(1, 8)]}}
+    total = check_mark(mark("642"), seven, [], "/data", cards=groups)
+    assert (total["status"], total["failedBy"]) == ("failed", "evidence")
+    assert total["reason"] == "None of the 7 cited lines of the card's output shows 642."
+    # a range of lines and one of its lines name each line once
+    again = {**card(""), "evidence": {"ref": ["card:g7r2m4@out0#L1-L7", "card:g7r2m4@out0#L3"]}}
+    assert check_mark(mark("642"), again, [], "/data", cards=groups)["reason"] == total["reason"]
+    pair = [{"ref": "card:c7d2e4#issues%20closed/opus%20emergent"}, {"ref": "card:c7d2e4#issues%20closed/opus%20managed"}]
+    wrong = check_mark(mark("243 against 105"), {**card(""), "evidence": pair}, [], "/data", cards=RUNS)
+    assert wrong["reason"] == "None of the 2 cited cells of the card shows 105."
+    mixed = [{"ref": "card:c7d2e4#issues%20closed/opus%20emergent"}, {"ref": "card:c7d2e4@out1#L3"}]
+    assert check_mark(mark("243 and 3.1"), {**card(""), "evidence": mixed}, [], "/data", cards=RUNS)["reason"] == "None of the 2 cited places of the card shows 3.1."
+    lines = {"ref": ["card:c7d2e4@out1#L2", "card:c7d2e4@out1#L3"]}
+    other = check_mark(mark("2.5 to 3.9 hours"), {**card("", "corrected", {"words": "2.5 to 3.8 hours"}), "evidence": lines}, [], "/data", cards=RUNS)
+    assert other["reason"] == "The check offered other words, but none of the 2 cited lines of the card's output shows 3.8."
+    reworded = check_mark(mark("243 against 105, both by opus"), {**card("", "corrected", {"words": "243 against 104, both by sonnet"}), "evidence": pair}, [], "/data", cards=RUNS)
+    assert reworded["reason"] == "The check offered other words, but none of the 2 cited cells of the card shows “sonnet”."
+    # one place still says what it shows
+    one = check_mark(mark("642"), {**card(""), "evidence": {"ref": "card:g7r2m4@out0#L6"}}, [], "/data", cards=groups)
+    assert one["reason"] == "Line 6 of the card's output reads “G6: 84 remarks”, not 642."
+
+
 def test_computed_output_that_is_a_printed_dataframe_carries_its_table():
     out = "            merged  total\nagent                  \nagent-03         4     10\nagent-07        12     40\n"
     r = check_mark(mark("12"), computed("agent-07        12     40"), [call(CODE, out)], "/data")

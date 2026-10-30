@@ -1651,7 +1651,8 @@ def card_refs(ev: Any) -> list[str]:
             ref = str(x or "").strip().strip("[]") if isinstance(x, str) else ""
             m = CARD_LINES.match(ref)
             if m and int(m.group(3)) <= int(m.group(4)) <= int(m.group(3)) + MAX_RANGE:
-                out += [f"card:{m.group(1)}@out{m.group(2)}#L{n}" for n in range(int(m.group(3)), int(m.group(4)) + 1)]
+                lines = [f"card:{m.group(1)}@out{m.group(2)}#L{n}" for n in range(int(m.group(3)), int(m.group(4)) + 1)]
+                out += [line for line in lines if line not in out]
             elif ref and ref not in out:
                 out.append(ref)
     return out
@@ -1715,6 +1716,16 @@ def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     return shown
 
 
+def several(places: list[dict[str, Any]]) -> str:
+    """Several cited places of cards as a reason names them together, since what one of them reads is no reading of the
+    others: `the 7 cited lines of the card's output`, `the 2 cited cells of the card`, `the 3 cited places of the cards`."""
+    kinds = {p["out"][0] for p in places}
+    noun = "lines" if kinds == {"lines"} else "cells" if kinds == {"cells"} else "places"
+    whose = ("the card's output" if noun == "lines" and len({(p["cid"], p["out"]) for p in places}) == 1
+             else "the card" if len({p["cid"] for p in places}) == 1 else "the cards")
+    return f"the {len(places)} cited {noun} of {whose}"
+
+
 def framed(target: str, places: list[dict[str, Any]], approx: bool = False) -> bool:
     """Cells show words that also name a number their column's name gives: "139 of the 176 PRs" cites the cell 139 of
     the column `of_176_still_open`. A cell's value must show a number of the words itself; its row's and its column's
@@ -1749,19 +1760,19 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     shown_all = [_card_shown(target, g) for g in groups.values()]
     shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
     values, texts = [p["value"] for p in places], [p["text"] for p in places]
+    said = "\n".join(texts)
     one = places[0]
-    if not (shows(target, "\n".join(values), approx) or shows(target, "\n".join(texts), approx)
-            or framed(target, places, approx)):
+    if not (shows(target, "\n".join(values), approx) or shows(target, said, approx) or framed(target, places, approx)):
         if len(places) > 1:
-            return [instead(" and ".join(p["where"] for p in places), target, texts, approx)], shown
+            # several places: what none of them shows, never one place's words under another's name
+            return [f"none of {several(places)} shows {unshown(target, said, approx)}"], shown
         if one["out"][0] == "cells":
             return [f"{one['where']} shows {short(one['value'], 40) or 'nothing'}, not {unshown(target, one['text'], approx)}"], shown
         return [instead(one["where"], target, texts, approx)], shown
-    missing = unshown_change(was, target, "\n".join(texts), approx) if was else []
+    missing = unshown_change(was, target, said, approx) if was else []
     if missing:
-        where = " and ".join(p["where"] for p in places)
-        return [f"{where} does not show “{short(' … '.join(missing), 60)}”" if len(places) > 1 or one["out"][0] == "lines"
-                else f"the card's {one['col']} for {one['row']} does not show “{short(' … '.join(missing), 60)}”"], shown
+        gone = f"“{short(' … '.join(missing), 60)}”"
+        return [f"none of {several(places)} shows {gone}" if len(places) > 1 else f"{one['where']} does not show {gone}"], shown
     return [], shown
 
 

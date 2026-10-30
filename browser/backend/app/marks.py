@@ -23,8 +23,8 @@
    autoRepair); a repair's own end starts none, so a mark that fails again waits for Repair.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
-a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
-validator's card_index), and the validator confirms a card's place by reading it (check_card).
+a chart's data row, a label card's count or share, a line of printed output) is written to a file the checker greps
+first (session_cards, the validator's card_index), and the validator confirms a card's place by reading it (check_card).
 
 A card's takeaway is checked the same way: its marks, `[words](#)`, are checked as soon as the card's write lands
 (card_written: after the add_card or edit_card call that wrote it, after the card check that may rewrite it, after the
@@ -120,19 +120,31 @@ def check_folders(c: str, main: dict[str, Any]) -> tuple[str, str]:
 
 
 def session_cards(c: str) -> list[dict[str, Any]]:
-    """The workspace's cards as the validator reads them (evidence.check_card): each card that ran with outputs, its
-    title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html table) or the
-    lines of its printed text, as the card's citations name them (cite.bundle_cells, cite.numbered_lines)."""
-    from . import cite, notebook  # noqa: PLC0415
+    """The workspace's cards as the validator reads them (evidence.check_card): each card that ran with outputs and each
+    label card, its title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html
+    table, a label card's values, concepts.card_output) or the lines of its printed text, as the card's citations name
+    them (cite.bundle_cells, cite.numbered_lines)."""
+    from . import cite, concepts, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
     out: list[dict[str, Any]] = []
     for _, nb in notebook._stored(ws):
         for cell in nb.get("cells") or []:
-            if not notebook.runnable(cell) or not cell.get("outputs") or not cell.get("id"):
+            if not cell.get("id"):
+                continue
+            if cell.get("kind") == "label":
+                try:
+                    label = concepts.card_output(ws, cell)
+                except Exception:  # noqa: BLE001 — a label that cannot be read leaves its card out, not the others
+                    log.exception("%s: the values of label card %s were not read", c, cell["id"])
+                    label = None
+                bundles = [(0, label)] if label else []
+            elif notebook.runnable(cell) and cell.get("outputs"):
+                bundles = list(cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"])))
+            else:
                 continue
             outs: list[dict[str, Any]] = []
-            for i, b in cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"])):
+            for i, b in bundles:
                 if notebook.ERROR_MIME in b:
                     continue
                 cells = cite.bundle_cells(b)
