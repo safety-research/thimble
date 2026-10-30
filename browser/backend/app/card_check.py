@@ -14,11 +14,16 @@ new change to the card cancels a running check and starts the next. At most READ
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
    card (context.render) and the picture, names what fails each criterion, and gives the replacement card.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
-   and kept only when the code runs clean and the card draws, as one undo step with actor `check`. A card that fails no
-   criterion stays as it is, unless its links check found a value its code types in and the replacement's code
-   changes (_problems). New code runs on the card's kernel, and in terminal mode, where the check runs in the shim,
-   through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial). A replacement that left all the
-   card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`.
+   and kept only when the code runs clean and the card draws, as one undo step with actor `check`. The replacement is a
+   version of the card, which gets the measure any version gets (card_fit.keeps_replacement): one that does not fit on
+   the analyst's screen, where the card as it stands comes closer, is not kept. As a version of the author's would, it
+   gets a critique (card_fit.critique_of), and the model reads the card once more with it (prompts/card-check.md
+   `## too-large`) for a replacement that fits; when that one does not fit either, the check ends `ok`, the card left
+   as the version its author made. A card that fails no criterion stays as it is, unless its links check found a value
+   its code types in and the replacement's code changes (_problems). New code runs on the card's kernel, and in
+   terminal mode, where the check runs in the shim, through `thimble-run trial` in main's sandbox, as a card run would
+   (cardrun.trial). A replacement that left all the card shows as it was (checkstore.shows_same) is one more version in
+   the card's history, and the check ends `ok`.
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -141,6 +146,8 @@ class _Run:
     waited: float = 0.0  # seconds spent waiting for API capacity, left out of the check's time
     note: str = ""  # FALLBACK_NOTE when the reading ran on the fallback model, kept on the finished record
     paused_at: float | None = None  # loop time it began to wait for a reading slot, while it waits (_slot)
+    drawn: render.Rendered | None = None  # the card as the check first drew it, which its replacement is measured against
+    revised: render.Rendered | None = None  # its replacement as last drawn, which a critique reads when it does not fit
 
 
 # --------------------------------------------------------------------------- the tool path
@@ -172,12 +179,13 @@ def card_of(name: str, args: dict[str, Any] | None, text: str, anchor: str | Non
 
 
 def wants_check(cell: dict[str, Any] | None) -> bool:
-    """Whether a card is read now: it has a takeaway, it is not a label card (thimble draws those from their label), a
-    replacement could change it (it is not locked or made by the analyst: checkstore.fixable), and a card of code ran
-    clean (an errored card goes back to its author through its own result)."""
-    from . import checkstore, notebook  # noqa: PLC0415
+    """Whether a card is read now: it has a takeaway, it is not a label card (thimble draws those from their label), it
+    does not wait for a version that fits (card_fit.held), a replacement could change it (it is not locked or made by
+    the analyst: checkstore.fixable), and a card of code ran clean (an errored card goes back to its author through its
+    own result)."""
+    from . import card_fit, checkstore, notebook  # noqa: PLC0415
 
-    if not cell or cell.get("kind") == "label" or not str(cell.get("takeaway") or "").strip():
+    if not cell or cell.get("kind") == "label" or not str(cell.get("takeaway") or "").strip() or card_fit.held(cell):
         return False
     if not checkstore.fixable(cell, checkstore.FIX_FIELDS):
         return False
@@ -531,6 +539,7 @@ async def _check(run: _Run) -> None:
         return
     from . import card_size  # noqa: PLC0415
 
+    run.drawn = drawn
     card_size.tell(c, cell, drawn.body)
     typed = (typed_numbers(str(cell.get("code") or ""), shown_numbers(notebook.get_cell(c, cid, full_outputs=True) or cell))
              if cell.get("code") else [])
@@ -848,10 +857,12 @@ def _problems(cell: dict[str, Any], failed: list[str], patch: dict[str, Any]) ->
 
 
 async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], failed: list[str],
-                   timing: dict[str, Any]) -> None:
+                   timing: dict[str, Any], *, again: bool = False) -> None:
     """Apply the replacement once, kept only when its code runs clean and the replaced card draws; otherwise the card stays,
     the replacement is recorded as a rejected fix and the check ends `error`. The fix's reason is the problem of the first
-    criterion the card failed.
+    criterion the card failed. A replacement that does not fit on the analyst's screen (TOO_LARGE) is a version that gets
+    a critique and one more version, as a version of the card's author gets (_revise_to_fit; `again` for that one); when
+    neither fits, the card stays as its author made it and the check ends `ok`.
 
     The trial on the card's kernel is settled however the check ends: a check stopped or past its time mid-trial leaves it
     running to its end in a task of its own, which then puts back the names it bound."""
@@ -878,12 +889,18 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
         why = await _not_kept(run, cand, _type_of(cell))
         timing["replace_ms"] = _ms(t0)
         if why:
-            timing["replacement"] = "rejected"
+            timing["replacement"] = "too large" if why == TOO_LARGE else "rejected"
             log.info("card check: the replacement of card:%s was not kept, since %s", cid, why)
             settled = True
             await _settle(c, cid, tid, keep=False)
             checkstore.record_rejected(c, cid, run.check, patch, why)
-            _end(run, "error", f"its revision was not kept: {why}")
+            nxt = await _revise_to_fit(run, cell, cand) if why == TOO_LARGE and not again else {}
+            if nxt:
+                await _replace(run, cell, nxt, failed, timing, again=True)
+            elif why == TOO_LARGE:  # the card as it stands comes closer to fitting, so it stays, as it would for its author
+                _end(run, "ok")
+            else:
+                _end(run, "error", f"its revision was not kept: {why}")
             return
         applied = checkstore.apply_fix(c, cid, run.check, patch, cand, failed[0] if failed else "")
         keep, settled = applied is not None, True
@@ -903,9 +920,39 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
             _spawn(_settle_now(c, cid, tid, keep))
 
 
+# why a replacement that draws is not kept: it does not fit on the analyst's screen, and the card as it stands comes
+# closer to fitting (card_fit.keeps_replacement)
+TOO_LARGE = "it does not fit on the analyst's screen"
+
+
+async def _revise_to_fit(run: _Run, cell: dict[str, Any], cand: dict[str, Any] | None) -> dict[str, Any]:
+    """The check's next replacement after one that does not fit on the analyst's screen: the card critique of that
+    replacement as drawn (card_fit.critique_of), and one more reading of the card with it (prompts/card-check.md
+    `## too-large`), as the card's author gets for a version of its own. The patch of that reading's card; {} when the
+    critique or the reading failed, or the reading gave the card back as it is."""
+    from . import card_fit, notebook  # noqa: PLC0415
+
+    if cand is None or run.revised is None:
+        return {}
+    timing = run.timing
+    t0 = time.perf_counter()
+    critique = await card_fit.critique_of(run.c, cand, run.author, run.revised)
+    timing["fit_critique_ms"] = _ms(t0)
+    if not critique:
+        return {}
+    t1 = time.perf_counter()
+    reading = await _read(run.c, cell, run.drawn.png if run.drawn is not None else None, run, too_large=critique)
+    timing["second_critique_ms"] = _ms(t1)
+    if isinstance(reading, str):
+        log.info("card check: the second reading of card:%s failed (%s)", run.cid, reading)
+        return {}
+    return _patch(cell, reading[1], notebook.get_cell(run.c, run.cid, full_outputs=True), c=run.c)
+
+
 async def _not_kept(run: _Run, cand: dict[str, Any] | None, typed: str = "") -> str:
     """Why a replacement is not kept, '' when it is: its code must run clean, a card of type `typed` must still draw
-    that type, and the replaced card must draw."""
+    that type, and the replaced card must draw, and fit on the analyst's screen as well as the card as the check drew
+    it (TOO_LARGE)."""
     if not cand:
         return "it could not be applied"
     if str(cand.get("status") or "ok") != "ok":
@@ -922,7 +969,10 @@ async def _not_kept(run: _Run, cand: dict[str, Any] | None, typed: str = "") -> 
     if not after.ok:
         return f"the replaced card did not draw ({after.error})"
     _keep(run.c, run.cid, f"{run.check}-revised.png", after.png)
-    return ""
+    run.revised = after
+    from . import card_fit  # noqa: PLC0415
+
+    return "" if card_fit.keeps_replacement(run.drawn, after) else TOO_LARGE
 
 
 def _spawn(coro: Any) -> asyncio.Task:
@@ -1162,16 +1212,19 @@ def _assessment(raw: Any) -> list[dict[str, Any]] | None:
 
 
 async def card_input(c: str, cell: dict[str, Any], run: _Run, picture: str | None,
-                     secs: dict[str, str]) -> dict[str, Any]:
+                     secs: dict[str, str], too_large: str = "") -> dict[str, Any]:
     """The card-check task's input (tasks.py): the card's id, kind, question, takeaway, citations, code and the
     context it was made in, each '' for none; the `typed` and `kept` parts of the reading's card (_typed_text,
-    _kept_text); the path of its picture, None when it was not drawn; and the effort the check reads at."""
+    _kept_text); for a reading after a replacement that did not fit on the analyst's screen, the critique of that
+    replacement (`too_large`, _revise_to_fit); the path of its picture, None when it was not drawn; and the effort the
+    check reads at."""
     code = str(cell.get("code") or "").strip()
     return {"card": {"id": run.cid, "kind": str(cell.get("kind") or "code"), "question": str(cell.get("title") or ""),
                      "takeaway": str(cell.get("takeaway") or "").strip(),
                      "citations": await asyncio.to_thread(_citations_text, c, cell) or "",
                      "code": code[:CODE_CHARS], "context": await asyncio.to_thread(_context_text, c, cell, run.author) or "",
-                     "typed": _typed_text(c, cell, secs), "kept": await asyncio.to_thread(_kept_text, c, cell, secs)},
+                     "typed": _typed_text(c, cell, secs), "kept": await asyncio.to_thread(_kept_text, c, cell, secs),
+                     **({"too_large": too_large} if too_large else {})},
             "picture": picture, "effort": run.effort or await asyncio.to_thread(read_effort, c)}
 
 
@@ -1195,6 +1248,8 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -
         "context": str(card.get("context") or "") or none,
         "typed": str(card.get("typed") or ""), "kept": str(card.get("kept") or ""),
     })
+    if str(card.get("too_large") or "").strip():  # the reading after a replacement that did not fit (_revise_to_fit)
+        user += "\n\n" + _fill(secs["too-large"], {"critique": str(card["too_large"]).strip()}).strip()
     images = []
     if isinstance(inp.get("picture"), str) and inp["picture"]:
         try:
@@ -1206,12 +1261,12 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -
     return await _call(c, _fill(secs["check"], {}), user, _tool(secs, "critique"), images, effort=effort, model=model)
 
 
-async def _read(c: str, cell: dict[str, Any], png: bytes | None, run: _Run,
-                picture: str | None = None) -> tuple[list[dict[str, Any]], dict[str, str], str] | str:
+async def _read(c: str, cell: dict[str, Any], png: bytes | None, run: _Run, picture: str | None = None, *,
+                too_large: str = "") -> tuple[list[dict[str, Any]], dict[str, str], str] | str:
     """(assessment, the replacement card {question, code, takeaway}, model) from the card-check task's reading of the
     card's picture (tasks.call: an extension's program, else check_task); why not, as a sentence, when the call failed
     or its output lacks a part. _Capacity when the API is at capacity after model.structured's own retries. `picture`
-    is where `png` is kept."""
+    is where `png` is kept; `too_large`, the critique of a replacement that did not fit (card_input)."""
     from . import prompts, tasks, userconf  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "cardCheck")):
@@ -1219,7 +1274,7 @@ async def _read(c: str, cell: dict[str, Any], png: bytes | None, run: _Run,
     if png and not picture:
         picture = str(_shot_path(c, run.cid, f"{run.check}-card.png"))
         await asyncio.to_thread(Path(picture).write_bytes, png)
-    inp = await card_input(c, cell, run, picture, secs)
+    inp = await card_input(c, cell, run, picture, secs, too_large)
     effort = str(inp["effort"])
     t0, outcome = time.perf_counter(), "stopped"  # stopped: the check ran past its time, or the card changed
     try:

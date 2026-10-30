@@ -34,6 +34,8 @@
 //                                      (`element`); each part has a thread of its own
 //   threadCardAnchor($, agentId, id)   where a card a thread's fork drew stands: `thread:<key>`, drawn under its answer
 //                                      in the thread's pane; null for any other agent (cards/tool.ts)
+//   threadQuestion(agentId)            the question a thread's fork answers, which the critique of a card it drew reads
+//                                      as the request; null for any other agent (cards/tool.ts)
 //   registerThreads                    its own hooks (the forks' ends, ...)
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -41,7 +43,7 @@ import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
 import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
-import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadsBright } from './thread'
+import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadQuestion as question, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
 type Engine = EngineInterface
@@ -156,6 +158,10 @@ export async function threadOnCard($: Engine, id: string, title: string, line = 
 
 export async function threadCardAnchor($: Engine, agentId: string | undefined, cardId: string): Promise<string | null> {
   return anchor($, agentId, cardId)
+}
+
+export function threadQuestion(agentId: string | undefined): string | null {
+  return question(agentId)
 }
 
 export const registerThreads: Register = (on, options) => register(on, options)

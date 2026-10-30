@@ -61,14 +61,19 @@ def enabled() -> bool:
 @dataclass
 class Rendered:
     """One card drawn: `png` the card at SCALE (None when the page failed), its box and its card-type frames' boxes in
-    CSS px, the height its body draws at the card's width (`body`, px: a custom card's page whole, past what the canvas
-    shows at rest; card_size), whether the fonts the card asks for were loaded, the API paths the page asked for that
-    the request did not answer, and the times in ms."""
+    CSS px, the height its body draws at the card's width (`body`, px: a custom card's page whole, with what its own
+    scroll boxes hold past their height, `inner`, and a table's rows past the ones it shows first, past what the canvas
+    shows at rest; card_size, card_fit), the width its widest content lays out at and the room it has (`width` and
+    `frame`, px, both 0 when nothing lays out wider than its room), whether the fonts the card asks for were loaded,
+    the API paths the page asked for that the request did not answer, and the times in ms."""
 
     png: bytes | None = None
     box: dict[str, float] = field(default_factory=dict)
     frames: list[dict[str, float]] = field(default_factory=list)
     body: float = 0.0
+    width: float = 0.0
+    frame: float = 0.0
+    inner: float = 0.0
     fonts: bool = True
     requests: list[str] = field(default_factory=list)
     ms: dict[str, float] = field(default_factory=dict)
@@ -284,6 +289,10 @@ class Pool:
         res.box = out.get("box") or {}
         res.frames = [f for f in out.get("frames") or [] if isinstance(f, dict)]
         res.body = float(out["body"]) if isinstance(out.get("body"), (int, float)) else 0.0
+        res.inner = float(out["inner"]) if isinstance(out.get("inner"), (int, float)) else 0.0
+        wide = out.get("wide") if isinstance(out.get("wide"), dict) else {}
+        if isinstance(wide.get("width"), (int, float)) and isinstance(wide.get("frame"), (int, float)):
+            res.width, res.frame = float(wide["width"]), float(wide["frame"])
         res.fonts = bool(out.get("fonts", True))
         res.requests = list(out.get("requests") or [])
         res.error = str(out.get("error") or "")
@@ -587,8 +596,9 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
     frames = type_frames(c, cell)
     if frames and not width and isinstance(w, (int, float)):
         w = max(w, TYPE_W)
-    # the card as it will stand at rest: check records, earlier fixes and a fix candidate's mark are not its content
-    card = {k: v for k, v in cell.items() if k not in ("check", "fixes", "candidate")}
+    # the card as it will stand at rest: check records, earlier fixes, a fix candidate's mark and the wait for a version
+    # that fits (card_fit) are not its content
+    card = {k: v for k, v in cell.items() if k not in ("check", "fixes", "candidate", "held")}
     return {
         "ws": c,
         "card": card,

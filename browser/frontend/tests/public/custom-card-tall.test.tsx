@@ -69,7 +69,7 @@ async function redrawn(props: { onTall?: (h: number) => void; onWide?: (w: numbe
 test("the frame's script measures the page's width and the frame's where it measures the height", () => {
   const script = withSizer('').replace(/^<script>|<\/script>$/g, '')
   const sent: Record<string, unknown>[] = []
-  const document = { body: { offsetHeight: 60 }, documentElement: { scrollWidth: 1180, clientWidth: 692, clientHeight: 60 } }
+  const document = { body: { offsetHeight: 60, getElementsByTagName: () => [] }, documentElement: { scrollWidth: 1180, clientWidth: 692, clientHeight: 60 } }
   const run = new Function('document', 'window', 'parent', 'getComputedStyle', 'addEventListener', 'innerHeight', script)
   run(document, {}, { postMessage: (m: Record<string, unknown>) => sent.push(m) }, () => ({ marginTop: '0', marginBottom: '0' }), () => undefined, 60)
   expect(sent[0]).toMatchObject({ type: SIZE_MESSAGE, wide: true, width: 1180, frame: 692 })

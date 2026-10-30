@@ -98,6 +98,7 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 |---|---|---|---|
 | guidance | `prompts/guidance.md` | `guidance/guidance.ts` | context beside the first prompt of every conversation, without the section of a switched-off feature |
 | card tool | `prompts/card-tool.md` | `cards/tool.ts` | the description of the `card` tool |
+| card critique | `prompts/card-critique.md` | `cards/fit.ts` | one model call when a version of a card does not fit on the screen, before the analyst sees it |
 | checker | `prompts/checker.md` | `marks/checker.ts` | the prompt of the fork that checks a reply's marks |
 | designer | `prompts/designer.md` | `designer/v.ts` | the prompt of the fork that `v` starts |
 | label classifier | `prompts/labels.md` | `labels/labels.ts` | each model call of a `--prompt` label |

@@ -243,6 +243,9 @@ export interface Cell {
   check?: unknown
   /** the changes checks made to the card, oldest first (lib/cardCheck) */
   fixes?: unknown[]
+  /** set while the card does not fit on the analyst's screen and its author makes a version that fits (backend
+   * card_fit.py): the card shows as one that still runs */
+  held?: Record<string, unknown> | null
 }
 
 /** A plan card's step status (backend notebook.PLAN_STATUSES). */

@@ -1308,6 +1308,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     _ask_again(lv, again)
     if was_open:
         _fixes_turn(lv)
+        _cards_shown(lv)
         _cards_checked(lv)
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
@@ -1364,6 +1365,18 @@ def _answer_checked(lv: Live, turn: str) -> None:
                                                                         for i, t in enumerate(texts)]})
     except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
         log.exception("%s: the checks over Claude's answer did not start at main's turn end", lv.c)
+
+
+def _cards_shown(lv: Live, sub: Sub | None = None) -> None:
+    """The cards that still wait for a version that fits show as they stand: those main's own calls hold, at main's
+    turn end (card_fit.turn_ended), or those subagent `sub` holds, at its end (card_fit.agent_ended). One of thimble's
+    agents shows its own at its run's end (subagents.run_ended)."""
+    from . import card_fit  # noqa: PLC0415 — card_fit imports the harness
+
+    if sub is None:
+        card_fit.turn_ended(lv.c)
+    elif sub.agent_id and not sub.thimble:
+        card_fit.agent_ended(lv.c, str(sub.agent_id))
 
 
 def _cards_checked(lv: Live) -> None:
@@ -2510,6 +2523,7 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
         subagents.run_ended(lv.c, str(sub.agent_id), status, sub.report or result,
                             source=kind or "mirror", interrupted=kind == threads.SESSION_ENDED)
         return
+    _cards_shown(lv, sub)
     if sub.agent_id and sub.agent_id in _events().asking(lv.c):
         _events().agent_moved(lv.c, sub.agent_id, float("inf"))  # a stopped agent's prompt is gone
     if sub.owner is not None:  # one agent of a workflow: the chat is the workflow's, which ends with the workflow
@@ -2520,6 +2534,7 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
         for member in [m for m in lv.subs if m.owner is sub]:
             _tail_sub(lv, member)
             member.done = True
+            _cards_shown(lv, member)
         result = _workflow_value(result)
     sub.done = True
     sub.finish = None

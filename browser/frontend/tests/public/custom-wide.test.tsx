@@ -10,7 +10,7 @@ import { SIZE_MESSAGE, withSizer } from '../../src/canvas/DataViz.tsx'
 function posted(scrollWidth: number, clientWidth: number, innerHeight: number, clientHeight: number): Record<string, unknown> {
   const script = withSizer('').replace(/^<script>|<\/script>$/g, '')
   const sent: Record<string, unknown>[] = []
-  const document = { body: { offsetHeight: 60 }, documentElement: { scrollWidth, clientWidth, clientHeight } }
+  const document = { body: { offsetHeight: 60, getElementsByTagName: () => [] }, documentElement: { scrollWidth, clientWidth, clientHeight } }
   const run = new Function('document', 'window', 'parent', 'getComputedStyle', 'addEventListener', 'innerHeight', script)
   run(document, {}, { postMessage: (m: Record<string, unknown>) => sent.push(m) }, () => ({ marginTop: '0', marginBottom: '0' }), () => undefined, innerHeight)
   return sent[0]

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
+import contextvars
 import copy
 import fcntl
 import hashlib
@@ -1120,9 +1121,10 @@ INTERRUPTED_EVALUE = "thimble stopped while this card ran; run it again"
 
 def mark_interrupted_cells(root: Path | None = None) -> list[str]:
     """Server start: a cell stored `running` was mid-run when the previous server went away, and nothing will write its
-    result. Mark each such cell errored with one Interrupted output (code, title and place stay), and end a pending card
-    check the same way. Reads every workspace under `root` directly, and writes changed notebooks back atomically under
-    the store's lock. Returns `<workspace>/<notebook>/<cell>` per cell marked."""
+    result. Mark each such cell errored with one Interrupted output (code, title and place stay), end a pending card
+    check the same way, and show a card that waited for a version that fits (card_fit) as it stands. Reads every
+    workspace under `root` directly, and writes changed notebooks back atomically under the store's lock. Returns
+    `<workspace>/<notebook>/<cell>` per cell marked."""
     from . import checkstore  # noqa: PLC0415 — checkstore imports this module
 
     root = config.WORKSPACES_DIR if root is None else root
@@ -1155,6 +1157,10 @@ def _mark_interrupted(p: Path, checkstore: Any) -> list[str]:
         if checkstore.interrupted(cell):
             changed = True
             marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')} (its check)")
+        # a card that waited for a version that fits (card_fit) shows as it stands: no version comes for it now
+        if cell.pop(HELD, None) is not None:
+            changed = True
+            marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')} (held)")
         if cell.get("status") != "running":
             continue
         cell.update(status="error", outputs=[_error_bundle(INTERRUPTED_ENAME, INTERRUPTED_EVALUE)], ts=_now())
@@ -1467,6 +1473,7 @@ def insert_cell(workspace: str, nb_id: str, cell: dict, after: str | None = None
                 idx = i + 1
                 break
     nb["cells"].insert(idx, cell)
+    _while_measured(cell)
     save_notebook(workspace, nb)
     _emit(workspace, cell)
     return cell
@@ -1532,6 +1539,8 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
         cell["starred"] = bool(starred)
     if "pos" in layout:
         cell["pos"] = pos_of(layout["pos"])
+    if code is not None or payload is not None:
+        _while_measured(cell)
     write_notebook(ws, nb)
     _emit(workspace, cell)
     if locked is not None and bool(locked) != was_locked:
@@ -1600,6 +1609,44 @@ def drop_payload_key(workspace: str, cell_id: str, key: str) -> bool:
     write_notebook(ws, nb)
     _emit(workspace, cell)
     return True
+
+
+HELD = "held"  # a card's record while it waits for a version that fits on the analyst's screen (card_fit.py)
+MEASURING_HELD = {"measuring": True}  # the record of a card a tool call made or changed until card_fit measured it
+# set by tools.call around an add_card or edit_card that card_fit measures, to the record the card gets (MEASURING_HELD,
+# with who made it: card_fit.holder): the card the call makes, or whose content it changes, is held from the moment its
+# content is stored, so the canvas never shows a version that does not fit, not even for the moment the measure takes
+MEASURING: contextvars.ContextVar[dict | None] = contextvars.ContextVar("thimble_card_measuring", default=None)
+
+
+def _while_measured(cell: dict) -> None:
+    """A card whose content a tool call stores while MEASURING is held until card_fit measures it, unless it is held
+    already (a new version of a card that waits keeps its record). Not a label card or a plan, which card_fit does not
+    measure."""
+    rec = MEASURING.get()
+    if rec and HELD not in cell and cell.get("kind") not in ("label", PLAN_KIND):
+        cell[HELD] = dict(rec)
+
+
+def set_held(workspace: str, cell_id: str, held: dict | None) -> dict | None:
+    """Card `cell_id` held with the record `held` while it waits for a version that fits (card_fit.py), or shown again
+    with None, and announced, with no `edited` stamp: the canvas draws a held card as one that still runs. The card as
+    stored; None for a card that is gone."""
+    ws = _ws(workspace)
+    with editing(ws):
+        hit = _locate(ws, cell_id)
+        if hit is None:
+            return None
+        nb, cell = hit
+        if held is None and HELD not in cell:
+            return cell
+        if held is None:
+            cell.pop(HELD, None)
+        else:
+            cell[HELD] = held
+        write_notebook(ws, nb)
+    _emit(workspace, cell)
+    return cell
 
 
 # --- the card's history ---
@@ -1735,12 +1782,14 @@ def version_of(ws: Path, cell: dict, entry: str) -> dict:
 
 
 @_changes
-def restore_version(workspace: str, cell_id: str, entry: str, *, by: str | None = None) -> dict:
+def restore_version(workspace: str, cell_id: str, entry: str, *, by: str | None = None,
+                    takeaway_author: str = "analyst") -> dict:
     """Make card `cell_id` as it stood before its edit `entry` (version_of), as an edit of the analyst's (or `by`): its
     question, kind, code, payload and takeaway, and with its code the outputs and status it showed then, as stored, so
-    it shows them without a run. A plan's steps come back with their ids, statuses and clocks, marked against the steps
-    it has now (plans.restored_payload). The card as stored; unchanged when it is that version already. 404 for an
-    unknown card or version."""
+    it shows them without a run. A takeaway that comes back is `takeaway_author`'s: the analyst's, who chose it, unless
+    the caller says whose it was (card_fit brings back a version of its author's). A plan's steps come back with their
+    ids, statuses and clocks, marked against the steps it has now (plans.restored_payload). The card as stored;
+    unchanged when it is that version already. 404 for an unknown card or version."""
     from . import plans  # noqa: PLC0415 — plans imports this module
 
     ws = _ws(workspace)
@@ -1777,7 +1826,7 @@ def restore_version(workspace: str, cell_id: str, entry: str, *, by: str | None 
         _name_cell(ws, cell)
     if (v.get("takeaway") or "") != (cell.get("takeaway") or ""):
         cell["takeaway"] = str(v.get("takeaway") or "")
-        cell["takeaway_author"] = "analyst" if cell["takeaway"].strip() else None
+        cell["takeaway_author"] = takeaway_author if cell["takeaway"].strip() else None
         cell.pop(TAKEAWAY_STALE, None)
     made = stamp_edit(ws, cell, before, by, shown=shown)
     if made is None:
@@ -3296,6 +3345,7 @@ async def _execute_cell(workspace: str, nb: dict, cell: dict, kernel: str | None
             else:
                 target.pop("reads_more", None)
         _verify_hook("ran", workspace, current, target)
+        _while_measured(target)
         write_notebook(ws, current)
     _emit(workspace, target)
     return target, (target if stored is outputs else {**target, "outputs": outputs})

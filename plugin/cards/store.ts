@@ -24,6 +24,9 @@ type Engine = EngineInterface
 /** One call of the card tool: the version it drew, with that version's title, data file and what it read from it
  *  ("412 rows", "an object with months (18), agents (44)"), or why it drew none. */
 export type CardCall = { version: number; title?: string; file?: string; read?: string; error?: string; down?: boolean }
+/** A version of a card that did not fit (cards/fit.ts): its number, how far past the limits it drew, and what the card's
+ *  meta says of it, to draw it again when it comes closest. */
+export type HeldVersion = { version: number; excess: number; title: string; keys: string[]; read: string; columns: string[]; file: string }
 export type CardMeta = {
   id: string
   version: number // the version on screen; 0 while no version has drawn
@@ -45,6 +48,9 @@ export type CardMeta = {
   errorWidth?: number | null // the width a drawing failed at, when the failure was a drawing's: it holds only at that width
   calls: Record<string, CardCall> // each call of the card, by its tool_use_id
   at: number
+  // while the version on screen does not fit and Claude draws one that does (cards/fit.ts): when it was first held, and
+  // each version since that did not fit, oldest first; its frame draws `drawing…` in place of the card
+  held?: { since: number; versions: HeldVersion[] } | null
 }
 /** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it.
  *  `width`, `theme` and `tree` are the runner's newest drawing, at the width the runner holds the card at, for a
@@ -269,7 +275,7 @@ export async function turnCards($: Engine): Promise<void> {
 }
 
 /** The cards this conversation drew before (a resumed session, or a reload of the plugin): back in $.state, the
- *  newest drawn card focused. */
+ *  newest drawn card focused, and none held. */
 export async function restoreCards($: Engine): Promise<void> {
   const dir = await cardsDir($)
   let entries: { name: string; kind: string }[] = []
@@ -280,7 +286,8 @@ export async function restoreCards($: Engine): Promise<void> {
     try { metas.push(JSON.parse(String(await $.fs.read(`${dir}/${x.name}/meta.json`))) as CardMeta) } catch { /* a card whose first call never finished */ }
   }
   const at: Record<string, string[]> = {}
-  for (const m of metas.sort((a, b) => a.at - b.at)) {
+  // a card held when the session ended draws as it stands: no version that fits comes for it now (cards/fit.ts)
+  for (const m of metas.sort((a, b) => a.at - b.at).map(x => (x.held ? { ...x, held: null } : x))) {
     await $.state.set({ ...CARD, id: m.id }, m)
     metasKept.set(m.id, m)
     for (const call of Object.keys(m.calls ?? {})) await $.state.set({ ...CALL, id: call }, { id: m.id })

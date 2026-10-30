@@ -9,7 +9,7 @@ import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
 import { askHere, drawThreads, passageRuns, threadUnder, threadUnderParts } from '../threads/pane'
 import { keptDir } from '../core/env'
-import { openThread, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadsBar, threadsKey } from '../threads/seam'
+import { openThread, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadQuestion, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
 import { treeRows } from '../core/trail.mjs'
@@ -193,6 +193,20 @@ test('a later question joins the running fork; once it ended, a new fork is told
   await askHere(s.$, SCOPE, 'which config?')
   expect(s.spawns.length).toBe(2)
   expect(s.spawns[1].prompt).toContain('Earlier in this thread:\nQ: why so many?\nQ: and the 3 that passed?\nA: They ran before the change.')
+})
+
+test("the request a card a thread's fork draws is critiqued against is the thread's last question, not main's prompt", async () => {
+  const s = setup()
+  const first = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await first
+  expect(threadQuestion('agent-1')).toBe('why so many? (asked about 41 of the 44)')
+  await askHere(s.$, SCOPE, 'and the 3 that passed?')
+  expect(threadQuestion('agent-1')).toBe('and the 3 that passed? (asked about 41 of the 44)')
+  // main and any other agent: the card tool reads main's last prompt
+  expect(threadQuestion(undefined)).toBe(null)
+  expect(threadQuestion('agent-9')).toBe(null)
 })
 
 test('where no fork starts, the thread\'s own agent type answers; a card its agent draws stands in the thread', async () => {

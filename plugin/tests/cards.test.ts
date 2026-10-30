@@ -6,6 +6,7 @@ import { expect, mock } from 'claude-code/testing'
 
 import Card from '../cards/client'
 import { cardWidth, rowsCut, rowsWord } from '../cards/draw'
+import { sizeOf, sizeWhere } from '../cards/fit'
 import { callLine } from '../cards/register'
 import { treeRows } from '../core/trail.mjs'
 import { test } from './kit'
@@ -884,30 +885,137 @@ test("a view's own Button under the pointer: the whole row shows highlighted, it
   expect(elements(named).find(n => n.props?.children === '██')!.props.hover).toEqual({ scope: button.props.hover.scope, color: 'success', backgroundColor: 'text' })
 })
 
-test('a card taller than its frame shows draws its first 30 rows and `+N rows` under them, a click on which opens the rest; the call tells Claude', async ($, on) => {
+// the critique of a card that does not fit (cards/fit.ts): one model call, answered here with CRITIQUE
+const CRITIQUE = 'The question asks which runs failed, but the card lists all 42 runs and every row says passed. Show the runs that failed.'
+function critic(on: Any) {
+  const asked: Any[] = []
+  on('model.complete', async (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: CRITIQUE, usage: {} } } })
+  return asked
+}
+
+test('a card taller than its frame shows waits for a version that fits: its frame draws `drawing…` and takes no keys, and the call carries a critique; a version that fits draws in its place', async ($, on) => {
   world(on)
+  const asked = critic(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_51', ...input } as never)) as Any
-  expect(String(r.result)).toContain('Note: the card is up to 42 rows tall, and its frame shows its first 30 rows with "+12 rows" under them, which opens the rest')
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  expect(String(r.result)).toContain('The analyst does not see “Every run” yet, since it shows more than the evidence for its answer.')
+  expect(String(r.result)).toContain(CRITIQUE)
+  // Claude reads no measure of the version the analyst never saw
+  expect(String(r.result)).not.toContain('frame shows')
+  expect(String(r.result)).not.toContain('rows tall')
+  // Claude reads the copy it revises from
+  expect(String(r.result)).toContain('run 42  passed')
+  // the critique read the card's copy and the guidance's Cards section
+  expect(asked).toHaveLength(1)
+  expect(JSON.stringify(asked[0].prompt)).toContain('run 1  passed')
+  // its copy shows its rows, and no measure goes to Claude
+  expect(JSON.stringify(asked[0].prompt)).not.toContain('frame shows')
+  expect(JSON.stringify(asked[0].prompt)).not.toContain('wider than the card')
+  expect(JSON.stringify(asked[0].system)).toContain('PROMPT card-critique')
   const frame = async () => elements(await $.ui.render(callRow('toolu_made_up_51', input)))
+  let els = await frame()
+  const held = els.find(n => n.type === 'Client')?.props.props
+  expect(held).toMatchObject({ tree: null, need: '', cap: 0 })
+  expect(els.some(n => n.props?.key === 'more')).toBe(false)
+  // nothing to ask about or make an artifact of yet: the frame holds the title alone
+  expect(els.some(n => n.props?.key === 'head-keys' || n.props?.key === 'title-ask')).toBe(false)
+  // on screen, it takes no keys: the view's `o` is typed
+  await shown($, callRow('toolu_made_up_51', input))
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  expect((await edit('o')).text).toBe('o')
+  // a version that fits draws in its place
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_51b', id, edits: [{ old: '// TALL', new: '// failed only' }] } as never)) as Any
+  expect(String(r2.result)).toContain('The analyst sees it now.')
+  els = await frame()
+  expect(els.find(n => n.type === 'Client')?.props.props.tree).toEqual(TREE)
+  expect(asked).toHaveLength(1)
+  // a card that fits from the first shows whole, and its call says nothing of it
+  const small = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_52', ...small } as never)) as Any
+  expect(String(r3.result)).not.toContain('rows tall')
+  expect(String(r3.result)).not.toContain('evidence for its answer')
+  expect(String(r3.result)).not.toContain('The analyst sees')
+  const fits = elements(await $.ui.render(callRow('toolu_made_up_52', small)))
+  expect(fits.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
+  expect(fits.some(n => n.props?.key === 'more')).toBe(false)
+})
+
+test('a call with the id alone of a card that waits for a version that fits places it, and says again that it waits', async ($, on) => {
+  world(on)
+  critic(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_58', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const placed = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_58b', id } as never)) as Any
+  expect(String(placed.result)).toContain('“Every run” stands here now, where this call stands.')
+  expect(String(placed.result)).toContain('The analyst does not see it yet, since it shows more than the evidence for its answer.')
+  expect(String(placed.result)).not.toContain('is drawn here now')
+  expect(elements(await $.ui.render(callRow('toolu_made_up_58b', { id }))).find(n => n.type === 'Client')?.props.props.tree).toBeNull()
+})
+
+test('a card a resumed session finds waiting for a version that fits draws as it stands', async ($, on) => {
+  const w = world(on)
+  // the card as tool.ts kept it, held, when the session ended
+  const dir = '/made-up/.thimble/conversations/s-cards/cards/c0123456789ab'
+  const held = { since: 1, versions: [{ version: 1, excess: 0.4, title: 'Every run', keys: [], read: '42 rows', columns: ['run'], file: 'runs.json' }] }
+  const meta = { id: 'c0123456789ab', version: 1, title: 'Every run', toolUseId: 'toolu_made_up_57', agentId: null, anchorRow: null, keys: [], read: '42 rows', columns: ['run'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_57: { version: 1 } }, at: 1, held }
+  w.files[`${dir}/meta.json`] = JSON.stringify(meta)
+  w.files[`${dir}/v1/view.js`] = `${VIEW}\n// TALL`
+  w.dirs['/made-up/.thimble/conversations/s-cards/cards'] = ['c0123456789ab']
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const client = elements(await $.ui.render(callRow('toolu_made_up_57', { title: 'Every run', data: 'runs.json', view: VIEW }))).find(n => n.type === 'Client')
+  // its Client asks for its drawing, which a held card's never does
+  expect(client?.props.props.need).toBe('1:92')
+})
+
+test('after two new versions that do not fit, the one that comes closest draws its first 30 rows and `+N rows`, a click on which opens the rest', async ($, on) => {
+  world(on)
+  critic(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_55', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  // the call's row draws the card's frame, where its later versions draw
+  await $.ui.render(callRow('toolu_made_up_55', input))
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_55b', id, edits: [{ old: '// TALL', new: '// ROWS 40' }] } as never)) as Any
+  expect(String(r2.result)).toContain('The analyst still does not see “Every run”, since it still shows more than the evidence for its answer:')
+  expect(String(r2.result)).toContain('Draw the next version with its `id` and `edits`')
+  expect(String(r2.result)).not.toContain('frame shows')
+  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_55c', id, edits: [{ old: '// ROWS 40', new: '// ROWS 35' }] } as never)) as Any
+  expect(String(r3.result)).toContain('The analyst sees “Every run” now, as this version.')
+  // nothing of the cut: the analyst sees the card, and opens the rest when they want it
+  expect(String(r3.result)).not.toContain('+5 rows')
+  const frame = async () => elements(await $.ui.render(callRow('toolu_made_up_55', input)))
   let els = await frame()
   expect(els.find(n => n.type === 'Client')?.props.props.cap).toBe(30)
   const more = els.find(n => n.type === 'Button' && n.props?.key === 'more')
-  expect(textOf(more)).toBe('+12 rows')
-  const ui = await $.ui.mount({ plugin: 'thimble', ...(callRow('toolu_made_up_51', input) as Any) })
+  expect(textOf(more)).toBe('+5 rows')
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(callRow('toolu_made_up_55', input) as Any) })
   await ui.press({ key: 'more' })
   await ui.unmount()
   els = await frame()
   expect(els.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
   expect(els.some(n => n.props?.key === 'more')).toBe(false)
-  // a card that fits shows whole, with no such line, and its call says nothing of it
-  const small = { title: 'Scores', data: 'runs.json', view: VIEW }
-  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_52', ...small } as never)) as Any
-  expect(String(r2.result)).not.toContain('rows tall')
-  const fits = elements(await $.ui.render(callRow('toolu_made_up_52', small)))
-  expect(fits.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
-  expect(fits.some(n => n.props?.key === 'more')).toBe(false)
+})
+
+test('when an earlier version comes closest, it draws again as a version of its own', async ($, on) => {
+  const w = world(on)
+  critic(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// ROWS 33` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_56', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  await $.ui.render(callRow('toolu_made_up_56', input))
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_56b', id, edits: [{ old: '// ROWS 33', new: '// ROWS 45' }] } as never)
+  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_56c', id, edits: [{ old: '// ROWS 45', new: '// ROWS 50' }] } as never)) as Any
+  expect(String(r3.result)).toContain('The analyst sees “Every run” now, as your first version.')
+  expect(String(r3.result)).not.toContain('+3 rows')
+  expect(Object.entries(w.files).find(([p]) => /\/v4\/view\.js$/.test(p))?.[1]).toContain('// ROWS 33')
+  const more = elements(await $.ui.render(callRow('toolu_made_up_56', input))).find(n => n.type === 'Button' && n.props?.key === 'more')
+  expect(textOf(more)).toBe('+3 rows')
 })
 
 test("the Client cuts a drawing at the frame's `cap` rows, and draws it whole without one", async () => {
@@ -928,23 +1036,35 @@ test("a border the view gives no color of its own draws dim, as the card's frame
   expect(drawn.map(n => [n.props.borderStyle, n.props.borderDimColor, n.props.borderColor])).toEqual([['round', true, undefined], ['single', undefined, '#80b2ea']])
 })
 
-test('a card one row past 30 draws whole, since a `+1 row` line would take the place of that row; two rows past, it shows 30 and `+2 rows`', async ($, on) => {
+test('a card one row past 30 draws whole, since a `+1 row` line would take the place of that row; two rows past, it waits for a version that fits, and draws 30 rows and `+2 rows` when the turn ends without one', async ($, on) => {
   world(on)
+  critic(on)
+  on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const one = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// ROWS 31` }
   const r1 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_53', ...one } as never)) as Any
-  expect(String(r1.result)).not.toContain('its frame shows its first')
+  expect(String(r1.result)).not.toContain('its frame shows')
+  expect(String(r1.result)).not.toContain('evidence for its answer')
   const whole = elements(await $.ui.render(callRow('toolu_made_up_53', one)))
   expect(whole.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
   expect(whole.some(n => n.props?.key === 'more')).toBe(false)
   const two = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// ROWS 32` }
   const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_54', ...two } as never)) as Any
-  expect(String(r2.result)).toContain('Note: the card is up to 32 rows tall, and its frame shows its first 30 rows with "+2 rows" under them')
+  expect(String(r2.result)).toContain('The analyst does not see “Every run” yet, since it shows more than the evidence for its answer.')
+  expect(elements(await $.ui.render(callRow('toolu_made_up_54', two))).find(n => n.type === 'Client')?.props.props.tree).toBeNull()
+  // main's turn ends with no version that fits: the card draws as it stands
+  await $.turn.complete({ turnId: 'turn-made-up-1', reason: 'answer', answer: 'Done.', durationMs: 10, isAborted: false } as never)
   const cut = elements(await $.ui.render(callRow('toolu_made_up_54', two)))
   expect(cut.find(n => n.type === 'Client')?.props.props.cap).toBe(30)
   const more = cut.find(n => n.type === 'Button' && n.props?.key === 'more')
   expect(textOf(more)).toBe('+2 rows')
   expect(more.props.label).toBe('show the other 2 rows of the card')
+})
+
+test("the critique reads where a version runs past the card besides its copy, which shows its rows, and no measure", () => {
+  expect(sizeWhere(sizeOf(42, 0))).toBe('')
+  expect(sizeWhere(sizeOf(12, 3))).toBe('Some of its lines are wider than the card.')
+  expect(sizeWhere(sizeOf(42, 3))).toBe('Some of its lines are wider than the card.')
 })
 
 test('the line under a cut card says "row" for one', () => {

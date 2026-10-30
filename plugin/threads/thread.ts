@@ -361,6 +361,17 @@ export async function threadCardAnchor($: Engine, agentId: string | undefined, c
   return `thread:${t.key}`
 }
 
+/** The question a thread's fork answers, the person's last in its thread, with what they asked it about: what the
+ *  critique of a card the fork drew reads as the request (cards/tool.ts), since the fork does not answer main's last
+ *  prompt. null when the agent is no thread's. */
+export function threadQuestion(agentId: string | undefined): string | null {
+  if (!agentId || forkOf(agentId)?.kind !== 'thread') return null
+  const key = byAgent.get(agentId)
+  const t = key ? threads.get(key) : null
+  const last = t?.asks[t.asks.length - 1]
+  return last ? `${last.text} (asked about ${last.scope.about})` : null
+}
+
 /** The cards a thread's fork drew, by the answer they stand under (for the pane). */
 export async function cardsOfTurn($: Engine, ids: string[] | undefined): Promise<Any[]> {
   const out: Any[] = []

@@ -39,6 +39,12 @@ const CARDS: Record<string, Cell> = {
     check: rec('error', { reason: 'its revision was not kept: its code did not run clean: NameError', stages: { critique: { status: 'ok', assessment: [{ problem: '' }, { problem: 'The takeaway names a count the table does not show' }] } } }),
     fixes: [{ id: 'fix_2', check: 'chk_1', ts: '2026-10-06T04:01:00Z', state: 'rejected', reason: 'its code did not run clean: NameError', fields: ['code'], before: { code: '' }, after: { code: 'len(posts)' } }],
   }),
+  // a revision that does not fit on the analyst's screen, where the card as it stands does, is not kept (backend
+  // card_fit.keeps_replacement): the card stays as its author made it, with no mark
+  tooLarge: card({
+    check: rec('ok', { stages: { critique: { status: 'ok', assessment: [{ problem: '' }, { problem: 'The graphic leaves out the start times the analyst asked for' }] } } }),
+    fixes: [{ id: 'fix_3', check: 'chk_1', ts: '2026-10-06T04:01:00Z', state: 'rejected', reason: "it does not fit on the analyst's screen", fields: ['code'], before: { code: 'grid' }, after: { code: 'every_row' } }],
+  }),
   // a revision an earlier check could not run says nothing about the check that came after it
   olderUnrun: card({
     check: rec('error', { id: 'chk_2', reason: "Anthropic's API is overloaded" }),
@@ -63,14 +69,14 @@ const buttons = (el: HTMLElement) => [...el.querySelectorAll('button')].map((b) 
 
 test('only typed-in numbers and a revision that would not run are problems', () => {
   const problems = Object.fromEntries(Object.entries(CARDS).map(([k, c]) => [k, checkProblem(checkOf(c))]))
-  for (const k of ['passed', 'revised', 'running', 'stopped', 'unfinished', 'olderUnrun']) expect(problems[k], k).toBe('')
+  for (const k of ['passed', 'revised', 'running', 'stopped', 'unfinished', 'tooLarge', 'olderUnrun']) expect(problems[k], k).toBe('')
   expect(problems.typed).toMatch(/types in 3 numbers/)
   expect(problems.unrun).toMatch(/^The takeaway names a count the table does not show\. Its revision of the card would not run: its code did not run clean: NameError\.$/)
 })
 
 test("the filter's check state follows the mark: the ✕ is Failed, a check that could not finish Unverified", () => {
   const states = Object.fromEntries(Object.entries(CARDS).map(([k, c]) => [k, checkState(c)]))
-  expect(states).toEqual({ passed: 'verified', revised: 'verified', running: 'unverified', stopped: 'unverified', unfinished: 'unverified', typed: 'failed', unrun: 'failed', olderUnrun: 'unverified' })
+  expect(states).toEqual({ passed: 'verified', revised: 'verified', running: 'unverified', stopped: 'unverified', unfinished: 'unverified', typed: 'failed', unrun: 'failed', tooLarge: 'verified', olderUnrun: 'unverified' })
   expect(checkState(card({}))).toBe('unchecked')
 })
 

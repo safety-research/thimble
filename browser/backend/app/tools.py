@@ -569,7 +569,7 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
                chat: str | None = None, session: str | None = None, tool_use_id: str | None = None) -> ToolResult:
     """Run one tool for one caller, by its name or an alias. KeyError for a tool the registry does not have; every other
     failure is an is_error result the model reads. `terminal`, `anchor`, `session` and `tool_use_id` go to the Ctx."""
-    from . import canvas_history, undo  # noqa: PLC0415
+    from . import canvas_history, card_check, card_fit, undo  # noqa: PLC0415 — both card modules import the harness
 
     name = canonical(name)
     spec = REGISTRY[name]
@@ -581,12 +581,17 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
         # from the start, and the fork is told about the thread's cards
         fork = await _as_fork(ctx, wait=spec.makes_cards)
         author = fork.cell_author
-        with canvas_history.acting(author):  # who changed a card
+        # who changed a card; and a card add_card or edit_card writes waits for its measure (card_fit.measuring), its
+        # record naming who made it (card_fit.holder), whose turn or run ends its wait
+        who = card_fit.holder(c, name, session, tool_use_id)
+        with canvas_history.acting(author), card_fit.measuring(name, who):
             res = await _run(spec, fork if spec.makes_cards else ctx, name, args)
+        # a card add_card or edit_card wrote that does not fit on the analyst's screen waits for a version that fits,
+        # with a critique in this result (card_fit.py)
+        res = await card_fit.after_tool(c, name, args, res, session=session, anchor=anchor, by=author,
+                                        agent=who.get("agent", ""))
         # the card check (card_check.py): a card add_card or edit_card wrote is drawn and read once it has its
         # takeaway; nothing of the check joins this result
-        from . import card_check  # noqa: PLC0415 — card_check imports the harness
-
         res = await card_check.after_tool(c, name, args, res, session=session, anchor=anchor)
         # the citations of the card's takeaway are checked as the write lands, not with main's next reply (marks.py)
         if name in card_check.CHECK_TOOLS and not res.is_error:
@@ -1809,7 +1814,8 @@ def _citing_documents(c: str, cid: str) -> "builtins.list[str]":
 async def _h_delete_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """Delete a card (notebook.delete_cell). A card a document cites is kept, with the `## delete_card-cited` line
     naming the
-    documents. The caller's remembered last card is forgotten when it is the one deleted."""
+    documents. The caller's remembered last card is forgotten when it is the one deleted, and the versions of a card that
+    waited for one that fits count for the card that takes its place (card_fit.deleting)."""
     from . import notebook
 
     cid = _cell_id_of(args.get("card") if args.get("card") not in (None, "") else args.get("cell"))
@@ -1824,6 +1830,9 @@ async def _h_delete_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if docs:
         return err(hint("delete_card-cited", cid=cid, docs=", ".join(docs)))
     question = " ".join(str(hit[1].get("title") or "").split()) or "(no question)"
+    from . import card_fit  # noqa: PLC0415 — card_fit imports the harness
+
+    card_fit.deleting(ctx.c, hit[1])  # a held card: the card that takes its place goes on from its versions
     notebook.delete_cell(ctx.c, cid)
     for key in [k for k, v in _last_cell.items() if v == cid]:
         del _last_cell[key]
