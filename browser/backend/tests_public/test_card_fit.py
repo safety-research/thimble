@@ -91,8 +91,7 @@ async def checking(monkeypatch):
 
     async def read(c, cell, picture, run, path=None):
         too = (await card_check.card_input(c, cell, run, None, card_check._sections()))["card"]["too_large"]
-        revision["read"].append(bool(too))
-        revision.setdefault("size", []).append(too)
+        revision["read"].append(too)
         if "gate" in revision:
             await revision["gate"].wait()
         criteria = card_check.CRITERIA + 1 if too else card_check.CRITERIA
@@ -151,11 +150,8 @@ async def test_a_card_that_does_not_fit_shows_once_its_check_ends_as_the_check_s
     assert held(cid) and held(cid)["body"] == 4068 and _harness["held_while_drawn"] == [notebook.MEASURING_HELD]
     cell = await checked(cid)
     assert held(cid) is None and cell["code"] == "620" and cell["check"]["status"] == "fixed"
-    # one pass: the check read it once, as a card that does not fit, with its size, and no other model call was made
+    # one pass: the check read it once, as a card that does not fit, and no other model call was made for it
     assert checking["read"] == [True] and not _harness["model"]
-    assert checking["size"] == [f"card:{cid}'s body draws 4068 px tall at the card's width, and about 800 px of a card's "
-                                "body fit on the analyst's screen with its question and takeaway, so they never see the "
-                                "whole card at once."]
     assert [(r["action"], r.get("why")) for r in card_fit_lines()] == [("held", None), ("shown", "checked")]
     # nor does the check tell its author the size of the version the analyst never saw
     after = await call("add_card", kind="note", question="What comes next?", text="The failed nights.")
@@ -233,11 +229,10 @@ async def test_the_reading_of_a_card_that_does_not_fit_asks_one_more_criterion(m
     monkeypatch.setattr(card_check, "_call", reading)
     card = {"id": "c1", "kind": "table", "question": "Which runs failed?", "takeaway": "14 of the 56 runs failed.",
             "code": "runs"}
-    size = "card:c1's body draws 4068 px tall at the card's width."
-    await card_check.check_task(CORPUS, {"card": {**card, "too_large": size}, "picture": None, "effort": "low"})
-    await card_check.check_task(CORPUS, {"card": {**card, "too_large": ""}, "picture": None, "effort": "low"})
+    await card_check.check_task(CORPUS, {"card": {**card, "too_large": True}, "picture": None, "effort": "low"})
+    await card_check.check_task(CORPUS, {"card": {**card, "too_large": False}, "picture": None, "effort": "low"})
     (large, six), (fits, five) = seen
-    assert f"does not fit on the analyst's screen: {size}" in large and "only what the question needs" in large
+    assert "does not fit on the analyst's screen" in large and "only what the question needs" in large
     # with the card guidance its author works from, and the toolkit it writes a card's code with
     assert "The content is the evidence for one answer" in large and "thimble.chart(kind, df)" in large
     assert "does not fit" not in fits and "thimble.chart(kind, df)" not in fits
@@ -330,12 +325,9 @@ async def test_main_s_turn_end_leaves_a_card_the_orientation_s_call_is_measuring
     assert held(cid)["author"] == tools.ORIENT_SESSION and held(cid)["body"] == 2400
 
 
-async def test_a_page_wider_than_its_card_is_held_and_its_check_reads_its_width_and_the_card_s(_harness):
+async def test_a_page_wider_than_its_card_is_held_with_its_width_and_the_card_s(_harness):
     cid = _cid(await call("add_card", kind="custom", question="How did the outage unfold?", html=page(300, 1180)))
     assert held(cid) and (held(cid)["width"], held(cid)["frame"]) == (1180, 692)
-    assert card_fit.size_note(notebook.get_cell(CORPUS, cid)) == (
-        f"card:{cid}'s page lays out 1180 px wide, and the card gives it 692 px, so the analyst does not see all of it "
-        "at the card's width.")
 
 
 async def test_a_card_left_held_by_the_server_before_shows_at_the_next_start(_harness, workspaces_tmp):

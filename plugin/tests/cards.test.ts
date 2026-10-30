@@ -931,10 +931,8 @@ test('a card taller than its frame waits for the card check: its frame draws `dr
   // one model call: the card check, which reads the card as drawn and its view
   await settle()
   expect(asked).toHaveLength(1)
-  expect(String(asked[0].prompt)).toContain('run 30  passed')
+  expect(String(asked[0].prompt)).toContain('run 42  passed')
   expect(String(asked[0].prompt)).toContain('// TALL')
-  // with the note on its size that Claude reads of a card that fits its frame and not the screen
-  expect(String(asked[0].prompt)).toContain('Note: the card is up to 42 rows tall, and its frame shows its first 30 rows with "+12 rows" under them')
   expect(JSON.stringify(asked[0].system)).toContain('PROMPT card-check')
   go()
   const props = await drawnOnce($, row)

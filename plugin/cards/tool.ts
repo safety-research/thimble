@@ -327,9 +327,8 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   }
   // the size of a version the check reads is the check's, not Claude's: the analyst sees the check's replacement
   const screen = screenRows()
-  const tallNote = (rows: number) => `Note: the card is up to ${rows} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(rows))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`
-  if (hold) void checkHeld($, { id, version, title, question: threadQuestion(input.agentId) ?? (await sinceLast($).catch(() => null))?.prompt?.text ?? '', columns: r.summary.columns, first: String(r.summary.first ?? ''), copy: copyText(r.lines, r.cut, width), note: rowsCut(r.lines.length) ? tallNote(r.lines.length) : '', width, view: view.text!, rows: `${dir}/rows.json` })
-  else if (rowsCut(tallest)) out.push('', tallNote(tallest))
+  if (hold) void checkHeld($, { id, version, title, question: threadQuestion(input.agentId) ?? (await sinceLast($).catch(() => null))?.prompt?.text ?? '', columns: r.summary.columns, first: String(r.summary.first ?? ''), copy: copyText(r.lines, r.cut, width), width, view: view.text!, rows: `${dir}/rows.json` })
+  else if (rowsCut(tallest)) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(tallest))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
   else if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
   void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0, ...(hold ? { held: true } : {}) })
   return { result: out.join('\n') }
@@ -339,7 +338,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
  *  place as a version of thimble's (personVersion), and the card shown, as the replacement or as it stands, unless
  *  Claude drew a newer version meanwhile, which waits for its own check. A check whose call failed is told on the
  *  failure line, as the workbench tells a check that failed by itself. Never throws. */
-async function checkHeld($: Engine, o: { id: string; version: number; title: string; question: string; columns: string[]; first: string; copy: string[]; note: string; width: number; view: string; rows: string }): Promise<void> {
+async function checkHeld($: Engine, o: { id: string; version: number; title: string; question: string; columns: string[]; first: string; copy: string[]; width: number; view: string; rows: string }): Promise<void> {
   let at = o.version
   try {
     const got = await checkCard($, { ...o, guide: await cardGuide($) })
