@@ -1,7 +1,8 @@
 """Checks on Claude's answers in the chat (checks.py's run target ANSWERS, answer_comments.py): an answer's passages are
 its sentences, split from paragraphs and list items and never inside a link or a code span, each with its offsets in its
 row's text; when main's turn ends with an answer each shown check that covers answers runs on it, a follow-on start
-through the fake module, and its add_comment stores the passage's quote and offsets; Heads up and Explainers cover
+through the fake module, and its add_comment stores the passage's quote and offsets; an explainer and a heads-up never
+share a sentence; Heads up and Explainers cover
 answers by default and a stored copy of Heads up from before reads so, unless the analyst set its Show in; a check turned off, or whose Chat
 is unchecked, leaves nothing in the chat; a run over answers tells main nothing when it ends and supersedes its
 check's earlier comments; the routes."""
@@ -11,6 +12,7 @@ import asyncio
 import time
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app import answer_comments, checks, config, subagents, tools
@@ -136,6 +138,90 @@ async def test_add_comment_on_an_answer_stores_its_quote_and_offsets_and_refuses
     res = await _comment(act, f"answer:{TURN}#s99", "No such sentence.", "toolu_a2")
     assert res.is_error and "not among the passages" in res.text
     assert _run()["comments"] == 1
+
+
+async def test_an_explainer_and_a_heads_up_never_share_a_sentence_the_one_there_first_keeps_it(board, bridge):
+    """Heads up and Explainers both run on the answer. A comment of one on a sentence the other's open comment holds is
+    not stored: its run hears why, and its comment goes on another sentence; a dismissed comment holds nothing, and does
+    not open again where the other's holds its sentence now. The chat then has one comment per tinted sentence."""
+    checks.edit(CORPUS, "explainers", shown=True)
+    checks.answer_ended(CORPUS, _turn())
+    runs = {}
+    for cid in (IMPORTANT, "explainers"):
+        await _until(lambda: (CORPUS, cid, checks.ANSWERS) in checks._active, f"no {cid} run after the answer")
+        runs[cid] = act = checks._active[(CORPUS, cid, checks.ANSWERS)]
+        await _until(lambda: act.agent or act.ended, f"the {cid} run's agent never started")
+
+    async def comment(cid: str, ref: str, text: str, tid: str):
+        sf.add_caller(config.workspace_dir(CORPUS), tid, runs[cid].agent, "thimble:check")
+        return await tools.call(CORPUS, "add_comment", {"ref": ref, "text": text},
+                                session=checks.session_key(cid, checks.ANSWERS), tool_use_id=tid)
+
+    s1, s2, s3 = (f"answer:{TURN}#s{n}" for n in (1, 2, 3))
+    res = await comment(IMPORTANT, s1, "The 18 posts are March's alone; the board holds 40 in all.", "toolu_n1")
+    assert not res.is_error, res.text
+    # an explainer on the heads-up's sentence: not stored, and the run hears why
+    res = await comment("explainers", s1, "board: the page where the agents post to each other.", "toolu_n2")
+    assert res.is_error and "Not added" in res.text and s1 in res.text and "Heads up" in res.text, res.text
+    res = await comment("explainers", s2, "agent-02: the agent that posts the status reports.", "toolu_n3")
+    assert not res.is_error, res.text
+    # and a heads-up on the explainer's sentence
+    res = await comment(IMPORTANT, s2, "agent-02 posted 6 of the 18.", "toolu_n4")
+    assert res.is_error and "Explainers" in res.text, res.text
+    assert [(x["check"], x["ref"]) for x in answer_comments.open_comments(CORPUS)] == [(IMPORTANT, s1),
+                                                                                       ("explainers", s2)]
+    assert (_run()["comments"], _run("explainers")["comments"]) == (1, 1)
+    # a dismissed comment holds its sentence no more, and does not open again once the other's holds it
+    [gloss] = [x for x in answer_comments.open_comments(CORPUS) if x["check"] == "explainers"]
+    answer_comments.set_status(CORPUS, gloss["id"], answer_comments.SETTLED)
+    res = await comment(IMPORTANT, s2, "agent-02 posted 6 of the 18.", "toolu_n5")
+    assert not res.is_error, res.text
+    with pytest.raises(HTTPException) as refused:
+        answer_comments.set_status(CORPUS, gloss["id"], "open")
+    assert refused.value.status_code == 409
+    # a sentence neither holds takes either, and a check's own comments share a sentence as before
+    for tid in ("toolu_n6", "toolu_n7"):
+        res = await comment("explainers", s3, f"status reports: {tid}.", tid)
+        assert not res.is_error, res.text
+    shown = answer_comments.state(CORPUS)["comments"]
+    assert sorted((x["ref"], x["check"]) for x in shown) == [(s1, IMPORTANT), (s2, IMPORTANT), (s3, "explainers"),
+                                                            (s3, "explainers")]
+
+
+def test_only_a_comment_the_chat_shows_keeps_its_sentence(board):
+    """A comment of the Explainers check holds its sentence from a heads-up only while the chat shows it: with
+    Explainers turned off, or with Chat left out of its Show in, a heads-up is stored on that sentence, and a dismissed
+    one opens again there."""
+    answer_comments.store_answer(CORPUS, _turn())
+    s1, s2 = answer_comments.passages(_turn())[:2]
+
+    def add(p: dict, cid: str, text: str) -> tuple[dict, bool]:
+        return answer_comments.add(CORPUS, passage=p, text=text, author=checks.AUTHOR, check=cid, run=f"run-{cid}")
+
+    checks.edit(CORPUS, "explainers", shown=True)
+    gloss, new = add(s1, "explainers", "board: the page where the agents post to each other.")
+    assert new
+    other, new = add(s2, "explainers", "agent-02: the agent that posts the status reports.")
+    assert new
+    # while the chat shows the explainer, a heads-up on its sentence is not stored
+    held, new = add(s1, IMPORTANT, "The 18 posts are March's alone; the board holds 40 in all.")
+    assert (held["id"], new) == (gloss["id"], False)
+    # Explainers off: the chat shows no explainer there, so the heads-up keeps that sentence
+    checks.edit(CORPUS, "explainers", shown=False)
+    heads, new = add(s1, IMPORTANT, "The 18 posts are March's alone; the board holds 40 in all.")
+    assert new and heads["check"] == IMPORTANT and heads["ref"] == s1["ref"]
+    # Explainers on, with Chat left out of its Show in: the same
+    checks.edit(CORPUS, "explainers", shown=True, covers=["documents", "cards"])
+    later, new = add(s2, IMPORTANT, "agent-02 posted 6 of the 18.")
+    assert new and later["check"] == IMPORTANT
+    # a dismissed heads-up opens again on a sentence whose explainer the chat does not show, and not on one it shows
+    answer_comments.set_status(CORPUS, later["id"], answer_comments.SETTLED)
+    assert answer_comments.set_status(CORPUS, later["id"], "open")["status"] == "open"
+    answer_comments.set_status(CORPUS, later["id"], answer_comments.SETTLED)
+    checks.edit(CORPUS, "explainers", covers=["documents", "cards", "answers"])
+    with pytest.raises(HTTPException) as refused:
+        answer_comments.set_status(CORPUS, later["id"], "open")
+    assert refused.value.status_code == 409 and other["id"] in refused.value.detail
 
 
 async def test_a_check_off_or_out_of_the_chat_leaves_nothing_there_and_its_comments_come_back(board, bridge):

@@ -132,7 +132,7 @@ export function CommentRow({ item: c, name, onDone }: { item: CommentItem; name:
   const [open, setOpen] = useState(false)
   // the chat's own send path: it opens main (and the chat column, when folded) and posts the message there
   const apply = () => bus.emit('openChat', { chatId: 'main', send: applyText(c, name) })
-  const go = () => teleport(c.ref)
+  const go = () => teleport(c.ref, { comment: c.id })
   return (
     <div className="lside-comment" data-comment={c.id} data-surface={c.surface}>
       <button type="button" className="lside-comment-where" onClick={go} title="Go to it">

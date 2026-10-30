@@ -12,7 +12,7 @@ import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
 import { failLineNow } from '../bar/notice'
-import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { explainBar, explainKey, headsKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayBand, trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
@@ -581,7 +581,7 @@ test('the selected words are trimmed to one line, and a long selection is cut af
   expect((await failLineNow(s.$))?.kind).toBe('failed')
 })
 
-test('selected words inside a mark open it; words over or across marks get one explainer whose mark covers the marks it overlaps', async () => {
+test('selected words inside a mark open it; words over or across marks get one explainer whose mark covers the explainers it overlaps, and never a heads-up', async () => {
   setOptions({})
   const s = setup([LOOK], { complete: reply({ body: 'When the client has used all its tries.', here: '' }) })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
@@ -599,11 +599,74 @@ test('selected words inside a mark open it; words over or across marks get one e
   await pressE(s, { text: 'budget runs', requestId: 't1-row' })
   await settle()
   expect(s.calls.length).toBe(1)
-  // and words over the heads-up and its neighbor get one explainer of their own, which the heads-up gives way to
+  // and words over the heads-up and its neighbor get one explainer of their own, which opens in the tray; the heads-up
+  // keeps its words, and a press on them opens it
   await pressE(s, { text: 'came 30 seconds', requestId: 't1-row' })
   await settle()
   expect(s.calls.length).toBe(2)
-  expect((await spansFor(s.$, 't1-row', ANSWER, [])).map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['a2', 'came 30 seconds']])
+  const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
+  expect(part.items.a2).toMatchObject({ term: 'came 30 seconds', asked: true })
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id: 'a2' })
+  const after = await spansFor(s.$, 't1-row', ANSWER, [])
+  expect(after.map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['h1', '30 seconds after a drop']])
+  await after[1]!.onPress!()
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads', id: 'h1' })
+})
+
+test("an explainer asked for on a heads-up's words, as the evidence pane's e asks for one of a citation's words, never covers the heads-up while it is written or once written", async () => {
+  setOptions({})
+  // the heads-up stands on the citation's words, as a look often puts it
+  const onCite = reply({ glosses: [], heads: { term: '41 of the 44', title: 'One office', bullets: ['[The log covers one office](logs/upload.log).'] } })
+  let done: (v: Any) => void = () => undefined
+  const s = setup([onCite], { complete: new Promise(r => { done = r }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  const drawn = async () => (await spansFor(s.$, 't1-row', ANSWER, marksIn(ANSWER))).map(x => [x.id, ANSWER.slice(x.start, x.end)])
+  expect(await drawn()).toEqual([['h1', '41 of the 44']])
+  const asked = explainTerm(s.$, 't1-row', '41 of the 44')
+  await settle()
+  expect(await drawn()).toEqual([['h1', '41 of the 44']])
+  done(reply({ body: 'The failed uploads the log counts.', here: '' }))
+  // written and kept on the answer, so the pane shows it
+  expect(await asked).toMatchObject({ term: '41 of the 44', asked: true, body: 'The failed uploads the log counts.' })
+  expect((await sessionGlosses(s.$)).map(g => g.term)).toEqual(['41 of the 44'])
+  expect(await drawn()).toEqual([['h1', '41 of the 44']])
+  const [h] = await spansFor(s.$, 't1-row', ANSWER, marksIn(ANSWER))
+  await h!.onPress!()
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads', id: 'h1' })
+})
+
+test('only what the analyst sees keeps its words: h gives no heads-up on the words of an explainer shown there, and gives one on the words of an explainer Explainers hides', async () => {
+  // Heads-ups on demand: the look after each answer gives explainers alone, and h asks for the heads-up
+  setOptions({ details: 'on demand' })
+  try {
+    const s = setup([
+      reply({ glosses: [{ term: 'network drop', body: 'A moment the office network went down.' }] }),
+      reply({ heads: { term: '30 seconds after a network drop', title: 'One office', bullets: ['The log covers one office.'] } }),
+      reply({ glosses: [{ term: 'power cut', body: 'The building lost its power.' }] }),
+      reply({ heads: { term: '20 seconds after a power cut', title: 'One building', bullets: ['Only one building lost power.'] } }),
+    ])
+    s.$.ui = { invalidate: () => undefined }
+    const h = async () => {
+      await (await headsKey(s.$, 'h', 0))!.later!()
+      await settle()
+      await drainNow(s.$)
+      await settle()
+    }
+    const drawn = async (row: string, text: string) => (await spansFor(s.$, row, text, [])).map(x => [x.id, text.slice(x.start, x.end)])
+    const one = 'Uploads fail when the retry budget runs out: 41 of the 44 failures came 30 seconds after a network drop.'
+    await answered(s, { id: 'k1', prompt: 'Why do uploads fail?', text: one })
+    await h()
+    expect(await drawn('k1-row', one)).toEqual([['g1', 'network drop']])
+    // Explainers off: the analyst sees no explainer on the next answer, so h's heads-up takes its words
+    const two = 'The second office lost 12 uploads 20 seconds after a power cut.'
+    await answered(s, { id: 'k2', prompt: 'And the second office?', text: two })
+    setOptions({ details: 'on demand', explain: 'off' })
+    await h()
+    expect((await partOf<ExplainPart>(s.$, 'k2-row', 'explain'))!.order).toEqual(['g1', 'h1'])
+    expect(await drawn('k2-row', two)).toEqual([['h1', '20 seconds after a power cut']])
+  } finally {
+    setOptions({})
+  }
 })
 
 // ------------------------------------------------------------------------------------------------ c: cite

@@ -1312,6 +1312,10 @@ Your task is in {n} files, in this order: {paths}. They hold the check's instruc
 
 {ref} is not among the passages this run checks. Comment only on the passages your task lists.
 
+## add_comment-held
+
+Not added: {ref} holds a comment of {check} already, and an explainer and a heads-up never share a sentence. Comment on another sentence that holds its words, or leave it out.
+
 ## add_comment-not-check
 
 Only the analyst's session and a check's own session comment with `add_comment`.

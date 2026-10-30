@@ -2,8 +2,10 @@
 // and comments on its passages (backend answer_comments.py, routes GET /ws/{c}/answer-comments and POST
 // …/{id}/dismiss, the stream's `answer-comments` record). Each open comment tints its passage in main's chat in its
 // check's color, as the report tints a commented passage; the first piece of the passage carries the anchor
-// `answer:<turn>#s<n>` (Go to it in the Comments sidebar scrolls to it), and a click opens the comment beside the passage
-// as the comment card the canvas and the report's margin draw (AnswerComment.tsx AnswerCommentPop).
+// `answer:<turn>#s<n>` (Go to it in the Comments sidebar scrolls to it and opens its comment), and a click opens the
+// comment beside the passage as the comment card the canvas and the report's margin draw (AnswerComment.tsx
+// AnswerCommentPop). An explainer and a heads-up never share a sentence, so each of their tints opens its own comment
+// (marksOf).
 //
 // A comment names the turn it is on (`turn`, the id the turn's `done` record names, chat/model.ts TextRow.turn) and
 // quotes its passage raw, as Claude wrote it. The chat draws the answer as markdown, so the passage is found in the drawn
@@ -78,24 +80,45 @@ export function commentsOfRow(row: { text: string; turn?: string }, comments: re
   })
 }
 
-/** The marks of one row's comments, `active` the open one. Pure. */
+/** The checks whose comments never share a sentence, each with the other: the explainers and the heads-ups (backend
+ * answer_comments.APART). */
+const APART: Readonly<Record<string, string>> = { 'heads-up': 'explainers', explainers: 'heads-up' }
+
+/** The marks of one row's comments, `active` the open one. An explainer and a heads-up never share a sentence: of two
+ * stored on one (before the backend kept them apart, or while one of their checks was hidden), the open one is drawn,
+ * else the one there first, so each tint opens its own comment and an open comment stands on its passage. Pure. */
 export function marksOf(comments: readonly AnswerComment[], active: string | null): AnswerMark[] {
-  return comments.map((c) => ({ id: c.id, quote: c.quote, colour: tintOf(c), ref: c.ref, active: c.id === active }))
+  const drawn: AnswerComment[] = []
+  for (const c of [...comments].sort((a, b) => Number(b.id === active) - Number(a.id === active)))
+    if (!drawn.some((d) => d.ref === c.ref && APART[d.check] === c.check)) drawn.push(c)
+  return comments.filter((c) => drawn.includes(c)).map((c) => ({ id: c.id, quote: c.quote, colour: tintOf(c), ref: c.ref, active: c.id === active }))
 }
 
-// the last `answer:` ref Go to it asked for and no chat has opened yet: main's chat may mount after the ask, when the
-// chat column was folded or showed another chat (Rows reads it as it mounts)
-let wanted: string | null = null
+/** What Go to it asked for: an `answer:` ref, and the comment to open there when it names one (shell/CommentsList). */
+export interface AnswerAsk {
+  ref: string
+  comment?: string
+}
+
+// the last ask Go to it made that no chat has opened yet: main's chat may mount after the ask, when the chat column was
+// folded or showed another chat (Rows reads it as it mounts)
+let wanted: AnswerAsk | null = null
 bus.on('openRef', (e) => {
-  if (e.ref.startsWith('answer:')) wanted = e.ref
+  if (e.ref.startsWith('answer:')) wanted = { ref: e.ref, comment: e.comment }
 })
 
-/** The `answer:` ref asked for that no chat opened yet, or null. */
-export const askedAnswer = (): string | null => wanted
+/** The ask for an `answer:` ref that no chat opened yet, or null. */
+export const askedAnswer = (): AnswerAsk | null => wanted
 
 /** The ask was answered: its comment opened. */
-export function answeredAsk(ref: string): void {
-  if (wanted === ref) wanted = null
+export function answeredAsk(ask: AnswerAsk): void {
+  if (wanted?.ref === ask.ref && wanted.comment === ask.comment) wanted = null
+}
+
+/** The open comment an ask opens: the one it names, else the first on its passage. Pure. */
+export function commentAsked(comments: readonly AnswerComment[], ask: AnswerAsk): AnswerComment | null {
+  const open = comments.filter((c) => c.ref === ask.ref && c.status === 'open')
+  return open.find((c) => c.id === ask.comment) ?? open[0] ?? null
 }
 
 /** The workspace's comments on Claude's answers, read again on the stream's `answer-comments` record, when a check

@@ -1703,7 +1703,9 @@ def _add_card_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
 
 def _add_answer_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
     """add_comment in a run over Claude's answers: a comment beside a sentence the run covers, `answer:<turn>#s<n>`,
-    stored with the sentence's raw text and offsets (answer_comments.add)."""
+    stored with the sentence's raw text and offsets (answer_comments.add). An explainer on a sentence a heads-up holds,
+    or a heads-up on one an explainer holds, is not stored (answer_comments.APART), and the run hears why, so it may
+    comment on another sentence that holds its words."""
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     text = _collapse(args.get("text"))
     if not text:
@@ -1716,8 +1718,11 @@ def _add_answer_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
     shown, details, evidence = note_parts(ctx.c, text, args.get("details"))
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
-    _, new = answer_comments.add(ctx.c, passage=p, text=shown, details=details, author=AUTHOR, check=act.check,
-                                 run=act.run, evidence=evidence)
+    cm, new = answer_comments.add(ctx.c, passage=p, text=shown, details=details, author=AUTHOR, check=act.check,
+                                  run=act.run, evidence=evidence)
+    if cm.get("check") != act.check:
+        held = read(ctx.c, str(cm.get("check"))) or {}
+        return tools.err(tools.hint("add_comment-held", ref=p["ref"], check=held.get("name") or cm.get("check")))
     if new:
         act.comments += 1
         check = read(ctx.c, act.check)
