@@ -876,7 +876,11 @@ async def test_a_reply_claude_s_safeguards_moved_to_another_model_is_told_in_a_n
     api_key(monkeypatch, [switched])
     await main_turn("What are these episodes?")
     said = [n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
-    assert said == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."]
+    assert said == [f"Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8. {BACK}"]
+
+
+# how a notice of a switch from Opus 5.5 to Opus 4.8 says to get Opus 5.5 back (session.FALLBACK_BACK)
+BACK = "Replies here may stay on Opus 4.8 for about an hour; a new session starts on Opus 5.5."
 
 
 class ServedClient(FakeClient):
@@ -913,7 +917,7 @@ async def test_a_reply_on_another_model_than_the_one_asked_for_is_told_with_it_i
     await main_turn("What happened?")
     assert client.bodies[0]["model"] == "claude-opus-5-5"
     assert agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]["model"] == "claude-opus-4-8", "the composer's model"
-    switched = "Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."
+    switched = f"Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8. {BACK}"
     assert safeguard_rows(agents.MAIN_ID) == [switched], "told in main with the reply"
     assert [n["chat"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"] == [agents.MAIN_ID]
     await main_turn("When?")
@@ -923,7 +927,7 @@ async def test_a_reply_on_another_model_than_the_one_asked_for_is_told_with_it_i
     events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
     await next(c for c in runtime._spaces[CORPUS].convs.values() if c.kind == "fork").task
     assert safeguard_rows(tid) == ['Claude\'s safeguards switched a reply of the side thread "why" from Opus 5.5 to '
-                                   'Opus 4.8.']
+                                   f'Opus 4.8. {BACK}']
 
     await main_turn("And now?")
     await main_turn("And then?")
@@ -948,4 +952,33 @@ async def test_on_claude_code_sign_in_a_reply_claude_code_moved_to_another_model
     claude_access.save(claude_access.CLAUDE_CODE, consent=True)
     await main_turn("What happened?")
     said = [(n["text"], n["chat"]) for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
-    assert said == [("Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8.", agents.MAIN_ID)]
+    assert said == [(f"Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8. {BACK}", agents.MAIN_ID)]
+
+
+async def test_the_safeguards_notice_says_how_to_get_the_model_asked_for_back(on, monkeypatch):
+    """What is true of the way back: thimble asks for the chosen model, with the safeguards' fallbacks, at every message,
+    and the Messages API answers a conversation that fell back on the fallback model for about an hour (sticky routing);
+    a new session is a new conversation, which starts on the chosen model. The notice says so, in main and in a side
+    thread."""
+    from app import notices
+
+    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    fell = Block(**{"type": "fallback", "from": {"model": "claude-opus-5-5"}, "to": {"model": "claude-opus-4-8"}})
+    client = ServedClient([("claude-opus-4-8", [fell, *text("Two incidents happened.")]),
+                           ("claude-opus-4-8", [fell, *text("Because of the deploy.")]),
+                           ("claude-opus-5-5", text("Hello again."))])
+    monkeypatch.setattr(llm, "client", lambda: client)
+    await main_turn("What happened?")
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    await next(c for c in runtime._spaces[CORPUS].convs.values() if c.kind == "fork").task
+    told = {n["chat"]: n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"}
+    assert told == {agents.MAIN_ID: f"Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8. {BACK}",
+                    tid: f'Claude\'s safeguards switched a reply of the side thread "why" from Opus 5.5 to Opus 4.8. '
+                         f'{BACK}'}
+    assert [(b["model"], b.get("fallbacks")) for b in client.bodies] == [("claude-opus-5-5", "default")] * 2
+
+    await runtime._spaces[CORPUS].switch(None)  # a new session's chat of main
+    await main_turn("Hello?")
+    assert (client.bodies[-1]["model"], len(client.bodies[-1]["messages"])) == ("claude-opus-5-5", 1)
+    assert agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]["model"] == "claude-opus-5-5", "the composer's model"
