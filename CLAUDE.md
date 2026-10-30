@@ -26,13 +26,14 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
    `--remove-0.9`: it needs a terminal. When this session had 0.9 loaded, each tool call then reports "Plugin
    directory does not exist": tell the user to type `/reload-plugins`, and go on.
 3. Clone the repository into a folder of its own, such as `~/thimble`, or use the local folder the user names; the
-   folder this session runs in may be their own project. The checkout stays where it is: the workbench builds about
-   1 GB in it, and `thimble-browser` runs from it. Run `scripts/install.sh` in the checkout, with `--no-browser` for
-   the plugin alone, and `--no-setup` (step 4 asks instead). Add `--local` when the source is a local folder, so the
-   plugin comes from it. The script prints a few dozen lines, one or two per step, and with the workbench it runs for
-   a few minutes (uv sync, npm ci and a build of the page). It checks what is missing first,
-   one line each, and installs nothing until all of it is there. Tell the user what is missing and the command that
-   fixes it, run that command only when the user agrees, then run the script again.
+   folder this session runs in may be their own project. The checkout stays where it is: the workbench builds about 1 GB
+   in it, and `thimble-browser` runs from it. Run `scripts/install.sh` in the checkout, with `--no-browser` for the
+   plugin alone, and `--no-setup` (step 4 asks instead). Leave out `--local` unless the user is working on thimble's own
+   code or trying a branch: with it, `thimble update` follows that checkout, which the user then pulls themselves. The
+   script prints a few dozen lines, one or two per step, and with the workbench it runs for a few minutes (uv sync, npm
+   ci and a build of the page). It checks what is missing first, one line each, and installs nothing until all of it is
+   there. Tell the user what is missing and the command that fixes it, run that command only when the user agrees, then
+   run the script again.
 
    The script runs in your shell, and its checks pass or fail there. The plugin runs in the `claude` that the user
    starts from a terminal, on the `node` that terminal finds first: a Node that only your own command loads
