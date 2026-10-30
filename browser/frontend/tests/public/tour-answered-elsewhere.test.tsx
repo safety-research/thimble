@@ -10,6 +10,10 @@ import { TourHost } from '../../src/shell/TourHost.tsx'
 import { currentTour } from '../../src/tour/run.ts'
 import { mount, unmountAll } from './mount.tsx'
 
+// a way to reach Claude is chosen: the first run's step (shell/ClaudeAccess, beside TourHost in the shell), which the
+// welcome waits for, is answered
+vi.mock('../../src/shell/ClaudeAccess.tsx', () => ({ accessAnswered: () => Promise.resolve() }))
+
 /** How soon a welcome waiting here follows an answer given in another page. */
 const SOON_MS = 3000
 
