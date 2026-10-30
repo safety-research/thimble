@@ -13,12 +13,13 @@
 // first-party API (settings/term.ts firstPartyApi). Effort offers the levels Claude Code offers for the model Checker
 // names (settings/features.mjs choicesIn).
 //
-// ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
-// choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
-// the ui.focus hook); onto another row it lands on that row's choice set, which changes nothing. A click on a choice
-// sets it and picks its row, a click on a name picks its row; ↵ on a choice sets it. A change goes through Claude Code
-// (settings/term.ts settingsAction), which keeps the value and loads the plugin again with it; the pane and the bar
-// draw it at once.
+// In the docked pane ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them to it as scrolls), and the
+// focus ring lands on its choice set; inline, Claude Code scrolls the pane with them. Tab moves the ring through the
+// names and the choices, and the row it lands in is picked (settingsFocus, the ui.focus hook). The ring moving sets
+// nothing: a choice is set by ↵ on it or a click on it, which picks its row too; ↵ on a name, or a click on it, picks
+// its row. The pane asks for no other key: Claude Code keeps ← for its agents view, which takes the conversation with
+// it. A change goes through Claude Code (settings/term.ts settingsAction), which keeps the value and loads the plugin
+// again with it; the pane and the bar draw it at once.
 import type { EngineInterface } from 'claude-code'
 
 import { barRows } from '../bar/bar'
@@ -79,8 +80,8 @@ async function choose($: Engine, s: Switch, c: string): Promise<void> {
   if (typeof said === 'string' && said) $.ui.toast(said)
 }
 
-/** A click on a choice: its row is picked and the ring lands on the choice now set, as ← → leave it; a click does not
- *  move the ring by itself, which stayed on the row picked before and drew there as a second choice set. */
+/** A click on a choice, or ↵ on it: its row is picked and the ring lands on the choice now set; a click does not move
+ *  the ring by itself, which stayed on the row picked before and drew there as a second choice set. */
 async function chooseHere($: Engine, s: Switch, c: string): Promise<void> {
   await choose($, s, c)
   await pick($, s)
@@ -94,20 +95,15 @@ async function pick($: Engine, s: Switch): Promise<void> {
   $.ui.invalidate('ui.render')
 }
 
-/** The ring moving in the pane (the ui.focus hook, core/pane.ts): onto a choice of the row picked, it sets that choice;
- *  onto another row, it picks that row and lands on its choice set. */
+/** The ring moving in the pane (the ui.focus hook, core/pane.ts), by tab or a click: it lands where the person moved
+ *  it, and the row it lands in is picked. It sets nothing: a choice is set only by a press on it (↵, a click). */
 export async function settingsFocus($: Engine, e: { element?: string; origin?: { kind?: string } }, next: (e: Any) => Promise<Any>): Promise<Any> {
   const to = parseKey(e.element)
-  if (!to || e.origin?.kind !== 'person') return next(e)
-  const picked = await pickedNow($)
-  const v = (await heldValues($))[to.s.key]
-  if (to.s.key === picked && to.c) {
-    if (to.c !== shownOf(to.s, v)) await choose($, to.s, to.c)
-    return next(e)
+  if (to && e.origin?.kind === 'person' && to.s.key !== (await pickedNow($))) {
+    await $.state.set(PICKED, to.s.key)
+    $.ui.invalidate('ui.render')
   }
-  await $.state.set(PICKED, to.s.key)
-  $.ui.invalidate('ui.render')
-  return next({ ...e, element: choiceKey(to.s, shownOf(to.s, v)) })
+  return next(e)
 }
 
 export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any): Promise<unknown> {
@@ -156,9 +152,11 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
   // the row picked and the line under it stay in view in a pane of any height (core/pane.ts keepsInView)
   const mine = rows.findIndex((r: Any) => r?.props?.key === `sw-${picked}`)
   keepsInView(mine < 0 ? null : { key: `${picked}:${shownOf(shown[at]!, values[picked])}`, top: treeRows([preview, ...rows.slice(0, mine)], width), rows: treeRows(rows[mine], width) })
+  // the keys that act here: ↑ and ↓ only where the pane is docked (inline they scroll it)
+  const keys = e.props?.placement === 'dock' ? '↑↓ setting · tab choice · ↵ set' : 'tab choice · ↵ set'
   return Box({ flexDirection: 'column', width, children: [
     preview,
     ...rows,
-    Box({ key: 'foot', marginTop: 1, children: [Text({ dimColor: true, children: '↑↓ setting · ←→ choice' })] }),
+    Box({ key: 'foot', marginTop: 1, children: [Text({ dimColor: true, children: keys })] }),
   ] })
 }

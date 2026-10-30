@@ -400,7 +400,7 @@ export const registerPanes: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // the ring moving in the settings pane: within a row it picks that choice, onto another row it lands on its choice set
+  // the ring moving in the settings pane: the row it lands in is picked, and nothing is set
   on('ui.focus', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
     const now = await paneNow($)
     if (now?.kind !== 'settings') return next(e)

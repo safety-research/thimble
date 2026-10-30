@@ -18,7 +18,7 @@ import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { introDone, introHint } from './intro'
+import { clicksReach, introDone, introHint } from './intro'
 import { remindAfterAnswer } from './hints'
 import { failNotice, promptTyped } from './notice'
 
@@ -117,8 +117,9 @@ export const registerBar: Register = on => {
       const shows = (await paneNow($).catch(() => null))?.kind ?? null
       drawnPane = shows && (await paneShows($, shows).catch(() => false)) ? shows : null
       const width = Math.max(20, e.props.bodyColumns)
-      // the hint at the first session's start that says where the settings are (intro.ts), in the bar
-      const intro = await introHint($).catch(() => null)
+      // the hint at the first session's start that says where the settings are (intro.ts), in the bar: the click on
+      // `thimble`, or the command where no click reaches it
+      const intro = await introHint($, await clicksReach($, e).catch(() => true)).catch(() => null)
       const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
       // what the features put above the bar (the tray), then a blank row and the bar. Claude Code shows the band whole
       // while it has at most maxRows rows, and a taller one in a window of maxRows − 1 rows that its wheel scrolls, its
