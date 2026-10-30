@@ -375,8 +375,9 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       return m ? 'line ' + m[1] + ': ' : ''
     } catch (_) { return '' }
   }
+  // an error can quote the records (JSON.parse writes the text it could not read): printable as the drawing is
   function errorOf(e) {
-    try { return where(e) + (e && typeof e === 'object' && 'message' in e ? Str(e.message) : Str(e)) } catch (_) { return 'the view threw a value thimble cannot read' }
+    try { return printable(where(e) + (e && typeof e === 'object' && 'message' in e ? Str(e.message) : Str(e))) } catch (_) { return 'the view threw a value thimble cannot read' }
   }
   function parseRows(text) {
     let v

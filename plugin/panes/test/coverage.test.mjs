@@ -132,3 +132,22 @@ test('a folder with no files: the head says so, and nothing else', () => {
   assert.equal(v.keys.length, 0)
   fits(v, 66)
 })
+
+test("a file's name holds the files' own bytes: one that does not print (macOS's `Icon\\r`, a color code) shows as its escape in its row and in its detail, laid out as it draws", () => {
+  const cov = {
+    root: '/made-up/data', total: { files: 3, touched_files: 1, seen_files: 1 },
+    groups: [{ folder: './', files: 3, touched: 1, seen_files: 1 }],
+    files: [{ path: 'run\u001b[31m.log', unit: 'lines', units: 40, seen: true, seen_units: 40, model_units: 0, searched_units: 0, computed_units: 0, status: 'seen' }],
+    untouched: { path: ['Icon\r', 'notes old.md'], unit: ['file', 'lines'], units: [1, 12], by: ['', ''] },
+  }
+  const v = coverageView(cov, { sel: 'file:run\u001b[31m.log' }, DIMS)
+  const t = textOf(v)
+  assert.doesNotMatch(t, /[\u0000-\u0009\u000b-\u001f\u007f- ]/)
+  for (const name of ['Icon\\r', 'notes\\xa0old.md', 'run\\x1b[31m.log']) assert.ok(t.includes(name), `${name} in ${t}`)
+  // the detail of the file picked names it the same way
+  const d = t.split('\n')
+  assert.match(d[d.findIndex(l => /^─+$/.test(l)) + 1], /^run\\x1b\[31m\.log  \.\/ · 40 lines$/)
+  // the row's key stays the file's path
+  assert.ok(v.keys.includes('file:Icon\r'))
+  fits(v, 66)
+})

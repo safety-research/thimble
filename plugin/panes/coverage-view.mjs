@@ -15,7 +15,7 @@
 //
 // A pane under 48 columns draws no bars in the rows. Before Claude touched anything the bar is empty and the rows dim,
 // with their file counts. A folder with no files says so, under the head, and draws nothing else.
-import { cut, textWidth } from '../core/text.js'
+import { cut, printable, textWidth } from '../core/text.js'
 
 /** Cells of a row's bar, and of the detail's. */
 export const ROW_BAR = 12
@@ -56,6 +56,8 @@ export function bar(read, comp, all, w) {
 const folderOf = p => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : './')
 const nameOf = p => { const t = p.replace(/\/$/, ''); return t.slice(t.lastIndexOf('/') + 1) + (p.endsWith('/') ? '/' : '') }
 const extOf = p => { const n = nameOf(p); const d = n.lastIndexOf('.'); return d > 0 ? n.slice(d + 1).toLowerCase() : '' }
+/** A file's or a folder's name as the pane draws it: printable (core/text.js), a name being the files' own words. */
+const shownName = p => printable(nameOf(p))
 
 const node = path => ({ path, files: 0, touched: 0, seen: 0, kids: new Map(), own: [], more: 0, moreTouched: 0 })
 
@@ -165,10 +167,10 @@ export function fileDetail(f, W) {
 
 function detailLines(f, W) {
   const lines = []
-  const where = folderOf(f.path)
+  const where = printable(folderOf(f.path))
   // the folder cut in its middle to leave the name and the size whole
   const size = ` · ${sizeOf(f)}`
-  lines.push([{ s: nameOf(f.path), tone: 'bold' }, { s: `  ${cut(where, Math.max(4, W - width(nameOf(f.path)) - 2 - width(size)), true)}${size}`, tone: 'dim' }])
+  lines.push([{ s: shownName(f.path), tone: 'bold' }, { s: `  ${cut(where, Math.max(4, W - width(shownName(f.path)) - 2 - width(size)), true)}${size}`, tone: 'dim' }])
   const tools = xs => (xs || []).filter(Boolean).slice(0, 4).join(', ')
   const ruled = (f.labels || []).filter(l => !(f.model_labels || []).includes(l))
   const computedBy = tools([...ruled, ...(f.computed_by || [])])
@@ -258,7 +260,7 @@ export function coverageView(cov, view, { W, H, under = 0 }) {
   const line = (r, i) => {
     const ind = '  '.repeat(r.depth)
     if (r.kind === 'more') return { key: r.key, runs: [{ s: cut(`${ind}  … ${num(r.count)} more ${r.count === 1 ? 'file' : 'files'}${r.touched ? '' : ', none touched'}`, W), tone: 'dim' }] }
-    const name = r.kind === 'dir' ? nameOf(r.node.path) : nameOf(r.file.path)
+    const name = shownName(r.kind === 'dir' ? r.node.path : r.file.path)
     const mark = r.kind === 'dir' ? (r.open ? '▾ ' : '▸ ') : '  '
     const lead = `${ind}${mark}`
     const shown = pad(lead + cut(name, Math.max(1, nameW - width(lead)), true), nameW)

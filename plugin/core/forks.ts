@@ -28,7 +28,6 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { claimAgent } from '../telemetry/telemetry'
 import { turnsNow } from './answers'
-import { printing } from './text.js'
 
 type Engine = EngineInterface
 
@@ -101,7 +100,7 @@ export const registerForks: Register = on => {
       if (w.workflows || !w.agents.length || !w.agents.every(a => forkOf(a.id))) return next(e)
       waited = true
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const els = printing($.ui.resolve(e)) as any
+      const els = $.ui.resolve(e) as any
       // with the blank row above it that Claude Code's line has
       return els.Box({ marginTop: 1, children: [els.Text({ dimColor: true, children: turnLine(p.word, p.durationMs) })] })
     }

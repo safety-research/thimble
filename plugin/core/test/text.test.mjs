@@ -1,10 +1,10 @@
-// What thimble draws of text it did not write (core/text.js printable, printing): each character that does not print
-// shows as its escape, as Python's repr writes it, wherever thimble draws it. Made-up text.
+// What thimble draws of text from the records (core/text.js printable): each character that does not print shows as
+// its escape, as Python's repr writes it. Made-up text.
 //   node --test plugin/core/test/text.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { printable, printing } from '../text.js'
+import { printable } from '../text.js'
 
 test("each character that does not print, as Python's str.isprintable reads it, shows as its escape, as Python's repr writes it; white space that lays text out stays: a line break (also \\r\\n), and a tab, as a space", () => {
   for (const [c, want] of [
@@ -50,31 +50,4 @@ test('spans of a text move with it: the cited value stays marked where escapes s
   assert.deepEqual(two, { text: 'x\ny', spans: [[0, 2], [2, 3]] })
   // nothing to escape: the same text and spans
   assert.deepEqual(printable('12 of 40', [[0, 2]]), { text: '12 of 40', spans: [[0, 2]] })
-})
-
-test("a drawing's elements draw every string printable: a Text's and a Button's strings, a Button's and a Link's label, a Code's source, a Markdown's text; the rest as given", () => {
-  const made = []
-  const el = type => (props, ...rest) => { made.push({ type, props, rest }); return { type, props } }
-  // Claude Code's table is frozen
-  const els = Object.freeze({ Box: el('Box'), Text: el('Text'), Button: el('Button'), Code: el('Code'), Markdown: el('Markdown'), Link: el('Link') })
-  const p = printing(els)
-  assert.equal(printing(p), p)
-  const inner = p.Text({ key: 'v', bold: true, children: '12\u0007' })
-  p.Text({ key: 'line', children: ['\u001b[0m', inner, 3, null] })
-  p.Button({ key: 'b', label: 'open run\u0000.log', children: [p.Text({ children: 'run\u0000.log' })] })
-  p.Code({ key: 'c', source: 'print("\u001b")' })
-  p.Markdown({ key: 'm', text: '[a\u202eb](file:///x)' })
-  p.Link({ key: 'l', href: 'file:///x', label: 'x\u200by' })
-  p.Box({ key: 'box', children: [inner] })
-  const by = type => made.filter(m => m.type === type).map(m => m.props)
-  assert.deepEqual(by('Text').map(t => t.children), ['12\\x07', ['\\x1b[0m', inner, 3, null], 'run\\x00.log'])
-  assert.equal(by('Text')[0].bold, true)
-  assert.equal(by('Button')[0].label, 'open run\\x00.log')
-  assert.equal(by('Code')[0].source, 'print("\\x1b")')
-  assert.equal(by('Markdown')[0].text, '[a\\u202eb](file:///x)')
-  assert.equal(by('Link')[0].label, 'x\\u200by')
-  assert.deepEqual(by('Box')[0], { key: 'box', children: [inner] })
-  // an element the table lacks stays missing
-  assert.equal(p.Raster, undefined)
-  assert.equal('Code' in p, true)
 })

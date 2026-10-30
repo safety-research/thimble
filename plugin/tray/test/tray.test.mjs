@@ -188,11 +188,11 @@ test('a line of code is named above a cited output line only when the code shows
   assert.equal(printLine('def report(v):\n    print(v)\nprint(len(runs))\nx = report(n_failed)', '40\n12', 1), '')
   // a print under a condition may not have run: the first line could be either print's
   assert.equal(printLine('if errors:\n    print(errors)\nprint(df.status.value_counts())', 'status\nfailed    12\npassed    28\nName: count, dtype: int64', 0), '')
-  // lines a warning added after the output: the value's line is the last print's when the print before it printed a
-  // count, one line; with a print of any value before it, either could have printed it
+  // a warning Python wrote after the output, with the line of code under it: no print wrote those lines, so the two
+  // prints wrote the two before them, and the value's line is the last print's
   const warned = '40\n12\n/made/up.py:3: FutureWarning: a made-up warning\n  df.groupby("day")'
   assert.equal(printLine('print(len(runs))\nprint(n_failed)', warned, 1), 'print(n_failed)')
-  assert.equal(printLine('print(n_runs)\nprint(n_failed)', warned, 1), '')
+  assert.equal(printLine('print(n_runs)\nprint(n_failed)', warned, 1), 'print(n_failed)')
   // an output cut to its window: its first line may be a part of a line another print began
   assert.equal(printLine('print(len(df))\nprint(df.to_string())', '…   n7  failed  12\n   n8  passed  9', 0), '')
   // a print of its own words alone writes exactly them: `total` inside a table's line is the table's
@@ -200,4 +200,31 @@ test('a line of code is named above a cited output line only when the code shows
   // the checker's way: a script from a heredoc, a print after a loop of prints
   const script = "python3 - <<'PY'\nimport csv\nruns = list(csv.DictReader(open('runs.csv')))\nprint(len(runs))\nfor r in runs:\n    if r['status'] == 'failed':\n        print(r['id'], r['day'])\nPY"
   assert.deepEqual([0, 2].map(i => printLine(script, '40\nn4 2026-03-04\nn9 2026-03-09', i)), ['print(len(runs))', "print(r['id'], r['day'])"])
+})
+
+test('lines that no print wrote can stand anywhere in the output, as any statement can write a warning: a line of code is named by the order of the lines only when no such line could change it, and never for a line Python wrote itself', () => {
+  // numpy's warnings, each with the line of code under it, before the output Python held back, as Claude Code's Bash
+  // gives them: the count printed 40, the sum 25 (made-up paths)
+  const code = 'import numpy as np\nimport pandas as pd\nruns = pd.read_csv("runs.csv")\nprint(len(runs))\nskipped_minutes = np.mean(runs[runs.status == "skipped"].minutes.to_numpy())\nprint((runs.status == "failed").sum())'
+  const out = '/made/up/numpy/_core/fromnumeric.py:3862: RuntimeWarning: Mean of empty slice\n  return _methods._mean(a, axis=axis, dtype=dtype,\n/made/up/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide\n  ret = ret.dtype.type(ret / rcount)\n40\n25'
+  assert.deepEqual([4, 5].map(i => printLine(code, out, i)), ['print(len(runs))', 'print((runs.status == "failed").sum())'])
+  // a warning's own line: no print wrote it, though the code has one print, which wrote the lines under it
+  const one = 'import pandas as pd\ndf = pd.read_csv("runs.csv")\nprint(df.groupby("status").size())'
+  const dtype = '<stdin>:2: DtypeWarning: Columns (4) have mixed types.\nstatus\nfailed    12\npassed    28\ndtype: int64'
+  assert.deepEqual([0, 2].map(i => printLine(one, dtype, i)), ['', 'print(df.groupby("status").size())'])
+  // a warning whose message goes on over lines of words: the count prints a number, so it printed 12, and the lines
+  // of words above it are before any print's
+  const sc = 'import pandas as pd\ndf = pd.read_csv("runs.csv")\nfailed = df[df.status == "failed"]\nfailed["late"] = failed.minutes > 30\nprint(len(failed))\nprint(failed.late.sum())'
+  const sco = '<stdin>:4: SettingWithCopyWarning: \nA value is trying to be set on a copy of a slice from a DataFrame.\nTry using .loc[row_indexer,col_indexer] = value instead\n\nSee the caveats in the documentation: https://pandas.pydata.org/made-up\n12\n5'
+  assert.deepEqual([5, 6, 1].map(i => printLine(sc, sco, i)), ['print(len(failed))', 'print(failed.late.sum())', ''])
+  // a child process prints straight away, before the output Python held back: a line of words is not the count's, but
+  // a number could be, so 40 under it could be either print's
+  const sp = 'import subprocess\nprint(len(runs))\nr = subprocess.run(["wc", "-l", "runs.csv"])\nprint(n_failed)'
+  assert.deepEqual([1, 2].map(i => printLine(sp, '41 runs.csv\n40\n12', i)), ['print(len(runs))', 'print(n_failed)'])
+  assert.deepEqual([1, 2].map(i => printLine(sp, '41\n40\n12', i)), ['', 'print(n_failed)'])
+  // an error stopped the code: its traceback stands first, and a print after the statement that failed never ran, so
+  // 12 could be either count's, and the error's line is no print's
+  const tb = "import json\nruns = [json.loads(l) for l in open('runs.jsonl')]\nprint(len(runs))\nfailed = [r for r in runs if r['status'] == 'failed']\nprint(len(failed))\nworst = max(failed, key=lambda r: r['minutes'])\nprint(worst['id'])"
+  const tf = 'Traceback (most recent call last):\n  File "<stdin>", line 6, in <module>\n  File "<stdin>", line 6, in <lambda>\nKeyError: \'minutes\'\n40\n12'
+  assert.deepEqual([4, 5, 3].map(i => printLine(tb, tf, i)), ['print(len(runs))', '', ''])
 })

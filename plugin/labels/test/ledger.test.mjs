@@ -121,6 +121,26 @@ test('an example picked opens in place: its words over up to five lines, where i
   assert.ok(mp.some(x => x.trim() === 'the model: says thanks'))
 })
 
+test("an example's words from the records show each character that does not print as its escape, before they are laid out: its rows fit the pane, and the label's match stays bold", () => {
+  // a log line of a test run with its color codes, a NUL and a no-break space, matched by the label; a byte in who
+  // wrote it and in its file's name
+  const log = { ref: 'runs/a/run\u0007.log#L4', value: 'yes', by: 'code', meta: 'wren\u001b', words: '\u001b[31mREVIEW WANTED\u001b[0m for my change\u0000, thanks all',
+    hit: { before: '\u001b[31m', match: 'REVIEW WANTED', after: '\u001b[0m for my change\u0000, thanks all' } }
+  for (const sel of [null, log.ref]) {
+    const ex = examples(ASKS, 'yes', { at: 0, total: 1, records: [log] }, { w: W, rows: 20, sel, place })
+    const t = text(ex.rows)
+    assert.ok(t.every(x => !/[\u0000-\u0008\u000b-\u001f\u007f- ]/.test(x)), JSON.stringify(t))
+    assert.ok(t.some(x => x.includes('wren\\x1b') && x.includes('\\x1b[31m')), JSON.stringify(t))
+    assert.ok(ex.rows.flat().some(r => r.bold && r.s === 'REVIEW WANTED'))
+    fits(ex.rows)
+    // the record's ref stays as the kernel knows it: a press on it picks that record
+    assert.deepEqual(partOf(ex.rows[1][0].part), ['r', log.ref])
+  }
+  const picked = text(examples(ASKS, 'yes', { at: 0, total: 1, records: [log] }, { w: W, rows: 20, sel: log.ref, place }).rows)
+  assert.ok(picked.some(x => x.includes('for my change\\x00, thanks\\xa0all')), JSON.stringify(picked))
+  assert.ok(picked.some(x => x.includes('runs/a/run\\x07.log:4')), JSON.stringify(picked))
+})
+
 test('one label opens on its first value with records; its definition holds every field, aligned, the rule whole', () => {
   const chosen = chosenOf([TONE], {})
   assert.deepEqual([chosen.lab.name, chosen.value], ['tone', 'friendly'])

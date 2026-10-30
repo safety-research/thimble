@@ -41,7 +41,6 @@ import { markPressed as trayMarkPressed, trayBand, trayBandDrawn, trayBar, trayF
 import { answerStepKey, pickedRow } from './answers'
 import { paneHeld } from './pane'
 import { askOnce } from './rowhook'
-import { printing } from './text.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -290,7 +289,7 @@ export const registerAnswerView: Register = on => {
     try {
       const r = await below()
       if (e.props.isSummary) return r
-      const els = printing($.ui.resolve(e)) as Any
+      const els = $.ui.resolve(e) as Any
       const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
       const tail = await underAll($, els, e.requestId, cols, async (t, rows, o) => (featureOn('cards') ? framesIn($, e, t, rows, o) : {}))
       const drawn = tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r

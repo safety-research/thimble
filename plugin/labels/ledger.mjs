@@ -22,7 +22,7 @@
 // label's i-th value), which pane.tsx turns into colors for the theme; `part` what a press on it does (lP label,
 // vP value, rP record, cP check, fP a field of the definition, pg-up, pg-down; P a JSON list); `hotkey` the key that presses it, which Claude Code
 // draws before it (`1: yes`), so a run with one takes width(hotkey) + 2 more cells.
-import { cut, cutWords, textWidth } from '../core/text.js'
+import { cut, cutWords, printable, textWidth } from '../core/text.js'
 import { howMade } from './use.mjs'
 
 export const NONE = '-'
@@ -247,10 +247,23 @@ function line(l, w, nameCol, wrap) {
 export function whoOf(r) {
   const ref = String(r?.ref || '')
   const frag = ref.includes('#') ? ref.slice(ref.indexOf('#') + 1) : ''
-  if (frag && !/^L\d+(-\d+)?$/.test(frag)) return `#${frag.split('/').filter(Boolean).pop() ?? frag}`
-  if (r?.meta) return oneLine(r.meta)
+  if (frag && !/^L\d+(-\d+)?$/.test(frag)) return printable(`#${frag.split('/').filter(Boolean).pop() ?? frag}`)
+  if (r?.meta) return oneLine(printable(r.meta))
   const m = /^L(\d+)/.exec(frag)
-  return m ? `line ${m[1]}` : ref.split('/').pop()
+  return m ? `line ${m[1]}` : printable(ref.split('/').pop())
+}
+
+/** A record of a value's page with the words it holds from the records (its text, the label's match in it, the fields
+ *  a code label read) printable, as the pane lays them out and draws them (core/text.js); its ref stays as the kernel
+ *  knows it. */
+function printableRecord(r) {
+  if (!r || typeof r !== 'object') return r
+  const p = v => (typeof v === 'string' ? printable(v) : v)
+  return {
+    ...r, text: p(r.text), words: p(r.words),
+    ...(r.hit && typeof r.hit === 'object' ? { hit: { ...r.hit, before: p(r.hit.before), match: p(r.hit.match), after: p(r.hit.after) } } : {}),
+    ...(Array.isArray(r.fields) ? { fields: r.fields.map(f => (Array.isArray(f) ? [p(f[0]), p(f[1])] : f)) } : {}),
+  }
 }
 
 /** A record's status at the right of its line: the person's check, that it waits for the model or got none, or the
@@ -402,7 +415,7 @@ function pickedRows(l, r, t, o) {
   }
   const indent = [{ s: ' '.repeat(o.x) }]
   const rows = kept.slice(1).map(k => [...indent, ...k])
-  const place = o.place(r)
+  const place = printable(o.place(r))
   const checks = r.missing ? [] : checkRuns(l, r)
   const cw = runsWidth(checks)
   if (!checks.length) rows.push([...indent, { s: cut(place, lw, true), tone: 'dim' }])
@@ -421,7 +434,7 @@ function pickedRows(l, r, t, o) {
  *  `rows` how many rows the examples have, their head included. Answers the rows, and where the list stands. */
 export function examples(l, value, page, o) {
   const w = o.w
-  const recs = Array.isArray(page?.records) ? page.records : []
+  const recs = Array.isArray(page?.records) ? page.records.map(printableRecord) : []
   const part = partsOf(l).find(p => p.v === value)
   const total = Number(page?.total ?? part?.n) || 0
   const at = Math.max(0, Number(page?.at) || 0)

@@ -44,7 +44,7 @@ import { drawSettings, settingsFocus } from '../panes/settings'
 import { drawThreadsPane, threadKnown, threadPaneParts, threadUnderSplit } from '../threads/seam'
 import { quiet } from './askcell.js'
 import { dropSelection } from './selection'
-import { cut, printable, printing } from './text.js'
+import { cut } from './text.js'
 import { accent } from './theme'
 import { crumbOf, nextTrail, treeRows } from './trail.mjs'
 
@@ -99,8 +99,7 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   const last = trail[trail.length - 1]
   if (o.under && !(last?.kind === o.under.kind && JSON.stringify(last.args ?? null) === JSON.stringify(o.under.args ?? null))) trail.push(o.under)
   await $.state.set(NOW, { kind, args, title, ...(rows ? { rows } : {}), ...(trail.length ? { trail } : {}) })
-  // a title of words thimble did not write (a side thread's subject) shows printable, as everything thimble draws does
-  const r = await $.ui.open({ id: PANE_ID, title: printable(title), ...(o.focus ? { focus: true } : {}), closeOnEscape: true, ...(rows ? { rows } : {}) })
+  const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), closeOnEscape: true, ...(rows ? { rows } : {}) })
   const why = String((r as { reason?: string }).reason ?? '')
   unplaced = { nowhere: !!why && !/columns/.test(why) }
   if (r.isPlaced) {
@@ -128,7 +127,7 @@ export async function paneBack($: Engine, to?: number, o: { later?: boolean } = 
   const rest = trail.slice(0, i)
   await $.state.set(NOW, { kind: e.kind, args: e.args, title: e.title, ...(e.rows ? { rows: e.rows } : {}), ...(rest.length ? { trail: rest } : {}) })
   const open = async () => {
-    const r = await $.ui.open({ id: PANE_ID, title: printable(e.title), focus: true, closeOnEscape: true, ...(e.rows ? { rows: e.rows } : {}) })
+    const r = await $.ui.open({ id: PANE_ID, title: e.title, focus: true, closeOnEscape: true, ...(e.rows ? { rows: e.rows } : {}) })
     // not placed (the close mark closed the pane, and an open of the plugin's own waits unseen in a narrow terminal):
     // closed, as openPane closes one, so no unseen pane stays open for the next pane to stand on
     if (!r.isPlaced) await closePane($)
@@ -399,7 +398,7 @@ export async function scrollPane($: Engine, e: { by?: number; origin?: { kind?: 
 
 export const registerPanes: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
-    const els = printing($.ui.resolve(e)) as Any
+    const els = $.ui.resolve(e) as Any
     const cols = Number((e as Any).props?.bodyColumns)
     if (cols > 0) paneColumns = cols
     return drawPane($, e, await paneNow($), els)

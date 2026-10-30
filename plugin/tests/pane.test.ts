@@ -232,6 +232,16 @@ test('every pane closes on esc and its top row says so: one a click opened, whic
   expect(textOf(nodes(await draw(s)).find(n => n.props?.key === 'pane-top'))).toBe('esc close')
 })
 
+test("a pane's title goes to Claude Code as given, as Claude's and the person's words do: a side thread's subject with a no-break space, a Persian word's non-joiner, or half an emoji its cut left, is no escape", async () => {
+  const s = setup()
+  // a subject cut at 60 code units through an emoji keeps half of it, which Claude Code draws as it draws any
+  const words = 'the citation “30 % of runs, می‌خواهم '
+  const subject = (words + 'a'.repeat(59 - words.length) + '👩‍💻”').slice(0, 60)
+  expect(subject.charCodeAt(59)).toBe(0xd83d)
+  await openPane(s.$, 'thread', { key: 't1' }, subject, { focus: true })
+  expect(s.opens.at(-1).title).toBe(subject)
+})
+
 test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below, and the ring lands on its choice set', async () => {
   const s = setup()
   const focused: Any[] = []
