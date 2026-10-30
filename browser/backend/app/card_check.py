@@ -1013,6 +1013,17 @@ def _tool(secs: dict[str, str], name: str, criteria: int = CRITERIA) -> Any:
     return model.ToolSpec(name=name.replace("-", "_"), description=desc, input_schema=schema)
 
 
+def _guide() -> dict[str, str]:
+    """What the reading of a card that does not fit reads besides, since its replacement is often a new graphic: the card
+    guidance its author works from (prompts/shared.md `## Cards`, without its part on a group of cards) and the toolkit
+    its author writes a card's code with (the `code` field of prompts/tools.md `## add_card`)."""
+    from . import prompts, tools  # noqa: PLC0415
+
+    guidance = prompts.without(prompts.section("shared", "Cards"), ["Several cards"], strict=False).strip()
+    schema = tools.tool_sections(["add_card"])["add_card"][1] or {}
+    return {"guidance": guidance, "toolkit": str(((schema.get("properties") or {}).get("code") or {}).get("description") or "")}
+
+
 def _criteria(card: dict[str, Any]) -> int:
     """How many criteria the reading of a card assesses: one more for a card that does not fit on the analyst's
     screen (card_input's `too_large`)."""
@@ -1235,7 +1246,7 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -
         "typed": str(card.get("typed") or ""), "kept": str(card.get("kept") or ""),
     })
     if str(card.get("too_large") or "").strip():
-        user += "\n\n" + _fill(secs["too-large"], {"size": str(card["too_large"]).strip()}).strip()
+        user += "\n\n" + _fill(secs["too-large"], {"size": str(card["too_large"]).strip(), **_guide()}).strip()
     images = []
     if isinstance(inp.get("picture"), str) and inp["picture"]:
         try:

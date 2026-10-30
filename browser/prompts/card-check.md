@@ -58,7 +58,15 @@ The card does not fit on the analyst's screen: {{size}} The analyst sees it only
 
 - Does the graphic show only what the question needs, in a form that fits on the screen?
 
-This holds for a look the analyst asked for too: when they asked for more than fits, such as a table of every field of every record, one compact form of all the records, with the ones that answer marked, meets their request.
+This holds for a look the analyst asked for too: when they asked for more than fits, such as a table of every field of every record, one compact form of all the records, with the ones that answer marked, meets their request. The card's author works from the card guidance and writes a card's code as the toolkit says, and so does its replacement.
+
+The card guidance
+
+{{guidance}}
+
+The toolkit
+
+{{toolkit}}
 
 ## critique
 

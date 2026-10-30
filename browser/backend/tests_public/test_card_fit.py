@@ -238,7 +238,9 @@ async def test_the_reading_of_a_card_that_does_not_fit_asks_one_more_criterion(m
     await card_check.check_task(CORPUS, {"card": {**card, "too_large": ""}, "picture": None, "effort": "low"})
     (large, six), (fits, five) = seen
     assert f"does not fit on the analyst's screen: {size}" in large and "only what the question needs" in large
-    assert "does not fit" not in fits
+    # with the card guidance its author works from, and the toolkit it writes a card's code with
+    assert "The content is the evidence for one answer" in large and "thimble.chart(kind, df)" in large
+    assert "does not fit" not in fits and "thimble.chart(kind, df)" not in fits
     assert (six["minItems"], six["maxItems"], five["minItems"], five["maxItems"]) == (6, 6, 5, 5)
     assert card_check._assessment([{"problem": ""}] * 6, 6) and card_check._assessment([{"problem": ""}] * 5, 6) is None
 
