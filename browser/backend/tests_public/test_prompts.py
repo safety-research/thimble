@@ -273,31 +273,46 @@ def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
     """The guidance's example sizes each answer to its question: a casual question answered in a few sentences in the
-    chat with no card, and a question about how something works answered with its steps in order and a diagram card,
-    with no table."""
+    chat with no card, a question about one detail in one sentence with no card, a question about how something works
+    answered with its steps in order and a diagram card, with no table, and a request for a full analysis, once its
+    plan card has a go (main's prompt: work in several steps starts with a plan), with a paragraph for each part and a
+    group of cards. Before, the guidance gave each kind of reply a fixed number of sentences, and an answer that needed
+    more had no room."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     _, turns = _what_to_make(mode)
     casual = next(t for t in turns if "folder" in t[0])
     chat = next(line for line in casual if line.startswith("chat"))
     assert "card:" not in chat and chat.count(". ") <= 2
     assert not any(line.startswith(("card", "group", "view")) for line in casual)
+    detail = next(t for t in turns if t[0].split(None, 1)[1].startswith("when "))
+    assert len(detail) == 2 and detail[1].startswith("chat") and detail[1].count(".") == 1 and "card:" not in detail[1]
     how = next(t for t in turns if "how does" in t[0].lower())
     assert any(line.startswith("chat") for line in how) and any("diagram" in line for line in how)
     assert not any("table" in line for line in how)
+    i = next(i for i, t in enumerate(turns) if "full analysis" in t[0])
+    plan, go = turns[i], turns[i + 1]
+    assert [line.split()[:2] for line in plan[1:]] == [["card", "plan"]] and go[0].split()[1:] == ["go"]
+    chat = next(line for line in go if line.startswith("chat"))
+    assert "a paragraph for each part" in chat and "[[card:<id>]]" in chat
+    assert _grouped([go]) and _grouped([go])[0] >= 3
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_says_why_a_finding_nobody_asked_for_gets_one_sentence(mode, monkeypatch):
-    """The guidance says why a reply stays short: the analyst asks in the middle of other work and reads the answer once,
-    so a reply shaped like a report makes them read past what they did not ask for; and a finding they did not ask about
-    gets one sentence at most, since they ask when they want more. Without these reasons, replies grew longer and added
-    paragraphs that nobody asked for."""
+def test_main_answers_at_the_length_the_question_needs(mode, monkeypatch):
+    """The guidance sets the length of a reply by one principle, the length the question needs, with its reasons: the
+    analyst reads the answer once, in the middle of other work, and asks when they want more, so a reply shaped like a
+    report makes them read past what they did not ask for. It gives no fixed number of sentences: before, a casual
+    question got two to four, each step of how something works one, and any other finding one at most, and a question
+    that needed a longer answer had no room for it. Without the reasons, replies grew longer and added paragraphs that
+    nobody asked for."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     para, _ = _what_to_make(mode)
-    assert "in the middle of other work" in para and "shaped like a report" in para
-    assert "read past what they did not ask for" in para
-    unasked = next(s for s in para.split(". ") if "did not ask about" in s)
-    assert "one sentence at most" in unasked and "they ask when they want more" in unasked
+    principle = next(s for s in para.split(". ") if "length the question needs" in s)
+    assert principle.startswith("Answer at the length the question needs")
+    assert "reads it once" in principle and "in the middle of other work" in principle
+    assert "asks when they want more" in principle
+    assert "shaped like a report" in para and "read past what they did not ask for" in para
+    assert not re.search(r"\b(one|two|three|four) (?:\w+ )?sentences?\b", para), "a length is the question's, not a number"
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
@@ -319,15 +334,15 @@ def test_main_answers_beside_one_card_in_a_sentence_or_two(mode, monkeypatch):
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
-    """The guidance answers a question about how something works with its steps in order, one sentence each, and a
-    diagram card when they branch, as the card kinds say a diagram is for how things branch and connect; its example of
-    such a question draws one for steps that branch, not for a straight line of steps."""
+    """The guidance answers a question about how something works with its steps in order in the chat, and a diagram
+    card when they branch, as the card kinds say a diagram is for how things branch and connect; its example of such a
+    question draws one for steps that branch, not for a straight line of steps."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     kinds = prompts.section("main", "Cards", mode)
     assert "`diagram` for how things branch" in kinds and "Steps in a straight line read better as a timeline" in kinds
     para, turns = _what_to_make(mode)
     how_works = next(s for s in para.split(". ") if "how something works" in s)
-    assert "order of its steps" in how_works and "in order in the chat, one sentence each" in how_works
+    assert "order of its steps" in how_works and "in order in the chat" in how_works
     assert "a diagram card when they branch" in how_works
     how = next(t for t in turns if "how does" in t[0].lower())
     diagram = next(line for line in how if "diagram" in line)
@@ -336,16 +351,17 @@ def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
-    """The guidance says why a casual question, such as what a folder holds, gets two to four sentences in the chat:
-    it comes before any analysis, so that the analyst can choose what to ask next. Not a broad question: a broad
-    question about the data, such as the main ways the runs fail, asks for analysis, whose work goes in cards."""
+    """The guidance says why a casual question, such as what a folder holds, gets plain sentences in the chat, without
+    a list or a card: it comes before any analysis, so that the analyst can choose what to ask next. Not a broad
+    question: a broad question about the data, such as the main ways the runs fail, asks for analysis, whose work goes
+    in cards."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     para, _ = _what_to_make(mode)
     sentences = para.split(". ")
     i = next(i for i, s in enumerate(sentences) if "casual question" in s)
     assert "folder" in sentences[i] and "before any analysis" in sentences[i] and "what to ask next" in sentences[i]
     short = sentences[i + 1]
-    assert "two to four plain sentences in the chat" in short and "without a list or a card" in short
+    assert "plain sentences in the chat" in short and "without a list or a card" in short
     assert "one thing that stands out" in short
     assert "broad" not in para
 
