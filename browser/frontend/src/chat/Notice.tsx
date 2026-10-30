@@ -6,10 +6,11 @@
 // (`/login`, `thimble server restart`), the command in code, and Open for the chat it happened in when another one is
 // shown; then its fix as buttons under the words, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
 // that failed, or that the server could not start, says why in a toast and leaves it. A failure of main's own request
-// shows in the strip only while another chat is open, since main's chat shows its API error card. In the agent's own
-// chat the notice is also a row (NoticeRow), the same words without buttons, kept as a quiet line of the chat's history
-// once the notice is closed; while it is open the strip shows it there, and an earlier closed row under its key in the
-// same words waits too, so the words show once.
+// shows in the strip only while another chat is open, since main's chat shows its API error card, and a switch of
+// Claude's safeguards only in the chat whose replies it switched: main's in main, a thread's in that thread. In the
+// agent's own chat the notice is also a row (NoticeRow), the same words without buttons, kept as a quiet line of the
+// chat's history once the notice is closed; while it is open the strip shows it there, and an earlier closed row under
+// its key in the same words waits too, so the words show once.
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -144,8 +145,12 @@ function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; 
 }
 
 /** Whether the strip shows a notice in the chat `current`: every one, but a failure of main's own request while main
- * is shown, whose API error card main's chat shows with its fix (backend notices.API). Pure. */
-export const stripShows = (n: Pick<Notice, 'kind' | 'chat'>, current: string): boolean => !(n.kind === 'api' && n.chat === current)
+ * is shown, whose API error card main's chat shows with its fix (backend notices.API), and a switch of Claude's
+ * safeguards in another chat, which tells of that chat's own replies (backend session.FALLBACK_TEXT). Pure. */
+export const stripShows = (n: Pick<Notice, 'kind' | 'chat'>, current: string): boolean => {
+  if (n.kind === 'api') return n.chat !== current
+  return n.kind !== 'safeguards' || !n.chat || n.chat === current
+}
 
 /** Every open notice of the workspace, above the composer of the chat shown (`current`), oldest first. */
 export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; current: string; labels?: ReadonlyMap<string, string>; onOpen: (chat: string) => void }) {
