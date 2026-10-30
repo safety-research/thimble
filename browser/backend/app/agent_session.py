@@ -66,8 +66,8 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import agents, cc_plugin, cc_settings, config, hook_auth, modes, permission_hook, sandbox_allow, session, \
-    tools, userconf
+from . import agents, cc_plugin, cc_settings, config, hook_auth, kernel_wrap, modes, permission_hook, sandbox_allow, \
+    session, tools, userconf
 from .ledger import atomic_write_text
 from .permission_updates import EDIT_MODE, WORKSPACE, allowing, offer_text, rule_text
 
@@ -350,13 +350,16 @@ def with_config(settings: dict[str, Any], conf: dict[str, Any]) -> dict[str, Any
 
 def fence_env(work: Path) -> dict[str, str]:
     """A fenced session's environment on top of environ's: the venv's bin first on PATH, the caches in the work
-    folder, since the home folder is not writable in the sandbox, and MEMORY_ENV, so the corpus's CLAUDE.md is read."""
+    folder, since the home folder is not writable in the sandbox, no cache beside a file its commands read
+    (kernel_wrap.NO_SIDE_WRITES), since `data` "allow" lets them write the corpus, and MEMORY_ENV, so the corpus's
+    CLAUDE.md is read."""
     cache = work / CACHE_DIR
     with contextlib.suppress(OSError):
         cache.mkdir(parents=True, exist_ok=True)
     path = os.environ.get("PATH", "")
     return {"PATH": os.pathsep.join([str(_venv() / "bin"), *[p for p in path.split(os.pathsep) if p]]),
-            "XDG_CACHE_HOME": str(cache), "MPLCONFIGDIR": str(cache / "matplotlib"), MEMORY_ENV: "1"}
+            "XDG_CACHE_HOME": str(cache), "MPLCONFIGDIR": str(cache / "matplotlib"),
+            **kernel_wrap.NO_SIDE_WRITES, MEMORY_ENV: "1"}
 
 
 def skill_prompts_env(corpus: Path, work: Path) -> dict[str, str]:

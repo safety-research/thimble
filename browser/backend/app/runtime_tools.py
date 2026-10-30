@@ -5,7 +5,8 @@ as the Claude Code tools 0.8's agents had, so the prompts read the same in both 
                      examples (the view kit), and the agent's write folders; never thimble's private files
     Write Edit       write files under the agent's write folders alone (its work folder, the workspace's agent folders)
     Bash             one shell command in Anthropic's sandbox runtime (srt, kernel_wrap.py): it reads what Read reads
-                     and the system, writes only the write folders, and starts in the corpus folder
+                     and the system, writes only the write folders, and starts in the corpus folder; the programs it
+                     runs write no cache beside what they read (kernel_wrap.NO_SIDE_WRITES)
     WebSearch WebFetch  the Messages API's own server tools (web_search, web_fetch)
 
 A tool that cannot run here (Bash without the sandbox) is left out of the agent's list (available). Nothing here
@@ -383,7 +384,8 @@ async def _bash(box: Box, a: dict[str, Any]) -> Out:
     argv = kernel_wrap.srt_argv(["/bin/bash", "-c", command], node=str(srt.node()),
                                 srt_dir=srt.package(config.REPO_ROOT) or config.REPO_ROOT, rules=_rules(box))
     env = {k: v for k in ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME") if (v := os.environ.get(k))}
-    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(home / "tmp"), npm_config_cache=str(home / ".npm-cache"))
+    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(home / "tmp"), npm_config_cache=str(home / ".npm-cache"),
+               **kernel_wrap.NO_SIDE_WRITES)
     proc = await asyncio.create_subprocess_exec(*argv, cwd=str(box.cwd), env=env, stdin=asyncio.subprocess.DEVNULL,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
                                                 start_new_session=True)

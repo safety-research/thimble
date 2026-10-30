@@ -278,7 +278,7 @@ def program_env(run: Run) -> dict[str, str]:
     env.update({
         "PATH": os.pathsep.join([str(Path(sys.executable).parent), *[p for p in env.get("PATH", "").split(os.pathsep) if p]]),
         "PYTHONPATH": os.pathsep.join([str(KIT), *([str(lib)] if lib.is_dir() else []), str(part.folder)]),
-        "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1",
+        **kernel_wrap.NO_SIDE_WRITES, "PYTHONUNBUFFERED": "1",
         "THIMBLE_API": api_url(), "THIMBLE_AGENT_TOKEN": run.token, "THIMBLE_SESSION": job.key,
         "THIMBLE_ROLE": "" if job.task else job.role, "THIMBLE_TASK": job.task, "THIMBLE_WORKSPACE": job.c,
         "THIMBLE_WORK": str(job.work),

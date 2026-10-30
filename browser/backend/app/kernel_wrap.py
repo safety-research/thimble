@@ -19,6 +19,8 @@ Both draw the same boundary:
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
 It is not a boundary against the network: a cell can reach thimble's API on 127.0.0.1 and any other local service.
+What a cell runs writes no cache beside the files it reads (NO_SIDE_WRITES), and neither does a command of an agent's
+shell, which may write the corpus.
 
 srt reads everything it is not told to hide, so srt_rules hides where user data lives on each system (SRT_HIDDEN) and
 shows the kernel's paths inside it again; bwrap shows only what kernel_wrap_argv binds. On Linux srt's bubblewrap also
@@ -51,6 +53,12 @@ ETC_RO = ("ld.so.cache", "ld.so.conf", "ld.so.conf.d", "passwd", "group", "nsswi
           "ca-certificates.conf", "pki", "fonts", "alternatives", "mime.types", "magic", "magic.mime", "os-release")
 EXTRA_RO = ("/var/cache/fontconfig",)  # fontconfig's cache, so matplotlib's first import does not rescan the fonts
 UNSET_ENV = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR")
+# what keeps the programs a cell or an agent's shell command runs from writing beside the files they only read, which
+# lie in the corpus when it is writable to them: Python's bytecode caches, and the refresh of git's index that `git
+# status` makes under an optional lock. `git diff` refreshes the index on its own, and the one setting that stops it
+# (diff.autoRefreshIndex) has it list each file whose times moved as changed, so that refresh is left as it is. A write
+# made on purpose, such as `git add`, goes through
+NO_SIDE_WRITES = {"PYTHONDONTWRITEBYTECODE": "1", "GIT_OPTIONAL_LOCKS": "0"}
 # the workspace's settings (the `kernel_wrap` switch among them) and thimble's config for it: the server creates each
 # before the kernel starts, and bwrap binds EMPTY_FILE over it (srt: read and write denied), so a cell can neither read
 # nor write it

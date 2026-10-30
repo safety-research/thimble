@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from app import (agent_session, cc_settings, checks, config, dev, harness, kernel_wrap, notebook, roles, srt, userconf, views, write_session)
+from conftest import code_project
 
 CORPUS = "copy"
 LIVE = os.environ.get("THIMBLE_LIVE_CLAUDE") == "1"
@@ -216,3 +217,37 @@ async def test_card_and_label_code_that_runs_shell_commands_in_the_corpus_leaves
     finally:
         await notebook.shutdown_all()
     assert snapshot(corpus) == before, sorted(set(snapshot(corpus)) ^ set(before))
+
+
+async def test_card_code_that_may_write_the_corpus_runs_git_and_imports_its_code_and_leaves_it_as_it_was(corpus,
+                                                                                                     monkeypatch):
+    """A kernel without a wrapper (kernel_wrap: none) may write the corpus, yet the `git status` a cell runs there
+    refreshes no index, and a module of the corpus it imports through the scratch mirror leaves no bytecode cache in
+    the corpus (kernel_wrap.NO_SIDE_WRITES)."""
+    if not shutil.which("git"):
+        pytest.skip("needs git")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, config.KERNEL_WRAP_NONE)
+    code_project(corpus)
+    before = snapshot(corpus)
+    code = ("import subprocess, tool.rows\n"
+            f"print(subprocess.run('git status --short', shell=True, capture_output=True, text=True, cwd={str(corpus)!r})"
+            ".stdout)\nprint('rows', tool.rows.N)")
+    try:
+        cell = await notebook.run_code(CORPUS, code, "main")
+    finally:
+        await notebook.shutdown_all()
+    assert "rows 3" in json.dumps(cell["outputs"]), cell["outputs"]
+    after = snapshot(corpus)
+    assert after == before, sorted(k for k in {*before, *after} if before.get(k) != after.get(k))
+
+
+def test_a_program_and_a_fenced_session_get_what_keeps_their_commands_from_writing_beside_what_they_read(
+        corpus, tmp_path):
+    """An extension's program, and the Claude Code session one starts, may write the corpus (`data` "allow"), and
+    their commands write no cache beside what they read there either (kernel_wrap.NO_SIDE_WRITES)."""
+    part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
+    job = harness.Job(CORPUS, "writer", "writer:report", "Write", {}, ("list_cards",),
+                      write_session.work_dir(CORPUS, "report"))
+    run = harness.Run(job, part, userconf.session(CORPUS, "writer", sandbox=True), "t", "t.s")
+    for env in (harness.program_env(run), agent_session.fence_env(tmp_path / "work")):
+        assert (env.get("PYTHONDONTWRITEBYTECODE"), env.get("GIT_OPTIONAL_LOCKS")) == ("1", "0")
