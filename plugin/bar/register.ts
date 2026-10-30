@@ -123,20 +123,20 @@ export const registerBar: Register = on => {
       const intro = await introHint($, await clicksReach($, e).catch(() => true)).catch(() => null)
       const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
       // what the features put above the bar (the tray), a blank row, and the bar (its rows as drawn: a failure line or a
-      // hint wraps). The tray takes the rows the band has over the bar and two blank rows, so the bar, with ] and [, stays
-      // in view under it, and one of those blank rows too when its body then shows whole, or once the person expanded it
-      // (d). Claude Code shows the band whole while it has at most maxRows rows, and hands its wheel only to a taller
-      // band, which it shows in a window of maxRows − 1 rows over its own row that counts the rest: while the tray's body
-      // shows in a window of its own, the band ends with two blank rows under the bar, out of that window, so the wheel
-      // reaches the tray (tray/tray.ts registerTray)
+      // hint wraps). The tray takes the rows the band has over the bar, so the bar, with ] and [, stays in view under it,
+      // and the blank row too when the band has no row to spare for it. Claude Code shows the band whole while it has at
+      // most maxRows rows, and hands its wheel only to a taller band, which it shows in a window of maxRows − 1 rows over
+      // its own row that counts the rows below: while the tray's body shows in a window of its own, the band ends with
+      // blank rows under the bar, out of that window, one for each row of the body under the tray's window (at least
+      // two), so the wheel reaches the tray and that row counts the body's rows still below (tray/tray.ts registerTray)
       const maxRows = Number(e.props.maxRows)
       const barH = treeRows(rows, width)
-      const above = await aboveBar($, els, width, maxRows > 0 ? { rows: Math.max(4, maxRows - barH - 2), spare: 1, at: Number(e.props.scroll?.offset) || 0, id: String(e.requestId) } : null)
+      const above = await aboveBar($, els, width, maxRows > 0 ? { rows: maxRows - barH, at: Number(e.props.scroll?.offset) || 0, id: String(e.requestId) } : null)
       const shape = aboveShape()
-      const gap = !(above.length && shape.tight)
-      const under = above.length && shape.windowed ? 2 : 0
+      const gap = !above.length || shape.gap
+      const under = above.length && shape.windowed ? shape.below : 0
       // a blank row above it too while all of it fits with the bar
-      const aboveGap = above.length > 0 && !under && !(maxRows > 0 && treeRows(above, width) + barH + (gap ? 2 : 1) > maxRows)
+      const aboveGap = above.length > 0 && !shape.windowed && !(maxRows > 0 && treeRows(above, width) + barH + (gap ? 2 : 1) > maxRows)
       const band = els.Box({ flexDirection: 'column', children: [
         ...(aboveGap ? [els.Text({ key: 'above-gap', children: ' ' })] : []),
         ...above,

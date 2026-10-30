@@ -169,17 +169,18 @@ export async function underCard($: Engine, els: Any, id: string, cols: number): 
 
 // ------------------------------------------------------------------------------------------------ above the prompt
 
-/** What stands above the bar: the tray while it is open. `room`: the rows the band gives it (tray/tray.ts BandRoom),
- *  those over the bar, and its blank rows once the person expanded it; null: no limit. */
+/** What stands above the bar: the tray while it is open. `room`: the rows the band has for it (tray/tray.ts BandRoom),
+ *  those over the bar; null: no limit. */
 export async function aboveBar($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
   return els0(await safe(trayBand($, els, width, room), []))
 }
 
-/** What stands above the bar as last drawn: whether it took the band's blank rows (`tight`, an expanded tray: the band
- *  leaves them out), and whether its body shows in a window of its own (`windowed`: the band then ends with blank rows
- *  under the bar, so that Claude Code hands it the wheel). */
-export function aboveShape(): { tight: boolean; windowed: boolean } {
-  try { return trayShape() } catch { return { tight: false, windowed: false } }
+/** What stands above the bar as last drawn: whether the band's blank row stands between it and the bar (`gap`; a
+ *  tray the band has no row to spare for takes it), and whether its body shows in a window of its own (`windowed`: the
+ *  band then ends with `below` blank rows under the bar, one for each row of the body under that window and at least
+ *  two, so that Claude Code hands it the wheel and its row under its window counts them). */
+export function aboveShape(): { gap: boolean; windowed: boolean; below: number } {
+  try { return trayShape() } catch { return { gap: true, windowed: false, below: 0 } }
 }
 
 /** The keys taken now by what holds them and names them in its own place, which every other surface leaves unnamed,
