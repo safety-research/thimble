@@ -122,28 +122,21 @@ export const registerBar: Register = on => {
       const intro = await introHint($, await clicksReach($, e).catch(() => true)).catch(() => null)
       const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
       // what the features put above the bar (the tray), a blank row, and the bar (its rows as drawn: a failure line or a
-      // hint wraps). The tray takes the rows the band has over the bar, so the bar, with ] and [, stays in view under it,
-      // and the blank row too when the band has no row to spare for it. Claude Code shows the band whole while it has at
-      // most maxRows rows, and hands its wheel only to a taller band, which it shows in a window of maxRows − 1 rows over
-      // its own row that counts the rows below: while the tray's body shows in a window of its own, the band ends with
-      // blank rows under the bar, out of that window, one for each row of the body under the tray's window (at least
-      // two), so the wheel reaches the tray and that row counts the body's rows still below (tray/tray.ts registerTray)
+      // hint wraps). Claude Code shows the band whole while it has at most maxRows rows: the tray takes at most the rows
+      // the band has over the bar, so the bar, with ] and [, stays in view under it, and the blank row too when it does
+      // not fit with it (tray/tray.ts trayBand)
       const maxRows = Number(e.props.maxRows)
       const barH = treeRows(rows, width)
-      const above = await aboveBar($, els, width, maxRows > 0 ? { rows: maxRows - barH, at: Number(e.props.scroll?.offset) || 0, id: String(e.requestId) } : null)
-      const shape = aboveShape()
-      const gap = !above.length || shape.gap
-      const under = above.length && shape.windowed ? shape.below : 0
+      const above = await aboveBar($, els, width, maxRows > 0 ? { rows: maxRows - barH } : null)
+      const gap = !above.length || aboveShape().gap
       // a blank row above it too while all of it fits with the bar
-      const aboveGap = above.length > 0 && !shape.windowed && !(maxRows > 0 && treeRows(above, width) + barH + (gap ? 2 : 1) > maxRows)
-      const band = els.Box({ flexDirection: 'column', children: [
+      const aboveGap = above.length > 0 && !(maxRows > 0 && treeRows(above, width) + barH + (gap ? 2 : 1) > maxRows)
+      return els.Box({ flexDirection: 'column', children: [
         ...(aboveGap ? [els.Text({ key: 'above-gap', children: ' ' })] : []),
         ...above,
         ...(gap ? [els.Text({ key: 'gap', children: ' ' })] : []),
         ...rows,
-        ...Array.from({ length: under }, (_, i) => els.Text({ key: `under-gap${i}`, children: ' ' })),
       ] })
-      return band
     } catch {
       // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
       return next(e)

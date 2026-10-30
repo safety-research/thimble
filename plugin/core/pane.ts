@@ -277,7 +277,8 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
   try {
     if (!now) return els.Text({ dimColor: true, children: 'Nothing is open here.' })
     const W = Math.max(20, Number(e?.props?.bodyColumns) || 80)
-    const H = Math.max(8, Number(e?.props?.scroll?.bodyRows) || 40)
+    // the rows Claude Code shows of the pane: a frame no taller, so its input bar stays in view in a short one
+    const H = Math.max(4, Number(e?.props?.scroll?.bodyRows) || 40)
     const placement = e?.props?.placement
     const keys = new Map<string, () => unknown>()
     const kels = noting(els, keys)
@@ -325,7 +326,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const over = tall > space ? tall - (space - 1) : 0
     // a pane opened again, or a conversation that grew (a question, an answer), shows its end, as a chat does
     if (scrolled.id !== id) scrolled = { id, by: C ? over : 0, conv: C }
-    else if (C !== scrolled.conv) scrolled = { id, by: over, conv: C }
+    else if (C !== scrolled.conv) scrolled = { ...scrolled, by: over, conv: C }
     // the part the drawing picked, shown when the pane opens and when the pick moves: its end on the window's last row
     // when it stands below the window, its start on the first when above (its start first, when it is taller)
     if (picked && over > 0 && scrolled.pick !== picked.key) {

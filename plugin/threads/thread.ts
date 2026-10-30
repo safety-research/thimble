@@ -400,12 +400,15 @@ export async function sendToMain($: Engine, key: string): Promise<boolean> {
 }
 
 /** Where a thread opens again: a pane it was asked under (a citation's evidence, a label, coverage, the claims), else
- *  the pane `thread`. `ask`: the input bar takes the keys. False when Claude Code did not place the pane. */
-export async function showThread($: Engine, key: string, o: { from?: string; ask?: boolean } = {}): Promise<boolean> {
+ *  the pane `thread`. `ask`: the input bar takes the keys. `read`: the pane takes them and its input waits, so ↑ ↓ and
+ *  the page keys scroll it (the tray's +). False when Claude Code did not place the pane. */
+export async function showThread($: Engine, key: string, o: { from?: string; ask?: boolean; read?: boolean } = {}): Promise<boolean> {
   const t = threads.get(key)
   if (!t) return false
-  if (o.ask) askNext = key
-  fieldShown($, key)
+  if (o.read) { if (askNext === key) askNext = null } else {
+    if (o.ask) askNext = key
+    fieldShown($, key)
+  }
   const p = t.scope.pane
   if (p && p.kind !== 'thread' && p.kind !== 'threads') return openPane($, p.kind, p.args, paneTitle(p.kind, p.args, t), { focus: true })
   // a citation's thread stands under its evidence
@@ -434,10 +437,11 @@ export function takeAskNext(key: string): boolean {
 }
 
 /** The thread about `scope`: an existing one, or a new one with no turns yet, opened in the side pane, its input bar
- *  taking the keys. `key`: a key at the prompt opened it, and these are the words a click on which opens it where the
- *  key cannot, `where` they are (the bar below by default): Claude Code places a pane at any width only for the
- *  person's press or command, never for a key at the prompt (core/pane.ts). */
-export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
+ *  taking the keys; `read`, the pane taking them, to be read (showThread). `key`: a key at the prompt opened it, and
+ *  these are the words a click on which opens it where the key cannot (`click`, when they are other words), `where`
+ *  they are (the bar below by default): Claude Code places a pane at any width only for the person's press or command,
+ *  never for a key at the prompt (core/pane.ts). */
+export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string; click?: string; where?: string; read?: boolean } = {}): Promise<boolean> {
   await restoreThreads($)
   // a card: the line it selects now, which the pane shows in place of the whole card
   if (scope.card && !scope.part) {
@@ -456,11 +460,11 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   // revealCard). Claude Code moves the chat when a press opened the thread (the bar's `a ask`, the card's margin), not
   // for the a key
   if (scope.card) await revealCard($, scope.card, 'start')
-  const placed = await showThread($, key, { ask: true })
+  const placed = await showThread($, key, o.read ? { read: true } : { ask: true })
   // open: a notice that a key could not open it goes
   if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
-    if (o.key) failNotice($, narrowNotice(o.key.split(' ')[0]!, o.key, o.where), 'pane:threads')
+    if (o.key) failNotice($, narrowNotice(o.key.split(' ')[0]!, o.click ?? o.key, o.where), 'pane:threads')
     else failNotice($, 'Claude Code did not open the side thread here.', 'pane:threads')
   }
   return placed

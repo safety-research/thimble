@@ -1,8 +1,7 @@
 // evidence.tsx: the side pane of one mark (core/pane.ts kind `evidence`, args {row, n}): its status and, once the check
 // gave it, its evidence.
 //
-//   computed   that call's real output, the marked words highlighted, first, so it is on the screen; then the code
-//              the check ran
+//   computed   that call's real output, all of it, the marked words highlighted, first; then the code the check ran
 //   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
 //   code       the substring highlighted
 //
@@ -18,12 +17,16 @@
 // and what it was) and failed, which says why in red (× failed), with the evidence the check gave when it is real; and
 // before an outcome, ⠋ checking (the turning glyph, as after the mark) or ? not checked. The cited value is bold in the citations' look (citeWords). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
-// pane reads the reply's marks in the state, so it draws again when the check settles.
+// pane shows all of the evidence, the line that holds the value in view when it opens (core/pane.ts keepsInView), and
+// scrolls the rest with the wheel and ↑ ↓. It reads the reply's marks in the state, so it draws again when the check
+// settles.
 import type { EngineInterface } from 'claude-code'
 
 import { spinNow } from '../bar/busy'
 import { quiet } from '../core/askcell.js'
+import { keepsInView } from '../core/pane'
 import { accent, themeLast, themeNow } from '../core/theme'
+import { rowsAt, treeRows } from '../core/trail.mjs'
 import { explaining, explainTerm, glossFor, sessionGlosses } from '../explain/seam'
 import { markColors } from '../explain/place.mjs'
 import { checkStatus, printableEvidence, wasLine } from '../tray/tray.mjs'
@@ -34,8 +37,6 @@ import { citeHeat, citeLook, wordsLook } from './view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-
-const OUTPUT_ROWS = 14 // output lines shown around the first highlight
 
 /** A citation's status (tray/tray.mjs checkStatus) as the tray's header, this pane and the claims pane draw it: its
  *  sign and its word in its tone's color (a checked one's success green, a failed one's error red, else dim), the
@@ -69,25 +70,24 @@ export function highlighted(els: Any, text: string, spans: [number, number][], k
   return els.Text({ key, wrap: 'wrap', ...(parts.some(x => typeof x !== 'string') ? citeHeat(id) : {}), children: parts.length ? parts : ' ' })
 }
 
-/** The output's lines around its first highlight, each with the parts of the spans that fall in it; `rows` of them
- *  (the tray shows fewer than the pane). */
-export function outputRows(els: Any, output: string, spans: [number, number][], rows = OUTPUT_ROWS): Any[] {
-  const lines = output.split('\n')
+/** The key of the output line that holds the first highlight, which the pane keeps in view when it opens. */
+const HIT = 'ev-hit'
+
+/** The output's lines, all of them, each with the parts of the spans that fall in it; the line that holds the first
+ *  highlight in a Box keyed HIT (a Box keeps its key in the drawing). A trailing newline ends the last line and starts
+ *  none. */
+export function outputRows(els: Any, output: string, spans: [number, number][]): Any[] {
+  const lines = output.replace(/\n+$/, '').split('\n')
   const starts: number[] = []
   let at = 0
   for (const l of lines) { starts.push(at); at += l.length + 1 }
-  const first = spans.length ? Math.max(0, starts.findIndex((s, i) => spans[0]![0] >= s && spans[0]![0] <= s + lines[i]!.length)) : 0
-  const from = Math.max(0, Math.min(first - 3, lines.length - rows))
-  const to = Math.min(lines.length, from + rows)
-  const out: Any[] = []
-  if (from > 0) out.push(els.Text({ key: 'up', dimColor: true, children: `… ${from} line${from === 1 ? '' : 's'} above` }))
-  for (let i = from; i < to; i++) {
+  const first = spans.length ? Math.max(0, starts.findIndex((s, i) => spans[0]![0] >= s && spans[0]![0] <= s + lines[i]!.length)) : -1
+  return lines.map((line, i) => {
     const s = starts[i]!
-    const mine = spans.map(([a, b]) => [Math.max(a, s) - s, Math.min(b, s + lines[i]!.length) - s] as [number, number]).filter(([a, b]) => b > a)
-    out.push(highlighted(els, lines[i]!, mine, `o${i}`))
-  }
-  if (to < lines.length) out.push(els.Text({ key: 'down', dimColor: true, children: `… ${lines.length - to} line${lines.length - to === 1 ? '' : 's'} below` }))
-  return out
+    const mine = spans.map(([a, b]) => [Math.max(a, s) - s, Math.min(b, s + line.length) - s] as [number, number]).filter(([a, b]) => b > a)
+    const el = highlighted(els, line, mine, `o${i}`)
+    return i === first ? els.Box({ key: HIT, flexDirection: 'column', children: [el] }) : el
+  })
 }
 
 /** Whether line n is one of the cited lines (`12` or `8-11`). */
@@ -154,7 +154,7 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   if (ev.kind === 'card') {
     return [
       Text({ key: 'ct', wrap: 'wrap', children: [Text({ key: 'k', dimColor: true, children: 'card  ' }), Text({ key: 't', bold: true, children: ev.title || ev.card })] }),
-      Box({ key: 'cv', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output ?? ev.value, ev.highlight ?? [], OUTPUT_ROWS) }),
+      Box({ key: 'cv', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output ?? ev.value, ev.highlight ?? []) }),
       // the places of another card or output that the words' other values stand in
       ...(ev.more ?? []).flatMap((p: Evidence, k: number) => [Text({ key: `mg${k}`, children: ' ' }), ...evidenceRows(els, p, width).map((x: Any, j: number) => Box({ key: `m${k}-${j}`, flexDirection: 'column', children: [x] }))]),
     ]
@@ -162,7 +162,7 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   if (ev.kind === 'computed') {
     return [
       Text({ key: 'oh', bold: true, children: ev.by === 'main' ? 'Output of the code Claude ran for the reply' : 'Output of the code the check ran' }),
-      Box({ key: 'out', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output, ev.highlight, OUTPUT_ROWS) }),
+      Box({ key: 'out', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output, ev.highlight) }),
       Text({ key: 'ch', bold: true, children: ' ' }),
       Text({ key: 'ch2', bold: true, children: 'The code' }),
       Code({ key: 'code', source: wrapCode(ev.code, width), language: 'python' }),
@@ -175,10 +175,8 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   ]
 }
 
-/** The pane of one mark. In the tray (`o.inTray`: the panel + opens on a citation computed by code, tray/tray.ts) the
- *  same, less what the tray's header says (the status and the words) and what only the pane takes (its e key, and the
- *  explainer e shows). */
-export async function drawEvidence($: EngineInterface, e: Any, args: unknown, els: Any, o: { inTray?: boolean } = {}): Promise<unknown> {
+/** The pane of one mark. */
+export async function drawEvidence($: EngineInterface, e: Any, args: unknown, els: Any): Promise<unknown> {
   const { Box, Text } = els
   const { row, n } = (args ?? {}) as { row?: string; n?: number }
   await themeNow($)
@@ -194,7 +192,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     '  ',
     Text({ key: 'w', ...wordsLook(m.status, id), children: m.shown.replace(/\*\*|`/g, '') }),
   ] })
-  const rows: Any[] = o.inTray ? [] : [head]
+  const rows: Any[] = [head]
   if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }) }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: 'error' } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
@@ -209,7 +207,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const me = `${row}:${n}`
   const words = m.shown.replace(/\*\*|`/g, '').trim()
   // the cited words explained in place (e, as e explains words everywhere): the session's explainer, else one being written, else why there is none
-  if (!o.inTray && explainShown.has(me)) {
+  if (explainShown.has(me)) {
     const g = glossFor(await sessionGlosses($).catch(() => []), words)
     const now = explaining(words)
     // each part after a dim ▎, its wrapped lines under its first (the gutter is a column of its own)
@@ -232,12 +230,17 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     }
     $.ui.invalidate('ui.render')
   } })
-  if (keys.length && !o.inTray) {
+  if (keys.length) {
     const { Button } = els
     rows.push(Text({ key: 'keys-gap', children: ' ' }), Box({ key: 'ev-keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
       ...(i ? [Text({ key: `ev-key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
       Button({ key: `ev-key-${x.k}`, plain: true, dimColor: true, hotkey: x.k, label: x.label, hover: quiet(`ev-key-${x.k}`), onPress: x.press }),
     ]) }))
   }
-  return Box({ flexDirection: 'column', children: rows })
+  const drawn = Box({ flexDirection: 'column', children: rows })
+  // the line that holds the value, in view when the pane opens, at the width the pane lays the drawing out at
+  const W = Math.max(20, Number(e?.props?.bodyColumns) || 80)
+  const hit = rowsAt(drawn, W, (x: Any) => (x?.key ?? x?.props?.key) === HIT)[0]
+  keepsInView(hit ? { key: `${row}:${n}`, top: hit.row, rows: treeRows(hit.el, W) } : null)
+  return drawn
 }

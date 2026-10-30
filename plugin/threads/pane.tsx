@@ -10,8 +10,6 @@
 //                                under it, the keys' row and the input bar at the bottom
 //   under a pane (threadUnder)   a citation's evidence, a label, coverage, the claims: the pane's thread under it, its
 //                                conversation and the input bar (core/pane.ts calls it)
-//   in the tray (threadInTray)   under a citation's evidence in the panel + opens in the tray (tray/tray.ts): the
-//                                thread's conversation, and its key row and input bar, one row each
 //
 // The conversation, written and spaced as Claude Code writes main's:
 //
@@ -32,8 +30,8 @@
 //
 // Under the claims pane each question shows the claim it asks about, quoted above it, and the input bar names it.
 //   ─────────────────────────────────         the input bar: Claude Code's prompt box, a rule above and below,
-//   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them
-//   ─────────────────────────────────
+//   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them; in a short pane (inline in a short
+//   ─────────────────────────────────         terminal) the rule above and the field alone (shortPane)
 import type { EngineInterface } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
@@ -45,8 +43,9 @@ import { WORD_MS } from '../hooks/keys'
 import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
+import { placeLines } from '../explain/expand'
 import { labelEdit } from '../labels/pane'
-import { cut, textWidth } from '../core/text.js'
+import { cut, printable, textWidth } from '../core/text.js'
 import { accent, themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
@@ -241,11 +240,11 @@ function paneKeys($: Engine, t: Thread | null, more: PaneKey[] = []): PaneKey[] 
 /** The keys' row above the input bar, ` · ` between keys, as the other panes draw theirs: each a plain Button its key
  *  presses, drawn dim at rest (Claude Code draws its key, lit, then a colon, and the label). The ring stays on the
  *  input bar as m comes (fieldSettled), so a key typed there presses it too (keyTyped). */
-function keysRow(els: Any, keys: PaneKey[]): Any[] {
+function keysRow(els: Any, keys: PaneKey[], short = false): Any[] {
   const { Box, Button, Text } = els
   if (!keys.length) return []
   return [
-    Text({ key: 'keys-gap', children: ' ' }),
+    ...(short ? [] : [Text({ key: 'keys-gap', children: ' ' })]),
     Box({ key: 'thread-keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
       ...(i ? [Text({ key: `thread-key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
       // a plain Button draws its key and label itself; children would draw them twice. Under the pointer its label
@@ -272,10 +271,15 @@ function keyTyped($: Engine, key: string, v: string, keys: PaneKey[]): void {
   })
 }
 
-/** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule; `one`, the row
- *  of `❯` and the field alone (the tray, whose frame stands around it in the few rows over the prompt). ↵ asks the
- *  thread about `scope`; a key of the keys' row typed alone into the empty field presses it (keyTyped). */
-function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = [], ask = '', one = false): Any[] {
+/** Whether a pane is short: inline in a short terminal, where Claude Code gives it a third of the window. Its input bar
+ *  then gives up the rows that only space it, so what the pane shows keeps its rows: the full bar takes five rows, a
+ *  third of a pane of fifteen. */
+const shortPane = (e: Any): boolean => { const h = Number(e?.props?.scroll?.bodyRows) || 0; return h > 0 && h < 15 }
+
+/** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule; in a short pane
+ *  (`short`, shortPane) the rule and the field alone. ↵ asks the thread about `scope`; a key of the keys' row typed alone
+ *  into the empty field presses it (keyTyped). */
+function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = [], ask = '', short = false): Any[] {
   const { Box, Text, Input } = els
   const key = threadKey(scope)
   const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
@@ -291,7 +295,7 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
       onSubmit: (v: string) => { void askHere($, scope, v) },
     })] }),
   ] })
-  return one ? [row] : [Text({ key: 'entry-gap', children: ' ' }), rule('entry-top'), row, rule('entry-bottom')]
+  return short ? [rule('entry-top'), row] : [Text({ key: 'entry-gap', children: ' ' }), rule('entry-top'), row, rule('entry-bottom')]
 }
 
 /** A field a pane edits in its input bar in place of a question (labels/pane.tsx: a label's rule, model or records):
@@ -411,7 +415,8 @@ function passageEl(els: Any, runs: PassageRun[]): Any {
   }) })
 }
 
-/** What a thread is on, at the top of its pane: a card, drawn; an explainer or a heads-up, its words; else its name. */
+/** What a thread is on, at the top of its pane: a card, drawn; an explainer or a heads-up, its words; lines of a file
+ *  an explainer cites (the tray's `place`), those lines; else its name. */
 async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number): Promise<{ el: Any; rows: number; keys?: PaneKey[] }> {
   const s = t.scope
   if (s.card) {
@@ -423,6 +428,15 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
     if (!open) return { el: subjectBlock(els, 'subject', meta.title, s.part ? '' : 'card', s.part ? [els.Text({ children: s.part })] : [], 'truncate-end'), rows: 3, keys }
     // whole: the conversation's drawing of the card, cut at the pane's edge (no row of it wraps)
     return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'card'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta, { layout: cardWidth() })]), rows: 14, keys }
+  }
+  if (s.mark && (s.mark.kind as string) === 'place') {
+    // `id`: the place, `path:from-to`, as the tray shows it
+    const id = String((s.mark as { id?: string }).id ?? '')
+    const at = /^(.*?)(?::(\d+)(?:-(\d+))?)?$/.exec(id)!
+    const from = at[2] ? Number(at[2]) : null
+    const got = await placeLines($, at[1]!, from, at[3] ? Number(at[3]) : from).catch(() => `${at[1]} could not be read here.`)
+    const more = typeof got === 'string' ? [got] : got.map(l => printable(`${l.n}  ${l.text}`.replace(/\t/g, '  ')))
+    return { el: subjectBlock(els, 'subject', id, 'lines of a file', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W - 2), 0) }
   }
   if (s.mark && s.mark.kind !== 'citation') {
     const m = s.mark as { row: string; kind: string; id: string }
@@ -456,14 +470,15 @@ export async function threadParts($: Engine, e: Any, els: Any, args: Any): Promi
   const t = threadOf(key)
   if (!t) return { body: [Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This thread is no longer in the session.' })], bottom: [] }
   const { W, H } = sizeOf(e)
+  const short = shortPane(e)
   const subject = await subjectOfPane($, e, els, t, W)
   const pk = paneKeys($, t, subject.keys)
-  const keys = keysRow(els, pk)
+  const keys = keysRow(els, pk, short)
   const pane = (t.scope as Any).pane as { kind?: string; args?: unknown } | undefined
   const quote = pane?.kind === 'claims' ? (await claimsThreadScope($, pane.args).catch(() => null))?.quote ?? '' : ''
   const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - keys.length), quote)
   ringDrawn($, key)
-  return { body: [subject.el, ...conv], bottom: [...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key), pk)] }
+  return { body: [subject.el, ...conv], bottom: [...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key), pk, '', short)] }
 }
 
 /** One thread (kind `thread`), whole: its parts in one column. */
@@ -511,37 +526,24 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   ringDrawn($, key)
   const pk = paneKeys($, t)
   // the blank row under the pane's drawing stands with the conversation when there is one, else with the input bar: a
-  // pane with no conversation opens at its top (core/pane.ts scrolls a conversation to its end)
+  // pane with no conversation opens at its top (core/pane.ts scrolls a conversation to its end); a short pane has none
+  // over its input bar
+  const short = shortPane(e)
   const gap = els.Text({ key: 'thread-gap', children: ' ' })
+  const under = conv.length || short ? [] : [gap]
   // a pane editing one of its fields: the field takes the input bar, and the thread's keys wait
   const edit = kind === 'labels' ? await labelEdit($, args).catch(() => null) : null
-  if (edit) return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...editEntry(els, edit, W - 1)] }
-  return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '')] }
+  if (edit) return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...editEntry(els, edit, W - 1)] }
+  return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...keysRow(els, pk, short), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '', short)] }
 }
 
-/** The thread about `scope` in the tray over the prompt, under the evidence of the citation it is about, as the side
- *  pane shows that thread under the same evidence (threadUnderParts): its conversation (`conv`), which scrolls with the
- *  evidence, and the key row and the input bar (`bottom`), one row each, which the tray keeps at its bottom
- *  (tray/tray.ts). The tray's frame and the band's few rows leave out the bar's blank row and rules. */
-export async function threadInTray($: Engine, e: Any, scope: ThreadScope, els: Any): Promise<{ conv: Any[]; bottom: Any[] }> {
-  const key = threadKey(scope)
-  await $.state.get({ plugin: 'thimble', key: 'thread', id: key })
-  const { W, H } = sizeOf(e)
-  const t = threadOf(key)
-  const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4))) : []
-  const pk = paneKeys($, t)
-  return {
-    conv: conv.length ? [els.Text({ key: 'thread-gap', children: ' ' }), ...conv] : [],
-    bottom: [...keysRow(els, pk).slice(1), ...entry($, els, scope, W - 1, false, pk, '', true)],
-  }
-}
-
-/** About how many rows threadUnder takes under a pane: the gap and the input bar, and with a conversation its share of
- *  the pane. A pane that keeps its own rows in view (the coverage pane's tree) leaves these out. */
+/** About how many rows threadUnder takes under a pane: the gap and the input bar (in a short pane, its rule and field),
+ *  and with a conversation its share of the pane. A pane that keeps its own rows in view (the coverage pane's tree)
+ *  leaves these out. */
 export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown): Promise<number> {
   const t = threadOf(threadKey(await paneScope($, kind, args)))
   const { H } = sizeOf(e)
-  return 5 + (t?.turns.length ? Math.max(4, Math.floor(H * 0.4)) + 1 : 0)
+  return (shortPane(e) ? 2 : 5) + (t?.turns.length ? Math.max(4, Math.floor(H * 0.4)) + 1 : 0)
 }
 
 export async function drawThreads($: Engine, e: Any, kind: 'threads' | 'thread', args: unknown, els: Any): Promise<Any> {

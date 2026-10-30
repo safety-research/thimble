@@ -13,10 +13,12 @@
 //                                      with the input bar, which the docked pane keeps at its bottom (core/pane.ts)
 //   threadKnown($, key)                whether the thread `key` is this conversation's, so the side pane can show it
 //                                      again: its way back passes over one that is not (core/pane.ts)
-//   openThread($, scope, {key})        the side pane on the thread about `scope` (a new one, or the one already about
+//   openThread($, scope, {key, read})  the side pane on the thread about `scope` (a new one, or the one already about
 //                                      it), its input taking the keys: the tray's `a` on a mark, a claim's question in
-//                                      the claims pane; true when it opened. `key`: the bar's words that open it where
-//                                      the key at the prompt cannot (a narrow terminal)
+//                                      the claims pane; `read`, the pane taking them (the tray's +, which shows all of
+//                                      a mark there); true when it opened. `key`: the key and the bar's words that open
+//                                      it where the key at the prompt cannot (a narrow terminal); `click`, other words
+//                                      that do
 //   threadAsked($, scope)              the first question of the thread about `scope`, or null when none was asked:
 //                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
@@ -24,9 +26,6 @@
 //   threadUnderSplit($, e, kind, args, els)   the same in two parts: the conversation, and the key row with the input
 //                                      bar, which the docked pane keeps at its bottom (core/pane.ts)
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
-//   threadInTray($, e, scope, els)     the thread about a citation in the tray's panel (+, tray/tray.ts), as the pane
-//                                      shows it under the citation's evidence: its conversation, and its key row and
-//                                      input bar, one row each
 //   PaneEdit                           a field a pane edits in the input bar under it, in place of a question: the
 //                                      labels pane's (labels/pane.tsx labelEdit), its name, its value, what ↵ does
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
@@ -45,7 +44,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { askHere, drawThreads, rowsUnder as roomUnder, threadInTray as inTray, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
+import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadQuestion as question, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
@@ -119,12 +118,6 @@ export async function threadUnderSplit($: Engine, e: Any, kind: string, args: un
   return threadUnderParts($, e, kind, args, els)
 }
 
-export async function threadInTray($: Engine, e: Any, scope: ThreadScope, els: Any): Promise<{ conv: unknown[]; bottom: unknown[] }> {
-  // a drawing made right after a reload reads the kept threads itself
-  await restoreThreads($).catch(() => undefined)
-  return inTray($, e, scope, els)
-}
-
 /** About how many rows threadUnder takes under a pane (threads/pane.tsx rowsUnder). */
 export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown): Promise<number> {
   return roomUnder($, e, kind, args)
@@ -133,7 +126,7 @@ export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown):
 /** A field a pane edits in the input bar under it (labels/pane.tsx labelEdit). */
 export type { PaneEdit }
 
-export async function openThread($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
+export async function openThread($: Engine, scope: ThreadScope, o: { key?: string; click?: string; where?: string; read?: boolean } = {}): Promise<boolean> {
   return openThreadOn($, scope, o)
 }
 
