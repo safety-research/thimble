@@ -15,11 +15,11 @@
 //   cmd {on, cursor, key}  page to frame: the page's ⌘ pointer went on or off, its arrow, and the ask key Settings pick,
 //                          as a view's frame hears it
 // A part is an element marked data-part (with data-part-text when its text is not what to quote), as on a card thimble
-// draws itself (pointer/parts.ts), a label of a drawing (SVG) or a shape that says what it is (its aria-label or its
-// tooltip), else the innermost element with text in it; when that element holds more than one of a drawing's labels,
-// its text is those labels run together (an SVG element has no innerText), and the whole card stands for it. On a Mac ⌘
-// points once it has been held alone for HOLD_MS, as on the page, and a ⌘-click asks at once; a ⌘-press selects none of
-// the page's text.
+// draws itself (pointer/parts.ts), a shape of a drawing (SVG) that says what it is (its aria-label or its tooltip), else
+// the innermost element with text in it; when that element holds more than one of a drawing's labels, its text is those
+// labels run together (an SVG element has no innerText), and the whole card stands for it. On a Mac ⌘ points once it
+// has been held alone for HOLD_MS, as on the page, and a ⌘-click asks at once; a ⌘-press selects none of the page's
+// text.
 import { bus } from '../lib/bus'
 import { getAskKey, isMacPlatform, onAskKey } from '../lib/platform'
 import { token } from '../lib/vizTheme'
@@ -82,8 +82,7 @@ export function cardBridge(holdMs: number, mac: boolean): void {
     const el = t instanceof Element ? t : null
     const own = el && el.closest('[data-part]')
     if (own) return own
-    const label = el instanceof SVGElement ? (el.closest('text') ?? (said(el) ? el : null)) : null
-    if (label) return label
+    if (el instanceof SVGElement && said(el)) return el
     for (let p = el; p && p !== document.body && p !== root; p = p.parentElement) if ((p.textContent || '').trim()) return p.querySelectorAll('text').length > 1 ? root : p
     return root
   }
