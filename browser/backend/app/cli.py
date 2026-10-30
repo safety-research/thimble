@@ -23,16 +23,16 @@ the plugin's hooks are off, /thimble also prints the command main's Monitor runs
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
 owner alone; `token` is new at each start and is what the plugin's hooks and this CLI prove they hold (hook_auth.py). A
 browser signs in with a one-time code from ui_url(pair=True), never with a value from this file. Only a terminal gets a
-link with a code: thimble-browser prints one at its start and a new one for each browser that is not signed in and opens
-the page (new_links), `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
-which gets its code as the hook shows it (leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
-only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
-recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
-`up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install. This install's own
-server is the one whose /api/health names that pid as its leader (own_server): `up` and thimble-browser print a link to
-it alone, and `stop` ends that pid alone. A server server.json does not record is never taken for it nor stopped, even
-one of this checkout and THIMBLE_HOME, such as one left running when its home was deleted under it, which reads the
-token of the new server.json all the same.
+link with a code: thimble-browser prints one at its start and a new one for a browser that is not signed in and opens
+the page once the last one was used or expired (new_links), `up` from a shell prints one, and /thimble prints LINK_LINE
+for main's Stop hook to show the link, which gets its code as the hook shows it (leave_link). `thimble unpair` signs
+every browser out. Its `pid` is trusted only while it is a thimble server on its port (is_server checks the command line
+and working folder, since a pid recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile
+makes the record true before `up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another
+install. This install's own server is the one whose /api/health names that pid as its leader (own_server): `up` and
+thimble-browser print a link to it alone, and `stop` ends that pid alone. A server server.json does not record is never
+taken for it nor stopped, even one of this checkout and THIMBLE_HOME, such as one left running when its home was deleted
+under it, which reads the token of the new server.json all the same.
 
 The port: THIMBLE_PORT when the caller sets it, else the one server.json records, else DEFAULT_PORT (8300). Without
 THIMBLE_PORT, a start whose port another program, another install's server or a server that answers but is not this
@@ -4679,7 +4679,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     of the folder the page opens (pick_session, open_session): a new one, as each `claude` starts a new session, as
     empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds a
     chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets a new link
-    there (watch_links). With `--detach` it returns once the link is printed and the server keeps running."""
+    there once the last one was used or expired (watch_links). With `--detach` it returns once the link is printed and
+    the server keeps running."""
     from . import claude_access, llm  # noqa: PLC0415
 
     llm.scrub_env()
@@ -4742,10 +4743,11 @@ def watch_links(name: str) -> threading.Event:
 
 def new_links(name: str, stop: threading.Event) -> None:
     """Until `stop` is set: each time a browser that is not signed in opens the page (hook_auth.want_link, at most once
-    a minute), a new sign-in link for workspace `name` with a new code (ui_url), printed as at the start
-    (NEW_LINK_LINE). It waits for one at GET /api/ui/link-wanted, which answers once the count or the server's start
-    differs from the last answer; a server that started again counts from 0. A server that does not answer is asked
-    again LINK_RETRY_S later, and a link the server gives no code for is not printed (pair_code logs why)."""
+    a minute, and not while the link printed last still works), a new sign-in link for workspace `name` with a new code
+    (ui_url), printed as at the start (NEW_LINK_LINE). It waits for one at GET /api/ui/link-wanted, which answers once
+    the count or the server's start differs from the last answer; a server that started again counts from 0. A server
+    that does not answer is asked again LINK_RETRY_S later, and a link the server gives no code for is not printed
+    (pair_code logs why)."""
     from . import hook_auth  # noqa: PLC0415
 
     seen: dict[str, Any] = {}

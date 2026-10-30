@@ -555,7 +555,9 @@ def create_app() -> FastAPI:
     @app.get("/api/ui/paired")
     def ui_paired(request: Request) -> dict:
         paired = hook_auth.analyst(request)
-        if not paired:  # the page shows its sign-in line: thimble-browser prints a new link in its terminal
+        # the page shows its sign-in line: thimble-browser prints a new link in its terminal, unless the link it printed
+        # last still works (hook_auth.want_link)
+        if not paired:
             hook_auth.want_link(request.scope)
         return {"paired": paired, "id": hook_auth.browser_id(request), "at": hook_auth.signed_in_at(request)}
 
