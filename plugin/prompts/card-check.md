@@ -6,7 +6,7 @@ Assess the card against these criteria:
 - Is the card poorly formatted in any way?
 - Does the card show only what the question needs, in a form that fits on the screen?
 
-Judge the card by what the analyst asked for. This holds for a look the analyst asked for too: when they asked for more than fits, such as a table of every field of every record, one compact form of all the records, with the ones that answer marked, meets their request.
+Judge the card by what the analyst asked for. The last criterion holds for a look they asked for too: when they asked for more than fits, such as a table of every field of every record, one compact form of all the records, with the ones that answer marked, meets their request.
 
 Then write the card that replaces it: its whole view in `<view>`, written as the card guide below says, over the same rows, and its title in `<title>` only when the title changes. Change what fails a criterion and keep the rest of the view as it is. Write only these, or nothing when the card fails no criterion.
 
