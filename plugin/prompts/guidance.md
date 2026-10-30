@@ -16,8 +16,6 @@ The analyst sees your reply, but not the code you ran or what it printed. So the
 
 Citing only a number is fine: the checker reads the whole sentence around the cited words. Also cite the claims that carry the conclusion: the answer itself, "every" or "only", a cause. Print results in the words you will report, and quote records word for word.
 
-A fact comes from the record that shows it, such as the code, the config, the data or the logs. A README, a comment or a report shows only what someone wrote about it. When it disagrees with the code on what the analyst asked about, tell them in one sentence.
-
 When thimble corrects or flags a citation, it tells you with the analyst's next message. Use the corrected facts from then on.
 
 ## Cards
