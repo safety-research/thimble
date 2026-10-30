@@ -26,7 +26,7 @@ import { quiet } from '../core/askcell.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { explaining, explainTerm, glossFor, sessionGlosses } from '../explain/seam'
 import { markColors } from '../explain/place.mjs'
-import { checkStatus, wasLine } from '../tray/tray.mjs'
+import { checkStatus, printableEvidence, wasLine } from '../tray/tray.mjs'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
@@ -219,7 +219,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
       if (g.here) rows.push(bar('h', Text({ dimColor: true, children: plain(g.here) })))
     } else rows.push(bar('w', Text({ ...(now.why ? { color: 'error' } : { dimColor: true }), children: now.pending ? 'writing an explainer of these words…' : now.why || 'no explainer yet: press e to ask for one' })))
   }
-  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60) }))
+  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, printableEvidence(m.evidence) as Evidence, Number(e?.props?.bodyColumns) || 60) }))
   // the pane's key: explain the cited words
   const keys: { k: string; label: string; press: () => unknown }[] = []
   if (words) keys.push({ k: 'e', label: explainShown.has(me) ? 'hide the explainer' : 'explain these words', press: () => {

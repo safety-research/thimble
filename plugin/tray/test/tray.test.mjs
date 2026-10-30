@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { partsAround } from '../../core/text.js'
-import { aboutOf, back, base, checkStatus, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top, wasLine } from '../tray.mjs'
+import { aboutOf, back, base, checkStatus, evidenceLine, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printableEvidence, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top, wasLine } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -118,6 +118,25 @@ test('what a side thread is about quotes the words once: words that open with a 
   assert.equal(aboutOf({ kind: 'heads', row: 'r1', id: 'h1' }, { gloss: { title: '"Cheated" is their own word' } }), 'the heads-up "Cheated" is their own word')
   assert.equal(aboutOf({ kind: 'heads', row: 'r1', id: 'h1' }, { gloss: { title: 'March is half a month' } }), 'the heads-up "March is half a month"')
   assert.equal(aboutOf({ kind: 'citation', row: 'r1', n: 2 }, { words: '“please post R3”' }), 'the citation “please post R3”')
+})
+
+test("a citation's evidence draws printable: a check's output, a file's line and name, a card's title and table, each byte that does not print as its escape, the cited value still marked; a file's link keeps its real name", () => {
+  const out = '\u001b[31mFAILED\u001b[0m 12 of 40\u0000\r\nrun 2\tok'
+  const at = out.indexOf('12 of 40')
+  const ev = printableEvidence({ kind: 'computed', by: 'checker', code: 'print(r.stdout)', output: out, highlight: [[at, at + 8]] })
+  assert.equal(ev.output, '\\x1b[31mFAILED\\x1b[0m 12 of 40\\x00\nrun 2 ok')
+  const line = evidenceLine(ev)
+  assert.equal(line.text.slice(line.spans[0][0], line.spans[0][1]), '12 of 40')
+  const log = '\u001b[32mok\u001b[0m failed: 12'
+  const file = printableEvidence({ kind: 'quote', file: 'logs/run\u001b.log', line: '2', lines: [{ n: 1, text: 'a\u00a0b' }, { n: 2, text: log, highlight: [log.indexOf('12'), log.indexOf('12') + 2] }] })
+  assert.equal(file.file, 'logs/run\\x1b.log')
+  assert.equal(file.lines[0].text, 'a\\xa0b')
+  assert.equal(file.lines[1].text.slice(...file.lines[1].highlight), '12')
+  const card = printableEvidence({ kind: 'card', card: 'c1', title: 'Runs\u200b', ref: 'card:c1#n/0', value: '12', table: { corner: '', cols: ['name\u0000', 'n'], rows: [{ label: 'a\u202e', values: ['x', '12'] }], at: { r: 0, c: 1 }, above: 0, below: 0 } })
+  assert.equal(card.title, 'Runs\\u200b')
+  assert.deepEqual([card.table.cols, card.table.rows[0].label], [['name\\x00', 'n'], 'a\\u202e'])
+  // a link to a file: its name as the file has it, a lone half of a pair (bytes that are no UTF-8) as U+FFFD
+  assert.equal(fileHref('/w/r\udce9sum.txt', '3'), 'file:///w/r%EF%BF%BDsum.txt#L3')
 })
 
 test('the line of code above a citation\'s output is one that printed it: never a print whose words the output lacks', () => {

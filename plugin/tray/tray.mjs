@@ -26,10 +26,13 @@
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
 //   firstSentence(s)                       a check's reason cut to its first sentence, for a citation's card
+//   printableEvidence(ev)                  a citation's evidence as the terminal draws it: each text of the records in
+//                                          it printable (core/text.js)
 //   evidenceLine(ev)                       the one line of a citation's evidence that holds the cited value
 //   lineWindow(line, room)                 that line cut to `room` characters around the value
 //   printLine(code, out, at), printedBy(ev) the line of a check's code that printed the output's line `at`
 //                                          (printed.mjs)
+import { printable } from '../core/text.js'
 import { printLine } from './printed.mjs'
 
 export { printLine }
@@ -267,7 +270,8 @@ export function drawsHyperlinks(env = {}) {
 /** A file's address, `file:///…/runs.jsonl#L41`, which a ctrl or cmd click opens on this machine. */
 export function fileHref(abs, line) {
   const n = /^(\d+)/.exec(String(line || ''))
-  return `file://${encodeURI(String(abs)).replace(/#/g, '%23').replace(/\?/g, '%3F')}${n ? `#L${n[1]}` : ''}`
+  // a name with a lone half of a surrogate pair (bytes that are no UTF-8) cannot be put in a link: it takes U+FFFD
+  return `file://${encodeURI(String(abs).toWellFormed()).replace(/#/g, '%23').replace(/\?/g, '%3F')}${n ? `#L${n[1]}` : ''}`
 }
 
 /** A check's reason, its first sentence only: a citation's card says why in one sentence (a decimal point or an
@@ -282,6 +286,39 @@ export function firstSentence(s) {
 function inRange(n, line) {
   const [a, b] = String(line ?? '').split('-').map(Number)
   return n >= a && n <= (Number.isNaN(b) || b === undefined ? a : b)
+}
+
+/**
+ * A citation's evidence as the terminal draws it (the tray, the evidence pane, the claims pane): each text of the
+ * records in it printable (core/text.js: what does not print as its escape), its highlights moved to match, so the
+ * lines are laid out and cut as they draw. A check's output, a file's line, a card's rows and a file's name are text
+ * thimble did not write; a byte that does not print among them would make Claude Code refuse the whole drawing.
+ */
+export function printableEvidence(ev) {
+  if (!ev || typeof ev !== 'object') return ev
+  const p = v => (typeof v === 'string' ? printable(v) : v)
+  const out = { ...ev }
+  for (const k of ['code', 'file', 'title', 'card', 'value']) if (typeof ev[k] === 'string') out[k] = printable(ev[k])
+  if (typeof ev.output === 'string') {
+    const o = printable(ev.output, Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h)) : [])
+    out.output = o.text
+    if (Array.isArray(ev.highlight)) out.highlight = o.spans
+  }
+  const t = ev.table
+  if (t && typeof t === 'object') {
+    out.table = { ...t, corner: p(t.corner), cols: Array.isArray(t.cols) ? t.cols.map(p) : t.cols,
+      rows: Array.isArray(t.rows) ? t.rows.map(r => (r && typeof r === 'object' ? { ...r, label: p(r.label), values: Array.isArray(r.values) ? r.values.map(p) : r.values } : r)) : t.rows }
+  }
+  if (Array.isArray(ev.lines)) {
+    out.lines = ev.lines.map(l => {
+      if (!l || typeof l !== 'object') return l
+      if (!Array.isArray(l.highlight)) return { ...l, text: printable(String(l.text ?? '')) }
+      const o = printable(String(l.text ?? ''), [l.highlight])
+      return { ...l, text: o.text, highlight: o.spans[0] }
+    })
+  }
+  if (Array.isArray(ev.more)) out.more = ev.more.map(printableEvidence)
+  return out
 }
 
 /**

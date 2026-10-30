@@ -226,6 +226,46 @@ test("a value computed by code beside a command that printed other lines shows n
   expect(band).not.toContain('python3 -c')
 })
 
+// a check's output that holds bytes a terminal acts on (a color code, a NUL), as a test run's colored output does
+const RAW = {
+  n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+  evidence: { kind: 'computed', by: 'checker', code: 'import subprocess\nprint(subprocess.run(["pytest", "-q"], capture_output=True, text=True).stdout)', output: '\u001b[31mFAILED\u001b[0m 12 of 40\u0000\r\n', highlight: [[16, 24]] },
+}
+/** The strings of a drawing that hold a character Claude Code refuses in a text (a control character). */
+const refused = (n: Any) => all(n).flatMap(x => kidsOf(x)).filter(c => typeof c === 'string' && /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(c))
+
+test('a check\'s output that holds bytes that do not print draws them as their escapes, in the tray collapsed and expanded, the value marked: the band keeps drawing', CITES, async ($, on) => {
+  await resumed($, on, RAW, 's-tray-raw')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  let drawn = await $.ui.render(above())
+  expect(refused(drawn)).toEqual([])
+  expect(textOf(drawn)).toContain('\\x1b[31mFAILED\\x1b[0m 12 of 40\\x00')
+  expect(all(drawn).some(n => n.type === 'Text' && n.props?.bold === true && textOf(n) === '12 of 40')).toBe(true)
+  // + shows all the code and output
+  await $.prompt.edit(key('+'))
+  drawn = await $.ui.render(above())
+  expect(refused(drawn)).toEqual([])
+  expect(textOf(drawn)).toContain('\\x1b[31mFAILED\\x1b[0m 12 of 40\\x00')
+})
+
+test('a file\'s line that holds bytes that do not print (a log\'s color codes) draws them as their escapes in the tray and in the side pane its place opens: both keep drawing', CITES, async ($, on) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('ui.close', () => ({ value: undefined }))
+  const line = '\u001b[32mok\u001b[0m failed: 12\u0007'
+  await resumed($, on, { ...QUOTED, evidence: { kind: 'quote', file: 'logs/run.log', line: '4', lines: [{ n: 3, text: 'runs: 40' }, { n: 4, text: line, highlight: [line.indexOf('12'), line.indexOf('12') + 2] }, { n: 5, text: 'passed: 28' }] } }, 's-tray-raw-file')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const ui = await $.ui.mount(above())
+  const band = await ui.drawn()
+  expect(refused(band)).toEqual([])
+  expect(textOf(band)).toContain('\\x1b[32mok\\x1b[0m failed: 12\\x07')
+  await ui.press({ key: 'tray-file' })
+  await ui.unmount()
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  expect(refused(pane)).toEqual([])
+  expect(textOf(pane)).toContain('\\x1b[32mok\\x1b[0m failed: 12\\x07')
+  expect(all(pane).some(n => n.type === 'Text' && n.props?.bold === true && textOf(n) === '12')).toBe(true)
+})
+
 test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', CITES, async ($, on) => {
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',

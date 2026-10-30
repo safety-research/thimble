@@ -47,9 +47,9 @@
 //
 // The tree holds only what Claude Code's Client draws: a Button's children are strings and Text, and a Text's are
 // strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
-// string holds no control character but a line break (the others, and a lone surrogate, show as their escapes, `\x00`;
-// a tab is a space). A Button around lines (a Box, or several) becomes a column Box with the Button's onPress number,
-// and a click on its cells presses it.
+// string holds no character that does not print (each shows as its escape, `\x00`, as core/text.js printable writes
+// it; a line break stays one, a tab is a space). A Button around lines (a Box, or several) becomes a column Box with
+// the Button's onPress number, and a click on its cells presses it.
 // A dense card gets blank rows between its parts (space.js), unless the view reads clicks by cell (surface.onPointer);
 // each version keeps the places its first drawing gave them, so a key never moves the card's rows.
 import fs from 'node:fs'
@@ -57,6 +57,7 @@ import http from 'node:http'
 import { types } from 'node:util'
 import vm from 'node:vm'
 
+import { printable } from '../core/text.js'
 import { buttonText, layoutLines, pressAt, rowOf, textAt } from './layout.js'
 import { spaced } from './space.js'
 
@@ -240,13 +241,10 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     onKey(fn) { keyListener = typeof fn === 'function' ? fn : null; return () => { keyListener = null } },
   })
   const props = () => ({ title, rows, data, columns })
-  // the characters a terminal would act on instead of drawing, C0 and C1 controls but a line break, and a lone
-  // surrogate, which is no character: each shows as its escape, as Python writes it (\x00, \r, \udc89), so bytes of
-  // binary data read as bytes. A line break stays one, also as \r\n; a tab is a space
-  const UNSEEN = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
-  const hex = (n, w) => { let h = n.toString(16); while (h.length < w) h = '0' + h; return h }
-  const escaped = c => { const n = c.charCodeAt(0); return n === 13 ? '\\r' : n < 256 ? '\\x' + hex(n, 2) : '\\u' + hex(n, 4) }
-  const clean = v => Str(v).replace(/\t/g, ' ').replace(/\r\n/g, '\n').replace(UNSEEN, escaped)
+  // what a terminal would act on or not draw shows as its escape, as Python's repr writes it, so bytes of binary data
+  // read as bytes: the hooks' own rule, core/text.js printable (its source, put in this context's code)
+  const printable = ${printable}
+  const clean = v => printable(Str(v))
   const said = n => n && typeof n === 'object' && typeof n.type === 'string' ? '<' + n.type + '>' : typeof n
 
   // On the light theme a terminal draws the shade glyphs ░ ▒ ▓ as a quarter, a half and three quarters of

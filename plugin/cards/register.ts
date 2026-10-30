@@ -19,7 +19,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { askOnce } from '../core/rowhook'
-import { cut } from '../core/text.js'
+import { cut, printing } from '../core/text.js'
 import { featureOn } from '../settings/features.mjs'
 import { noteCode, sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
 import { cardOfKey, cardPost, clientFault, firstWaits, frame, framesUnder, noteRun, noteShown, noteViewport, runFolded } from './draw'
@@ -74,7 +74,7 @@ export const registerCards: Register = (on, options) => {
     const input = (e.props.input ?? {}) as Any
     const id = (await callOf($, e.props.tool_use_id)) ?? (input.id ? String(input.id) : cardIdOf(e.props.tool_use_id))
     const meta = await metaOf($, id)
-    const E = $.ui.resolve(e) as Any
+    const E = printing($.ui.resolve(e)) as Any
     const call = meta?.calls[e.props.tool_use_id]
     const line = callLine(input, meta, e.props.tool_use_id, !!e.props.isRunning)
     const own = E.Box({ key: 'card-call', children: [E.Text({ key: 'card-call-line', color: call?.error ? 'error' : undefined, dimColor: !call?.error, wrap: 'wrap', children: line })] })
@@ -108,7 +108,7 @@ export const registerCards: Register = (on, options) => {
   // call did (callLine); the copy is in ctrl+o
   on('ui.render', { component: 'ToolResult', props: { tool: 'mcp__thimble__card' } }, async ($, e, next) => {
     if (!featureOn('cards') || e.props.isExpanded) return next(e)
-    return ($.ui.resolve(e) as Any).Box({ key: 'card-result' })
+    return (printing($.ui.resolve(e)) as Any).Box({ key: 'card-result' })
   }).catch(($, e, next) => next(e))
 
   // a text row of main's that places cards on lines of their own (marks/message.js cardRef): each card draws there, and
@@ -138,7 +138,7 @@ export const registerCards: Register = (on, options) => {
       if (!featureOn('cards')) return r
       const frames = await framesUnder($, e)
       if (!frames.length) return r
-      const E = $.ui.resolve(e) as Any
+      const E = printing($.ui.resolve(e)) as Any
       return E.Box({ flexDirection: 'column', children: [r, ...frames] })
     } catch {
       return below()

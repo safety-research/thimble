@@ -40,7 +40,7 @@ import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords, titleWords } from '../core/selection'
-import { cut } from '../core/text.js'
+import { cut, printing } from '../core/text.js'
 import { rowsAt, rowsKnown, treeRows } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
@@ -376,7 +376,7 @@ export async function cardKeyWords($: Engine): Promise<{ key: string; words: str
  *  the features put under a card. `o.layout`: the width the card is laid out at when that is wider than the frame
  *  (a copy in the side pane is the conversation's drawing, cut at the frame's edge, so no row of it wraps). */
 export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: number; indent?: number } = {}): Promise<Any> {
-  const E = $.ui.resolve(e) as Any
+  const E = printing($.ui.resolve(e)) as Any
   const row = String(e.requestId ?? '')
   // a card the version of its answer shown now leaves out (a squeeze's): nothing in its place
   if (await cardHidden($, meta.id)) {
@@ -558,14 +558,14 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
     // a card drawn under an answer (v, a squeeze's new card) draws on the line a version of that answer places it on;
     // another row's line points to it
     if (meta.anchorRow && !here.includes(meta.anchorRow)) {
-      const E = $.ui.resolve(e) as Any
+      const E = printing($.ui.resolve(e)) as Any
       out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” is drawn under an earlier answer` })] })
       continue
     }
     // a card stands in one place: the newest row that placed it (or a catch-up of the replies, `<row>#cu`, drawn below
     // them); an earlier one shows a line that points there
     if (!meta.anchorRow && meta.inRow && !here.includes(meta.inRow)) {
-      const E = $.ui.resolve(e) as Any
+      const E = printing($.ui.resolve(e)) as Any
       const where = meta.inRow.endsWith('#cu') ? 'is in the catch-up below' : 'is drawn further down'
       out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” ${where}` })] })
       continue

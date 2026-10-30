@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { printable } from '../../core/text.js'
 import { startRunner } from './start.mjs'
 import { saidOf } from '../argv.mjs'
 import { checkView } from '../runner.mjs'
@@ -121,6 +122,20 @@ test('bytes of binary data that do not print show as their escapes, as Python wr
   assert.deepEqual(r.lines, ['logo.png \\x89PNG', '\\x1a', '\\x00\\x00\\x00\\rIHDR\\x7f', 'run-\\udc89.log ok 🎉'])
   // nothing a terminal acts on is left, and no lone half
   for (const s of strings) assert.doesNotMatch(s, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/)
+})
+
+test("every character that does not print, as Python reads it, shows as its escape, as Python's repr writes it: a no-break space, a soft hyphen, a zero-width space, a direction mark, a line separator, a private one", async () => {
+  // made-up names a file of a shop's orders holds: what draws as a space, as nothing, or turns the text around
+  writeFileSync(join(dir, 'odd.json'), JSON.stringify([{ name: 'Ana\u00a0Lima' }, { name: 'co\u00adop' }, { name: 'zero\u200bwidth' }, { name: '\u202edesrever' }, { name: 'two\u2028lines' }, { name: 'own\ue000mark' }]))
+  const view = 'function view(p, s) { const { Box, Text } = s.elements; return Box({ flexDirection: "column", children: p.rows.map(r => Text({ children: r.name })) }) }'
+  const r = await ask('load', { id: 'c0000cccc', version: 1, title: 'Names', view, rows: join(dir, 'odd.json'), width: 60 })
+  assert.equal(r.ok, true)
+  const strings = []
+  const walk = n => (typeof n === 'string' ? strings.push(n) : (n.c || []).forEach(walk))
+  walk(r.tree)
+  assert.deepEqual(strings, ['Ana\\xa0Lima', 'co\\xadop', 'zero\\u200bwidth', '\\u202edesrever', 'two\\u2028lines', 'own\\ue000mark'])
+  // the hooks' rule, the one core/text.js gives
+  assert.deepEqual(strings, ['Ana\u00a0Lima', 'co\u00adop', 'zero\u200bwidth', '\u202edesrever', 'two\u2028lines', 'own\ue000mark'].map(s => printable(s)))
 })
 
 test('on the light theme a shade glyph draws as █ in a mixed color, and the text copy keeps the glyph the view wrote', async () => {
