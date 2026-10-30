@@ -508,11 +508,12 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health(request: Request) -> dict:
         # `ui` lets an open tab tell it is stale and `boot` lets the plugin's shim tell a restart; to a caller that proves
-        # the token (the CLI), also `leader`, which lets `server up`/`stop` find a server whose record was lost, and
-        # `home`/`app`, which let the same install's commands tell its server from another install's. Without the proof
-        # no path or pid: another account on the computer reaches this route too. Answered on the event loop, not in a
-        # worker thread, which can wait behind threads that compute: the supervisor and the plugin give a health call 1
-        # to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for one that is starting or gone.
+        # the token (the CLI), also `leader`, which lets `server up` and thimble-browser tell the server server.json
+        # records from any other (cli.own_server), and `home`/`app`, which let the same install's commands tell its
+        # server from another install's. Without the proof no path or pid: another account on the computer reaches this
+        # route too. Answered on the event loop, not in a worker thread, which can wait behind threads that compute: the
+        # supervisor and the plugin give a health call 1 to 2 s (cli.HEALTH_TIMEOUT_S) before they take the server for
+        # one that is starting or gone.
         out = {"ok": True, "boot": config.BOOT_ID, "ui": ui_build()}
         if hook_auth.proven(request.scope):
             out.update({"leader": os.getsid(0), **install})
@@ -554,7 +555,9 @@ def create_app() -> FastAPI:
     @app.get("/api/ui/paired")
     def ui_paired(request: Request) -> dict:
         paired = hook_auth.analyst(request)
-        if not paired:  # the page shows its sign-in line: thimble-browser prints a new link in its terminal
+        # the page shows its sign-in line: thimble-browser prints a new link in its terminal, unless the link it printed
+        # last still works (hook_auth.want_link)
+        if not paired:
             hook_auth.want_link(request.scope)
         return {"paired": paired, "id": hook_auth.browser_id(request), "at": hook_auth.signed_in_at(request)}
 

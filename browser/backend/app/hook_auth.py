@@ -41,10 +41,10 @@ token proves only the routes hooks, the shim, the module and the CLI use (guarde
 and each new sign-in prints a line in main's terminal and posts a notice.
 
 A page that is not signed in asks whether it is (GET /api/ui/paired) before it shows its sign-in line, and the server
-counts that ask (want_link), at most once in LINK_EVERY_S unless a code was spent since. thimble-browser waits for
-the count in the terminal it holds (GET /api/ui/link-wanted, cli.new_links) and prints a new link there, with a new code
-from the token route, as at its start. So a code reaches that terminal alone, as the start's does, and nothing is
-written.
+counts that ask (want_link), at most once in LINK_EVERY_S unless a code was spent since, and never while a code is
+alive, since the link printed with it still signs the browser in. thimble-browser waits for the count in the terminal it
+holds (GET /api/ui/link-wanted, cli.new_links) and prints a new link there, with a new code from the token route, as at
+its start. So a code reaches that terminal alone, as the start's does, and nothing is written.
 
 A cookie is bound to a host and a path, never to a port, so a browser sends a cookie of 127.0.0.1 to every server on
 127.0.0.1 (and one of localhost to every server on localhost) whose page asks for a path the cookie covers. A cookie
@@ -388,17 +388,21 @@ _wanted_at: float | None = None
 
 def want_link(scope: dict) -> None:
     """A browser that is not signed in asked whether it is (GET /api/ui/paired), as its page does before it shows the
-    sign-in line: count it (links_wanted), so thimble-browser prints a new link in its terminal (module note). After a
-    counted ask, others count again LINK_EVERY_S later, as the link printed for it still works, or once a live code was
-    spent (_spend), which may be that link's. A screenshot's page (shot_proven) wants none, and neither does a request
-    a browser marks as from another site or another page (Sec-Fetch-Site other than same-origin, as an <img> on another
-    site's page sends), since each new link ends the one before it that waits to be used."""
+    sign-in line: count it (links_wanted), so thimble-browser prints a new link in its terminal (module note). Not while
+    a code is alive (made, and not yet spent or expired): the link printed with it still signs the browser in, and a new
+    code for its workspace would end it (mint), as when a tab left open from an earlier start asks right after
+    thimble-browser printed its link. After a counted ask, others count again LINK_EVERY_S later, or once a live code
+    was spent (_spend), which may be that link's. A screenshot's page (shot_proven) wants none, and neither does a
+    request a browser marks as from another site or another page (Sec-Fetch-Site other than same-origin, as an <img> on
+    another site's page sends), since each new link ends the one before it that waits to be used."""
     global _wanted, _wanted_at
     headers = Headers(scope=scope)
     if shot_proven(headers, scope.get("method", "")) or headers.get("sec-fetch-site", "same-origin") != "same-origin":
         return
     now = _now()
     with _pair_lock:
+        if any(until > now for until, _ws in _codes.values()):
+            return
         if _wanted_at is None or now - _wanted_at >= LINK_EVERY_S:
             _wanted, _wanted_at = _wanted + 1, now
 

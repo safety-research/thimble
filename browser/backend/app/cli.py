@@ -13,29 +13,34 @@
     thimble extension add <folder | git URL | built-in name> [--yes] | on <name> | off <name> | list | remove <name>
                                                                                               (extensions.py)
 
-`server up` (alias `ensure`) is the one starter: `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn
-on the server's port (port) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map
-the cwd to a workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. It always
-exits 0, since a skill fails whole when its command exits non-zero. `--action fresh` moves the workspace aside into
-<workspaces>/.archive/; `--action restore` restores an archive. Where the plugin's hooks are off, /thimble also prints
-the command main's Monitor runs (cc_plugin.route, monitor_lines).
+`server up` (alias `ensure`) is the one starter: this install's own server answering (own_server), else under `flock
+<home>/server.lock` spawn uvicorn on the server's port (port) as its own session leader (plus Vite on 5300 when
+THIMBLE_DEV is on), wait until it answers, map the cwd to a workspace, print `thimble: <url>` (LINK_LINE in a session),
+and name the session to the server. It always exits 0, since a skill fails whole when its command exits non-zero.
+`--action fresh` moves the workspace aside into <workspaces>/.archive/; `--action restore` restores an archive. Where
+the plugin's hooks are off, /thimble also prints the command main's Monitor runs (cc_plugin.route, monitor_lines).
 
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
 owner alone; `token` is new at each start and is what the plugin's hooks and this CLI prove they hold (hook_auth.py). A
 browser signs in with a one-time code from ui_url(pair=True), never with a value from this file. Only a terminal gets a
-link with a code: thimble-browser prints one at its start and a new one for each browser that is not signed in and opens
-the page (new_links), `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
-which gets its code as the hook shows it (leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
-only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
-recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
-`up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install.
+link with a code: thimble-browser prints one at its start and a new one for a browser that is not signed in and opens
+the page once the last one was used or expired (new_links), `up` from a shell prints one, and /thimble prints LINK_LINE
+for main's Stop hook to show the link, which gets its code as the hook shows it (leave_link). `thimble unpair` signs
+every browser out. Its `pid` is trusted only while it is a thimble server on its port (is_server checks the command line
+and working folder, since a pid recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile
+makes the record true before `up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another
+install. This install's own server is the one whose /api/health names that pid as its leader (own_server): `up` and
+thimble-browser print a link to it alone, and `stop` ends that pid alone. A server server.json does not record is never
+taken for it nor stopped, even one of this checkout and THIMBLE_HOME, such as one left running when its home was deleted
+under it, which reads the token of the new server.json all the same.
 
 The port: THIMBLE_PORT when the caller sets it, else the one server.json records, else DEFAULT_PORT (8300). Without
-THIMBLE_PORT, a start whose port another program or another install's server holds starts on a free port instead
-(pick_port), and server.json records it, so every reader finds the server there: this CLI, the launcher, the plugin's
-shim, hooks and hooks module, and the browser link (ui_url). With THIMBLE_PORT that port alone is used: another
-install's server there is refused with FOREIGN_LINE, and another program there makes the start fail (port_line). Vite's
-UI port in dev mode follows the same rule with THIMBLE_UI_PORT (DEFAULT_UI_PORT, 5300).
+THIMBLE_PORT, a start whose port another program, another install's server or a server that answers but is not this
+install's own holds starts on a free port instead (pick_port), as does a second start when the server could not bind
+its port (lost_port), and server.json records it, so every reader finds the server there: this CLI, the launcher, the
+plugin's shim, hooks and hooks module, and the browser link (ui_url). With THIMBLE_PORT that port alone is used: another
+install's server there is refused with FOREIGN_LINE, and any other process there makes the start fail (start_failure).
+Vite's UI port in dev mode follows the same rule with THIMBLE_UI_PORT (DEFAULT_UI_PORT, 5300).
 
 Claude Code's Bash sandbox gives each command its own network and pid namespace, where a server would die with the
 command and the host's cannot be reached. So /thimble's work runs in the plugin's UserPromptExpansion hook, which Claude
@@ -463,10 +468,10 @@ def _this_home(other: Any) -> bool:
 
 
 def held_by_this_install(p: int, st: dict[str, Any]) -> bool:
-    """Whether this install's own server holds port `p`, answering or not: the pid server.json names is a thimble server
+    """Whether a server of this install holds port `p`, answering or not: the pid server.json names is a thimble server
     on `p`, or the process listening on `p` is a thimble server of this checkout started with this THIMBLE_HOME (or
-    whose environment cannot be read). start then keeps the port, so a stuck server is named (start_failure) rather
-    than left running beside a new one."""
+    whose environment cannot be read). start keeps the port for one that does not answer, so a stuck server is named
+    (start_failure) rather than left running beside a new one."""
     if st.get("pid") and is_server(st.get("pid"), p, st.get("repo")):
         return True
     holder = procs.listener(p)
@@ -552,10 +557,20 @@ def foreign_home(url: str | None = None) -> str | None:
 
 
 def serves(url: str | None = None) -> bool:
-    """Whether this install's server answers at `url` (default api_url): healthy, and not another install's
-    (foreign_home)."""
+    """Whether a server of this install answers at `url` (default api_url): healthy, and not another install's
+    (foreign_home). It may still be one server.json does not record, which is not this install's own (own_server)."""
     url = url or api_url()
     return healthy(url) and foreign_home(url) is None
+
+
+def own_server(url: str | None = None, pid: int | None = None) -> bool:
+    """Whether this install's own server answers at `url` (default api_url): the server there names as the leader of its
+    process session `pid`, the uvicorn `start` just spawned, else the pid server.json records (health_leader, which a
+    server names only to a request that proves the token it holds). Not a server of this checkout that server.json does
+    not record either, such as one left running when its home was deleted under it, which reads the token of the new
+    server.json all the same (module note)."""
+    leader = health_leader(url)
+    return leader is not None and leader == (pid or read_state().get("pid"))
 
 
 def refuse_foreign(url: str | None = None) -> bool:
@@ -571,24 +586,19 @@ def refuse_foreign(url: str | None = None) -> bool:
 
 
 def reconcile(st: dict[str, Any] | None = None) -> dict[str, Any]:
-    """server.json made true: a recorded pid that is no thimble server on its port is cleared, a healthy server of this
-    checkout on the port is adopted when none is recorded, and a dead Vite pid is cleared. The state, written back when it
-    changed; {} when there is no record."""
+    """server.json made true: a recorded pid that is no thimble server on its port is cleared, unless the server
+    answering there names it as its leader (own_server: it is, though its command line could not be read), and a dead
+    Vite pid is cleared. A server it does not record is never adopted, as it is not this install's own (module note).
+    The state, written back when it changed; {} when there is no record."""
     st = read_state() if st is None else st
     if not st:
         return st
     p = int(st.get("port") or port())
     changed = False
     pid = st.get("pid")
-    if pid and not is_server(pid, p, st.get("repo")):
+    if pid and not is_server(pid, p, st.get("repo")) and not own_server(api_url(p), pid):
         _log(f"server.json named pid {pid}, which is not a thimble server on port {p}; cleared")
         st["pid"], changed = None, True
-    if not st.get("pid"):
-        leader = health_leader(api_url(p))
-        if leader and is_server(leader, p, st.get("repo")) and not foreign_home(api_url(p)):
-            _log(f"adopted the thimble server on port {p}, pid {leader}, which server.json did not name")
-            st.update(pid=leader, stopped=None)
-            changed = True
     vite = st.get("vite_pid")
     if vite and (not pid_alive(vite) or argv_check("vite")(int(vite)) is not None):
         st["vite_pid"], changed = None, True
@@ -727,14 +737,17 @@ def vite_cmd(ui: int) -> list[str]:
 
 def start(p: int | None = None) -> dict[str, Any]:
     """Spawn the backend (and Vite in dev mode) and write server.json, which records the port. The caller holds the
-    lock. Without THIMBLE_PORT, when the port is not free and this install's own server does not hold it
-    (held_by_this_install), the server starts on a free port instead (pick_port); in dev mode, without THIMBLE_UI_PORT,
-    Vite does the same where the UI port is not free and no Vite of this install serves it (own_vite)."""
+    lock. Without THIMBLE_PORT, when the port is not free, the server starts on a free port instead (pick_port), unless
+    a server of this install that does not answer holds it (held_by_this_install): a server that answers there is not
+    this install's own, which the caller found not answering (own_server). In dev mode, without THIMBLE_UI_PORT, Vite
+    does the same where the UI port is not free and no Vite of this install serves it (own_vite)."""
     if p is None:
         p = port()
-        if explicit_port() is None and not port_free(p) and not held_by_this_install(p, read_state()):
+        if explicit_port() is None and not port_free(p) and (healthy(api_url(p))
+                                                              or not held_by_this_install(p, read_state())):
             q = pick_port(p, (ui_port(),))
-            _log(f"port {p} is taken by another program or another install's server; starting on port {q}, a free one")
+            _log(f"port {p} is taken by another program, another install's server or a server that is not this "
+                 f"install's own; starting on port {q}, a free one")
             p = q
     ui = ui_port()
     env = resolve_env()
@@ -786,16 +799,18 @@ def start_vite(ui: int, p: int, environ: dict[str, str] | None = None) -> int | 
 
 
 def wait_healthy(url: str, wait_s: float, pid: int | None = None) -> bool:
-    """Up to `wait_s` for the server at `url` to answer; with `pid` (the uvicorn just spawned) the wait ends as soon as
-    that process has exited, since a server that failed at start will not answer later."""
+    """Up to `wait_s` for this install's own server to answer at `url` (own_server): `pid`, the uvicorn just spawned,
+    else the server server.json records. Another server that answers there is not it: with `pid` the wait ends as soon
+    as that process has exited, since a server that failed at start, as one that could not bind a port another process
+    holds, will not answer later."""
     deadline = time.monotonic() + wait_s
     while True:
-        if healthy(url):
+        if own_server(url, pid):
             return True
         if time.monotonic() >= deadline:
             return False
         if pid is not None and spawned_exited(pid):
-            return healthy(url)
+            return False
         time.sleep(0.1)
 
 
@@ -1075,20 +1090,16 @@ def clear_kernel_handoff(pid: int) -> None:
 
 
 def stop(*, vite: bool = True, kernels: bool = True) -> list[str]:
-    """Stop the kernels, the backend recorded in server.json (by pid), Vite unless `vite=False`, then the kernels once
-    more. With `kernels=False` (a restart) they stay for the next server to reconnect: the hand-off tells the server so
-    before it gets its SIGTERM (hand_over_kernels)."""
+    """Stop the kernels, the backend recorded in server.json (by pid: the server this install started, never one found
+    on its port, module note), Vite unless `vite=False`, then the kernels once more. With `kernels=False` (a restart)
+    they stay for the next server to reconnect: the hand-off tells the server so before it gets its SIGTERM
+    (hand_over_kernels)."""
     st = read_state()
     p = int(st.get("port") or port())
     lines = [stop_kernels()] if kernels else []
-    recorded = is_server(st.get("pid"), p, st.get("repo"))
     if not kernels and st.get("pid") and pid_alive(st.get("pid")):
         hand_over_kernels(int(st["pid"]))
     lines.append(_kill(st.get("pid"), server_check(p, st.get("repo")), "server", SERVER_STOP_S))
-    if not recorded:  # a stale record (module note): the server answering on the port, when it is this checkout's
-        leader = health_leader(api_url(p))
-        if leader and leader != st.get("pid") and is_server(leader, p, st.get("repo")):
-            lines.append(_kill(leader, server_check(p, st.get("repo")), "server", SERVER_STOP_S))
     if vite and st.get("vite_pid"):  # a release install, and a checkout that serves the build, run no Vite
         lines.append(_kill(st.get("vite_pid"), argv_check("vite"), "vite"))
     if kernels:
@@ -1136,12 +1147,13 @@ def starting(url: str) -> bool:
 
 
 def ensure_running(wait_s: float) -> bool:
-    """Health, then under the lock start if still unhealthy and wait. Restarts Vite in dev mode when only it is down,
-    and a healthy server whose source changed since it started (auto_restart). Another install's server on the port is
-    not this install's (serves): start passes over the port then, and once more when another server took the free port
-    it chose before the new server bound it. The server is at api_url() after it returns."""
+    """This install's own server answering (own_server), else under the lock a start if it still does not, and a wait
+    until it does. Restarts Vite in dev mode when only it is down, and a healthy server whose source changed since it
+    started (auto_restart). Another server on the port, another install's or one server.json does not record, is not
+    this install's own: start passes over the port then, and once more when the server it spawned could not bind the
+    port it chose (lost_port). The server is at api_url() after it returns."""
     url = api_url()
-    if serves(url):
+    if own_server(url):
         with lock():
             reconcile()
         verdict = auto_restart(url, wait_s)
@@ -1160,22 +1172,23 @@ def ensure_running(wait_s: float) -> bool:
         reconcile()
         url = api_url()
         spawned = None
-        if not serves(url) and not starting(url):
+        if not own_server(url) and not starting(url):
             spawned = start().get("pid")
             url = api_url()
         up = wait_healthy(url, wait_s, spawned)
         if not up and spawned and lost_port(int(spawned)):
-            _log(f"another process took port {LAST_START.get('port')} before the server bound it; starting again")
+            _log(f"another process holds port {LAST_START.get('port')}, which the server could not bind; starting anew")
             spawned = start().get("pid")
             url = api_url()
             up = wait_healthy(url, wait_s, spawned)
-        reconcile()  # a uvicorn that could not bind the port leaves no dead pid; the server answering is adopted
+        reconcile()  # a uvicorn that could not bind its port leaves its dead pid, which is cleared
         return up
 
 
 def lost_port(spawned: int) -> bool:
-    """Whether the server `start` spawned as `spawned` exited because another process took its port, a free one when
-    start looked (a second install starting at the same moment): without THIMBLE_PORT a second start then picks again."""
+    """Whether the server `start` spawned as `spawned` exited because another process holds its port: one that took it
+    after start looked (a second install starting at the same moment), or a server that did not answer start's look.
+    Without THIMBLE_PORT a second start then picks again, and passes over the port when that server answers now."""
     p = int(LAST_START.get("port") or 0)
     if explicit_port() is not None or not p or LAST_START.get("pid") != spawned or not spawned_exited(spawned):
         return False
@@ -3899,7 +3912,7 @@ def restart(*, keep_vite: bool = False) -> list[str]:
     lines = stop(vite=not keep_vite, kernels=False)
     _leave_restart_reason(MANUAL_RESTART)
     with lock():
-        if not serves():
+        if not own_server():
             start()
         up = wait_healthy(api_url(), start_wait_s())
     lines.append(f"server {'up' if up else 'did not come up'} at {api_url()}")
@@ -4180,7 +4193,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         up = None
     url = api_url()  # where the server runs: start passes over a port that is not free (pick_port)
     if up is None:
-        up = serves(url)
+        up = own_server(url)
     notices = list(NOTICES)
     NOTICES.clear()
     may_register = up and registrable(cwd, args.session)
@@ -4659,14 +4672,15 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
 
 
 def cmd_browser(args: argparse.Namespace) -> int:
-    """`thimble-browser [FOLDER]` (browser/scripts/thimble-browser): start the server if needed, open the folder as a
-    workspace, print the page's sign-in link and how thimble reaches Claude (claude_access.py), then hold the terminal
-    until Ctrl-C, which stops the server. No Claude Code session starts here: the server runs main and every agent
-    itself (runtime.py). `--session` says which session of the folder the page opens (pick_session, open_session): a
-    new one, as each `claude` starts a new session, as empty as the folder's first; the latest (`--continue`); one
-    picked from a list (`--resume`); or the one that holds a chat of main by id. While it holds the terminal, a browser
-    that is not signed in and opens the page gets a new link there (watch_links). With `--detach` it returns once the
-    link is printed and the server keeps running."""
+    """`thimble-browser [FOLDER]` (browser/scripts/thimble-browser): start the server unless this install's own server
+    answers (ensure_running, own_server), open the folder as a workspace, print the page's sign-in link to that server
+    and how thimble reaches Claude (claude_access.py), then hold the terminal until Ctrl-C, which stops it. No Claude
+    Code session starts here: the server runs main and every agent itself (runtime.py). `--session` says which session
+    of the folder the page opens (pick_session, open_session): a new one, as each `claude` starts a new session, as
+    empty as the folder's first; the latest (`--continue`); one picked from a list (`--resume`); or the one that holds a
+    chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets a new link
+    there once the last one was used or expired (watch_links). With `--detach` it returns once the link is printed and
+    the server keeps running."""
     from . import claude_access, llm  # noqa: PLC0415
 
     llm.scrub_env()
@@ -4690,7 +4704,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
         _log(str(e))
         up = None
     url = api_url()
-    if not up and not serves(url):
+    if not up and not own_server(url):
         why = start_failure(url)
         print(BROWSER_LINE.format(what=f"the server did not start: {why or 'see ' + str(log_path())}"))
         return 1
@@ -4729,10 +4743,11 @@ def watch_links(name: str) -> threading.Event:
 
 def new_links(name: str, stop: threading.Event) -> None:
     """Until `stop` is set: each time a browser that is not signed in opens the page (hook_auth.want_link, at most once
-    a minute), a new sign-in link for workspace `name` with a new code (ui_url), printed as at the start
-    (NEW_LINK_LINE). It waits for one at GET /api/ui/link-wanted, which answers once the count or the server's start
-    differs from the last answer; a server that started again counts from 0. A server that does not answer is asked
-    again LINK_RETRY_S later, and a link the server gives no code for is not printed (pair_code logs why)."""
+    a minute, and not while the link printed last still works), a new sign-in link for workspace `name` with a new code
+    (ui_url), printed as at the start (NEW_LINK_LINE). It waits for one at GET /api/ui/link-wanted, which answers once
+    the count or the server's start differs from the last answer; a server that started again counts from 0. A server
+    that does not answer is asked again LINK_RETRY_S later, and a link the server gives no code for is not printed
+    (pair_code logs why)."""
     from . import hook_auth  # noqa: PLC0415
 
     seen: dict[str, Any] = {}
