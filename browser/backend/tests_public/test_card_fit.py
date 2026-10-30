@@ -218,9 +218,9 @@ async def test_the_check_s_replacement_reaches_its_author_with_its_next_call_or_
     told = (await call("list_cards", group="all")).text
     assert f"thimble's card check replaced card:{cid} in place, so the analyst sees its version, not yours" in told
     # its kind, and what its code draws, since that is not a table (this test's kernel prints the code's last value)
-    assert "not yours: a table card that draws text. Its question is “Which runs failed?”" in told
-    assert "its takeaway “4 of the 56 runs failed, all in enrich.”" in told
-    assert "It changed the code and takeaway: The question names no runs." in told
+    assert "not yours: a table card that draws text, with the question “Which runs failed?”." in told
+    assert "Its takeaway reads: 4 of the 56 runs failed, all in enrich. It changed the code and takeaway: The question" \
+           " names no runs." in told
     assert "card check" not in (await call("list_cards", group="all")).text  # told once
 
     # main's turn ended before the check of its next card did: its next turn reads it as it starts

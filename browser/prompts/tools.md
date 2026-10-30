@@ -626,7 +626,7 @@ card:{cid}'s page lays out {width} px wide, and the card gives it {frame} px, so
 
 ## card-replaced
 
-thimble's card check replaced card:{cid} in place, so the analyst sees its version, not yours: {what}. Its question is “{question}”, and its takeaway “{takeaway}”. It changed the {changed}{why}
+thimble's card check replaced card:{cid} in place, so the analyst sees its version, not yours: {what}, with the question “{question}”. Its takeaway reads: {takeaway} It changed the {changed}{why}
 
 ## kind-mismatch
 

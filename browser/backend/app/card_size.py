@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -38,6 +39,7 @@ REPLACED = "card-replaced"
 # what a card's code draws, in the words of `## card-replaced`, when its kind says another shape (tools._kind_mismatch)
 SHAPES = {"chart": "a chart", "image": "an image", "table": "a table", "text": "text", "none": "nothing"}
 CHANGED = {"title": "question", "code": "code", "takeaway": "takeaway"}  # checkstore.FIX_FIELDS, as the note names them
+SENTENCE_END = re.compile(r"[.!?][)\]\"'’”]*$")  # a text that ends as a sentence does, quote or bracket after it
 BY_HAND = frozenset({"", "user"})  # created_by of a card the analyst made: no session to tell
 KEPT = 50  # notes kept for one author before its next call; the oldest go first
 
@@ -116,6 +118,12 @@ def tell_wide(c: str, cell: dict[str, Any] | None, width: float | int | None, fr
     return True
 
 
+def _sentence(text: Any) -> str:
+    """`text` on one line, ending as a sentence does: with a full stop added when it has none."""
+    t = " ".join(str(text or "").split())
+    return t if not t or SENTENCE_END.search(t) else f"{t}."
+
+
 def tell_replaced(c: str, cell: dict[str, Any] | None, fix: dict[str, Any] | None) -> bool:
     """Keep the note for the author of `cell` that the card check put this version in its place by `fix`
     (checkstore.apply_fix's), in the words of `## card-replaced`; True when a note was kept (not for a card made by
@@ -130,12 +138,12 @@ def tell_replaced(c: str, cell: dict[str, Any] | None, fix: dict[str, Any] | Non
     kind = str(cell.get("kind") or notebook.DEFAULT_KIND)
     shape = _kind_mismatch(kind, cell)
     changed = [CHANGED[f] for f in (fix or {}).get("fields") or [] if f in CHANGED] or ["card"]
-    reason = " ".join(str((fix or {}).get("reason") or "").split())
+    reason = _sentence((fix or {}).get("reason"))
     note = hint(REPLACED, cid=cid, what=f"a {kind} card" + (f" that draws {SHAPES.get(shape, shape)}" if shape else ""),
                 question=" ".join(str(cell.get("title") or "").split()),
-                takeaway=" ".join(cite.canon_text(str(cell.get("takeaway") or "")).split()),
+                takeaway=_sentence(cite.canon_text(str(cell.get("takeaway") or ""))),
                 changed=" and ".join([", ".join(changed[:-1]), changed[-1]] if len(changed) > 1 else changed),
-                why=f": {reason}" if reason.endswith((".", "!", "?")) else f": {reason}." if reason else ".")
+                why=f": {reason}" if reason else ".")
     if not _keep(c, author, cid, version(cell), REPLACED, note):
         return False
     log.info("%s: card:%s was replaced by its check; told to %s with its next call or turn", c, cid, author)
