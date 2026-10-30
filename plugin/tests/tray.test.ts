@@ -226,6 +226,25 @@ test("a value computed by code beside a command that printed other lines shows n
   expect(band).not.toContain('python3 -c')
 })
 
+test("values computed by code whose output opens with Python's warnings, as Claude Code's Bash gives them (stderr first, the output Python held back after): each value shows the print that printed it, the count's above 40 and the sum's above 25", CITES, async ($, on) => {
+  const output = '/made/up/numpy/_core/fromnumeric.py:3862: RuntimeWarning: Mean of empty slice\n  return _methods._mean(a, axis=axis, dtype=dtype,\n/made/up/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide\n  ret = ret.dtype.type(ret / rcount)\n40\n25'
+  const code = 'import numpy as np\nimport pandas as pd\nruns = pd.read_csv("runs.csv")\nprint(len(runs))\nskipped_minutes = np.mean(runs[runs.status == "skipped"].minutes.to_numpy())\nprint((runs.status == "failed").sum())'
+  const text = 'The check counted [40 nightly runs](#) in runs.csv, and [25 of them failed](#).'
+  const at = (v: string) => [[output.lastIndexOf(v), output.lastIndexOf(v) + 2]]
+  await resumed($, on, [
+    { n: 1, row: 'row-t1', words: '40 nightly runs', start: 18, end: 38, sentence: text, status: 'verified', shown: '40 nightly runs', evidence: { kind: 'computed', by: 'checker', code, output, highlight: at('40') } },
+    { n: 2, row: 'row-t1', words: '25 of them failed', start: 56, end: 78, sentence: text, status: 'verified', shown: '25 of them failed', evidence: { kind: 'computed', by: 'checker', code, output, highlight: at('25') } },
+  ], 's-tray-warned', { text })
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  let band = textOf(await $.ui.render(above()))
+  expect(band).toContain('print(len(runs))│40')
+  expect(band).not.toContain('.sum())')
+  await $.prompt.edit(key(']'))
+  band = textOf(await $.ui.render(above()))
+  expect(band).toContain('print((runs.status == "failed").sum())│25')
+  expect(band).not.toContain('print(len(runs))')
+})
+
 // a check's output that holds bytes a terminal acts on (a color code, a NUL), as a test run's colored output does
 const RAW = {
   n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',

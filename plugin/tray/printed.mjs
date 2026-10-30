@@ -4,9 +4,12 @@
 // It names a line only when it is sure, since a line that did not print the value is worse than none: the print whose
 // own words stand in the output line (`print("failed:", n)` above `failed: 12`), or, when the code's every statement
 // that may print is a print, the one print that could have written the line, or the one that wrote it in every
-// reading of the output by the code's prints in the order they run. A statement that may print and is no print (a
-// command such as `head`, a call such as `df.info()`) leaves a line without a print's words unknown, and a print in a
-// function's body leaves the order unknown.
+// reading of the output by the code's prints in the order they run. Prints are not all that writes an output: any
+// statement can write a warning, an error stops the code, and a call or a child process can print. So a reading lets
+// lines that no print wrote stand anywhere (a line that holds a print's own words is that print's), and the lines
+// Python writes itself, a warning and an error's traceback, are no print's. A statement that may print and is no
+// print (a command such as `head`, a call such as `df.info()`) leaves a line without a print's words unknown, and a
+// print in a function's body leaves the order unknown.
 //
 //   printLine(code, out, at)   the line of `code` that printed line `at` of the output `out`, or ''
 
@@ -178,9 +181,10 @@ const STRING = /[rRbBuUfF]{0,2}(?:'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)")/g
 
 /** What a simple print statement prints, as far as its code tells: the words it writes out exactly when it hands out no
  *  value (`exact`, white space left out), whether it prints one line (`one`: its values are counts, `len(…)`, or
- *  numbers), and whether it ends its line (`ends`: no `end=`, no `file=`, no echo -n, no printf or write). */
+ *  numbers), whether that line is numbers alone (`digits`: it hands out no string), and whether it ends its line
+ *  (`ends`: no `end=`, no `file=`, no echo -n, no printf or write). */
 function printOf(text, bare) {
-  const out = { exact: null, one: false, ends: true }
+  const out = { exact: null, one: false, digits: false, ends: true }
   if (/^(?:printf\b|(?:[\w$]+\.)*stdout\.write)/.test(bare)) return { ...out, ends: false }
   const args = argsOf(text, bare)
   if (!args) return out
@@ -217,6 +221,8 @@ function printOf(text, bare) {
     if (!/^(?:-?\d[\d_]*(?:\.\d+)?|len\s*\(.*\))$/.test(a)) one = false
   }
   out.one = one
+  // counts and numbers alone, joined by a separator with no letter: a line of numbers
+  out.digits = one && values > 0 && !words.length && sep != null && !/\p{L}/u.test(sep)
   // words only: the line is those words, joined by the separator (simple escapes read as what they print)
   if (!values && sep != null && words.every(w => w != null && !/\\(?![tn"'\\])/.test(w) && !/\\n/.test(w))) {
     out.exact = words.join(sep).replace(/\\t/g, ' ').replace(/\\(["'\\])/g, '$1').replace(/\s+/g, '')
@@ -354,11 +360,39 @@ function held(t, i, parent, read) {
 
 // ------------------------------------------------------------------------------------- reading the output in order
 
-/** The prints that could have printed the output's line `k`, in some reading of all of its lines by the code's prints
- *  in the order they run, each print's lines one after another: a print writes at least one line (exactly one when it
- *  prints `one`), never a line that holds another print's words (`best`), at most one line that holds its own, and only
- *  its own words when it writes them exactly. */
-function readers(steps, units, said, best, k) {
+// the lines Python writes into a script's output itself, which no print wrote: a warning (`<file>:<line>:
+// <Category>Warning: <message>`, and the line of code under it, two spaces in, when Python has that line), and an
+// error's traceback, from its first line to the line that names the error
+const WARNING = /^\S.*:\d+: [A-Z]\w*Warning:(?: |$)/
+const TRACEBACK = 'Traceback (most recent call last):'
+
+/** Which lines of the output Python wrote itself (`own`), and whether the code stopped at an error (`stopped`): its
+ *  statements after the one that failed never ran. */
+function pythonsLines(said) {
+  const own = said.map(() => false)
+  let stopped = false
+  for (let j = 0; j < said.length; j++) {
+    if (WARNING.test(said[j])) {
+      own[j] = true
+      if (/^ {2}\S/.test(said[j + 1] ?? '')) own[++j] = true
+    } else if (said[j] === TRACEBACK) {
+      own[j] = stopped = true
+      while (j + 1 < said.length && /^\s/.test(said[j + 1])) own[++j] = true
+      if (j + 1 < said.length && said[j + 1].trim()) own[++j] = true
+    }
+  }
+  return { own, stopped }
+}
+
+/** A line of numbers alone (`40`, `0.45 12`, `1e-05`), as a print of counts and numbers writes it. */
+const numbers = s => /\d/.test(s) && !/\p{L}/u.test(s.replace(/(\d)[eE](?=[-+]?\d)/g, '$1'))
+
+/** The prints that could have printed the output's line `k`, in some reading of its lines by the code's prints in the
+ *  order they run, or null when no reading fits the output: each print that runs writes lines one after another, at
+ *  least one (exactly one when it prints `one`), only lines it `may` write and at most one that holds its `own` words.
+ *  A line no print wrote may stand anywhere (`free`: it holds no print's own words), and once the code `stopped` at an
+ *  error, the prints after it never ran. */
+function readers(steps, said, may, own, free, stopped, k) {
   const M = said.length
   // the steps as a machine of states: an edge reads a print's lines, or nothing
   const edges = []
@@ -380,6 +414,8 @@ function readers(steps, units, said, best, k) {
   }
   const start = n++
   const end = build(steps, start)
+  // the code stopped at an error: the reading may end at any state
+  if (stopped) for (let q = 0; q < n; q++) if (q !== end) edges.push([q, end, null])
   const eps = Array.from({ length: n }, () => [])
   const back = Array.from({ length: n }, () => [])
   // the edges that read lines: [from, to, the print's last ends]
@@ -400,9 +436,6 @@ function readers(steps, units, said, best, k) {
     return set
   }
   // where a print's lines from line s can end (exclusive): the lines it may write, up to its limits
-  const norm = s => s.replace(/\s+/g, '')
-  const may = (u, j) => (!best[j].length || best[j].includes(u)) && (u.exact == null || norm(said[j]) === u.exact)
-  const own = (u, j) => best[j].includes(u)
   const last = new Map()
   for (const u of new Set(reads.map(r => r[2]))) {
     // walking back from the end: the first line u may not write, and its second line of own words
@@ -418,13 +451,15 @@ function readers(steps, units, said, best, k) {
     last.set(u, at)
   }
   for (const r of reads) r[2] = last.get(r[2])
-  // forward: the states reached when lines [0, pos) are read; a print read from pos reaches pos + 1 to its last end
+  // forward: the states reached when lines [0, pos) are read; a print read from pos reaches pos + 1 to its last end,
+  // and a line no print wrote is passed over
   const F = []
   const diff = Array.from({ length: n }, () => new Int32Array(M + 2))
   const cnt = new Int32Array(n)
   for (let pos = 0; pos <= M; pos++) {
     const here = new Uint8Array(n)
     if (pos === 0) here[start] = 1
+    else if (free[pos - 1]) here.set(F[pos - 1])
     for (let q = 0; q < n; q++) { cnt[q] += diff[q][pos]; if (cnt[q] > 0) here[q] = 1 }
     F[pos] = close(here, eps)
     if (pos === M) break
@@ -434,7 +469,7 @@ function readers(steps, units, said, best, k) {
       if (F[pos][q] && e > pos) { diff[q2][pos + 1]++; diff[q2][e + 1]-- }
     }
   }
-  if (!F[M][end]) return []
+  if (!F[M][end]) return null
   // backward: the states from which lines [pos, M) can be read to the end, and for each state the next such pos
   const next = Array.from({ length: n }, () => new Int32Array(M + 2).fill(M + 1))
   const done = new Uint8Array(n)
@@ -448,6 +483,7 @@ function readers(steps, units, said, best, k) {
       const e = ends[pos]
       if (e > pos && next[q2][pos + 1] <= e) B[q] = 1
     }
+    if (free[pos]) for (let q = 0; q < n; q++) if (next[q][pos + 1] === pos + 1) B[q] = 1
     close(B, back)
     for (let q = 0; q < n; q++) next[q][pos] = B[q] ? pos : next[q][pos + 1]
   }
@@ -468,9 +504,11 @@ function readers(steps, units, said, best, k) {
  * The line of a check's code that printed the output's line `at` (`out` is the whole output; a single line is its
  * line 0), or '' when the code does not show it for sure: a line that did not print the value is worse than none.
  * It is the print whose own words stand in that line, the one with the most of them (`print("failed:", n)`); else, in
- * code where every statement that may print is a print, the one print that could have written that line (`print(df)`
- * under `print("Failures by day:")`), or the one that wrote it in every reading of the output by the prints in the
- * order they run (`print(len(runs))` then `print(sum(...))`, a loop's prints).
+ * code where every statement that may print is a print, the one print that could have written that line: by what
+ * each print can write (`print(df)` under `print("Failures by day:")`, which writes only its words; a print of a value
+ * under `print(len(runs))`, which writes a number) and, where the code shows the order its prints run in, in every
+ * reading of the whole output in that order (`print(len(runs))` then `print(sum(...))`, a loop's prints). A line
+ * Python wrote itself (a warning, a traceback) is no print's.
  */
 export function printLine(code, out, at = 0) {
   const lines = String(code || '').split('\n')
@@ -481,10 +519,13 @@ export function printLine(code, out, at = 0) {
   if (said.length > 1 && said[said.length - 1] === '') said = said.slice(0, -1)
   const k = Math.max(0, Math.min(said.length - 1, Math.trunc(Number(at)) || 0))
   const norm = s => s.replace(/\s+/g, '')
+  const python = pythonsLines(said)
+  if (python.own[k]) return ''
   // the prints whose own words stand in each line, the most of them (a print that writes only its words: exactly them)
-  const best = said.map(line => {
+  const best = said.map((line, j) => {
     let most = 0
     let who = []
+    if (python.own[j]) return who
     for (const u of units) {
       if (!u.bits.length) continue
       const got = u.exact != null ? (norm(line) === u.exact ? u.bits.reduce((a, b) => a + b.length, 0) : 0) : u.bits.filter(b => line.includes(b)).reduce((a, b) => a + b.length, 0)
@@ -501,9 +542,15 @@ export function printLine(code, out, at = 0) {
   // the output cut by its window (`…` at an end): its first or last line may be a part of another print's
   const cut = (k === 0 && said[0].startsWith('…')) || (k === said.length - 1 && said[k].endsWith('…'))
   if (cut) return ''
-  const could = units.filter(u => (!best[k].length || best[k].includes(u)) && (u.exact == null || norm(said[k]) === u.exact))
+  // the lines a print may write: none Python wrote, none that holds another print's words, only its own words when it
+  // writes them exactly, a line of numbers when it prints numbers alone
+  const may = (u, j) => !python.own[j] && (!best[j].length || best[j].includes(u)) && (u.exact == null || norm(said[j]) === u.exact) && (!u.digits || numbers(said[j]))
+  const could = units.filter(u => may(u, k))
   if (!could.length) return ''
-  if (one(could)) return one(could)
-  if (read.unordered || units.some(u => !u.ends) || said[0].startsWith('…') || said[said.length - 1].endsWith('…')) return ''
-  return one(readers(read.steps, units, said, best, k))
+  // where the code does not show the order its prints run in, or the window cut the output: what each print may write
+  if (read.unordered || units.some(u => !u.ends) || said[0].startsWith('…') || said[said.length - 1].endsWith('…')) return one(could)
+  // else the readings of the whole output in that order: a line that no print wrote in any of them is none's (the
+  // lines of a warning's message after its first); when no reading fits (a partial output), what each print may write
+  const by = readers(read.steps, said, may, (u, j) => best[j].includes(u), best.map(b => !b.length), python.stopped, k)
+  return one(by ?? could)
 }
