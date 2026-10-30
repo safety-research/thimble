@@ -739,22 +739,36 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
  *  whose reply the reply draws failed too, says so under it). */
 const statusOf = (m: MarkItem | null) => checkStatus(m)
 
-/** The color of a line of code: the theme key thimble draws inline code in (marks/view.ts), a blue Claude Code shades
- *  for the theme it draws in. */
-const CODE_INK = 'permission'
+/** A part of the tray's body and the rows it takes; `short`, the same on one row, which a cut card shows (fitCitation);
+ *  `code`, in place of `el`, a line of code, which unitEls draws with the lines of code beside it. */
+type Unit = { h: number; el?: Any; code?: string; short?: Unit }
 
-/** A part of the tray's body and the rows it takes; `short`, the same on one row, which a cut card shows (fitCitation). */
-type Unit = { h: number; el: Any; short?: Unit }
+/** A card's units as elements: lines of code next to each other as one Code, which Claude Code draws in its own colors
+ *  for Python, as the side pane draws the code (marks/evidence.tsx), each line on one row. */
+function unitEls(els: Any, units: Unit[]): Any[] {
+  const out: Any[] = []
+  let code: string[] = []
+  const flush = () => {
+    if (code.length) out.push(els.Code({ key: `code${out.length}`, source: code.join('\n'), language: 'python', wrap: 'truncate-end' }))
+    code = []
+  }
+  for (const u of units) {
+    if (u.code === undefined) { flush(); out.push(u.el) } else code.push(u.code)
+  }
+  flush()
+  return out
+}
 
 /** A line of evidence in the ruled block under the code or the file's place: a dim rule on the left, so code and
  *  output read apart, and the line, the cited words bold in the citations' look (marks/evidence.tsx citeWords); `dim`,
- *  a line around the cited one. */
-function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string, dim = false): Unit {
+ *  a line around the cited one; `tint`, a line of printed output, whose cited words stand on the citations' purple
+ *  tint too (marks/evidence.tsx outputWords). */
+function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string, dim = false, tint = false): Unit {
   const { Box, Text } = els
   const h = rowsOf(text, w - 2)
   return { h, el: Box({ key, flexDirection: 'row', children: [
     Text({ key: 'rule', dimColor: true, children: Array(h).fill('│').join('\n') }),
-    Box({ key: 'l', flexShrink: 1, marginLeft: 1, children: [dim ? Text({ key: 't', dimColor: true, wrap: 'wrap', children: text || ' ' }) : highlighted(els, text, spans, 't')] }),
+    Box({ key: 'l', flexShrink: 1, marginLeft: 1, children: [dim ? Text({ key: 't', dimColor: true, wrap: 'wrap', children: text || ' ' }) : highlighted(els, text, spans, 't', { tint })] }),
   ] }) }
 }
 
@@ -771,18 +785,20 @@ function repairRow(els: Any, m: MarkItem): Unit {
 /** Lines of a citation's evidence, one row each, of which a cut card shows a window around the line it keeps in view
  *  (`key`): the code around the line that printed the value, the printed output around the line that holds it, a file's
  *  lines around the cited one, a table's header over its cited row. `draw(i)`: line i, the lines around the cited ones
- *  dim. `lead`: a row over them, the file's place or the card's title. */
-type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit }
+ *  dim. `lead`: a row over them, the file's place or the card's title. `gap`: a blank row over the block, between it and
+ *  the block above it (the output's, under the code). */
+type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit; gap?: Unit }
 
 /** A citation's card under its header (the status is in the header): what it says over its evidence (`top`), then its
  *  evidence (Block). A corrected one says what it was (`was 15 of 40`; a rewritten sentence or a narrowed citation says
  *  which, as the header says only corrected or repaired); a failed one why in one sentence; after a repair (x) that
  *  verified it as written, why; all dim, and under it `x repair` (repairRow). For a value code computed: the code, in
- *  code color, around the line that printed the value (tray.mjs printedAt: only a line the code shows printed it, else
- *  no code), then the printed output around the line that holds it in the ruled block; printed output that is a table
- *  shows as its header over the cited row. For a file: its place (`place`, a click opens the side pane), then its lines
- *  around the cited one in the ruled block. For a card's value: the card's title, then the header over the cited row,
- *  or its printed lines around the cited one. The cited words bold in the citations' look. */
+ *  Claude Code's colors for Python (unitEls), around the line that printed the value (tray.mjs printedAt: only a line
+ *  the code shows printed it, else no code), a blank row, then the printed output around the line that holds it in the
+ *  ruled block; printed output that is a table shows as its header over the cited row. For a file: its place (`place`,
+ *  a click opens the side pane), then its lines around the cited one in the ruled block. For a card's value: the card's
+ *  title, then the header over the cited row, or its printed lines around the cited one. The cited words bold in the
+ *  citations' look; in printed output (a computed value's, a card's), on the citations' purple tint too. */
 function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null): { top: Unit[]; blocks: Block[] } {
   const { Text } = els
   if (!m) return { top: [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }], blocks: [] }
@@ -811,9 +827,10 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
   // a table: its header over the cited rows, the first cited row kept in view
   const tableBlock = (rows: { text: string; spans: [number, number][] }[], lead?: Unit): Block => ({
     n: rows.length, key: Math.min(1, rows.length - 1), ...(lead ? { lead } : {}),
-    draw: i => ruled(els, rows[i]!.text, i ? rows[i]!.spans : [], w, i ? `tr${i}` : 'th'),
+    draw: i => ruled(els, rows[i]!.text, i ? rows[i]!.spans : [], w, i ? `tr${i}` : 'th', false, true),
   })
-  // printed output, one row a line: the line that holds the value (its words in the citations' look), the others dim
+  // printed output, one row a line: the line that holds the value (its words in the citations' look, on their tint), the
+  // others dim
   const outputBlock = (lead?: Unit): Block => {
     const out = String(ev.kind === 'card' && ev.output == null ? ev.value ?? '' : ev.output ?? '').replace(/\n+$/, '')
     const lines = out.split('\n')
@@ -825,7 +842,7 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
       const s = starts[i]!
       const mine = spans.map(([a, b]) => [Math.max(a, s) - s, Math.min(b, s + lines[i]!.length) - s] as [number, number]).filter(([a, b]) => b > a)
       const cut = lineWindow({ text: lines[i]!, spans: mine }, w - 2) as { text: string; spans: [number, number][] }
-      return ruled(els, cut.text, cut.spans, w, i === key ? 'ev' : `o${i}`, i !== key)
+      return ruled(els, cut.text, cut.spans, w, i === key ? 'ev' : `o${i}`, i !== key, true)
     } }
   }
   if (ev.kind === 'card') {
@@ -837,9 +854,11 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
     const p = printedAt(ev)
     if (p >= 0) {
       const code = String(ev.code ?? '').split('\n')
-      blocks.push({ n: code.length, key: p, draw: i => ({ h: 1, el: Text({ key: i === p ? 'said' : `c${i}`, color: CODE_INK, ...(i === p ? {} : { dimColor: true }), wrap: 'truncate-end', children: code[i] || ' ' }) }) })
+      blocks.push({ n: code.length, key: p, draw: i => ({ h: 1, code: code[i] ?? '' }) })
     }
-    blocks.push(tl ? tableBlock(tl as { text: string; spans: [number, number][] }[]) : outputBlock())
+    const out = tl ? tableBlock(tl as { text: string; spans: [number, number][] }[]) : outputBlock()
+    // under the code, a blank row before its output
+    blocks.push(blocks.length ? { ...out, gap: { h: 1, el: Text({ key: 'gap', children: ' ' }) } } : out)
     return { top, blocks }
   }
   // a file's lines: those the check read around the cited ones, which stay bright
@@ -857,11 +876,12 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
 
 /** A citation's card in at most `rows` rows: whole when it fits. Else cut: what it says over its evidence on a row
  *  each, and of each block a window around its key line (tray.mjs around), the key lines first (the value's line, then
- *  the line that printed it), then the place or title over them, then a line more to each in turn, as rows allow;
- *  `hidden`, how many lines that leaves out, which the row under it says (moreRow), the side pane showing them all. */
+ *  the line that printed it), then the blank row between the code and its output, then the place or title over them,
+ *  then a line more to each in turn, as rows allow; `hidden`, how many lines that leaves out, which the row under it
+ *  says (moreRow), the side pane showing them all. */
 function fitCitation(parts: { top: Unit[]; blocks: Block[] }, rows: number): { units: Unit[]; hidden: number } {
   const sum = (us: Unit[]) => us.reduce((n, u) => n + u.h, 0)
-  const all = [...parts.top, ...parts.blocks.flatMap(b => [...(b.lead ? [b.lead] : []), ...Array.from({ length: b.n }, (_, i) => b.draw(i))])]
+  const all = [...parts.top, ...parts.blocks.flatMap(b => [...(b.gap ? [b.gap] : []), ...(b.lead ? [b.lead] : []), ...Array.from({ length: b.n }, (_, i) => b.draw(i))])]
   if (sum(all) <= rows) return { units: all, hidden: 0 }
   const top = parts.top.map(u => u.short ?? u)
   let hidden = parts.top.reduce((n, u) => n + (u.short ? u.h - u.short.h : 0), 0)
@@ -871,7 +891,10 @@ function fitCitation(parts: { top: Unit[]; blocks: Block[] }, rows: number): { u
   const order = parts.blocks.map((_, i) => i).reverse()
   const size = parts.blocks.map(() => 0)
   const lead = parts.blocks.map(() => false)
+  const gap = parts.blocks.map(() => false)
   for (const i of order) if (room > 0 && parts.blocks[i]!.n) { size[i] = 1; room-- }
+  // a blank row stands between two blocks only while both show
+  for (const i of order) { const g = parts.blocks[i]!.gap; if (g && size[i] && size[i - 1] && room >= g.h) { gap[i] = true; room -= g.h } }
   for (const i of order) { const l = parts.blocks[i]!.lead; if (l && room >= l.h) { lead[i] = true; room -= l.h } }
   for (let grew = true; grew && room > 0;) {
     grew = false
@@ -879,6 +902,7 @@ function fitCitation(parts: { top: Unit[]; blocks: Block[] }, rows: number): { u
   }
   const units = [...top]
   parts.blocks.forEach((b, i) => {
+    if (gap[i]) units.push(b.gap!)
     if (lead[i]) units.push(b.lead!)
     const [from, to] = around(b.n, b.key, size[i]!) as [number, number]
     for (let j = from; j < to; j++) units.push(b.draw(j))
@@ -1051,7 +1075,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
   let hidden = 0
   if (parts) {
     const fit = fitCitation(parts, rows)
-    shown = fit.units.map(u => u.el)
+    shown = unitEls(els, fit.units)
     hidden = fit.hidden
   } else if (treeRows(body, inner) > rows) {
     // from its start: a window of the rows left over the row that says how much more there is
