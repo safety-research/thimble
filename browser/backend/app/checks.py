@@ -778,7 +778,8 @@ def _replaced_part(c: str, check: dict[str, Any], doc: str, cover: list[dict[str
                  if cm.get("check") == cid and canvas_comments.key_of(cm) in keys]
     elif doc == ANSWERS:
         refs = {p["ref"] for p in cover}
-        found = [f"comment {cm['id']} on {cm['ref']} · {_collapse(cm.get('text'))}"
+        found = [f"comment {cm['id']} on {cm['ref']}" + (f" at “{cm['words']}”" if cm.get("words") else "")
+                 + f" · {_collapse(cm.get('text'))}"
                  + (f" — {_collapse(cm.get('details'))}" if _collapse(cm.get("details")) else "")
                  for cm in answer_comments.open_comments(c) if cm.get("check") == cid and cm.get("ref") in refs]
     else:
@@ -1702,10 +1703,10 @@ def _add_card_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
 
 
 def _add_answer_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
-    """add_comment in a run over Claude's answers: a comment beside a sentence the run covers, `answer:<turn>#s<n>`,
-    stored with the sentence's raw text and offsets (answer_comments.add). An explainer on a sentence a heads-up holds,
-    or a heads-up on one an explainer holds, is not stored (answer_comments.APART), and the run hears why, so it may
-    comment on another sentence that holds its words."""
+    """add_comment in a run over Claude's answers: a comment beside a sentence the run covers, `answer:<turn>#s<n>`, on
+    the `words` of it the comment is about (the whole sentence for none), stored with the sentence's raw text and
+    offsets (answer_comments.add). An explainer on words a heads-up holds, or a heads-up on words an explainer holds, is
+    not stored (answer_comments.APART), and the run hears why, so it may comment on other words."""
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     text = _collapse(args.get("text"))
     if not text:
@@ -1715,14 +1716,19 @@ def _add_answer_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
     p = answer_comments.passage_of(ctx.c, ref)
     if p is None:
         return tools.err(tools.hint("add_comment-uncovered", ref=ref))
+    words = answer_comments.words_in(p, args.get("words"))
+    if words is None:
+        return tools.err(tools.hint("add_comment-no-words", ref=p["ref"], words=_collapse(args.get("words")),
+                                    sentence=answer_comments.plain(p["text"])))
     shown, details, evidence = note_parts(ctx.c, text, args.get("details"))
     if not shown:
         return tools.err("add_comment: `text` holds nothing but citations")
     cm, new = answer_comments.add(ctx.c, passage=p, text=shown, details=details, author=AUTHOR, check=act.check,
-                                  run=act.run, evidence=evidence)
+                                  run=act.run, evidence=evidence, words=words)
     if cm.get("check") != act.check:
         held = read(ctx.c, str(cm.get("check"))) or {}
-        return tools.err(tools.hint("add_comment-held", ref=p["ref"], check=held.get("name") or cm.get("check")))
+        return tools.err(tools.hint("add_comment-held", ref=p["ref"], check=held.get("name") or cm.get("check"),
+                                    words=cm.get("words") or answer_comments.plain(cm.get("quote"))))
     if new:
         act.comments += 1
         check = read(ctx.c, act.check)

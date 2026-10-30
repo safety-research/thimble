@@ -294,6 +294,7 @@ Comment on one sentence, paragraph or heading of a written document, or on a car
   "type": "object",
   "properties": {
     "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step, answer:<turn>#s<n> of a sentence of Claude's answer."},
+    "words": {"type": "string", "description": "On a sentence of Claude's answer, the words of it that the comment is about, exactly as it says them. The chat marks these words, else the whole sentence."},
     "text": {"type": "string", "description": "The statement: one short, clear sentence of about 20 words."},
     "details": {"type": "string", "description": "The evidence for the statement, with its citations, in plain sentences or a few bullets of about 120 words at most."}
   },
@@ -1354,7 +1355,11 @@ Your task is in {n} files, in this order: {paths}. They hold the check's instruc
 
 ## add_comment-held
 
-Not added: {ref} holds a comment of {check} already, and an explainer and a heads-up never share a sentence. Comment on another sentence that holds its words, or leave it out.
+Not added: in {ref}, a comment of {check} holds “{words}” already, and an explainer and a heads-up never share words. Give other words, here or in another sentence, or leave it out.
+
+## add_comment-no-words
+
+Not added: {ref} does not say “{words}”; it says “{sentence}”. Give `words` exactly as it says them.
 
 ## add_comment-not-check
 
