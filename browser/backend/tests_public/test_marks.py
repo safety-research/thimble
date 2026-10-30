@@ -538,6 +538,46 @@ def test_a_check_that_fails_a_mark_repairs_it_at_once_and_the_repair_s_answer_re
     assert "pressed" not in said[1] and '"243 against 105" is corrected to "243 against 104"' in said[1]
 
 
+GROUPS = {"text/plain": "".join(f"G{i}: {n} remarks\n" for i, n in enumerate((57, 85, 96, 97, 148, 84, 75), 1))}
+
+
+def test_a_total_of_a_card_s_lines_fails_in_plain_words_and_its_repair_can_verify_it_as_computed(_fresh, monkeypatch):
+    """B12: the reply cites a total of a card's seven printed lines (made up), and the check gives the seven lines as its
+    places. No line shows the total, so the validator fails it, and its reason now says that of the seven lines
+    together. The repair thimble starts at once reads that reason, and a sum that a call of the repair prints is computed
+    evidence, which verifies the total: the validator itself adds nothing up."""
+    cid = _seed_card("", [GROUPS])
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+    turn = marks.new_turn()
+    code = ("import re\nrows = open('remarks-per-group.txt').read()\n"
+            "print(f\"{sum(int(n) for n in re.findall(r'G\\d: (\\d+) remarks', rows))} remarks\")")
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        if "pressed x to repair" in prompt:
+            out = [{"mark": 1, "kind": "computed", "evidence": {"output": "642 remarks"}, "status": "verified",
+                    "correction": None, "reason": "the seven groups' remarks add up to 642"}]
+            calls = [{"command": f"python3 - <<'PY'\n{code}\nPY", "output": "642 remarks\n", "by": "checker"}]
+            return {"answer": _answer(out), "calls": calls, "error": None}
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": [f"card:{cid}@out0#L{n}" for n in range(1, 8)]},
+                "status": "verified", "correction": None, "reason": "the seven groups add up to 642"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, ["Of the [642](#) remarks, most come from G5."], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    assert len(seen) == 2, seen
+    assert seen[1].endswith("\n\n" + "\n".join((
+        marks.REPAIR_FIRST.format(n=1, found="could not confirm it")
+        + ': "None of the 7 cited lines of the card\'s output shows 642."', *marks.REPAIR_TASK)))
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "verified" and m["evidence"]["kind"] == "computed" and m.get("repair") is True, m
+
+
 def test_a_repair_that_fails_again_starts_no_other_and_repair_asks_again(_fresh, monkeypatch):
     place = _runs_card()
     _main_at(monkeypatch, "cut-1")
