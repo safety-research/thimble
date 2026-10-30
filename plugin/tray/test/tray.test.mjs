@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { partsAround } from '../../core/text.js'
-import { aboutOf, around, back, base, checkStatus, evidenceLine, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, outputAt, printableEvidence, printedAt, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top, wasLine } from '../tray.mjs'
+import { aboutOf, around, back, base, cardLabel, checkStatus, cutWords, evidenceLine, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, printLine, push, restWords, SHOW_ALL, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, TABLE_LABEL, top, wasLine } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -113,6 +113,20 @@ test('a citation\'s card: why in one sentence, and the one line of evidence that
   assert.equal(lineWindow({ text: said, spans: [[0, 4]] }, 30).text, 'Each open ticket waits for a …')
 })
 
+
+test("the words the tray, the side pane and the workbench's evidence label draw over each part of a citation's evidence and where they leave lines out: a part's label with its whole size, a file's place, a card; a marker with how many lines and where; + after the tray's last", () => {
+  assert.equal(partLabel('code', 7), 'code · 7 lines')
+  assert.equal(partLabel('output', 62), 'output · 62 lines')
+  assert.equal(partLabel('output', 1), 'output · 1 line')
+  assert.equal(TABLE_LABEL, 'output · table')
+  assert.equal(placeLabel('changes.log', 3), 'changes.log · line 3')
+  assert.equal(placeLabel('notes/runs.md', '8-11'), 'notes/runs.md · lines 8-11')
+  assert.equal(cardLabel('Runs by status'), 'card · Runs by status')
+  assert.equal(cutWords(5, 'above'), '⋯ 5 lines above')
+  assert.equal(cutWords(13, 'below'), '⋯ 13 lines below')
+  assert.equal(cutWords(1, 'above'), '⋯ 1 line above')
+  assert.deepEqual(SHOW_ALL, { key: '+', words: 'show all' })
+})
 
 test("a cut card keeps a citation's key lines in the middle of what it shows: the window around a line, moved in from the ends, and the lines of code and output it keeps", () => {
   assert.deepEqual(around(10, 5, 3), [4, 7])
