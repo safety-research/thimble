@@ -37,7 +37,7 @@ import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHeld, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { markPressed as trayMarkPressed, trayBand, trayBandDrawn, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayRowShown, trayShape, type BandRoom } from '../tray/seam'
+import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayShape, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { paneHeld } from './pane'
 import { askOnce } from './rowhook'
@@ -182,12 +182,6 @@ export function aboveShape(): { tight: boolean; windowed: boolean } {
   try { return trayShape() } catch { return { tight: false, windowed: false } }
 }
 
-/** The band above the prompt drew `rows` rows: what the transcript's window gives way to (the tray tells the person's
- *  scroll of the transcript from it, tray/tray.ts rowShown). */
-export function bandDrawn(rows: number): void {
-  try { trayBandDrawn(rows) } catch { /* the band draws as it is */ }
-}
-
 /** The keys taken now by what holds them and names them in its own place, which every other surface leaves unnamed,
  *  so each key shows once, where it acts. In the order a key at an empty prompt reaches them (hooks/keys.ts): the line
  *  of a fix (fix/line.ts fixHeld), the open tray's, or a card's ] reached (tray/seam.ts trayHeld), then the open
@@ -285,8 +279,6 @@ export const registerAnswerView: Register = on => {
   // (fails safe, core/rowhook.ts: a throw here leaves the answer and its cards as drawn beneath)
   on('ui.render', { component: 'AssistantMessage', requestId: /\S/ }, async ($, e, next) => {
     const below = askOnce(e, next)
-    // which of its rows the screen shows: a scroll of the transcript under an open tray closes it
-    try { trayRowShown($, e.requestId, e.props?.onScreen) } catch { /* the row draws as it is */ }
     try {
       const r = await below()
       if (e.props.isSummary) return r

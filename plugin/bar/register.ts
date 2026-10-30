@@ -12,7 +12,7 @@
 //                since
 import type { EngineInterface, Register } from 'claude-code'
 
-import { aboveBar, aboveShape, bandDrawn } from '../core/answerview'
+import { aboveBar, aboveShape } from '../core/answerview'
 import { closePane, narrowNotice, openPane, paneNow, paneShows } from '../core/pane'
 import { printing } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
@@ -144,8 +144,6 @@ export const registerBar: Register = on => {
         ...rows,
         ...Array.from({ length: under }, (_, i) => els.Text({ key: `under-gap${i}`, children: ' ' })),
       ] })
-      // the rows the band takes on the screen, which the transcript's window gives way to
-      bandDrawn(maxRows > 0 ? Math.min(maxRows, treeRows(band, width)) : treeRows(band, width))
       return band
     } catch {
       // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
