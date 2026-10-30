@@ -95,12 +95,20 @@ describe('citations in a reply read inline', () => {
 })
 
 describe("main's model", () => {
-  test('is the menu\'s choice, else the settings\', else the one its replies came from, else Opus 5.5', () => {
+  test('is the one its replies come from, else the menu\'s choice, else the settings\', else Opus 5.5', () => {
     expect(MAIN_DEFAULT_MODEL).toBe('claude-opus-5-5')
     expect(mainModel(null)).toBe('claude-opus-5-5')
     expect(mainModel({ session: 's', cwd: '/', since: '', model: 'claude-sonnet-5' })).toBe('claude-sonnet-5')
-    expect(mainModel({ session: 's', cwd: '/', since: '', model: 'claude-sonnet-5' }, 'claude-opus-5')).toBe('claude-opus-5')
-    expect(mainModel({ session: 's', cwd: '/', since: '', model: 'claude-sonnet-5', model_choice: 'claude-fable-5-1' }, 'claude-opus-5')).toBe('claude-fable-5-1')
+    expect(mainModel({ session: 's', cwd: '/', since: '', model: 'claude-sonnet-5' }, 'claude-opus-5')).toBe('claude-sonnet-5')
+    expect(mainModel({ session: 's', cwd: '/', since: '', model: 'claude-sonnet-5', model_choice: 'claude-fable-5-1' }, 'claude-opus-5')).toBe('claude-sonnet-5')
+    // before main's first reply
+    expect(mainModel({ session: 's', cwd: '/', since: '', model_choice: 'claude-fable-5-1' }, 'claude-opus-5')).toBe('claude-fable-5-1')
+    expect(mainModel({ session: 's', cwd: '/', since: '' }, 'claude-opus-5')).toBe('claude-opus-5')
+  })
+
+  test("after Claude's safeguards moved its replies to Opus 4.8, Opus 5.5 picked again does not show while replies come from 4.8", () => {
+    const moved = { session: 's', cwd: '/', since: '', model: 'claude-opus-4-8', model_choice: 'claude-opus-5-5' }
+    expect(mainModel(moved, 'claude-opus-5-5')).toBe('claude-opus-4-8')
   })
 
   describe('at the composer', () => {
@@ -123,6 +131,13 @@ describe("main's model", () => {
       await act(async () => item!.click())
       await settle()
       expect(picked).toEqual(['claude-sonnet-5'])
+      // the model shown is the one main's replies come from, so picking it back before the next reply goes on too
+      await act(async () => trigger!.click())
+      await settle()
+      const shown = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"], [role="menuitemcheckbox"]')].find((n) => n.textContent?.includes('Opus 5.5'))
+      await act(async () => shown!.click())
+      await settle()
+      expect(picked).toEqual(['claude-sonnet-5', 'claude-opus-5-5'])
     })
   })
 })

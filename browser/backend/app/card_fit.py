@@ -308,6 +308,9 @@ async def fit(c: str, cid: str, author: str, *, by: str | None = None, agent: st
         return ""
     size, png = drawn
     line.update(body=round(size.body), inner=round(size.inner), width=round(size.width), frame=round(size.frame))
+    # the record as it stands after the measure, since a call that ran meanwhile may have changed it: delete_card of a
+    # held card this one takes the place of gives it that card's versions (deleting)
+    hold = _record(notebook.get_cell(c, cid))
     # the versions a held card it takes the place of had (deleting), for a card measured for the first time
     before = int(hold.get("before") or 0) if hold is not None else _carry(c, cell, author, agent)
     if size.fits:
