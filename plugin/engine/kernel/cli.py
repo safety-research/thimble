@@ -539,10 +539,10 @@ next thimble update, thimble fixes or thimble reapply, or when a Claude Code ses
 
 Afterwards: /reload-plugins in Claude Code, and restart thimble-browser.
 
-A dev install (scripts/install.sh --local in a git clone) follows your own checkout instead of the releases: after `git pull`, thimble
-update moves thimble and your fixes onto the commit you checked out. It fetches nothing and leaves out changes you have
-not committed. Each fix that still applies cleanly is replayed onto that commit; one that does not is set aside for
-thimble reapply, as above."""
+A dev install (scripts/install.sh --local in a git clone) follows your own checkout instead of the releases: after
+`git pull`, thimble update moves thimble and your fixes onto the commit you checked out. It fetches nothing and leaves
+out changes you have not committed. Each fix that still applies cleanly is replayed onto that commit; one that does not
+is set aside for thimble reapply, as above."""
 
 
 def cmd_update(a: argparse.Namespace) -> int:

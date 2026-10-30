@@ -185,11 +185,11 @@ The browser workbench:
 To update both products, run `thimble update` in a shell (not inside Claude Code). It moves the plugin and the browser
 workbench to the newest release, keeps your fixes (each one that still fits the release stays on; one that does not is
 off, kept in `thimble fixes`, until `thimble reapply` has Claude fit it), and says what to do next; after an install
-with `scripts/install.sh --local` in a git clone, it moves them to the commit your checkout has, so pull it first. A plugin installed
-without a clone updates with `claude plugin update thimble@thimble` until you use its first fix: from then on, Claude
-Code loads it from your fixes, and only `thimble update` moves it to a new release. Without a clone, your shell does
-not find `thimble`: run `~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place
-of `~/.thimble`). To uninstall the plugin:
+with `scripts/install.sh --local` in a git clone, it moves them to the commit your checkout has, so pull it first. A
+plugin installed without a clone updates with `claude plugin update thimble@thimble` until you use its first fix: from
+then on, Claude Code loads it from your fixes, and only `thimble update` moves it to a new release. Without a clone,
+your shell does not find `thimble`: run `~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`,
+use it in place of `~/.thimble`). To uninstall the plugin:
 
 ```
 claude plugin uninstall thimble@thimble
@@ -197,11 +197,11 @@ claude plugin uninstall thimble@thimble
 
 To remove the browser workbench, delete `~/.local/bin/thimble-browser` and the checkout. Uninstalling leaves your data
 alone. To remove what thimble wrote, delete `~/.thimble` and `~/.thimble-browser` (and a `thimble/` folder that a build
-before 0.10.0 made in a data folder). With `--local`, your fixes also live in the checkout, as the branch `mine` and
-the refs under `refs/thimble/`. After a new install, the first fix you ask for, or a `thimble update` that moves to a
-new commit of your checkout, sets them aside by itself, under `refs/thimble-old/`, when `mine` is one that thimble
-left: no worktree or other thimble home uses it, it tracks no upstream, and thimble made or recorded every commit that
-only `mine` has. Otherwise it asks you to rename `mine`. To remove them, after you delete `~/.thimble`, run
+before 0.10.0 made in a data folder). With `--local` in a git clone, your fixes also live in the checkout, as the branch
+`mine` and the refs under `refs/thimble/`. After a new install, the first fix you ask for, or a `thimble update` that
+moves to a new commit of your checkout, sets them aside by itself, under `refs/thimble-old/`, when `mine` is one that
+thimble left: no worktree or other thimble home uses it, it tracks no upstream, and thimble made or recorded every
+commit that only `mine` has. Otherwise it asks you to rename `mine`. To remove them, after you delete `~/.thimble`, run
 `git worktree prune`, `git branch -D mine`
 and `git for-each-ref --format='delete %(refname)' refs/thimble refs/thimble-old | git update-ref --stdin` in the
 checkout.
