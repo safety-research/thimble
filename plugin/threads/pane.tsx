@@ -31,7 +31,7 @@
 // Under the claims pane each question shows the claim it asks about, quoted above it, and the input bar names it.
 //   ─────────────────────────────────         the input bar: Claude Code's prompt box, a rule above and below,
 //   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them; in a short pane (inline in a short
-//   ─────────────────────────────────         terminal) the rule above and the field alone (shortPane)
+//   ─────────────────────────────────         terminal) the field alone (core/pane.ts shortPane)
 import type { EngineInterface } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
@@ -40,7 +40,7 @@ import { cardWidth, frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { quiet } from '../core/askcell.js'
 import { WORD_MS } from '../hooks/keys'
-import { openPane, PANE_ID } from '../core/pane'
+import { openPane, PANE_ID, shortPane } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
 import { placeLines } from '../explain/expand'
@@ -271,14 +271,9 @@ function keyTyped($: Engine, key: string, v: string, keys: PaneKey[]): void {
   })
 }
 
-/** Whether a pane is short: inline in a short terminal, where Claude Code gives it a third of the window. Its input bar
- *  then gives up the rows that only space it, so what the pane shows keeps its rows: the full bar takes five rows, a
- *  third of a pane of fifteen. */
-const shortPane = (e: Any): boolean => { const h = Number(e?.props?.scroll?.bodyRows) || 0; return h > 0 && h < 15 }
-
 /** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule; in a short pane
- *  (`short`, shortPane) the rule and the field alone. ↵ asks the thread about `scope`; a key of the keys' row typed alone
- *  into the empty field presses it (keyTyped). */
+ *  (`short`, core/pane.ts shortPane) the field alone, so what the pane shows keeps the rows that only space it. ↵ asks the
+ *  thread about `scope`; a key of the keys' row typed alone into the empty field presses it (keyTyped). */
 function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = [], ask = '', short = false): Any[] {
   const { Box, Text, Input } = els
   const key = threadKey(scope)
@@ -295,7 +290,7 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
       onSubmit: (v: string) => { void askHere($, scope, v) },
     })] }),
   ] })
-  return short ? [rule('entry-top'), row] : [Text({ key: 'entry-gap', children: ' ' }), rule('entry-top'), row, rule('entry-bottom')]
+  return short ? [row] : [Text({ key: 'entry-gap', children: ' ' }), rule('entry-top'), row, rule('entry-bottom')]
 }
 
 /** A field a pane edits in its input bar in place of a question (labels/pane.tsx: a label's rule, model or records):
@@ -539,13 +534,13 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...keysRow(els, pk, short), ...entry($, els, scope, W - 1, asking, pk, claims?.ask ?? '', short)], asking }
 }
 
-/** About how many rows threadUnder takes under a pane: the gap and the input bar (in a short pane, its rule and field),
+/** About how many rows threadUnder takes under a pane: the gap and the input bar (in a short pane, its field alone),
  *  and with a conversation its share of the pane. A pane that keeps its own rows in view (the coverage pane's tree)
  *  leaves these out. */
 export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown): Promise<number> {
   const t = threadOf(threadKey(await paneScope($, kind, args)))
   const { H } = sizeOf(e)
-  return (shortPane(e) ? 2 : 5) + (t?.turns.length ? Math.max(4, Math.floor(H * 0.4)) + 1 : 0)
+  return (shortPane(e) ? 1 : 5) + (t?.turns.length ? Math.max(4, Math.floor(H * 0.4)) + 1 : 0)
 }
 
 export async function drawThreads($: Engine, e: Any, kind: 'threads' | 'thread', args: unknown, els: Any): Promise<Any> {

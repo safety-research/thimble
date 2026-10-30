@@ -769,6 +769,11 @@ test('+ on a cut citation computed by code shows all of it in the side pane: wha
   pane = all(await $.ui.render(PANE(12)))
   expect(textOf(pane)).toContain('❯ which runs failed?')
   expect(textOf(pane.find(n => n.props?.key === 'pane-more'))).toMatch(/^↑ \d+ rows above/)
+  // inline in a short terminal, where Claude Code gives the pane a third of the window: the line that says how much more
+  // there is stands beside esc close, and the input bar is its field alone, under the thread's key row
+  const inline = all(await $.ui.render({ ...(PANE(8) as Any), props: { ...(PANE(8) as Any).props, placement: 'inline' } } as never))
+  expect(textOf(inline.find(n => n.props?.key === 'pane-top'))).toMatch(/^↑ \d+ rows above · scroll or ↑esc close$/)
+  expect(treeRows(inline.find(n => n.props?.key === 'pane-under'), 90)).toBeLessThanOrEqual(2)
 })
 
 // a heads-up whose words are a citation's words, or hold them
