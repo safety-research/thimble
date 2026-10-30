@@ -117,6 +117,25 @@ test("a long line of a call's output shows the words around the highlighted ones
   expect(document.querySelector('.mark-pop .cite-cell')?.textContent).toBe(QUOTED)
 })
 
+test("a computed mark's label holds every line of the output and of the code, each in a box of its own that opens on its key line: the output's line that holds the value, the code's line that printed it (the terminal's rule)", async () => {
+  const output = ['runs: 400', ...Array.from({ length: 30 }, (_, i) => `run ${i + 1}: FAIL`), 'failed: 61 of 400'].join('\n')
+  const at = output.lastIndexOf('61')
+  const code = 'rows = load()\nfor r in bad:\n    print(f"run {r}: FAIL")\nprint(f"failed: {len(bad)} of {len(rows)}")\nprint("done")'
+  const checks = [item(0, '61', { evidence: { kind: 'computed', code, output, highlight: [[at, at + 2]], by: 'checker' } })]
+  const el = await mount(<ChatMarkdown text="[61](#) failed" checks={checks} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  const out = document.querySelector<HTMLElement>('.mark-pop .mark-ev-out')!
+  expect(out.querySelectorAll('.refchip-line').length).toBe(32)
+  expect(out.querySelector('[data-key]')?.textContent).toBe('failed: 61 of 400')
+  expect(out.tabIndex).toBe(0)
+  const box = document.querySelector<HTMLElement>('.mark-pop .mark-ev-code')!
+  expect([...box.querySelectorAll('.refchip-line')].map((l) => l.textContent)).toEqual(code.split('\n'))
+  expect(box.querySelector('[data-key]')?.textContent).toBe('print(f"failed: {len(bad)} of {len(rows)}")')
+  expect(box.querySelector('[data-key]')?.classList.contains('mark-ev-said')).toBe(true)
+  expect(document.querySelector('.mark-pop')?.textContent).not.toContain('…')
+})
+
 test('a line short enough to read whole is shown whole, and a long one cut at words on both sides', () => {
   expect(lineWindow('rows 40, merged 12', [15, 17])).toEqual({ from: 0, to: 18, lead: false, tail: false })
   const w = lineWindow(PARAGRAPH, [PARAGRAPH.indexOf(QUOTED), PARAGRAPH.indexOf(QUOTED) + QUOTED.length])

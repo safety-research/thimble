@@ -1,6 +1,7 @@
 // A mark's evidence label in a real browser, with thimble's own stylesheets (src/marks/Mark.tsx, styles/marks.css): a
 // long cited line of a README and a long line of a call's output wrap inside the label, which stays at most 560 px
-// wide, so no line runs past its edge and the highlighted words show inside it without a scroll.
+// wide, so no line runs past its edge and the highlighted words show inside it without a scroll. Output taller than its
+// box opens on the line that holds the value, the code on the line that printed it, and both scroll.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -27,7 +28,11 @@ beforeAll(async () => {
       `const o = output.indexOf(words)`,
       `const computed = { kind: 'computed' as const, code: 'git log --oneline | grep -n said', output, highlight: [[o, o + words.length]] as [number, number][], by: 'check' }`,
       `const item = (k: number, evidence: object) => ({ n: k + 1, piece: 0, k, words, sentence: '', status: 'verified' as const, shown: words, evidence })`,
-      `createRoot(document.getElementById('root')!).render(<div className="chat-text" style={{ width: 300, padding: 16 }}><ChatMarkdown text={'In the notes, [' + words + '](#); in the log, [' + words + '](#).'} checks={[item(0, quote), item(1, computed)]} /></div>)`,
+      // forty lines of output, the value on the twenty-fifth, and the code that printed them
+      `const long = Array.from({ length: 40 }, (_, i) => i === 24 ? 'failed: 61 of 400' : 'run ' + i + ': FAIL').join('\\n')`,
+      `const h = long.indexOf('61')`,
+      `const tall = { kind: 'computed' as const, code: 'import csv\\nrows = load()\\nbad = pick(rows)\\nfor r in bad:\\n    print(f"run {r}: FAIL")\\nprint(f"failed: {len(bad)} of {len(rows)}")\\nprint("done")', output: long, highlight: [[h, h + 2]] as [number, number][], by: 'check' }`,
+      `createRoot(document.getElementById('root')!).render(<div className="chat-text" style={{ width: 300, padding: 16 }}><ChatMarkdown text={'In the notes, [' + words + '](#); in the log, [' + words + '](#); in the runs, [' + words + '](#).'} checks={[item(0, quote), item(1, computed), item(2, tall)]} /></div>)`,
     ],
     { loader: { '.css': 'css', '.woff2': 'empty', '.woff': 'empty' }, conditions: ['style'] },
   )
@@ -80,4 +85,33 @@ test('a long cited line wraps inside the label, its quoted words in view', async
 test("a long line of a call's output wraps inside the label, its highlighted words in view", async () => {
   const c = await label(1)
   assert.ok(c.width <= 560 && c.overflow <= 1 && c.rows > 1 && c.inside, `the output line ${JSON.stringify(c)}`)
+})
+
+test('output taller than its box opens on the line that holds the value, the code on the line that printed it; the wheel and the arrow keys scroll each box', async () => {
+  await page.locator('.mark-words').nth(2).click()
+  await page.waitForSelector('.mark-pop .cite-cell')
+  // whether a box's key line shows inside it, how far it has scrolled, and whether it can scroll at all
+  const box = (sel: string) =>
+    page.evaluate((s) => {
+      const b = document.querySelector<HTMLElement>(s)!
+      const B = b.getBoundingClientRect()
+      const L = b.querySelector('[data-key]')!.getBoundingClientRect()
+      return { inView: L.top >= B.top && L.bottom <= B.bottom, top: b.scrollTop, scrolls: b.scrollHeight > b.clientHeight }
+    }, sel)
+  const out = await box('.mark-pop .mark-ev-out')
+  const code = await box('.mark-pop .mark-ev-code')
+  assert.ok(out.scrolls && out.inView && out.top > 0, `the output ${JSON.stringify(out)}`)
+  assert.ok(code.scrolls && code.inView && code.top > 0, `the code ${JSON.stringify(code)}`)
+  // the wheel over the output moves it; with the focus on it, ↓ moves it on
+  const at = (await page.locator('.mark-pop .mark-ev-out').boundingBox())!
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2)
+  await page.mouse.wheel(0, 120)
+  await page.waitForFunction((t) => document.querySelector<HTMLElement>('.mark-pop .mark-ev-out')!.scrollTop > t, out.top)
+  const wheeled = (await box('.mark-pop .mark-ev-out')).top
+  await page.locator('.mark-pop .mark-ev-out').focus()
+  await page.keyboard.press('ArrowDown')
+  await page.waitForFunction((t) => document.querySelector<HTMLElement>('.mark-pop .mark-ev-out')!.scrollTop > t, wheeled)
+  await page.keyboard.press('Escape')
+  await page.mouse.click(990, 690)
+  await page.waitForFunction(() => !document.querySelector('.mark-pop'))
 })
