@@ -428,14 +428,14 @@ def _differs(repo: Path, commit: str, root: Path, prefix: str = "", memo: dict |
     return off, n
 
 
-def _zip_release(root: Path, prefix: str = "") -> tuple[str, str]:
+def _zip_release(root: Path, prefix: str = "", latest: dict[str, Any] | None = None) -> tuple[str, str]:
     """(tag, commit) of the release whose files the folder `root` has (find_source's zip), among thimble's releases
-    at update_url(): their trees alone are fetched, with no file contents, into a scratch repository, and each is
-    compared with the folder (_differs). The release the folder has whole wins: of several, the one with the most files
-    (a release that only removed files), then the one the folder's name gives (GitHub names a release's archive
-    thimble-0.10.6), then the newest. A folder that no release matches stops, with the nearest release and its files
-    that differ."""
-    latest = latest_release(then="try again")
+    at update_url() (`latest`, when they were read already): their trees alone are fetched, with no file contents, into
+    a scratch repository that goes after, and each is compared with the folder (_differs). The release the folder has
+    whole wins: of several, the one with the most files (a release that only removed files), then the one the folder's
+    name gives (GitHub names a release's archive thimble-0.10.6), then the newest. A folder that no release matches
+    stops, with the nearest release and its files that differ."""
+    latest = latest or latest_release(then="try again")
     m = re.search(r"(\d+\.\d+\.\d+)$", root.name)
     named = f"v{m.group(1)}" if m else ""
     home().mkdir(parents=True, exist_ok=True)
@@ -2769,11 +2769,14 @@ def _link_copy(src: Path, dest: Path) -> None:
 
 def _browser_behind(repo: Path, base: str) -> str:
     """The release tag of the folder the browser workbench runs from, when it runs from the folder its install built it
-    in (no browser-ready) and that folder holds another release's files than base's (in `repo`). '' when the workbench
-    is not installed, runs from live or has base's files, and when its folder's files are no release's (a checkout with
-    changes of its own stays as it is)."""
+    in (no browser-ready), that folder is a release's zip, with no git of its own, and it holds another release's files
+    than base's (in `repo`). '' when the workbench is not installed, runs from live or has base's files, when its folder
+    is a git checkout (the person's to pull: thimble update leaves it as it is), and when the folder's files are no
+    release's."""
     seed = _browser_seed()
     if seed is None or (home() / "browser-ready").exists() or not (seed.parent / PLUGIN_JSON).is_file():
+        return ""
+    if _own_checkout(seed.parent):
         return ""
     if not _differs(repo, base, seed.parent)[0]:
         return ""
@@ -2979,12 +2982,12 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
 
     A dev install (the person's own clone, kind clone) has no releases to wait for: the target is what the person
     checked out (_update_dev). A release's zip has no git of its own: live, from thimble's repository at the release
-    the zip holds (ensure_live), is its git checkout first, and then it updates as a GitHub install does. once: the
-    session's check, which says a new commit once."""
+    the zip holds (ensure_live), is its git checkout first, and then it updates as a GitHub install does; a check only
+    reads which release that is. once: the session's check, which says a new commit once."""
     rel = release()
     has_live = bool(rel) and (live_dir() / ".git").exists()
     src = None if has_live else find_source()
-    if src and src["kind"] == "zip":
+    if src and src["kind"] == "zip" and not check:
         with Lock():
             rel, has_live = ensure_live(), True
     if (rel.get("kind") if has_live else src["kind"]) == "clone":
@@ -2994,6 +2997,9 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         repo, base, now = live_dir(), str(rel["base"]), release_name(rel)
         if not rel.get("tag"):
             now = _described(repo, base) or now
+    elif src["kind"] == "zip":
+        tag, base = _zip_release(Path(src["repo"]), src["prefix"], latest)
+        repo, now = Path(src["repo"]), tag[1:]
     else:
         repo, base = Path(src["repo"]), str(src["commit"])
         now = _described(repo, base) or _version_at(repo, base) or base[:7]
@@ -3014,9 +3020,9 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         return out
     behind = _browser_behind(repo, base) if not check and not out["newer"] and base == latest["commit"] else None
     if behind:
-        # the plugin has the release, and the browser workbench runs an older one from the folder its install built it
-        # in (a release's zip, or a clone not pulled, with the plugin from GitHub): both go to the release
-        out.update({"from": behind[1:], "newer": True})
+        # the plugin has the release, and the browser workbench runs an older one from the release's zip its install
+        # built it in, with the plugin from GitHub: the workbench alone moves from that release (browser_only)
+        out.update({"from": behind[1:], "newer": True, "browser_only": True})
     if check or not out["newer"]:
         same = now == latest["version"]
         line = (f"thimble {now} is the newest release." if same else
@@ -3221,8 +3227,11 @@ def _summary(d: dict[str, Any], paint: Paint | None = None) -> list[str]:
     c = paint or Paint(False)
     both = d.get("browser") == "ready"
     versions = f"{d['from']} → {d['to']}"
-    out = [f"Updated thimble{' to your checkout' if d.get('dev') else ''} {c('bold', versions)} "
-           f"(terminal plugin{' and browser' if both else ''})"]
+    # what moved from `from`: the terminal plugin, unless it had the release already (browser_only), and the browser
+    # workbench, once it runs the release
+    moved = [*([] if d.get("browser_only") else ["terminal plugin"]), *(["browser"] if both else [])]
+    line = f"Updated thimble{' to your checkout' if d.get('dev') else ''} {c('bold', versions)} ({' and '.join(moved)})"
+    out = [line] if moved else []
     if d.get("how") == "behind":
         out.append(f"{d['to']} is older than what thimble ran ({d['from']}); thimble moved back to it, as you checked it out.")
     elif d.get("how") == "apart":
