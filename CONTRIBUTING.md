@@ -124,7 +124,8 @@ When the model does something you do not want, change the cause, not the symptom
 5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
 The browser workbench (`browser/`, thimble 0.8's browser mode) keeps its own texts in `browser/prompts/`, and reads
-none of these.
+of these only the ones it runs as the terminal does: the citation checker's and the look's (`checker.md`,
+`observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`).
 
 ## Pull requests
 

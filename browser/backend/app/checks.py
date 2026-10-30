@@ -61,7 +61,10 @@ and starts each shown check that covers answers, a follow-on start, on the passa
 last run there that it has not seen (the new answer alone at its first run). A check turned on, or whose Chat is
 checked, runs on the last MAX_ANSWERS answers' passages it has not seen (refresh). Its comments are answer_comments'
 store, which the chat tints in the check's color. A run over answers never wakes main: neither its start nor its end
-sends main an event, a hand-back or a delivery; its end changes only answer-comments.json.
+sends main an event, a hand-back or a delivery; its end changes only answer-comments.json. A run of Heads up or
+Explainers over answers is no agent: it is the terminal's look at those answers (_looked, look.py), one fork of main
+shared by the two checks' runs, so the chat marks an answer as the terminal does; one whose prompt the analyst changed
+runs as its agent.
 
 Notices. A run that ends failed (its agent's API error, a start that did not happen, a program's error) is told in the
 foreground with Open on its chat, since the analyst may be in another chat (notices.post, under the run's key); its
@@ -616,6 +619,9 @@ class _Active:
 
 _active: dict[tuple[str, str, str], _Active] = {}  # (workspace, check, doc) -> its run
 _queue: list[_Active] = []  # runs waiting for a place, in the order they came
+# the looks at Claude's answers under way (_looked), by (workspace, passages, lenses): a run of Heads up or Explainers
+# that starts while the other's look at the same answers goes shares it, so the two decide an answer's marks together
+_looking: dict[tuple[str, tuple[str, ...], tuple[str, ...]], asyncio.Future] = {}
 _tasks: dict[asyncio.Task, str] = {}  # the starts and refreshes that run -> their workspace
 _retry_handle: asyncio.TimerHandle | None = None
 
@@ -1037,7 +1043,8 @@ async def _go(act: _Active) -> None:
 
 async def _launch(act: _Active) -> None:
     """Write the run's task file (first_message), then start its agent (subagents.start_job, `thimble:check`) on
-    Settings' checks row, as its route says; or the run as an extension's program of the checks task (_program)."""
+    Settings' checks row, as its route says; or the run as an extension's program of the checks task (_program); or,
+    for Heads up and Explainers over Claude's answers, the terminal's look (_looked)."""
     from . import subagents, tasks  # noqa: PLC0415 — tasks reads the extensions
 
     c = act.c
@@ -1046,10 +1053,13 @@ async def _launch(act: _Active) -> None:
         _finish(act, "failed", f"no check {act.check}")
         return
     cover = [p for p in passages_of(c, act.doc) if p["ref"] in set(act.covered)]
+    part = tasks.program(c, "checks")
+    if part is None and act.doc == ANSWERS and _is_lens(check):
+        await _looked(act, cover)
+        return
     text = await asyncio.to_thread(first_message, c, check, act.doc, cover)
     if act.ended:
         return
-    part = tasks.program(c, "checks")
     if part is not None:
         await _program(act, check, cover, text, part)
         return
@@ -1082,6 +1092,47 @@ def _write_task(c: str, path: Path, text: str) -> list[Path]:
     (read_parts.write), in a folder its agent and main's Bash can write, so never through a link. The paths, in
     order."""
     return read_parts.write(config.workspace_dir(c), path, text + "\n")
+
+
+def _is_lens(check: dict[str, Any]) -> bool:
+    """Whether a run of `check` over Claude's answers is the terminal's look: Heads up or Explainers, with the prompt its
+    built-in has now. One whose prompt the analyst changed runs as its agent, on the analyst's words."""
+    from . import look  # noqa: PLC0415
+
+    cid = str(check.get("id") or "")
+    return cid in look.LENS_OF and _words_key(check.get("prompt")) == _words_key((builtin(cid) or {}).get("prompt"))
+
+
+async def _looked(act: _Active, cover: list[dict[str, Any]]) -> None:
+    """A run of Heads up or Explainers over Claude's answers, as the terminal marks an answer: one look (look.run) with
+    the lens of each of the two that is on and covers the answers, shared with the other's run on the same passages
+    while it goes (_looking), so the heads-up and the explainers are decided together; this check's marks are its
+    comments on their words. A mark on words the other kind already holds there is not added (answer_comments.add)."""
+    from . import look  # noqa: PLC0415
+
+    c = act.c
+    lenses = [lens for cid, lens in look.LENS_OF.items()
+              if cid == act.check or any(x["id"] == cid and x.get("shown") and covers(x, "answers") and _is_lens(x)
+                                         for x in list_checks(c))]
+    key = (c, tuple(act.covered), tuple(lenses))
+    task = _looking.get(key)
+    if task is None:
+        task = _looking[key] = asyncio.ensure_future(look.run(c, lenses, cover))
+        task.add_done_callback(lambda t: _looking.pop(key, None) if _looking.get(key) is t else None)
+    got = await asyncio.shield(task)
+    if act.ended:
+        return
+    if got.get("error"):
+        _finish(act, "failed", str(got["error"]))
+        return
+    for it in got["items"]:
+        if it["lens"] != look.LENS_OF[act.check]:
+            continue
+        shown, details, evidence = note_parts(c, it["text"], it["details"])
+        if shown:
+            answer_comments.add(c, passage=it["passage"], text=shown, details=details, author=AUTHOR, check=act.check,
+                                run=act.run, evidence=evidence, words=it["words"])
+    _finish(act, "done", "")
 
 
 def subagent_started(c: str, run: Any, req: dict[str, Any]) -> None:
