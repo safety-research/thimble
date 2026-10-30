@@ -215,6 +215,17 @@ test("a value computed by code shows, above its output line, the line that print
   expect(band).not.toContain('print(len(runs))')
 })
 
+test("a value computed by code beside a command that printed other lines shows no line of code above it: `head` may have printed the cited line, so the script's print after it is not named", CITES, async ($, on) => {
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'main', code: 'head -3 runs.csv\npython3 -c \'import csv; print(sum(1 for r in csv.DictReader(open("runs.csv")) if r["status"] == "failed"))\'', output: 'id,day,status\nn1,2026-03-01,passed\nn2,2026-03-02,failed\n12', highlight: [[49, 55]] },
+  }, 's-tray-head')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const band = textOf(await $.ui.render(above()))
+  expect(band).toContain('n2,2026-03-02,failed')
+  expect(band).not.toContain('python3 -c')
+})
+
 test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', CITES, async ($, on) => {
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',

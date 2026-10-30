@@ -29,6 +29,10 @@
 //   evidenceLine(ev)                       the one line of a citation's evidence that holds the cited value
 //   lineWindow(line, room)                 that line cut to `room` characters around the value
 //   printLine(code, out, at), printedBy(ev) the line of a check's code that printed the output's line `at`
+//                                          (printed.mjs)
+import { printLine } from './printed.mjs'
+
+export { printLine }
 
 export const sameRef = (a, b) => !!a && !!b && a.row === b.row && a.kind === b.kind && (a.kind === 'citation' ? a.n === b.n : a.id === b.id)
 
@@ -359,130 +363,18 @@ export function lineWindow(line, room) {
   return { ...line, text: head + text.slice(from, to) + tail, spans: moved }
 }
 
-// a line that prints: Python's print, a shell's echo or printf, JavaScript's console.log, a write to stdout
-const PRINTS = /\b(print|printf|println|puts|echo)\b|console\.log|\.write\s*\(/
-// what a template fills in: an f-string's or format's `{}`, a template's `${}`, a shell's `$name`, a % conversion
-const FILLED = /\$\{[^{}]*\}|\{[^{}]*\}|\$\w+|%[-+ #0]*\d*(?:\.\d+)?[sdifrxXeEgGc%]/
-
-/** A print line's own part: the string literals it hands the print itself, each as written, and the rest of what it
- *  hands it. That is the print's arguments, inside its parentheses, or the rest of the line after a shell's echo; a
- *  literal deeper inside them (`df["status"]`, `== "failed"`, `.groupby("day")`) only picks what is printed. */
-function printArgs(line) {
-  const s = String(line)
-  const m = PRINTS.exec(s)
-  if (!m) return { literals: [], rest: '' }
-  // the brackets around each character outside string literals (-1 inside one), the literals passed over whole
-  const lits = []
-  const depth = []
-  let d = 0
-  for (let i = 0; i < s.length; i++) {
-    depth[i] = d
-    const c = s[i]
-    if (c === '"' || c === "'") {
-      let j = i + 1
-      while (j < s.length && s[j] !== c) j += s[j] === '\\' ? 2 : 1
-      // with its prefix, as in f"…" or rb'…'
-      const pre = /(?:^|[^\w$])([frbuFRBU]{1,2})$/.exec(s.slice(Math.max(0, i - 3), i))
-      lits.push({ at: i - (pre ? pre[1].length : 0), end: Math.min(j + 1, s.length), d, text: s.slice(i + 1, j) })
-      for (let k = i + 1; k <= j && k < s.length; k++) depth[k] = -1
-      i = j
-    } else if ('([{'.includes(c)) d++
-    else if (')]}'.includes(c)) d = Math.max(0, d - 1)
-  }
-  const from = m.index + m[0].length
-  const paren = m[0].endsWith('(') ? from - 1 : /^\s*\(/.test(s.slice(from)) ? s.indexOf('(', from) : -1
-  const own = paren >= 0 ? depth[paren] + 1 : Math.max(0, depth[m.index])
-  // the arguments end at the bracket that closes the print's parentheses
-  let to = s.length
-  if (paren >= 0) for (let i = paren + 1; i < s.length; i++) if (depth[i] === own && ')]}'.includes(s[i])) { to = i; break }
-  const literals = lits.filter(l => l.at >= from && l.at < to && l.d === own)
-  let rest = ''
-  let at = paren >= 0 ? paren + 1 : from
-  for (const l of literals) { rest += s.slice(at, l.at); at = l.end }
-  rest += s.slice(at, to)
-  return { literals: literals.map(l => l.text), rest }
-}
-
-/** The words a line of code writes out as they are: the string literals it hands the print itself, without what
- *  f-strings, `{}`, %, a shell's `$name` and a template's `${}` fill in. */
-function literalBits(line) {
-  const bits = []
-  for (const text of printArgs(line).literals) {
-    for (const part of text.split(new RegExp(`${FILLED.source}|\\\\[ntr]`))) {
-      const t = part.trim()
-      if (t.length >= 2) bits.push(t)
-    }
-  }
-  return bits
-}
-
-/** Whether a print line may print more lines after the one that holds its words: it prints a value (an argument that
- *  is no literal, a field a template fills in), or a literal breaks the line. */
-function goesOn(line) {
-  const { literals, rest } = printArgs(line)
-  const values = rest.replace(/\b(sep|end|file|flush)\s*=\s*[^,)]*/g, '')
-  return /[\w$]/.test(values) || literals.some(t => FILLED.test(t) || /\\n/.test(t))
-}
-
-/**
- * The one line of a check's code that printed the output's line `at` (`out` is the whole output; a single line is its
- * line 0): the print whose own words stand in that line, the one with the most of them (the later one on a tie).
- * Else the line came from a print of values alone (`print(n)`, `echo $x`), or from the print whose words stand on a
- * line above it and that went on printing (`print("by day:", counts)`): the prints in order between the nearest lines
- * above and below that hold a print's words, each of which printed at least one line. That line when the order leaves
- * one; else '', since a print of other values beside it (a neighbor's `print(len(df))`) is never shown as the one that
- * printed it. A line whose own words are not in the output did not print it (a script's `print("totals")` above another
- * print's line, a trailing `echo $TMPDIR` above the script's output).
- */
-export function printLine(code, out, at = 0) {
-  const lines = String(code || '').split('\n')
-  const prints = []
-  lines.forEach((l, i) => {
-    if (!l.trim() || /^\s*(#|\/\/)/.test(l) || !PRINTS.test(l)) return
-    prints.push({ i, bits: literalBits(l), indent: /^\s*/.exec(l)[0].length })
-  })
-  const said = String(out ?? '').split('\n')
-  const k = Math.max(0, Math.min(said.length - 1, Math.trunc(Number(at)) || 0))
-  const words = new Map()
-  const wordsOn = j => {
-    if (!words.has(j)) {
-      let best = null
-      let most = 0
-      for (const p of prints) {
-        const n = p.bits.filter(b => said[j].includes(b)).reduce((a, b) => a + b.length, 0)
-        if (n > 0 && n >= most) { best = p; most = n }
-      }
-      words.set(j, best)
-    }
-    return words.get(j)
-  }
-  const shown = p => lines[p.i].trim()
-  if (wordsOn(k)) return shown(wordsOn(k))
-  let a = k - 1
-  while (a >= 0 && !wordsOn(a)) a--
-  let b = k + 1
-  while (b < said.length && !wordsOn(b)) b++
-  const above = a >= 0 ? wordsOn(a) : null
-  const below = b < said.length ? wordsOn(b) : null
-  // the prints of values alone that ran between them: after the one above and before the one below; where the one
-  // below stands no later in the code, a loop went round, and they are the prints of that loop after the one above
-  // or before the one below
-  const between = p => {
-    if (p.bits.length) return false
-    if (!above || !below || below.i > above.i) return (!above || p.i > above.i) && (!below || p.i < below.i)
-    return (p.i > above.i && p.indent >= above.indent) || (p.i < below.i && p.indent >= below.indent)
-  }
-  const bare = prints.filter(between)
-  // each printed one line at least, in order, after any lines the print above went on with
-  const room = b - a - 1
-  const nth = k - a - 1
-  const could = bare.filter((p, t) => nth >= t && room - 1 - nth >= bare.length - 1 - t)
-  if (above && goesOn(lines[above.i]) && room - 1 - nth >= bare.length) could.push(above)
-  return could.length === 1 ? shown(could[0]) : ''
-}
+// the line printedBy gave for a cited output line, by its line, code and output: the tray and the claims pane draw it
+// again with each frame, and reading a long output takes a while
+const printed = new Map()
 
 /** The line of a computed citation's code that printed the output line that holds the value (evidenceLine), or ''. */
 export function printedBy(ev) {
   if (!ev || ev.kind !== 'computed') return ''
-  return printLine(ev.code, ev.output, outputHit(ev)?.i ?? 0)
+  const at = outputHit(ev)?.i ?? 0
+  const key = `${at}\u0000${ev.code}\u0000${ev.output}`
+  if (!printed.has(key)) {
+    if (printed.size >= 64) printed.delete(printed.keys().next().value)
+    printed.set(key, printLine(ev.code, ev.output, at))
+  }
+  return printed.get(key)
 }

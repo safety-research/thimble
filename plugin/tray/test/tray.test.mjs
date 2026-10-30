@@ -147,11 +147,38 @@ test("of several prints, the line shown is the one that printed the cited line, 
   assert.deepEqual([0, 2, 4].map(i => printLine(loop, out, i)), ['print(len(runs))', 'print(counts[d])', 'print(counts[d])'])
   // a label print that goes on with a value of several lines, then a print of one value: the value's last line is the
   // second print's, the lines between could be either's, so none is shown
-  const label = 'print("by status:", counts)\nprint(len(runs))'
+  const label = 'print("by status:", counts)\nprint(n_runs)'
   const said = 'by status: status\npassed    28\nfailed    12\n40'
-  assert.deepEqual([2, 3].map(i => printLine(label, said, i)), ['', 'print(len(runs))'])
+  assert.deepEqual([2, 3].map(i => printLine(label, said, i)), ['', 'print(n_runs)'])
+  // a print of a count prints one line, so the lines between are the label print's
+  assert.deepEqual([2, 3].map(i => printLine('print("by status:", counts)\nprint(len(runs))', said, i)), ['print("by status:", counts)', 'print(len(runs))'])
   // three prints of values, each of several lines or one: a line inside them could be any one's, so none is shown,
   // though a comparison's literal names a word of the line
   const three = 'print(runs.shape)\nprint(runs["status"].value_counts())\nprint(runs.groupby("config")["status"].apply(lambda s: (s == "failed").mean()))'
   assert.equal(printLine(three, '(40, 5)\nstatus\npassed    28\nfailed    12\nName: count, dtype: int64\nconfig\na    0.20\nb    0.45', 3), '')
+})
+
+test('a line of code is named above a cited output line only when the code shows that it printed that line: never a print beside a command, a function or a condition that may have printed it', () => {
+  // `head` printed the file's lines, the script after it only the count: no line of the code is named for a file's
+  // line, nor for the count, since `head` may have printed it too
+  const head = 'head -3 runs.csv\npython3 -c \'import csv; print(sum(1 for r in csv.DictReader(open("runs.csv")) if r["status"] == "failed"))\''
+  const csv = 'id,day,status\nn1,2026-03-01,passed\nn2,2026-03-02,failed\n12'
+  assert.deepEqual([0, 2, 3].map(i => printLine(head, csv, i)), ['', '', ''])
+  // a print inside a function runs when the function is called, so the print beside the call is not the one
+  assert.equal(printLine('def show(label, value):\n    print(f"{label}: {value}")\n\nprint(len(runs))\nshow("failed", n_failed)', '40\nfailed: 12', 1), '')
+  assert.equal(printLine('def report(v):\n    print(v)\nprint(len(runs))\nx = report(n_failed)', '40\n12', 1), '')
+  // a print under a condition may not have run: the first line could be either print's
+  assert.equal(printLine('if errors:\n    print(errors)\nprint(df.status.value_counts())', 'status\nfailed    12\npassed    28\nName: count, dtype: int64', 0), '')
+  // lines a warning added after the output: the value's line is the last print's when the print before it printed a
+  // count, one line; with a print of any value before it, either could have printed it
+  const warned = '40\n12\n/made/up.py:3: FutureWarning: a made-up warning\n  df.groupby("day")'
+  assert.equal(printLine('print(len(runs))\nprint(n_failed)', warned, 1), 'print(n_failed)')
+  assert.equal(printLine('print(n_runs)\nprint(n_failed)', warned, 1), '')
+  // an output cut to its window: its first line may be a part of a line another print began
+  assert.equal(printLine('print(len(df))\nprint(df.to_string())', '…   n7  failed  12\n   n8  passed  9', 0), '')
+  // a print of its own words alone writes exactly them: `total` inside a table's line is the table's
+  assert.equal(printLine('print("total")\nprint(df)', 'total\n   kind  total\n0  edit  12', 1), 'print(df)')
+  // the checker's way: a script from a heredoc, a print after a loop of prints
+  const script = "python3 - <<'PY'\nimport csv\nruns = list(csv.DictReader(open('runs.csv')))\nprint(len(runs))\nfor r in runs:\n    if r['status'] == 'failed':\n        print(r['id'], r['day'])\nPY"
+  assert.deepEqual([0, 2].map(i => printLine(script, '40\nn4 2026-03-04\nn9 2026-03-09', i)), ['print(len(runs))', "print(r['id'], r['day'])"])
 })
