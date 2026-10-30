@@ -3471,8 +3471,8 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
 
 
 def _checkout(repo: Path) -> dict[str, Any]:
-    """The person's own clone as they have it now, {commit, name, dirty}: its HEAD (as they pulled it: thimble fetches
-    nothing), named `<branch> at <sha7>` (the sha alone on a detached HEAD), and the files with changes not committed."""
+    """The person's own clone as they have it now, {commit, name, dirty}: its HEAD (as they pulled it: thimble never
+    pulls), named `<branch> at <sha7>` (the sha alone on a detached HEAD), and the files with changes not committed."""
     commit = git("rev-parse", "HEAD", cwd=repo)
     branch = git("symbolic-ref", "--short", "-q", "HEAD", cwd=repo, check=False)
     dirty = [x[3:] for x in run(["git", "-c", "core.quotePath=false", "status", "--porcelain"], cwd=repo).stdout.splitlines()
@@ -3492,6 +3492,55 @@ def _ancestor(repo: Path, a: str, b: str) -> bool:
     return run(["git", "merge-base", "--is-ancestor", a, b], cwd=repo, check=False).returncode == 0
 
 
+def _upstream(repo: Path) -> dict[str, str] | None:
+    """What the person's clone pulls from: its branch's upstream, else origin's main (a detached HEAD, a branch of their
+    own), {remote, ref, tracking, name, pull}; None when it has neither."""
+    branch = git("symbolic-ref", "-q", "HEAD", cwd=repo, check=False)
+    f = git("for-each-ref", "--format=%(upstream)%09%(upstream:short)%09%(upstream:remotename)%09%(upstream:remoteref)",
+            branch, cwd=repo, check=False).split("\t") if branch else []
+    if len(f) == 4 and f[0].startswith("refs/remotes/") and f[2] and f[3]:
+        return {"remote": f[2], "ref": f[3], "tracking": f[0], "name": f[1], "pull": f"git -C {_q(repo)} pull"}
+    if "origin" in git("remote", cwd=repo, check=False).split():
+        return {"remote": "origin", "ref": "refs/heads/main", "tracking": "refs/remotes/origin/main",
+                "name": "origin/main", "pull": f"git -C {_q(repo)} pull origin main"}
+    return None
+
+
+def _behind(repo: Path, commit: str) -> dict[str, Any]:
+    """Whether the person's clone is behind what it pulls from (_upstream), which thimble update fetches into its
+    remote-tracking branch alone: the clone's HEAD, branches and files stay as they are, for the person to pull.
+    {name, behind, tip, pull}, or {name, error} when the fetch failed (offline); {} with no upstream to check."""
+    up = _upstream(repo)
+    if not up:
+        return {}
+    try:
+        p = run(["git", "fetch", "-q", "--no-tags", up["remote"], f"+{up['ref']}:{up['tracking']}"], cwd=repo,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, check=False, timeout=120)
+        err = "" if p.returncode == 0 else next(
+            (x.strip() for x in (p.stderr or p.stdout).splitlines() if x.strip()), "no message")
+    except FixError as e:
+        err = str(e)
+    if err:
+        return {"name": up["name"], "error": err}
+    tip = git("rev-parse", f"{up['tracking']}^{{commit}}", cwd=repo)
+    return {"name": up["name"], "behind": int(git("rev-list", "--count", f"{commit}..{tip}", cwd=repo)), "tip": tip,
+            "pull": up["pull"]}
+
+
+def _behind_lines(d: dict[str, Any]) -> list[str]:
+    """What a dev install's thimble update says of the checkout (`to`) against what it pulls from (d's upstream,
+    _behind): how far behind it is and the command that pulls it, or that thimble could not check."""
+    u = d.get("upstream") or {}
+    if u.get("error"):
+        return [f"thimble could not check whether {u['name']} has newer commits ({u['error']}); check the network, "
+                "then run thimble update again."]
+    if not u.get("behind"):
+        return []
+    n = u["behind"]
+    return [f"thimble runs your checkout ({d['to']}), which is {n} commit{'' if n == 1 else 's'} behind {u['name']} "
+            f"({u['tip'][:7]}): {u['pull']}, then run thimble update again."]
+
+
 def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[str, Any] | None,
                 say=None) -> dict[str, Any]:
     """thimble update on a dev install (scripts/install.sh --local): the target is the HEAD of the person's own clone,
@@ -3502,7 +3551,7 @@ def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[s
     and goes on again once the new commit passes done's checks with it. A pull is often a small step, and a fix whose
     change still applies is the same change there; one the checkout already has comes up empty and leaves the list (the
     person's own merged pull request). A fix that does not apply, or fails the checks, is set aside, for thimble reapply
-    and --continue."""
+    and --continue. It also says when the checkout is behind what it pulls from (_behind), in place of up to date."""
     repo = Path(rel["repo"]) if rel else Path(src["repo"])
     base = str(rel["base"]) if rel else str(src["commit"])
     co = _checkout(repo)
@@ -3518,10 +3567,13 @@ def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[s
             if out["say"]:
                 write_json(home() / "release.json", {**rel, "told": new})
         return {**out, "lines": []}
+    out["upstream"] = _behind(repo, new)
     if not out["newer"]:
         # the fixes an update by an older thimble set aside, which it left at that
         carried = carry(browser=True, say=say) if rel else None
-        lines = [f"thimble is up to date with your checkout ({to}).", *_dirty_line(co["dirty"])]
+        behind = _behind_lines(out)
+        lines = [*(behind if out["upstream"].get("behind") else
+                   [f"thimble is up to date with your checkout ({to}).", *behind]), *_dirty_line(co["dirty"])]
         if carried:
             return {**out, "carried": carried, "reload": bool(carried.get("reload")),
                     "lines": [*lines, *_carried_lines(carried)]}
@@ -3602,6 +3654,7 @@ def _summary(d: dict[str, Any], paint: Paint | None = None) -> list[str]:
         out.append(f"{d['to']} is older than what thimble ran ({d['from']}); thimble moved back to it, as you checked it out.")
     elif d.get("how") == "apart":
         out.append(f"{d['to']} does not contain what thimble ran ({d['from']}); thimble moved to it, as you checked it out.")
+    out += _behind_lines(d)
     out += _dirty_line(d.get("dirty") or [])
     titles = d.get("titles") or {}
     if d.get("back"):

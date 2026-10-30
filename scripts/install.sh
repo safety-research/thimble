@@ -29,7 +29,9 @@ Running it again is safe, and updates both.
 
   --no-browser   install the terminal plugin only
   --no-plugin    install the browser workbench only
-  --local        use this checkout as the plugin's marketplace, in place of GitHub (to try a branch)
+  --local        for working on thimble's own code or trying a branch: the plugin comes from this checkout in place
+                 of GitHub, and thimble update follows the checkout, which you pull yourself. Leave it out for a
+                 normal install, which updates from GitHub
   --bin-dir DIR  put the thimble command and the thimble-browser launcher in DIR
   --no-setup     do not ask how the browser workbench reaches Claude (the page asks at its first start)
   --remove-0.9   when thimble 0.9 is here, remove it, then install: it shows the steps and runs them only after you

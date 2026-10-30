@@ -118,8 +118,9 @@ Options:
   `thimble-browser --setup` asks again. `thimble-browser --setup --key-file FILE` takes an API key from a file you
   wrote (so that Claude, when it installs thimble for you, never sees the key), and `--setup --find-wif` lists the
   Workload Identity Federation config files in `~/.anthropic`, `~/.config/anthropic` and `~/.thimble-browser`.
-- `--local`: the plugin from this checkout in place of GitHub, to try a branch. Claude Code then loads the plugin from
-  the checkout's `plugin/` folder.
+- `--local`: for working on thimble's own code or trying a branch. Claude Code loads the plugin from this checkout's
+  `plugin/` folder in place of GitHub, and `thimble update` then follows the checkout, which you pull yourself (it says
+  when the checkout is behind, and never pulls it). Leave it out for a normal install, which updates from GitHub.
 - `--remove-0.9`: remove thimble 0.9 first, after you answer y, in a terminal (see "If you used thimble 0.9").
 
 You can run it again at any time. It installs again what it installed, and updates the plugin and the browser
