@@ -291,14 +291,16 @@ class Conv:
     async def call_thimble(self, name: str, args: dict[str, Any], tool_use_id: str) -> Any:
         """One of thimble's tools, as 0.8's MCP shim and call route ran it: the caller's line first (who made the
         call), then the call as that caller's session (tools._as_caller), so a fork's call runs as main's own and an
-        agent's as its role's."""
-        from . import subagent_files as files, tools  # noqa: PLC0415
+        agent's as its role's. Main's result carries the quiet events that came while its turn runs, such as the
+        analyst's choice in a label's ask (events.with_held)."""
+        from . import events, subagent_files as files, tools  # noqa: PLC0415
 
         files.add_caller(self.space.ws, tool_use_id, self.agent_id or "", self.agent_type or "")
         refused, session = await tools._as_caller(self.c, name, tool_use_id)
         if refused:
             return tools.err(refused)
-        return await tools.call(self.c, name, args, session=session, tool_use_id=tool_use_id)
+        res = await tools.call(self.c, name, args, session=session, tool_use_id=tool_use_id)
+        return events.with_held(self.c, res) if self.kind == "main" else res
 
     def take_notes(self) -> list[str]:
         """What waits for this conversation's next turn: the notes kept for it (Space.tell), then those about the cards
