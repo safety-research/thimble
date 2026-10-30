@@ -37,7 +37,7 @@ import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHeld, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { markPressed as trayMarkPressed, trayBand, trayBandDrawn, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayRowShown, trayShape, type BandRoom } from '../tray/seam'
+import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayShape, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { paneHeld } from './pane'
 import { askOnce } from './rowhook'
@@ -168,23 +168,18 @@ export async function underCard($: Engine, els: Any, id: string, cols: number): 
 
 // ------------------------------------------------------------------------------------------------ above the prompt
 
-/** What stands above the bar: the tray while it is open. `room`: the rows the band gives it (tray/tray.ts BandRoom),
- *  those over the bar, and its blank rows once the person expanded it; null: no limit. */
+/** What stands above the bar: the tray while it is open. `room`: the rows the band has for it (tray/tray.ts BandRoom),
+ *  those over the bar; null: no limit. */
 export async function aboveBar($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
   return els0(await safe(trayBand($, els, width, room), []))
 }
 
-/** What stands above the bar as last drawn: whether it took the band's blank rows (`tight`, an expanded tray: the band
- *  leaves them out), and whether its body shows in a window of its own (`windowed`: the band then ends with blank rows
- *  under the bar, so that Claude Code hands it the wheel). */
-export function aboveShape(): { tight: boolean; windowed: boolean } {
-  try { return trayShape() } catch { return { tight: false, windowed: false } }
-}
-
-/** The band above the prompt drew `rows` rows: what the transcript's window gives way to (the tray tells the person's
- *  scroll of the transcript from it, tray/tray.ts rowShown). */
-export function bandDrawn(rows: number): void {
-  try { trayBandDrawn(rows) } catch { /* the band draws as it is */ }
+/** What stands above the bar as last drawn: whether the band's blank row stands between it and the bar (`gap`; a
+ *  tray the band has no row to spare for takes it), and whether its body shows in a window of its own (`windowed`: the
+ *  band then ends with `below` blank rows under the bar, one for each row of the body under that window and at least
+ *  two, so that Claude Code hands it the wheel and its row under its window counts them). */
+export function aboveShape(): { gap: boolean; windowed: boolean; below: number } {
+  try { return trayShape() } catch { return { gap: true, windowed: false, below: 0 } }
 }
 
 /** The keys taken now by what holds them and names them in its own place, which every other surface leaves unnamed,
@@ -284,8 +279,6 @@ export const registerAnswerView: Register = on => {
   // (fails safe, core/rowhook.ts: a throw here leaves the answer and its cards as drawn beneath)
   on('ui.render', { component: 'AssistantMessage', requestId: /\S/ }, async ($, e, next) => {
     const below = askOnce(e, next)
-    // which of its rows the screen shows: a scroll of the transcript under an open tray closes it
-    try { trayRowShown($, e.requestId, e.props?.onScreen) } catch { /* the row draws as it is */ }
     try {
       const r = await below()
       if (e.props.isSummary) return r

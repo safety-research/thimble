@@ -10,6 +10,8 @@
 //                                under it, the keys' row and the input bar at the bottom
 //   under a pane (threadUnder)   a citation's evidence, a label, coverage, the claims: the pane's thread under it, its
 //                                conversation and the input bar (core/pane.ts calls it)
+//   in the tray (threadInTray)   under a citation's evidence in the panel + opens in the tray (tray/tray.ts): the
+//                                thread's conversation, and its key row and input bar, one row each
 //
 // The conversation, written and spaced as Claude Code writes main's:
 //
@@ -270,29 +272,26 @@ function keyTyped($: Engine, key: string, v: string, keys: PaneKey[]): void {
   })
 }
 
-/** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule. ↵ asks the
+/** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule; `one`, the row
+ *  of `❯` and the field alone (the tray, whose frame stands around it in the few rows over the prompt). ↵ asks the
  *  thread about `scope`; a key of the keys' row typed alone into the empty field presses it (keyTyped). */
-function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = [], ask = ''): Any[] {
+function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = [], ask = '', one = false): Any[] {
   const { Box, Text, Input } = els
   const key = threadKey(scope)
   const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
   const what = cut(askWords(scope), Math.max(20, w - 24))
-  return [
-    Text({ key: 'entry-gap', children: ' ' }),
-    rule('entry-top'),
-    Box({ key: 'entry-row', flexDirection: 'row', children: [
-      Box({ width: 2, flexShrink: 0, children: [Text({ color: 'text', children: '❯ ' })] }),
-      Box({ flexGrow: 1, flexShrink: 1, children: [Input({
-        key: fieldKey(key), placeholder: ask ? cut(ask, Math.max(20, w - 12)) : `Ask about ${what}${what.endsWith('…') ? '' : '…'}`, submitLabel: 'ask',
-        ...(focus ? { autoFocus: true } : {}),
-        ...(carried.has(key) ? { value: carried.get(key) } : {}),
-        onInput: (v: string) => { const was = typed.get(key) ?? ''; typed.set(key, v); if (!was) keyTyped($, key, v, keys) },
-        // the question stays in the field while its thread's fork starts: a second ↵ then asks nothing more
-        onSubmit: (v: string) => { void askHere($, scope, v) },
-      })] }),
-    ] }),
-    rule('entry-bottom'),
-  ]
+  const row = Box({ key: 'entry-row', flexDirection: 'row', children: [
+    Box({ width: 2, flexShrink: 0, children: [Text({ color: 'text', children: '❯ ' })] }),
+    Box({ flexGrow: 1, flexShrink: 1, children: [Input({
+      key: fieldKey(key), placeholder: ask ? cut(ask, Math.max(20, w - 12)) : `Ask about ${what}${what.endsWith('…') ? '' : '…'}`, submitLabel: 'ask',
+      ...(focus ? { autoFocus: true } : {}),
+      ...(carried.has(key) ? { value: carried.get(key) } : {}),
+      onInput: (v: string) => { const was = typed.get(key) ?? ''; typed.set(key, v); if (!was) keyTyped($, key, v, keys) },
+      // the question stays in the field while its thread's fork starts: a second ↵ then asks nothing more
+      onSubmit: (v: string) => { void askHere($, scope, v) },
+    })] }),
+  ] })
+  return one ? [row] : [Text({ key: 'entry-gap', children: ' ' }), rule('entry-top'), row, rule('entry-bottom')]
 }
 
 /** A field a pane edits in its input bar in place of a question (labels/pane.tsx: a label's rule, model or records):
@@ -518,6 +517,23 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   const edit = kind === 'labels' ? await labelEdit($, args).catch(() => null) : null
   if (edit) return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...editEntry(els, edit, W - 1)] }
   return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '')] }
+}
+
+/** The thread about `scope` in the tray over the prompt, under the evidence of the citation it is about, as the side
+ *  pane shows that thread under the same evidence (threadUnderParts): its conversation (`conv`), which scrolls with the
+ *  evidence, and the key row and the input bar (`bottom`), one row each, which the tray keeps at its bottom
+ *  (tray/tray.ts). The tray's frame and the band's few rows leave out the bar's blank row and rules. */
+export async function threadInTray($: Engine, e: Any, scope: ThreadScope, els: Any): Promise<{ conv: Any[]; bottom: Any[] }> {
+  const key = threadKey(scope)
+  await $.state.get({ plugin: 'thimble', key: 'thread', id: key })
+  const { W, H } = sizeOf(e)
+  const t = threadOf(key)
+  const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4))) : []
+  const pk = paneKeys($, t)
+  return {
+    conv: conv.length ? [els.Text({ key: 'thread-gap', children: ' ' }), ...conv] : [],
+    bottom: [...keysRow(els, pk).slice(1), ...entry($, els, scope, W - 1, false, pk, '', true)],
+  }
 }
 
 /** About how many rows threadUnder takes under a pane: the gap and the input bar, and with a conversation its share of
