@@ -160,48 +160,28 @@ async def test_an_example_quotes_several_moments_of_each_trial_and_code_on_it_as
     assert r.is_error and "`refs`" in r.text and "card of code" not in r.text, r.text
 
 
-async def test_fix_this_on_a_card_of_code_that_printed_quotes_makes_it_an_example_in_place(group, data_tmp):
-    """A card of code printed two trials' quotes as a Python list, and a request to fix that card made another card:
-    edit_card could not change a card of code to another kind, so no fix of that card could succeed. Given an
-    example's refs, edit_card now makes the card that example where it stands, its question kept; the takeaway,
-    written for the printed list, goes, and the card's history keeps the code. Code given beside the refs is refused,
-    and the card stays as it was."""
+async def test_the_example_a_card_of_code_that_printed_quotes_should_be_is_a_new_card(group, data_tmp):
+    """A card of code printed two trials' quotes as a Python list. edit_card does not change a card of code into an
+    example: given an example's refs, with the kind or without it, it says to add a new card and leaves the card's code
+    as it was, and add_card makes the example from the same refs."""
     said = ["The forecast says rain until noon, so the picnic could start at one instead.",
             "The shelter by the lake seats twenty, and the club has eighteen names on its list."]
     trials = [_trajectory(data_tmp, t, said) for t in ("picnic-lake__RvtmQxa", "picnic-hill__GdsaPwe")]
     code = "quotes = [%r, %r]\nfor q in quotes:\n    print(q)" % tuple(said)
-    r = await call("add_card", group, kind="code", question="What did the agents say about the weather?",
-                   code=code, takeaway="Both agents moved the picnic to the afternoon.")
-    cid = _cid(r)
-    after = _cid(await call("add_card", group, kind="note", question="What next?", text="Book the shelter."))
+    cid = _cid(await call("add_card", group, kind="code", question="What did the agents say about the weather?", code=code))
     refs = [{"ref": t, "quote": "start at one instead"} for t in trials]
-    r = await call("edit_card", group, card=f"card:{cid}", kind="example", refs=refs)
-    assert _cid(r) == cid and tools.hint("takeaway-missing-shown", cid=cid) in r.text, r.text
-    cell = notebook.get_cell(CORPUS, cid)
-    assert cell["kind"] == "example" and not notebook.runnable(cell) and "code" not in cell and "outputs" not in cell
-    assert [ref.split("#")[0] for ref in cell["payload"]["refs"]] == trials, cell["payload"]
-    assert cell["title"] == "What did the agents say about the weather?" and cell["takeaway"] == ""
-    ws = config.workspace_dir(CORPUS)
-    assert [c["id"] for c in notebook.read_notebook(ws, group)["cells"]] == [cid, after], "the card stays in its place"
-    was = notebook.version_of(ws, cell, cell["edited"][-1]["id"])
-    assert was["kind"] == "code" and was["code"] == code and was["status"] == "ok", was
-    # code beside the refs, or a kind that runs code, is refused and leaves the card as it was; a plan's steps still
-    # ask for a card of their own; a note's text alone makes a card of code that note
-    sid = _cid(await call("add_card", group, kind="code", question="Steps?", code="print(1)"))
-    for wrong in ({"kind": "example", "code": code, "refs": refs}, {"kind": "code", "code": code, "refs": refs},
-                  {"steps": [{"text": "Read the trials"}]}):
-        r = await call("edit_card", group, card=f"card:{sid}", **wrong)
-        assert r.is_error and notebook.get_cell(CORPUS, sid)["code"] == "print(1)", r.text
-    tid = _cid(await call("add_card", group, kind="table", question="How many trials?",
-                          code="import pandas as pd\npd.DataFrame({'trials': [2]}, index=['all'])"))
-    assert _cid(await call("edit_card", group, card=f"card:{tid}", text="Two trials.")) == tid
-    assert notebook.get_cell(CORPUS, tid)["payload"] == {"text": "Two trials."}
+    for args in ({"kind": "example", "refs": refs}, {"refs": refs}):
+        r = await call("edit_card", group, card=f"card:{cid}", **args)
+        assert r.is_error and tools.hint("edit_card-kind", cid=cid, kind="code", new="example") in r.text, r.text
+        assert notebook.get_cell(CORPUS, cid)["code"] == code
+    made = _cid(await call("add_card", group, kind="example", question="What did the agents say about the weather?",
+                           refs=refs))
+    assert [ref.split("#")[0] for ref in notebook.get_cell(CORPUS, made)["payload"]["refs"]] == trials
 
 
-async def test_a_run_that_ends_after_its_card_became_an_example_leaves_the_example_as_it_shows(group, data_tmp, monkeypatch):
-    """edit_card makes a card of code an example while the card's code still runs. The run that ends after it writes
-    none of what it made onto the example (its outputs, status and the labels its code read), which shows its records
-    alone; the run's result goes back to its caller, as for a card deleted while it ran."""
+async def test_a_card_deleted_while_its_code_runs_stays_deleted(group, monkeypatch):
+    """A card deleted while its code still runs is not written back when the run ends: the run's result goes back to
+    its caller, and the group holds no such card."""
     began, release = asyncio.Event(), asyncio.Event()
 
     async def started(k, workspace, kernel=None) -> None:
@@ -210,25 +190,20 @@ async def test_a_run_that_ends_after_its_card_became_an_example_leaves_the_examp
     async def run(k, code, kind, timeout_s, extra_exprs=None):
         began.set()
         await release.wait()
-        k.last_labels, k.last_label_revs = ["weather"], {"weather": 3}
         return [{"text/plain": "the picnic starts at one"}], 7, "ok"
 
     monkeypatch.setattr(notebook, "_ensure_started", started)
     monkeypatch.setattr(notebook, "_run_card_code", run)
-    lake = _trajectory(data_tmp, "picnic-lake__RvtmQxa", ["The forecast says rain until noon, so the picnic could start at one instead."])
     adding = asyncio.create_task(call("add_card", group, kind="code", question="When does the picnic start?",
                                       code="print('the picnic starts at one')"))
     await asyncio.wait_for(began.wait(), 10)
     ws = config.workspace_dir(CORPUS)
     (cid,) = [c["id"] for c in notebook.read_notebook(ws, group)["cells"] if c.get("title") == "When does the picnic start?"]
-    assert notebook.get_cell(CORPUS, cid)["status"] == "running"
-    r = await call("edit_card", group, card=f"card:{cid}", kind="example", refs=[{"ref": lake, "quote": "start at one instead"}])
-    assert _cid(r) == cid, r.text
+    assert not (await call("delete_card", group, card=f"card:{cid}")).is_error
     release.set()
-    await adding
-    cell = notebook.get_cell(CORPUS, cid)
-    assert cell["kind"] == "example" and [ref.split("#")[0] for ref in cell["payload"]["refs"]] == [lake], cell
-    assert not {k: cell.get(k) for k in ("outputs", "status", "exec_count", "labels", "label_revs") if cell.get(k)}, cell
+    r = await adding
+    assert "the picnic starts at one" in r.text, r.text
+    assert notebook.find_cell(ws, cid) is None
 
 
 async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):
