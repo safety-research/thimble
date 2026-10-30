@@ -673,8 +673,9 @@ def formats(c: str, slug: str, renderer: str) -> list[dict[str, Any]]:
 
 
 def _scratch(c: str) -> Path:
-    """The workspace's folder for export files; RuntimeError when a folder on its way is a symlink (ledger.unlinked)."""
-    d = config.workspace_dir(c) / "scratch" / "exports"
+    """The workspace's folder for export files, outside the kernels' scratch mirror, where a corpus entry named
+    `exports` is a link; RuntimeError when a folder on its way is a symlink (ledger.unlinked)."""
+    d = config.workspace_dir(c) / "tmp" / "exports"
     try:
         unlinked(config.workspace_dir(c), d / "x")
     except ValueError as e:

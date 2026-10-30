@@ -1,12 +1,15 @@
 """app.notebook's kernels: a cell runs and its output is stored; it runs in the workspace's scratch mirror of the
-corpus, so its writes never reach the corpus; and the kernel's environment holds no credential.
+corpus, one link per entry of the corpus folder, so its writes never reach the corpus and a folder of many files starts
+it as fast as a small one; and the kernel's environment holds no credential.
 
 Each test gets a fresh workspace dir (workspaces_tmp) and shuts its kernel down at the end. Kernel startup takes a
 second or two, so timeouts are generous."""
 from __future__ import annotations
 
 import json
+import os
 import threading
+from pathlib import Path
 
 import httpx
 import pytest
@@ -172,7 +175,7 @@ def test_a_kernel_client_the_garbage_collector_takes_unclosed_has_its_sockets_cl
 
 
 async def test_kernel_cwd_is_the_scratch_mirror_and_writes_never_reach_the_corpus(corpus):
-    """The kernel starts in workspaces/<c>/scratch, a symlink mirror of the corpus, so relative
+    """The kernel starts in workspaces/<c>/scratch, a link to each entry of the corpus folder, so relative
     reads work while every file a cell creates lands in scratch — never in the corpus directory."""
     corpus_dir = config.corpus_dir(corpus)
     scratch = config.workspace_dir(corpus) / notebook.SCRATCH_DIR
@@ -186,13 +189,28 @@ async def test_kernel_cwd_is_the_scratch_mirror_and_writes_never_reach_the_corpu
     lines = _text(cell).splitlines()
     assert lines[0] == str(scratch) and lines[1] == "True"
     assert lines[2] == str((corpus_dir / "manifest.json").resolve())  # read through the link
-    assert lines[3] == "True True"  # directories are real (walk/glob descend), files are links
+    assert lines[3] == "True True"  # a folder is one link, which glob reads through
     assert (scratch / "made-by-a-cell.db").is_file() and (scratch / "notes.txt").is_file()
     assert not (corpus_dir / "made-by-a-cell.db").exists() and not (corpus_dir / "notes.txt").exists()
     # the mirror is rebuilt on the next kernel start and leaves what the cell made alone
     await notebook.shutdown_all()
     cell = await notebook.run_code(corpus, "import os; print(os.path.exists('notes.txt'), os.path.islink('manifest.json'))", "user")
     assert _text(cell).strip() == "True True"
+
+
+async def test_the_first_card_on_a_folder_of_many_files_waits_for_no_link_per_file(data_tmp, workspaces_tmp):
+    """The kernel's cwd shows each entry of the corpus folder through one link, so the first card on a folder of a
+    million screenshots (AI Village's) waits for no link per file, and reads every file by its relative path."""
+    shots = data_tmp / "mini" / "images" / "turns"
+    for day in range(20):
+        (shots / f"day-{day}").mkdir(parents=True)
+        for i in range(100):
+            (shots / f"day-{day}" / f"{i}.png").write_bytes(b"png")
+    cell = await notebook.run_code("mini", "import glob; print(len(glob.glob('images/turns/*/*.png')))", "user")
+    assert cell["status"] == "ok" and _text(cell).strip() == "2000", cell["outputs"]
+    scratch = config.workspace_dir("mini") / notebook.SCRATCH_DIR
+    made = {str(Path(d, n).relative_to(scratch)) for d, ds, fs in os.walk(scratch) for n in ds + fs}
+    assert made == set(os.listdir(data_tmp / "mini")) and all((scratch / n).is_symlink() for n in made)
 
 
 def test_kernel_env_drops_secrets(monkeypatch):

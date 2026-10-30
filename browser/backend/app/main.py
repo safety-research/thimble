@@ -363,14 +363,17 @@ async def _lifespan(app: FastAPI):
     if why := userconf.problem():
         log.warning("%s; no agent starts until it is fixed", why)
     # what older versions left in Claude Code's files and in the workspaces, taken out once: the keys they wrote into
-    # folders' settings.local.json (claude_changes.cleanup) and each workspace's own Claude Code config dir
+    # folders' settings.local.json (claude_changes.cleanup), each workspace's own Claude Code config dir, and the
+    # records of their per-file scratch mirrors in thimble's home (a mirror itself goes at its kernel's next start,
+    # notebook.mirror_corpus)
     try:
-        from . import claude_changes
+        from . import claude_changes, cli
 
         for line in claude_changes.cleanup():
             log.info("%s", line)
         for old in config.WORKSPACES_DIR.glob("*/.claude-config"):
             shutil.rmtree(old, ignore_errors=True)
+        shutil.rmtree(cli.home() / "mirrors", ignore_errors=True)
     except Exception:
         log.exception("removing what an older thimble left failed")
     # the views an older thimble kept in a workspace's views/ moved into its local extension, once

@@ -112,3 +112,12 @@ async def test_a_document_not_written_yet_answers_no_content_and_a_written_one_i
     await _write(report)
     r = client.get(f"{BASE}/report")
     assert r.status_code == 200 and r.json()["id"] == report_types.read_doc(CORPUS, MAIN, "report")["id"]
+
+
+def test_the_export_hook_s_files_go_outside_the_kernels_scratch_mirror(data_tmp, workspaces_tmp):
+    """The kernels' scratch mirror links each entry of the corpus folder, so a corpus folder named exports stands there
+    as a link to it: the export hook writes its request and its result in the workspace's temp folder instead."""
+    (data_tmp / CORPUS / "exports").mkdir()
+    scratch = notebook.scratch_dir(CORPUS, fresh=True)
+    folder = exports._scratch(CORPUS)
+    assert (scratch / "exports").is_symlink() and scratch not in folder.parents and folder.is_dir()
