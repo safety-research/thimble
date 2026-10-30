@@ -316,8 +316,10 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
     assert r.returncode == 0, r.stdout + r.stderr
     assert "Not started" in r.stdout and "the analyst chooses first" in r.stdout
-    # Claude is told to wait for the choice and the reads, and the trial's counts are said as the trial's only
-    assert "`thimble label spam --wait` waits for their choice, then for the model's reads" in r.stdout
+    # Claude is told that the analyst is asked when its command ends and to wait for the reads after their choice, and
+    # the trial's counts are said as the trial's only
+    assert "They are asked when your command ends." in r.stdout
+    assert "After their choice, `thimble label spam --wait` waits for the model's reads" in r.stdout
     assert "Answer now" not in r.stdout and "Counts from a trial are not the label's" in r.stdout
     ev = feed(root)[-1]
     assert ev["kind"] == "label_ask" and ev["units"] == 420 and ev["sample"] == 300
@@ -325,11 +327,11 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     assert ev["chars"] > 420 * 40
     assert ev["text"] == "Read 420 records of chat/big.jsonl with Claude" and ev["meta"] == "9 model calls"
     assert "the analyst's choice" in run(root, "label", "spam").stdout
-    # --wait waits for the analyst's choice up to its time, and then says nothing runs before they choose
+    # --wait says at once that nothing runs before they choose: they are asked only once Claude's command ends
     t0 = time.time()
-    r = run(root, "label", "spam", "--wait", "2")
-    assert r.returncode == 0 and 2 <= time.time() - t0 < 30
-    assert "still waiting for the analyst's choice after 2s; nothing runs until then" in r.stdout
+    r = run(root, "label", "spam", "--wait", "60")
+    assert r.returncode == 0 and time.time() - t0 < 30
+    assert "spam: waits for the analyst's choice, and nothing runs until they choose" in r.stdout
     # Claude cannot answer for the person: a made-up ask id is refused and the label still waits
     r = run(root, "label", "spam", "--answer", "all", "--ask", "a000")
     assert r.returncode == 1 and LB.load(st, "spam")["run"]["state"] == "ask"
@@ -356,6 +358,38 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     got = json.loads(run(root, "label", "spam", "--answer", "cancel", "--ask", ev["ask"]).stdout)
     assert got["reads"] == 0 and got["waiting"] == 0
     assert "chose not to run it over its 420 records" in run(root, "label", "spam").stdout
+
+
+def test_wait_in_the_command_that_made_an_ask_ends_at_once_and_after_the_choice_waits_for_the_reads(root: Path):
+    # the analyst is asked after Claude's command ends (Claude Code's question tool waits for the Bash call), so a
+    # --wait in that same command ends at once, saying the label waits for their choice, and the question shows
+    with open(root / "chat" / "big.jsonl", "w") as f:
+        for i in range(420):
+            f.write(json.dumps({"agent": "wren", "text": f"message {i}", "n": i}) + "\n")
+    env = {**os.environ, "THIMBLE_ROOT": str(root), "THIMBLE_PYTHON": sys.executable}
+    one = '"$T" label spam --in chat/big.jsonl --prompt "The message is spam."; "$T" label spam --wait 60'
+    t0 = time.time()
+    r = subprocess.run(["sh", "-c", one], capture_output=True, text=True, env={**env, "T": str(THIMBLE)}, cwd=root,
+                       timeout=120)
+    assert r.returncode == 0 and time.time() - t0 < 30, r.stdout + r.stderr
+    assert "Not started" in r.stdout
+    assert "spam: waits for the analyst's choice, and nothing runs until they choose" in r.stdout
+    # once they chose, --wait waits for the model's reads (the plugin writes them back beside the session), then prints
+    # the label's counts
+    ev = feed(root)[-1]
+    assert json.loads(run(root, "label", "spam", "--answer", "all", "--ask", ev["ask"]).stdout)["reads"] == 420
+    refs = [u["ref"] for u in json.loads(run(root, "label", "spam", "--waiting").stdout)["units"]]
+    waiting = subprocess.Popen([str(THIMBLE), "label", "spam", "--wait", "60"], stdout=subprocess.PIPE, text=True,
+                               env=env, cwd=root)
+    try:
+        time.sleep(2)
+        assert waiting.poll() is None
+        run(root, "label", "spam", "--answers", "-", stdin=json.dumps({"values": {ref: {"value": "no"} for ref in refs}}))
+        out, _ = waiting.communicate(timeout=60)
+    finally:
+        waiting.kill()
+        waiting.wait()
+    assert waiting.returncode == 0 and "  spam: yes 0 · no 420 of 420 records" in out
 
 
 def test_a_label_sorts_only_the_folders_own_records(root: Path, tmp_path: Path):
