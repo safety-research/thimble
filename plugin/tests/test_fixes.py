@@ -1051,6 +1051,58 @@ def test_dev_install_up_to_date_and_uncommitted_changes(world, monkeypatch):
     assert json.loads(live_file("plugin/.claude-plugin/plugin.json"))["version"] == f"0.10.2+{new[:7]}"
 
 
+def test_dev_install_update_says_when_the_checkout_is_behind_what_it_pulls_from_and_never_pulls(world, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    rel, base7 = world["rel"], world["base"][:7]
+    # the checkout's upstream: a made-up bare repository as origin, main tracking origin/main
+    bare = world["tmp"] / "origin.git"
+    sh("git", "clone", "-q", "--bare", str(rel), str(bare))
+    sh("git", "remote", "add", "origin", str(bare), cwd=rel)
+    sh("git", "fetch", "-q", "origin", cwd=rel)
+    sh("git", "branch", "-q", "--set-upstream-to=origin/main", "main", cwd=rel)
+    assert FX.update()["lines"] == [f"thimble is up to date with your checkout (main at {base7})."]
+    other = world["tmp"] / "other"
+    sh("git", "clone", "-q", str(bare), str(other))
+
+    def push(name: str) -> str:
+        (other / "plugin" / f"{name}.md").write_text("x\n")
+        sh("git", "add", "-A", cwd=other)
+        sh("git", "commit", "-q", "-m", name, cwd=other)
+        sh("git", "push", "-q", "origin", "main", cwd=other)
+        return sh("git", "rev-parse", "HEAD", cwd=other)
+
+    push("one")
+    tip = push("two")
+    # GitHub has 2 commits the checkout lacks: said in place of up to date, with the command that pulls them
+    pull = f"git -C {FX._q(sh('git', 'rev-parse', '--show-toplevel', cwd=rel))} pull"
+    behind = (f"thimble runs your checkout (main at {base7}), which is 2 commits behind origin/main ({tip[:7]}): "
+              f"{pull}, then run thimble update again.")
+    out = FX.update()
+    assert out["lines"] == [behind] and out["newer"] is False
+    # the checkout stays as it was: its HEAD, its branch and its files
+    assert sh("git", "rev-parse", "HEAD", "main", cwd=rel).split() == [world["base"]] * 2
+    assert sh("git", "status", "--porcelain", cwd=rel) == "" and not (rel / "plugin" / "one.md").exists()
+    # a branch with no upstream: origin's main
+    sh("git", "branch", "-q", "--unset-upstream", cwd=rel)
+    assert FX.update()["lines"] == [behind.replace(" pull,", " pull origin main,")]
+    sh("git", "branch", "-q", "--set-upstream-to=origin/main", "main", cwd=rel)
+    # the person runs the command; GitHub has one more commit by the next thimble update, which says so
+    subprocess.run(pull, shell=True, check=True, capture_output=True, env={**os.environ, **GIT_ID})
+    tip2 = push("three")
+    out = FX.update()
+    assert out["lines"][:2] == [f"Updated thimble to your checkout {base7} → main at {tip[:7]} (terminal plugin)",
+                                f"thimble runs your checkout (main at {tip[:7]}), which is 1 commit behind origin/main "
+                                f"({tip2[:7]}): {pull}, then run thimble update again."]
+    assert FX.release()["base"] == tip and sh("git", "rev-parse", "HEAD", cwd=rel) == tip
+    # offline: the line it had, and that thimble could not check
+    sh("git", "remote", "set-url", "origin", str(world["tmp"] / "no-such-origin.git"), cwd=rel)
+    lines = FX.update()["lines"]
+    assert lines[0] == f"thimble is up to date with your checkout (main at {tip[:7]})." and len(lines) == 2
+    assert lines[1].startswith("thimble could not check whether origin/main has newer commits (")
+    assert "no-such-origin.git" in lines[1]
+    assert lines[1].endswith("); check the network, then run thimble update again.")
+
+
 def test_a_github_install_follows_releases_not_the_commit_its_clone_has(world, upstream, monkeypatch):
     monkeypatch.delenv("CLAUDECODE", raising=False)
     cc_clone = world["cc"] / "plugins" / "marketplaces" / "thimble"
