@@ -473,6 +473,42 @@ def fork_of_thread() -> runtime.Conv:
     return next(c for c in runtime._spaces[CORPUS].convs.values() if c.kind == "fork")
 
 
+async def test_a_side_thread_s_event_starts_its_fork_and_leaves_main_idle(on, monkeypatch):
+    """A side thread's event starts the thread's fork, not a turn of main's (runtime.deliver), so main is not marked
+    running for it: the page shows main idle while the thread works, and after."""
+    api_key(monkeypatch, [text("Main answered."), text("Because of the deploy.")])
+    await main_turn("What happened?")
+    assert not agents.running(CORPUS, agents.MAIN_ID)
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    assert not agents.running(CORPUS, agents.MAIN_ID)
+    await fork_of_thread().task
+    runtime._spaces[CORPUS].read()
+    assert not agents.running(CORPUS, agents.MAIN_ID) and not agents.running(CORPUS, tid)
+
+
+async def test_main_s_held_notes_wait_for_its_own_next_event_not_a_side_thread_s(on, monkeypatch):
+    """A quiet event, such as what the check of main's reply changed, waits for main's next event. A side thread's event
+    goes to the thread's fork, which never read main's reply, so it carries none of them, nor does the result of a
+    thimble call of the fork's: main reads them with its own next event."""
+    client = api_key(monkeypatch, [text("Main answered."), call("list_cards", {"group": "all"}, "toolu_f"),
+                                   text("From the card."), text("Main again.")])
+    await main_turn("What happened?")
+    events.post(CORPUS, "citations", {"text": '"302 of 439" is corrected to "319 of 460"'})
+    tid = str(agents.new_thread(CORPUS, None, None, "where")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Where does this number come from?"})
+    await fork_of_thread().task
+    assert "319 of 460" not in json.dumps(client.bodies[1:3]), "the thread's fork got main's held note"
+    assert [n["meta"]["kind"] for n in events.held(CORPUS)] == ["citations"]
+    await main_turn("And next?")
+    assert events.MEANWHILE in json.dumps(client.bodies[3]["messages"][-1])
+    assert "319 of 460" in json.dumps(client.bodies[3]["messages"][-1]) and events.held(CORPUS) == []
+
+
+def fork_of_thread() -> runtime.Conv:
+    return next(c for c in runtime._spaces[CORPUS].convs.values() if c.kind == "fork")
+
+
 async def test_main_s_held_notes_wait_for_its_own_next_event_not_a_side_thread_s(on, monkeypatch):
     """A quiet event, such as what the check of main's reply changed, waits for main's next event. A side thread's event
     goes to the thread's fork, which never read main's reply, so it carries none of them, nor does the result of a
