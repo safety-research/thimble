@@ -1109,14 +1109,16 @@ def _needs_code(tool: str, kind: str, args: dict[str, Any] | None = None) -> str
 
 
 def _code_on_data(tool: str, kind: str, args: dict[str, Any]) -> str:
-    """The error line for `code` given to a card of a data kind, which would drop it without running it."""
+    """The error line for `code` given to a card of a data kind, which would drop it without running it. It names the
+    field the card shows rather than a code card, which shows its code: code that printed an example's quotes made a
+    card of Python source, not of quotes."""
     from . import notebook
 
     if not _given(args, "code"):
         return ""
     a = "an" if kind[:1] in "aeiou" else "a"
-    return (f"{tool}: {a} {kind} card shows `{notebook.PAYLOAD_KEYS.get(kind, 'content')}` and runs no `code`, so leave "
-            f"`code` out, or add a card of code for what it computes")
+    key = notebook.PAYLOAD_KEYS.get(kind, "content")
+    return f"{tool}: {a} {kind} card shows `{key}` and runs no `code`, so leave `code` out and give what it shows as `{key}`"
 
 
 def _content_on_code(tool: str, kind: str, args: dict[str, Any]) -> str:

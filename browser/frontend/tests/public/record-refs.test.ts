@@ -30,6 +30,15 @@ describe('record refs', () => {
     expect(recordOf('budget.xlsx#Q3!B2')).toEqual({ path: 'budget.xlsx' })
     expect(recordOf('pandas-dev/pandas#57012')).toBeNull()
   })
+
+  test("an example's address names the trial a trajectory belongs to, not the trial's agent folder", () => {
+    // `<job>/<trial>/agent/trajectory.json`: a trial folder with no digit in it, so every quote of three trials read
+    // `agent › … › trajectory.json` and the card could not say whose each quote was
+    const trial = (t: string) => `hp-kinds-stuck/${t}/agent/trajectory.json`
+    expect(addressLabel(`${trial('hp-compute-workdir-stuck__MmrWMRE')}#L16`)).toBe('hp-compute-workdir-stuck__MmrWMRE › trajectory.json L16')
+    expect(addressLabel(`${trial('hp-registry-publish__QkTzPaw')}#/steps/7`)).toBe('hp-registry-publish__QkTzPaw › trajectory.json /steps/7')
+    expect(refLabel('batch2/agents/agent-03.jsonl#L412')).toBe('batch2 › agent-03.jsonl L412')
+  })
 })
 
 const LABEL = { id: 'k1', name: 'refund', unit: 'record', marks: 'record', labels: ['refund', 'no'], classes: [{ name: 'refund', color: 3, highlight: true }, { name: 'no', color: 0, highlight: false }] } as unknown as Concept
