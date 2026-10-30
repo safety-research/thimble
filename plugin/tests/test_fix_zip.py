@@ -242,14 +242,13 @@ def test_a_check_on_a_zip_install_says_whether_a_newer_release_is_out_and_change
     before = files_of(zipped["folder"])
     assert cli.main(["update", "--check"]) == 0
     assert capsys.readouterr().out == "thimble 0.10.3 is out (you have 0.10.2): thimble update in a shell\n"
-    assert files_of(zipped["folder"]) == before
-    assert not FX.home().exists() or not any(FX.home().iterdir())
+    assert files_of(zipped["folder"]) == before and not FX.home().exists()
     newest = unzip(zipped["bare"], "v0.10.3", tmp_path / "elsewhere")
     install(world, newest)
     monkeypatch.setattr(FX, "PLUGIN", newest / "plugin")
     assert cli.main(["update", "--check"]) == 0
     assert capsys.readouterr().out == "thimble 0.10.3 is the newest release.\n"
-    assert not FX.home().exists() or not any(FX.home().iterdir())
+    assert not FX.home().exists()
 
 
 def test_a_newer_zip_installed_before_the_first_fix_goes_on_moves_the_release(world, zipped, tmp_path, monkeypatch):

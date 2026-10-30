@@ -438,11 +438,10 @@ def _zip_release(root: Path, prefix: str = "", latest: dict[str, Any] | None = N
     latest = latest or latest_release(then="try again")
     m = re.search(r"(\d+\.\d+\.\d+)$", root.name)
     named = f"v{m.group(1)}" if m else ""
-    home().mkdir(parents=True, exist_ok=True)
     seen: list[tuple[str, str, list[str], int]] = []
     memo: dict = {}
-    with tempfile.TemporaryDirectory(prefix="zip-", dir=home()) as d:
-        git("init", "-q", "--bare", d, cwd=home())
+    with tempfile.TemporaryDirectory(prefix="thimble-zip-") as d:
+        git("init", "-q", "--bare", d, cwd=d)
         git("remote", "add", "origin", latest["url"], cwd=d)
         git("config", "remote.origin.promisor", "true", cwd=d)
         run(["git", "fetch", "-q", "--depth", "1", "--filter=blob:none", "--no-tags", "origin",
