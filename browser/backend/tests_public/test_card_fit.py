@@ -420,6 +420,37 @@ async def test_a_held_card_deleted_while_the_card_that_takes_its_place_is_measur
     assert f"The analyst sees card:{cid} now, as this version." in last.text and held(cid) is None
 
 
+async def test_a_held_card_deleted_at_once_with_an_edit_of_the_card_that_takes_its_place_counts_for_that_card(
+        _harness, monkeypatch):
+    """edit_card of the new card and delete_card of the held one sent in one step run at once: the delete lands while
+    the new version is measured, and that version still goes on from the held card's versions."""
+    import asyncio
+
+    old = _cid(await call("add_card", kind="custom", question="Which runs failed?", html=page(2400)))
+    new = _cid(await call("add_card", kind="custom", question="Which runs failed?", html=page(1900)))
+    assert held(new) and held(new).get("before") is None
+    measure, drawing, deleted = card_fit._measure, asyncio.Event(), asyncio.Event()
+
+    async def slow(c, cell):  # the harness draws the new version until the delete has landed
+        if cell["id"] == new:
+            drawing.set()
+            await deleted.wait()
+        return await measure(c, cell)
+
+    async def delete():
+        await drawing.wait()
+        res = await call("delete_card", card=old)
+        deleted.set()
+        return res
+
+    monkeypatch.setattr(card_fit, "_measure", slow)
+    edit, gone = await asyncio.gather(call("edit_card", card=new, html=page(1500)), delete())
+    assert not gone.is_error
+    # the held card's version and the new card's two: the second new version that does not fit shows with its cut-off
+    assert f"The analyst sees card:{new} now, as this version." in edit.text and held(new) is None
+    assert card_fit_lines()[-1]["tries"] == 2
+
+
 async def test_a_card_that_took_a_held_card_s_place_and_fit_leaves_nothing_for_a_later_card(_harness):
     old = _cid(await call("add_card", kind="custom", question="Which runs failed?", html=page(2400)))
     assert held(_cid(await call("add_card", kind="custom", question="Which runs failed?", html=page(520)))) is None
