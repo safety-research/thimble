@@ -1182,9 +1182,9 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     help_ = capsys.readouterr().out
     for line in ("thimble update ", "thimble reapply ", "thimble fixes ", "thimble fix show N", "thimble fix apply N",
                  "thimble file issue N", "thimble file pr N", "thimble fix off [N]", "thimble fix on [N]",
-                 "thimble fix diff N", "thimble fix remove N", "thimble fix export N"):
+                 "thimble fix diff N", "thimble fix remove N", "thimble fix export N", "thimble doctor "):
         assert f"\n    {line}" in help_, line
-    assert all(f"thimble {w}" not in help_ for w in ("doctor", "demo", "browser", "fix merge"))
+    assert all(f"thimble {w}" not in help_ for w in ("demo", "browser", "fix merge"))
     assert "thimble fix merge A B C" in cli.FIX_HELP  # the escape hatch stays in thimble fix --help only
     assert help_.index("thimble fix on [N]") < help_.index("Claude runs these in a session") < help_.index("thimble label [NAME]")
     monkeypatch.setattr(FX, "can_share", lambda: False)
