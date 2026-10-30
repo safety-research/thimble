@@ -645,7 +645,7 @@ The analyst does not see card:{cid} yet, since it shows more than the evidence f
 
 ## card-revise-code
 
-Make the next version with `edit_card`, as a table, plot, diagram, timeline or code card. A card of another kind, such as a custom card, is a new card: add it with `add_card`, then delete card:{cid} with `delete_card`.
+Make the next version with `edit_card`, in whatever kind fits it.
 
 ## card-revise-data
 
