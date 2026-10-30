@@ -24,6 +24,9 @@
 //   threadUnderSplit($, e, kind, args, els)   the same in two parts: the conversation, and the key row with the input
 //                                      bar, which the docked pane keeps at its bottom (core/pane.ts)
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
+//   threadInTray($, e, scope, els)     the thread about a citation in the tray's panel (+, tray/tray.ts), as the pane
+//                                      shows it under the citation's evidence: its conversation, and its key row and
+//                                      input bar, one row each
 //   PaneEdit                           a field a pane edits in the input bar under it, in place of a question: the
 //                                      labels pane's (labels/pane.tsx labelEdit), its name, its value, what ↵ does
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
@@ -42,7 +45,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
+import { askHere, drawThreads, rowsUnder as roomUnder, threadInTray as inTray, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadQuestion as question, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
@@ -114,6 +117,12 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
 
 export async function threadUnderSplit($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: unknown[]; bottom: unknown[] }> {
   return threadUnderParts($, e, kind, args, els)
+}
+
+export async function threadInTray($: Engine, e: Any, scope: ThreadScope, els: Any): Promise<{ conv: unknown[]; bottom: unknown[] }> {
+  // a drawing made right after a reload reads the kept threads itself
+  await restoreThreads($).catch(() => undefined)
+  return inTray($, e, scope, els)
 }
 
 /** About how many rows threadUnder takes under a pane (threads/pane.tsx rowsUnder). */

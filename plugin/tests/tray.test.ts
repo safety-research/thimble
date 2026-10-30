@@ -185,7 +185,9 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('a ask')
 })
 
-test('a corrected value computed by code: drawn in the reply as a verified one, with no sign; the header says corrected, the line under it what it was, then the line that printed it and its output; + shows all the code and output; - goes back', CITES, async ($, on) => {
+test('a corrected value computed by code: drawn in the reply as a verified one, with no sign; the header says corrected, the line under it what it was, then the line that printed it, its output and + expand; + opens in their place the panel a opens on it, as the side pane draws it, the input of its side thread at its bottom; 0 back, and - too, go back to the one line', CITES, async ($, on) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('ui.close', () => ({ value: undefined }))
   const { clock } = await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11. One run was retried.',
     evidence: { kind: 'computed', by: 'checker', code: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', output: 'runs: 40\nfailed: 11\npassed: 29', highlight: [[17, 19]] },
@@ -212,35 +214,52 @@ test('a corrected value computed by code: drawn in the reply as a verified one, 
   expect(band).not.toContain('corrected; was')
   expect(band).not.toContain('The output says 11')
   expect(band).toContain('print(f"failed: {bad}")│failed: 11')
-  // + show all at the end of the ruled block, dim: its own verb, as `d expand N more lines` under a cut tray's window
-  // shows the rest of the body
-  expect(band).toContain('│failed: 11│+ show all')
-  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ show all')?.props?.dimColor).toBe(true)
+  // + expand at the end of the ruled block, dim
+  expect(band).toContain('│failed: 11│+ expand')
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ expand')?.props?.dimColor).toBe(true)
   expect(band).not.toContain('runs: 40')
   expect(band).not.toContain('print("runs:", n)')
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'print(f"failed: {bad}")')?.props?.color).toBe('permission')
   expect(drawnBand.some(n => n.type === 'Code')).toBe(false)
-  expect(band).toContain('+ show all')
+  expect(drawnBand.some(n => n.type === 'Input')).toBe(false)
   // (keys apart, so they are not a word typed)
   await clock.advance(2000)
-  // +: all the code (as code), then all the output after the rule, its value still in the tint; no headings
+  // +: the panel a opens on the citation, in place of the one line: what it was, the check's reason, the sentence, the
+  // output around the value (the value in the citations' look) and the code; the header keeps the status and the words,
+  // and says 0 back
   expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
-  const open = await $.ui.render(above())
-  const code = all(open).find(n => n.type === 'Code')
-  expect(code?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
+  const open = all(await $.ui.render(above()))
   band = textOf(open)
-  expect(band).toContain('│runs: 40│failed: 11│passed: 29')
-  expect(band).not.toContain('show all')
-  expect(band).toContain('− collapse')
-  expect(band).not.toContain('Output of the code')
-  expect(band).not.toContain('The code')
-  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === undefined && (n.hover ?? n.props?.hover)?.backgroundColor === citeTint() && n.props?.underline === true && n.props?.bold === true && textOf(n) === '11')).toBe(true)
-  // -: back to the one line
+  expect(band).toContain('✓ corrected  a ask · 0 back')
+  const panel = ['was 12 of 40', 'The output says 11. One run was retried.', 'Output of the code the check ran', 'runs: 40failed: 11passed: 29', 'The code']
+  for (const words of panel) expect(band).toContain(words)
+  expect(open.find(n => n.type === 'Code')?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
+  expect(open.some(n => n.type === 'Text' && n.props?.backgroundColor === undefined && (n.hover ?? n.props?.hover)?.backgroundColor === citeTint() && n.props?.underline === true && n.props?.bold === true && textOf(n) === '11')).toBe(true)
+  expect(band).not.toContain('+ expand')
+  expect(band).not.toContain('collapse')
+  // at its bottom, the input of the side thread about the citation, the one a opens
+  const input = open.find(n => n.type === 'Input')
+  expect(input?.props?.placeholder).toBe('Ask about the citation "11 of 40"…')
+  // the panel a opens: the side pane on the citation's evidence, with that thread under it, holds the same
+  expect(await $.prompt.edit(key('1'))).toEqual({ text: '', cursor: 0 })
+  const pane = all(await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never))
+  for (const words of panel) expect(textOf(pane)).toContain(words)
+  expect(pane.find(n => n.type === 'Input')?.props?.placeholder).toBe(input.props.placeholder)
+  // back in the tray: + again, then 0 goes back to the one line, and so does -
   await clock.advance(2000)
-  expect(await $.prompt.edit(key('-'))).toEqual({ text: '', cursor: 0 })
-  band = textOf(await $.ui.render(above()))
-  expect(band).not.toContain('runs: 40')
-  expect(band).toContain('failed: 11')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  for (const back of ['0', '-']) {
+    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+    expect(textOf(await $.ui.render(above()))).toContain('Output of the code the check ran')
+    expect(await $.prompt.edit(key(back))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+    band = textOf(await $.ui.render(above()))
+    expect(band).not.toContain('runs: 40')
+    expect(band).toContain('│failed: 11│+ expand')
+    expect(band).toContain('a ask · 0 close')
+  }
 })
 
 test("a value computed by code shows, above its output line, the line that printed it: not the print of another value beside it, though a literal of its own print is a word of the line", CITES, async ($, on) => {
@@ -305,7 +324,7 @@ test('a file\'s line that holds bytes that do not print (a log\'s color codes) d
   expect(all(pane).some(n => n.type === 'Text' && n.props?.bold === true && textOf(n) === '12')).toBe(true)
 })
 
-test('each key of the tray is a click too: + show all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', CITES, async ($, on) => {
+test('each key of the tray is a click too: + expand as +, 0 back and 0 close in its header as 0, and a click on the citation in the reply or in the tray\'s title closes it', CITES, async ($, on) => {
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
     evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nprint(f"failed: {bad}")', output: 'runs: 40\nfailed: 12\npassed: 28', highlight: [[17, 19]] },
@@ -313,21 +332,21 @@ test('each key of the tray is a click too: + show all and − collapse as + and 
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('✓ verified')
-  expect(band).toContain('+ show all')
+  expect(band).toContain('+ expand')
   expect(band).not.toContain('next prompt')
-  // + show all: all the output, as +; − collapse: back
+  // + expand: the panel a opens on the citation, as +; 0 back in its header: the one line again, as 0
   let tray = await $.ui.mount(above())
   await tray.press({ key: 'more-press' })
   await tray.unmount()
   band = textOf(await $.ui.render(above()))
-  expect(band).toContain('│runs: 40│failed: 12│passed: 28')
-  expect(band).toContain('− collapse')
+  expect(band).toContain('runs: 40failed: 12passed: 28')
+  expect(band).toContain('a ask · 0 back')
   tray = await $.ui.mount(above())
-  await tray.press({ key: 'more-press' })
+  await tray.press({ key: 'tray-0' })
   await tray.unmount()
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('runs: 40')
-  expect(band).toContain('+ show all')
+  expect(band).toContain('+ expand')
   // a click on the citation's words in the tray's title closes it, as in the reply
   tray = await $.ui.mount(above())
   await tray.press({ key: 'tray-title' })
@@ -639,6 +658,13 @@ test('an open tray stays as it is while the person scrolls the transcript under 
   expect(await band()).not.toContain('a ask · 0 ')
 })
 
+// a value code computed, the citation's evidence ten lines of output
+const OUTPUT = ['runs: 40', ...Array.from({ length: 8 }, (_, i) => `run ${i + 1}: ok`), 'failed: 12'].join('\n')
+const TALL = {
+  n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+  evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nfor i, r in enumerate(runs):\n    print(f"run {i + 1}: {r}")\nprint(f"failed: {bad}")', output: OUTPUT, highlight: [[OUTPUT.length - 2, OUTPUT.length]] },
+}
+
 /** The band as claudeBand draws it, and what it shows of the tray: whether the bar is the last row of Claude Code's
  *  window (the tray in the rows over it), how many rows stand under that window (which Claude Code's row counts), the
  *  rows of the tray's body window, the rows of its body above and under that window, and whether the last row of an
@@ -729,6 +755,49 @@ test('a box taller than the band shows as much of its body as the rows Claude Co
   d = await cutBand(short)
   expect(d.offset).toBe(1)
   expect(bandScrolls()).toBe(1)
+})
+
+test('the panel + opens on a citation whose code and output are long keeps its head, its input and the bar in view in a band too short for it: the wheel moves its body, from what the check found to the code\'s last line. A question asked in its input asks the side thread about the citation, whose conversation shows at the panel\'s end', CITES, async ($, on) => {
+  const scrolls: Any[] = []
+  const { clock, spawns } = await resumed($, on, TALL, 's-tray-panel', { scrolls })
+  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const band = claudeBand($, scrolls, 12)
+  const input = (t: Any) => all(t).find(n => n.type === 'Input')
+  let d = await cutBand(band)
+  expect(d.cut).toBe(true)
+  expect(d.barLast).toBe(true)
+  // from its top: the sentence, then the output of the check's code; the input under the body's window
+  expect(d.inView((n: Any) => n.type === 'Text' && textOf(n) === 'Output of the code the check ran')).toBe(true)
+  expect(d.inView((n: Any) => n.type === 'Code')).toBe(false)
+  expect(input(d.tree)?.props?.placeholder).toBe('Ask about the citation "12 of 40"…')
+  const field = String(input(d.tree).props.key)
+  for (const k of ['tray-head', field, 'bar']) expect(d.shows(k)).toBe(true)
+  expect(d.at(field)!.row).toBeGreaterThan(d.at('tray-window')!.row + d.win - 1)
+  // the wheel to the body's end: the code's last line in view, over the input, the head and the bar still in view
+  await band.wheel(100)
+  d = await cutBand(band)
+  expect(d.below).toBe(0)
+  expect(d.inView((n: Any) => n.type === 'Code')).toBe(true)
+  for (const k of ['tray-head', field, 'bar']) expect(d.shows(k)).toBe(true)
+  expect(d.offset).toBe(0)
+  await band.wheel(-100)
+  // a question asked in the input: a fork answers it in the side thread about the citation, and the panel shows the
+  // thread's conversation after the code, the window moved to its end
+  const mounted = await $.ui.mount(above(12))
+  await mounted.input({ key: field, text: 'which runs failed?' })
+  await mounted.unmount()
+  await clock.advance(1000)
+  expect(spawns.map(s => s.description)).toEqual(['thread · the citation "12 of 40"'])
+  d = await cutBand(band)
+  expect(d.text).toContain('❯ which runs failed?')
+  expect(d.below).toBe(0)
+  expect(d.above).toBeGreaterThan(0)
+  for (const k of ['tray-head', 'bar']) expect(d.shows(k)).toBe(true)
+  expect(input(d.tree)).toBeDefined()
 })
 
 // a heads-up whose words are a citation's words, or hold them

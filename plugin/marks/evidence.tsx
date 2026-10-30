@@ -175,8 +175,10 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   ]
 }
 
-/** The pane of one mark. */
-export async function drawEvidence($: EngineInterface, e: Any, args: unknown, els: Any): Promise<unknown> {
+/** The pane of one mark. In the tray (`o.inTray`: the panel + opens on a citation computed by code, tray/tray.ts) the
+ *  same, less what the tray's header says (the status and the words) and what only the pane takes (its e key, and the
+ *  explainer e shows). */
+export async function drawEvidence($: EngineInterface, e: Any, args: unknown, els: Any, o: { inTray?: boolean } = {}): Promise<unknown> {
   const { Box, Text } = els
   const { row, n } = (args ?? {}) as { row?: string; n?: number }
   await themeNow($)
@@ -192,7 +194,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     '  ',
     Text({ key: 'w', ...wordsLook(m.status, id), children: m.shown.replace(/\*\*|`/g, '') }),
   ] })
-  const rows: Any[] = [head]
+  const rows: Any[] = o.inTray ? [] : [head]
   if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: wasLine({ rewritten: !!m.rewrite, narrowed: !!m.narrowed, was: m.rewrite ? plainSentence(m.sentence) : m.was }) }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: 'error' } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
@@ -207,7 +209,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const me = `${row}:${n}`
   const words = m.shown.replace(/\*\*|`/g, '').trim()
   // the cited words explained in place (e, as e explains words everywhere): the session's explainer, else one being written, else why there is none
-  if (explainShown.has(me)) {
+  if (!o.inTray && explainShown.has(me)) {
     const g = glossFor(await sessionGlosses($).catch(() => []), words)
     const now = explaining(words)
     // each part after a dim ▎, its wrapped lines under its first (the gutter is a column of its own)
@@ -230,7 +232,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     }
     $.ui.invalidate('ui.render')
   } })
-  if (keys.length) {
+  if (keys.length && !o.inTray) {
     const { Button } = els
     rows.push(Text({ key: 'keys-gap', children: ' ' }), Box({ key: 'ev-keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
       ...(i ? [Text({ key: `ev-key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
