@@ -55,6 +55,14 @@
 }
 /* the lines wrap in the label, so a long one reads whole (Mark.tsx lineWindow cuts it at words around the marked ones) */
 .mark-pop .refchip-lines { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* the label over each part of the evidence, as the terminal labels it (`code · 7 lines`, `output · 62 lines`), the
+   box under it; and at each edge of a box with lines out of view there, how many (Mark.tsx KeyBox) */
+.mark-pop .mark-ev-label { margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--text-tertiary); }
+.mark-pop .mark-ev-label + .refchip-lines,
+.mark-pop .mark-ev-label + .refchip-table,
+.mark-pop .mark-ev-label + .mark-ev-edge { margin-top: 2px; }
+.mark-pop .mark-ev-edge + .refchip-lines { margin-top: 0; }
+.mark-pop .mark-ev-edge { font-size: 12px; line-height: 1.6; color: var(--text-tertiary); white-space: pre; }
 .mark-pop-why {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -71,22 +79,24 @@
 .mark-pop-repair-error { color: var(--status-negative); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mark-pop-was { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mark-ev { display: flex; flex-direction: column; min-width: 0; }
+/* the code in a box as tall as four of its lines, the output in one as tall as ten, the rest a scroll away (Mark.tsx
+   KeyBox): each the place its lines are laid out from, so a box counts the lines out of view */
 .mark-pop .mark-ev-code {
-  margin: 6px 0 0;
-  padding-top: 6px;
-  max-height: 6.8em;
+  position: relative;
+  max-height: 6.4em;
   overflow: auto;
-  border-top: 1px solid var(--border-hairline);
   color: var(--text-secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-/* the output in a box of its own as tall as ten of its lines, the rest a scroll away (Mark.tsx KeyBox) */
-.mark-pop .mark-ev-out { max-height: 16em; overflow-y: auto; }
+.mark-pop .mark-ev-out { position: relative; max-height: 16em; overflow-y: auto; }
 /* the code's line that printed the value, in the text's own ink */
 .mark-pop .mark-ev-code .mark-ev-said { color: var(--text-primary); }
-/* the marked words: the accent's wash a cited table cell takes (refchip.css .cite-cell) */
+/* the marked words, in a line or a table's cell: on the citations' purple tint, in the text's own weight and color, as
+   the terminal marks the words in a citation's evidence (in place of the accent's wash of refchip.css .cite-cell) */
 .mark-pop .refchip-lines .cite-cell { border-radius: 2px; }
+.mark-pop .cite-cell,
+.mark-pop .outputs-html tbody td.cite-cell { background: var(--cite-tint); font-weight: inherit; }
 /* a cited place's row: its line number, then its text, which wraps beside the number */
 .mark-ev-line { display: flex; }
 .mark-ev-text { flex: 1 1 auto; min-width: 0; }

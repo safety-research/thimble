@@ -9,7 +9,7 @@ import { bus } from '../../src/lib/bus.ts'
 import { MarksFooter } from '../../src/marks/MarksFooter.tsx'
 import type { MarkItem } from '../../src/marks/marks.ts'
 import { withMarkHrefs } from '../../src/marks/marks.ts'
-import { lineWindow } from '../../src/marks/Mark.tsx'
+import { lineWindow, outOfView } from '../../src/marks/Mark.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => unmountAll())
@@ -51,7 +51,7 @@ test("a mark's label shows its evidence as a citation's label does: the output l
   expect(pop?.querySelector('.mark-pop-why')).toBeNull()
 })
 
-test("a place in a mark's label opens its file and the label closes at once, hovered or pinned", async () => {
+test("a place in a mark's label, named as the terminal names it, opens its file and the label closes at once, hovered or pinned", async () => {
   const ev = { kind: 'quote' as const, file: 'runs/a.jsonl', line: 5880, lines: [{ n: 5880, text: '11 passed, 819 deselected', highlight: [0, 25] as [number, number] }] }
   const el = await mount(<ChatMarkdown text="[11 passed, 819 deselected](#) on the branch" checks={[item(0, '11 passed, 819 deselected', { evidence: ev })]} />)
   const opened: unknown[] = []
@@ -60,7 +60,7 @@ test("a place in a mark's label opens its file and the label closes at once, hov
     await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await settle()
     const chip = document.querySelector<HTMLElement>('.mark-pop .refchip-pop-chip')
-    expect(chip?.textContent).toBe('runs/a.jsonl:5880')
+    expect(chip?.textContent).toBe('runs/a.jsonl · line 5880')
     await act(async () => chip!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(opened).toEqual([{ ref: 'runs/a.jsonl#L5880' }])
     expect(document.querySelector('.mark-pop')).toBeNull()
@@ -134,6 +134,28 @@ test("a computed mark's label holds every line of the output and of the code, ea
   expect(box.querySelector('[data-key]')?.textContent).toBe('print(f"failed: {len(bad)} of {len(rows)}")')
   expect(box.querySelector('[data-key]')?.classList.contains('mark-ev-said')).toBe(true)
   expect(document.querySelector('.mark-pop')?.textContent).not.toContain('…')
+})
+
+test("a computed mark's label shows the code first, then the output, each under its label as the terminal's tray and side pane label it: what the part is and its whole size", async () => {
+  const output = ['runs: 400', ...Array.from({ length: 30 }, (_, i) => `run ${i + 1}: FAIL`), 'failed: 61 of 400'].join('\n')
+  const at = output.lastIndexOf('61')
+  const code = 'rows = load()\nfor r in bad:\n    print(f"run {r}: FAIL")\nprint(f"failed: {len(bad)} of {len(rows)}")\nprint("done")\n'
+  const el = await mount(<ChatMarkdown text="[61](#) failed" checks={[item(0, '61', { evidence: { kind: 'computed', code, output, highlight: [[at, at + 2]], by: 'checker' } })]} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  const parts = [...document.querySelector('.mark-pop .mark-ev')!.children].map((c) => c.className.split(' ').find((n) => n.startsWith('mark-ev-') || n === 'refchip-pop-head'))
+  expect(parts).toEqual(['refchip-pop-head', 'mark-ev-label', 'mark-ev-code', 'mark-ev-label', 'mark-ev-out'])
+  expect([...document.querySelectorAll('.mark-pop .mark-ev-label')].map((l) => l.textContent)).toEqual(['code · 5 lines', 'output · 32 lines'])
+})
+
+test("a box's edges count the lines out of view there, a line in view in part counting as in view; none for a box that holds no more than it shows", () => {
+  // ten lines of 20 px, a box 50 px tall scrolled to 60 px: the fourth to the sixth line in view, the sixth in part
+  const lines = Array.from({ length: 10 }, (_, i) => ({ offsetTop: i * 20, offsetHeight: 20 })) as unknown as Element[]
+  const box = (scrollTop: number, clientHeight = 50) => ({ scrollTop, clientHeight, scrollHeight: 200, children: lines })
+  expect(outOfView(box(60))).toEqual({ above: 3, below: 4 })
+  expect(outOfView(box(0))).toEqual({ above: 0, below: 7 })
+  expect(outOfView(box(150))).toEqual({ above: 7, below: 0 })
+  expect(outOfView({ ...box(0), clientHeight: 200 })).toBe(null)
 })
 
 test("a computed mark's label draws its code in the file reader's colors for Python, as the terminal draws it in Claude Code's: each line in its place, the line that printed the value keyed, and the value in the output still marked", async () => {

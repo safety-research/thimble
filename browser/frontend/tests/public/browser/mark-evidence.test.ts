@@ -1,7 +1,8 @@
 // A mark's evidence label in a real browser, with thimble's own stylesheets (src/marks/Mark.tsx, styles/marks.css): a
 // long cited line of a README and a long line of a call's output wrap inside the label, which stays at most 560 px
 // wide, so no line runs past its edge and the highlighted words show inside it without a scroll. Output taller than its
-// box opens on the line that holds the value, the code on the line that printed it, and both scroll.
+// box opens on the line that holds the value, the code on the line that printed it, and both scroll, each box's edges
+// counting the lines out of view there. The marked words stand on the citations' purple tint, in the text's weight.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -85,6 +86,67 @@ test('a long cited line wraps inside the label, its quoted words in view', async
 test("a long line of a call's output wraps inside the label, its highlighted words in view", async () => {
   const c = await label(1)
   assert.ok(c.width <= 560 && c.overflow <= 1 && c.rows > 1 && c.inside, `the output line ${JSON.stringify(c)}`)
+})
+
+test("the code's box over the output's, each under its label, and each box's edges say how many lines are out of view there as it scrolls, an edge with none showing no row", async () => {
+  await page.locator('.mark-words').nth(2).click()
+  await page.waitForSelector('.mark-pop .cite-cell')
+  // the label, then the box between the edges that have lines out of view: the code's part, then the output's
+  const parts = await page.evaluate(() => [...document.querySelector('.mark-pop .mark-ev')!.children].slice(1).map((c) => (c.classList.contains('mark-ev-label') ? c.textContent : c.classList.contains('mark-ev-edge') ? c.textContent?.replace(/\d+/, 'N') : c.classList.contains('mark-ev-code') ? 'code' : 'output')))
+  assert.deepEqual(parts.filter((p) => !p?.startsWith('⋯')), ['code · 7 lines', 'code', 'output · 40 lines', 'output'], parts.join(' | '))
+  // the output opens on its value's line, lines out of view on both sides
+  assert.deepEqual(parts.slice(parts.indexOf('output · 40 lines')), ['output · 40 lines', '⋯ N lines above', 'output', '⋯ N lines below'], parts.join(' | '))
+  // a box's edges, and the lines it shows whole or in part
+  const edges = (sel: string) =>
+    page.evaluate((s) => {
+      const b = document.querySelector<HTMLElement>(s)!
+      const B = b.getBoundingClientRect()
+      const shown = [...b.children].filter((l) => { const L = l.getBoundingClientRect(); return L.bottom > B.top + 1 && L.top < B.bottom - 1 }).length
+      const edge = (e: Element | null, where: string) => (e?.classList.contains(`is-${where}`) ? e.textContent : '')
+      return { above: edge(b.previousElementSibling, 'above'), below: edge(b.nextElementSibling, 'below'), shown, lines: b.children.length }
+    }, sel)
+  const count = (t: string | null) => Number(/^⋯ (\d+) lines? (above|below)$/.exec(t ?? '')?.[1] ?? 0)
+  const out = await edges('.mark-pop .mark-ev-out')
+  assert.ok(count(out.above) > 0 && count(out.below) > 0 && count(out.above) + out.shown + count(out.below) === out.lines, `the output at open ${JSON.stringify(out)}`)
+  // scrolled to its top: nothing above, the rest below
+  await page.evaluate(() => { const b = document.querySelector<HTMLElement>('.mark-pop .mark-ev-out')!; b.scrollTop = 0; b.dispatchEvent(new Event('scroll')) })
+  await page.waitForFunction(() => !document.querySelector('.mark-pop .mark-ev-out')!.previousElementSibling?.classList.contains('is-above'))
+  const top = await edges('.mark-pop .mark-ev-out')
+  assert.ok(top.above === '' && count(top.below) === top.lines - top.shown, `the output at its top ${JSON.stringify(top)}`)
+  const code = await edges('.mark-pop .mark-ev-code')
+  assert.ok(count(code.above) + code.shown + count(code.below) === code.lines && code.lines === 7, `the code ${JSON.stringify(code)}`)
+  // the marked words on the citations' purple tint, in the text's own weight
+  const look = await page.evaluate(() => {
+    const w = document.querySelector('.mark-pop .mark-ev-out .cite-cell')!
+    const probe = document.createElement('span')
+    probe.style.background = 'var(--cite-tint)'
+    document.querySelector('.mark-pop')!.append(probe)
+    const tint = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    return { bg: getComputedStyle(w).backgroundColor, tint, weight: getComputedStyle(w).fontWeight, line: getComputedStyle(w.closest('.refchip-line')!).fontWeight }
+  })
+  assert.ok(look.bg === look.tint && look.weight === look.line, `the marked words ${JSON.stringify(look)}`)
+  await page.keyboard.press('Escape')
+  await page.mouse.click(990, 690)
+  await page.waitForFunction(() => !document.querySelector('.mark-pop'))
+})
+
+test("a quote's marked words stand on the citations' purple tint too, its place named as the terminal names it", async () => {
+  await page.locator('.mark-words').nth(0).click()
+  await page.waitForSelector('.mark-pop .cite-cell')
+  const got = await page.evaluate(() => {
+    const w = document.querySelector('.mark-pop .cite-cell')!
+    const probe = document.createElement('span')
+    probe.style.background = 'var(--cite-tint)'
+    document.querySelector('.mark-pop')!.append(probe)
+    const tint = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    return { chip: document.querySelector('.mark-pop .refchip-pop-chip')?.textContent, bg: getComputedStyle(w).backgroundColor, tint, weight: getComputedStyle(w).fontWeight }
+  })
+  assert.ok(got.chip === 'README.md · line 55' && got.bg === got.tint && got.weight === '400', JSON.stringify(got))
+  await page.keyboard.press('Escape')
+  await page.mouse.click(990, 690)
+  await page.waitForFunction(() => !document.querySelector('.mark-pop'))
 })
 
 test('output taller than its box opens on the line that holds the value, the code on the line that printed it; the wheel and the arrow keys scroll each box', async () => {
