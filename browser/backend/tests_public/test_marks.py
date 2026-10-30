@@ -46,18 +46,19 @@ def test_the_checker_prompt_is_the_terminal_s_with_the_browser_s_few_changes():
     assert "1. [12] in: We saw [12] runs." in text and "{{" not in text and "thimble label" not in text
 
 
-def test_the_checker_takes_what_the_code_does_from_the_code_not_from_a_readme():
+def test_the_checker_cites_the_artifact_itself_not_a_description_of_it():
     """I77: an answer and all its citations came from an out-of-date README, and the check verified them from the
-    README, where the cited words stood. The checker's text, the browser's and the terminal's, now says that a document
-    such as a README is evidence of what it says, not of what the code does, which the check finds in the code. The
-    README stays the evidence of a sentence about what the README says: a line that only sent the check to the code made
-    it change the README's own words in such sentences to the code's."""
+    README, where the cited words stood. The checker's text, the browser's and the terminal's, now gives one principle
+    in place of a sentence on reports of events and one on READMEs: cite the relevant artifact itself, not a
+    description of it, unless the claim is what the description says, such as the code that implements a claim or the
+    log of a run, not a post about it, which shows what its writer said."""
     text = marks.checker_prompt("1. [at 02:00] in: A cron job starts the run [at 02:00] every night.", "/data")
     sentences = re.split(r"(?<=\.)\s+", text)
-    i = next(i for i, s in enumerate(sentences) if "README" in s)
-    assert sentences[i] == ("A document such as a README is evidence of what it says, not of what the code does: for "
-                            "that, find the code.")
-    assert sentences[i - 1].startswith("A report of an event") and "what its writer said, not the event" in sentences[i - 1]
+    i = sentences.index("Cite the relevant artifact itself, not a description of it, unless the claim is what the "
+                        "description says.")
+    assert sentences[i + 1] == ("For example, cite the relevant code passage that implements the cited claim, or the log "
+                                "of a run, not a post about it: a post shows what its writer said, not what happened.")
+    assert "A report of an event" not in text and "A document such as a README" not in text
 
 
 def test_split_marks_keeps_a_sentence_together_and_caps_the_forks():
