@@ -1024,9 +1024,9 @@ def _checks(wt: Path, paths: list[str], base: str) -> tuple[str, list[str]]:
     the terminal plugin's (the copy's launcher and the kernel's command, LAUNCHER_SMOKE; the hooks tests when Claude
     Code is installed; the kernel's tests when this Python has pytest); browser/frontend/, the page's (PAGE_CHECKS);
     browser/backend/ and browser/prompts/, the server's (SERVER_LOADS, and SERVER_PROMPTS when its Python has pytest);
-    the rest of browser/, none. The page's and the
-    server's run with the browser workbench's packages, which the copy borrows (_borrow): with none (the workbench is
-    not installed), they are left out. THIMBLE_FIX_TESTS, a shell command, replaces them all."""
+    the rest of browser/, none. The page's and the server's run with the browser workbench's packages, which the copy
+    borrows (_borrow): with none (the workbench is not installed), they are left out. THIMBLE_FIX_TESTS, a shell
+    command, replaces them all."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if cmd:
         return cmd, []
@@ -1697,9 +1697,9 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
          within: float | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the checks of the parts
     of thimble it changed in the sandbox (_checks, as carry runs them for the fixes an update set aside). ready, failed
-    (with the reason), or a request with no code. A round of a fix changed in place (prev):
-    a ready change becomes the fix's new version, the fix's change and the round's in one commit (settle), which waits
-    for the person's y while the version before stays as it was; a round that changed nothing leaves the fix as it was.
+    (with the reason), or a request with no code. A round of a fix changed in place (prev): a ready change becomes the
+    fix's new version, the fix's change and the round's in one commit (settle), which waits for the person's y while
+    the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
     `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r.
     The tests run in a process of their own (_start_tests), and done waits for what came of them; with `within`, at
