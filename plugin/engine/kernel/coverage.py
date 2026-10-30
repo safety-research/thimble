@@ -19,10 +19,6 @@ A file is touched when it is seen, model, searched or computed; a listed file is
 read. Each file has two measures in its own unit: the share read, and the share gone over (read, read by a model,
 searched or computed over; read is part of it). shellcmd.py says what a shell command did with each file.
 
-A copy holds what the files it copies hold, so it is touched as they are: a compressed file beside the file it holds
-(`runs.csv.gz` beside `runs.csv`) is counted as that file, and what touched either touched both; an archive (a zip, a
-tar) whose every file is a file of the folder is touched as those files were, as one whole file.
-
 What happened to each file is kept only for the files touched. A file not touched is counted by its folder and type,
 and a few of each folder's are named (`untouched`): a folder of a million screenshots costs one pass over its names.
 """
@@ -248,29 +244,6 @@ def _file_record(f: str, c: dict[str, Any], unit: str, x: dict[str, Any], search
     return o
 
 
-def _copies(known: SH.Known, cnt: dict[str, dict[str, Any]]) -> tuple[list[tuple[str, str]], dict[str, list[str]]]:
-    """The folder's copies: each compressed file with the file beside it that it holds (`runs.csv.gz`, `runs.csv`),
-    and each archive with the folder's files it holds, when it holds no other. An archive's file is looked for beside
-    the archive, then in each folder above it (an archive of the folder it is in, made from the folder above)."""
-    twins = [(f, f[:-len(ext)]) for ext in S.COMPRESSED for f in known.by_ext.get(ext, ()) if f[:-len(ext)] in known.set]
-    held: dict[str, list[str]] = {}
-    for a, c in cnt.items():
-        if not c.get("members"):
-            continue
-        ups = [a[:a.rfind("/") + 1]]
-        while ups[-1]:
-            ups.append(ups[-1][:ups[-1].rstrip("/").rfind("/") + 1])
-        got = [next((u + m for u in ups if u + m in known.set), "") for m in c["members"]]
-        if all(got) and a not in got:
-            held[a] = got
-    return twins, held
-
-
-def _seen(x: dict[str, Any], unit: str) -> bool:
-    """Whether a file's own calls showed Claude some of it, as _file_record says it: lines, pages, or a whole file."""
-    return bool(_ranges_len(x["lines"])) or (unit == "pages" and bool(x["pages"] or x["whole"])) or (unit == "file" and x["whole"])
-
-
 @contextmanager
 def _collector_waits() -> Iterator[None]:
     """Python's cycle collector goes over every object the process holds, again each time many more are made: a count
@@ -306,16 +279,9 @@ def _coverage(st: Store, session: str | None, per_folder: int, until: float | No
 
     files = S.list_files(st.root)
     known = SH.Known(files)
-    # rows are counted only for the sources and PDFs, and an archive's files listed: one test per extension, and a
-    # name with none, or a compressed one (`.tar.gz`), tested alone
-    cnt = S.counts(st.root, [f for ext, fs in known.by_ext.items()
-                             for f in (fs if not ext or ext in S.COMPRESSED or S.counted("x" + ext) else ())],
+    # rows are counted only for the sources and PDFs: one test per extension, and a name with none tested alone
+    cnt = S.counts(st.root, [f for ext, fs in known.by_ext.items() if not ext or S.counted("x" + ext) for f in fs],
                    st.cache / "counts.json", until)
-    # a compressed copy of a file is counted as the file it holds (its kind, rows and lines)
-    twins, held = _copies(known, cnt)
-    for c, o in twins:
-        if o in cnt and c not in cnt:
-            cnt[c] = cnt[o]
 
     def count(f: str) -> dict[str, Any]:
         return cnt.get(f) or S.whole_file(f)
@@ -507,45 +473,6 @@ def _coverage(st: Store, session: str | None, per_folder: int, until: float | No
                         listed[f].add(prog)  # the output was cut before its lines
                 else:
                     listed[f].add(prog)
-
-    # the copies (the module's docstring): what touched a compressed copy or the file it holds touched both, then each
-    # archive is touched as the files it holds, then again for a compressed archive (`runs.tar.gz` of `runs.tar`)
-    progs = [*searched_by.values(), *computed_by.values()]
-
-    def share(c: str, o: str) -> None:
-        xs = [per[f] for f in (c, o) if f in per]
-        if xs:
-            both = {"lines": [r for x in xs for r in x["lines"]], "hits": set().union(*(x["hits"] for x in xs)),
-                    "pages": [r for x in xs for r in x["pages"]], "whole": any(x["whole"] for x in xs),
-                    "model": max(x["model"] for x in xs), "labels": set().union(*(x["labels"] for x in xs)),
-                    "model_labels": set().union(*(x["model_labels"] for x in xs)),
-                    "computed": max(x["computed"] for x in xs), "computed_by": set().union(*(x["computed_by"] for x in xs))}
-            for f in (c, o):
-                per[f] = {**both, "named": per[f]["named"] if f in per else set()}
-        for fs in progs:
-            if c in fs or o in fs:
-                fs.update((c, o))
-
-    for c, o in twins:
-        share(c, o)
-    for a, fs in held.items():
-        xs = [(per[f], f) for f in fs if f in per]
-        if any(_seen(x, unit_of(f)) for x, f in xs):
-            at(a)["whole"] = True
-        for x, _ in xs:
-            if x["model"] or x["computed"] or x["labels"]:
-                y = at(a)
-                y["model"] = max(y["model"], int(bool(x["model"])))
-                y["computed"] = max(y["computed"], int(bool(x["computed"])))
-                y["labels"] |= x["labels"]
-                y["model_labels"] |= x["model_labels"]
-                y["computed_by"] |= x["computed_by"]
-        for got in progs:
-            if any(f in got for f in fs):
-                got.add(a)
-    for c, o in twins:
-        if c in held or o in held:
-            share(c, o)
 
     # the files touched: those searched or gone over whole, and those whose own calls showed some of them; a file a call
     # named but showed nothing of (a Read past its end, a search that showed none of its lines) is only named
