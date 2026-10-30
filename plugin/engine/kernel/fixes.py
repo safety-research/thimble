@@ -981,10 +981,12 @@ LAUNCHER_SMOKE = ("(lim() { \"$THIMBLE_PYTHON\" -c 'import os,signal,subprocess 
 PAGE_CHECKS = ('(cd browser/frontend && node_modules/.bin/tsc -b && node_modules/.bin/vite build --logLevel warn '
                '--outDir "$TMPDIR/page" --emptyOutDir && node_modules/.bin/vitest run --changed {base} --passWithNoTests)')
 # the server's checks, in its folder: its code loads (app.main imports the module of each of its routes, as the server's
-# start does), and its prompts render and name only the hints its code has (scripts/check.sh's parity). Its whole suite
-# needs what the sandbox does not give (a browser, the network, many minutes): CI runs it
-SERVER_CHECKS = ('(cd browser/backend && .venv/bin/python -c "import app.main" && THIMBLE_SKIP_KEY=1 .venv/bin/python -m '
-                 'pytest -q -x -p no:cacheprovider tests_public/test_prompts.py tests_public/test_american_names.py)')
+# start does), and, when its Python has pytest, its prompts render and name only the hints its code has
+# (scripts/check.sh's parity). Its whole suite needs what the sandbox does not give (a browser, the network, many
+# minutes): CI runs it
+SERVER_LOADS = '(cd browser/backend && .venv/bin/python -c "import app.main")'
+SERVER_PROMPTS = ('(cd browser/backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest -q -x -p no:cacheprovider '
+                  'tests_public/test_prompts.py tests_public/test_american_names.py)')
 # the browser workbench's packages, as its install puts them in browser/: (part, folder of packages)
 WORKBENCH_PACKAGES = (("frontend", "node_modules"), ("backend", ".venv"))
 
@@ -1021,7 +1023,8 @@ def _checks(wt: Path, paths: list[str], base: str) -> tuple[str, list[str]]:
     carry the fixes it puts back, so that the two check alike. By the part of thimble a path is in: outside browser/,
     the terminal plugin's (the copy's launcher and the kernel's command, LAUNCHER_SMOKE; the hooks tests when Claude
     Code is installed; the kernel's tests when this Python has pytest); browser/frontend/, the page's (PAGE_CHECKS);
-    browser/backend/ and browser/prompts/, the server's (SERVER_CHECKS); the rest of browser/, none. The page's and the
+    browser/backend/ and browser/prompts/, the server's (SERVER_LOADS, and SERVER_PROMPTS when its Python has pytest);
+    the rest of browser/, none. The page's and the
     server's run with the browser workbench's packages, which the copy borrows (_borrow): with none (the workbench is
     not installed), they are left out. THIMBLE_FIX_TESTS, a shell command, replaces them all."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
@@ -1042,7 +1045,9 @@ def _checks(wt: Path, paths: list[str], base: str) -> tuple[str, list[str]]:
         parts.append(PAGE_CHECKS.format(base=shlex.quote(base)))
         reads += lent["frontend"]
     if server and "backend" in lent:
-        parts.append(SERVER_CHECKS)
+        parts.append(SERVER_LOADS)
+        if _has_pytest(str(wt / "browser" / "backend" / ".venv" / "bin" / "python")):
+            parts.append(SERVER_PROMPTS)
         reads += lent["backend"]
     return " && ".join(parts) or "true", reads
 

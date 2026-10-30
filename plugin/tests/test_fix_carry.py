@@ -544,7 +544,8 @@ def made_up_venv(root: Path) -> Path:
 
 def test_the_checks_follow_the_parts_a_change_touches_and_borrow_the_workbenchs_packages(world, monkeypatch, tmp_path):
     monkeypatch.delenv("THIMBLE_FIX_TESTS")
-    monkeypatch.setattr(FX, "_has_pytest", lambda py: False)
+    # the kernel's Python has no pytest, and the server's Python (a copy's) has it
+    monkeypatch.setattr(FX, "_has_pytest", lambda py: py.startswith(str(tmp_path)))
     seen: list = []
     monkeypatch.setattr(FX, "sandbox_argv", lambda fid, **kw: seen.append((fid, kw)) or ["box"])
     quick = f"{FX.LAUNCHER_SMOKE} && {FX.QUICK_TESTS}"
@@ -563,7 +564,7 @@ def test_the_checks_follow_the_parts_a_change_touches_and_borrow_the_workbenchs_
         (b / "frontend" / "node_modules" / name).mkdir(parents=True)
     venv = made_up_venv(b / "backend" / ".venv")
     cmd, reads = FX._checks(copy, ["browser/frontend/src/App.tsx", "browser/prompts/main.md", "plugin/x.ts"], "v0.10.3")
-    assert cmd == f"{quick} && {page} && {FX.SERVER_CHECKS}"
+    assert cmd == f"{quick} && {page} && {FX.SERVER_LOADS} && {FX.SERVER_PROMPTS}"
     lent = copy / "browser" / "frontend" / "node_modules"
     assert sorted(x.name for x in lent.iterdir()) == [".bin", "react"] and (lent / "react").is_symlink()
     assert (lent / "react").resolve() == (b / "frontend" / "node_modules" / "react").resolve()
@@ -572,7 +573,10 @@ def test_the_checks_follow_the_parts_a_change_touches_and_borrow_the_workbenchs_
             *FX._py_dirs(str(venv / "bin" / "python"))} <= set(reads)
     # the command done and carry run in a copy: the checks, in the sandbox that reads the packages
     (FX.home() / "work" / "carry" / "browser" / "backend").mkdir(parents=True)
-    assert FX._checks_argv("carry", ["browser/backend/app/errors.py"], "v0.10.3") == ["box", FX.SERVER_CHECKS]
+    assert FX._checks_argv("carry", ["browser/backend/app/errors.py"], "v0.10.3") == ["box", f"{FX.SERVER_LOADS} && {FX.SERVER_PROMPTS}"]
+    # a server's Python with no pytest (one install.sh --python linked): its code loads, and that is all it can check
+    monkeypatch.setattr(FX, "_has_pytest", lambda py: False)
+    assert FX._checks_argv("carry", ["browser/backend/app/errors.py"], "v0.10.3") == ["box", FX.SERVER_LOADS]
     assert seen[-1][0] == "carry" and str(venv.resolve()) in seen[-1][1]["reads"]
     # before the workbench runs from live, the copy borrows the packages of the checkout it was installed in
     seed = tmp_path / "checkout" / "browser"
