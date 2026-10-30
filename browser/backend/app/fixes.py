@@ -36,8 +36,9 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
                              shows it where main started it, as the card of a subagent with its steps (an `agent`
                              record whose `run` is the round), and its thread shows its whole run
     its end (settle)         the kernel commits the change, refuses a change to the way back (the fix flow, the privacy
-                             scan) or a binary file, and runs the tests of what the change touched (`fix done`), one fix
-                             at a time; a fix that passes is ready. How it ended is a row
+                             scan) or a binary file, and runs the checks of the parts of thimble the change touched
+                             (`fix done`), as it checks the fixes an update puts back, one fix at a time; a fix that
+                             passes is ready. How it ended is a row
                              in main's chat and in the fix's thread, at the time it ended (note: a `fix` chip): a ready
                              fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself
     the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
@@ -598,92 +599,6 @@ def end_of(answer: str) -> dict[str, Any]:
             "request": req is not None and does is None}
 
 
-def changed(work: Path, base: str) -> list[str]:
-    """The paths the copy changed since `base`, new files among them; none for a copy git may not run in (_own_git,
-    _nested_git), which the kernel's check then fails."""
-    g = _own_git(work)
-    if g is None or _nested_git(work):
-        return []
-    env = {**os.environ, **g}
-    p = subprocess.run(["git", "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=all"],
-                       cwd=work, capture_output=True, text=True, env=env)
-    q = subprocess.run(["git", "-c", "core.quotePath=false", "diff", "--name-only", base], cwd=work, capture_output=True,
-                       text=True, env=env)
-    out = {ln[3:].split(" -> ")[-1] for ln in p.stdout.splitlines() if len(ln) > 3}
-    out |= {ln for ln in q.stdout.splitlines() if ln}
-    return sorted(out)
-
-
-def _own_git(work: Path) -> dict[str, str] | None:
-    """git's environment for a fix's copy (GIT_DIR, GIT_WORK_TREE): the copy's own worktree entry in live's repository,
-    as live's records have it, never the copy's .git, which the fixer's sandbox writes and could point at another
-    repository, or at a git folder whose settings run commands outside the sandbox (the kernel's _own_git does the
-    same). None when the copy's .git is not a file that names that entry, or the entry does not name the copy back."""
-    import stat  # noqa: PLC0415
-
-    live = fixes_home() / "live"
-    try:
-        fd = os.open(work / ".git", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except OSError:
-        return None
-    try:
-        link = os.read(fd, 4096).decode(errors="replace").strip() if stat.S_ISREG(os.fstat(fd).st_mode) else ""
-    finally:
-        os.close(fd)
-    common = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=live, capture_output=True, text=True,
-                            check=False).stdout.strip() if live.is_dir() else ""
-    if not link.startswith("gitdir:") or not common:
-        return None
-    entry = Path(os.path.realpath(os.path.join(work, link[len("gitdir:"):].strip())))
-    if entry.parent != (live / common).resolve() / "worktrees":
-        return None
-    try:
-        back = (entry / "gitdir").read_text().strip()
-    except OSError:
-        return None
-    if not back or os.path.realpath(os.path.join(entry, back)) != os.path.realpath(work / ".git"):
-        return None
-    return {"GIT_DIR": str(entry), "GIT_WORK_TREE": str(work)}
-
-
-def _nested_git(work: Path) -> bool:
-    """Whether the copy holds a git repository of its own below its top (sub/.git, a folder, a file or a link), whose
-    settings (core.fsmonitor) git that reads the copy's files would run outside the sandbox (the kernel's _nested_git
-    does the same). Each folder is also asked for .git as git asks; the walk follows no link, and a folder it cannot read
-    counts."""
-    top = os.fspath(work)
-    stuck: list[OSError] = []
-    for d, dirs, files in os.walk(top, onerror=stuck.append):
-        if d == top:
-            # the copy's own .git, its link to live's repository (_own_git)
-            dirs[:] = [n for n in dirs if n != ".git"]
-            files = [n for n in files if n != ".git"]
-        if ".git" in dirs or ".git" in files:
-            return True
-        for n in dirs:
-            sub = os.path.join(d, n)
-            if not os.path.islink(sub) and os.path.lexists(os.path.join(sub, ".git")):
-                return True
-    return bool(stuck)
-
-
-def tests_for(paths: list[str]) -> str:
-    """The tests of what a change touched, as one shell command the kernel runs in its sandbox, in the copy
-    (THIMBLE_FIX_TESTS): the page's type check and the unit tests of what changed, the server's tests, and the
-    terminal plugin's quick tests."""
-    parts = []
-    if any(p.startswith("browser/frontend/") for p in paths):
-        parts.append("(cd browser/frontend && node_modules/.bin/tsc -b && node_modules/.bin/vitest run --changed HEAD~1"
-                     " --passWithNoTests)")
-    if any(p.startswith("browser/backend/") or p.startswith("browser/prompts/") for p in paths):
-        parts.append("(cd browser/backend && THIMBLE_SKIP_KEY=1 .venv/bin/python -m pytest -q -x -p no:cacheprovider "
-                     "tests_public)")
-    if any(p.startswith("plugin/") for p in paths):
-        quick = '"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider'
-        parts.append(f"claude plugin test plugin && {quick}" if config.CLI_PATH else quick)
-    return " && ".join(parts) or "true"
-
-
 def srt_ready() -> str:
     """The kernel runs a fix's tests in its sandbox runtime, in the plugin's home: installed there when it is missing
     (plugin/sandbox/setup.mjs, as a terminal session's start installs it). '' when it is there, else why not."""
@@ -730,10 +645,9 @@ async def settle(fid: int, answer: str) -> None:
             note(fid, "problem", f"“{name}” could not be checked: {why}")
             return
         end = end_of(answer)
-        work = Path(rec.get("work") or "")
-        paths = await asyncio.to_thread(changed, work, str(rec.get("base") or "HEAD")) if work.is_dir() else []
-        env = {"THIMBLE_FIX_TESTS": tests_for(paths), "THIMBLE_PYTHON": sys.executable,
-               "THIMBLE_FIX_READ": os.pathsep.join(map(str, lent_reads()))}
+        # the kernel checks what the change touched, as it checks the fixes an update puts back (its _checks), with this
+        # server's Python and the packages lent to the copy
+        env = {"THIMBLE_PYTHON": sys.executable, "THIMBLE_FIX_READ": os.pathsep.join(map(str, lent_reads()))}
         args = ["done", str(fid), "--summary", "-", *(["--title", end["title"]] if end["title"] else []),
                 *(["--request"] if end["request"] else [])]
         # the tests run for one fix at a time, and once more when they fail (the kernel's run_tests)

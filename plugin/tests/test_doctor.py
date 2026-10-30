@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, fake, upstream, world  # noqa: E402, F401  (world and upstream are fixtures)
+from test_fixes import FX, fake, made, press, release_with, upstream, world  # noqa: E402, F401  (world and upstream are fixtures)
 
 from kernel import cli  # noqa: E402
 
@@ -129,3 +129,54 @@ def test_the_doctor_says_each_part_that_works(world, monkeypatch, capsys):
     # --offline leaves out the look for a newer release
     assert cli.main(["doctor", "--offline"]) == 0
     assert capsys.readouterr().out.splitlines() == out[:-1]
+
+
+def test_the_doctor_names_a_fix_that_keeps_claude_code_from_loading_thimble_and_the_command_that_turns_it_off(world, monkeypatch, capsys):
+    """A fix whose change keeps the plugin's hooks module from loading (it imports what is not there): Claude Code does
+    not load thimble, so no session's start can check it. The doctor loads the plugin as Claude Code would (the
+    plugin's smoke test, alone), finds the first fix with which it does not load, and says how to turn it off."""
+    release_with(world, {"plugin/tests/smoke.test.ts": "// the made-up claude runs it\n",
+                         "plugin/tests/bar.test.ts": "// left out of the doctor's check\n"})
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    FX.apply(a["id"], press(a["id"]))
+    b = FX.new("say who asked")
+    (Path(b["work"]) / "plugin" / "bar" / "hints.ts").write_text("import { gone } from './made-up-gone'\n")
+    FX.done(b["id"], "Hints say who asked", "")
+    FX.apply(b["id"], press(b["id"]))
+    bin_ = doctor_world(world, monkeypatch)
+    fake(bin_ / "thimble", world["log"])
+    for tool in ("tar", "grep", "ls"):
+        (bin_ / tool).symlink_to(shutil.which(tool, path="/usr/bin:/bin"))
+    # the made-up claude: its test of a plugin whose hooks module imports what is not there fails, as Claude Code's does
+    listed = json.dumps([{"id": "thimble@thimble", "version": "0.10.2", "enabled": True}])
+    fake(bin_ / "claude", world["log"],
+         f'case "$1 $2" in "--version ") echo "2.1.312 (Claude Code)";; "plugin list") echo \'{listed}\';; '
+         f'"plugin test") echo tests: $(ls "$3/tests") >> \'{world["log"]}\'; grep -rqs made-up-gone "$3" && {{ '
+         'echo "(fail) the module loads [1.0ms]"; echo "  HooksError: thimble: hooks module did not load: '
+         "SyntaxError: Export named 'gone' not found in module '$3/bar/made-up-gone.ts'.\"; exit 1; };; esac")
+    assert cli.main(["doctor", "--offline"]) == 1
+    out = capsys.readouterr().out.splitlines()
+    i = out.index(f"  × fix {b['id']}, Hints say who asked, keeps Claude Code from loading thimble: SyntaxError: Export "
+                  "named 'gone' not found in module 'plugin/bar/made-up-gone.ts'.")
+    assert out[i + 1] == f"      Turn it off: thimble fix off {b['id']}"
+    # the doctor's check runs the plugin's smoke test alone: the release, the fixes in turn
+    assert {x for x in world["log"].read_text().splitlines() if x.startswith("tests:")} == {"tests: smoke.test.ts"}
+    # turned off, thimble loads with the fix left on
+    FX.one_off(b["id"])
+    assert cli.main(["doctor", "--offline"]) == 0
+    assert "  ✓ your fixes: 1 on (thimble fixes lists them)" in capsys.readouterr().out.splitlines()
+
+
+def test_the_doctor_names_the_fixes_an_older_update_put_back_with_no_check(world, monkeypatch, capsys):
+    bin_ = doctor_world(world, monkeypatch)
+    fake(bin_ / "thimble", world["log"])
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    FX.apply(a["id"], press(a["id"]))
+    # an update by thimble 0.10.6 moved the release and put the fix back on it, with no check
+    FX.write_json(FX.home() / "release.json", {**FX.release(), "checked": "made-up"})
+    assert cli.main(["doctor", "--offline"]) == 1
+    out = capsys.readouterr().out.splitlines()
+    i = out.index(f"  × 1 of your fixes is on with no check on thimble 0.10.2 yet (fix {a['id']})")
+    assert out[i + 1] == "      Check it: thimble fixes (a fix that does not fit goes off)"

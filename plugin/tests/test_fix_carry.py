@@ -20,7 +20,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, calls, commit_in_checkout, fake, live_file, made, on_fix, press, sh, three_fixes, upstream, world  # noqa: E402, F401
+from test_fixes import FX, calls, commit_in_checkout, fake, live_file, made, on_fix, press, release_with, sh, three_fixes, upstream, world  # noqa: E402, F401
 
 LAUNCHER = Path(__file__).resolve().parents[2] / "browser" / "scripts" / "thimble-browser"
 
@@ -53,6 +53,56 @@ def update_as_before() -> list[int]:
         FX._repoint()
         FX._sync()
     return aside
+
+
+def put_back_unchecked(ids: list[int]) -> tuple[list[int], list[int]]:
+    """What thimble 0.10.6's update did after it set the fixes aside on the new release (its carry), and what a dev
+    install's update by 0.10.5 or 0.10.6 did after it moved mine (its replay): each fix of `ids` cherry-picked back onto
+    mine in turn, on again with no check; one whose change does not apply is left out. (back, missed)."""
+    live = FX.live_dir()
+    back: list[int] = []
+    missed: list[int] = []
+    for fid in ids:
+        p = subprocess.run(["git", "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{fid}"], cwd=live,
+                           capture_output=True, text=True)
+        if p.returncode != 0:
+            subprocess.run(["git", "cherry-pick", "--abort"], cwd=live, capture_output=True)
+            missed.append(fid)
+            continue
+        c = sh("git", "rev-parse", "HEAD", cwd=live)
+        sh("git", "update-ref", f"refs/thimble/fixes/{fid}", c, cwd=live)
+        r = FX.records()[fid]
+        r.update(state="on", commit=c, error=None, pending=None, files=FX._numstat(live, f"{c}^", c))
+        FX.put(r)
+        back.append(fid)
+    return back, missed
+
+
+def update_as_0_10_6() -> list[int]:
+    """thimble update as thimble 0.10.6 ran it, with its own kernel: every fix in mine set aside, mine the plain release,
+    then each fix whose change applies put back on with no check (put_back_unchecked), and the record of what was set
+    aside gone; release.json keeps what it had, with the new release. Then Claude Code copies live. The fixes put back."""
+    latest = FX.latest_release()
+    with FX.Lock():
+        FX.ensure_live()
+        live, rel = FX.live_dir(), FX.release()
+        now = FX.release_name(rel)
+        ref = f"refs/thimble/releases/{latest['tag']}"
+        sh("git", "fetch", "-q", "--no-tags", latest["url"], f"+refs/tags/{latest['tag']}:{ref}", cwd=live)
+        new = sh("git", "rev-parse", f"{ref}^{{commit}}", cwd=live)
+        recs = FX.records()
+        aside = list(dict.fromkeys(FX._replay_order(recs)))
+        FX._set_aside(aside, recs, latest["version"], latest["version"], now)
+        FX._unstamp()
+        sh("git", "checkout", "-q", "-B", "mine", new, cwd=live)
+        rel.update(base=new, version=FX._version_at(live, new), tag=latest["tag"], updated=time.time())
+        FX.write_json(FX.home() / "release.json", rel)
+        FX.place_release(new)
+        back, missed = put_back_unchecked(aside)
+        assert not missed
+        FX._repoint()
+        FX._sync()
+    return back
 
 
 def fix_of(words: str, path: str, text: str, title: str) -> int:
@@ -208,11 +258,11 @@ def test_when_the_checks_cannot_run_nothing_moves_and_the_next_carry_checks_agai
     before = len(calls(world))
     why = "the sandbox runtime that fixes run in is not installed"
 
-    def no_sandbox(paths, page):
+    def no_sandbox(fid, paths, base):
         raise FX.FixError(why)
 
     with monkeypatch.context() as m:
-        m.setattr(FX, "_carry_argv", no_sandbox)
+        m.setattr(FX, "_checks_argv", no_sandbox)
         rows = FX.list_lines(120)
         assert " ".join(rows[:rows.index("")]) == f"Your 3 fixes stay off: thimble could not check them on thimble 0.10.3 ({why})."
         assert [FX.get(i)["state"] for i in (a, b, c)] == ["pending"] * 3
@@ -483,33 +533,120 @@ def test_a_list_that_cannot_put_fixes_back_still_lists_them_and_says_why(world, 
         FX.carry()
 
 
-def test_the_checks_are_a_fixs_quick_tests_and_the_pages_build_for_a_fix_to_the_page(world, monkeypatch, tmp_path):
+def made_up_venv(root: Path) -> Path:
+    """A made-up Python environment for the browser workbench's server in `root` (its bin/python runs this Python)."""
+    py = root / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    py.chmod(0o755)
+    return root
+
+
+def test_the_checks_follow_the_parts_a_change_touches_and_borrow_the_workbenchs_packages(world, monkeypatch, tmp_path):
     monkeypatch.delenv("THIMBLE_FIX_TESTS")
-    monkeypatch.setattr(FX, "_has_pytest", lambda py: False)
+    # the kernel's Python has no pytest, and the server's Python (a copy's) has it
+    monkeypatch.setattr(FX, "_has_pytest", lambda py: py.startswith(str(tmp_path)))
     seen: list = []
     monkeypatch.setattr(FX, "sandbox_argv", lambda fid, **kw: seen.append((fid, kw)) or ["box"])
     quick = f"{FX.LAUNCHER_SMOKE} && {FX.QUICK_TESTS}"
-    assert FX._carry_argv(["plugin/bar/bar.tsx"], []) == ["box", quick] and seen[-1] == ("carry", {})
-    # the page: its build, reading its packages, once the workbench is installed; nothing else to check without it
-    assert FX._carry_argv(["browser/frontend/src/App.tsx"], ["/made-up/node_modules"]) == ["box", FX.PAGE_BUILD]
-    assert seen[-1] == ("carry", {"reads": ["/made-up/node_modules"]})
-    assert FX._carry_argv(["browser/frontend/src/App.tsx"], []) == ["box", "true"]
-    assert FX._carry_argv(["plugin/x.ts", "browser/frontend/src/App.tsx"], ["/p"]) == ["box", f"{quick} && {FX.PAGE_BUILD}"]
-    # live's page packages, lent to the copy as a folder of links that leaves out the page's temp files
+    page = FX.PAGE_CHECKS.format(base="v0.10.3")
     FX.ensure_live()
-    assert FX._page_packages() == []
-    nm = FX.live_dir() / "browser" / "frontend" / "node_modules"
-    (nm / "react").mkdir(parents=True)
-    (nm / ".vite").mkdir()
-    (nm / ".bin").mkdir()
+    copy = tmp_path / "copy"
+    (copy / "browser" / "frontend").mkdir(parents=True)
+    (copy / "browser" / "backend").mkdir()
+    # without the workbench's packages, the terminal plugin's checks alone, and nothing for the page or the server
+    assert FX._checks(copy, ["plugin/bar/bar.tsx", "browser/frontend/src/App.tsx"], "v0.10.3") == (quick, [])
+    assert FX._checks(copy, ["browser/backend/app/errors.py", "browser/scripts/thimble-browser"], "v0.10.3") == ("true", [])
+    # the workbench on live: its page packages and its server's Python environment, which the copy borrows, the page's
+    # as a folder of links that leaves out its tools' temp files
+    b = FX.live_dir() / "browser"
+    for name in ("react", ".vite", ".bin"):
+        (b / "frontend" / "node_modules" / name).mkdir(parents=True)
+    venv = made_up_venv(b / "backend" / ".venv")
+    cmd, reads = FX._checks(copy, ["browser/frontend/src/App.tsx", "browser/prompts/main.md", "plugin/x.ts"], "v0.10.3")
+    assert cmd == f"{quick} && {page} && {FX.SERVER_LOADS} && {FX.SERVER_PROMPTS}"
+    lent = copy / "browser" / "frontend" / "node_modules"
+    assert sorted(x.name for x in lent.iterdir()) == [".bin", "react"] and (lent / "react").is_symlink()
+    assert (lent / "react").resolve() == (b / "frontend" / "node_modules" / "react").resolve()
+    assert (copy / "browser" / "backend" / ".venv").resolve() == venv.resolve()
+    assert {str((b / "frontend" / "node_modules").resolve()), str(venv.resolve()),
+            *FX._py_dirs(str(venv / "bin" / "python"))} <= set(reads)
+    # the command done and carry run in a copy: the checks, in the sandbox that reads the packages
+    (FX.home() / "work" / "carry" / "browser" / "backend").mkdir(parents=True)
+    assert FX._checks_argv("carry", ["browser/backend/app/errors.py"], "v0.10.3") == ["box", f"{FX.SERVER_LOADS} && {FX.SERVER_PROMPTS}"]
+    # a server's Python with no pytest (one install.sh --python linked): its code loads, and that is all it can check
+    monkeypatch.setattr(FX, "_has_pytest", lambda py: False)
+    assert FX._checks_argv("carry", ["browser/backend/app/errors.py"], "v0.10.3") == ["box", FX.SERVER_LOADS]
+    assert seen[-1][0] == "carry" and str(venv.resolve()) in seen[-1][1]["reads"]
+    # before the workbench runs from live, the copy borrows the packages of the checkout it was installed in
+    seed = tmp_path / "checkout" / "browser"
+    (seed / "frontend" / "node_modules" / "vite").mkdir(parents=True)
+    made_up_venv(seed / "backend" / ".venv")
     (tmp_path / "browser-home").mkdir()
+    (tmp_path / "browser-home" / "checkout").write_text(f"{seed}\n")
     monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp_path / "browser-home"))
-    assert FX._page_packages() == [str(nm.resolve())]
-    wt = tmp_path / "copy"
-    FX._lend_page(wt)
-    lent = wt / "browser" / "frontend" / "node_modules"
-    assert sorted(x.name for x in lent.iterdir()) == [".bin", "react"]
-    assert (lent / "react").resolve() == (nm / "react").resolve() and (lent / "react").is_symlink()
+    shutil.rmtree(b / "frontend" / "node_modules")
+    shutil.rmtree(b / "backend" / ".venv")
+    other = tmp_path / "other"
+    (other / "browser" / "frontend").mkdir(parents=True)
+    (other / "browser" / "backend").mkdir()
+    assert FX._checks(other, ["browser/frontend/src/App.tsx"], "v0.10.3")[0] == page
+    assert [x.name for x in (other / "browser" / "frontend" / "node_modules").iterdir()] == ["vite"]
+    assert (other / "browser" / "backend" / ".venv").resolve() == (seed / "backend" / ".venv").resolve()
+
+
+def test_the_python_the_sandbox_reads_includes_each_link_on_the_way_to_it(tmp_path):
+    """A uv environment's python names uv's folder of its minor version, itself a link to the folder of the patch: the
+    sandbox reads the link's folder by its own name, or the program is not there."""
+    real = tmp_path / "uv" / "cpython-3.14.6-made-up"
+    (real / "bin").mkdir(parents=True)
+    os.symlink(sys.executable, real / "bin" / "python3.14")
+    (tmp_path / "uv" / "cpython-3.14-made-up").symlink_to(real, target_is_directory=True)
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").symlink_to(tmp_path / "uv" / "cpython-3.14-made-up" / "bin" / "python3.14")
+    assert str(tmp_path / "uv" / "cpython-3.14-made-up") in FX._py_dirs(str(venv / "bin" / "python"))
+
+
+# a made-up server of the browser workbench: its start (app.main) loads the error log, and its checks' tests pass
+SERVER = {
+    "browser/backend/app/__init__.py": "",
+    "browser/backend/app/notebook.py": "def active_notebook_id() -> str:\n    return 'made-up'\n",
+    "browser/backend/app/errors.py": "def error_line(text: str) -> str:\n    return text\n",
+    "browser/backend/app/main.py": "from . import errors, notebook  # noqa: F401\n",
+    "browser/backend/tests_public/test_prompts.py": "def test_made_up_prompts():\n    assert True\n",
+    "browser/backend/tests_public/test_american_names.py": "def test_made_up_names():\n    assert True\n",
+}
+NAMES_THE_NOTEBOOK = ("from .notebook import active_notebook_id\n\n\ndef error_line(text: str) -> str:\n"
+                      "    return f'{active_notebook_id()}: {text}'\n")
+
+
+def test_a_fix_to_the_server_that_breaks_it_on_the_new_release_stays_off_and_done_checks_it_alike(world, monkeypatch):
+    """A fix made in the workbench changes the server's error log to name the notebook; the next commit renames what it
+    calls, in another file, so its change still applies, and the server no longer starts with it. carry checks it as
+    done checks a fix to the server: it stays off, and the release runs."""
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.setattr(FX, "sandbox_argv", lambda fid, **kw: ["/bin/bash", "-c"])
+    release_with(world, SERVER)
+    r = FX.new("say which notebook an error came from", made_in="browser")
+    made_up_venv(FX.live_dir() / "browser" / "backend" / ".venv")
+    (Path(r["work"]) / "browser" / "backend" / "app" / "errors.py").write_text(NAMES_THE_NOTEBOOK)
+    assert FX.done(r["id"], "Error log names the notebook", "")["state"] == "ready"
+    FX.apply(r["id"], press(r["id"]))
+    # from now on the checks are thimble's own
+    monkeypatch.delenv("THIMBLE_FIX_TESTS")
+    # the person pulls a commit that renames the notebook's id: the fix's change applies, and app.main no longer loads
+    new = commit_in_checkout(world, {"browser/backend/app/notebook.py": "def notebook_id() -> str:\n    return 'made-up'\n"},
+                             "made-up work")
+    out = FX.update()
+    assert (out["back"], out["aside"]) == ([], [r["id"]])
+    assert (FX.get(r["id"])["state"], FX.get(r["id"])["error"]) == ("pending", f"it does not fit thimble main at {new[:7]}")
+    assert "active_notebook_id" not in live_file("browser/backend/app/errors.py")
+    # the same change made as a fix on the new release fails done's checks, with the server's own words
+    s = FX.new("say which notebook an error came from, again")
+    (Path(s["work"]) / "browser" / "backend" / "app" / "errors.py").write_text(NAMES_THE_NOTEBOOK)
+    s = FX.done(s["id"], "Error log names the notebook", "")
+    assert s["state"] == "failed" and "cannot import name 'active_notebook_id'" in s["tests_tail"]
 
 
 def test_thimble_browser_puts_back_the_fixes_an_update_set_aside_before_it_builds_the_page(tmp_path):
@@ -552,6 +689,16 @@ def test_thimble_browser_puts_back_the_fixes_an_update_set_aside_before_it_build
     log.write_text("")
     subprocess.run(["bash", str(b / "scripts" / "thimble-browser"), str(data)], capture_output=True, text=True, env=env, cwd=data)
     assert [x.split()[0] for x in log.read_text().splitlines()] == ["server"]
+    # an update by an older thimble put fixes back with no check (release.json's checked is not its base): the carry
+    # checks them, once
+    rel = th / "fixes" / "release.json"
+    for checked, steps in (("b" * 40, ["kernel", "server"]), ("a" * 40, ["server"])):
+        rel.write_text(json.dumps({"kind": "github", "base": "a" * 40, "checked": checked}, indent=1) + "\n")
+        log.write_text("")
+        p = subprocess.run(["bash", str(b / "scripts" / "thimble-browser"), str(data)], capture_output=True, text=True,
+                           env=env, cwd=data)
+        assert p.returncode == 0, p.stderr
+        assert [x.split()[0] for x in log.read_text().splitlines()] == steps
 
 
 def browser_fix(world, publish, monkeypatch, tmp_path) -> tuple[int, Path]:
@@ -677,3 +824,101 @@ def test_thimble_update_installs_the_workbench_of_the_new_release_before_it_chec
     # the page's packages and its build for 0.10.3 come first, then the fix's check, then the build with the fix
     assert steps == [f"--prefix {fe} ci --no-audit --no-fund", f"--prefix {fe} run build", "check", f"--prefix {fe} run build"]
     assert out["back"] == [a] and out["browser"] == "ready" and FX.get(a)["state"] == "on"
+
+
+def test_fixes_an_update_by_0_10_6_put_back_with_no_check_are_checked_once_and_one_that_breaks_the_release_goes_off(world, upstream, monkeypatch, tmp_path, capsys):
+    """thimble 0.10.6's update put back each fix whose change applied, with no check: the first carry of this kernel
+    (here the plugin's step at a session's start) checks them on the release as its own update would have, once."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a = made(world)["id"]
+    FX.done(a, "Bar says read", "")
+    FX.apply(a, press(a))
+    # fix b calls what 0.10.3 takes away (made-up-old-api), and its change applies all the same
+    b = fix_of("say who asked", "plugin/hints.ts", "import { askerOf } from 'made-up-old-api'\n", "Hints say who asked")
+    c = fix_of("count the untouched files", "plugin/legend.ts", "const legend = `untouched ${n}`\n", "Legend counts untouched")
+    assert FX.listing()["due"] is None
+    new = upstream({"plugin/api.ts": "export const gone = 'made-up-old-api'\n"}, "v0.10.3")
+    assert update_as_0_10_6() == [a, b, c]
+    live = FX.live_dir()
+    assert [FX.get(i)["state"] for i in (a, b, c)] == ["on"] * 3 and "askerOf" in live_file("plugin/hints.ts")
+    log = checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/api.ts && grep -qs made-up-old-api plugin/hints.ts")
+    # the plugin's list at the session's start says that they wait for a check, and moves nothing
+    assert cli.main(["fix", "list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["due"] == {"to": "0.10.3", "n": 3, "on": True} and runs(log) == 0
+    # inside Claude Code, thimble fixes says so too
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert FX.list_lines(120)[0] == "Your 3 fixes are on with no check on thimble 0.10.3 yet: thimble fixes, in a shell, checks them."
+    monkeypatch.delenv("CLAUDECODE")
+    # its carry, a step on its bar: fix b does not fit 0.10.3 and is off, saying why; the others stay on
+    assert cli.main(["fix", "carry", "--json"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert (got["to"], got["back"], got["aside"], got["why"], got["reload"]) == (
+        "0.10.3", [a, c], [b], {str(b): "it does not fit thimble 0.10.3"}, True)
+    assert [FX.get(i)["state"] for i in (a, b, c)] == ["on", "pending", "on"] and FX.is_on()
+    assert not (live / "plugin" / "hints.ts").exists() and "read ${n}" in live_file("plugin/bar/bar.tsx")
+    assert sh("git", "log", "--format=%s", f"{new}..mine", cwd=live).splitlines() == ["Legend counts untouched", "Bar says read"]
+    assert FX.get(a)["note"] == FX._aside_before(a)["note"]
+    assert "  Set aside     it does not fit thimble 0.10.3" in FX.show_lines(b, 120)
+    assert f"  fix {b} is off: it does not fit thimble 0.10.3" in FX.list_lines(120)
+    # once on each release: nothing waits, and nothing runs the checks again
+    n = runs(log)
+    assert FX.listing()["due"] is None and FX.carry() is None and runs(log) == n
+    assert FX.release()["checked"] == new
+    # thimble reapply has Claude fit fix b alone
+    text = FX.reapply_argv()["argv"][1]
+    assert "Hints say who asked" in text and "Bar says read" not in text and "Legend counts untouched" not in text
+
+
+def test_a_dev_update_by_an_older_thimble_that_replayed_every_fix_is_checked_by_the_next_thimble_fixes(world, monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a = on_fix(world)["id"]
+    b = fix_of("a note", "plugin/notes.md", "made-up note\n", "A note")
+    # the person pulls a commit whose new rule the bar's word breaks, though the fix's change applies; 0.10.6's dev
+    # update moved mine to it and replayed each fix, with no check
+    new = commit_in_checkout(world, {"plugin/rule.md": "the bar says coverage\n"}, "made-up work")
+    live, rel = FX.live_dir(), FX.release()
+    order = FX._replay_order(FX.records())
+    FX._unstamp()
+    sh("git", "checkout", "-q", "-B", "mine", new, cwd=live)
+    rel.update(base=new, version=FX._version_at(live, new), checkout=f"main at {new[:7]}", updated=time.time(), told=new)
+    FX.write_json(FX.home() / "release.json", rel)
+    FX.place_release(new)
+    assert put_back_unchecked(order) == ([a, b], [])
+    log = checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/rule.md && grep -qs 'read ' plugin/bar/bar.tsx")
+    capsys.readouterr()
+    rows = FX.list_lines(120)
+    assert capsys.readouterr().err.splitlines() == ["Checking your 2 fixes on thimble main at " + new[:7] + " (a minute or two)...",
+                                                    "They do not pass together: checking them one at a time..."]
+    assert rows[0] == f"Fix {b} fits thimble main at {new[:7]} and is on again."
+    assert f"  fix {a} is off: it does not fit thimble main at {new[:7]}" in rows
+    assert [FX.get(i)["state"] for i in (a, b)] == ["pending", "on"] and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
+    assert FX.carry() is None and FX.release()["checked"] == new
+
+
+def test_an_update_of_this_kernels_own_marks_its_release_checked_and_live_made_with_no_fix_is_too(world, upstream, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    FX.ensure_live()
+    assert FX.release()["checked"] == FX.release()["base"]
+    a = on_fix(world)["id"]
+    new = upstream({"plugin/notes.md": "made-up note\n"}, "v0.10.3")
+    out = FX.update()
+    assert out["back"] == [a] and FX.release()["checked"] == new and FX.listing()["due"] is None
+    # a home an older thimble made, with no fix on its release: carry has nothing to check, and says so once
+    FX.one_off(a)
+    FX.write_json(FX.home() / "release.json", {**FX.release(), "checked": "made-up"})
+    assert FX.listing()["due"] is None and FX.carry() is None and FX.release()["checked"] == new
+
+
+def test_when_every_fix_an_older_update_put_back_goes_off_claude_code_copies_the_plain_release(world, upstream, monkeypatch, tmp_path):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    b = fix_of("say who asked", "plugin/hints.ts", "import { askerOf } from 'made-up-old-api'\n", "Hints say who asked")
+    new = upstream({"plugin/api.ts": "export const gone = 'made-up-old-api'\n"}, "v0.10.3")
+    assert update_as_0_10_6() == [b]
+    checks_that_fail_on(monkeypatch, tmp_path, "test -f plugin/api.ts && grep -qs made-up-old-api plugin/hints.ts")
+    before = len(calls(world))
+    out = FX.carry()
+    assert (out["back"], out["aside"], out["reload"]) == ([], [b], True)
+    assert calls(world)[before:] == ["plugin update thimble@thimble"]
+    assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == new and FX.get(b)["state"] == "pending"

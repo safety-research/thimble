@@ -1193,8 +1193,8 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
 
 def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_live(world, tmp_path, monkeypatch):
     """scripts/install.sh links bin/thimble to the plugin's command and names the link in cli-link; once Claude Code
-    loads thimble from live, the link runs the release checkout's launcher, which runs thimble fix, file, update and
-    reapply itself and hands the rest to live's. A link to 0.10's command is no 0.9 left behind."""
+    loads thimble from live, the link runs the release checkout's launcher, which runs thimble fix, file, update,
+    reapply and doctor itself and hands the rest to live's. A link to 0.10's command is no 0.9 left behind."""
     real = Path(__file__).resolve().parents[1] / "bin" / "thimble"
     release_with(world, {"plugin/bin/thimble": real.read_text(),
                          "plugin/engine/thimble.py": "import sys\nprint('made-up kernel', *sys.argv[1:])\n"})
@@ -1222,6 +1222,7 @@ def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_
     live_cmd = FX.live_dir() / "plugin" / "bin" / "thimble"
     assert ran(link, "fix", "list") == "made-up kernel fix list"
     assert ran(link, "file", "issue", "1") == "made-up kernel file issue 1"
+    assert ran(link, "doctor") == "made-up kernel doctor"
     assert ran(link, "label") == "fixed kernel label" and ran(link, "--help") == "fixed kernel --help"
     assert ran(live_cmd, "fixes") == "made-up kernel fixes" and ran(live_cmd, "coverage") == "fixed kernel coverage"
     # a fix may change the launcher (its record says so), and one that breaks live's leaves the way back working

@@ -1382,7 +1382,7 @@ test("after an update by an older thimble, the session's start has the kernel ch
   await s.tick()
   expect(carried).toEqual([{ steps: expect.arrayContaining(['checking your fixes on thimble 0.10.6']), timeoutMs: 1800000 }])
   expect(busySteps()).not.toContain('checking your fixes on thimble 0.10.6')
-  expect(textOf(await fixLineRows(s.$, ELS, 140))).toContain('↑ thimble 0.10.6 · 1 fix on again · 1 off: it does not fit it · thimble reloaded · thimble fix list, in a shell, lists your fixes')
+  expect(textOf(await fixLineRows(s.$, ELS, 140))).toContain('↑ thimble 0.10.6 · 1 fix on again · 1 off: it does not fit 0.10.6 · thimble reloaded · thimble fix list, in a shell, lists your fixes')
   expect(s.commands).toEqual(['reload-plugins'])
   // the reload starts the module again: no fix waits for its check now, so no second check and no second load, and the
   // line stays until the prompt
