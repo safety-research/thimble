@@ -150,7 +150,7 @@ test("two trials' records of one name in a dated job folder have addresses that 
   const entries = await cardOf(page, 'trials')
   assert.deepEqual(
     entries.map((e) => e.address),
-    ['picnic-north__Hqwz › plan.json /steps/1', 'picnic-south__Pmrk › plan.json /steps/1'],
+    ['picnic-north__Hqwz › … › plan.json /steps/1', 'picnic-south__Pmrk › … › plan.json /steps/1'],
   )
 })
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// The chips of files shown together tell them apart as an example card's addresses do (src/lib/refs prefixesAmong):
+// The chips of files shown together tell them apart as an example card's addresses do (src/lib/refs runFolder):
 // in a reply, the citations of two trials' trajectories in a job folder named by its date name each its trial, not
 // the date; and under an example card, a citation in its takeaway reads as the card's address over the same record.
 import { act } from 'react'
@@ -39,7 +39,7 @@ test("a reply's citations of two trials in a dated job folder name the trials", 
     </ChipContext.Provider>,
   )
   const names = [...el.querySelectorAll('.refchip[data-ref]')].map((c) => c.getAttribute('aria-label'))
-  expect(names).toEqual(['picnic-lake__RvtmQxa › trajectory.json L5', 'picnic-hill__GdsaPwe › trajectory.json L5'])
+  expect(names).toEqual(['picnic-lake__RvtmQxa › … › trajectory.json L5', 'picnic-hill__GdsaPwe › … › trajectory.json L5'])
 })
 
 test("a citation in an example card's takeaway reads as the card's address over the same record", async () => {
@@ -61,7 +61,7 @@ test("a citation in an example card's takeaway reads as the card's address over 
   )
   await settle()
   const addresses = [...el.querySelectorAll('.bcell-address .chip-text')].map((a) => a.textContent)
-  expect(addresses).toEqual(['picnic-lake__RvtmQxa › trajectory.json L5', 'picnic-hill__GdsaPwe › trajectory.json L5'])
+  expect(addresses).toEqual(['picnic-lake__RvtmQxa › … › trajectory.json L5', 'picnic-hill__GdsaPwe › … › trajectory.json L5'])
   // the takeaway's citation names its record in its hover as the address over that record does
   const cite = el.querySelector<HTMLElement>('.bcell-take .refchip-value')!
   await act(async () => {
