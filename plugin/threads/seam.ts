@@ -24,7 +24,8 @@
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
 //                                      conversation and its input bar, about what the pane shows (core/pane.ts)
 //   threadUnderSplit($, e, kind, args, els)   the same in two parts: the conversation, and the key row with the input
-//                                      bar, which the docked pane keeps at its bottom (core/pane.ts)
+//                                      bar, which the docked pane keeps at its bottom (core/pane.ts); and whether the
+//                                      pane opened to ask, its input taking the keys
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
 //   PaneEdit                           a field a pane edits in the input bar under it, in place of a question: the
 //                                      labels pane's (labels/pane.tsx labelEdit), its name, its value, what ↵ does
@@ -114,7 +115,7 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
   return under($, e, kind, args, els)
 }
 
-export async function threadUnderSplit($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: unknown[]; bottom: unknown[] }> {
+export async function threadUnderSplit($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: unknown[]; bottom: unknown[]; asking: boolean }> {
   return threadUnderParts($, e, kind, args, els)
 }
 

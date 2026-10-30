@@ -512,8 +512,9 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
 }
 
 /** The thread under a pane in two parts: its conversation (`conv`), which scrolls with the pane's drawing, and the key
- *  row with the input bar (`bottom`), which the docked pane keeps at its bottom (core/pane.ts). */
-export async function threadUnderParts($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: Any[]; bottom: Any[] }> {
+ *  row with the input bar (`bottom`), which the docked pane keeps at its bottom (core/pane.ts); `asking`, whether the
+ *  pane opened to ask (its input takes the keys), so it shows the conversation's end over the input. */
+export async function threadUnderParts($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: Any[]; bottom: Any[]; asking: boolean }> {
   const scope = await paneScope($, kind, args)
   const key = threadKey(scope)
   await $.state.get({ plugin: 'thimble', key: 'thread', id: key })
@@ -533,8 +534,9 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   const under = conv.length || short ? [] : [gap]
   // a pane editing one of its fields: the field takes the input bar, and the thread's keys wait
   const edit = kind === 'labels' ? await labelEdit($, args).catch(() => null) : null
-  if (edit) return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...editEntry(els, edit, W - 1)] }
-  return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...keysRow(els, pk, short), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '', short)] }
+  if (edit) return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...editEntry(els, edit, W - 1)], asking: false }
+  const asking = takeAskNext(key)
+  return { conv: conv.length ? [gap, ...conv] : [], bottom: [...under, ...keysRow(els, pk, short), ...entry($, els, scope, W - 1, asking, pk, claims?.ask ?? '', short)], asking }
 }
 
 /** About how many rows threadUnder takes under a pane: the gap and the input bar (in a short pane, its rule and field),

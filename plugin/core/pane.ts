@@ -295,6 +295,8 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     let under: Any[] = []
     let conv: Any[] = []
     let drawn: unknown
+    // the pane opened to ask: its input takes the keys, and the conversation's end shows over it
+    let asking = false
     if (now.kind === 'thread') {
       // a thread's own key row and input bar stand where a pane's thread's do
       const p = await threadPaneParts($, { ...e, props: { ...(e?.props ?? {}), scroll: { ...(e?.props?.scroll ?? {}), bodyRows: Math.max(4, H - T) } } }, now.args, kels)
@@ -303,7 +305,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
       drawn = p.body[0] ?? null
     } else {
       if (THREADED.has(now.kind)) {
-        try { ({ conv, bottom: under } = (await threadUnderSplit($, e, now.kind, now.args, kels)) as { conv: Any[]; bottom: Any[] }) } catch { under = []; conv = [] }
+        try { ({ conv, bottom: under, asking } = (await threadUnderSplit($, e, now.kind, now.args, kels)) as { conv: Any[]; bottom: Any[]; asking: boolean }) } catch { under = []; conv = [] }
       }
       drawn = await drawKind($, e, now, kels, Math.max(4, H - T - (OWN_ROOM.has(now.kind) ? 0 : treeRows(under, W))))
     }
@@ -328,12 +330,15 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     if (scrolled.id !== id) scrolled = { id, by: C ? over : 0, conv: C }
     else if (C !== scrolled.conv) scrolled = { ...scrolled, by: over, conv: C }
     // the part the drawing picked, shown when the pane opens and when the pick moves: its end on the window's last row
-    // when it stands below the window, its start on the first when above (its start first, when it is taller)
+    // when it stands below the window, its start on the first when above (its start first, when it is taller). A pane
+    // opened to ask that has a conversation keeps the conversation's end in view instead
     if (picked && over > 0 && scrolled.pick !== picked.key) {
       const rows = space - 1
       let by = scrolled.by
-      if (picked.top + picked.rows > by + rows) by = picked.top + picked.rows - rows
-      if (picked.top < by) by = picked.top
+      if (!(asking && C)) {
+        if (picked.top + picked.rows > by + rows) by = picked.top + picked.rows - rows
+        if (picked.top < by) by = picked.top
+      }
       scrolled = { ...scrolled, by, pick: picked.key }
     }
     scrolled.by = Math.max(0, Math.min(over, scrolled.by))
