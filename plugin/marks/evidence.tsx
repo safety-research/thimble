@@ -1,7 +1,8 @@
 // evidence.tsx: the side pane of one mark (core/pane.ts kind `evidence`, args {row, n}): its status and, once the check
 // gave it, its evidence.
 //
-//   computed   that call's real output, all of it, the marked words highlighted, first; then the code the check ran
+//   computed   that call's real output, all of it, the marked words on the citations' purple tint, first; then, after a
+//              blank row, the code the check ran, in Claude Code's colors for Python
 //   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
 //   code       the substring highlighted
 //
@@ -15,7 +16,7 @@
 // Its status in the tray's words (tray/tray.mjs checkStatus), with the sign the reply draws after the mark: two outcomes,
 // verified (✓ verified; a corrected mark, its right words in place of Claude's, says ✓ corrected, or ✓ repaired after x,
 // and what it was) and failed, which says why in red (× failed), with the evidence the check gave when it is real; and
-// before an outcome, ⠋ checking (the turning glyph, as after the mark) or ? not checked. The cited value is bold in the citations' look (citeWords). What the check found wrong in the rest of the
+// before an outcome, ⠋ checking (the turning glyph, as after the mark) or ? not checked. The cited value is bold in the citations' look (citeWords), and in printed output on their purple tint too (outputWords). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane shows all of the evidence, the line that holds the value in view when it opens (core/pane.ts keepsInView), and
 // scrolls the rest with the wheel and ↑ ↓. It reads the reply's marks in the state, so it draws again when the check
@@ -33,7 +34,7 @@ import { checkStatus, printableEvidence, wasLine } from '../tray/tray.mjs'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
-import { citeHeat, citeLook, wordsLook } from './view'
+import { citeHeat, citeLook, citeTint, wordsLook } from './view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -53,17 +54,23 @@ export function statusEls(els: Any, s: { sign: string; word: string; tone: strin
  *  group). */
 export const citeWords = (id: string) => ({ ...citeLook(id), bold: true })
 
-/** A line of text with spans of it highlighted (the cited words in citeWords), as Text runs. The cited words are Texts
- *  nested in the line's, which alone can heat a hover group on the terminal: the line joins their group, so the pointer
- *  over the line lights them. */
-export function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
+/** The cited words in printed output (a computed value's, a card's), here and in the tray: citeWords on the citations'
+ *  purple tint, as the tray's title and the reply draw the citation the tray shows, so the value stands out of the
+ *  lines around it. */
+export const outputWords = (id: string) => ({ ...citeWords(id), backgroundColor: citeTint() })
+
+/** A line of text with spans of it highlighted (the cited words in citeWords; `tint`, a line of printed output, in
+ *  outputWords), as Text runs. The cited words are Texts nested in the line's, which alone can heat a hover group on
+ *  the terminal: the line joins their group, so the pointer over the line lights them. */
+export function highlighted(els: Any, text: string, spans: [number, number][], key: string, o: { tint?: boolean } = {}): Any {
   const id = `ev:${key}:${text}`
+  const look = o.tint ? outputWords(id) : citeWords(id)
   const parts: Any[] = []
   let at = 0
   spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b], k) => {
     if (a < at) return
     if (a > at) parts.push(text.slice(at, a))
-    parts.push(els.Text({ key: `h${k}`, ...citeWords(id), children: text.slice(a, b) }))
+    parts.push(els.Text({ key: `h${k}`, ...look, children: text.slice(a, b) }))
     at = b
   })
   if (at < text.length) parts.push(text.slice(at))
@@ -85,7 +92,7 @@ export function outputRows(els: Any, output: string, spans: [number, number][]):
   return lines.map((line, i) => {
     const s = starts[i]!
     const mine = spans.map(([a, b]) => [Math.max(a, s) - s, Math.min(b, s + line.length) - s] as [number, number]).filter(([a, b]) => b > a)
-    const el = highlighted(els, line, mine, `o${i}`)
+    const el = highlighted(els, line, mine, `o${i}`, { tint: true })
     return i === first ? els.Box({ key: HIT, flexDirection: 'column', children: [el] }) : el
   })
 }
@@ -142,7 +149,7 @@ export function tableRows(els: Any, t: EvidenceTable, width: number, key = 'tb')
   return [
     els.Text({ key: `${key}h`, dimColor: true, wrap: 'truncate-end', children: lines[0]!.text }),
     // the cited row, and the other cited rows of words that hold several values (a range, a pair)
-    ...lines.slice(1).map((l, i) => highlighted(els, l.text, l.spans as [number, number][], i ? `${key}r${i}` : `${key}r`)),
+    ...lines.slice(1).map((l, i) => highlighted(els, l.text, l.spans as [number, number][], i ? `${key}r${i}` : `${key}r`, { tint: true })),
   ]
 }
 

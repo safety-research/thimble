@@ -18,7 +18,7 @@ function textOf(n: Any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
-  return textOf(n.props?.children) + (n.type === 'Markdown' ? String(n.props.text) : '') + textOf(n.children)
+  return textOf(n.props?.children) + (n.type === 'Markdown' ? String(n.props.text) : n.type === 'Code' ? String(n.props.source) : '') + textOf(n.children)
 }
 function all(n: Any, out: Any[] = []): Any[] {
   if (!n || typeof n !== 'object') return out
@@ -156,7 +156,7 @@ async function barRowsOf($: Any): Promise<number> {
   return treeRows(tree, 100) - (tray ? tray.row + treeRows(tray.el, 100) + 1 : 1)
 }
 
-test('a corrected value computed by code: drawn in the reply as a verified one, with no sign; the header says corrected, the line under it what it was, then the code and its output, whole while they fit, the line that printed the value and the one that holds it bright, the others dim; in a band too short for them, those two lines over `+ N more lines`, and + shows all of it in the side pane a opens, its side thread\'s input at its bottom; - is typed', CITES, async ($, on) => {
+test('a corrected value computed by code: drawn in the reply as a verified one, with no sign; the header says corrected, the line under it what it was, then the code in Claude Code\'s colors for Python, a blank row and its output, whole while they fit, the value on the citations\' purple tint and the output\'s other lines dim; in a band too short for them, the line that printed the value and the one that holds it over `+ N more lines`, the blank row between them once a row is left for it; + shows all of it in the side pane a opens, the value on the same tint, its side thread\'s input at its bottom; - is typed', CITES, async ($, on) => {
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e); return { value: { isPlaced: true } } as never })
   on('ui.close', () => ({ value: undefined }))
@@ -179,25 +179,27 @@ test('a corrected value computed by code: drawn in the reply as a verified one, 
   const bar = await barRowsOf($)
   let drawnBand = all(await $.ui.render(above()))
   let band = textOf(drawnBand)
-  // the header's status says corrected, in a checked one's color, what it was under it (no reason), then the code and
-  // its output after a rule, whole: nothing more to show
+  // the header's status says corrected, in a checked one's color, what it was under it (no reason), then the code, a
+  // blank row and its output after a rule, whole: nothing more to show
   expect(band).toContain('✓ corrected  a ask · 0 close')
   expect(band).not.toContain('verified')
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === ' corrected')?.props).toMatchObject({ color: 'success' })
   expect(band).toContain('closewas 12 of 40')
   expect(band).not.toContain('corrected; was')
   expect(band).not.toContain('The output says 11')
-  expect(band).toContain('was 12 of 40import jsonprint("runs:", n)print(f"failed: {bad}")print("passed:", n - bad)│runs: 40│failed: 11│passed: 29')
+  expect(band).toContain('was 12 of 40import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad) │runs: 40│failed: 11│passed: 29')
   expect(band).not.toContain('more line')
-  // the line that printed the value in code color, the other lines of code dim; the output's other lines dim, the value
-  // bold in the citations' look
-  const line = (t: string) => drawnBand.find(n => n.type === 'Text' && textOf(n) === t)?.props
-  expect(line('print(f"failed: {bad}")')).toMatchObject({ color: 'permission' })
-  expect(line('print(f"failed: {bad}")')?.dimColor).toBeUndefined()
-  expect(line('import json')).toMatchObject({ color: 'permission', dimColor: true })
-  expect(line('passed: 29')).toMatchObject({ dimColor: true })
-  expect(drawnBand.some(n => n.type === 'Text' && n.props?.underline === true && n.props?.bold === true && textOf(n) === '11')).toBe(true)
-  expect(drawnBand.some(n => n.type === 'Code')).toBe(false)
+  // the code is one Code, which Claude Code draws in its colors for Python, a line a row, as the side pane draws it; one
+  // blank row stands between it and the output
+  const codes = drawnBand.filter(n => n.type === 'Code')
+  expect(codes.length).toBe(1)
+  expect(codes[0].props).toMatchObject({ source: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', language: 'python', wrap: 'truncate-end' })
+  const body = kidsOf(drawnBand.find(n => n.props?.key === 'tray-body'))
+  const at = body.indexOf(codes[0])
+  expect([textOf(body[at + 1]), textOf(body[at + 2])]).toEqual([' ', '│runs: 40'])
+  // the output's other lines dim; the value bold in the citations' look, on their purple tint, as the tray's title
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'passed: 29')?.props).toMatchObject({ dimColor: true })
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '11' && n.props?.bold === true)?.props).toMatchObject({ underline: true, backgroundColor: citeTint() })
   expect(drawnBand.some(n => n.type === 'Input')).toBe(false)
   // a band with seven rows for the tray: its frame and header take three, what it was one, and the row under it one, so
   // the line that printed the value and the one that holds it, over what it leaves out; the band keeps to its rows
@@ -207,6 +209,10 @@ test('a corrected value computed by code: drawn in the reply as a verified one, 
   expect(band).toContain('was 12 of 40print(f"failed: {bad}")│failed: 11+ 5 more lines')
   expect(band).toContain('s rewrite')
   for (const gone of ['import json', 'runs: 40', 'passed: 29']) expect(band).not.toContain(gone)
+  // a row more: the blank row between them, the same lines left out
+  const taller = await $.ui.render(above(bar + 8))
+  expect(treeRows(taller, 100)).toBeLessThanOrEqual(bar + 8)
+  expect(textOf(taller)).toContain('was 12 of 40print(f"failed: {bad}") │failed: 11+ 5 more lines')
   // +: all of it in the side pane, the pane a opens on the citation (its evidence, with the side thread under it); the
   // pane takes the keys, its input waiting, and the tray gives way to it
   await clock.advance(2000)
@@ -217,6 +223,7 @@ test('a corrected value computed by code: drawn in the reply as a verified one, 
   const pane = all(await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never))
   for (const words of ['✓ corrected  11 of 40', 'was 12 of 40', 'The output says 11. One run was retried.', 'Output of the code the check ran', 'runs: 40failed: 11passed: 29', 'The code']) expect(textOf(pane)).toContain(words)
   expect(pane.find(n => n.type === 'Code')?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
+  expect(pane.find(n => n.type === 'Text' && textOf(n) === '11' && n.props?.bold === true)?.props).toMatchObject({ underline: true, backgroundColor: citeTint() })
   const input = pane.find(n => n.type === 'Input')
   expect(input?.props?.placeholder).toBe('Ask about the citation "11 of 40"…')
   expect(input?.props?.autoFocus).toBeUndefined()
@@ -234,13 +241,22 @@ test("a value computed by code shows, above its output line, the line that print
   }, 's-tray-said')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const bar = await barRowsOf($)
-  // whole, the print of the other value dim; cut to that line and the value's, the other print not among them
-  const whole = all(await $.ui.render(above()))
-  expect(whole.find(n => n.type === 'Text' && textOf(n) === 'print(sum(r["status"] == "failed" for r in runs))')?.props?.dimColor).toBeUndefined()
-  expect(whole.find(n => n.type === 'Text' && textOf(n) === 'print(len(runs))')?.props).toMatchObject({ dimColor: true })
+  // whole, all the code over its output; cut to that line and the value's, the other print not among them
+  expect(textOf(await $.ui.render(above()))).toContain('print(len(runs))\nprint(sum(r["status"] == "failed" for r in runs)) │40│12')
   const band = textOf(await $.ui.render(above(bar + 6)))
   expect(band).toContain('print(sum(r["status"] == "failed" for r in runs))│12')
   expect(band).not.toContain('print(len(runs))')
+})
+
+test("a check's code that ends in a newline draws as one without it, as Claude Code draws no row for the empty line after the last newline: the tray counts none for it, and one blank row stands before the output; an empty line inside the code keeps its row", CITES, async ($, on) => {
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'rows = load()\n\nprint(len(rows))\nprint(n_failed)\n', output: '40\n12', highlight: [[3, 5]] },
+  }, 's-tray-newline')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const drawn = all(await $.ui.render(above()))
+  expect(drawn.filter(n => n.type === 'Code').map(n => n.props.source)).toEqual(['rows = load()\n \nprint(len(rows))\nprint(n_failed)'])
+  expect(textOf(drawn)).toContain('print(n_failed) │40│12')
 })
 
 test("a value computed by code beside a command that printed other lines shows no line of code above it: `head` may have printed the cited line, so the script's print after it is not named", CITES, async ($, on) => {
@@ -736,10 +752,10 @@ test('+ on a cut citation computed by code shows all of it in the side pane: wha
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(2000)
   const bar = await barRowsOf($)
-  // with eight rows for it: the line that printed the value and the value's line, a line before each, over what it
-  // leaves out
+  // with eight rows for it: the line that printed the value, the blank row under it, and the value's line with the line
+  // before it, over what it leaves out
   const band = textOf(await $.ui.render(above(bar + 8)))
-  expect(band).toContain('print(f"run {i + 1}: {r}")print(f"failed: {bad}")│run 8: ok│failed: 12+ 10 more lines')
+  expect(band).toContain('print(f"failed: {bad}") │run 8: ok│failed: 12+ 11 more lines')
   for (const gone of ['runs: 40', 'print("runs:", n)']) expect(band).not.toContain(gone)
   // +: every line of the output and the code in the side pane, the value's line in view
   expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
