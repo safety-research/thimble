@@ -198,15 +198,18 @@ def short(s: str, n: int) -> str:
 # or could not confirm it, else this module's, which says what the records show in place of the words, or what is
 # missing, never the whole cited words again.
 
+class Named(str):
+    """A clause of a reason that opens with a name, whose case is its own: the cited file as the check named it
+    (`notes is outside …`, `peer/run.log has no line 9`). place() and look() write such clauses, so they mark them."""
+
+
 def sentence(clause: str) -> str:
-    """A clause of a reason as the sentence the person reads: a stop at its end, and a capital first letter unless its
-    first word is a name, whose case is its own, as check_reason keeps it: a file's path or name (`peer/run.log is
-    outside …`), or a word with a digit, a dash or a capital in it."""
+    """A clause of a reason as the sentence the person reads: a stop at its end, and a capital first letter unless the
+    clause opens with a name (Named)."""
     s = norm_ws(clause)
     if not s:
         return s
-    first = re.match(r"[^\s,;:]+", s)
-    if first and re.fullmatch(r"[a-z]+", first.group(0)):
+    if not isinstance(clause, Named):
         s = s[0].upper() + s[1:]
     return s if s[-1] in ".!?" else s + "."
 
@@ -1291,7 +1294,7 @@ def place(ev: dict[str, Any], cwd: str, root: str | None, tmp: str | None = None
     files = [p for p in paths if os.path.isfile(p)]
     # a path that names a file only through a link out of the session's folders names a file outside them, not none
     if not paths or (not files and any(os.path.isfile(p) for p in named_paths(str(file), cwd, root, calls))):
-        return [f"{file} is outside the folder this session works in"], None, []
+        return [Named(f"{file} is outside the folder this session works in")], None, []
     if not files:
         return [f"there is no file {file} in this session's folder"], None, []
     looks = [look(p, str(file), line, str(sub), cwd, root) for p in files]
@@ -1308,7 +1311,7 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     a, b = span
     near = read_lines(path, max(1, a - SHIFT_MAX), b + SHIFT_MAX, partial=True)
     if near is None or near[0] + len(near[1]) - 1 < b:
-        return [f"{file} has no line {line}"], None, []
+        return [Named(f"{file} has no line {line}")], None, []
     top, texts = near
     at = lambda x, y: texts[x - top:y - top + 1]  # noqa: E731
     last = top + len(texts) - 1

@@ -487,20 +487,29 @@ def test_a_link_to_a_file_outside_the_folder_and_a_pipe_are_no_evidence(tmp_path
 
 def test_a_reason_that_opens_with_the_cited_file_names_it_as_it_is(tmp_path: Path):
     """A failed citation's reason that opens with the cited file keeps the file's name as it is: with its first letter
-    capital it named a file that does not exist (`Peer/run.log is outside …` for peer/run.log). A reason that opens
-    with a plain word still opens with a capital."""
+    capital it named a file that does not exist (`Peer/run.log is outside …` for peer/run.log), also when the name is
+    one plain word (`Notes is outside …` for notes, `Todo has no line 9.` for todo). A reason that opens with a plain
+    word of its own still opens with a capital."""
     data, shared = tmp_path / "data", tmp_path / "shared"
     data.mkdir()
     shared.mkdir()
     (shared / "run.log").write_text("shelter request refused\n")
+    (shared / "notes").write_text("bring the striped blanket\n")
     (data / "peer").symlink_to(shared, target_is_directory=True)
+    (data / "notes").symlink_to(shared / "notes")
     (data / "notes.md").write_text("the lake shelter seats twenty\n")
+    (data / "todo").write_text("buy lemons\n")
     outside = check_mark(mark('"shelter request refused"'), quote("peer/run.log", 1, "shelter request refused"), [], str(data))
     assert (outside["status"], outside["reason"]) == ("failed", "peer/run.log is outside the folder this session works in."), outside
     short = check_mark(mark('"seats twenty"'), quote("notes.md", 9, "seats twenty"), [], str(data))
     assert (short["status"], short["reason"]) == ("failed", "notes.md has no line 9."), short
-    assert one_sentence(outside["reason"]) and one_sentence(short["reason"])
+    word = check_mark(mark('"bring the striped blanket"'), quote("notes", 1, "bring the striped blanket"), [], str(data))
+    assert (word["status"], word["reason"]) == ("failed", "notes is outside the folder this session works in."), word
+    todo = check_mark(mark('"buy lemons"'), quote("todo", 9, "buy lemons"), [], str(data))
+    assert (todo["status"], todo["reason"]) == ("failed", "todo has no line 9."), todo
+    assert all(one_sentence(r["reason"]) for r in (outside, short, word, todo))
     assert check_mark(mark('"x"'), quote("nope.txt", 1, "x"), [], str(data))["reason"] == "There is no file nope.txt in this session's folder."
+    assert check_mark(mark('"x"'), quote("readme", 1, "x"), [], str(data))["reason"] == "There is no file readme in this session's folder."
 
 
 def test_a_file_read_through_a_link_out_of_the_session_s_folders_is_outside_them_not_missing(tmp_path: Path):
