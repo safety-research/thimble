@@ -853,8 +853,10 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
     const blocks: Block[] = []
     const p = printedAt(ev)
     if (p >= 0) {
-      const code = String(ev.code ?? '').split('\n')
-      blocks.push({ n: code.length, key: p, draw: i => ({ h: 1, code: code[i] ?? '' }) })
+      // its lines, without the empty one a last newline leaves; an empty line as a space, so Claude Code gives it its
+      // row at the end of the window too
+      const code = String(ev.code ?? '').replace(/\n+$/, '').split('\n')
+      blocks.push({ n: code.length, key: p, draw: i => ({ h: 1, code: code[i] || ' ' }) })
     }
     const out = tl ? tableBlock(tl as { text: string; spans: [number, number][] }[]) : outputBlock()
     // under the code, a blank row before its output

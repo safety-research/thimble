@@ -248,6 +248,17 @@ test("a value computed by code shows, above its output line, the line that print
   expect(band).not.toContain('print(len(runs))')
 })
 
+test("a check's code that ends in a newline draws as one without it, as Claude Code draws no row for the empty line after the last newline: the tray counts none for it, and one blank row stands before the output; an empty line inside the code keeps its row", CITES, async ($, on) => {
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'rows = load()\n\nprint(len(rows))\nprint(n_failed)\n', output: '40\n12', highlight: [[3, 5]] },
+  }, 's-tray-newline')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const drawn = all(await $.ui.render(above()))
+  expect(drawn.filter(n => n.type === 'Code').map(n => n.props.source)).toEqual(['rows = load()\n \nprint(len(rows))\nprint(n_failed)'])
+  expect(textOf(drawn)).toContain('print(n_failed) │40│12')
+})
+
 test("a value computed by code beside a command that printed other lines shows no line of code above it: `head` may have printed the cited line, so the script's print after it is not named", CITES, async ($, on) => {
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
