@@ -313,7 +313,8 @@ async def test_a_prompt_apply_slows_down_when_the_api_pushes_back_and_asks_again
 
 
 async def test_a_prompt_apply_asks_a_rate_limited_or_refused_call_no_second_time(api, monkeypatch):
-    """A call still rate-limited after its retries, or refused, is not asked again: its units fail after one round."""
+    """A call still rate-limited after its retries, or refused, is not asked again: its units fail, or are blocked,
+    after one round."""
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
     monkeypatch.setattr(concepts, "RETRY_DELAYS", (0.0, 0.0))
     asked: dict[str, int] = {}
@@ -328,7 +329,7 @@ async def test_a_prompt_apply_asks_a_rate_limited_or_refused_call_no_second_time
     monkeypatch.setattr(concepts, "classify_structured", call)
     k = await _create(api, description="a board post that claims a PR")
     s = (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"]})).json()
-    assert s["failed"] == 8 and s["labeled"] == 0
+    assert s["failed"] == 4 and s["blocked"] == 4 and s["labeled"] == 0
     assert {asked[r] for r, st in status.items() if st == "rate_limited"} == {3}
     assert {asked[r] for r, st in status.items() if st == "refused"} == {1}
 
@@ -378,6 +379,51 @@ async def test_a_prompt_apply_asks_a_batch_cut_off_twice_in_halves_until_only_th
     assert {r["ref"] for r in rows} == {f"events.jsonl#L{i}" for i in range(1, 21)} - {bad}
     # L11-L20 in one call; L1-L10 twice, then 1-5 and 6-10, 6-7 and 8-10, 6 and 7
     assert sorted(sizes) == [1, 1, 2, 3, 5, 5, 10, 10, 10]
+
+
+async def test_a_prompt_apply_asks_a_refused_batch_in_halves_so_only_the_item_the_safeguards_stop_is_blocked(
+        api, workspaces_tmp, monkeypatch):
+    """A batch Claude's safeguards stop whenever one item is in it is asked again in halves, down to that item alone: the
+    other 9 are labeled, and that item is left unlabeled as blocked, not failed, and the run is done."""
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 10)
+    bad = "events.jsonl#L7"
+    sizes: list[int] = []
+
+    async def call(c, concept, items, comment=True, on_retry=None):
+        sizes.append(len(items))
+        if any(ref == bad for ref, _t in items):
+            return model_mod.CallResult(status="refused", detail="the model's safeguards declined the call")
+        return _ok(FakeClassify.rule(items))
+
+    monkeypatch.setattr(concepts, "classify_structured", call)
+    k = await _create(api, description="a forge event that claims a PR")
+    s = (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["events.jsonl"]})).json()
+    assert s["status"] == "done" and s["total"] == 20 and s["labeled"] == 19 and s["failed"] == 0 and s["blocked"] == 1
+    assert s["message"] == "Claude's safeguards stopped the classifier on 1 record, so it is left unlabeled"
+    rows = concepts.read_labels(workspaces_tmp / CORPUS, k["id"])
+    assert {r["ref"] for r in rows} == {f"events.jsonl#L{i}" for i in range(1, 21)} - {bad}
+    # L11-L20 in one call; L1-L10 once, then 1-5 and 6-10, 6-7 and 8-10, 6 and 7, and 7 is not asked again
+    assert sorted(sizes) == [1, 1, 2, 3, 5, 5, 10, 10]
+
+
+async def test_a_prompt_apply_labels_every_item_of_a_batch_the_safeguards_stopped_once(api, workspaces_tmp, monkeypatch):
+    """A batch refused once is asked again in halves, and when those are answered, every unit is labeled: nothing
+    fails or is blocked."""
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 10)
+    sizes: list[int] = []
+
+    async def call(c, concept, items, comment=True, on_retry=None):
+        sizes.append(len(items))
+        if len(sizes) == 1:
+            return model_mod.CallResult(status="refused", detail="the model's safeguards declined the call")
+        return _ok(FakeClassify.rule(items))
+
+    monkeypatch.setattr(concepts, "classify_structured", call)
+    k = await _create(api, description="a forge event that claims a PR")
+    s = (await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["events.jsonl"]})).json()
+    assert s["labeled"] == 20 and s["failed"] == 0 and s["blocked"] == 0 and s["message"] is None
+    assert len(concepts.read_labels(workspaces_tmp / CORPUS, k["id"])) == 20
+    assert sorted(sizes) == [5, 5, 10, 10]
 
 
 class _RunClock:

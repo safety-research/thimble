@@ -2565,6 +2565,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                  f" to another value count under that value (the label itself gave {before}).")
     if s.get("failed"):
         line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
+    elif s.get("blocked"):
+        line += f" {s['blocked']} {unit}(s) skipped: {s.get('message')}."
     if (s.get("cut") or {}).get("line"):
         line += f" {s['cut']['line']}."
     values = (concepts.find_concept(ctx.ws, s["concept"]) or {}).get("labels") or [None]
