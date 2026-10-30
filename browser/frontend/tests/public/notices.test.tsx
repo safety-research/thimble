@@ -190,6 +190,31 @@ describe('the strip above the composer, and the rows', () => {
     expect(el.querySelector('.chat-notice-open')).not.toBeNull()
   })
 
+  test("a switch of Claude's safeguards shows only in the chat whose replies it switched: main's in main, a thread's in that thread, once", async () => {
+    const back = 'Replies here may stay on Opus 4.8 for about an hour; a new session starts on Opus 5.5.'
+    const mine = `Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8. ${back}`
+    const why = `Claude's safeguards switched a reply of the side thread "why" from Opus 5.5 to Opus 4.8. ${back}`
+    const when = `Claude's safeguards switched a reply of the side thread "when" from Opus 5.5 to Opus 4.8. ${back}`
+    const label = "Claude's safeguards switched 8 of the label claims a PR's calls from Opus 5.5 to Opus 4.8."
+    open = [
+      { id: 's0', key: 'safeguards:main', kind: 'safeguards', chat: 'main', text: mine },
+      { id: 's1', key: 'safeguards:t1', kind: 'safeguards', chat: 't1', agent: 'Side thread: why', text: why },
+      { id: 's2', key: 'safeguards:t2', kind: 'safeguards', chat: 't2', agent: 'Side thread: when', text: when },
+      { id: 'l1', key: 'safeguards:label:k1', kind: 'safeguards', agent: 'Label: claims a PR', text: label },
+      { id: 'b1', key: 'build:agent-network', kind: 'view', chat: 'dev-1', agent: 'View build: Agent Network', text: BUILD },
+    ]
+    // a label's switch belongs to no chat, and a failure shows in every chat, with Open on its own
+    const others = [`Label: claims a PR ${label}`, `View build: Agent Network ${BUILD}`]
+    let el = await strip('nt-own', 'main')
+    expect(lines(el)).toEqual([mine, ...others])
+    unmountAll()
+    el = await strip('nt-own', 't1')
+    expect(lines(el)).toEqual([`Side thread: why ${why}`, ...others])
+    unmountAll()
+    el = await strip('nt-own', 'dev-1')
+    expect(lines(el)).toEqual(others)
+  })
+
   test('× hides the notice at once and dismisses it on the server', async () => {
     open = [{ id: 'b1', key: 'build:agent-network', chat: 'dev-1', text: BUILD }, { id: 'p1', text: BLOCKED }]
     const el = await strip('nt-x')

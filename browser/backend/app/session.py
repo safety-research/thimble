@@ -188,12 +188,16 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
 # So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). The server's
 # own agents (runtime.py) write the record before each reply on another model than the one asked for, main's and every
 # agent's alike (runtime.Conv.switches). Each downgrade becomes a notice (notices.post) that names the chat it happened
-# in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason refusal), which the
-# chat shows as its API error card; its text record carries `refusal: true`, and the failure of an agent it stopped is
-# told as any API error's (_sub_error, subagents.run_ended).
+# in, which the page shows in that chat alone, and says the way back (FALLBACK_BACK): thimble asks for the chosen model
+# at every message, but once a conversation fell back, the Messages API answers its requests that carry `fallbacks`
+# (Claude Code's too) on the fallback model for about an hour (sticky routing, best effort), and a new session, a new
+# conversation, starts on the model asked for. A block: the request ends with Claude Code's API error line
+# (isApiErrorMessage, stop_reason refusal), which the chat shows as its API error card; its text record carries
+# `refusal: true`, and the failure of an agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
-FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
-AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
+FALLBACK_BACK = "Replies here may stay on {fallback} for about an hour; a new session starts on {model}."
+FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}. " + FALLBACK_BACK
+AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}. " + FALLBACK_BACK
 FALLBACK_KEY = "safeguards:{chat}"  # the notices' key: a later switch in the same chat updates the notice
 SUB_ERROR_TEXT = "{subject} stopped with an error: {why}."  # a side thread's fork or a helper an API error stopped
 REFUSAL = "refusal"  # the stop_reason of a reply the model's safeguards stopped
@@ -2167,7 +2171,8 @@ def _sub_who(c: str, sub: Sub) -> tuple[str, str]:
 
 def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None = None) -> None:
     """Claude's safeguards switched a reply in chat `chat` (main's, or subagent `sub`'s) from `model` to `fallback`: a
-    notice that says so (FALLBACK_TEXT), one per chat however often it happens (FALLBACK_KEY). Never raises."""
+    notice that says so and how to get `model` back (FALLBACK_TEXT), one per chat however often it happens
+    (FALLBACK_KEY). Never raises."""
     from . import notices  # noqa: PLC0415
 
     was = model_label(str(model or "")) if model else "the model it was asked for"
