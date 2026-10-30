@@ -12,8 +12,9 @@
    only as Python (Bash `python3 …`).
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py), checks that evidence with no model call and no
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
-   calls (the fork's or main's) by a part of its output, and that call's real output must show the words. Its result
-   is what the analyst sees.
+   calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
+   lies in the corpus folder or main's, or is a label's definition, which holds the label's rule (_rules_dir); code
+   may also cite the workspace's temp folder. Its result is what the analyst sees.
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
@@ -526,7 +527,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
-                                         answer, calls, cwd, root, str(_temp_dir(c)), cards or [])
+                                         answer, calls, cwd, root, str(_temp_dir(c)), cards or [], str(_rules_dir(c)))
         if not result["parsed"]:
             await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
@@ -595,6 +596,15 @@ def _temp_dir(c: str) -> Path:
     p = config.workspace_dir(c) / "tmp"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _rules_dir(c: str) -> Path:
+    """The workspace's labels' definitions (concepts.concepts_dir), each of which holds its label's rule, as the
+    terminal keeps a `--code` rule in its temp folder: the validator's `rules`. Beside the workspace's temp folder, it
+    is the one folder of the workspace a citation may name: the workspace's answers, marks and chats are no evidence."""
+    from . import concepts  # noqa: PLC0415 — concepts imports much of the app
+
+    return concepts.concepts_dir(config.workspace_dir(c))
 
 
 def cited_outputs(answer: str) -> list[str]:

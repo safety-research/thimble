@@ -803,3 +803,124 @@ def test_a_file_reached_through_a_link_into_a_folder_beside_main_s_is_evidence(_
     asyncio.run(go())
     (m,) = marks.stored(CORPUS, turn)["items"]
     assert m["status"] == "verified" and m["evidence"]["file"] == "agents/peer/worker.md", m
+
+
+REVIEW_RULE = ('def label(unit):\n    body = (unit.get("body") or "").strip()\n    if not body:\n        return None\n'
+               '    return "yes" if "REVIEW WANTED" in body else "no"\n')
+
+
+def test_a_label_s_rule_is_evidence_of_what_the_label_counts_and_how(_fresh, monkeypatch):
+    """B11: the workbench keeps a label's rule in the label's definition, concepts/<id>.json in the workspace, outside
+    every folder the validator read a cited file from, so a citation of the rule failed as outside the folder this
+    session works in, even when the rule showed the claim right, and so did its Repair. The check now gives the
+    validator the workspace's labels' definitions: a citation of a code label's rule holds as the code reads, and the
+    analyst sees the code; so does a model label's prompt; a claim the rule shows false stays failed with the rule
+    beside it, or is corrected; and Repair of a mark the old check failed holds."""
+    from app import concepts
+
+    ws = config.workspace_dir(CORPUS)
+    review = concepts.new_concept("asks for a review", kind="code", spec=REVIEW_RULE)
+    refund = concepts.new_concept("asks for a refund", "a post that asks for a refund or a credit")
+    for k in (review, refund):
+        concepts.write_concept(ws, k)
+    rule, prompt = (concepts.concepts_dir(ws) / f"{k['id']}.json" for k in (review, refund))
+
+    def line(p: Path, key: str) -> int:
+        lines = p.read_text(encoding="utf-8").splitlines()
+        return next(i for i, x in enumerate(lines, 1) if x.lstrip().startswith(f'"{key}":'))
+
+    def place(p: Path, key: str, sub: str) -> dict:
+        return {"file": str(p), "line": line(p, key), "substring": sub}
+
+    fixed = "Again, [2 of the 8] posts ask for a review, empty posts left out."
+    answers = {
+        1: {"kind": "code", "evidence": place(rule, "spec", "if not body:\n        return None"), "status": "verified",
+            "reason": "the rule leaves empty posts out"},
+        2: {"kind": "code", "evidence": place(rule, "spec", '"REVIEW WANTED" in body'), "status": "wrong",
+            "reason": "The rule matches REVIEW WANTED in capitals only."},
+        3: {"kind": "code", "evidence": place(rule, "spec", "if not body:"), "status": "corrected",
+            "correction": {"words": "2 of the 8", "sentence": fixed}, "reason": "the rule leaves empty posts out"},
+        4: {"kind": "quote", "evidence": place(prompt, "description", "a post that asks for a refund or a credit"),
+            "status": "verified", "reason": "the label's prompt says so"},
+    }
+
+    async def fork(c, main, cut, text):
+        n = [int(x) for x in re.findall(r"^(\d+)\. \[", text, re.M)]
+        return {"answer": _answer([{**answers[k], "mark": k} for k in n]), "calls": [], "error": None}
+
+    _main_at(monkeypatch, "cut-1")
+    turn = marks.new_turn()
+    reply = ("[2 of the 8](#) posts ask for a review, not counting empty posts. It counts REVIEW WANTED "
+             "[in any case](#). Again, [2 of the 8](#) posts ask for a review, empty posts among them. The other label "
+             "asks the model for [a post that asks for a refund or a credit](#).")
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, [reply], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    got = {m["n"]: m for m in marks.stored(CORPUS, turn)["items"]}
+    assert got[1]["status"] == "verified" and got[1]["evidence"]["file"] == str(rule), got[1]
+    (row,) = [r for r in got[1]["evidence"]["lines"] if r["n"] == line(rule, "spec")]
+    assert row["decoded"] and row["text"].startswith("def label(unit):\n"), row
+    assert (got[2]["status"], got[2]["failedBy"], got[2]["reason"]) == ("failed", "check", answers[2]["reason"]), got[2]
+    assert got[2]["evidence"]["file"] == str(rule), got[2]
+    assert got[3]["status"] == "corrected" and got[3]["rewrite"] == fixed, got[3]
+    assert got[4]["status"] == "verified" and got[4]["evidence"]["file"] == str(prompt), got[4]
+
+    # a mark the old check failed as outside the folder is repaired now
+    failed = {"n": 1, "piece": 0, "k": 0, "words": "2 of the 8", "status": "failed", "failedBy": "evidence",
+              "sentence": "[2 of the 8] posts ask for a review, not counting empty posts.", "shown": "2 of the 8",
+              "reason": f"{rule} is outside the folder this session works in."}
+    again = marks.new_turn()
+    marks._save(CORPUS, {"turn": again, "items": [failed]})
+
+    async def repair():
+        assert await marks.repair(CORPUS, turn=again, n=1, fork=fork) == ""
+        await _wait_all()
+
+    asyncio.run(repair())
+    (m,) = marks.stored(CORPUS, again)["items"]
+    assert m["status"] == "verified" and m["evidence"]["file"] == str(rule), m
+
+
+def test_of_the_workspace_only_its_labels_definitions_are_evidence(_fresh, monkeypatch):
+    """B11's folder is the labels' definitions alone: a reply's stored marks and main's chat, which hold the reply's own
+    words, stay outside the folder this session works in, as a quote and as code, by their paths, by a path through
+    the labels' folder, and through a link in it."""
+    from app import concepts
+
+    ws = config.workspace_dir(CORPUS)
+    labels = concepts.concepts_dir(ws)
+    labels.mkdir(parents=True, exist_ok=True)
+    turn = marks.new_turn()
+    stored = ws / "marks" / f"{turn}.json"
+    (labels / "k9.json").symlink_to(stored)
+    places = {1: ("quote", stored), 2: ("code", labels / ".." / "marks" / f"{turn}.json"),
+              3: ("quote", agents.paths(CORPUS, agents.MAIN_ID)[1]), 4: ("code", labels / "k9.json")}
+
+    async def fork(c, main, cut, text):
+        def line(p: Path) -> int:
+            lines = p.read_text(encoding="utf-8").splitlines()
+            return next(i for i, x in enumerate(lines, 1) if "ask for a review" in x)
+
+        n = [int(x) for x in re.findall(r"^(\d+)\. \[", text, re.M)]
+        out = [{"mark": k, "kind": places[k][0], "status": "verified", "correction": None, "reason": "it says so",
+                "evidence": {"file": str(places[k][1]), "line": line(places[k][1]), "substring": "ask for a review"}}
+               for k in n]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    _main_at(monkeypatch, "cut-1")
+    reply = "Two posts [ask for a review](#), [ask for a review](#), [ask for a review](#) and [ask for a review](#)."
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, [reply], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    items = marks.stored(CORPUS, turn)["items"]
+    assert len(items) == 4
+    for m in items:
+        assert m["status"] == "failed" and "is outside the folder this session works in" in m["reason"], m
