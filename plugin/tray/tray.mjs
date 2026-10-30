@@ -38,7 +38,8 @@
 //                                          and the workbench's evidence label: `code · 7 lines`, `output · 62 lines`,
 //                                          `changes.log · line 3`, `card · Runs by status`
 //   cutWords(n, where), SHOW_ALL           the marker where a drawing leaves lines out: `⋯ 5 lines above`, `⋯ 1 line
-//                                          below`; the tray's last one names + after it (`· + show all`)
+//                                          below`; the key the tray's header names while the tray leaves lines out
+//                                          (`+ show all`)
 //   moreLines(n)                           what the claims pane says under a citation's one line of the lines it leaves
 //                                          out
 import { printable } from '../core/text.js'
@@ -401,8 +402,8 @@ export const cardLabel = title => `card · ${title}`
  *  above`, `⋯ 1 line below`. */
 export const cutWords = (n, where) => `⋯ ${lineCount(n)} ${where}`
 
-/** What the tray's last marker names after it, as the tray draws a key: + and its words, all of the mark in the side
- *  pane (`⋯ 13 lines below · + show all`). */
+/** The key the tray's header names among its keys, before `a ask`, while the tray leaves lines out: + and its words,
+ *  all of the mark in the side pane (`+ show all · a ask · 0 close`). */
 export const SHOW_ALL = { key: '+', words: 'show all' }
 
 /** A line cut to `room` characters around its first span when it is longer: the span with as much of the line on each

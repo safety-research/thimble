@@ -18,8 +18,8 @@
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread), its input taking the keys; 1 too,
 //               unnamed. With a thread about it already, a opens that thread
-//   +           on a cut card, named by its last marker (`⋯ 13 lines below · + show all`): all of the mark in the side
-//               pane, the same pane a opens, to read (showAll)
+//   + show all  named before a while the card leaves lines out: all of the mark in the side pane, the same pane a
+//               opens, to read (showAll)
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   2–9         a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
 //               links to a file's lines are citations too, drawn as the answer's: the answer's own citation of those
@@ -39,15 +39,16 @@
 //
 // The tray stands in the band above the prompt, over the bar (bar/register.ts), so the bar with ] and [ stays in view
 // under it. It is a summary of the mark: as much of it as fits in the rows the band has over the bar, whole when it
-// fits. A citation's evidence shows in parts, each under its label, dim: the code (`code · 7 lines`, its whole size),
-// a blank row, then its printed output (`output · 62 lines`); a file's lines under their place (`changes.log · line
-// 3`); a card's value under the card. A taller card is cut to those rows: a citation keeps the line of code that
-// printed its value and the output line that holds it in view, with what fits around them; an explainer, a heads-up or
-// a file's lines show from their start. Where it leaves lines out a marker says how many, dim (`⋯ 5 lines above`,
-// `⋯ 13 lines below`), and the last ends with `· + show all`: + or a click on any marker shows all of the mark in the
-// side pane (core/pane.ts), whole, in the same parts, where the wheel and ↑ ↓ scroll it and the side thread about the
-// mark has its conversation and its input under it. No line is left out without its marker: a band too short for the
-// lines around the key ones and the labels drops them first.
+// fits, a blank row between its head and the card. A citation's evidence shows in parts, each under its label, dim: the
+// code (`code · 7 lines`, its whole size), a blank row, then its printed output (`output · 62 lines`); a file's lines
+// under their place (`changes.log · line 3`); a card's value under the card. A taller card is cut to those rows: a
+// citation keeps the line of code that printed its value and the output line that holds it in view, with what fits
+// around them; an explainer, a heads-up or a file's lines show from their start. Where it leaves lines out a marker says
+// how many, dim (`⋯ 5 lines above`, `⋯ 13 lines below`), and the header names + among its keys (`+ show all`): +, a
+// click on those words or on any marker shows all of the mark in the side pane (core/pane.ts), whole, in the same
+// parts, where the wheel and ↑ ↓ scroll it and the side thread about the mark has its conversation and its input under
+// it. No line is left out without its marker: a band too short for the lines around the key ones and the labels drops
+// them first.
 //
 // A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. An open tray
 // does not change what the next prompt asks: a question about the mark goes to a side thread (a). The tray closes when
@@ -155,8 +156,8 @@ export async function trayHolds($: Engine): Promise<boolean> {
 }
 
 /** The keys the tray takes now and names in its own place, which nothing else names (core/answerview.ts heldKeys), so
- *  each key shows once, where it acts: while it is open, its header's (h a 0), its body's (x, and + on a cut card's
- *  last marker) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which the bar names
+ *  each key shows once, where it acts: while it is open, its header's (h, + while the card leaves lines out, a, 0), its
+ *  body's (x) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which the bar names
  *  as the card's. `ask`: the keys asked about, when not all (a key of a citation's body reads the citation). Read from
  *  the state, so a drawing that asks draws again when the tray opens or closes. */
 export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
@@ -495,15 +496,17 @@ async function pressedAgain($: Engine, f: Frame): Promise<boolean> {
   return true
 }
 
-/** +, or a click on a marker of a cut card: all of the mark in the side pane, the pane a opens on it
- *  (threads/seam.ts openThread): a citation's whole evidence (marks/evidence.tsx: what the check found, the sentence,
- *  all the code and the output), an explainer's or a heads-up's words, a file's lines, with the side thread about it
- *  under them. It opens to be read: the pane takes the keys, so ↑ ↓ and the page keys scroll it as the wheel does, and
- *  its input waits for a click or tab. `byKey`: + at the prompt, which Claude Code lets open no pane in a narrow
- *  terminal; the line then says to click `show all`. The tray gives way to the pane once it opened. */
+/** +, or a click on `+ show all` in the header of a cut card or on one of its markers: all of the mark in the side
+ *  pane, the pane a opens on it (threads/seam.ts openThread): a citation's whole evidence (marks/evidence.tsx: what the
+ *  check found, the sentence, all the code and the output), an explainer's or a heads-up's words, a file's lines, with
+ *  the side thread about it under them. It opens to be read: the pane takes the keys, so ↑ ↓ and the page keys scroll
+ *  it as the wheel does, and its input waits for a click or tab. `byKey`: + at the prompt, which Claude Code lets open
+ *  no pane in a narrow terminal; the line then says to click `show all`. The tray gives way to the pane once it
+ *  opened. */
 async function showAll($: Engine, f: Frame, byKey = false): Promise<void> {
   const info = await infoOf($, f)
-  // the words of the marker to click, not its count, which the line, taking rows of the band, may change
+  // the words of the header's key to click, which stays there while the line takes a row of the band: the card, cut to
+  // fewer rows, still leaves lines out
   const more = byKey ? { key: SHOW_ALL.key, click: SHOW_ALL.words, where: 'in the tray' } : {}
   const placed = await openThread($, { about: aboutOf(f, info), mark: refOf(f) as MarkRef }, { read: true, ...more })
   if (placed) await setTray($, null)
@@ -677,8 +680,9 @@ async function restItem($: Engine): Promise<BarItem[]> {
 }
 
 /** An open tray's keys, in its header at the right, each a click that does what its key does: h the explainer on a
- *  citation's words, a ask, 0 back or close (] and [ are on the bar, trayBar). x repair is in the citation's card and
- *  + on a cut card's last marker, where they act, and 2–9 are its links in an explainer's words. */
+ *  citation's words, + show all (showAll), which the header names only while the card leaves lines out (trayBand), a
+ *  ask, 0 back or close (] and [ are on the bar, trayBar). x repair is in the citation's card, where it acts, and 2–9
+ *  are its links in an explainer's words. */
 async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
   await themeNow($)
   const out: BarItem[] = []
@@ -690,6 +694,7 @@ async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<B
       out.push({ id: 'tray-h', key: 'h', words: inner.kind === 'heads' ? 'heads-up' : `explain ${term.length > 24 ? `${term.slice(0, 23)}…` : term}`, press: () => pushMark($, inner) })
     }
   }
+  out.push({ id: 'tray-+', key: SHOW_ALL.key, words: SHOW_ALL.words, press: () => showAll($, f) })
   out.push({ id: 'tray-a', key: 'a', words: 'ask', press: () => askAbout($, f) })
   out.push({ id: 'tray-0', key: '0', words: tray.stack.length > 1 ? 'back' : 'close', press: () => goBack($) })
   return out
@@ -954,17 +959,12 @@ function fitCitation(parts: { top: Unit[]; blocks: Block[] }, rows: number): Uni
 }
 
 /** A marker where the tray leaves lines out, dim: how many, and where (tray.mjs cutWords: `⋯ 5 lines above`), a click
- *  that shows all of the mark in the side pane, as + does (showAll); `last`, the tray's last marker, which names + after
- *  its words (`· + show all`), its key as the header draws a key. Underlined under the pointer. */
-function cutRow(els: Any, cut: { n: number; where: 'above' | 'below' }, last: boolean, key: string, press: () => unknown): Unit {
+ *  that shows all of the mark in the side pane, as + does (showAll), which the header names. Underlined under the
+ *  pointer. */
+function cutRow(els: Any, cut: { n: number; where: 'above' | 'below' }, key: string, press: () => unknown): Unit {
   const { Button, Text } = els
   return { h: 1, el: Button({ key, plain: true, label: 'show all of it in the side pane', hover: quiet(key), onPress: press, children: [
     Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: cutWords(cut.n, cut.where) }),
-    ...(last ? [
-      Text({ key: 's', dimColor: true, children: ' · ' }),
-      Text({ key: 'k', color: accent(), bold: true, children: SHOW_ALL.key }),
-      Text({ key: 'a', dimColor: true, children: ` ${SHOW_ALL.words}` }),
-    ] : []),
   ] }) }
 }
 
@@ -1012,7 +1012,7 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
 let gapRow = true
 
 /** What the tray as last drawn left out (the frame it showed, and how many lines in all): + shows it all in the side
- *  pane while the tray's last marker names it (showAll). */
+ *  pane while the tray's header names it (showAll). */
 let cutNow: { ref: string; n: number } | null = null
 const frameKey = (f: Frame) => `${f.row}|${f.kind}|${f.kind === 'citation' ? f.n : f.id}`
 
@@ -1022,14 +1022,16 @@ export type BandRoom = { rows: number }
 /** The tray as last drawn: whether the band's blank row stands between it and the bar (`gap`). */
 export const trayShape = (): { gap: boolean } => ({ gap: gapRow })
 
-/** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, drawn and clicked as in
- *  the reply) on top, a citation's status and its keys at its right (trayKeys), then the mark's card, its rows starting
- *  where the title starts. It shows as much of the card as fits in the rows the band has over the bar (`room`; null: no
- *  limit), so the bar with ] and [ stays in view under it; the band's blank row over the bar stays while the whole card
- *  fits with it. A taller card is cut to those rows: a citation keeps the line that printed its value and the line that
- *  holds it in view, with what fits around them (fitCitation); an explainer, a heads-up or a file's lines show from
- *  their start, a marker under them (`⋯ 9 lines below`). Each marker is a click, and the last names + (cutRow): either
- *  shows all of it in the side pane (showAll). */
+/** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, bold on the tint the
+ *  reply gives the open mark, and a click that closes it, as in the reply) on top, a citation's status and its keys at
+ *  its right (trayKeys), a blank row, then the mark's card, its rows starting where the title starts. It shows as much
+ *  of the card as fits in the rows the band has over the bar (`room`; null: no limit), so the bar with ] and [ stays in
+ *  view under it; the band's blank row over the bar stays while the whole card fits with it, and the one under the head
+ *  while a row of the card fits under it. A taller card is cut to those rows: a citation keeps the line that printed
+ *  its value and the line that holds it in view, with what fits around them (fitCitation); an explainer, a heads-up or
+ *  a file's lines show from their start, a marker under them (`⋯ 9 lines below`). Each marker is a click (cutRow), and
+ *  the header names + among its keys while the card leaves lines out (`+ show all`, a click too): each shows all of it
+ *  in the side pane (showAll). */
 export async function trayBand($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
@@ -1080,69 +1082,96 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
     ]
   }
   const tone = TONES[f.kind]
-  // its keys at the right, after a citation's status, each drawn as the bar draws a key and a click that presses it
-  const keys = await trayKeys($, tray, f)
-  const keysLen = keys.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
-  // the status: its sign, a space and its word, then two cells before the keys
-  const rightLen = (status ? status.word.length + 4 : 0) + keysLen
-  // the title and the keys on one row when both fit, else the title on a row of its own above them
-  const oneRow = title.length + 2 + rightLen <= inner
-  const roomT = oneRow ? title.length : inner
-  // the title is the marked words, drawn as the reply draws the open mark (marks/view.ts markEl: bold on its tint, a
-  // citation underlined; an explainer's or a heads-up's words on their stronger fill), and a click on
-  // them closes the tray, as a second click on the open mark in the reply does
+  // the title is the marked words, drawn as the reply draws the open mark (marks/view.ts markEl) but not underlined: bold
+  // on its tint, a failed citation's in red; an explainer's or a heads-up's words on their stronger fill. A click on them
+  // closes the tray, as a second click on the open mark in the reply does
   const fills = markColors(themeLast())
   const cite = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed', `tray:${f.row}:${f.n}`) : f.kind === 'place' ? wordsLook('unchecked', `tray:${f.row}:${f.id}`) : null
-  const look: Any = cite ? { ...cite, bold: true, backgroundColor: cite.hover.backgroundColor } : { bold: true, backgroundColor: f.kind === 'heads' ? fills.headsFocus : fills.glossFocus }
-  const titleEl = els.Button({ key: 'tray-title', plain: true, label: 'close the tray', hover: { inverse: false, ...(look.hover ? { scope: look.hover.scope } : {}) }, onPress: () => closeTray($), children: [
-    Text({ key: 't', ...look, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
-  ] })
+  const look: Any = cite
+    ? { ...(cite.color ? { color: cite.color } : {}), hover: cite.hover, bold: true, backgroundColor: cite.hover.backgroundColor }
+    : { bold: true, backgroundColor: f.kind === 'heads' ? fills.headsFocus : fills.glossFocus }
   const about = aboutOf(f, await infoOf($, f))
-  // each key's words dim, as the bar draws a key's, and the words that name a kind of mark (`] next heads up`) in that
-  // mark's look (kindLook), as the bar's ] names it
-  const keyEls = keys.flatMap((k, i) => [
-    ...(i ? [Text({ key: `ksep${i}`, dimColor: true, children: ' · ' })] : []),
-    els.Button({ key: k.id, plain: true, label: k.key === 'a' ? `ask about ${about}` : `${k.key} ${k.words}`, hover: quiet(k.id), onPress: k.press, children: [
-      Text({ key: 'k', color: accent(), bold: true, children: k.key }),
-      ...partsAround(` ${k.words}`, k.marked?.words).map((p: { s: string; marked: boolean }, j: number) => Text({ key: j ? `w${j}` : 'w', ...(p.marked ? k.marked!.look : { dimColor: true }), children: p.s })),
-    ] }),
-  ])
   // a citation's status: the turning glyph beside `checking` turns with the one after its words in the reply
   const spin = status?.sign === 'spin' ? await spinNow($) : ''
-  const rightEl = Box({ key: 'r', flexDirection: 'row', ...(oneRow ? { flexShrink: 0 } : { flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }), children: [
-    ...(status ? [...statusEls(els, status, spin), Text({ key: 'gap', children: '  ' })] : []),
-    ...keyEls,
-  ] })
-  const head = oneRow
-    ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
-    : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
-  // the rows the card may take: the band's rows over the bar, less the frame's two borders and its head
-  const fixed = 2 + treeRows(head, inner)
-  const rows = room ? Math.max(1, room.rows - fixed) : Infinity
-  // the card in units: a citation's fit to its rows (fitCitation); other words taller than the rows, from their start, a
-  // window of the rows left over the marker under it, which says how many it leaves out
-  let laid: Unit[] | null = parts ? fitCitation(parts, rows) : null
-  if (!laid && treeRows(body, inner) > rows) {
+  // the head: the title, and its keys `ks` at the right, after a citation's status, each drawn as the bar draws a key
+  // and a click that presses it
+  const headOf = (ks: BarItem[]): Any => {
+    const keysLen = ks.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
+    // the status: its sign, a space and its word, then two cells before the keys
+    const rightLen = (status ? status.word.length + 4 : 0) + keysLen
+    // the title and the keys on one row when both fit, else the title on a row of its own above them
+    const oneRow = title.length + 2 + rightLen <= inner
+    const titleEl = els.Button({ key: 'tray-title', plain: true, label: 'close the tray', hover: { inverse: false, ...(look.hover ? { scope: look.hover.scope } : {}) }, onPress: () => closeTray($), children: [
+      Text({ key: 't', ...look, wrap: 'truncate-end', children: cutTitle(title, oneRow ? title.length : inner) }),
+    ] })
+    // each key's words dim, as the bar draws a key's, and the words that name a kind of mark (`] next heads up`) in that
+    // mark's look (kindLook), as the bar's ] names it
+    const keyEls = ks.flatMap((k, i) => [
+      ...(i ? [Text({ key: `ksep${i}`, dimColor: true, children: ' · ' })] : []),
+      els.Button({ key: k.id, plain: true, label: k.key === 'a' ? `ask about ${about}` : `${k.key} ${k.words}`, hover: quiet(k.id), onPress: k.press, children: [
+        Text({ key: 'k', color: accent(), bold: true, children: k.key }),
+        ...partsAround(` ${k.words}`, k.marked?.words).map((p: { s: string; marked: boolean }, j: number) => Text({ key: j ? `w${j}` : 'w', ...(p.marked ? k.marked!.look : { dimColor: true }), children: p.s })),
+      ] }),
+    ])
+    const rightEl = Box({ key: 'r', flexDirection: 'row', ...(oneRow ? { flexShrink: 0 } : { flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }), children: [
+      ...(status ? [...statusEls(els, status, spin), Text({ key: 'gap', children: '  ' })] : []),
+      ...keyEls,
+    ] })
+    return oneRow
+      ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
+      : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
+  }
+  // the rows the band has under `head`, less the frame's two borders (Infinity: no limit); a blank row stands first, so
+  // the title stands apart from the card, while a row is left for the card under it too. An explainer's or a heads-up's
+  // words start with one of their own, as the reply draws them (marks/view.ts messageEl)
+  const leftOf = (head: Any) => (room ? room.rows - 2 - treeRows(head, inner) : Infinity)
+  const gapUnder = (head: Any) => !words && leftOf(head) >= 2
+  // the card in units, in the rows left for it under `head`, one at least: a citation's fit to its rows (fitCitation);
+  // other words taller than the rows, from their start, a window of the rows left over the marker under it, which says
+  // how many it leaves out (null: other words that fit, whole)
+  const layOut = (head: Any): Unit[] | null => {
+    const rows = Math.max(1, leftOf(head) - (gapUnder(head) ? 1 : 0))
+    if (parts) return fitCitation(parts, rows)
+    if (treeRows(body, inner) <= rows) return null
     const keep = Math.max(0, rows - 1)
-    laid = [
+    return [
       ...(keep ? [{ h: keep, el: Box({ key: 'tray-window', flexDirection: 'column', height: keep, overflow: 'hidden', children: [
         Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, children: body }),
       ] }) }] : []),
       { h: 1, cut: { n: treeRows(body, inner) - keep, where: 'below' as const } },
     ]
   }
-  // each marker a click that shows all of it in the side pane, the last naming + too
+  // its keys (trayKeys), + among them only while the card leaves lines out. The card is laid out under the head without
+  // +; when it leaves lines out the head names + too, and when that head takes a row more, the card is laid out again in
+  // the rows left, where it leaves lines out still, so the frame keeps to the band's rows. A band too short for that head
+  // and a row of the card keeps the head without +
+  const keys = await trayKeys($, tray, f)
+  let named = keys.filter(k => k.key !== SHOW_ALL.key)
+  let head = headOf(named)
+  let laid = layOut(head)
+  if (laid?.some(u => u.cut)) {
+    const taller = headOf(keys)
+    const grew = treeRows(taller, inner) > treeRows(head, inner)
+    if (!grew || leftOf(taller) >= 1) {
+      named = keys
+      head = taller
+      if (grew) laid = layOut(head)
+    }
+  }
+  const under: Any[] = gapUnder(head) ? [Text({ key: 'tray-gap', children: ' ' })] : []
+  // the rows of the frame but the card's: its two borders, its head and the blank row under it
+  const fixed = 2 + treeRows([head, ...under], inner)
+  // each marker a click that shows all of it in the side pane, as + does
   const marks = (laid ?? []).filter(u => u.cut)
-  const lastMark = marks[marks.length - 1]
-  const shown: Any[] = laid ? unitEls(els, laid.map((u, k) => (u.cut ? cutRow(els, u.cut, u === lastMark, `tray-cut-${k}`, () => showAll($, f)) : u))) : body
-  if (lastMark) cutNow = { ref: frameKey(f), n: marks.reduce((n, u) => n + u.cut!.n, 0) }
+  const shown: Any[] = laid ? unitEls(els, laid.map((u, k) => (u.cut ? cutRow(els, u.cut, `tray-cut-${k}`, () => showAll($, f)) : u))) : body
+  if (marks.length) cutNow = { ref: frameKey(f), n: marks.reduce((n, u) => n + u.cut!.n, 0) }
   gapRow = !room || fixed + treeRows(shown, inner) < room.rows
   // the words of its keys and of its markers, which a click on one leaves selected: no answer's words
   // (core/selection.ts)
-  const markWords = (u: Unit) => `${cutWords(u.cut!.n, u.cut!.where)}${u === lastMark ? ` · ${SHOW_ALL.key} ${SHOW_ALL.words}` : ''}`
-  controlWords('tray', [...keys.flatMap(k => [k.words, `${k.key} ${k.words}`]), ...marks.map(markWords)])
+  controlWords('tray', [...named.flatMap(k => [k.words, `${k.key} ${k.words}`]), ...marks.map(u => cutWords(u.cut!.n, u.cut!.where))])
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [
     head,
+    ...under,
     Box({ key: 'tray-body', flexDirection: 'column', children: shown }),
   ] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
