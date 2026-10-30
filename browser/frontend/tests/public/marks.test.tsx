@@ -2,14 +2,17 @@
 // A reply's marks drawn by what the check found (marks/Mark.tsx), as a card's citations are drawn: two looks, verified
 // (a correction shows its new words and looks verified) and failed (a wrong mark, one the check could not confirm, one
 // no check could run: a red × after the words, as the terminal draws it), and a click opens the evidence in the citation's label.
+// A mark no check has said anything of yet is drawn as not checked.
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { act } from 'react'
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { MarksFooter } from '../../src/marks/MarksFooter.tsx'
 import type { MarkItem } from '../../src/marks/marks.ts'
 import { withMarkHrefs } from '../../src/marks/marks.ts'
-import { lineWindow } from '../../src/marks/Mark.tsx'
+import { lineWindow, outOfView } from '../../src/marks/Mark.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => unmountAll())
@@ -51,7 +54,7 @@ test("a mark's label shows its evidence as a citation's label does: the output l
   expect(pop?.querySelector('.mark-pop-why')).toBeNull()
 })
 
-test("a place in a mark's label opens its file and the label closes at once, hovered or pinned", async () => {
+test("a place in a mark's label, named as the terminal names it, opens its file and the label closes at once, hovered or pinned", async () => {
   const ev = { kind: 'quote' as const, file: 'runs/a.jsonl', line: 5880, lines: [{ n: 5880, text: '11 passed, 819 deselected', highlight: [0, 25] as [number, number] }] }
   const el = await mount(<ChatMarkdown text="[11 passed, 819 deselected](#) on the branch" checks={[item(0, '11 passed, 819 deselected', { evidence: ev })]} />)
   const opened: unknown[] = []
@@ -60,7 +63,7 @@ test("a place in a mark's label opens its file and the label closes at once, hov
     await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await settle()
     const chip = document.querySelector<HTMLElement>('.mark-pop .refchip-pop-chip')
-    expect(chip?.textContent).toBe('runs/a.jsonl:5880')
+    expect(chip?.textContent).toBe('runs/a.jsonl · line 5880')
     await act(async () => chip!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(opened).toEqual([{ ref: 'runs/a.jsonl#L5880' }])
     expect(document.querySelector('.mark-pop')).toBeNull()
@@ -117,6 +120,66 @@ test("a long line of a call's output shows the words around the highlighted ones
   expect(document.querySelector('.mark-pop .cite-cell')?.textContent).toBe(QUOTED)
 })
 
+test("a computed mark's label holds every line of the output and of the code, each in a box of its own that opens on its key line: the output's line that holds the value, the code's line that printed it (the terminal's rule)", async () => {
+  const output = ['runs: 400', ...Array.from({ length: 30 }, (_, i) => `run ${i + 1}: FAIL`), 'failed: 61 of 400'].join('\n')
+  const at = output.lastIndexOf('61')
+  const code = 'rows = load()\nfor r in bad:\n    print(f"run {r}: FAIL")\nprint(f"failed: {len(bad)} of {len(rows)}")\nprint("done")'
+  const checks = [item(0, '61', { evidence: { kind: 'computed', code, output, highlight: [[at, at + 2]], by: 'checker' } })]
+  const el = await mount(<ChatMarkdown text="[61](#) failed" checks={checks} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  const out = document.querySelector<HTMLElement>('.mark-pop .mark-ev-out')!
+  expect(out.querySelectorAll('.refchip-line').length).toBe(32)
+  expect(out.querySelector('[data-key]')?.textContent).toBe('failed: 61 of 400')
+  expect(out.tabIndex).toBe(0)
+  const box = document.querySelector<HTMLElement>('.mark-pop .mark-ev-code')!
+  expect([...box.querySelectorAll('.refchip-line')].map((l) => l.textContent)).toEqual(code.split('\n'))
+  expect(box.querySelector('[data-key]')?.textContent).toBe('print(f"failed: {len(bad)} of {len(rows)}")')
+  expect(box.querySelector('[data-key]')?.classList.contains('mark-ev-said')).toBe(true)
+  expect(document.querySelector('.mark-pop')?.textContent).not.toContain('…')
+})
+
+test("a computed mark's label shows the code first, then the output, each under its label as the terminal's tray and side pane label it: what the part is and its whole size", async () => {
+  const output = ['runs: 400', ...Array.from({ length: 30 }, (_, i) => `run ${i + 1}: FAIL`), 'failed: 61 of 400'].join('\n')
+  const at = output.lastIndexOf('61')
+  const code = 'rows = load()\nfor r in bad:\n    print(f"run {r}: FAIL")\nprint(f"failed: {len(bad)} of {len(rows)}")\nprint("done")\n'
+  const el = await mount(<ChatMarkdown text="[61](#) failed" checks={[item(0, '61', { evidence: { kind: 'computed', code, output, highlight: [[at, at + 2]], by: 'checker' } })]} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  const parts = [...document.querySelector('.mark-pop .mark-ev')!.children].map((c) => c.className.split(' ').find((n) => n.startsWith('mark-ev-') || n === 'refchip-pop-head'))
+  expect(parts).toEqual(['refchip-pop-head', 'mark-ev-label', 'mark-ev-code', 'mark-ev-label', 'mark-ev-out'])
+  expect([...document.querySelectorAll('.mark-pop .mark-ev-label')].map((l) => l.textContent)).toEqual(['code · 5 lines', 'output · 32 lines'])
+})
+
+test("a box's edges count the lines out of view there, a line in view in part counting as in view; none for a box that holds no more than it shows", () => {
+  // ten lines of 20 px, a box 50 px tall scrolled to 60 px: the fourth to the sixth line in view, the sixth in part
+  const lines = Array.from({ length: 10 }, (_, i) => ({ offsetTop: i * 20, offsetHeight: 20 })) as unknown as Element[]
+  const box = (scrollTop: number, clientHeight = 50) => ({ scrollTop, clientHeight, scrollHeight: 200, children: lines })
+  expect(outOfView(box(60))).toEqual({ above: 3, below: 4 })
+  expect(outOfView(box(0))).toEqual({ above: 0, below: 7 })
+  expect(outOfView(box(150))).toEqual({ above: 7, below: 0 })
+  expect(outOfView({ ...box(0), clientHeight: 200 })).toBe(null)
+})
+
+test("a computed mark's label draws its code in the file reader's colors for Python, as the terminal draws it in Claude Code's: each line in its place, the line that printed the value keyed, and the value in the output still marked", async () => {
+  const output = 'runs: 40\nfailed: 12'
+  const at = output.lastIndexOf('12')
+  const lines = ['import csv', 'rows = list(csv.DictReader(open("runs.csv")))', '', 'print(f"runs: {len(rows)}")', 'print(f"failed: {sum(r[\'status\'] == \'failed\' for r in rows)}")']
+  const checks = [item(0, '12', { evidence: { kind: 'computed', code: lines.join('\n'), output, highlight: [[at, at + 2]], by: 'checker' } })]
+  const el = await mount(<ChatMarkdown text="[12](#) failed" checks={checks} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  const box = document.querySelector<HTMLElement>('.mark-pop .mark-ev-code')!
+  // the highlighter loads once, when code is first drawn
+  await vi.waitFor(async () => {
+    await settle()
+    expect(box.querySelector('.tok-keyword')?.textContent).toBe('import')
+  })
+  expect(box.querySelector('.tok-string')?.textContent).toBe('"runs.csv"')
+  expect([...box.querySelectorAll('.refchip-line')].map((l) => l.textContent)).toEqual([...lines.slice(0, 2), ' ', ...lines.slice(3)])
+  expect(box.querySelector('[data-key]')?.textContent).toBe(lines[4])
+  expect(document.querySelector('.mark-pop .mark-ev-out .cite-cell')?.textContent).toBe('12')
+})
+
 test('a line short enough to read whole is shown whole, and a long one cut at words on both sides', () => {
   expect(lineWindow('rows 40, merged 12', [15, 17])).toEqual({ from: 0, to: 18, lead: false, tail: false })
   const w = lineWindow(PARAGRAPH, [PARAGRAPH.indexOf(QUOTED), PARAGRAPH.indexOf(QUOTED) + QUOTED.length])
@@ -130,6 +193,24 @@ test('a line short enough to read whole is shown whole, and a long one cut at wo
 test('while the reply streams its marks wait, whatever an earlier check said', async () => {
   const el = await mount(<ChatMarkdown text="[12](#) runs" streaming checks={[item(0, '12', { status: 'failed' })]} />)
   expect(el.querySelector('.mark')?.getAttribute('data-mark-look')).toBe('pending')
+})
+
+test('a mark no check has said anything of yet draws as not checked, its underline dotted, never as a checked one', async () => {
+  // a side thread's answer whose check has not begun, or one from before side threads' answers were checked: no record
+  // of its marks
+  const el = await mount(<ChatMarkdown text="It is [302 of 439](#) runs." />)
+  expect(el.querySelector('.mark')?.getAttribute('data-mark-look')).toBe('pending')
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  expect(document.querySelector('.mark-pop .mark-pop-state')?.textContent?.trim()).toBe('not checked yet')
+  const css = readFileSync(path.resolve(__dirname, '../../src/styles/marks.css'), 'utf8')
+  const rule = (selector: string) => {
+    const at = css.indexOf(`\n${selector} {`)
+    expect(at, selector).toBeGreaterThanOrEqual(0)
+    return css.slice(at, css.indexOf('}', at))
+  }
+  expect(rule('.mark-words')).toMatch(/text-decoration-style: solid;/)
+  expect(rule('.mark.is-pending .mark-words')).toMatch(/text-decoration-style: dotted;/)
 })
 
 test("a turn's marks go to its own text rows in order, and its reply gets the footer", async () => {

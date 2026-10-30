@@ -80,7 +80,7 @@ declare module 'claude-code' {
 
       // ---- core (core/)
       /** what the side pane shows, and the trail of panes it showed before, to go back to (core/pane.ts) */
-      pane: { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: { kind: string; args: unknown; title: string; rows?: number }[] } | null
+      pane: { kind: string; args: unknown; title?: string; rows?: number; trail?: { kind: string; args: unknown; title: string; rows?: number }[] } | null
       /** the row the settings pane picked (panes/settings.tsx), by its feature's key */
       settingsRow: string
       /** the selection the pane held when it closed, and the ones e and c took, by row and words (core/selection.ts) */
@@ -93,6 +93,9 @@ declare module 'claude-code' {
       forks: Record<string, 'checker' | 'designer' | 'thread' | 'fixer'>
       /** what Claude reads with the person's next prompt, by key (core/tell.ts) */
       tell: Record<string, string>
+      /** what main or a side thread's fork reads of a card it drew, with its next card call or its next turn: by whom it
+       *  is for (`main`, `thread:<key>`), then by key (core/tell.ts tellFor) */
+      tellFor: Record<string, Record<string, string>>
       /** the session's temp folder, as a real path (core/home.ts tempDir) */
       tempDir: string
       /** how far the session's change feed has been read (core/feed.ts) */
@@ -128,9 +131,10 @@ declare module 'claude-code' {
       threadsGen: number
 
       // ---- fixes (fix/): the person's changes to their own thimble; the kernel keeps the records (fixes.jsonl)
-      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read; what the
-       *  kernel did with the fixes an update set aside as it read them, once (fixes.ts FixList, Carried) */
-      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number; carried?: { to: string; back: number[]; had: number[]; aside: number[]; why?: Record<string, string>; off?: boolean; reload?: boolean } | null } | null
+      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read; the fixes an
+       *  update set aside that wait for their check on the release, which the session's start runs (fixes.ts FixList,
+       *  CarryDue) */
+      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number; due?: { to: string; n: number } | null } | null
       /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
        *  changed; a reload that waits for Claude's turn or a restart; for an update, whether the session loads what
        *  changed (fixes.ts FixLine) */

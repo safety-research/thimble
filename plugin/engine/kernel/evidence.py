@@ -35,14 +35,16 @@ shows the words, so a mark is never verified on evidence the checker made up:
             from a file.
   quote     one place or several: the file is inside the folder the session started in or the shell's folder (a
   code      relative path is read from either, since main may have run `cd`; for what code does, also the temp
-            folder, where Claude keeps its own code), compared by real paths, a regular file, the line (or a range of
-            at most 50 lines) exists, and the place's substring is in it: in the raw line or in the line's JSON strings
-            decoded, runs of white space as one space (or as none: JSON written with no space after its colons), `**`
-            and backticks as formatting, and every quote mark as the same mark (a quote inside a quote may be written
-            with the other kind). The quoted words of a direct quote (the case of their first letter aside), and the
-            days and numbers of the words, are in the cited lines too; a quote of what code prints may fill the
-            fields of the code's template (in_code). A correction of a quote also puts in only words the cited lines
-            show, as for computed evidence.
+            folder, where Claude keeps its own code; and a folder of labels' rules when the host gives one, `rules`,
+            as the browser keeps each label's definition, its rule in it), compared by real paths, a regular file, the
+            line (or a range of at most 50 lines) exists, and the place's substring is in it: in the raw line or in
+            the line's JSON strings decoded (a JSONL record's, or those of one member of a JSON document written over
+            many lines, such as a label's rule), runs of white space as one space (or as none: JSON written with no
+            space after its colons), `**` and backticks as formatting, and every quote mark as the same mark (a quote
+            inside a quote may be written with the other kind). The quoted words of a direct quote (the case of their
+            first letter aside), and the days and numbers of the words, are in the cited lines too; a quote of what
+            code prints may fill the fields of the code's template (in_code). A correction of a quote also puts in
+            only words the cited lines show, as for computed evidence.
             Not checked: that a substring means what a paraphrase of it says ("agent-3 deleted the page" on a line that
             holds "page"). That is the checker's judgment; the person sees the line next to the claim.
   card      a value a card of the session shows: a cell of one of its tables (a chart's data rows are a table) or a
@@ -81,11 +83,13 @@ evidence in every case, whatever call or place the reply pointed at. A mark the 
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, fails as a check that did not run (`failedBy` `none`), which x in the tray starts again. A checker's note on the rest of the sentence stays beside the mark.
 
-  check_all(marks, answer, calls, cwd, root, tmp, cards)  -> {parsed, results}: every mark of a reply
-  check_mark(mark, item, calls, cwd, root, tmp, cards)    -> {n, status, shown, reason, failedBy?, evidence?, note?,
-                                                              was?, narrowed?, rewrite?}
-  card_index(cards)                                       -> the cards' places and values, one per line, for the checker
-  terminal_cards(folder)                                  -> the terminal's cards (cards/<id>/meta.json, rows.json) as `cards`
+  check_all(marks, answer, calls, cwd, root, tmp, cards, rules)  -> {parsed, results}: every mark of a reply
+  check_mark(mark, item, calls, cwd, root, tmp, cards, rules)    -> {n, status, shown, reason, failedBy?, evidence?,
+                                                                     note?, was?, narrowed?, rewrite?}
+  card_index(cards)                                              -> the cards' places and values, one per line,
+                                                                     for the checker
+  terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
+                                                                     rows.json) as `cards`
   parse_answer(text)                               -> the last ```json array of the checker's answer, or None
 """
 from __future__ import annotations
@@ -198,12 +202,19 @@ def short(s: str, n: int) -> str:
 # or could not confirm it, else this module's, which says what the records show in place of the words, or what is
 # missing, never the whole cited words again.
 
+class Named(str):
+    """A clause of a reason that opens with a name, whose case is its own: the cited file as the check named it
+    (`notes is outside …`, `peer/run.log has no line 9`). place() and look() write such clauses, so they mark them."""
+
+
 def sentence(clause: str) -> str:
-    """A clause of a reason as the sentence the person reads: its first letter capital, a stop at its end."""
+    """A clause of a reason as the sentence the person reads: a stop at its end, and a capital first letter unless the
+    clause opens with a name (Named)."""
     s = norm_ws(clause)
     if not s:
         return s
-    s = s[0].upper() + s[1:]
+    if not isinstance(clause, Named):
+        s = s[0].upper() + s[1:]
     return s if s[-1] in ".!?" else s + "."
 
 
@@ -1174,25 +1185,45 @@ def json_unescaped(raw: str) -> str:
     return text if text != raw else ""
 
 
-def forms(raw: str) -> list[tuple[str, bool]]:
-    """The texts a line can hold words in: the line as written, and its JSON strings decoded (`decoded` True); a JSON
-    line cut at LINE_BYTES, with its escapes read."""
-    out = [(raw, False)]
+NO_JSON = object()  # line_json's answer for a line that holds no JSON value whole
+
+
+def line_json(raw: str) -> Any:
+    """The JSON value a line holds whole: the line itself (a JSONL record), else one member (`"spec": "…",`) or one
+    element (`"…",`) of a JSON document written over many lines, the comma that ends it left out, as the browser writes
+    a label's definition, its rule in it; NO_JSON when it holds none."""
     try:
-        out.append(("\n".join(json_strings(json.loads(raw))), True))
+        return json.loads(raw)
     except ValueError:
-        if raw.lstrip()[:1] in "{[" and json_unescaped(raw):
-            out.append((json_unescaped(raw), True))
+        pass
+    part = raw.strip().removesuffix(",")
+    if part.startswith('"'):
+        for text in ("{" + part + "}", part):
+            try:
+                return json.loads(text)
+            except ValueError:
+                continue
+    return NO_JSON
+
+
+def forms(raw: str) -> list[tuple[str, bool]]:
+    """The texts a line can hold words in: the line as written, and the strings of the JSON it holds decoded (`decoded`
+    True, line_json); a JSON line cut at LINE_BYTES, with its escapes read."""
+    out = [(raw, False)]
+    v = line_json(raw)
+    if v is not NO_JSON:
+        out.append(("\n".join(json_strings(v)), True))
+    elif raw.lstrip()[:1] in "{[" and json_unescaped(raw):
+        out.append((json_unescaped(raw), True))
     return out
 
 
 def shown_forms(raw: str) -> list[tuple[str, bool]]:
-    """The texts a cited line is shown in, best first: each string value of its JSON alone, decoded (a record's message
-    reads as written, its line breaks real), then the line as written. A JSON line cut at LINE_BYTES shows with its
-    escapes read."""
-    try:
-        v = json.loads(raw)
-    except ValueError:
+    """The texts a cited line is shown in, best first: each string value of the JSON it holds alone, decoded (a record's
+    message, or a label's rule, reads as written, its line breaks real), then the line as written. A JSON line cut at
+    LINE_BYTES shows with its escapes read."""
+    v = line_json(raw)
+    if v is NO_JSON:
         cut = json_unescaped(raw) if raw.lstrip()[:1] in "{[" else ""
         return [(cut, True), (raw, False)] if cut else [(raw, False)]
     vals: list[str] = []
@@ -1233,12 +1264,10 @@ def inside(path: str, folders: list[str]) -> bool:
 LEADING_CD = re.compile(r"\s*cd\s+(\S+)\s*(?:&&|;|\n)")
 
 
-def paths_of(file: str, cwd: str, root: str | None, tmp: str | None, calls: list[dict[str, Any]] = ()) -> list[str]:
-    """The paths a cited file may name inside the session's folders (absolute, links not followed): an absolute path
-    as it is; a relative one from the folder the session started in, from the shell's folder (where main's `cd` left
-    it), and from each folder a call of the session moved to with a leading `cd`, since the check may have named the
-    file from there. A file in `tmp` counts when `tmp` is given."""
-    folders = [f for f in (root, cwd, tmp) if f]
+def named_paths(file: str, cwd: str, root: str | None, calls: list[dict[str, Any]] = ()) -> list[str]:
+    """The paths a cited file may name (absolute, links not followed): an absolute path as it is; a relative one from
+    the folder the session started in, from the shell's folder (where main's `cd` left it), and from each folder a call
+    of the session moved to with a leading `cd`, since the check may have named the file from there."""
     if os.path.isabs(file):
         bases = [""]
     else:
@@ -1247,7 +1276,14 @@ def paths_of(file: str, cwd: str, root: str | None, tmp: str | None, calls: list
             m = LEADING_CD.match(str(c.get("command") or ""))
             d = m.group(1).strip("'\"") if m else ""
             bases += [d] if os.path.isabs(d) else [os.path.join(b, d) for b in (root, cwd) if b and d]
-    return [p for p in dict.fromkeys(os.path.abspath(os.path.join(b, file)) for b in bases) if inside(p, folders)]
+    return list(dict.fromkeys(os.path.abspath(os.path.join(b, file)) for b in bases))
+
+
+def paths_of(file: str, cwd: str, root: str | None, also: list[str], calls: list[dict[str, Any]] = ()) -> list[str]:
+    """The paths a cited file may name (named_paths) that lie inside the session's folders, or inside one of the folders
+    `also` names (the temp folder, a folder of labels' rules)."""
+    folders = [f for f in (root, cwd, *also) if f]
+    return [p for p in named_paths(file, cwd, root, calls) if inside(p, folders)]
 
 
 ADJACENT = re.compile(r"([\"'])\s+\1")
@@ -1270,18 +1306,19 @@ def holds(sub: str, hay: list[str]) -> bool:
     return any(loose in h or plain in h or tight in re.sub(r"\s+", "", h) for h in map(one_quote, hay))
 
 
-def place(ev: dict[str, Any], cwd: str, root: str | None, tmp: str | None = None, calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None, list[str]]:
+def place(ev: dict[str, Any], cwd: str, root: str | None, also: list[str] = (), calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None, list[str]]:
     """One cited place: its problems, the place to show (`file`, `line`, the cited lines with a line around them, the
     substring highlighted) and the texts the cited lines hold. A relative path names a file of one of the folders
-    paths_of() reads it from: the one whose lines hold the substring. A file in `tmp` counts too (Claude's
-    own code, such as a label's rule); its path shows whole."""
+    paths_of() reads it from: the one whose lines hold the substring. A file in one of the folders `also` names counts
+    too (the temp folder, where Claude keeps its own code, or a folder of labels' rules); its path shows whole."""
     file, line, sub = ev.get("file"), ev.get("line", ev.get("lines")), ev.get("substring")
     if not file or line is None or not sub:
         return ["the check named no line of a file to look at"], None, []
-    paths = paths_of(str(file), cwd, root, tmp, calls)
-    if not paths:
-        return [f"{file} is outside the folder this session works in"], None, []
+    paths = paths_of(str(file), cwd, root, also, calls)
     files = [p for p in paths if os.path.isfile(p)]
+    # a path that names a file only through a link out of the session's folders names a file outside them, not none
+    if not paths or (not files and any(os.path.isfile(p) for p in named_paths(str(file), cwd, root, calls))):
+        return [Named(f"{file} is outside the folder this session works in")], None, []
     if not files:
         return [f"there is no file {file} in this session's folder"], None, []
     looks = [look(p, str(file), line, str(sub), cwd, root) for p in files]
@@ -1298,7 +1335,7 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     a, b = span
     near = read_lines(path, max(1, a - SHIFT_MAX), b + SHIFT_MAX, partial=True)
     if near is None or near[0] + len(near[1]) - 1 < b:
-        return [f"{file} has no line {line}"], None, []
+        return [Named(f"{file} has no line {line}")], None, []
     top, texts = near
     at = lambda x, y: texts[x - top:y - top + 1]  # noqa: E731
     last = top + len(texts) - 1
@@ -1332,18 +1369,22 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     return problems, {"file": rel, "line": line, "lines": rows}, hay
 
 
-def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, calls: list[dict[str, Any]] = (), was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, calls: list[dict[str, Any]] = (), was: str = "", rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of quote or code evidence, and the cited places to show. The evidence is one place, or several when
     the claim joins places (a value set on one line and used on another): each place holds the words the check gave
     for it, and the places together hold the quoted words of a direct quote and the numbers of the words. A claim about
     what code does may cite Claude's own code in `tmp`; a quote of a record may not, since a file there holds what
-    Claude derived, not the records. For a correction of a quote of a record, `was` is the marked words: the cited lines
-    also show each run of words the correction puts in."""
+    Claude derived, not the records. A label's rule in `rules` is evidence of what the label counts and how, as code or
+    as a quote; a quote of it, as any quote, holds the days and numbers of the words in its lines, so a rule shows no
+    count it does not state. For a correction of a quote of a record, `was` is the marked words: the cited lines also
+    show each run of words the correction puts in."""
     problems: list[str] = []
     shown: list[dict[str, Any]] = []
     hay: list[str] = []
+    # the folders a cited file may lie in besides the session's: Claude's own code for code, labels' rules for both
+    also = [f for f in (tmp if kind == "code" else None, rules) if f]
     for ev in evs:
-        p, s, h = place(ev, cwd, root, tmp if kind == "code" else None, calls)
+        p, s, h = place(ev, cwd, root, also, calls)
         problems += p
         hay += h
         if s:
@@ -1610,7 +1651,8 @@ def card_refs(ev: Any) -> list[str]:
             ref = str(x or "").strip().strip("[]") if isinstance(x, str) else ""
             m = CARD_LINES.match(ref)
             if m and int(m.group(3)) <= int(m.group(4)) <= int(m.group(3)) + MAX_RANGE:
-                out += [f"card:{m.group(1)}@out{m.group(2)}#L{n}" for n in range(int(m.group(3)), int(m.group(4)) + 1)]
+                lines = [f"card:{m.group(1)}@out{m.group(2)}#L{n}" for n in range(int(m.group(3)), int(m.group(4)) + 1)]
+                out += [line for line in lines if line not in out]
             elif ref and ref not in out:
                 out.append(ref)
     return out
@@ -1674,6 +1716,16 @@ def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     return shown
 
 
+def several(places: list[dict[str, Any]]) -> str:
+    """Several cited places of cards as a reason names them together, since what one of them reads is no reading of the
+    others: `the 7 cited lines of the card's output`, `the 2 cited cells of the card`, `the 3 cited places of the cards`."""
+    kinds = {p["out"][0] for p in places}
+    noun = "lines" if kinds == {"lines"} else "cells" if kinds == {"cells"} else "places"
+    whose = ("the card's output" if noun == "lines" and len({(p["cid"], p["out"]) for p in places}) == 1
+             else "the card" if len({p["cid"] for p in places}) == 1 else "the cards")
+    return f"the {len(places)} cited {noun} of {whose}"
+
+
 def framed(target: str, places: list[dict[str, Any]], approx: bool = False) -> bool:
     """Cells show words that also name a number their column's name gives: "139 of the 176 PRs" cites the cell 139 of
     the column `of_176_still_open`. A cell's value must show a number of the words itself; its row's and its column's
@@ -1708,19 +1760,19 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     shown_all = [_card_shown(target, g) for g in groups.values()]
     shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
     values, texts = [p["value"] for p in places], [p["text"] for p in places]
+    said = "\n".join(texts)
     one = places[0]
-    if not (shows(target, "\n".join(values), approx) or shows(target, "\n".join(texts), approx)
-            or framed(target, places, approx)):
+    if not (shows(target, "\n".join(values), approx) or shows(target, said, approx) or framed(target, places, approx)):
         if len(places) > 1:
-            return [instead(" and ".join(p["where"] for p in places), target, texts, approx)], shown
+            # several places: what none of them shows, never one place's words under another's name
+            return [f"none of {several(places)} shows {unshown(target, said, approx)}"], shown
         if one["out"][0] == "cells":
             return [f"{one['where']} shows {short(one['value'], 40) or 'nothing'}, not {unshown(target, one['text'], approx)}"], shown
         return [instead(one["where"], target, texts, approx)], shown
-    missing = unshown_change(was, target, "\n".join(texts), approx) if was else []
+    missing = unshown_change(was, target, said, approx) if was else []
     if missing:
-        where = " and ".join(p["where"] for p in places)
-        return [f"{where} does not show “{short(' … '.join(missing), 60)}”" if len(places) > 1 or one["out"][0] == "lines"
-                else f"the card's {one['col']} for {one['row']} does not show “{short(' … '.join(missing), 60)}”"], shown
+        gone = f"“{short(' … '.join(missing), 60)}”"
+        return [f"none of {several(places)} shows {gone}" if len(places) > 1 else f"{one['where']} does not show {gone}"], shown
     return [], shown
 
 
@@ -1749,7 +1801,7 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None, was: str = "", cards: list[dict[str, Any]] | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show. For a correction, `target` is its
     new words and `was` the marked words."""
     if kind == "card":
@@ -1758,7 +1810,7 @@ def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]],
         return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was, root or cwd)
     if kind in ("quote", "code"):
         evs = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict)]
-        return check_quote(target, kind, evs, cwd, root, tmp, calls, was) if evs else (["the check named no place in a file"], None)
+        return check_quote(target, kind, evs, cwd, root, tmp, calls, was, rules) if evs else (["the check named no place in a file"], None)
     return ["the check gave evidence of a kind thimble does not know"], None
 
 
@@ -1981,10 +2033,11 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     return None
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
     rewrite?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real Bash
-    calls of the session ({command, output, by}).
+    calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
+    session's (check_quote).
 
     The checker's status is `verified`, `corrected`, `narrowed` (only a part of the words is cited: a correction whose
     `narrowed` result keeps the rest as the reply's own words), `wrong` (the data show the claim false) or
@@ -2023,7 +2076,8 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         gave when that evidence is real."""
         res = {**out, "status": "failed", "reason": why, "failedBy": by, **extra}
         if ev:
-            _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp, cards=cards)
+            _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp, cards=cards,
+                                         rules=rules)
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
                 res["evidence"] = evidence
         return res
@@ -2089,7 +2143,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if not new and quoted_around(str(mark.get("sentence") or ""), words):
         # a quote whose marks stand around the citation (`"[I've been locked out]."`) is a direct quote too
         target = f'"{target}"'
-    problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards)
+    problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards, rules)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
@@ -2135,10 +2189,11 @@ def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> lis
     return out
 
 
-def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
-    folder; `cards` the session's cards' outputs (check_card). A mark the validator fails on fails as a check that did
-    not run, with why; the other marks are judged."""
+    folder; `cards` the session's cards' outputs (check_card); `rules` the folder where the host keeps its labels'
+    rules, when it keeps them apart from the temp folder (the browser's labels' definitions). A mark the validator fails
+    on fails as a check that did not run, with why; the other marks are judged."""
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}
@@ -2150,7 +2205,7 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
     results = []
     for m in marks:
         try:
-            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards))
+            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
                             "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})."})

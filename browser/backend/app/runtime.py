@@ -26,7 +26,9 @@ What 0.8 did through Claude Code's interactive session and thimble's plugin, the
 - a `thread` event starts a fork of main's conversation that answers the thread, or a new turn of its fork;
 - the plugin module's ops (module_bridge.request: spawn, send, stop, abort, note) start, message and stop the agents
   and main here (module_op);
-- the notes main heard through the module (`$.session.append`) wait for main's next turn (tell).
+- the notes main heard through the module (`$.session.append`) wait for main's next turn (tell), and so do the notes
+  about the cards main or a thread's fork made that no call of theirs took yet, such as the card check's replacement
+  (card_size, Conv.take_notes).
 No plugin hook or hooks module runs, so nothing depends on hooks Claude Code may skip (an Enterprise sign-in's
 security plugin skips person-installed plugins' prompt.context and session.append hooks).
 
@@ -192,6 +194,7 @@ class Conv:
     task: asyncio.Task | None = None
     last_text: str = ""
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
+    switched: str | None = None  # the model Claude's safeguards answer this conversation on instead (switches)
 
     @property
     def c(self) -> str:
@@ -213,7 +216,12 @@ class Conv:
         self.space.read()
         return got
 
-    def emit_assistant(self, blocks: list[dict[str, Any]], model: str, usage: dict[str, Any] | None = None) -> None:
+    def emit_assistant(self, blocks: list[dict[str, Any]], model: str, usage: dict[str, Any] | None = None, *,
+                       asked: str = "", told: list[dict[str, Any]] | None = None) -> None:
+        """A reply of `model`, after the records of a switch to it from `asked`, the model the request was for
+        (switches)."""
+        for rec in self.switches(asked, model, told or []):
+            self.emit(rec)
         if not blocks:
             return
         from . import tools  # noqa: PLC0415
@@ -228,6 +236,30 @@ class Conv:
         self.emit({"type": "assistant", "message": {"id": f"msg_{secrets.token_hex(8)}", "type": "message",
                                                      "role": "assistant", "model": model, "content": shown,
                                                      "usage": usage or {}}})
+
+    def switches(self, asked: str, model: str, told: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The records of Claude's safeguards answering this conversation on another model than the one asked for
+        (session.FALLBACK_SUBTYPE, as Claude Code writes them), which the mirror tells as a notice in its chat: the
+        reply's own (`told`: a Messages API reply's `fallback` blocks), else one for a reply of `model` when it is not
+        `asked` and the replies were not on it already, as a reply sticky routing sends straight to the fallback
+        model, and a Claude Code reply on its own fallback, come with none. A reply on the model asked for ends the
+        switch, so a later one is told again."""
+        from . import config, session  # noqa: PLC0415
+
+        got = "" if not model or model.startswith("<") else config.base_model(model)
+        if told:
+            self.switched = config.base_model(str(told[-1].get("fallbackModel") or "")) or got or None
+            return told
+        if not got or not asked:
+            return []
+        if config.same_model(got, asked):
+            self.switched = None
+            return []
+        if self.switched and config.same_model(got, self.switched):
+            return []
+        self.switched = got
+        return [{"type": "system", "subtype": session.FALLBACK_SUBTYPE, "direction": "retry",
+                 "originalModel": config.base_model(config.exact_model(asked)), "fallbackModel": got}]
 
     def live_text(self, piece: str, text: str | None) -> None:
         """Main's words while Claude writes them, to the pages that are open (investigation.push, a `chat-live`
@@ -259,17 +291,34 @@ class Conv:
     async def call_thimble(self, name: str, args: dict[str, Any], tool_use_id: str) -> Any:
         """One of thimble's tools, as 0.8's MCP shim and call route ran it: the caller's line first (who made the
         call), then the call as that caller's session (tools._as_caller), so a fork's call runs as main's own and an
-        agent's as its role's."""
-        from . import subagent_files as files, tools  # noqa: PLC0415
+        agent's as its role's. Main's result carries the quiet events that came while its turn runs, such as the
+        analyst's choice in a label's ask (events.with_held)."""
+        from . import events, subagent_files as files, tools  # noqa: PLC0415
 
         files.add_caller(self.space.ws, tool_use_id, self.agent_id or "", self.agent_type or "")
         refused, session = await tools._as_caller(self.c, name, tool_use_id)
         if refused:
             return tools.err(refused)
-        return await tools.call(self.c, name, args, session=session, tool_use_id=tool_use_id)
+        res = await tools.call(self.c, name, args, session=session, tool_use_id=tool_use_id)
+        return events.with_held(self.c, res) if self.kind == "main" else res
 
     def take_notes(self) -> list[str]:
-        return self.space.take_notes(self.id)
+        """What waits for this conversation's next turn: the notes kept for it (Space.tell), then those about the cards
+        it made that no call of its own took yet (card_size.take)."""
+        from . import card_size  # noqa: PLC0415
+
+        author = self.card_author()
+        return [*self.space.take_notes(self.id), *(card_size.take(self.c, author) if author else [])]
+
+    def card_author(self) -> str | None:
+        """The `created_by` of the cards this conversation makes (tools.Ctx.cell_author): main's are the terminal's, a
+        thread's fork's its thread's chat. None for one of thimble's agents, whose calls alone take its notes."""
+        from . import session, tools  # noqa: PLC0415
+
+        if self.kind == "main":
+            return tools.TERMINAL
+        chat = session.chat_of_agent(self.c, self.agent_id) if self.kind == "fork" else None
+        return f"chat:{chat}" if chat else None
 
 
 # --------------------------------------------------------------------------- one workspace

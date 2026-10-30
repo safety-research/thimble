@@ -8,8 +8,8 @@ lists the comments. A check on an answer never starts a turn of Claude's.
                                           text}]}]}, the last ANSWERS_KEPT, each row's text as the chat shows it;
                                           `turn` is the id the turn's `done` record names (marks.new_turn) and a
                                           row's `uuid` its place among the turn's texts
-    workspaces/<c>/answer-comments.json   {comments: [{id, turn, row, ref, start, end, quote, check, run, author, text,
-                                          details, evidence, fp, ts, status, resolution}]}
+    workspaces/<c>/answer-comments.json   {comments: [{id, turn, row, ref, start, end, quote, words, check, run, author,
+                                          text, details, evidence, fp, ts, status, resolution}]}
 
 Passages (passages): each row's text is split into paragraphs (blank lines), list items (lines that start `- `, `* ` or
 `<n>. `) and sentences (after `.`, `?` or `!` followed by a space and an uppercase letter or a digit, never inside a
@@ -19,9 +19,16 @@ is `answer:<turn>#s<n>` (n from 1 across the turn; `<turn>` the turn's id) with 
 fingerprint of its turn and words.
 
 A comment keeps its passage's raw text as `quote` and its offsets, so the chat finds the passage again in the drawn
-answer (chat/answerComments.ts). `status` is `open`, `dismissed` (the analyst's dismiss, `resolution` done) or
-dismissed with `resolution` superseded (a later run of its check covered its passage). Each change emits
-`answer-comments` on the workspace's stream, and the chat and the sidebar read the comments again.
+answer (chat/answerComments.ts), and `words`, the words of the passage it is about as the chat draws them (plain), which
+the chat marks, as the terminal marks a term's words; a comment with no words marks its whole passage. `status` is
+`open`, `dismissed` (the analyst's dismiss, `resolution` done) or dismissed with `resolution` superseded (a later run of
+its check covered its passage). Each change emits `answer-comments` on the workspace's stream, and the chat and the
+sidebar read the comments again.
+
+An explainer and a heads-up (the Explainers and Heads up checks, APART) never share words, as in the terminal: the
+comment already there keeps its words, so a new comment of the other check whose words meet them is not stored (add),
+and a dismissed one does not open again there (set_status). Each tint in the chat then opens its own comment. Only a
+comment the chat shows keeps its words: one of a check turned off, or whose Show in leaves out Chat, keeps none.
 """
 from __future__ import annotations
 
@@ -51,6 +58,8 @@ RESOLUTION_DONE = "done"
 RESOLUTION_SUPERSEDED = "superseded"
 TEXT_CHARS = 20_000  # of a row's text, kept
 DETAILS_CHARS = 2_000
+# the checks whose comments never share a sentence, each with the other: the explainers and the heads-ups (module note)
+APART = {"heads-up": "explainers", "explainers": "heads-up"}
 UUID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 REF_RE = re.compile(r"^answer:([A-Za-z0-9_-]{1,80})#s([0-9]{1,5})$")
 # the heading of the answer in a check's task file (checks.task_text), then the answer's sentences, each with its ref
@@ -63,6 +72,13 @@ _END_RE = re.compile(r"[.!?][\"'”’)\]*_]*(?=\s+[A-Z0-9])")
 _LIST_RE = re.compile(r"^[ \t]*(?:[-*]|[0-9]{1,3}\.)[ \t]+")
 _HEADING_RE = re.compile(r"^[ \t]*#{1,6}[ \t]+")
 _FENCE_RE = re.compile(r"^[ \t]*(```|~~~)")
+# markdown's marks as the chat drops them (chat/answerComments.ts plainQuote): a citation as its value, a link as its
+# words, code and emphasis without their marks, a list item or heading without its lead
+_PLAIN = ((re.compile(r"\[\[([^\]|]*)\|[^\]]*\]\]"), r"\1"), (re.compile(r"\[\[[^\]]*\]\]"), ""),
+          (re.compile(r"!?\[([^\]]*)\]\([^)]*\)"), r"\1"), (re.compile(r"`+([^`]*)`+"), r"\1"),
+          (re.compile(r"(\*\*|__|~~)(.+?)\1"), r"\2"),
+          (re.compile(r"(^|[\s(])[*_]([^*_\s][^*_]*?)[*_](?=[\s).,;:!?]|$)"), r"\1\2"),
+          (re.compile(r"^\s*(?:[-*+]|\d+[.)]|#{1,6})\s+", re.M), ""))
 
 
 def _now() -> str:
@@ -79,6 +95,36 @@ def _ws_file(c: str, name: str) -> Path:
 
 def fingerprint(turn: str, text: str) -> str:
     return hashlib.sha1("\x1f".join(["a", turn, _collapse(text).lower()]).encode("utf-8")).hexdigest()[:16]
+
+
+def plain(text: Any) -> str:
+    """A passage's raw text as the chat draws its words (_PLAIN), white space collapsed."""
+    s = str(text or "")
+    for pattern, to in _PLAIN:
+        s = pattern.sub(to, s)
+    return _collapse(s)
+
+
+def _find(sentence: str, words: str) -> re.Match[str] | None:
+    """The first place of `words` (plain) in `sentence` (plain), case and white space aside."""
+    return re.search(r"\s+".join(map(re.escape, words.split())), sentence, re.IGNORECASE) if words else None
+
+
+def words_in(passage: dict[str, Any], words: Any) -> str | None:
+    """The words a comment names, as its passage says them (plain): `words` found in the passage whatever their case,
+    white space and markdown; "" for none named; None when the passage does not hold them."""
+    w = plain(words)
+    if not w:
+        return ""
+    m = _find(plain(passage.get("text")), w)
+    return m.group(0) if m else None
+
+
+def _span(cm: dict[str, Any]) -> tuple[int, int]:
+    """Where a comment's words stand in its passage as the chat draws it: their first place, else the whole passage."""
+    sentence = plain(cm.get("quote"))
+    m = _find(sentence, str(cm.get("words") or ""))
+    return (m.start(), m.end()) if m else (0, len(sentence))
 
 
 # --------------------------------------------------------------------------- passages
@@ -262,23 +308,56 @@ def _new_id(used: set[str]) -> str:
             return i
 
 
+def _in_chat(check: dict[str, Any] | None) -> bool:
+    """Whether the chat shows a check's comments now: the check is on, and its Show in has Chat."""
+    from . import checks  # noqa: PLC0415 — checks imports this module
+
+    return check is not None and bool(check.get("shown")) and checks.covers(check, "answers")
+
+
+def _seen(c: str) -> set[str]:
+    """The checks of APART whose comments the chat shows now (_in_chat)."""
+    from . import checks  # noqa: PLC0415 — checks imports this module
+
+    return {cid for cid in APART if _in_chat(checks.read(c, cid))}
+
+
+def _held(items: list[dict[str, Any]], cm: dict[str, Any], seen: set[str]) -> dict[str, Any] | None:
+    """The open comment of the check APART from comment `cm`'s on its passage whose words meet `cm`'s (_span), which
+    keeps them while the chat shows that check's comments (`seen`, _seen); None when none does."""
+    other = APART.get(str(cm.get("check") or ""))
+    if other is None or other not in seen:
+        return None
+    a, b = _span(cm)
+    return next((x for x in items if x.get("check") == other and x.get("ref") == cm.get("ref")
+                 and (x.get("status") or "open") == "open" and _span(x)[0] < b and a < _span(x)[1]), None)
+
+
 def add(c: str, *, passage: dict[str, Any], text: str, author: str, details: str = "", check: str | None = None,
-        run: str | None = None, evidence: str = "") -> tuple[dict[str, Any], bool]:
-    """Store a comment on one passage of an answer, with the passage's raw text as `quote` and its offsets, or find
-    the same open one. (the comment, whether it is new)."""
+        run: str | None = None, evidence: str = "", words: str = "") -> tuple[dict[str, Any], bool]:
+    """Store a comment on one passage of an answer, with the passage's raw text as `quote` and its offsets and the words
+    it is about (words_in; none for the whole passage), or find the same open one. (the comment, whether it is new).
+    When an open comment of the check APART from `check` holds words these meet, while the chat shows it, nothing is
+    stored: (that comment, False)."""
     text = _collapse(text)
     details = str(details or "").strip()[:DETAILS_CHARS]
+    words = _collapse(words)
+    seen = _seen(c)
 
     def fn(items: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
         same = next((x for x in items if x.get("ref") == passage["ref"] and x.get("check") == check
                      and x.get("run") == run and (x.get("status") or "open") == "open"
-                     and _collapse(x.get("text")) == text and str(x.get("details") or "") == details), None)
+                     and _collapse(x.get("text")) == text and str(x.get("details") or "") == details
+                     and str(x.get("words") or "") == words), None)
         if same is not None:
             return same, False
         cm = {"id": _new_id({str(x["id"]) for x in items}), "turn": passage["turn"], "row": passage["row"],
               "ref": passage["ref"], "start": passage["start"], "end": passage["end"], "quote": passage["text"],
-              "check": check, "run": run, "author": author, "text": text, "details": details, "evidence": evidence,
-              "fp": passage["fp"], "ts": _now(), "status": "open", "resolution": None}
+              "words": words, "check": check, "run": run, "author": author, "text": text, "details": details,
+              "evidence": evidence, "fp": passage["fp"], "ts": _now(), "status": "open", "resolution": None}
+        held = _held(items, cm, seen)
+        if held is not None:
+            return held, False
         items.append(cm)
         return cm, True
 
@@ -290,12 +369,18 @@ def add(c: str, *, passage: dict[str, Any], text: str, author: str, details: str
 
 def set_status(c: str, cid: str, status: str) -> dict[str, Any]:
     """Dismiss a comment (`dismissed`, resolution done) or open it again (`open`). The comment; 404 for no comment of
-    that id."""
+    that id, 409 for one whose words an open comment of the check APART from its own holds now, while the chat shows
+    it."""
+    seen = _seen(c)
 
     def fn(items: list[dict[str, Any]]) -> dict[str, Any] | None:
         for x in items:
             if str(x["id"]) != cid:
                 continue
+            if (status == "open" and (x.get("status") or "open") != "open"
+                    and (held := _held(items, x, seen)) is not None):
+                raise HTTPException(409, f"comment {cid!r} does not open again: its words meet those of comment "
+                                         f"{held['id']!r} of {held.get('check')}, and the two never share words")
             if status == "open":
                 x["status"] = "open"
                 for k in ("resolution", "resolved_ts", "superseded_by"):
@@ -342,8 +427,8 @@ def open_comments(c: str) -> list[dict[str, Any]]:
 
 def state(c: str, sid: str | None = None, status: str = "open") -> dict[str, Any]:
     """GET /ws/{c}/answer-comments: {comments: [{id, check, check_name, color, turn, row, ref, start, end,
-    quote, text, details, status, at}], running: [{check, check_name, turn}]}, of the session `sid`'s answers when
-    given; `color` is the check's color, a label palette place 1-8 (checks.COLOURS), as the browser draws it."""
+    quote, words, text, details, status, at}], running: [{check, check_name, turn}]}, of the session `sid`'s answers
+    when given; `color` is the check's color, a label palette place 1-8 (checks.COLOURS), as the browser draws it."""
     from . import checks  # noqa: PLC0415 — checks imports this module
 
     turns = None
@@ -352,7 +437,7 @@ def state(c: str, sid: str | None = None, status: str = "open") -> dict[str, Any
     every = {str(x["id"]): x for x in checks.list_checks(c)}
     # a check the analyst turned off, or whose Show in leaves out the chat, leaves nothing in the chat: its comments and
     # its running state stay in the store and come back when it is turned on again
-    off = {cid for cid, x in every.items() if not x.get("shown") or not checks.covers(x, "answers")}
+    off = {cid for cid, x in every.items() if not _in_chat(x)}
     out = []
     for x in _read(c):
         if (status == "open" and (x.get("status") or "open") != "open") or (turns is not None and x.get("turn") not in turns):
@@ -364,7 +449,8 @@ def state(c: str, sid: str | None = None, status: str = "open") -> dict[str, Any
                     "color": int(check.get("colour") or checks.COLOURS[0]),
                     "turn": str(x.get("turn") or ""), "row": str(x.get("row") or ""), "ref": str(x.get("ref") or ""),
                     "start": int(x.get("start") or 0), "end": int(x.get("end") or 0), "quote": str(x.get("quote") or ""),
-                    "text": str(x.get("text") or ""), "details": str(x.get("details") or ""),
+                    "words": str(x.get("words") or ""), "text": str(x.get("text") or ""),
+                    "details": str(x.get("details") or ""),
                     "status": "open" if (x.get("status") or "open") == "open" else SETTLED, "at": str(x.get("ts") or "")})
     running = []
     for check in every.values():

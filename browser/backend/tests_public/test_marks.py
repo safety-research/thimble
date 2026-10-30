@@ -46,6 +46,21 @@ def test_the_checker_prompt_is_the_terminal_s_with_the_browser_s_few_changes():
     assert "1. [12] in: We saw [12] runs." in text and "{{" not in text and "thimble label" not in text
 
 
+def test_the_checker_cites_the_artifact_itself_not_a_description_of_it():
+    """I77: an answer and all its citations came from an out-of-date README, and the check verified them from the
+    README, where the cited words stood. The checker's text, the browser's and the terminal's, now gives one principle
+    in place of a sentence on reports of events and one on READMEs: cite the relevant artifact itself, not a
+    description of it, unless the claim is what the description says, such as the code that implements a claim or the
+    log of a run, not a post about it, which shows what its writer said."""
+    text = marks.checker_prompt("1. [at 02:00] in: A cron job starts the run [at 02:00] every night.", "/data")
+    sentences = re.split(r"(?<=\.)\s+", text)
+    i = sentences.index("Cite the relevant artifact itself, not a description of it, unless the claim is what the "
+                        "description says.")
+    assert sentences[i + 1] == ("For example, cite the relevant code passage that implements the cited claim, or the log "
+                                "of a run, not a post about it: a post shows what its writer said, not what happened.")
+    assert "A report of an event" not in text and "A document such as a README" not in text
+
+
 def test_split_marks_keeps_a_sentence_together_and_caps_the_forks():
     items = [{"n": i, "sentence": f"s{i // 2}"} for i in range(1, 41)]
     shares = marks.split_marks(items)
@@ -523,6 +538,105 @@ def test_a_check_that_fails_a_mark_repairs_it_at_once_and_the_repair_s_answer_re
     assert "pressed" not in said[1] and '"243 against 105" is corrected to "243 against 104"' in said[1]
 
 
+GROUPS = {"text/plain": "".join(f"G{i}: {n} remarks\n" for i, n in enumerate((57, 85, 96, 97, 148, 84, 75), 1))}
+
+
+def test_a_total_of_a_card_s_lines_fails_in_plain_words_and_its_repair_can_verify_it_as_computed(_fresh, monkeypatch):
+    """B12: the reply cites a total of a card's seven printed lines (made up), and the check gives the seven lines as its
+    places. No line shows the total, so the validator fails it, and its reason now says that of the seven lines
+    together. The repair thimble starts at once reads that reason, and a sum that a call of the repair prints is computed
+    evidence, which verifies the total: the validator itself adds nothing up."""
+    cid = _seed_card("", [GROUPS])
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+    turn = marks.new_turn()
+    code = ("import re\nrows = open('remarks-per-group.txt').read()\n"
+            "print(f\"{sum(int(n) for n in re.findall(r'G\\d: (\\d+) remarks', rows))} remarks\")")
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        if "pressed x to repair" in prompt:
+            out = [{"mark": 1, "kind": "computed", "evidence": {"output": "642 remarks"}, "status": "verified",
+                    "correction": None, "reason": "the seven groups' remarks add up to 642"}]
+            calls = [{"command": f"python3 - <<'PY'\n{code}\nPY", "output": "642 remarks\n", "by": "checker"}]
+            return {"answer": _answer(out), "calls": calls, "error": None}
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": [f"card:{cid}@out0#L{n}" for n in range(1, 8)]},
+                "status": "verified", "correction": None, "reason": "the seven groups add up to 642"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, ["Of the [642](#) remarks, most come from G5."], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    assert len(seen) == 2, seen
+    assert seen[1].endswith("\n\n" + "\n".join((
+        marks.REPAIR_FIRST.format(n=1, found="could not confirm it")
+        + ': "None of the 7 cited lines of the card\'s output shows 642."', *marks.REPAIR_TASK)))
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "verified" and m["evidence"]["kind"] == "computed" and m.get("repair") is True, m
+
+
+def _label_card(takeaway: str) -> str:
+    """A made-up prompt label, what the person asked for, over 72 messages, 33 of which ask to investigate the agents, and
+    its card with `takeaway`; the card's id."""
+    from app import concepts, notebook
+
+    ws = config.workspace_dir(CORPUS)
+    k = concepts.define_concept(CORPUS, "what the person asked for", "what the message asks thimble to do",
+                                unit="record", labels=["investigate the agents", "other"], created_by="main")
+    lf = concepts.labels_file(ws, k["id"])
+    lf.parent.mkdir(parents=True, exist_ok=True)
+    rows = [{"ref": f"messages.jsonl#L{n}", "label": "investigate the agents" if n <= 33 else "other", "confidence": 0.9,
+             "source": "prompt", "ts": "t"} for n in range(1, 73)]
+    lf.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    nb = notebook.create_notebook(ws, "Board", role="exploration")
+    cell = notebook.new_cell("label", "main", "What did the people ask for?", nb["id"], payload={"concept": k["id"]})
+    cell.update(takeaway=takeaway)
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    return cell["id"]
+
+
+def test_a_label_card_s_values_are_places_its_takeaway_s_count_is_checked_against(_fresh):
+    """B13: a label card draws its values from its label, not from outputs, so the cards' index listed none of its places,
+    and the check of its takeaway's "[33 of the 72]" named no value or line of a card. Each value it lists, with its
+    count and share under the card's headers, and the units the label labeled are its places now: the index lists them,
+    the validator reads them, and the page reads a cited one back from the card."""
+    from app import notebook, refs
+
+    cid = _label_card("[33 of the 72](#) messages ask about the agents' behavior.")
+    count, total = f"card:{cid}#records/investigate%20the%20agents", f"card:{cid}#records/all"
+    listed: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        index = next(w for w in prompt.split("`") if w.endswith("cards-index.tsv"))
+        listed.append(Path(index).read_text(encoding="utf-8"))
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": [count, total]}, "status": "verified",
+                "correction": None, "reason": "the card shows 33 of its 72 records"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    asyncio.run(marks.start_check(CORPUS, main, marks.new_turn(), [], "cut", fork=fork, cards={cid}))
+    assert f"# card:{cid} What did the people ask for?\n" in listed[0]
+    for place in (f"{count}\t33", f"card:{cid}#share/investigate%20the%20agents\t46%", f"card:{cid}#records/other\t39",
+                  f"card:{cid}#share/other\t54%", f"{total}\t72"):
+        assert place + "\n" in listed[0], place
+    (m,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert m["status"] == "verified", m
+    t = m["evidence"]["table"]
+    assert t["corner"] == "value" and t["cols"] == ["records", "share"]
+    assert [r["label"] for r in t["rows"]] == ["investigate the agents", "other", "all"]
+    # a place that shows another value fails as a table card's does
+    wrong = marks.evidence().check_mark({"n": 1, "words": "34"}, {"kind": "card", "status": "verified", "evidence": {"ref": count}},
+                                        [], "/", cards=marks.session_cards(CORPUS))
+    assert wrong["status"] == "failed" and wrong["reason"] == "The card's records for investigate the agents shows 33, not 34."
+    # the page reads the cited place back from the card, as a table card's cell
+    got = refs.resolve(config.corpus_dir(CORPUS), count)
+    assert got["meta"]["span"]["value"] == "33" and "<th>all</th><td>72</td>" in got["meta"]["table_html"]
+
+
 def test_a_repair_that_fails_again_starts_no_other_and_repair_asks_again(_fresh, monkeypatch):
     place = _runs_card()
     _main_at(monkeypatch, "cut-1")
@@ -710,6 +824,11 @@ def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder
     quote = {"kind": "quote", "status": "verified", "correction": None, "reason": "the first line says it"}
     places = {1: str(corpus / "prompts" / "worker.md"), 2: "prompts/worker.md", 3: str(outside)}
     seen: list[str] = []
+    # a stand-in for the terminal's checker.md with its slots, so the test tells the checker's shell folder from the
+    # folder its paths start from without pinning the terminal's sentences
+    checker = tmp_path / "checker.md"
+    checker.write_text("{{MARKS}}\nshell: {{CWD}}\npaths from: {{ROOT}}\n")
+    monkeypatch.setattr(marks, "CHECKER", checker)
 
     async def fork(c, main, cut, prompt):
         seen.append(prompt)
@@ -736,7 +855,7 @@ def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder
         assert got[k]["evidence"]["file"] == "prompts/worker.md", got[k]["evidence"]
     assert got[3]["status"] == "failed" and "is outside the folder this session works in" in got[3]["reason"], got[3]
     # the checker's shell is main's folder, and its paths are from the corpus folder, where the cards' paths start
-    assert f"Your shell is in `{inner}`." in seen[0] and f"Paths are from `{corpus}`, or absolute." in seen[0]
+    assert f"\nshell: {inner}\n" in seen[0] and f"\npaths from: {corpus}\n" in seen[0], seen[0]
 
     # a mark the old check failed as outside the folder is repaired now
     failed = {"n": 1, "piece": 0, "k": 0, "words": "# Your role", "sentence": 'The prompt opens ["# Your role"].',
@@ -752,3 +871,205 @@ def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder
     asyncio.run(repair())
     (m,) = marks.stored(CORPUS, again)["items"]
     assert m["status"] == "verified" and m["evidence"]["file"] == "prompts/worker.md", m
+
+
+def test_a_file_reached_through_a_link_into_a_folder_beside_main_s_is_evidence(_fresh, data_tmp, monkeypatch):
+    """Main runs in a folder inside the workspace's corpus folder, and a link there leads into a folder beside it, as a
+    link to a sibling run's folder does. A file read through that link lies in the corpus folder, so its citation holds,
+    and the check names the file by the path it was cited by, from the corpus folder."""
+    from types import SimpleNamespace
+
+    corpus = config.corpus_dir(CORPUS)
+    inner = corpus / "agents"
+    (inner / "peer").symlink_to("../prompts", target_is_directory=True)
+    quote = {"kind": "quote", "status": "verified", "correction": None, "reason": "the first line says it"}
+
+    async def fork(c, main, cut, prompt):
+        n = [int(m) for m in re.findall(r"^(\d+)\. \[", prompt, re.M)]
+        out = [{**quote, "mark": k, "evidence": {"file": "peer/worker.md", "line": 1, "substring": "# Your role"}} for k in n]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    lv = SimpleNamespace(sid=SID, cwd=str(inner), config=None, config_known=False, transcript_path=None, model="",
+                         effort="", context_tokens=0, last_cut="cut-1")
+    monkeypatch.setattr(session, "current", lambda c: lv if c == CORPUS else None)
+    turn = marks.new_turn()
+
+    async def go():
+        main = {"sid": SID, "cwd": str(inner), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, ['The prompt opens ["# Your role"](#).'], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "verified" and m["evidence"]["file"] == "agents/peer/worker.md", m
+
+
+REVIEW_RULE = ('def label(unit):\n    body = (unit.get("body") or "").strip()\n    if not body:\n        return None\n'
+               '    return "yes" if "REVIEW WANTED" in body else "no"\n')
+
+
+def test_a_label_s_rule_is_evidence_of_what_the_label_counts_and_how(_fresh, monkeypatch):
+    """B11: the workbench keeps a label's rule in the label's definition, concepts/<id>.json in the workspace, outside
+    every folder the validator read a cited file from, so a citation of the rule failed as outside the folder this
+    session works in, even when the rule showed the claim right, and so did its Repair. The check now gives the
+    validator the workspace's labels' definitions: a citation of a code label's rule holds as the code reads, and the
+    analyst sees the code; so does a model label's prompt; a claim the rule shows false stays failed with the rule
+    beside it, or is corrected; and Repair of a mark the old check failed holds."""
+    from app import concepts
+
+    ws = config.workspace_dir(CORPUS)
+    review = concepts.new_concept("asks for a review", kind="code", spec=REVIEW_RULE)
+    refund = concepts.new_concept("asks for a refund", "a post that asks for a refund or a credit")
+    for k in (review, refund):
+        concepts.write_concept(ws, k)
+    rule, prompt = (concepts.concepts_dir(ws) / f"{k['id']}.json" for k in (review, refund))
+
+    def line(p: Path, key: str) -> int:
+        lines = p.read_text(encoding="utf-8").splitlines()
+        return next(i for i, x in enumerate(lines, 1) if x.lstrip().startswith(f'"{key}":'))
+
+    def place(p: Path, key: str, sub: str) -> dict:
+        return {"file": str(p), "line": line(p, key), "substring": sub}
+
+    fixed = "Again, [2 of the 8] posts ask for a review, empty posts left out."
+    answers = {
+        1: {"kind": "code", "evidence": place(rule, "spec", "if not body:\n        return None"), "status": "verified",
+            "reason": "the rule leaves empty posts out"},
+        2: {"kind": "code", "evidence": place(rule, "spec", '"REVIEW WANTED" in body'), "status": "wrong",
+            "reason": "The rule matches REVIEW WANTED in capitals only."},
+        3: {"kind": "code", "evidence": place(rule, "spec", "if not body:"), "status": "corrected",
+            "correction": {"words": "2 of the 8", "sentence": fixed}, "reason": "the rule leaves empty posts out"},
+        4: {"kind": "quote", "evidence": place(prompt, "description", "a post that asks for a refund or a credit"),
+            "status": "verified", "reason": "the label's prompt says so"},
+    }
+
+    async def fork(c, main, cut, text):
+        n = [int(x) for x in re.findall(r"^(\d+)\. \[", text, re.M)]
+        return {"answer": _answer([{**answers[k], "mark": k} for k in n]), "calls": [], "error": None}
+
+    _main_at(monkeypatch, "cut-1")
+    turn = marks.new_turn()
+    reply = ("[2 of the 8](#) posts ask for a review, not counting empty posts. It counts REVIEW WANTED "
+             "[in any case](#). Again, [2 of the 8](#) posts ask for a review, empty posts among them. The other label "
+             "asks the model for [a post that asks for a refund or a credit](#).")
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, [reply], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    got = {m["n"]: m for m in marks.stored(CORPUS, turn)["items"]}
+    assert got[1]["status"] == "verified" and got[1]["evidence"]["file"] == str(rule), got[1]
+    (row,) = [r for r in got[1]["evidence"]["lines"] if r["n"] == line(rule, "spec")]
+    assert row["decoded"] and row["text"].startswith("def label(unit):\n"), row
+    assert (got[2]["status"], got[2]["failedBy"], got[2]["reason"]) == ("failed", "check", answers[2]["reason"]), got[2]
+    assert got[2]["evidence"]["file"] == str(rule), got[2]
+    assert got[3]["status"] == "corrected" and got[3]["rewrite"] == fixed, got[3]
+    assert got[4]["status"] == "verified" and got[4]["evidence"]["file"] == str(prompt), got[4]
+
+    # a mark the old check failed as outside the folder is repaired now
+    failed = {"n": 1, "piece": 0, "k": 0, "words": "2 of the 8", "status": "failed", "failedBy": "evidence",
+              "sentence": "[2 of the 8] posts ask for a review, not counting empty posts.", "shown": "2 of the 8",
+              "reason": f"{rule} is outside the folder this session works in."}
+    again = marks.new_turn()
+    marks._save(CORPUS, {"turn": again, "items": [failed]})
+
+    async def repair():
+        assert await marks.repair(CORPUS, turn=again, n=1, fork=fork) == ""
+        await _wait_all()
+
+    asyncio.run(repair())
+    (m,) = marks.stored(CORPUS, again)["items"]
+    assert m["status"] == "verified" and m["evidence"]["file"] == str(rule), m
+
+
+def test_of_the_workspace_only_its_labels_definitions_are_evidence(_fresh, monkeypatch):
+    """B11's folder is the labels' definitions alone: a reply's stored marks and main's chat, which hold the reply's own
+    words, stay outside the folder this session works in, as a quote and as code, by their paths, by a path through
+    the labels' folder, and through a link in it."""
+    from app import concepts
+
+    ws = config.workspace_dir(CORPUS)
+    labels = concepts.concepts_dir(ws)
+    labels.mkdir(parents=True, exist_ok=True)
+    turn = marks.new_turn()
+    stored = ws / "marks" / f"{turn}.json"
+    (labels / "k9.json").symlink_to(stored)
+    places = {1: ("quote", stored), 2: ("code", labels / ".." / "marks" / f"{turn}.json"),
+              3: ("quote", agents.paths(CORPUS, agents.MAIN_ID)[1]), 4: ("code", labels / "k9.json")}
+
+    async def fork(c, main, cut, text):
+        def line(p: Path) -> int:
+            lines = p.read_text(encoding="utf-8").splitlines()
+            return next(i for i, x in enumerate(lines, 1) if "ask for a review" in x)
+
+        n = [int(x) for x in re.findall(r"^(\d+)\. \[", text, re.M)]
+        out = [{"mark": k, "kind": places[k][0], "status": "verified", "correction": None, "reason": "it says so",
+                "evidence": {"file": str(places[k][1]), "line": line(places[k][1]), "substring": "ask for a review"}}
+               for k in n]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    _main_at(monkeypatch, "cut-1")
+    reply = "Two posts [ask for a review](#), [ask for a review](#), [ask for a review](#) and [ask for a review](#)."
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, [reply], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    items = marks.stored(CORPUS, turn)["items"]
+    assert len(items) == 4
+    for m in items:
+        assert m["status"] == "failed" and "is outside the folder this session works in" in m["reason"], m
+
+
+def test_a_side_thread_s_answer_is_checked_with_its_fork_s_calls_and_main_hears_nothing_of_it(_fresh, monkeypatch,
+                                                                                              tmp_path):
+    """The terminal checks a side thread's answer as it checks a reply (plugin/marks/checker.ts checkAnswer): a fork of
+    main, which never read the answer, reads in the terminal's words what holds the marks (threadAnswer), and the Bash
+    calls of the thread's fork are evidence as main's are for a reply. The marks records go to the thread's chat, and
+    main hears nothing of the check, nor of the repair it starts for the mark it found wrong."""
+    terminal = (marks.PLUGIN / "marks" / "checker.ts").read_text(encoding="utf-8")
+    for part in (f"'{marks.LAST_REPLY}'", *marks.THREAD_ANSWER.split("{about}")):
+        assert part in terminal, f"the terminal's checker.ts no longer says {part!r}: look at marks.THREAD_ANSWER"
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    code = "runs = ['failed', 'passed', 'failed', 'passed', 'passed', 'failed', 'passed', 'passed']\n" \
+           "print(f\"{runs.count('failed')} of {len(runs)}\")"
+    calls = tmp_path / "agent-a0f.jsonl"  # the transcript of the thread's fork, which counted the runs
+    calls.write_text("".join(json.dumps(r) + "\n" for r in (
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash",
+                                                       "input": {"command": f"python3 - <<'PY'\n{code}\nPY"}}]}},
+        {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "3 of 8\n"}]}})))
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+    found = {1: {"status": "verified", "correction": None, "reason": "3 of the 8 runs failed"},
+             2: {"status": "wrong", "correction": None, "reason": "5 of the 8 runs passed"}}
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        out = [{"mark": n, "kind": "computed", "evidence": {"output": "3 of 8"}, **found[n]}
+               for n in map(int, re.findall(r"^(\d+)\. \[", prompt, re.M))]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    monkeypatch.setattr(marks, "run_fork", fork)
+    turn = marks.new_turn()
+
+    async def go():
+        marks.answer_ended(CORPUS, tid, turn, ["Of the runs, [3 of 8](#) failed and [all the rest](#) passed."],
+                           str(calls))
+        while [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]:
+            await _wait_all()
+
+    asyncio.run(go())
+    assert len(seen) == 2, seen  # the check, then the repair of the mark it found wrong
+    holds = marks.THREAD_ANSWER.format(about='"why"')
+    assert all(f"Your task now is to check {holds}." in p for p in seen), seen[0]
+    got = {m["n"]: m for m in marks.stored(CORPUS, turn)["items"]}
+    assert got[1]["status"] == "verified" and got[1]["evidence"]["by"] == "main", got[1]
+    assert got[2]["status"] == "failed" and got[2].get("repair") is True, got[2]
+    records = [r for r in agents.read_events(agents.paths(CORPUS, tid)[1]) if r["type"] == "marks"]
+    assert {r["turn"] for r in records} == {turn} and records[-1]["items"] == marks.stored(CORPUS, turn)["items"]
+    assert not [r for r in _log() if r["type"] == "marks"]
+    assert _fresh == [], "main was told of the thread's check"

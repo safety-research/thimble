@@ -7,6 +7,8 @@
 //   cutWords(s, n, keep)  s in at most n cells, cut at a word's edge, its start or its end kept
 //   partsAround(s, words)  s in parts around the last place it holds `words`, which a drawing draws in a look of its own
 //   fenced(text)   text in a fenced block, so a model reads text from the records as data, not as words to act on
+//   printable(s, spans)  s with each character that does not print as its escape, as Python's repr writes it (`\x1b`,
+//                  `\u200b`); with `spans`, {text, spans}, the spans moved with the text
 
 /** A code point's cells: 0 for combining marks and zero-width characters, 2 for wide and fullwidth ones. */
 function charWidth(cp) {
@@ -94,4 +96,46 @@ export function fenced(text) {
   const longest = Math.max(2, ...[...String(text).matchAll(/`+/g)].map(m => m[0].length))
   const fence = '`'.repeat(longest + 1)
   return `${fence}text\n${text}\n${fence}`
+}
+
+/**
+ * s as a terminal can draw it, whatever it holds: each character that does not print, as Python's str.isprintable
+ * decides it (a control character, a format character such as a zero-width space or a direction mark, a lone half of a
+ * surrogate pair, a separator but the space, a private or unassigned code point), shows as its escape, as Python's repr
+ * writes it (`\x00`, `\x1b`, `\xa0`, `\u200b`, `\udce9`, `\U000e0001`). White space that lays text out stays: a line
+ * break (also `\r\n`), and a tab, as a space. Text from the records (a check's output, a file's name and lines, a
+ * card's rows, an error that quotes them) can hold such characters: Claude Code refuses a whole drawing whose text
+ * holds a control character, and the others draw as nothing or move the text around them. Each drawing makes such text
+ * printable before it lays it out, so its rows are as wide as they draw; Claude's own words stay as Claude Code draws
+ * them. With `spans` (ranges of s), {text, spans}: the spans moved with the text. Self-contained, so a card's context
+ * runs it too (cards/runner.mjs).
+ */
+export function printable(s, spans) {
+  const text = String(s ?? '')
+  const ranges = Array.isArray(spans) ? spans : null
+  const hidden = /\r\n|\t|(?![ \n])[\p{C}\p{Z}]/gu
+  if (!hidden.test(text)) return ranges ? { text, spans: ranges } : text
+  const hex = (n, w) => n.toString(16).padStart(w, '0')
+  // each change: where it stands in s, the characters it replaces, and the characters it writes
+  const edits = []
+  const out = text.replace(hidden, (c, at) => {
+    const cp = c.codePointAt(0)
+    const by = c === '\r\n' ? '\n' : c === '\t' ? ' ' : c === '\r' ? '\\r'
+      : cp < 0x100 ? `\\x${hex(cp, 2)}` : cp < 0x10000 ? `\\u${hex(cp, 4)}` : `\\U${hex(cp, 8)}`
+    edits.push([at, c.length, by.length])
+    return by
+  })
+  if (!ranges) return out
+  // an offset of s in the text: moved by the changes before it; one inside a change goes to its start, or, a span's
+  // end, to its end
+  const moved = (x, end) => {
+    let d = 0
+    for (const [at, n, m] of edits) {
+      if (at >= x) break
+      if (x < at + n) return at + d + (end ? m : 0)
+      d += m - n
+    }
+    return x + d
+  }
+  return { text: out, spans: ranges.map(([a, b]) => [moved(a, false), moved(b, true)]) }
 }

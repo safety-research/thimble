@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'vitest'
 import { viewMarks, withKeeps } from '../../src/files/labels.ts'
 import { rowsByRef } from '../../src/files/marks.tsx'
-import { addressLabel, parseRef, recordKey, recordOf, refLabel, surfaceOf } from '../../src/lib/refs.ts'
+import { addressLabel, parseRef, recordKey, recordOf, refLabel, refPaths, surfaceOf } from '../../src/lib/refs.ts'
 import type { Concept, LabelRow, LabelsForPath } from '../../src/lib/types.ts'
 
 describe('record refs', () => {
@@ -31,13 +31,39 @@ describe('record refs', () => {
     expect(recordOf('pandas-dev/pandas#57012')).toBeNull()
   })
 
-  test("an example's address names the trial a trajectory belongs to, not the trial's agent folder", () => {
-    // `<job>/<trial>/agent/trajectory.json`: a trial folder with no digit in it, so every quote of three trials read
-    // `agent › … › trajectory.json` and the card could not say whose each quote was
-    const trial = (t: string) => `hp-kinds-stuck/${t}/agent/trajectory.json`
-    expect(addressLabel(`${trial('hp-compute-workdir-stuck__MmrWMRE')}#L16`)).toBe('hp-compute-workdir-stuck__MmrWMRE › trajectory.json L16')
-    expect(addressLabel(`${trial('hp-registry-publish__QkTzPaw')}#/steps/7`)).toBe('hp-registry-publish__QkTzPaw › trajectory.json /steps/7')
-    expect(refLabel('batch2/agents/agent-03.jsonl#L412')).toBe('batch2 › agent-03.jsonl L412')
+  test("an example's addresses name the folder that tells its records' files apart", () => {
+    // trials' trajectories read the same alone: `agent › trajectory.json` when no folder above them holds a digit, and
+    // `<date> › … › trajectory.json` in a job folder named by its date; on one card each names its trial
+    const runs = (t: string) => `picnic-runs/${t}/agent/trajectory.json`
+    const dated = (t: string) => `jobs/2026-05-02__09-00-00/${t}/agent/trajectory.json`
+    expect(addressLabel(`${runs('picnic-lake__RvtmQxa')}#L16`)).toBe('agent › trajectory.json L16')
+    expect(addressLabel(`${dated('picnic-lake__RvtmQxa')}#L16`)).toBe('2026-05-02__09-00-00 › … › trajectory.json L16')
+    for (const at of [runs, dated]) {
+      const refs = [`${at('picnic-hill__GdsaPwe')}#/steps/3`, `${at('picnic-lake__RvtmQxa')}#/steps/3`, `${at('picnic-lake__RvtmQxa')}#L40`]
+      expect(refs.map((r) => addressLabel(r, refPaths(refs)))).toEqual(['picnic-hill__GdsaPwe › … › trajectory.json /steps/3', 'picnic-lake__RvtmQxa › … › trajectory.json /steps/3', 'picnic-lake__RvtmQxa › … › trajectory.json L40'])
+    }
+    // the folder right over the file reads with no folders left out
+    const results = ['jobs/2026-05-02__09-00-00/picnic-hill__GdsaPwe/result.json#L5', 'jobs/2026-05-02__09-00-00/picnic-lake__RvtmQxa/result.json#L5']
+    expect(results.map((r) => addressLabel(r, refPaths(results)))).toEqual(['picnic-hill__GdsaPwe › result.json L5', 'picnic-lake__RvtmQxa › result.json L5'])
+    // addresses that differ already, and the passages of one file, keep their own
+    const own = ['batch2/agents/agent-03.jsonl#L412', 'batch3/agents/agent-03.jsonl#L9', 'batch3/agents/agent-03.jsonl#L12', 'notes.md']
+    expect(own.map((r) => addressLabel(r, refPaths(own)))).toEqual(['batch2 › agent-03.jsonl L412', 'batch3 › agent-03.jsonl L9', 'batch3 › agent-03.jsonl L12', 'notes.md'])
+  })
+
+  test('a folder named agent reads as any other folder', () => {
+    expect(refLabel('agent/notes.md#L1')).toBe('agent › notes.md L1')
+    expect(refLabel('src/agent/main.py#L3')).toBe('agent › main.py L3')
+    expect(refLabel('harness/agent/agent.py')).toBe('agent › agent.py')
+    expect(refLabel('runs/r1/agent/log.txt#L2')).toBe('r1 › … › log.txt L2')
+    expect(refLabel('jobs/run-7/picnic-lake__RvtmQxa/agent/trajectory.json#L5')).toBe('run-7 › … › trajectory.json L5')
+    expect(addressLabel('src/agent/main.py#L3')).toBe('agent › main.py L3')
+  })
+
+  test("a chip names the folder that tells its file apart from the files cited with it, as an example's addresses do", () => {
+    const trial = (t: string, at: string) => `jobs/2026-05-02__09-00-00/${t}/agent/trajectory.json#${at}`
+    const refs = [trial('picnic-hill__GdsaPwe', 'L66'), trial('picnic-lake__RvtmQxa', 'L66'), trial('picnic-lake__RvtmQxa', 'L40.b0'), 'notes.md#L2']
+    expect(refs.map((r) => refLabel(r))).toEqual(['2026-05-02__09-00-00 › … › trajectory.json L66', '2026-05-02__09-00-00 › … › trajectory.json L66', '2026-05-02__09-00-00 › … › trajectory.json L40.b0', 'notes.md L2'])
+    expect(refs.map((r) => refLabel(r, refPaths(refs)))).toEqual(['picnic-hill__GdsaPwe › … › trajectory.json L66', 'picnic-lake__RvtmQxa › … › trajectory.json L66', 'picnic-lake__RvtmQxa › … › trajectory.json L40.b0', 'notes.md L2'])
   })
 })
 

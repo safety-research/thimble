@@ -17,6 +17,8 @@ In a shell:
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix remove N           fix N leaves your list (off first, when it is on)
     thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
+    thimble doctor                 a checklist of what works, with the fix for each problem
+    thimble --version              the version of the thimble that runs (its commit, between releases)
 
 In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
 
@@ -72,30 +74,66 @@ def out_json(v: Any) -> None:
 
 # ------------------------------------------------------------------ coverage
 
-# Claude Code reads the first 4 MiB of a command's output, so the --json record keeps to COVER_BYTES
+# Claude Code reads the first 4 MiB of a command's output, so the --json record keeps to COVER_BYTES: the folders to
+# half of it and the file types to an eighth, whatever their number, and the files named to what is left
 COVER_BYTES = 3 << 20
 COVER_PER_FOLDER = 200  # untouched files named of each folder, at most
 COVER_GROUP_KEYS = ("folder", "files", "touched", "seen_files")  # what the coverage pane reads of a folder
 
 
+def _size(v: Any) -> int:
+    """A value's bytes in the --json record, and one more for the comma after it."""
+    return len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1
+
+
+def _up(folder: str) -> str:
+    """The folder a folder is in: `runs/` of `runs/r1/`, `./` of `runs/`."""
+    t = folder.rstrip("/")
+    return t.rsplit("/", 1)[0] + "/" if "/" in t else "./"
+
+
 def cover_groups(groups: list[dict[str, Any]], room: int) -> list[dict[str, Any]]:
-    """The folders of the --json record: each with what the pane reads of it, in at most `room` bytes. While they take
-    more, the deepest folders Claude touched no file of fold into their parent folder, which then counts their files
-    (the pane counts a folder's files into every folder above it, so each folder's count stays whole). A trace corpus
-    can hold tens of thousands of folders of one or two files."""
-    size = lambda v: len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1  # noqa: E731
-    out = {g["folder"]: {k: g.get(k, 0) for k in COVER_GROUP_KEYS} for g in groups}
-    depth = lambda f: 0 if f == "./" else f.rstrip("/").count("/") + 1  # noqa: E731
-    while out and size(list(out.values())) > room:
-        deep = max(depth(f) for f, g in out.items() if not g["touched"]) if any(not g["touched"] for g in out.values()) else 0
-        if deep <= 1:
-            break
-        for f in [f for f, g in out.items() if not g["touched"] and depth(f) == deep]:
-            g = out.pop(f)
-            up = f.rstrip("/").rsplit("/", 1)[0] + "/" if deep > 1 else "./"
-            into = out.setdefault(up, {"folder": up, "files": 0, "touched": 0, "seen_files": 0})
-            into["files"] += g["files"]
-    return sorted(out.values(), key=lambda g: (-g["touched"], -g["files"], g["folder"]))
+    """The folders of the --json record: each with what the pane reads of it, in at most `room` bytes, whatever the
+    number of folders. A trace corpus can hold tens of thousands of folders of one or two files, all of which Claude
+    may touch, or all at the top. While they take more, the folders are kept in the order the pane needs them: those
+    that hold a file Claude read, then the top folders, then those that hold a file Claude touched, then the rest; of
+    each, the folders higher up first (a folder is kept only with the one it is in), then the ones the pane lists
+    first. A folder not kept counts into the nearest kept folder above it (the pane counts a folder's files into every
+    folder above it, so each folder's count stays whole)."""
+    order = lambda g: (-g["touched"], -g["files"], g["folder"])  # noqa: E731 — the pane's order
+    own = {g["folder"]: {k: g.get(k, 0) for k in COVER_GROUP_KEYS} for g in groups}
+    if _size(list(own.values())) <= room:
+        return sorted(own.values(), key=order)
+    # every folder that holds files, and each folder above one: its files, touched and read, its own and those under it
+    under: dict[str, list[int]] = {"./": [0, 0, 0]}
+    for f, g in own.items():
+        while True:
+            s = under.setdefault(f, [0, 0, 0])
+            s[0] += g["files"]
+            s[1] += g["touched"]
+            s[2] += g["seen_files"]
+            if f == "./":
+                break
+            f = _up(f)
+    rank = lambda f: (0 if under[f][2] else 1 if f.count("/") == 1 else 2 if under[f][1] else 3,  # noqa: E731
+                      f.count("/"), -under[f][1], -under[f][0], f)
+    # a folder's entry at its longest: each count as long as the count of every file
+    digits = len(str(under["./"][0]))
+    cost = lambda f: _size({"folder": f, "files": 0, "touched": 0, "seen_files": 0}) + 3 * (digits - 1)  # noqa: E731
+    kept = {"./"}
+    left = room - 2 - cost("./")  # (and the list's brackets)
+    for f in sorted(under, key=rank):
+        if f not in kept and _up(f) in kept and cost(f) <= left:
+            kept.add(f)
+            left -= cost(f)
+    out: dict[str, dict[str, Any]] = {}
+    for f, g in own.items():
+        while f not in kept:
+            f = _up(f)
+        o = out.setdefault(f, {"folder": f, "files": 0, "touched": 0, "seen_files": 0})
+        for k in ("files", "touched", "seen_files"):
+            o[k] += g[k]
+    return sorted(out.values(), key=order)
 
 
 def cmd_coverage(a: argparse.Namespace) -> int:
@@ -112,33 +150,45 @@ def cmd_coverage(a: argparse.Namespace) -> int:
             print(f"Still counting the folder's files: {u.done:,} of {u.total:,} counted. Run it again to go on.")
         return 0
     if a.json:
-        # The totals, groups and types count every file and always print (the folders as cover_groups keeps them);
-        # then the touched files by status, then the untouched files coverage named (a few of each folder), while the
-        # record keeps to COVER_BYTES. `cut` says how many of each are left out.
-        size = lambda v: len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1  # noqa: E731
+        # The totals count every file and always print; the folders as cover_groups keeps them, each counting every
+        # file in it, and the file types with the most rows, while they keep to their part of COVER_BYTES. Then the
+        # touched files by status, then the untouched files coverage named (a few of each folder), of the folders the
+        # record keeps, while the whole keeps to COVER_BYTES. `cut` says how many of each are left out.
         cov["groups"] = cover_groups(cov["groups"], COVER_BYTES // 2)
+        shown = {g["folder"] for g in cov["groups"]}
+        types, room = [], COVER_BYTES // 8
+        for t in cov["types"]:
+            room -= _size(t)
+            if room < 0:
+                break
+            types.append(t)
+        n_types, cov["types"] = len(cov["types"]), types
         quiet = cov["untouched"]
         n_quiet = cov["total"]["files"] - cov["total"]["touched_files"]
         cols = list(quiet)
-        most = {"files": len(cov["files"]), "untouched": n_quiet}  # `cut` at its longest
-        room = COVER_BYTES - size({**cov, "files": [], "untouched": {k: [] for k in cols}, "cut": most})
+        most = {"files": len(cov["files"]), "untouched": n_quiet, "types": n_types}  # `cut` at its longest
+        room = COVER_BYTES - _size({**cov, "files": [], "untouched": {k: [] for k in cols}, "cut": most})
         files = []
         for o in sorted(cov["files"], key=lambda o: CV.ORDER.index(o["status"])):
-            room -= size(o)
+            if o["folder"] not in shown:
+                continue
+            room -= _size(o)
             if room < 0:
                 break
             files.append(o)
-        kept = 0
-        for i in range(len(quiet["path"])):
-            room -= sum(size(quiet[k][i]) for k in cols)
+        named = []
+        for i, p in enumerate(quiet["path"]):
+            if CV.folder_of(p) not in shown:
+                continue
+            room -= sum(_size(quiet[k][i]) for k in cols)
             if room < 0:
                 break
-            kept = i + 1
-        cut = {"files": len(cov["files"]) - len(files), "untouched": n_quiet - kept}
-        if cut["files"] or cut["untouched"]:
-            cov["cut"] = cut
+            named.append(i)
+        cut = {"files": len(cov["files"]) - len(files), "untouched": n_quiet - len(named), "types": n_types - len(types)}
+        if any(cut.values()):
+            cov["cut"] = {k: n for k, n in cut.items() if n or k != "types"}
         cov["files"] = files
-        cov["untouched"] = {k: v[:kept] for k, v in quiet.items()}
+        cov["untouched"] = {k: [v[i] for i in named] for k, v in quiet.items()}
         print(json.dumps(cov, ensure_ascii=False, separators=(",", ":"), default=str))
         return 0
     print(CV.coverage_text(cov))
@@ -434,11 +484,11 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         if ask:
             choices = "run them or cancel" if ask["rest"] else f"run all, run on a random sample of {EST.SAMPLE}, or cancel"
             print(f"  Not started: the model would read {'the other ' if ask['rest'] else ''}{ask['units']:,} records in "
-                  f"{EST.calls_line(ask['calls'])}, so the analyst chooses first: {choices}. "
-                  f"`thimble label {name} --wait` waits for their choice, then for the model's reads, and prints the "
-                  f"label's counts; run it before you answer from this label. Counts from a trial are not the "
-                  f"label's. To read more records later, run this command again, and the analyst is asked again. A "
-                  f"trial (--limit N) never asks.")
+                  f"{EST.calls_line(ask['calls'])}, so the analyst chooses first: {choices}. They are asked when your "
+                  f"command ends. After their choice, `thimble label {name} --wait` waits for the model's reads and "
+                  f"prints the label's counts; run it before you answer from this label. Counts from a trial are not "
+                  f"the label's. To read more records later, run this command again, and the analyst is asked again. "
+                  f"A trial (--limit N) never asks.")
         elif s["waiting"]:
             calls = len(LB.batches(LB.waiting(st, name)["units"]))
             print(f"  The model reads them in {EST.calls_line(calls)} of up to {LB.BATCH_ITEMS} records each, which run "
@@ -453,15 +503,14 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             run = lab.get("run") or {}
             if not s["waiting"] or run.get("state") == "cancelled":
                 break
-            if run.get("state") == "ask" and time.time() - t0 > a.wait:
-                # the ask waits for the analyst while this waits; once they choose, the reads start and this waits on
-                print(f"{name}: still waiting for the analyst's choice after {a.wait:.0f}s; nothing runs "
-                      f"until then. {s['waiting']:,} records wait, and the counts so far are not the label's. Their "
-                      f"choice reaches you when they answer.")
-                return 0
             if run.get("state") == "ask":
-                time.sleep(1.0)
-                continue
+                # the analyst is asked only once Claude's command ends (labels/use.ts: Claude Code's question tool waits
+                # for the Bash call), so no choice comes while this waits: it ends at once, so that the question shows
+                print(f"{name}: waits for the analyst's choice, and nothing runs until they choose; they are asked when "
+                      f"your command ends. {s['waiting']:,} records wait, and the counts so far are not the label's. "
+                      f"After their choice, `thimble label {name} --wait` waits for the model's reads and prints the "
+                      f"counts.")
+                return 0
             if time.time() - t0 > a.wait:
                 print(f"{name}: still {s['waiting']:,} records waiting after {a.wait:.0f}s; the calls go on beside the session")
                 break
@@ -523,9 +572,9 @@ Both take your names, paths and the names of your data out of the text first. Ru
 UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the
 browser workbench in one go. Run it in a shell, not inside Claude Code.
 
-When you have fixes, it puts each one that still applies back on the release, as it was (fixes you turned off stay
-off), and one the release already has leaves your list. A fix that does not fit the release is set aside: it is off,
-and thimble keeps its old change. Then:
+When you have fixes, it puts each one that still fits back on the release, as it was (fixes you turned off stay off):
+its change applies, and the release passes the checks a new fix passes with it. One the release already has leaves
+your list. A fix that does not fit the release is set aside: it is off, and thimble keeps its old change. Then:
 
     thimble reapply                  Claude Code opens in ~/.thimble/fixes/live. Claude checks each set-aside fix
                                      against the release, brings back what is still needed (one commit per fix), and
@@ -534,15 +583,17 @@ and thimble keeps its old change. Then:
                                      fix with no commit is left out, because the release does it or it cannot work there
     thimble update --check           only says whether a newer release is out
 
-After an update by thimble 0.10.5 or before, which set every fix aside, thimble puts back what still applies at your
-next thimble update, thimble fixes or thimble reapply, or when a Claude Code session loads it.
+After an update by thimble 0.10.5 or before, which set every fix aside, thimble checks them and puts back what still
+fits at your next thimble update, thimble fixes or thimble reapply, at a Claude Code session's start, or when
+thimble-browser starts.
 
 Afterwards: /reload-plugins in Claude Code, and restart thimble-browser.
 
-A dev install (scripts/install.sh --local) follows your own checkout instead of the releases: after `git pull`, thimble
-update moves thimble and your fixes onto the commit you checked out. It fetches nothing and leaves out changes you have
-not committed. Each fix that still applies cleanly is replayed onto that commit; one that does not is set aside for
-thimble reapply, as above."""
+A dev install (scripts/install.sh --local in a git clone) follows your own checkout instead of the releases: after
+`git pull`, thimble update moves thimble and your fixes onto the commit you checked out. It never pulls: it fetches
+what your checkout pulls from only to say when the checkout is behind, with the command that pulls it. It leaves out
+changes you have not committed. Each fix that still fits is replayed onto that commit; one that does not is set aside
+for thimble reapply, as above."""
 
 
 def cmd_update(a: argparse.Namespace) -> int:
@@ -570,6 +621,12 @@ def cmd_reapply(a: argparse.Namespace) -> int:
     return FX.cmd_reapply(a)
 
 
+def cmd_doctor(a: argparse.Namespace) -> int:
+    from . import doctor as DR  # noqa: PLC0415
+
+    return DR.cmd(a)
+
+
 def _shares(line: str) -> bool:
     """A help line of share.py's commands (thimble file issue, thimble file pr), or the line that goes on from one."""
     return "thimble file " in line or "needs gh, GitHub's" in line
@@ -591,7 +648,7 @@ def _help() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,browser,demo,doctor,label,coverage}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,doctor,label,coverage}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -633,10 +690,11 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser("fix", help="your changes to thimble", description=_no_share(FIX_HELP),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
+    # the verbs after `export` are the plugin's own: a request, the fixer's end, the person's keys, and carry, which a
+    # session's start and thimble-browser's start run for the fixes an update set aside
     p.add_argument("verb", nargs="?", default="list",
                    choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "again", "done", "shown", "apply", "merge", "notnow",
-                            "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
+                            "redo", "undo", "remove", "sandbox", "draft", "keep", "send", "carry"), metavar="VERB")
     p.add_argument("id", nargs="?")
     p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
     p.add_argument("more", nargs="*", help=argparse.SUPPRESS)  # merge: the third fix and on
@@ -680,9 +738,20 @@ def main(argv: list[str] | None = None) -> int:
                        "back what is still needed, and runs thimble update --continue. Run it in a shell.")
     p.add_argument("--print", action="store_true", help="print Claude's first message, and open nothing")
     p.set_defaults(fn=cmd_reapply)
+    p = sub.add_parser("doctor", help="a checklist of what works, with the fix for each problem",
+                       description="thimble doctor: a checklist of what thimble needs, one line each: ✓ when it works, "
+                       "× when it does not, with the step that fixes it on the line below. Run it in a shell.")
+    p.add_argument("--offline", action="store_true", help="do not look for a newer release")
+    p.set_defaults(fn=cmd_doctor)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "fixes":
         args = ["fix", "list", *args[1:]]
+    if args and args[0] == "--version":
+        from . import fixes as FX  # noqa: PLC0415
+
+        v = FX.version_name()
+        print(f"thimble {v}" if v else "thimble (version unknown)")
+        return 0
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
         print(_help())

@@ -700,6 +700,22 @@ async def test_a_message_about_a_built_view_shows_in_its_thread_as_written_not_i
     assert _thread_texts(slug) == ["Why is run 3 missing? It may be a bug."]
 
 
+async def test_the_task_a_build_starts_on_is_thimble_s_in_its_thread_not_the_analyst_s_message(board, bridge, gates):
+    """The prompt a builder starts on is thimble's own text (dev.build_task), and the analyst typed none of it: the mirror
+    keeps it in the build's thread as thimble's, which the page shows as no one's message."""
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    [spawn] = bridge.ops("spawn")
+    lv, sub = types.SimpleNamespace(c=CORPUS), session.Sub(CORPUS, str(_prop(slug)["chat"]), None, agent, role="dev")
+    sub.thimble = view_tools.BUILDER
+    line = json.dumps({"type": "user", "message": {"role": "user", "content": spawn["prompt"]}})
+    assert session.translate_sub(lv, sub, line) == 1
+    _, log = agents.paths(CORPUS, str(_prop(slug)["chat"]))
+    [task] = [r for r in map(json.loads, log.read_text().splitlines()) if r.get("type") == "user"]
+    assert task["text"] == spawn["prompt"].strip()
+    assert task["by"] == "thimble", "thimble's task, not a line the analyst typed in the terminal"
+
+
 async def test_a_message_that_asks_for_no_change_is_answered_with_no_build_round_and_its_attempts_kept(
         board, bridge, gates, monkeypatch):
     slug = _propose(asked=True)

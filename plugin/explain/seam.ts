@@ -4,12 +4,15 @@
 //
 // The observer's look after each answer gives explainers (terms the analyst may lack the background for) and at most
 // one heads-up (a detail they should know before they rely on the answer). explainMerge places each on the words of the
-// newest message that holds them (place.mjs mergeLook) and keeps it as that message's part `explain`. The row draws
-// each as a press on its words: an explainer highlighted teal, a heads-up orange (place.mjs markColors); a press
-// opens the tray on it (tray/seam.ts openTray). Claude hears with the next prompt the words of each one shown on its
-// answer (tellComments), and which ones the analyst opened (core/engaged.ts). A term is explained once per
-// conversation; the lenses' digests name the terms already explained and the heads-ups already given, which this
-// module keeps in the conversation's folder (explain.json).
+// newest message that holds them (place.mjs mergeLook) and keeps it as that message's part `explain`. An explainer
+// and a heads-up never share words: the one already there keeps them, so a look's new one that would take words of
+// the other kind is not added, and an explainer the analyst asks for is drawn only on words no heads-up stands on.
+// Only what the analyst sees keeps words: one a switch hides keeps none.
+// The row draws each as a press on its words: an explainer highlighted teal, a heads-up orange (place.mjs
+// markColors); a press opens the tray on it (tray/seam.ts openTray). Claude hears with the next prompt the words of
+// each one shown on its answer (tellComments), and which ones the analyst opened (core/engaged.ts). A term is
+// explained once per conversation; the lenses' digests name the terms already explained and the heads-ups already
+// given, which this module keeps in the conversation's folder (explain.json).
 //
 //   explainSpans($, row, text, marks)  the explainers and heads-ups on the words of a row as it shows now (`text`, a
 //                                      squeezed version too: a term is found again there in another form)
@@ -30,7 +33,8 @@
 //                                      analyst selected with the mouse in Claude's words (core/selection.ts;
 //                                      fullscreen layout only), on the answer they lie in, else the newest answer
 //                                      that holds them, opened in the tray. Words inside an explainer or a heads-up (or on it) open that one; words
-//                                      over or across marks get one explainer, whose mark covers those it overlaps
+//                                      over or across marks get one explainer, whose mark covers the explainers it
+//                                      overlaps; a heads-up keeps its words
 //   headsKey($, key), headsBar         h at an empty prompt, `h heads-ups` on the bar, while Minimal is on (nothing is
 //                                      marked by itself then): one look of the heads lens alone at the answer the
 //                                      keys act on (observer/observer.ts headsUpsNow), once per answer
@@ -180,7 +184,7 @@ export async function explainMerge($: Engine, look: Look): Promise<void> {
     const shownText = (await textView($, x.row, x.text)).text
     msgs.push({ row: x.row, text: shownText === x.text ? x.text : `${x.text}\n\n${shownText}`, part })
   }
-  const r = mergeLook(msgs, look.out, { glossed: m.glossed }) as { parts: Record<string, ExplainPart>; placed: string[]; heads: string[] }
+  const r = mergeLook(msgs, look.out, { glossed: m.glossed }, shown) as { parts: Record<string, ExplainPart>; placed: string[]; heads: string[] }
   for (const [row, part] of Object.entries(r.parts)) await setPart($, row, 'explain', part)
   if (r.placed.length) m.glossed = [...m.glossed, ...r.placed].slice(-GLOSSED_KEEP)
   if (r.heads.length) m.headsGiven = [...m.headsGiven, ...r.heads].slice(-HEADS_KEEP)
@@ -247,17 +251,20 @@ const asking = new Set<string>()
 const askedOn = new Map<string, { row: string; words: string }>()
 const failed = new Map<string, string>()
 
-/** The words of `row` being explained on demand now, drawn teal at once as the explainer will be (core/answerview.ts
- *  spansFor puts them before the row's other marks, as the explainer covers the marks it overlaps). Nothing opens on a
- *  press until it is written; a failed one is gone, and its failure line says why. */
+/** The words of `row` being explained on demand now, drawn teal at once where the explainer will be (core/answerview.ts
+ *  spansFor puts them before the row's other marks, as the explainer covers the explainers it overlaps; like it, they
+ *  never stand on a heads-up's words). Nothing opens on a press until it is written; a failed one is gone, and its
+ *  failure line says why. */
 export async function pendingSpans($: Engine, row: string, text: string): Promise<Span[]> {
   const mine = [...askedOn.entries()].filter(([, a]) => a.row === row)
   if (!mine.length || !featureOn('explain')) return []
   const own = (await messageOf($, row))?.text ?? ''
   const original = text !== own && text !== withoutMarks(own)
-  const items = Object.fromEntries(mine.map(([t, a]) => [`asking:${t}`, { id: `asking:${t}`, term: a.words, asked: true }]))
+  const part = await partOf<ExplainPart>($, row, 'explain')
+  const heads = Object.fromEntries(Object.entries(part?.items ?? {}).filter(([, g]) => g.kind === 'heads' && shown(g)))
+  const items = { ...heads, ...Object.fromEntries(mine.map(([t, a]) => [`asking:${t}`, { id: `asking:${t}`, term: a.words, asked: true }])) }
   const c = markColors(await themeNow($))
-  return (placeGlosses(text, { items, order: Object.keys(items) }, original) as { id: string; start: number; end: number }[]).map(p => ({
+  return (placeGlosses(text, { items, order: Object.keys(items) }, original) as { id: string; start: number; end: number }[]).filter(p => !heads[p.id]).map(p => ({
     id: p.id,
     start: p.start,
     end: p.end,
@@ -370,7 +377,8 @@ export function pickedWords(text: string): { words: string; cut: boolean } {
 }
 
 /** The explainer or heads-up on `row` that the words stand inside, or on, as the row draws its marks now; null when
- *  they stand outside every mark, or over or across one (a new explainer covers those: place.mjs placeGlosses). */
+ *  they stand outside every mark, or over or across one (a new explainer covers the explainers among those, and a
+ *  heads-up keeps its words: place.mjs placeGlosses). */
 async function markOf($: Engine, row: string, words: string): Promise<(Gloss & { id: string }) | null> {
   const part = await partOf<ExplainPart>($, row, 'explain').catch(() => null)
   if (!part?.items) return null

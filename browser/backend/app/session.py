@@ -185,10 +185,12 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
 # replies going on on another model: after a reply with stop_reason refusal (at once, or after more replies on the
 # same model), after Claude Code's meta line that a safety classifier stopped the reply (no refusal record), or as a
 # reply whose first block is a `fallback` block (workflow agents; 2.1.295-2.1.300, the view builder experiment's runs).
-# So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). Each
-# downgrade becomes a notice (notices.post) that names the chat it happened in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason
-# refusal), which the chat shows as its API error card; its text record carries `refusal: true`, and the failure of an
-# agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
+# So a subagent's reply on a model other than the one its run replies on is a downgrade (_sub_safeguards). The server's
+# own agents (runtime.py) write the record before each reply on another model than the one asked for, main's and every
+# agent's alike (runtime.Conv.switches). Each downgrade becomes a notice (notices.post) that names the chat it happened
+# in. A block: the request ends with Claude Code's API error line (isApiErrorMessage, stop_reason refusal), which the
+# chat shows as its API error card; its text record carries `refusal: true`, and the failure of an agent it stopped is
+# told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
 FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
 AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
@@ -1182,12 +1184,15 @@ def _cancel_grace(c: str) -> None:
 
 def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
     """events.post logged event `event_id` as it posted it: the mirror skips its record, and main runs until the turn
-    ends. A
-    thread's event is remembered with its thread (thread_for)."""
+    ends. A thread's event is remembered with its thread (thread_for); when the server runs main (runtime.py), it starts
+    the thread's fork and no turn of main's (runtime.deliver), so main does not run for it."""
+    from . import runtime  # noqa: PLC0415
+
     _expected.add(event_id)
     if thread:
         _event_threads[event_id] = thread
-    agents.set_running(c, agents.MAIN_ID, True)
+    if not (thread and runtime.enabled()):
+        agents.set_running(c, agents.MAIN_ID, True)
     lv = _live.get(c)
     if lv is not None:
         lv.wake.set()
@@ -1306,6 +1311,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     _ask_again(lv, again)
     if was_open:
         _fixes_turn(lv)
+        _cards_shown(lv)
         _cards_checked(lv)
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
@@ -1362,6 +1368,18 @@ def _answer_checked(lv: Live, turn: str) -> None:
                                                                         for i, t in enumerate(texts)]})
     except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
         log.exception("%s: the checks over Claude's answer did not start at main's turn end", lv.c)
+
+
+def _cards_shown(lv: Live, sub: Sub | None = None) -> None:
+    """The held cards that no card check reads show as they stand: those main's own calls hold, at main's turn end
+    (card_fit.turn_ended), or those subagent `sub` holds, at its end (card_fit.agent_ended). One of thimble's agents
+    shows its own at its run's end (subagents.run_ended)."""
+    from . import card_fit  # noqa: PLC0415 — card_fit imports the harness
+
+    if sub is None:
+        card_fit.turn_ended(lv.c)
+    elif sub.agent_id and not sub.thimble:
+        card_fit.agent_ended(lv.c, str(sub.agent_id))
 
 
 def _cards_checked(lv: Live) -> None:
@@ -2508,6 +2526,7 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
         subagents.run_ended(lv.c, str(sub.agent_id), status, sub.report or result,
                             source=kind or "mirror", interrupted=kind == threads.SESSION_ENDED)
         return
+    _cards_shown(lv, sub)
     if sub.agent_id and sub.agent_id in _events().asking(lv.c):
         _events().agent_moved(lv.c, sub.agent_id, float("inf"))  # a stopped agent's prompt is gone
     if sub.owner is not None:  # one agent of a workflow: the chat is the workflow's, which ends with the workflow
@@ -2518,19 +2537,33 @@ def _finish_sub(lv: Live, sub: Sub, status: str, result: str | None, *, kind: st
         for member in [m for m in lv.subs if m.owner is sub]:
             _tail_sub(lv, member)
             member.done = True
+            _cards_shown(lv, member)
         result = _workflow_value(result)
     sub.done = True
     sub.finish = None
+    turn = marks.new_turn() if sub.thread else ""  # what a thread's run's `done` record names, as main's turn's does
     try:
         if sub.thread:
-            threads.fork_finished(lv.c, sub.chat, status, kind=kind, tool_use_id=sub.tool_use_id, agent_id=sub.agent_id)
+            threads.fork_finished(lv.c, sub.chat, status, kind=kind, tool_use_id=sub.tool_use_id, agent_id=sub.agent_id,
+                                  turn=turn)
         else:
             agents.finish_agent(lv.c, sub.chat, status, (sub.report or result or "")[:RESULT_LIMIT] or None)
     except Exception:  # noqa: BLE001 — a chat deleted under the mirror
         log.debug("%s: subagent chat %s could not be finished", lv.c, sub.chat, exc_info=True)
+    if sub.thread:
+        _thread_marks(lv, sub, turn)
     if sub.thread and kind is None and status in ("done", "completed") and not sub.api_error:
         _thread_answered(lv, sub.chat)
         _proposer_after_thread(lv, sub.chat)
+
+
+def _thread_marks(lv: Live, sub: Sub, turn: str) -> None:
+    """A side thread's run ended under `turn`: the marks of its answer are checked, as the terminal checks them
+    (marks.answer_ended), the calls of its fork's transcript standing for main's."""
+    try:
+        marks.answer_ended(lv.c, sub.chat, turn, threads.answer(lv.c, sub.chat, turn), str(sub.path or ""))
+    except Exception:  # noqa: BLE001 — a check that does not start is no reason to fail the mirror
+        log.exception("%s: the check of the citations did not start at the end of thread %s's run", lv.c, sub.chat)
 
 
 def _thread_answered(lv: Live, chat: str) -> None:
@@ -3044,7 +3077,7 @@ def _typed(rec: dict) -> str | None:
 def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     """One line of a subagent's transcript into its chat: tool calls and results, its text (a thread's fork's as its
     reply, without the lines only the terminal shows), the messages the analyst typed to it in the agent view, and for
-    an agent chat the prompts it was sent."""
+    an agent chat the prompts it was sent (one of thimble's agents', thimble's own: `by` agents.THIMBLE)."""
     rec = _load(line)
     n = 0
     att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else None
@@ -3087,7 +3120,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 return 0
             if sub.thimble and sub.agent_id and _sent_quietly(lv.c, str(sub.agent_id), prompt):
                 return 0  # thimble's wrapping of the person's words, which the chat shows where they were said
-            sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
+            # one of thimble's agents is sent thimble's own text (its start's task, a change), never the analyst's words,
+            # which reach its chat as their own records (views.message, _typed)
+            sub.rec.record("user", text=prompt.strip(), by=agents.THIMBLE if sub.thimble else TERMINAL)
             return 1
     if rec.get("type") == "user":
         for b in _content_list(rec):

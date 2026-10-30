@@ -7,8 +7,8 @@ is its liveness (session.connected); the stream carries no events.
 The browser posts `POST /api/ws/{c}/events {kind, payload}`; server code calls post(). A kind is a bullet of main.md's
 `## Events from the browser`, and other kinds are refused. A post with no subscriber is refused with 409. An event of
 QUIET_KINDS asks main for nothing, so it wakes no turn: it waits in the workspace's HELD_FILE and rides along, under
-MEANWHILE, with the next event or the analyst's next prompt in the terminal (the plugin's UserPromptSubmit hook takes it
-with held_route).
+MEANWHILE, with main's next event or the analyst's next prompt in the terminal (the plugin's UserPromptSubmit hook takes
+it with held_route); when the server runs main, also with the result of main's next thimble call (with_held).
 
 Each event is queued per workspace and session (_pending), and the plugin's watcher takes it with a long poll
 (pull_route) as the text the model reads (render); unacknowledged events return to the queue after ACK_S. The watcher
@@ -264,7 +264,7 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
     return {"content": body, "meta": meta}
 
 
-# the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
+# the kinds that say something ended and ask main for nothing: each waits and rides along with main's next event, under
 # MEANWHILE (prompts/main.md)
 QUIET_KINDS = frozenset({"orient", "written", "labeled", "label_ask", "view", "card_types", "citations"})
 MEANWHILE = "meanwhile:"
@@ -420,6 +420,22 @@ def meanwhile(notes: list[dict[str, Any]]) -> str:
     return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) if notes else ""
 
 
+def with_held(c: str, res: Any) -> Any:
+    """`res` (a tools.ToolResult of main's thimble call, when the server runs main) with the quiet events waiting after
+    its text, as MEANWHILE, and no longer waiting: a turn of main's that still runs reads them there, as a card's author
+    reads the card's notes (card_size.with_notes), and does not end as if they had not come, such as a label's ask the
+    analyst answered meanwhile."""
+    text = meanwhile(pop_held(c))
+    if not text:
+        return res
+    for b in res.content:
+        if b.get("type") == "text":
+            b["text"] = f"{b.get('text', '')}\n\n{text}" if str(b.get("text", "")) else text
+            return res
+    res.content.append({"type": "text", "text": text})
+    return res
+
+
 def _joined(notes: list[dict[str, Any]]) -> str:
     """The events' lines in main's terminal, one per line."""
     return "\n".join(str(n.get("terminal") or "") for n in notes if n.get("terminal"))
@@ -533,11 +549,11 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     main just continued in whose shim has not subscribed yet (_awaits_shim); a parked session's subscription, or another
     session's, gets nothing. The analyst's words show on main's statusline until main gets them (_notice). Returns the
     number reached. When the server runs main itself (runtime.py), the event goes to it, with the held ones riding
-    along as below."""
+    along as below; a thread's event goes to the thread's fork (runtime.deliver), so they wait for main's own."""
     from . import runtime  # noqa: PLC0415
 
     if runtime.enabled():
-        if held(c):
+        if held(c) and (note.get("meta") or {}).get("kind") != THREAD:
             riders = pop_held(c)
             note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}"}
         runtime.deliver(c, note)

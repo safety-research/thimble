@@ -100,8 +100,8 @@ def registrations(data: Path) -> dict[str, tuple[str, Path | None, Path | None]]
 
 def last_used(path: Path) -> float | None:
     """The newest modification time of `path` or anything under it; None when it cannot be read. Links are not
-    stat'ed: a link is made with its folder's mtime and keeps it, and the folder is counted. A workspace's scratch
-    mirror holds a link for every corpus file."""
+    stat'ed or followed: a link is made with its folder's mtime and keeps it, and the folder is counted. A workspace's
+    scratch mirror holds a link to each entry of its corpus folder."""
     try:
         newest = path.stat().st_mtime
     except OSError:

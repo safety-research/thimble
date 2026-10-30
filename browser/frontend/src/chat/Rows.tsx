@@ -28,7 +28,7 @@ import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdown'
 import { AnswerCommentPop } from './AnswerComment'
-import { answeredAsk, askedAnswer, commentsOfRow, marksOf, useAnswerComments, type AnswerComment, type AnswerMark } from './answerComments'
+import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, useAnswerComments, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
 import { MarksFooter } from '../marks/MarksFooter'
 import { FixResult } from './FixStrip'
 import { API_ERROR_KIND, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
@@ -161,7 +161,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
   }, [shown])
   const answers = useAnswerComments(ws, chat === 'main' && !nested)
   const [opened, setOpened] = useState<string | null>(null)
-  const [asked, setAsked] = useState<string | null>(() => (chat === 'main' && !nested ? askedAnswer() : null))
+  const [asked, setAsked] = useState<AnswerAsk | null>(() => (chat === 'main' && !nested ? askedAnswer() : null))
   // each text row's comments and marks, again when the comments or the open one change
   const rowMarks = useMemo(() => {
     const out = new Map<number, { comments: AnswerComment[]; marks: AnswerMark[] }>()
@@ -174,21 +174,21 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
     return out
   }, [shown, answers.comments, opened])
   const marksCtx = useMemo(() => ({ open: (id: string) => setOpened((cur) => (cur === id ? null : id)) }), [])
-  // Go to it on `answer:<turn>#s<n>`: its comment opens once it is read, and its passage comes into view
+  // Go to it on `answer:<turn>#s<n>`: the comment it names opens once it is read, and its passage comes into view
   useEffect(() => {
     if (chat !== 'main' || nested) return
     return bus.on('openRef', (e) => {
-      if (e.ref.startsWith('answer:')) setAsked(e.ref)
+      if (e.ref.startsWith('answer:')) setAsked({ ref: e.ref, comment: e.comment })
     })
   }, [chat, nested])
   useEffect(() => {
     if (!asked) return
-    const hit = answers.comments.find((c) => c.ref === asked && c.status === 'open')
+    const hit = commentAsked(answers.comments, asked)
     if (!hit) return
     setOpened(hit.id)
     setAsked(null)
     answeredAsk(asked)
-    window.setTimeout(() => revealAnchor(asked), 0)
+    window.setTimeout(() => revealAnchor(asked.ref), 0)
   }, [asked, answers.comments])
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
@@ -196,6 +196,9 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
       {shown.map((r, i) => {
         switch (r.kind) {
           case 'user':
+            // a prompt thimble sent one of its agents is no one's message: the thread's own card says what it asked (a
+            // view's Proposal, a ticket's request)
+            if (r.by === 'thimble') return null
             if (r.by === 'extension') return <ExtensionLead key={r.index} name={r.extension ?? ''} text={r.text} ws={ws} />
             return (
               <div key={r.index} className="chat-msg chat-user" data-event={r.event}>

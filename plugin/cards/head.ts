@@ -1,6 +1,7 @@
 // head.ts: the keys in a card's header, `a ask · p artifact`. They act on the card that takes the keys now (draw.ts
-// headOwner: the card in focus, else the newest on screen), whose header alone shows the letters; every other card's
-// header shows the words, which a click presses.
+// headOwner: the card in focus, else the newest on screen), whose header alone shows the letters, each while its key
+// reaches the card (the open tray takes a: core/answerview.ts heldKeys); every other card's header shows the words,
+// which a click presses.
 //
 //   a   a side thread about the card, as a click on `ask` starts (core/answerview.ts cardAsk)
 //   p   a private claude.ai artifact of the card: a fork of the conversation (core/forks.ts, kind `artifact`, with

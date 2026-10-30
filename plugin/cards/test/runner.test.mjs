@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
+import { printable } from '../../core/text.js'
 import { startRunner } from './start.mjs'
 import { saidOf } from '../argv.mjs'
 import { checkView } from '../runner.mjs'
@@ -104,7 +105,46 @@ test('the tree holds only what Claude Code draws: a Button of words, and strings
   const ctrl = 'function view(p, s) { const { Text } = s.elements; return Text({ children: "a\\u0080b\\u0007c\\td" }) }'
   const r3 = (await load(ctrl)).r
   assert.equal(r3.ok, true)
-  assert.deepEqual(r3.tree.c[0].c, ['abc d'])
+  assert.deepEqual(r3.tree.c[0].c, ['a\\x80b\\x07c d'])
+})
+
+test('bytes of binary data that do not print show as their escapes, as Python writes them, in the drawing and its copy; a line break, also as \\r\\n, and a character of two halves stay', async () => {
+  // a field read from a binary file: the start of a PNG as Latin-1, then bytes of a file name decoded with
+  // surrogateescape, which leaves each byte that is no UTF-8 as a lone half
+  writeFileSync(join(dir, 'bytes.json'), JSON.stringify([{ name: 'logo.png', head: '\u0089PNG\r\n\u001a\n\u0000\u0000\u0000\rIHDR\u007f' }, { name: 'run-\udc89.log', head: 'ok 🎉' }]))
+  const view = 'function view(p, s) { const { Box, Text } = s.elements; return Box({ flexDirection: "column", children: p.rows.map(r => Text({ children: r.name + " " + r.head })) }) }'
+  const r = await ask('load', { id: 'c0000bbbb', version: 1, title: 'Files', view, rows: join(dir, 'bytes.json'), width: 60 })
+  assert.equal(r.ok, true)
+  const strings = []
+  const walk = n => (typeof n === 'string' ? strings.push(n) : (n.c || []).forEach(walk))
+  walk(r.tree)
+  assert.deepEqual(strings, ['logo.png \\x89PNG\n\\x1a\n\\x00\\x00\\x00\\rIHDR\\x7f', 'run-\\udc89.log ok 🎉'])
+  assert.deepEqual(r.lines, ['logo.png \\x89PNG', '\\x1a', '\\x00\\x00\\x00\\rIHDR\\x7f', 'run-\\udc89.log ok 🎉'])
+  // nothing a terminal acts on is left, and no lone half
+  for (const s of strings) assert.doesNotMatch(s, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/)
+})
+
+test("every character that does not print, as Python reads it, shows as its escape, as Python's repr writes it: a no-break space, a soft hyphen, a zero-width space, a direction mark, a line separator, a private one", async () => {
+  // made-up names a file of a shop's orders holds: what draws as a space, as nothing, or turns the text around
+  writeFileSync(join(dir, 'odd.json'), JSON.stringify([{ name: 'Ana\u00a0Lima' }, { name: 'co\u00adop' }, { name: 'zero\u200bwidth' }, { name: '\u202edesrever' }, { name: 'two\u2028lines' }, { name: 'own\ue000mark' }]))
+  const view = 'function view(p, s) { const { Box, Text } = s.elements; return Box({ flexDirection: "column", children: p.rows.map(r => Text({ children: r.name })) }) }'
+  const r = await ask('load', { id: 'c0000cccc', version: 1, title: 'Names', view, rows: join(dir, 'odd.json'), width: 60 })
+  assert.equal(r.ok, true)
+  const strings = []
+  const walk = n => (typeof n === 'string' ? strings.push(n) : (n.c || []).forEach(walk))
+  walk(r.tree)
+  assert.deepEqual(strings, ['Ana\\xa0Lima', 'co\\xadop', 'zero\\u200bwidth', '\\u202edesrever', 'two\\u2028lines', 'own\\ue000mark'])
+  // the hooks' rule, the one core/text.js gives
+  assert.deepEqual(strings, ['Ana\u00a0Lima', 'co\u00adop', 'zero\u200bwidth', '\u202edesrever', 'two\u2028lines', 'own\ue000mark'].map(s => printable(s)))
+})
+
+test("a view's error that quotes the records (JSON.parse writes the text it could not read) shows their bytes as escapes too: the card's frame draws it, and Claude reads it", async () => {
+  writeFileSync(join(dir, 'colored.json'), JSON.stringify([{ name: 'n4', log: '\u001b[31mFAILED\u001b[0m\u0000' }]))
+  const view = 'function view(p, s) { return s.elements.Text({ children: JSON.parse(p.rows[0].log).status }) }'
+  const r = await ask('load', { id: 'c0000dddd', version: 1, title: 'Logs', view, rows: join(dir, 'colored.json'), width: 60 })
+  assert.equal(r.ok, false)
+  assert.match(r.error, /^line 1: .*\\x1b\[31mFAILED\\x1b\[0m\\x00/)
+  assert.doesNotMatch(r.error, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/)
 })
 
 test('on the light theme a shade glyph draws as █ in a mixed color, and the text copy keeps the glyph the view wrote', async () => {

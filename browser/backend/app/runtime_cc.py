@@ -106,12 +106,13 @@ def _tidy(cwd: Path) -> None:
 def settings(spec: Any, bash: bool, tmp: Path | None = None) -> dict[str, Any]:
     """The session's inline settings: its effort as 0.8's calls pinned it (sdk.cli_settings), the sandbox for Bash
     (required: a sandbox that cannot start refuses the call, module note), the PATH Bash has on the Messages API
-    (runtime_tools.shell_path), edits only in the write folders, and no reads of thimble's private files. `tmp` is the
-    session's TMPDIR, which its commands may write too."""
-    from . import cc_settings, runtime_tools, sdk  # noqa: PLC0415
+    (runtime_tools.shell_path) and the variables that keep its programs from writing caches beside what they read
+    (kernel_wrap.NO_SIDE_WRITES), edits only in the write folders, and no reads of thimble's private files. `tmp` is
+    the session's TMPDIR, which its commands may write too."""
+    from . import cc_settings, kernel_wrap, runtime_tools, sdk  # noqa: PLC0415
 
     out = json.loads(sdk.cli_settings(spec.model, spec.effort or None))
-    out["env"] = {**out.get("env", {}), "PATH": runtime_tools.shell_path()}
+    out["env"] = {**out.get("env", {}), "PATH": runtime_tools.shell_path(), **kernel_wrap.NO_SIDE_WRITES}
     no_write = list(getattr(spec, "no_write", []) or [])
     corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings lets Claude edit the folder
     out["permissions"] = {
@@ -287,7 +288,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                     continue
                 blocks = [b for b in (_block(x) for x in msg.content) if b is not None]
                 bash_ids.update(str(b["id"]) for b in blocks if b.get("type") == "tool_use" and b.get("name") == "Bash")
-                conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {})
+                conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {}, asked=spec.model)
                 results([r for r in (_result(x) for x in msg.content) if r is not None])
                 said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
                 reply = said or reply

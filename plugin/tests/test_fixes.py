@@ -1051,6 +1051,58 @@ def test_dev_install_up_to_date_and_uncommitted_changes(world, monkeypatch):
     assert json.loads(live_file("plugin/.claude-plugin/plugin.json"))["version"] == f"0.10.2+{new[:7]}"
 
 
+def test_dev_install_update_says_when_the_checkout_is_behind_what_it_pulls_from_and_never_pulls(world, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    rel, base7 = world["rel"], world["base"][:7]
+    # the checkout's upstream: a made-up bare repository as origin, main tracking origin/main
+    bare = world["tmp"] / "origin.git"
+    sh("git", "clone", "-q", "--bare", str(rel), str(bare))
+    sh("git", "remote", "add", "origin", str(bare), cwd=rel)
+    sh("git", "fetch", "-q", "origin", cwd=rel)
+    sh("git", "branch", "-q", "--set-upstream-to=origin/main", "main", cwd=rel)
+    assert FX.update()["lines"] == [f"thimble is up to date with your checkout (main at {base7})."]
+    other = world["tmp"] / "other"
+    sh("git", "clone", "-q", str(bare), str(other))
+
+    def push(name: str) -> str:
+        (other / "plugin" / f"{name}.md").write_text("x\n")
+        sh("git", "add", "-A", cwd=other)
+        sh("git", "commit", "-q", "-m", name, cwd=other)
+        sh("git", "push", "-q", "origin", "main", cwd=other)
+        return sh("git", "rev-parse", "HEAD", cwd=other)
+
+    push("one")
+    tip = push("two")
+    # GitHub has 2 commits the checkout lacks: said in place of up to date, with the command that pulls them
+    pull = f"git -C {FX._q(sh('git', 'rev-parse', '--show-toplevel', cwd=rel))} pull"
+    behind = (f"thimble runs your checkout (main at {base7}), which is 2 commits behind origin/main ({tip[:7]}): "
+              f"{pull}, then run thimble update again.")
+    out = FX.update()
+    assert out["lines"] == [behind] and out["newer"] is False
+    # the checkout stays as it was: its HEAD, its branch and its files
+    assert sh("git", "rev-parse", "HEAD", "main", cwd=rel).split() == [world["base"]] * 2
+    assert sh("git", "status", "--porcelain", cwd=rel) == "" and not (rel / "plugin" / "one.md").exists()
+    # a branch with no upstream: origin's main
+    sh("git", "branch", "-q", "--unset-upstream", cwd=rel)
+    assert FX.update()["lines"] == [behind.replace(" pull,", " pull origin main,")]
+    sh("git", "branch", "-q", "--set-upstream-to=origin/main", "main", cwd=rel)
+    # the person runs the command; GitHub has one more commit by the next thimble update, which says so
+    subprocess.run(pull, shell=True, check=True, capture_output=True, env={**os.environ, **GIT_ID})
+    tip2 = push("three")
+    out = FX.update()
+    assert out["lines"][:2] == [f"Updated thimble to your checkout {base7} → main at {tip[:7]} (terminal plugin)",
+                                f"thimble runs your checkout (main at {tip[:7]}), which is 1 commit behind origin/main "
+                                f"({tip2[:7]}): {pull}, then run thimble update again."]
+    assert FX.release()["base"] == tip and sh("git", "rev-parse", "HEAD", cwd=rel) == tip
+    # offline: the line it had, and that thimble could not check
+    sh("git", "remote", "set-url", "origin", str(world["tmp"] / "no-such-origin.git"), cwd=rel)
+    lines = FX.update()["lines"]
+    assert lines[0] == f"thimble is up to date with your checkout (main at {tip[:7]})." and len(lines) == 2
+    assert lines[1].startswith("thimble could not check whether origin/main has newer commits (")
+    assert "no-such-origin.git" in lines[1]
+    assert lines[1].endswith("); check the network, then run thimble update again.")
+
+
 def test_a_github_install_follows_releases_not_the_commit_its_clone_has(world, upstream, monkeypatch):
     monkeypatch.delenv("CLAUDECODE", raising=False)
     cc_clone = world["cc"] / "plugins" / "marketplaces" / "thimble"
@@ -1182,9 +1234,9 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     help_ = capsys.readouterr().out
     for line in ("thimble update ", "thimble reapply ", "thimble fixes ", "thimble fix show N", "thimble fix apply N",
                  "thimble file issue N", "thimble file pr N", "thimble fix off [N]", "thimble fix on [N]",
-                 "thimble fix diff N", "thimble fix remove N", "thimble fix export N"):
+                 "thimble fix diff N", "thimble fix remove N", "thimble fix export N", "thimble doctor "):
         assert f"\n    {line}" in help_, line
-    assert all(f"thimble {w}" not in help_ for w in ("doctor", "demo", "browser", "fix merge"))
+    assert all(f"thimble {w}" not in help_ for w in ("demo", "browser", "fix merge"))
     assert "thimble fix merge A B C" in cli.FIX_HELP  # the escape hatch stays in thimble fix --help only
     assert help_.index("thimble fix on [N]") < help_.index("Claude runs these in a session") < help_.index("thimble label [NAME]")
     monkeypatch.setattr(FX, "can_share", lambda: False)
@@ -1193,8 +1245,8 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
 
 def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_live(world, tmp_path, monkeypatch):
     """scripts/install.sh links bin/thimble to the plugin's command and names the link in cli-link; once Claude Code
-    loads thimble from live, the link runs the release checkout's launcher, which runs thimble fix, file, update and
-    reapply itself and hands the rest to live's. A link to 0.10's command is no 0.9 left behind."""
+    loads thimble from live, the link runs the release checkout's launcher, which runs thimble fix, file, update,
+    reapply and doctor itself and hands the rest to live's. A link to 0.10's command is no 0.9 left behind."""
     real = Path(__file__).resolve().parents[1] / "bin" / "thimble"
     release_with(world, {"plugin/bin/thimble": real.read_text(),
                          "plugin/engine/thimble.py": "import sys\nprint('made-up kernel', *sys.argv[1:])\n"})
@@ -1222,6 +1274,7 @@ def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_
     live_cmd = FX.live_dir() / "plugin" / "bin" / "thimble"
     assert ran(link, "fix", "list") == "made-up kernel fix list"
     assert ran(link, "file", "issue", "1") == "made-up kernel file issue 1"
+    assert ran(link, "doctor") == "made-up kernel doctor"
     assert ran(link, "label") == "fixed kernel label" and ran(link, "--help") == "fixed kernel --help"
     assert ran(live_cmd, "fixes") == "made-up kernel fixes" and ran(live_cmd, "coverage") == "fixed kernel coverage"
     # a fix may change the launcher (its record says so), and one that breaks live's leaves the way back working
@@ -1705,3 +1758,59 @@ def test_two_sessions_check_only_their_own_fixes_and_a_copy_that_is_no_checkout_
     p = Path(again["work"]) / "plugin" / "bar" / "bar.tsx"
     p.write_text(p.read_text() + "// bold\n")
     assert FX.done(again["id"], "Bar bold", "y", session="s-made-up-a")["state"] == "ready"
+
+
+def test_thimble_version_names_the_thimble_that_runs(world, tmp_path, monkeypatch, capsys):
+    """thimble --version, in a shell or in Claude's Bash tool: the copy Claude Code installed, by the version its
+    plugin.json carries (scripts/install.sh writes the release's there), else by the release tag of its commit, else by
+    that commit, also after a request made live on an older release; once a fix is on, Claude Code loads thimble from
+    live: the release the fixes are on. The head of thimble fix names the same thimble."""
+    from kernel import cli  # noqa: PLC0415
+
+    def version() -> str:
+        assert cli.main(["--version"]) == 0
+        return capsys.readouterr().out.strip()
+
+    copy = tmp_path / "copy" / "plugin"
+    (copy / ".claude-plugin").mkdir(parents=True)
+    manifest = copy / ".claude-plugin" / "plugin.json"
+    monkeypatch.setattr(FX, "PLUGIN", copy)
+    manifest.write_text(json.dumps({"name": "thimble", "version": "0.10.7"}) + "\n")
+    assert version() == "thimble 0.10.7"
+    # a copy with no version: the commit Claude Code installed, by its release tag when it has one
+    manifest.write_text(json.dumps({"name": "thimble"}) + "\n")
+    assert version() == f"thimble {world['base'][:7]}"
+    sh("git", "tag", "v0.10.6", cwd=world["rel"])
+    assert version() == "thimble 0.10.6"
+    # a request that never went on makes live at 0.10.6, and then 0.10.7 is installed: Claude Code loads the copy it
+    # installed, not live, so that copy is the thimble that runs
+    r = made(world)
+    manifest.write_text(json.dumps({"name": "thimble", "version": "0.10.7"}) + "\n")
+    assert FX.release()["tag"] == "v0.10.6" and not FX.release()["pointed"]
+    assert version() == "thimble 0.10.7"
+    assert FX.list_lines()[0].startswith("Your thimble fixes · thimble 0.10.7 with ")
+    # with a fix on, Claude Code loads thimble from live: the release the fixes are on, whatever a copy says
+    FX.done(r["id"], "Bar says read", "")
+    FX.apply(r["id"], press(r["id"]))
+    assert FX.release()["pointed"]
+    assert version() == "thimble 0.10.6"
+    assert FX.list_lines()[0] == "Your thimble fixes · thimble 0.10.6 with 1 on"
+
+
+def test_thimble_version_of_a_folder_with_no_git_and_no_version_says_so(tmp_path, monkeypatch, capsys):
+    """A copy whose plugin.json has no version, from a folder with no git (a release's archive that no install named):
+    nothing names it, and thimble --version says so rather than fail."""
+    from kernel import cli  # noqa: PLC0415
+
+    folder = tmp_path / "thimble-unpacked"
+    (folder / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (folder / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble"}) + "\n")
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {
+        "source": {"source": "directory", "path": str(folder)}, "installLocation": str(folder)}}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cc))
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setattr(FX, "PLUGIN", folder / "plugin")
+    assert cli.main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == "thimble (version unknown)"

@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import hook_auth, main, notices, session
-from conftest import sign_in
+from conftest import browser_base, sign_in
 
 CORPUS = "mini"
 SID = "5e55a000-0000-4000-8000-0000000000b1"
@@ -280,6 +280,59 @@ def test_thimble_browser_waits_with_the_token_for_a_browser_that_wants_a_link(cl
     assert page.get("/api/ui/paired").json()["paired"] is False
     waiting.join(10)
     assert not waiting.is_alive() and got["r"].json() == {"boot": config.BOOT_ID, "wanted": 1}
+
+
+@pytest.mark.real_read_guard
+@pytest.mark.real_write_guard
+def test_a_tab_left_open_that_asks_right_after_a_start_leaves_the_link_thimble_browser_printed_working(
+        client, plugin_headers, monkeypatch, capsys):
+    """B2: thimble-browser prints its start's link, with a code from the token route, then waits for a browser that
+    wants a link (cli.new_links); a tab left open from an earlier start, whose browser this server does not know, asks
+    whether it is signed in right then. The link on screen answers it: no ask counts while its code is alive, so no new
+    link ends it, and the browser that opens it signs in. Once it is spent, or expired, the next ask counts at once. A
+    signed-in page mints no code: the pair route takes the token alone."""
+    import threading
+
+    from app import cli
+
+    now = [1000.0]
+    monkeypatch.setattr(hook_auth, "_now", lambda: now[0])
+    monkeypatch.setattr(hook_auth, "LINK_WAIT_S", 0.5)
+    cli.write_state({"port": 8399, "url": "http://127.0.0.1:8399", "api": "http://127.0.0.1:8399", "env": {}})
+    stale = TestClient(client.app, base_url=browser_base(key="key-of-an-earlier-start"))
+    stale.cookies.set(hook_auth.ui_cookie(), "cookie-of-an-earlier-start")
+    stop = threading.Event()
+    waits: list[str] = []
+
+    def request(m, u, b=None, timeout=5.0):  # cli._request, to the test's server with the token's proof
+        path = u.removeprefix("http://127.0.0.1:8399")
+        if path.startswith("/api/ui/link-wanted"):
+            waits.append(path)
+            if len(waits) == 2:  # thimble-browser waits now, after its first answer: the tab asks
+                assert stale.get("/api/ui/paired").json()["paired"] is False
+            if len(waits) == 3:
+                stop.set()
+                return 0, "stopped"
+        r = client.request(m, path, json=b, headers=plugin_headers())
+        return r.status_code, r.json()
+
+    monkeypatch.setattr(cli, "_request", request)
+    link = cli.ui_url(CORPUS, pair=True)
+    cli.new_links(CORPUS, stop)
+    assert len(waits) == 3 and capsys.readouterr().out == "", "no new link ends the one on screen"
+    browser = TestClient(client.app, base_url="http://testserver")
+    sign_in(browser, link.split("#p=", 1)[1], CORPUS)
+    assert browser.get("/api/ui/paired").json()["paired"] is True
+    assert stale.get("/api/ui/paired").json()["paired"] is False and hook_auth.links_wanted() == 1, \
+        "the link was used: the next ask counts"
+    cli.ui_url(CORPUS, pair=True)  # the link printed for it
+    now[0] += hook_auth.LINK_EVERY_S
+    stale.get("/api/ui/paired")
+    assert hook_auth.links_wanted() == 1, "the new link answers it"
+    now[0] += hook_auth.PAIR_TTL_S
+    stale.get("/api/ui/paired")
+    assert hook_auth.links_wanted() == 2, "an expired link answers nothing"
+    assert browser.post("/api/ui/pair", json={"ws": CORPUS}).status_code == 401, "the token alone mints a code"
 
 
 @pytest.mark.real_write_guard

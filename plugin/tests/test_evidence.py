@@ -407,6 +407,84 @@ def test_what_code_does_may_cite_claudes_own_code_in_the_temp_folder_a_quote_may
     assert said["status"] == "failed" and "outside the folder" in said["reason"]
 
 
+RULE = 'def label(r):\n    body = (r.get("body") or "").strip()\n    if not body:\n        return None\n    return "yes" if "REVIEW WANTED" in body else "no"\n'
+
+
+def definitions(tmp_path: Path) -> tuple[Path, Path]:
+    """A records folder, and beside it a workspace's folder of labels' definitions as the browser writes them (JSON, a
+    member a line, the rule a JSON string at line 6): a code label k1, and a model label k2, its prompt at line 4."""
+    data, rules = tmp_path / "data", tmp_path / "ws" / "concepts"
+    data.mkdir()
+    rules.mkdir(parents=True)
+    for k in ({"id": "k1", "name": "asks for a review", "description": "", "kind": "code", "spec": RULE},
+              {"id": "k2", "name": "asks for a refund", "description": "a post that asks for a refund or a credit", "kind": "prompt", "spec": ""}):
+        (rules / f"{k['id']}.json").write_text(json.dumps(k, indent=1, ensure_ascii=False))
+    return data, rules
+
+
+def test_a_label_s_rule_in_its_definition_is_evidence_as_the_code_reads(tmp_path: Path):
+    """B11: the browser keeps a label's rule in the label's definition, a JSON file in its workspace, and gives their
+    folder as `rules`. A citation of the rule holds as the code reads, its JSON string decoded (quote marks, line breaks),
+    and the person sees the code with its line breaks; a claim the rule shows false stays failed, with the rule beside it.
+    Without the folder, the file is outside."""
+    data, rules = definitions(tmp_path)
+    k1 = str(rules / "k1.json")
+    count = {"n": 1, "words": "2 of the 8", "sentence": "[2 of the 8] posts ask for a review, not counting empty posts."}
+    skips = quote(k1, 6, 'body = (r.get("body") or "").strip()\n    if not body:\n        return None', kind="code")
+    ok = check_mark(count, skips, [], str(data), None, None, None, str(rules))
+    assert ok["status"] == "verified" and ok["evidence"]["file"] == k1, ok["reason"]
+    (row,) = [r for r in ok["evidence"]["lines"] if r["n"] == 6]
+    assert row["decoded"] and row["text"].startswith('def label(r):\n    body = (r.get("body")') and row["highlight"], row
+    # the line as the file holds it, its escapes and all, holds too
+    assert check_mark(count, quote(k1, 6, "if not body:\\n        return None", kind="code"), [], str(data), None, None, None, str(rules))["status"] == "verified"
+    assert "outside the folder" in check_mark(count, skips, [], str(data))["reason"]
+
+    capitals = {"n": 2, "words": "in any case", "sentence": "It counts REVIEW WANTED [in any case]."}
+    wrong = {**quote(k1, 6, '"REVIEW WANTED" in body', kind="code"), "status": "wrong", "reason": "The rule matches REVIEW WANTED in capitals only."}
+    found = check_mark(capitals, wrong, [], str(data), None, None, None, str(rules))
+    assert (found["status"], found["failedBy"], found["reason"]) == ("failed", "check", wrong["reason"]) and found["evidence"]["file"] == k1, found
+    said = check_mark(capitals, quote(k1, 6, "body.lower()", kind="code"), [], str(data), None, None, None, str(rules))
+    assert said["status"] == "failed" and said["failedBy"] == "evidence" and said["reason"].startswith(f"Line 6 of {k1} reads"), said["reason"]
+
+
+def test_a_quote_of_a_label_s_definition_holds_what_its_lines_state(tmp_path: Path):
+    """A model label's prompt may be quoted, as its definition states it. As any quote, a quote of a rule shows the
+    numbers of the words in its lines, so a count cited to a rule fails on that count, not on the rule's folder."""
+    data, rules = definitions(tmp_path)
+    k2 = str(rules / "k2.json")
+    for kind in ("quote", "code"):
+        asks = check_mark(mark("a post that asks for a refund"), quote(k2, 4, "a post that asks for a refund or a credit", kind=kind), [], str(data), None, None, None, str(rules))
+        assert asks["status"] == "verified" and asks["evidence"]["file"] == k2, (kind, asks["reason"])
+    count = check_mark(mark("72 of the 3,862"), quote(str(rules / "k1.json"), 6, "if not body:"), [], str(data), None, None, None, str(rules))
+    assert count["status"] == "failed" and count["reason"].startswith(f"Line 6 of {rules / 'k1.json'} reads") and count["reason"].endswith(", not 72."), count["reason"]
+
+
+def test_beside_the_labels_rules_the_workspace_is_no_evidence(tmp_path: Path):
+    """Only the folder of labels' rules is given: a file beside it in the workspace, such as a reply's marks that hold
+    the cited words, stays outside, by its path, by a path through the rules' folder, and through a link in it."""
+    data, rules = definitions(tmp_path)
+    stored = tmp_path / "ws" / "marks" / "a1b2c3d4.json"
+    stored.parent.mkdir()
+    stored.write_text(json.dumps({"turn": "a1b2c3d4", "items": [{"words": "2 of the 8"}]}, indent=1))
+    (rules / "k3.json").symlink_to(stored)
+    for file in (stored, rules / ".." / "marks" / "a1b2c3d4.json", rules / "k3.json"):
+        for kind in ("quote", "code"):
+            r = check_mark(mark("2 of the 8"), quote(str(file), 5, '"words": "2 of the 8"', kind=kind), [], str(data), None, str(tmp_path / "ws" / "tmp"), None, str(rules))
+            assert r["status"] == "failed" and "is outside the folder this session works in" in r["reason"], (file, kind, r["reason"])
+
+
+def test_a_quote_in_a_json_document_written_over_many_lines_reads_its_strings_decoded(tmp_path: Path):
+    """A line of a JSON document written over many lines holds one member: its string reads decoded, as a JSONL
+    record's strings do, so a quote matches the words as they read and shows with its line breaks."""
+    doc = {"posts": [{"author": "agent-02", "body": 'He wrote "ship it" — then left.\nNo reply.'}]}
+    (tmp_path / "board.json").write_text(json.dumps(doc, indent=2))
+    n = next(i for i, l in enumerate((tmp_path / "board.json").read_text().splitlines(), 1) if '"body"' in l)
+    r = check_mark(mark('"ship it" — then left'), quote("board.json", n, 'He wrote "ship it" — then left.'), [], str(tmp_path))
+    assert r["status"] == "verified", r["reason"]
+    (row,) = [x for x in r["evidence"]["lines"] if x["n"] == n]
+    assert row["decoded"] and row["text"] == 'He wrote "ship it" — then left.\nNo reply.', row
+
+
 def test_emphasis_in_the_output_is_formatting():
     code = 'import sqlite3\nprint(sqlite3.connect("f").execute("select body from r where id=605").fetchone()[0])'
     r = check_mark(mark('"one token away from an approval"'), computed("It is **one token away from an approval**."), [call(code, "It is **one token away from an approval**.")], "/data")
@@ -483,6 +561,50 @@ def test_a_link_to_a_file_outside_the_folder_and_a_pipe_are_no_evidence(tmp_path
     os.mkfifo(data / "pipe")
     assert "outside the folder" in check_mark(mark('"the secret line"'), quote("link.txt", 1, "the secret line"), [], str(data))["reason"]
     assert check_mark(mark('"x"'), quote("pipe", 1, "x"), [], str(data))["status"] == "failed"
+
+
+def test_a_reason_that_opens_with_the_cited_file_names_it_as_it_is(tmp_path: Path):
+    """A failed citation's reason that opens with the cited file keeps the file's name as it is: with its first letter
+    capital it named a file that does not exist (`Peer/run.log is outside …` for peer/run.log), also when the name is
+    one plain word (`Notes is outside …` for notes, `Todo has no line 9.` for todo). A reason that opens with a plain
+    word of its own still opens with a capital."""
+    data, shared = tmp_path / "data", tmp_path / "shared"
+    data.mkdir()
+    shared.mkdir()
+    (shared / "run.log").write_text("shelter request refused\n")
+    (shared / "notes").write_text("bring the striped blanket\n")
+    (data / "peer").symlink_to(shared, target_is_directory=True)
+    (data / "notes").symlink_to(shared / "notes")
+    (data / "notes.md").write_text("the lake shelter seats twenty\n")
+    (data / "todo").write_text("buy lemons\n")
+    outside = check_mark(mark('"shelter request refused"'), quote("peer/run.log", 1, "shelter request refused"), [], str(data))
+    assert (outside["status"], outside["reason"]) == ("failed", "peer/run.log is outside the folder this session works in."), outside
+    short = check_mark(mark('"seats twenty"'), quote("notes.md", 9, "seats twenty"), [], str(data))
+    assert (short["status"], short["reason"]) == ("failed", "notes.md has no line 9."), short
+    word = check_mark(mark('"bring the striped blanket"'), quote("notes", 1, "bring the striped blanket"), [], str(data))
+    assert (word["status"], word["reason"]) == ("failed", "notes is outside the folder this session works in."), word
+    todo = check_mark(mark('"buy lemons"'), quote("todo", 9, "buy lemons"), [], str(data))
+    assert (todo["status"], todo["reason"]) == ("failed", "todo has no line 9."), todo
+    assert all(one_sentence(r["reason"]) for r in (outside, short, word, todo))
+    assert check_mark(mark('"x"'), quote("nope.txt", 1, "x"), [], str(data))["reason"] == "There is no file nope.txt in this session's folder."
+    assert check_mark(mark('"x"'), quote("readme", 1, "x"), [], str(data))["reason"] == "There is no file readme in this session's folder."
+
+
+def test_a_file_read_through_a_link_out_of_the_session_s_folders_is_outside_them_not_missing(tmp_path: Path):
+    """Main's shell is in a folder inside the folder its session started in, and a link there leads out of both. A
+    citation of a file read through that link fails as a file outside the session's folders, as it does with one
+    folder, not as a file that does not exist: the same path from the start folder names no file, but the file is
+    there, outside. A path that names no file anywhere is still missing."""
+    root, shared = tmp_path / "outings", tmp_path / "shared-notes"
+    (root / "run-a").mkdir(parents=True)
+    shared.mkdir()
+    (shared / "notes.md").write_text("bring the striped blanket\n")
+    (root / "run-a" / "shared").symlink_to("../../shared-notes", target_is_directory=True)
+    cwd = str(root / "run-a")
+    r = check_mark(mark('"bring the striped blanket"'), quote("shared/notes.md", 1, "bring the striped blanket"), [], cwd, str(root))
+    assert (r["status"], r["reason"]) == ("failed", "shared/notes.md is outside the folder this session works in."), r
+    gone = check_mark(mark('"x"'), quote("shared/nothing.md", 1, "x"), [], cwd, str(root))
+    assert gone["reason"] == "There is no file shared/nothing.md in this session's folder.", gone
 
 
 def test_a_path_from_the_start_folder_holds_after_main_moved_the_shell(tmp_path: Path):
@@ -718,6 +840,35 @@ def test_words_that_hold_a_range_or_a_pair_cite_a_place_for_each_value():
     # a correction of a pair stands at its places
     fixed = check_mark(mark("243 against 105"), {**card("", "corrected", {"words": "243 against 104"}), "evidence": pair}, [], "/data", cards=RUNS)
     assert fixed["status"] == "corrected" and fixed["shown"] == "243 against 104"
+
+
+def test_words_no_cited_place_shows_are_said_of_the_places_together_never_with_one_line_under_another_s_number():
+    """B12: a total of a card's seven printed lines (made up), cited as the seven lines. No line shows the total, and the
+    reason says so of the seven together, where it named each line with "and" and then quoted the line nearest the
+    words under the last line's number. A wrong pair of cells, a place of each kind and a correction no cited place shows
+    say it of their places alike."""
+    groups = [{"id": "g7r2m4", "title": "Remarks per group", "outputs": [
+        {"out": 0, "lines": [[i, f"G{i}: {n} remarks"] for i, n in enumerate((57, 85, 96, 97, 148, 84, 75), 1)]}]}]
+    seven = {**card(""), "evidence": {"ref": [f"card:g7r2m4@out0#L{i}" for i in range(1, 8)]}}
+    total = check_mark(mark("642"), seven, [], "/data", cards=groups)
+    assert (total["status"], total["failedBy"]) == ("failed", "evidence")
+    assert total["reason"] == "None of the 7 cited lines of the card's output shows 642."
+    # a range of lines and one of its lines name each line once
+    again = {**card(""), "evidence": {"ref": ["card:g7r2m4@out0#L1-L7", "card:g7r2m4@out0#L3"]}}
+    assert check_mark(mark("642"), again, [], "/data", cards=groups)["reason"] == total["reason"]
+    pair = [{"ref": "card:c7d2e4#issues%20closed/opus%20emergent"}, {"ref": "card:c7d2e4#issues%20closed/opus%20managed"}]
+    wrong = check_mark(mark("243 against 105"), {**card(""), "evidence": pair}, [], "/data", cards=RUNS)
+    assert wrong["reason"] == "None of the 2 cited cells of the card shows 105."
+    mixed = [{"ref": "card:c7d2e4#issues%20closed/opus%20emergent"}, {"ref": "card:c7d2e4@out1#L3"}]
+    assert check_mark(mark("243 and 3.1"), {**card(""), "evidence": mixed}, [], "/data", cards=RUNS)["reason"] == "None of the 2 cited places of the card shows 3.1."
+    lines = {"ref": ["card:c7d2e4@out1#L2", "card:c7d2e4@out1#L3"]}
+    other = check_mark(mark("2.5 to 3.9 hours"), {**card("", "corrected", {"words": "2.5 to 3.8 hours"}), "evidence": lines}, [], "/data", cards=RUNS)
+    assert other["reason"] == "The check offered other words, but none of the 2 cited lines of the card's output shows 3.8."
+    reworded = check_mark(mark("243 against 105, both by opus"), {**card("", "corrected", {"words": "243 against 104, both by sonnet"}), "evidence": pair}, [], "/data", cards=RUNS)
+    assert reworded["reason"] == "The check offered other words, but none of the 2 cited cells of the card shows “sonnet”."
+    # one place still says what it shows
+    one = check_mark(mark("642"), {**card(""), "evidence": {"ref": "card:g7r2m4@out0#L6"}}, [], "/data", cards=groups)
+    assert one["reason"] == "Line 6 of the card's output reads “G6: 84 remarks”, not 642."
 
 
 def test_computed_output_that_is_a_printed_dataframe_carries_its_table():

@@ -5,7 +5,8 @@ as the Claude Code tools 0.8's agents had, so the prompts read the same in both 
                      examples (the view kit), and the agent's write folders; never thimble's private files
     Write Edit       write files under the agent's write folders alone (its work folder, the workspace's agent folders)
     Bash             one shell command in Anthropic's sandbox runtime (srt, kernel_wrap.py): it reads what Read reads
-                     and the system, writes only the write folders, and starts in the corpus folder
+                     and the system, writes only the write folders, and starts in the corpus folder; the programs it
+                     runs write no cache beside what they read (kernel_wrap.NO_SIDE_WRITES)
     WebSearch WebFetch  the Messages API's own server tools (web_search, web_fetch)
 
 A tool that cannot run here (Bash without the sandbox) is left out of the agent's list (available). Nothing here
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import itertools
 import json
 import os
 import re
@@ -22,7 +24,7 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 READ_LINES = 2000
 LINE_CHARS = 2000
@@ -152,8 +154,20 @@ def _binary(p: Path) -> bool:
         return False
 
 
-def _lines(p: Path) -> list[str]:
-    return p.read_text("utf-8", errors="replace").splitlines()
+def _lines(p: Path) -> Iterator[str]:
+    """A text file's lines, read one at a time, as the citation check reads them (the terminal's evidence.read_lines):
+    each ends at a newline alone, without it and a carriage return before it, so a U+2028 in a JSON string ends no
+    line, and the number Read or Grep gives a line is the one a citation of it names."""
+    with p.open("rb") as f:
+        for raw in f:
+            yield raw.decode("utf-8", errors="replace").removesuffix("\n").removesuffix("\r")
+
+
+def _window(p: Path, offset: int, limit: int) -> tuple[list[str], int]:
+    """Lines `offset` to `offset + limit - 1` of a text file (from 1), and how many lines follow them."""
+    lines = _lines(p)
+    shown = list(itertools.islice(lines, offset - 1, offset - 1 + limit))
+    return shown, sum(1 for _ in lines)
 
 
 def _files(base: Path) -> list[Path]:
@@ -235,9 +249,8 @@ async def _read(box: Box, a: dict[str, Any]) -> Out:
         return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
     offset = max(1, int(a.get("offset") or 1))
     limit = max(1, min(int(a.get("limit") or READ_LINES), READ_LINES))
-    lines = await asyncio.to_thread(_lines, q)
-    out = [f"{n:>6}\t{ln[:LINE_CHARS]}" for n, ln in enumerate(lines[offset - 1:offset - 1 + limit], offset)]
-    more = len(lines) - (offset - 1 + limit)
+    lines, more = await asyncio.to_thread(_window, q, offset, limit)
+    out = [f"{n:>6}\t{ln[:LINE_CHARS]}" for n, ln in enumerate(lines, offset)]
     if more > 0:
         out.append(f"[{more} more lines: read on with offset {offset + limit}]")
     return Out("\n".join(out) or "(empty file)")
@@ -383,7 +396,8 @@ async def _bash(box: Box, a: dict[str, Any]) -> Out:
     argv = kernel_wrap.srt_argv(["/bin/bash", "-c", command], node=str(srt.node()),
                                 srt_dir=srt.package(config.REPO_ROOT) or config.REPO_ROOT, rules=_rules(box))
     env = {k: v for k in ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME") if (v := os.environ.get(k))}
-    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(home / "tmp"), npm_config_cache=str(home / ".npm-cache"))
+    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(home / "tmp"), npm_config_cache=str(home / ".npm-cache"),
+               **kernel_wrap.NO_SIDE_WRITES)
     proc = await asyncio.create_subprocess_exec(*argv, cwd=str(box.cwd), env=env, stdin=asyncio.subprocess.DEVNULL,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
                                                 start_new_session=True)

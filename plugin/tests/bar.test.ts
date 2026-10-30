@@ -48,9 +48,14 @@ function textOf(n: Any): string {
 
 /** A made-up session: the folder's coverage counts as `coverage` says (a JSON text, or a failure), with two labels.
  *  `ran`: each command's argv. `o.count`: answers each run of `thimble coverage` instead, when it comes; `o.disk`: the
- *  files the plugin writes and reads back, by path. */
-function world(on: Any, coverage: { ok: boolean; out: string }, o: { count?: (argv: string[]) => Promise<{ code: number; out: string }>; disk?: Map<string, string> } = {}) {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' })
+ *  files the plugin writes and reads back, by path; `o.env`: more of the environment, which the test may change as it
+ *  goes. */
+function world(on: Any, coverage: { ok: boolean; out: string }, o: { count?: (argv: string[]) => Promise<{ code: number; out: string }>; disk?: Map<string, string>; env?: Record<string, string | undefined> } = {}) {
+  const env = { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' }
+  if (o.env) {
+    const more = o.env
+    on('env.get', (_$: unknown, e: { name: string }) => ({ value: e.name in more ? more[e.name] : (env as Record<string, string>)[e.name] }))
+  } else mock.env(on, env)
   const clock = mock.clock(on, { now: 0 })
   const submitted: string[] = []
   const opened: string[] = []
@@ -173,6 +178,33 @@ test("the coverage pane's r close is a click alone: an r typed while the pane ho
   expect(w.opens.length).toBe(opens)
 })
 
+test('each key shows once, where it acts: while the coverage pane shows, its key row names r close, and the bar names coverage without r, still a click; r still closes it, and closed, the bar names r again', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  const closes: string[] = []
+  on('ui.close', (_$: unknown, e: { id: string }) => { closes.push(e.id); w.opened.splice(0); return { value: undefined } })
+  const key = (k: string) => $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never) as Promise<Any>
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 43% (3/7 files)')
+  expect((await key('r')).text).toBe('')
+  await w.clock.advance(400)
+  expect(w.opened).toEqual(['thimble'])
+  expect(textOf(await $.ui.render(PANE))).toContain('r: close')
+  const beside = await $.ui.render(BAND)
+  expect(textOf(beside)).toContain('coverage 43% (3/7 files)')
+  expect(textOf(beside)).not.toContain('r coverage')
+  const walk = (n: Any): Any[] => (Array.isArray(n) ? n.flatMap(walk) : n && typeof n === 'object' ? [n, ...walk(n.props?.children), ...walk(n.children)] : [])
+  expect(walk(beside).find(n => n.type === 'Button' && n.props?.key === 'bar-coverage')?.props?.label).toBe('coverage 43% (3/7 files)')
+  // r, typed in the pane, reaches the prompt and closes it
+  expect((await key('r')).text).toBe('')
+  await w.clock.advance(400)
+  expect(closes).toEqual(['thimble'])
+  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 43% (3/7 files)')
+})
+
 test("a drawing never starts a count, since Claude Code stops a drawing's calls when a newer one replaces it; the session's start counts once", async ($, on) => {
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   const counted = () => w.ran.filter(a => a.includes('coverage')).length
@@ -199,6 +231,18 @@ test('an empty folder: the count ends well with nothing to count, so the bar nam
   expect(line).toContain('l 2 labels')
   expect(line).not.toContain('coverage')
   expect(line).not.toContain('could not be counted')
+})
+
+test('a count that fails says why and what to do, and promises no count that may fail again', async ($, on) => {
+  const w = world(on, { ok: false, out: 'made-up: the kernel stopped' })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(100)
+  // the count after Claude's reply, the newest failure
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  const line = textOf(await $.ui.render(BAND))
+  expect(line).toContain('Coverage could not be counted: made-up: the kernel stopped. Type /thimble-fix to ask for a fix.')
+  expect(line).not.toContain('counted again')
 })
 
 /** The made-up folder after Claude touched one more file. */
@@ -247,7 +291,8 @@ test("at a load of the plugin (a reload, a setting changed, a resumed session), 
   await pane.unmount()
   ends[0]!({ code: 0, out: JSON.stringify(NEWER) })
   await w.clock.advance(100)
-  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 57% (4/7 files)')
+  // (the pane shows, and names r close: the bar names coverage without r)
+  expect(textOf(await $.ui.render(BAND))).toContain('coverage 57% (4/7 files)')
   expect(JSON.parse(disk.get(KEPT_COUNT)!)).toMatchObject({ root: '/made-up/data', coverage: '57% (4/7 files)', labels: 2, record: { total: { touched_files: 4 } } })
 })
 
@@ -472,6 +517,33 @@ test('the first session starts with one plain line above the bar that says where
   // a reload or a new session keeps it gone: it is kept for the install, not the session
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test("where no click reaches thimble (Claude Code's classic layout, CLAUDE_CODE_DISABLE_MOUSE, CLAUDE_CODE_DISABLE_MOUSE_CLICKS), the first session's line names /thimble-settings in place of the click; elsewhere the click", async ($, on) => {
+  const env: Record<string, string | undefined> = {}
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) }, { env })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  const band = async (isFullscreen: boolean, vars: Record<string, string> = {}) => {
+    for (const k of ['CLAUDE_CODE_DISABLE_MOUSE', 'CLAUDE_CODE_DISABLE_MOUSE_CLICKS']) delete env[k]
+    Object.assign(env, vars)
+    return textOf(await $.ui.render({ ...(BAND as Any), viewport: { columns: 100, rows: 40, isFullscreen } } as never))
+  }
+  const click = 'click thimble for settings.'
+  const typed = 'type /thimble-settings for settings.'
+  // the fullscreen layout asks the terminal for clicks
+  expect(await band(true)).toContain(click)
+  // the classic layout asks for none; nor does Claude Code with CLAUDE_CODE_DISABLE_MOUSE set, and with
+  // CLAUDE_CODE_DISABLE_MOUSE_CLICKS set it drops the clicks, read as Claude Code reads them
+  for (const [isFullscreen, vars] of [[false, {}], [true, { CLAUDE_CODE_DISABLE_MOUSE: '1' }], [true, { CLAUDE_CODE_DISABLE_MOUSE: 'TRUE' }], [true, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }], [true, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'yes' }]] as [boolean, Record<string, string>][]) {
+    const b = await band(isFullscreen, vars)
+    expect([isFullscreen, vars, b.includes(typed), b.includes(click)]).toEqual([isFullscreen, vars, true, false])
+  }
+  // a variable set to a false value, or one Claude Code does not read as either, leaves the clicks; and
+  // CLAUDE_CODE_DISABLE_MOUSE set either way decides alone
+  for (const vars of [{ CLAUDE_CODE_DISABLE_MOUSE: '0' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'off' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'maybe' }, { CLAUDE_CODE_DISABLE_MOUSE: 'false', CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }]) {
+    expect([vars, (await band(true, vars)).includes(click)]).toEqual([vars, true])
+  }
 })
 
 test('the line at the first session goes by itself after a few seconds, and stays gone after a reload', async ($, on) => {

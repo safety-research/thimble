@@ -109,11 +109,45 @@ test('step 3, a file picked: its detail in its own unit, the tree scrolled to ke
 })
 
 
+test('a big folder, whose record names only some files: the files it does not name are said to be untouched only when none was touched', () => {
+  // the kernel counted each run's trial folders into the run and named none of their files: 3 of a/'s 6 were touched
+  const cov = { root: '/made-up/data', total: { files: 13, touched_files: 4, seen_files: 1 },
+    groups: [{ folder: 'runs/a/', files: 6, touched: 3, seen_files: 0 }, { folder: 'runs/b/', files: 6, touched: 0, seen_files: 0 }, { folder: './', files: 1, touched: 1, seen_files: 1 }],
+    files: [{ path: 'README.md', unit: 'lines', units: 3, seen: true, seen_units: 3, status: 'seen' }],
+    untouched: { path: [], unit: [], units: [], by: [] } }
+  const v = coverageView(cov, { open: ['runs/', 'runs/a/', 'runs/b/'] }, DIMS)
+  show('a big folder', v)
+  const t = textOf(v).split('\n')
+  const after = name => t[t.findIndex(l => l.includes(`▾ ${name}`)) + 1]
+  assert.match(after('a/'), /^ +… 6 more files$/)
+  assert.match(after('b/'), /^ +… 6 more files, none touched$/)
+  fits(v, 66)
+})
+
 test('a folder with no files: the head says so, and nothing else', () => {
   const v = coverageView({ root: '/made-up/empty', total: { files: 0, touched_files: 0, seen_files: 0 }, groups: [], files: [], untouched: {} }, null, DIMS)
   const t = textOf(v).split('\n')
   assert.match(t[0], /^Coverage +no files$/)
   assert.ok(t.some(l => l === 'This folder holds no files, so there is nothing to cover yet.'))
   assert.equal(v.keys.length, 0)
+  fits(v, 66)
+})
+
+test("a file's name holds the files' own bytes: one that does not print (macOS's `Icon\\r`, a color code) shows as its escape in its row and in its detail, laid out as it draws", () => {
+  const cov = {
+    root: '/made-up/data', total: { files: 3, touched_files: 1, seen_files: 1 },
+    groups: [{ folder: './', files: 3, touched: 1, seen_files: 1 }],
+    files: [{ path: 'run\u001b[31m.log', unit: 'lines', units: 40, seen: true, seen_units: 40, model_units: 0, searched_units: 0, computed_units: 0, status: 'seen' }],
+    untouched: { path: ['Icon\r', 'notes old.md'], unit: ['file', 'lines'], units: [1, 12], by: ['', ''] },
+  }
+  const v = coverageView(cov, { sel: 'file:run\u001b[31m.log' }, DIMS)
+  const t = textOf(v)
+  assert.doesNotMatch(t, /[\u0000-\u0009\u000b-\u001f\u007f- ]/)
+  for (const name of ['Icon\\r', 'notes\\xa0old.md', 'run\\x1b[31m.log']) assert.ok(t.includes(name), `${name} in ${t}`)
+  // the detail of the file picked names it the same way
+  const d = t.split('\n')
+  assert.match(d[d.findIndex(l => /^─+$/.test(l)) + 1], /^run\\x1b\[31m\.log  \.\/ · 40 lines$/)
+  // the row's key stays the file's path
+  assert.ok(v.keys.includes('file:Icon\r'))
   fits(v, 66)
 })

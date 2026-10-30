@@ -3,6 +3,7 @@
 // Claude a text copy of what it drew. The cards' keys at an empty prompt reach them through hooks/keys.ts.
 //
 //   tool.ts      the card tool: one call draws a card, or a new version of one, and answers its text copy
+//   fit.ts       a version that does not fit on the screen: held until the card check, whose replacement draws
 //   runner.mjs   the runner, one Node process per session in Anthropic's sandbox runtime: each card's view in a context
 //                of its own, its state and handlers
 //   argv.mjs     the command that starts the runner, and the sandbox's rules for it

@@ -294,6 +294,7 @@ Comment on one sentence, paragraph or heading of a written document, or on a car
   "type": "object",
   "properties": {
     "ref": {"type": "string", "description": "report:<doc>#<id> of a sentence or a heading, report:<doc>#p<id> of a paragraph, card:<id> of a card, card:<id>#step-<n> of a plan's step, answer:<turn>#s<n> of a sentence of Claude's answer."},
+    "words": {"type": "string", "description": "On a sentence of Claude's answer, the words of it that the comment is about, exactly as it says them. The chat marks these words, else the whole sentence."},
     "text": {"type": "string", "description": "The statement: one short, clear sentence of about 20 words."},
     "details": {"type": "string", "description": "The evidence for the statement, with its citations, in plain sentences or a few bullets of about 120 words at most."}
   },
@@ -622,6 +623,10 @@ card:{cid}'s body draws {height} px tall at the card's width, and about {limit} 
 ## card-wide
 
 card:{cid}'s page lays out {width} px wide, and the card gives it {frame} px, so the analyst does not see all of it at the card's width.
+
+## card-replaced
+
+thimble's card check replaced card:{cid} in place, so the analyst sees its version, not yours: {what}, with the question “{question}”. Its takeaway reads: {takeaway} It changed the {changed}{why}
 
 ## kind-mismatch
 
@@ -1312,6 +1317,14 @@ Your task is in {n} files, in this order: {paths}. They hold the check's instruc
 
 {ref} is not among the passages this run checks. Comment only on the passages your task lists.
 
+## add_comment-held
+
+Not added: in {ref}, a comment of {check} holds “{words}” already, and an explainer and a heads-up never share words. Give other words, here or in another sentence, or leave it out.
+
+## add_comment-no-words
+
+Not added: {ref} does not say “{words}”; it says “{sentence}”. Give `words` exactly as it says them.
+
 ## add_comment-not-check
 
 Only the analyst's session and a check's own session comment with `add_comment`.
@@ -1439,6 +1452,18 @@ None yet.
 ## context-cut-oldest
 
 [The {n} oldest entries are left out here, since the whole conversation is too long.]
+
+## look-keys
+
+(none)
+
+## look-no-cards
+
+No cards in these turns.
+
+## look-read
+
+The session's calls above show what it read.
 
 ## orient-no-request
 

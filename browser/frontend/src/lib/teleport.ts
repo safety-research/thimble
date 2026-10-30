@@ -4,15 +4,15 @@ import { plainRef, surfaceOf } from './refs'
 
 /** Open the surface that owns `ref` at it; with `browser`, a file's ref opens in the File browser rather than in a view
  * that claims the file; with `focus`, a canvas card's or frame's ref opens focus mode on the first card of its frame
- * (a canvas group's chip: Canvas, bus openRef); with `still`, a canvas card is opened neither selected nor flashed.
- * Files shows itself once it knows where the ref opens, since a pane that shows a view on its own may take it instead
- * (FilesTab). */
-export function teleport(ref: string, opts: { browser?: boolean; focus?: boolean; still?: boolean } = {}): void {
+ * (a canvas group's chip: Canvas, bus openRef); with `still`, a canvas card is opened neither selected nor flashed;
+ * with `comment`, that comment opens there, of those on the passage. Files shows itself once it knows where the ref
+ * opens, since a pane that shows a view on its own may take it instead (FilesTab). */
+export function teleport(ref: string, opts: { browser?: boolean; focus?: boolean; still?: boolean; comment?: string } = {}): void {
   const r = plainRef(ref.trim())
   if (!r) return
   const tab = surfaceOf(r)
   if (tab && tab !== 'files') bus.emit('showTab', { tab })
-  bus.emit('openRef', { ref: r, ...(opts.browser ? { browser: true } : {}), ...(opts.focus ? { focus: true } : {}), ...(opts.still ? { still: true } : {}) })
+  bus.emit('openRef', { ref: r, ...(opts.browser ? { browser: true } : {}), ...(opts.focus ? { focus: true } : {}), ...(opts.still ? { still: true } : {}), ...(opts.comment ? { comment: opts.comment } : {}) })
 }
 
 /** The element `?ref=<ref>` in the page's URL names, which the shell opens once it is mounted (Shell): the screenshot

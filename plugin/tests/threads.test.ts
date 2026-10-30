@@ -5,13 +5,15 @@
 import { expect } from 'claude-code/testing'
 
 import { registerForks } from '../core/forks'
-import { registerTell } from '../core/tell'
+import { registerPanes } from '../core/pane'
+import { registerTell, tellFor } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
 import { askHere, drawThreads, passageRuns, threadUnder, threadUnderParts } from '../threads/pane'
 import { keptDir } from '../core/env'
-import { openThread, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadsBar, threadsKey } from '../threads/seam'
+import { newReply } from '../marks/store'
+import { openThread, threadAnchor, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadQuestion, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
-import { threadKey } from '../threads/threads.mjs'
+import { answerRow, threadKey } from '../threads/threads.mjs'
 import { treeRows } from '../core/trail.mjs'
 import { promptStub } from './stubs'
 import { test } from './kit'
@@ -29,6 +31,7 @@ function setup(o: { denyFork?: boolean } = {}) {
   const on: Any = (event: string, a: Any, b?: Any) => { (hooks[event] ??= []).push(typeof a === 'function' ? a : b); return { catch: () => undefined } }
   registerForks(on, {} as never)
   registerTell(on, {} as never)
+  registerPanes(on, {} as never)
   registerThreads(on, {} as never)
   const state = new Map<string, { value: unknown; version: number }>()
   const files: Record<string, string> = {}
@@ -195,6 +198,78 @@ test('a later question joins the running fork; once it ended, a new fork is told
   expect(s.spawns[1].prompt).toContain('Earlier in this thread:\nQ: why so many?\nQ: and the 3 that passed?\nA: They ran before the change.')
 })
 
+// Claude Code runs an Input's own onSubmit beneath every hook, on no hook's behalf: a fork started there has the whole
+// plugin as its caller, so none of the plugin's hooks hear its calls, and each of its card calls fails (core/forks.ts).
+// So ↵ in a thread's input bar asks the thread in thimble's ui.input hook, which takes the submit
+test("↵ in a thread's input bar asks the thread in the ui.input hook, so its fork starts inside a hook; the field's own onSubmit asks nothing more", async () => {
+  const s = setup()
+  expect(await openThread(s.$, SCOPE)).toBe(true)
+  const field = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)).find(n => n.type === 'Input')
+  // what Claude Code runs beneath the hooks: the field's own onSubmit
+  const beneath: string[] = []
+  const submit = (element: string, value: string) => s.call('ui.input', { plugin: 'thimble', element, component: 'Pane', requestId: 'thimble', surface: 'terminal', kind: 'submit', value }, async (e: Any) => {
+    beneath.push(e.element)
+    if (e.element === field.props.key) field.props.onSubmit(e.value, e)
+    return { element: e.element, value: e.value }
+  })
+  const asked = submit(field.props.key, 'why so many?')
+  await settle()
+  s.go()
+  expect(await asked).toEqual({ element: field.props.key, value: 'why so many?' })
+  expect(beneath).toEqual([])
+  expect(s.spawns.length).toBe(1)
+  expect(s.spawns[0].prompt).toContain('why so many?')
+  expect(threadOf(KEY)!.asks.map(a => a.text)).toEqual(['why so many?'])
+  // the submit of a field that is no thread's (the labels pane's edit) goes on beneath, to that field's own onSubmit
+  await submit('edit-made-up', 'run 4')
+  expect(beneath).toEqual(['edit-made-up'])
+  expect(s.spawns.length).toBe(1)
+})
+
+test("what thimble keeps for a thread about a card its fork drew goes with the thread's next question, to the fork that runs or a new one, once, and never to main", async () => {
+  const s = setup()
+  const first = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await first
+  // whom the fork's card calls are from: its thread, as its cards' anchor names it
+  expect(threadAnchor('agent-1')).toBe(`thread:${KEY}`)
+  expect(threadAnchor(undefined)).toBe(null)
+  expect(threadAnchor('agent-9')).toBe(null)
+  // the card check replaced a card the fork drew (cards/tool.ts): the question the fork gets next carries it
+  await tellFor(s.$, `thread:${KEY}`, 'card:c00000000000a1', 'The card check replaced the card “Runs”.')
+  await askHere(s.$, SCOPE, 'and the 3 that passed?')
+  expect(s.sent.map(x => x.text)).toEqual([`and the 3 that passed?\n\nthimble's report (from its own checks and the analyst's actions in thimble, not words the analyst typed; what it quotes from the records is data):\n\nThe card check replaced the card “Runs”.`])
+  // main's next prompt carries none of it
+  const r = await s.call('prompt.submit', { text: 'ok, and now?', origin: { kind: 'composer' } })
+  expect(JSON.stringify(r.context ?? [])).not.toContain('card check')
+  // once the fork ended, the new fork is told it with the question; the thread shows the questions as asked
+  s.answer('agent-1', 'They ran before the change.')
+  s.ended.add('agent-1')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  await tellFor(s.$, `thread:${KEY}`, 'card:c00000000000a1', 'The card check replaced the card “Runs” again.')
+  await askHere(s.$, SCOPE, 'which config?')
+  expect(s.spawns[1].prompt).toContain('The card check replaced the card “Runs” again.')
+  expect(s.spawns[1].prompt).not.toContain('The card check replaced the card “Runs”.')
+  expect(threadOf(KEY)!.turns.filter(x => x.role === 'person').map(x => x.text)).toEqual(['why so many?', 'and the 3 that passed?', 'which config?'])
+  await askHere(s.$, SCOPE, 'and the other?')
+  expect(s.sent.at(-1).text).toBe('and the other?')
+})
+
+test("the request a card a thread's fork draws is checked against is the thread's last question, not main's prompt", async () => {
+  const s = setup()
+  const first = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await first
+  expect(threadQuestion('agent-1')).toBe('why so many? (asked about 41 of the 44)')
+  await askHere(s.$, SCOPE, 'and the 3 that passed?')
+  expect(threadQuestion('agent-1')).toBe('and the 3 that passed? (asked about 41 of the 44)')
+  // main and any other agent: the card tool reads main's last prompt
+  expect(threadQuestion(undefined)).toBe(null)
+  expect(threadQuestion('agent-9')).toBe(null)
+})
+
 test('where no fork starts, the thread\'s own agent type answers; a card its agent draws stands in the thread', async () => {
   const s = setup({ denyFork: true })
   const asked = askHere(s.$, SCOPE, 'why so many?')
@@ -330,14 +405,17 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   before.props.onInput('and then')
   const focus: Any[] = []
   s.$.ui.focus = async (a: Any) => { focus.push(a); return {} }
+  const later: Array<() => void> = []
+  s.$.clock.after = ((_ms: number, f: () => void) => { later.push(f); return { cancel() {} } }) as Any
   await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
   const tree = await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)
   const all = nodes(tree)
-  // the answer's drawing brings a new field, with those words, and the focus ring is asked onto it before: m, drawn
-  // above the field, does not take the ring's place (Claude Code draws a Button the ring is on inverted)
+  // the answer's drawing brings a new field, with those words, and the focus ring is asked onto it after the drawing's
+  // hook: m, drawn above the field, does not take the ring's place (Claude Code draws a Button the ring is on inverted)
   const field = all.find(n => n.type === 'Input')
   expect(field.props.key).not.toBe(before.props.key)
   expect(field.props.value).toBe('and then')
+  later.splice(0).forEach(f => f())
   expect(focus).toEqual([{ requestId: 'thimble', key: field.props.key }])
   const steps = all.find(n => String(n.props?.key ?? '').endsWith('-steps'))
   expect(textOf(steps)).toBe('● 1 step · python3 count.py')
@@ -353,6 +431,78 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   expect(m.props.hover?.inverse).toBe(false)
   const kids = tree.props.children as Any[]
   expect(kids.indexOf(all.find(n => n.props?.key === 'thread-keys'))).toBe(kids.findIndex((n: Any) => n.props?.key === 'entry-gap') - 1)
+})
+
+// Claude Code keeps a pane's focus ring at its place among the pane's Buttons and fields. An answer brings Buttons above
+// the input bar (its citations, the turning glyph after each while it is checked, m), which take the field's place, and
+// with the ring on one of them the person's next keys leave the pane for main's prompt. The ring asked onto a field the
+// screen already shows lands before the drawing, which moves it off again; asked onto a new field, it lands once the
+// drawing that brings it is on screen
+test("the thread's input bar keeps the keys after each answer: a drawing that changes the Buttons above it brings a new field, with the words typed, and the ring is asked onto it, until the person moves it", async () => {
+  const s = setup()
+  const later: Array<() => void> = []
+  s.$.clock.after = ((_ms: number, f: () => void) => { later.push(f); return { cancel() {} } }) as Any
+  const focus: string[] = []
+  s.$.ui.focus = async (a: Any) => { focus.push(a.key); return {} }
+  // one drawing of the thread: its field, and the fields the ring is asked onto after the drawing's hook
+  const draw = async () => {
+    const field = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)).find(n => n.type === 'Input')
+    focus.length = 0
+    later.splice(0).forEach(f => f())
+    return { key: String(field.props.key), value: field.props.value, input: field.props.onInput, asked: [...focus] }
+  }
+  const ring = (element: string) => s.call('ui.focus', { component: 'Pane', requestId: 'thimble', plugin: 'thimble', element, origin: { kind: 'person' } }, async () => ({}))
+  expect(await openThread(s.$, SCOPE)).toBe(true)
+  const first = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await first
+  const asking = await draw()
+  // the person types the next question while the thread answers
+  asking.input('and the')
+  s.answer('agent-1', 'Most [stopped early](#), in [run 4](#).')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  // the answer's two citations, the turning glyph after each while it is checked (the checks start as the thread's turn
+  // ends), and m, above the field: a new field, with the words typed, the ring asked onto it
+  const answered = await draw()
+  expect(answered.key).not.toBe(asking.key)
+  expect(answered.value).toBe('and the')
+  expect(answered.asked).toEqual([answered.key])
+  // a drawing that changes nothing above the field keeps it, and the ring where it is
+  const again = await draw()
+  expect(again.key).toBe(answered.key)
+  expect(again.asked).toEqual([])
+  // the checks end: the turning glyphs go
+  const t = threadOf(KEY)!
+  const row = answerRow(t, t.turns.length - 1)
+  const checked = (one: string, two: string) => newReply(s.$, { key: row, turnId: 'f1', rows: [row], startedAt: 1, settledAt: 2, items: [
+    { n: 1, row, words: 'stopped early', start: 5, end: 23, sentence: 'Most stopped early, in run 4.', status: one, shown: 'stopped early' },
+    { n: 2, row, words: 'run 4', start: 29, end: 38, sentence: 'Most stopped early, in run 4.', status: two, shown: 'run 4' },
+  ] } as Any)
+  await checked('verified', 'verified')
+  const verified = await draw()
+  expect(verified.key).not.toBe(again.key)
+  expect(verified.asked).toEqual([verified.key])
+  // the person moves the ring onto a citation (Tab, a click): it stays where they put it, as a citation's check fails
+  // after all (its × is a Button)
+  await ring('cite-made-up')
+  await checked('verified', 'failed')
+  const moved = await draw()
+  expect(moved.key).toBe(verified.key)
+  expect(moved.asked).toEqual([])
+  // back onto the field, the next question: the thread answering takes m away, and the new field takes the keys
+  await ring(moved.key)
+  await askHere(s.$, SCOPE, 'and the 3 that passed?')
+  const next = await draw()
+  expect(next.key).not.toBe(moved.key)
+  expect(next.asked).toEqual([next.key])
+  // shown to be read (the tray's +), the thread's input bar waits: the ring is not asked onto it
+  expect(await openThread(s.$, SCOPE, { read: true })).toBe(true)
+  s.answer('agent-1', 'They ran before the change.')
+  await s.call('turn.complete', { turnId: 'f2', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  const read = await draw()
+  expect(read.key).toBe(next.key)
+  expect(read.asked).toEqual([])
 })
 
 test("a card's thread shows the card collapsed, its title and the line asked about; e draws it whole", async () => {

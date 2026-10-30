@@ -2,6 +2,7 @@
 `claude plugin install` takes: a string bare, a boolean as true or false, and no empty value (Claude Code refuses one,
 and one refused value drops them all)."""
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -493,6 +494,26 @@ def test_a_failure_of_the_remove_other_than_not_found_stops_the_install(tmp_path
     assert settings == {"extraKnownMarketplaces": {"thimble": {"source": {"source": "directory", "path": str(live)}}}}
 
 
+@pytest.mark.parametrize("folder", ["Downloads/thimble-0.10.6", "code/thimble"])
+def test_an_install_from_github_after_one_with_local_moves_the_marketplace_to_github(tmp_path, folder):
+    """An install with --local, from a release's zip unpacked in Downloads or from a clone, left Claude Code's
+    marketplace thimble at that folder, in its list and in its user settings, and Claude Code refuses GitHub's source for
+    the name while its settings name a folder. The install without --local, from a new release's zip or a clone, as an
+    older thimble's refusal and INSTALL.md say, takes thimble out of the settings, and the add moves the marketplace to
+    GitHub. The plugin's options and the other settings stay, with the file's mode."""
+    (tmp_path / folder).mkdir(parents=True)
+    others = {"pluginConfigs": {"thimble@thimble": {"options": {"minimal": True, "citations": "manual"}}},
+              "env": {"MADE_UP_NAME": "été"}}
+    p, calls = plugin_install(tmp_path, tmp_path / folder, settings=others)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert calls[:2] == ["plugin marketplace add safety-research/thimble", "plugin list --json"]
+    github = {"source": "github", "repo": "safety-research/thimble"}
+    settings = tmp_path / "cc" / "settings.json"
+    assert json.loads(settings.read_text(encoding="utf-8")) == {**others, "extraKnownMarketplaces": {"thimble": {"source": github}}}
+    assert settings.stat().st_mode & 0o777 == 0o640
+    assert json.loads((tmp_path / "cc" / "plugins" / "known_marketplaces.json").read_text())["thimble"]["source"] == github
+
+
 def test_install_md_updates_with_thimble_update():
     """INSTALL.md's update is the shell's thimble update, which updates both products and keeps the fixes; no line says
     that 0.10 has no thimble command, or that another command replaces thimble update."""
@@ -506,13 +527,15 @@ def test_install_md_updates_with_thimble_update():
 def test_install_md_says_when_each_way_updates_the_plugin():
     """INSTALL.md says what the code does: scripts/install.sh and claude plugin update reach the plugin until Claude Code
     loads it from the fixes, and thimble update after; --local is an option of scripts/install.sh, not of thimble
-    update; the first fix asked for, or thimble update, sets a leftover mine aside only when the code does."""
+    update, and a dev install is one in a git clone (a release's zip installed with --local follows the releases); the
+    first fix asked for, or thimble update, sets a leftover mine aside only when the code does."""
     text = " ".join((ROOT / "INSTALL.md").read_text().split())
     install = text.split("## Install", 1)[1].split(" ## ", 1)[0]
     assert ("From the first fix you use, or the first update by `thimble update`, Claude Code loads the plugin from your "
             "fixes, and the script leaves the plugin to `thimble update`.") in install
     update = text.split("## Update and uninstall", 1)[1].split(" ## ", 1)[0]
-    assert "after an install with `scripts/install.sh --local`, it moves them to the commit your checkout has" in update
+    assert ("after an install with `scripts/install.sh --local` in a git clone, it moves them to the commit your checkout "
+            "has") in update
     assert "`claude plugin update thimble@thimble` until you use its first fix" in update
     assert ("the first fix you ask for, or a `thimble update` that moves to a new commit of your checkout, sets them aside"
             in update and "it tracks no upstream" in update)
@@ -528,6 +551,15 @@ def test_install_md_says_how_a_plugin_without_a_clone_updates_after_its_first_fi
             "`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of "
             "`~/.thimble`).") in update
     assert (ROOT / "plugin" / "bin" / "thimble").is_file()
+
+
+def test_the_update_help_and_install_md_s_update_section_keep_the_width_of_the_text_around_them():
+    """thimble update --help (cli.py's UPDATE_HELP, which it prints as written) and INSTALL.md's update section wrap at
+    120 columns: a paragraph that an edit made longer is wrapped again, not left with one long line."""
+    helps = re.search(r'UPDATE_HELP = """(.*?)"""', (ROOT / "plugin" / "engine" / "kernel" / "cli.py").read_text(), re.S)
+    update = (ROOT / "INSTALL.md").read_text().split("## Update and uninstall", 1)[1].split("\n## ", 1)[0]
+    for text in (helps.group(1), update):
+        assert [line for line in text.splitlines() if len(line) > 120] == []
 
 
 def whole_install(tmp_path, *args):
@@ -618,3 +650,306 @@ def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plug
     sample = text.split(" 6. When the plugin works", 1)[1].split(" ## ", 1)[0]
     when = sample.split("the line gives a command to run in a new terminal", 1)[0]
     assert "outside this session's folder" in when and "Node" in when, sample
+
+
+GIT = ["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Test", "-c", "user.email=test@example.com"]
+MADE = 1767225600  # the made-up release's plugin.json was written on 2026-01-01
+
+
+def release_market(tmp_path, kind, at=None, description="made up"):
+    """A made-up release of thimble 0.10.6 for Claude Code's marketplace thimble, whose plugin holds the real launcher
+    and kernel and a plugin.json with no version: "tag", a checkout at the release tag v0.10.6 (GitHub's clone, or a
+    clone with --local); "branch", a checkout at a commit after it; "archive", the release's archive from GitHub, a
+    folder with no git named thimble-0.10.6. at: its folder, in place of one in tmp_path."""
+    market = at or tmp_path / ("thimble-0.10.6" if kind == "archive" else "thimble")
+    (market / ".claude-plugin").mkdir(parents=True)
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
+    plugin = market / "plugin"
+    shutil.copytree(ROOT / "plugin" / "bin", plugin / "bin")
+    shutil.copytree(ROOT / "plugin" / "engine", plugin / "engine", ignore=shutil.ignore_patterns("__pycache__"))
+    (plugin / ".claude-plugin").mkdir()
+    (plugin / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble", "description": description, "userConfig": {}}, indent=2) + "\n")
+    if kind != "archive":
+        subprocess.run([*GIT, "init", "-q", "-b", "main"], cwd=market, check=True)
+        subprocess.run([*GIT, "add", "-A"], cwd=market, check=True)
+        subprocess.run([*GIT, "commit", "-q", "-m", "thimble 0.10.6"], cwd=market, check=True)
+        subprocess.run([*GIT, "tag", "v0.10.6"], cwd=market, check=True)
+    if kind == "branch":
+        (market / "made-up.md").write_text("a commit after the release\n")
+        subprocess.run([*GIT, "add", "-A"], cwd=market, check=True)
+        subprocess.run([*GIT, "commit", "-q", "-m", "after 0.10.6"], cwd=market, check=True)
+    return market
+
+
+class Installed:
+    """What install_release saw: the marketplace, its plugin.json and the bytes it had before the install, what the
+    made-up claude noted, the install's environment, what it printed, and its temp folder."""
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def install_release(tmp_path, kind, source="directory", installed=False, wrap=(), prepare=None, description="made up"):
+    """scripts/install.sh --no-browser with made-up commands, whose Claude Code's marketplace thimble is a made-up
+    release (release_market): the person's own folder (source "directory", as --local adds it), or Claude Code's own
+    clone of GitHub's (source "github", in its plugins/marketplaces). The made-up claude notes the version in the
+    plugin.json it installs, as it installs it. installed: Claude Code has thimble already, so the install updates it:
+    the made-up claude's marketplace update gives its own clone the plugin.json of the clone's commit, as a fresh clone
+    of GitHub's has it, and its plugin update notes the version. wrap: a command the install runs under. prepare: what
+    to do to the marketplace before the install."""
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    github = source == "github"
+    market = release_market(tmp_path, kind, cc / "plugins" / "marketplaces" / "thimble" if github else None, description)
+    manifest = market / "plugin" / ".claude-plugin" / "plugin.json"
+    before = manifest.read_bytes()
+    os.utime(manifest, (MADE, MADE))
+    if prepare:
+        prepare(market)
+    entry = {"source": "github", "repo": "safety-research/thimble"} if github else {"source": "directory", "path": str(market)}
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"source": entry, "installLocation": str(market)}}))
+    log = tmp_path / "claude.log"
+    seen = tmp_path / "seen.py"
+    seen.write_text("import json, sys\nprint(sys.argv[2], 'version', json.load(open(sys.argv[1])).get('version'))\n")
+    listed = '[{"id": "thimble@thimble"}]' if installed else "[]"
+    fresh = f'git -C "{market}" checkout -q -- plugin/.claude-plugin/plugin.json' if github else ":"
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "claude", f'echo "$@" >> "{log}"\n'
+         'case "$1 $2 $3" in\n'
+         '  "--version  ") echo "2.1.311 (Claude Code)" ;;\n'
+         f'  "plugin list --json") echo \'{listed}\' ;;\n'
+         f'  "plugin marketplace update") {fresh} ;;\n'
+         f'  "plugin install thimble@thimble") "{sys.executable}" "{seen}" "{manifest}" installs >> "{log}" ;;\n'
+         f'  "plugin update thimble@thimble") "{sys.executable}" "{seen}" "{manifest}" updates >> "{log}" ;;\n'
+         'esac\nexit 0\n')
+    stub(bin_ / "node", "echo v22.20.0\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(home / ".thimble"), "TMPDIR": str(tmp), "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
+    p = subprocess.run([*wrap, str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    noted = [x for x in log.read_text().splitlines() if x.startswith(("installs", "updates"))]
+    return Installed(market=market, manifest=manifest, before=before, seen=noted, env=env, out=p.stdout + p.stderr, tmp=tmp,
+                     calls=[x for x in log.read_text().splitlines() if x.startswith("plugin ")])
+
+
+def status(market):
+    return subprocess.run([*GIT, "status", "--porcelain", "--ignored"], cwd=market, capture_output=True, text=True).stdout
+
+
+def left_beside(i):
+    """What the install left beside plugin.json, in the checkout's git folder and in its temp folder."""
+    git_dir = i.market / ".git" / "thimble-plugin.json"
+    return ([p.name for p in i.manifest.parent.iterdir() if p.name != "plugin.json"] + ([git_dir.name] if git_dir.exists() else [])
+            + [p.name for p in i.tmp.iterdir()])
+
+
+def test_claude_code_installs_the_release_with_its_version_from_a_checkout_at_its_tag(tmp_path):
+    """A release names its version by its tag alone. The install writes it in the plugin.json Claude Code installs, so
+    that Claude Code records it and names its copy by it. The person's own checkout (--local) has its plugin.json back
+    as it was once Claude Code has its copy, so git sees no change there. A checkout at a commit after the release
+    installs with no version: Claude Code names it by its commit."""
+    i = install_release(tmp_path / "tag", "tag")
+    assert i.seen == ["installs version 0.10.6"]
+    assert i.manifest.read_bytes() == i.before and i.manifest.stat().st_mtime == MADE
+    assert status(i.market) == "" and left_beside(i) == []
+    i = install_release(tmp_path / "branch", "branch")
+    assert i.seen == ["installs version None"]
+    assert i.manifest.read_bytes() == i.before
+
+
+def test_claude_code_s_own_clone_keeps_the_version_it_installed(tmp_path):
+    """A GitHub install: Claude Code's own clone of the marketplace keeps the version the install wrote in it, so that
+    Claude Code reads there the version it installed, and never takes its copy for an older one (claude plugin update
+    says it is at the latest version, and no second copy named by the commit is made)."""
+    i = install_release(tmp_path, "tag", source="github")
+    assert i.seen == ["installs version 0.10.6"]
+    assert json.loads(i.manifest.read_text()) == {"name": "thimble", "version": "0.10.6", **json.loads(i.before)}
+    assert left_beside(i) == []
+    out = subprocess.run([str(tmp_path / "bin" / "thimble"), "--version"], capture_output=True, text=True, env=i.env, cwd=tmp_path)
+    assert (out.returncode, out.stdout) == (0, "thimble 0.10.6\n"), out.stderr
+
+
+def test_an_update_installs_the_release_with_its_version(tmp_path):
+    """Run again where Claude Code has thimble, the install updates it: the marketplace first (a GitHub install's clone
+    comes fresh from GitHub, with no version), then the version, then the plugin, so Claude Code updates to the
+    release by its version. Claude Code's clone keeps it; the person's own checkout has its plugin.json back."""
+    i = install_release(tmp_path / "github", "tag", source="github", installed=True)
+    assert i.seen == ["updates version 0.10.6"]
+    assert i.calls.index("plugin marketplace update thimble") < i.calls.index("plugin update thimble@thimble")
+    assert json.loads(i.manifest.read_text())["version"] == "0.10.6"
+    i = install_release(tmp_path / "local", "tag", installed=True)
+    assert i.seen == ["updates version 0.10.6"]
+    assert i.manifest.read_bytes() == i.before and i.manifest.stat().st_mtime == MADE
+    assert status(i.market) == "" and left_beside(i) == []
+
+
+def test_an_install_that_stopped_before_it_put_plugin_json_back_is_put_right_by_the_next(tmp_path):
+    """An install that was killed while Claude Code installed left the person's checkout with the version in its
+    plugin.json and the file as it was by a second name in the checkout's git folder: the next install puts it back."""
+    def stopped(market):
+        manifest = market / "plugin" / ".claude-plugin" / "plugin.json"
+        os.link(manifest, market / ".git" / "thimble-plugin.json")
+        stamped = {"name": "thimble", "version": "0.10.6", **json.loads(manifest.read_text())}
+        tmp = manifest.with_name("new.json")
+        tmp.write_text(json.dumps(stamped, indent=2) + "\n")
+        tmp.replace(manifest)
+
+    i = install_release(tmp_path, "tag", prepare=stopped)
+    assert i.seen == ["installs version 0.10.6"]
+    assert i.manifest.read_bytes() == i.before and i.manifest.stat().st_mtime == MADE
+    assert status(i.market) == "" and left_beside(i) == []
+
+
+def test_a_write_that_fails_leaves_the_checkout_whole(tmp_path):
+    """The version is written to a new file beside plugin.json, which then takes its name: a write that fails (here past
+    a file size limit, as on a full disk) leaves the person's plugin.json as it was, and nothing beside it or in the
+    temp folder; the install goes on, and its notes say what failed."""
+    i = install_release(tmp_path, "tag", wrap=["bash", "-c", 'trap "" XFSZ; ulimit -f 4; exec "$@"', "limit"],
+                        description="made up " * 1000)
+    assert i.seen == ["installs version None"] and len(i.before) > 8000
+    assert i.manifest.read_bytes() == i.before and i.manifest.stat().st_mtime == MADE
+    assert status(i.market) == "" and left_beside(i) == []
+    assert "Traceback" not in i.out
+    assert re.search(r"Note: Claude Code shows the version of thimble as its commit: the install could not write the "
+                     r"version, 0\.10\.6, in \S+/plugin\.json \(File too large\)\. Fix that, then run scripts/install\.sh again",
+                     i.out), i.out
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write a read-only file")
+def test_a_plugin_json_the_install_cannot_write_gets_a_note_that_says_what_to_do(tmp_path):
+    """A release archive unpacked read-only: the install cannot write the version, so Claude Code shows "unknown"; the
+    install goes on, with no traceback and nothing left behind, and its notes give the command that lets it write the
+    version next time."""
+    def read_only(market):
+        (market / "plugin" / ".claude-plugin" / "plugin.json").chmod(0o444)
+        (market / "plugin" / ".claude-plugin").chmod(0o555)
+
+    try:
+        i = install_release(tmp_path, "archive", prepare=read_only)
+        assert i.seen == ["installs version None"]
+        assert i.manifest.read_bytes() == i.before and left_beside(i) == []
+        assert "Traceback" not in i.out
+        manifest = i.manifest.resolve()
+        assert (f'Note: Claude Code shows the version of thimble as "unknown": the install could not write the version, '
+                f"0.10.6, in {manifest}, which is read-only. To have it shown, run this, then scripts/install.sh again: "
+                f"chmod u+w {manifest.parent} {manifest}\n") in i.out, i.out
+    finally:
+        (tmp_path / "thimble-0.10.6" / "plugin" / ".claude-plugin").chmod(0o755)
+
+
+def test_a_release_archive_installs_with_its_version_and_thimble_names_it(tmp_path):
+    """The release's archive from GitHub, a folder with no git named thimble-0.10.6: Claude Code installs it with the
+    version 0.10.6, where it would record "unknown" and name its copy unknown, and the folder keeps the version, so that
+    thimble, in a shell or in Claude's Bash tool, names its version: thimble --version, and the head of thimble fix."""
+    i = install_release(tmp_path, "archive")
+    assert i.seen == ["installs version 0.10.6"]
+    manifest = json.loads(i.manifest.read_text())
+    assert manifest == {"name": "thimble", "version": "0.10.6", **json.loads(i.before)}
+    assert left_beside(i) == []
+    thimble = tmp_path / "bin" / "thimble"
+    out = subprocess.run([str(thimble), "--version"], capture_output=True, text=True, env=i.env, cwd=tmp_path)
+    assert (out.returncode, out.stdout) == (0, "thimble 0.10.6\n"), out.stderr
+    out = subprocess.run([str(thimble), "fix"], capture_output=True, text=True, env=i.env, cwd=tmp_path)
+    assert out.stdout.splitlines()[0] == "Your thimble fixes · thimble 0.10.6 with no fixes of yours", out.stdout + out.stderr
+
+
+def test_what_claude_reads_about_the_version_says_where_it_comes_from():
+    """Asked which thimble runs, Claude has thimble --version, and the texts it may read say where the version comes
+    from, as the code does: the manifest has none, since a release names its version by its tag, which the install
+    writes in the copy Claude Code installs (CONTRIBUTING.md's row of the manifest); live's copy carries one only when
+    the release's plugin.json has one (the fix flow's account of Claude Code's copies, engine/kernel/fixes.py)."""
+    assert "version" not in json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text())
+    text = " ".join((ROOT / "CONTRIBUTING.md").read_text().split())
+    row = text.split("| the manifest:", 1)[1].split(" |", 1)[0]
+    assert "release commit adds" not in row and "by its tag" in row and "`scripts/install.sh` writes it" in row, row
+    fixes = " ".join((ROOT / "plugin" / "engine" / "kernel" / "fixes.py").read_text().split('"""', 2)[1].split())
+    assert "when the release's plugin.json has a version" in fixes and "names its version by its tag alone" in fixes
+
+
+# the docs an install reads: the README, which sends Claude to CLAUDE.md, and the two it names
+INSTALL_DOCS = ("README.md", "CLAUDE.md", "INSTALL.md", "browser/README.md")
+
+
+def tracked():
+    """The repository's files, by their paths."""
+    return subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+
+
+def named_paths(doc, text=None):
+    """The repository's paths a doc names, wherever it names them: code blocks, code spans, links (a link's #anchor is
+    no part of its path) and plain text. A path of names joined by / is one when its first folder is an entry of the
+    doc's folder or of the repository's top, or it has three names or more, or it ends in a file of a type the
+    repository has (by its extension); a lone file name of such a type is one in code or a link (README.md's
+    `docs/assets/thimble-term.png` and `INSTALL.md`, browser/README.md's `backend/app/wif.py`). Not URLs, paths in a
+    home (~/) or from the root, variables, packages (@), placeholders (<plugin>, path/to/), globs, or two names that
+    are none of these (`refs/thimble/`, the repository safety-research/thimble, `workspaces/.archive`)."""
+    text = (ROOT / doc).read_text() if text is None else text
+    at = (ROOT / doc).parent
+    types = {Path(f).suffix for f in tracked() if Path(f).suffix}
+    blocks = re.findall(r"```[a-z]*\n(.*?)```", text, re.S)
+    prose = re.sub(r"```[a-z]*\n.*?```", " ", text, flags=re.S)
+    spans = re.findall(r"`([^`\n]+)`", prose)
+    links = re.findall(r"\]\(([^)\s]+)\)", prose) + re.findall(r'\b(?:src|href)="([^"]+)"', prose)
+    prose = re.sub(r"`[^`\n]+`|\]\([^)\s]*\)|<[^>\n]*>", " ", prose)
+    out = []
+    for word, code in [(w, True) for w in " ".join(blocks + spans + links).split()] + [(w, False) for w in prose.split()]:
+        p = word.strip("'\",;:()[]*_!?").split("#")[0].rstrip("/.")
+        if not p or "://" in p or p[0] in "~$/-@" or set(p) & set("<>*=$") or p.startswith("path/to/"):
+            continue
+        names = p.split("/")
+        if not all(re.fullmatch(r"[\w.-]+", n) for n in names):
+            continue
+        typed = Path(names[-1]).suffix in types
+        if len(names) > 1 and ((at / names[0]).exists() or (ROOT / names[0]).exists() or len(names) > 2 or typed):
+            out.append(p)
+        elif len(names) == 1 and code and typed:
+            out.append(p)
+    return out
+
+
+def missing(doc, text=None):
+    """The paths a doc names (named_paths) that are not in the repository: beside the doc or at its top, or as the
+    end of one of its paths (a file of a folder the doc names before it: the plugin's engine/thimble.py), or that its
+    build makes there (git ignores those: frontend/dist)."""
+    at = (ROOT / doc).parent
+    files = ["/" + f for f in tracked()]
+    out = []
+    for p in named_paths(doc, text):
+        if (at / p).exists() or (ROOT / p).exists():
+            continue
+        if "/" in p and any(f.endswith("/" + p) or f"/{p}/" in f for f in files):
+            continue
+        if any(subprocess.run(["git", "check-ignore", "-q", q], cwd=ROOT).returncode == 0 for q in (str(at / p), f"{at / p}/")):
+            continue
+        out.append(p)
+    return out
+
+
+def test_every_path_the_install_docs_name_is_in_the_repository():
+    """The docs an install reads name only files that are in the repository, so that Claude, which reads them first
+    when it installs thimble, never looks for one that is not there. The check sees a path wherever a doc names it: a
+    mistyped folder, a link with an anchor, a file of any type the repository has, and a path in plain text."""
+    names = {doc: named_paths(doc) for doc in INSTALL_DOCS}
+    assert "examples/sample/runs.csv" in names["CLAUDE.md"] and "INSTALL.md" in names["README.md"]
+    assert "docs/assets/thimble-banner.svg" in names["README.md"] and "engine/thimble.py" in names["INSTALL.md"]
+    gone = {doc: missing(doc) for doc in INSTALL_DOCS}
+    assert not any(gone.values()), "; ".join(f"{doc} names {', '.join(ps)}, not in the repository" for doc, ps in gone.items() if ps)
+    made_up =("Run `plugins/bin/thimble`, read [the notes](INSTAL.md#update) and `pyproject.toml`, and see\n"
+               "docs/missing.png, then [the steps](INSTALL.md#update) and `refs/thimble/` and path/to/folder.\n")
+    assert sorted(missing("CLAUDE.md", made_up)) == ["INSTAL.md", "docs/missing.png", "plugins/bin/thimble", "pyproject.toml"]
+
+
+def test_claude_knows_0_9_by_what_the_install_script_finds():
+    """Claude's install steps (CLAUDE.md, step 2) know thimble 0.9 by what scripts/install.sh finds and says, and name
+    no file in the person's home as its sign for Claude to look for first: on a machine without 0.9 that look ends the
+    install's first steps in a red "Exit code 1", and the install of 0.10 makes ~/.local/bin/thimble too (a link to its
+    own command), which the script tells from 0.9's."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 2. thimble 0.9 is here", 1)[1].split(" 3. ", 1)[0]
+    when = step.split("Before you remove anything", 1)[0]
+    assert "`scripts/install.sh` (step 3) stops with what it found" in when and "~/" not in when, when

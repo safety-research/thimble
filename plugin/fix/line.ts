@@ -36,8 +36,9 @@
 //                                         prompt, and the line goes)
 //   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it   (until the
 //             ◇ Claude changed no code: <title> stays as it was   (a round of a fix the person has)    next prompt)
-//   update    ↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit it · thimble reloaded   (until the next
-//             prompt: at session start, once the kernel put back the fixes an update set aside)
+//   update    ↑ thimble 0.10.6 · 2 fixes on again · 1 off: it does not fit 0.10.6 · thimble reloaded   (until the
+//             next prompt: at session start, once the kernel checked the fixes an update set aside and put back those
+//             that fit)
 //   release   ↑ thimble 0.10.3 is out (you have 0.10.2) · thimble update in a shell   (at session start)
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
 //
@@ -75,6 +76,13 @@ export async function fixKey($: Engine, k: string): Promise<{ later: () => Promi
   const l = await fixLineNow($)
   if (!l || !keysOf(l, l.kind === 'failed' ? await fixOf($, l.id) : null).includes(k)) return null
   return { later: () => pressLine($, l.id, l.kind, k) }
+}
+
+/** The keys the line takes now, while it shows, which it names itself: nothing else names them (core/answerview.ts
+ *  heldKeys), as a key at an empty prompt reaches the line before the tray or a card (hooks/keys.ts). */
+export async function fixHeld($: Engine): Promise<string[]> {
+  const l = await fixLineNow($)
+  return l ? keysOf(l, l.kind === 'failed' ? await fixOf($, l.id) : null) : []
 }
 
 /** A failed fix's view after d as the bar last drew it: whether its keys showed, which they do only while the prompt box

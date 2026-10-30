@@ -2,6 +2,7 @@
 as a browser chat running as the analyst."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 
@@ -128,8 +129,8 @@ async def test_an_example_keeps_each_quote_of_a_record_whose_ref_stays_as_given(
 def _trajectory(data, trial: str, said: list[str]) -> str:
     """An agent trajectory of one trial, as `<job>/<trial>/agent/trajectory.json` holds it (ATIF): a user step, then one
     agent step per message in `said`. Returns its corpus path."""
-    rel = f"hp-kinds-stuck/{trial}/agent/trajectory.json"
-    steps = [{"step_id": 1, "source": "user", "message": "Publish the package to the registry at proxy:4873."}]
+    rel = f"picnic-runs/{trial}/agent/trajectory.json"
+    steps = [{"step_id": 1, "source": "user", "message": "Plan the club picnic in Willow Park for Saturday."}]
     steps += [{"step_id": n, "source": "agent", "message": m} for n, m in enumerate(said, 2)]
     path = data / CORPUS / rel
     path.parent.mkdir(parents=True)
@@ -138,27 +139,71 @@ def _trajectory(data, trial: str, said: list[str]) -> str:
 
 
 async def test_an_example_quotes_several_moments_of_each_trial_and_code_on_it_asks_for_its_refs(group, data_tmp):
-    """A card asked what agents did when they published to a shared registry, quoting why each trial began, what the
-    registry said and how it ended. Its quotes came out as a code card, a Python list of the quotes and a print of them,
-    since the example's refs read as one passage of a record and code given to an example was sent to a card of code,
-    which shows its code. Several quotes of each trial make one example card, and code given to an example is refused
-    with what the card shows instead."""
-    said = ["Let me set up an out-of-band oracle on my own container, then test what I can push into Verdaccio.",
-            "Publish needs auth.",
-            "I could not complete this one, and I want to be precise about why rather than leave a plausible-looking file behind."]
-    trials = [_trajectory(data_tmp, t, said) for t in ("hp-compute-workdir-stuck__MmrWMRE", "hp-registry__QkTzPaw")]
-    quotes = ["out-of-band oracle", "Publish needs auth.", "I could not complete this one"]
-    r = await call("add_card", group, kind="example", question="What happened when agents tried to publish a package?",
+    """An example of several passages of each of two trials' trajectories is one example card that keeps each quote by
+    its line, and one passage named by its JSON pointer keeps the pointer. Code given to an example is refused with the
+    field the card shows, `refs`, rather than sent to a card of code, which shows its code above what it prints."""
+    said = ["The forecast says rain until noon, so the picnic could start at one instead.",
+            "The shelter by the lake seats twenty, and the club has eighteen names on its list.",
+            "I am done: the lake shelter is booked for one o'clock and the guest list went out."]
+    trials = [_trajectory(data_tmp, t, said) for t in ("picnic-lake__RvtmQxa", "picnic-hill__GdsaPwe")]
+    quotes = ["start at one instead", "The shelter by the lake seats twenty", "I am done"]
+    r = await call("add_card", group, kind="example", question="Where and when did each agent plan the picnic?",
                    refs=[{"ref": t, "quote": q} for t in trials for q in quotes])
     refs = notebook.get_cell(CORPUS, _cid(r))["payload"]["refs"]
     assert len(refs) == 6 and all(ref.startswith(trials[i // 3] + "#L") for i, ref in enumerate(refs)), refs
     # one passage of one step, by its JSON pointer, keeps the pointer and the quote beside it
-    r = await call("add_card", group, kind="example", question="Why did the first trial stop?",
-                   refs=[{"ref": f"{trials[0]}#/steps/3", "quote": "I could not complete this one"}])
-    assert notebook.get_cell(CORPUS, _cid(r))["payload"] == {"refs": [f"{trials[0]}#/steps/3"], "quotes": ["I could not complete this one"]}
+    r = await call("add_card", group, kind="example", question="How did the first trial end?",
+                   refs=[{"ref": f"{trials[0]}#/steps/3", "quote": "I am done"}])
+    assert notebook.get_cell(CORPUS, _cid(r))["payload"] == {"refs": [f"{trials[0]}#/steps/3"], "quotes": ["I am done"]}
     code = "ex = [(%r, %r)]\nfor trial, why in ex:\n    print(trial, why)" % (trials[0], said[0])
     r = await call("add_card", group, kind="example", question="Why?", code=code, refs=trials)
     assert r.is_error and "`refs`" in r.text and "card of code" not in r.text, r.text
+
+
+async def test_the_example_a_card_of_code_that_printed_quotes_should_be_is_a_new_card(group, data_tmp):
+    """A card of code printed two trials' quotes as a Python list. edit_card does not change a card of code into an
+    example: given an example's refs, with the kind or without it, it says to add a new card and leaves the card's code
+    as it was, and add_card makes the example from the same refs."""
+    said = ["The forecast says rain until noon, so the picnic could start at one instead.",
+            "The shelter by the lake seats twenty, and the club has eighteen names on its list."]
+    trials = [_trajectory(data_tmp, t, said) for t in ("picnic-lake__RvtmQxa", "picnic-hill__GdsaPwe")]
+    code = "quotes = [%r, %r]\nfor q in quotes:\n    print(q)" % tuple(said)
+    cid = _cid(await call("add_card", group, kind="code", question="What did the agents say about the weather?", code=code))
+    refs = [{"ref": t, "quote": "start at one instead"} for t in trials]
+    for args in ({"kind": "example", "refs": refs}, {"refs": refs}):
+        r = await call("edit_card", group, card=f"card:{cid}", **args)
+        assert r.is_error and tools.hint("edit_card-kind", cid=cid, kind="code", new="example") in r.text, r.text
+        assert notebook.get_cell(CORPUS, cid)["code"] == code
+    made = _cid(await call("add_card", group, kind="example", question="What did the agents say about the weather?",
+                           refs=refs))
+    assert [ref.split("#")[0] for ref in notebook.get_cell(CORPUS, made)["payload"]["refs"]] == trials
+
+
+async def test_a_card_deleted_while_its_code_runs_stays_deleted(group, monkeypatch):
+    """A card deleted while its code still runs is not written back when the run ends: the run's result goes back to
+    its caller, and the group holds no such card."""
+    began, release = asyncio.Event(), asyncio.Event()
+
+    async def started(k, workspace, kernel=None) -> None:
+        return None
+
+    async def run(k, code, kind, timeout_s, extra_exprs=None):
+        began.set()
+        await release.wait()
+        return [{"text/plain": "the picnic starts at one"}], 7, "ok"
+
+    monkeypatch.setattr(notebook, "_ensure_started", started)
+    monkeypatch.setattr(notebook, "_run_card_code", run)
+    adding = asyncio.create_task(call("add_card", group, kind="code", question="When does the picnic start?",
+                                      code="print('the picnic starts at one')"))
+    await asyncio.wait_for(began.wait(), 10)
+    ws = config.workspace_dir(CORPUS)
+    (cid,) = [c["id"] for c in notebook.read_notebook(ws, group)["cells"] if c.get("title") == "When does the picnic start?"]
+    assert not (await call("delete_card", group, card=f"card:{cid}")).is_error
+    release.set()
+    r = await adding
+    assert "the picnic starts at one" in r.text, r.text
+    assert notebook.find_cell(ws, cid) is None
 
 
 async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):

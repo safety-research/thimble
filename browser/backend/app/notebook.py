@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
+import contextvars
 import copy
 import fcntl
 import hashlib
@@ -50,7 +51,7 @@ from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from . import cite, config, frames, kernel_wrap, ledger, page_fonts, procs, srt, view_calls
-from .ledger import atomic_write_text, read_json, unlinked, write_json
+from .ledger import atomic_write_text, read_json, write_json
 
 log = logging.getLogger("thimble.notebook")
 
@@ -118,23 +119,8 @@ def kernel_env_of(env: Any) -> dict[str, str]:
     return {k: v for k, v in env.items() if not k.startswith(_SECRET_ENV_PREFIXES) and not _SECRET_ENV_RE.search(k)}
 
 
-SCRATCH_DIR = "scratch"  # workspace-relative: the kernels' cwd, a symlink mirror of the corpus plus what cells write
+SCRATCH_DIR = "scratch"  # workspace-relative: the kernels' cwd, a link per entry of the corpus plus what cells write
 VCS_DIR = ".git"  # left out of the mirror (mirror_corpus)
-
-
-MIRRORS_DIR = "mirrors"  # under thimble's home, which no kernel reads or writes: each scratch mirror's manifest
-
-
-def _mirror_manifest(scratch: Path) -> Path:
-    return _home() / MIRRORS_DIR / f"{hashlib.sha1(str(scratch.resolve()).encode()).hexdigest()[:16]}.json"
-
-
-def _dir_mtime_ns(path: Path, follow: bool = False) -> int | None:
-    try:
-        st = os.stat(path, follow_symlinks=follow)
-    except OSError:
-        return None
-    return st.st_mtime_ns if stat.S_ISDIR(st.st_mode) else None
 
 
 def _drop_dangling(p: Path) -> None:
@@ -143,28 +129,42 @@ def _drop_dangling(p: Path) -> None:
             p.unlink()
 
 
-def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str], dirs: tuple[str, ...] = ()) -> None:
-    """One folder of the mirror: a link in `dest` to each of `names` in `src` (`links`, the names that are links in the
+def _unmirror(src: Path, dest: Path) -> bool:
+    """Whether the real folder `dest` went, as one the per-file mirror of earlier versions left for the corpus folder
+    `src`: a folder for it and for each folder under it, holding nothing but a link to each of their files. Such a
+    folder goes, so that the corpus folder's own link can take its place; one that holds anything else, such as a file
+    a cell wrote, is the kernel's and stays as it is. False at once unless both are folders."""
+    if os.path.islink(dest) or not (os.path.isdir(src) and os.path.isdir(dest)):
+        return False
+    for root, dirs, files in os.walk(dest):  # the walk enters the real folders, not a link to one
+        here = src / os.path.relpath(root, dest)
+        for name in [*files, *(d for d in dirs if os.path.islink(os.path.join(root, d)))]:
+            try:
+                if os.readlink(os.path.join(root, name)) != str(here / name):
+                    return False
+            except OSError:  # not a link: a file a cell wrote
+                return False
+    shutil.rmtree(dest, ignore_errors=True)
+    return not os.path.lexists(dest)
+
+
+def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str]) -> None:
+    """The mirror's links: a link in `dest` to each of `names` in `src` (`links`, the names that are links in the
     corpus, only while their target exists), re-pointed when it points elsewhere, and the links in `dest` whose target
-    is gone removed. A real entry under a corpus name is the kernel's and stays. A link to `src`'s entry under the name of
-    one of its folders `dirs` (a corpus file that became a folder) is removed, so the folder can be mirrored."""
+    is gone removed. A real entry under a corpus name is the kernel's and stays, unless it is a folder an earlier
+    version's mirror left there (_unmirror)."""
     have: dict[str, bool] = {}  # name in dest -> whether it is a link
     with contextlib.suppress(OSError), os.scandir(dest) as it:
         for e in it:
             have[e.name] = e.is_symlink()
-    for name in dirs:
-        if have.get(name):
-            with contextlib.suppress(OSError):
-                if os.readlink(dest / name) == str(src / name):
-                    (dest / name).unlink()
     for name in names:
         target = src / name
         if name in links and not os.path.exists(target):
             continue
         is_link = have.get(name)
-        if is_link is False:
-            continue  # a real file the kernel wrote under a corpus file's name: left as it is
         link = dest / name
+        if is_link is False and not _unmirror(target, link):
+            continue  # a real entry the kernel made under a corpus name: left as it is
         if is_link:
             try:
                 if os.readlink(link) == str(target):
@@ -183,116 +183,37 @@ def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str
 
 
 def mirror_corpus(corpus: Path, scratch: Path) -> None:
-    """Make `scratch` mirror the tree under `corpus`: every corpus directory a real directory, every file a symlink, so
-    a kernel with `scratch` as cwd reads the corpus by the same relative paths and writes only into `scratch`.
-    Idempotent: entries the kernel created are left alone, dangling symlinks removed, moved targets re-pointed.
-
-    The corpus's folders come from corpus_walk, and a manifest under thimble's home keeps, for each folder mirrored,
-    its mtime and its scratch folder's mtime as they were right after: a folder whose two mtimes are unchanged is
-    skipped without reading either, so mirroring an unchanged corpus costs two stats per folder. A folder that holds
-    links is mirrored on every pass, since a link's target comes and goes without its folder's mtime moving. Without a
-    manifest for this corpus, the dangling links anywhere in `scratch` are removed first, as no record says which
-    corpus folders went. Blocking."""
-    from . import corpus_walk  # noqa: PLC0415
-
+    """Make `scratch` show the corpus by the same relative paths: a link in `scratch` to each entry of the corpus
+    folder, so a kernel with `scratch` as cwd reads every corpus file through the link of the entry it lies under, and
+    what it writes beside those links stays in `scratch`; a write under a folder's link reaches the corpus, which the
+    kernel's sandbox keeps read-only. A folder is one link, whatever it holds: a pass lists the corpus folder alone, so
+    a corpus of a million files costs what one of ten does; what changes below an entry shows at once, and an entry
+    added to the corpus folder or gone from it at the next pass. Seen from the cwd each folder is a link, which glob's
+    `**` follows and os.walk and pathlib's rglob do not. Idempotent: entries the kernel created are left alone,
+    dangling links removed, links that point elsewhere re-pointed, and a folder the per-file mirror of earlier versions
+    left becomes its link (_unmirror). Blocking."""
     corpus = corpus.resolve()
     scratch.mkdir(parents=True, exist_ok=True)
-    manifest = _mirror_manifest(scratch)
-    try:
-        saved = read_json(manifest, None)
-    except (OSError, ValueError):
-        saved = None
-    done: dict[str, list[int]] = {}
-    if isinstance(saved, dict) and saved.get("corpus") == str(corpus) and isinstance(saved.get("dirs"), dict):
-        done = {k: v for k, v in saved["dirs"].items() if isinstance(v, list) and len(v) == 2}
-    if not done:
-        for root, dirs, files in os.walk(scratch):
-            for name in [*files, *dirs]:
-                _drop_dangling(Path(root) / name)
-    # a corpus that is a git repository keeps its objects under .git, never data for a card
-    tree = corpus_walk.walk(corpus, frozenset({VCS_DIR}))
-    kept: dict[str, list[int]] = {}
-    skipped: set[str] = set()
-    for rel, folder in tree.items():
-        if rel and rel.rpartition("/")[0] in skipped:
-            skipped.add(rel)
-            continue
-        dest = scratch / rel if rel else scratch
-        now: int | None = None
-        try:
-            st = os.stat(dest, follow_symlinks=not rel)
-        except FileNotFoundError:
-            dest.mkdir()
-        else:
-            if not stat.S_ISDIR(st.st_mode):
-                skipped.add(rel)  # a kernel-made file where the corpus has a directory: the kernel's entry wins
+    names: list[str] = []
+    links: set[str] = set()
+    with contextlib.suppress(OSError), os.scandir(corpus) as it:
+        for e in it:
+            if e.name == VCS_DIR:  # a corpus that is a git repository keeps its objects there, never data for a card
                 continue
-            now = st.st_mtime_ns
-        was = done.get(rel)
-        if was is not None and not folder.racy and not folder.links and was == [folder.mtime_ns, now]:
-            kept[rel] = was
-            continue
-        _mirror_folder(corpus / rel if rel else corpus, dest, folder.file_names(), folder.link_names(), folder.dirs)
-        for sub in folder.dirs:  # made now, so that the mtime kept below is the one the next pass finds
-            with contextlib.suppress(FileExistsError):
-                (dest / sub).mkdir()
-        after = _dir_mtime_ns(dest, follow=not rel)
-        # a folder listed in its racy window is kept with times no pass matches: mirrored again, and swept once gone
-        kept[rel] = [folder.mtime_ns, after] if not folder.racy and after is not None else [-1, -1]
-    gone = set(done) - set(tree)
-    for rel in gone:
-        parts = rel.split("/")
-        if any("/".join(parts[:i]) in gone for i in range(1, len(parts))):
-            continue
-        top = scratch / rel
-        try:
-            unlinked(scratch, top)
-        except ValueError:
-            continue
-        if top.is_symlink():
-            continue  # a kernel's link in place of the folder: what it points at is not the mirror's
-        for root, dirs, files in os.walk(top):  # the corpus folder is gone, and so are its files
-            for name in [*files, *dirs]:
-                _drop_dangling(Path(root) / name)
-    try:
-        manifest.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(manifest, json.dumps({"corpus": str(corpus), "scratch": str(scratch.resolve()), "dirs": kept},
-                                               separators=(",", ":")))
-    except OSError:
-        log.warning("scratch mirror: its manifest %s could not be written", manifest)
-    _prune_manifests(manifest)
-
-
-_manifests_pruned = False
-
-
-def _prune_manifests(keep: Path) -> None:
-    """Remove, once per server run, the manifests of scratch mirrors that are gone, such as a deleted workspace's."""
-    global _manifests_pruned
-    if _manifests_pruned:
-        return
-    _manifests_pruned = True
-    for p in keep.parent.glob("*.json"):
-        if p == keep:
-            continue
-        try:
-            saved = read_json(p, None)
-        except (OSError, ValueError):
-            saved = None
-        where = saved.get("scratch") if isinstance(saved, dict) else None
-        if not isinstance(where, str) or not os.path.isdir(where):
-            with contextlib.suppress(OSError):
-                p.unlink()
+            names.append(e.name)
+            if e.is_symlink():
+                links.add(e.name)
+    _mirror_folder(corpus, scratch, sorted(names), frozenset(links))
 
 
 MIRROR_MEMO_S = 30.0  # a mirror this recent serves the next kernel's start too
 _mirrored: dict[Path, float] = {}  # scratch dir -> when its mirror last ran (monotonic)
-_mirror_lock = threading.Lock()  # kernels that start together wait for one walk
+_mirror_lock = threading.Lock()  # kernels that start together wait for one pass
 
 
 def scratch_dir(workspace: str, corpus: Path | None = None, *, fresh: bool = False) -> Path:
     """workspaces/<c>/scratch, mirrored over the corpus and returned: every kernel's cwd. Blocking; kernels starting
-    within MIRROR_MEMO_S of the last mirror reuse it rather than walking the corpus again, unless `fresh`."""
+    within MIRROR_MEMO_S of the last mirror reuse it rather than listing the corpus folder again, unless `fresh`."""
     scratch = config.workspace_dir(workspace) / SCRATCH_DIR
     with _mirror_lock:
         last = _mirrored.get(scratch)
@@ -1120,9 +1041,10 @@ INTERRUPTED_EVALUE = "thimble stopped while this card ran; run it again"
 
 def mark_interrupted_cells(root: Path | None = None) -> list[str]:
     """Server start: a cell stored `running` was mid-run when the previous server went away, and nothing will write its
-    result. Mark each such cell errored with one Interrupted output (code, title and place stay), and end a pending card
-    check the same way. Reads every workspace under `root` directly, and writes changed notebooks back atomically under
-    the store's lock. Returns `<workspace>/<notebook>/<cell>` per cell marked."""
+    result. Mark each such cell errored with one Interrupted output (code, title and place stay), end a pending card
+    check the same way, and show a card held for its measure or its check (card_fit) as it stands. Reads every
+    workspace under `root` directly, and writes changed notebooks back atomically under the store's lock. Returns
+    `<workspace>/<notebook>/<cell>` per cell marked."""
     from . import checkstore  # noqa: PLC0415 — checkstore imports this module
 
     root = config.WORKSPACES_DIR if root is None else root
@@ -1155,6 +1077,10 @@ def _mark_interrupted(p: Path, checkstore: Any) -> list[str]:
         if checkstore.interrupted(cell):
             changed = True
             marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')} (its check)")
+        # a card held for its measure or its check (card_fit) shows as it stands: neither comes for it now
+        if cell.pop(HELD, None) is not None:
+            changed = True
+            marked.append(f"{p.parent.parent.name}/{p.stem}/{cell.get('id')} (held)")
         if cell.get("status") != "running":
             continue
         cell.update(status="error", outputs=[_error_bundle(INTERRUPTED_ENAME, INTERRUPTED_EVALUE)], ts=_now())
@@ -1467,6 +1393,7 @@ def insert_cell(workspace: str, nb_id: str, cell: dict, after: str | None = None
                 idx = i + 1
                 break
     nb["cells"].insert(idx, cell)
+    _while_measured(cell)
     save_notebook(workspace, nb)
     _emit(workspace, cell)
     return cell
@@ -1532,6 +1459,8 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
         cell["starred"] = bool(starred)
     if "pos" in layout:
         cell["pos"] = pos_of(layout["pos"])
+    if code is not None or payload is not None:
+        _while_measured(cell)
     write_notebook(ws, nb)
     _emit(workspace, cell)
     if locked is not None and bool(locked) != was_locked:
@@ -1558,6 +1487,44 @@ def drop_payload_key(workspace: str, cell_id: str, key: str) -> bool:
     write_notebook(ws, nb)
     _emit(workspace, cell)
     return True
+
+
+HELD = "held"  # a card's record while it waits for its measure, or does not fit and waits for its check (card_fit.py)
+MEASURING_HELD = {"measuring": True}  # the record of a card a tool call made or changed until card_fit measured it
+# set by tools.call around an add_card or edit_card that card_fit measures, to the record the card gets (MEASURING_HELD,
+# with who made it: card_fit.holder): the card the call makes, or whose content it changes, is held from the moment its
+# content is stored, so the canvas never shows a version that does not fit, not even for the moment the measure takes
+MEASURING: contextvars.ContextVar[dict | None] = contextvars.ContextVar("thimble_card_measuring", default=None)
+
+
+def _while_measured(cell: dict) -> None:
+    """A card whose content a tool call stores while MEASURING is held until card_fit measures it, also one held as a
+    version before it that did not fit, so the end of that version's check does not show this one. Not a label card or
+    a plan, which card_fit does not measure."""
+    rec = MEASURING.get()
+    if rec and cell.get("kind") not in ("label", PLAN_KIND):
+        cell[HELD] = dict(rec)
+
+
+def set_held(workspace: str, cell_id: str, held: dict | None) -> dict | None:
+    """Card `cell_id` held with the record `held` while it waits for its measure or its check (card_fit.py), or shown
+    again with None, and announced, with no `edited` stamp: the canvas draws a held card as one that still runs. The
+    card as stored; None for a card that is gone."""
+    ws = _ws(workspace)
+    with editing(ws):
+        hit = _locate(ws, cell_id)
+        if hit is None:
+            return None
+        nb, cell = hit
+        if held is None and HELD not in cell:
+            return cell
+        if held is None:
+            cell.pop(HELD, None)
+        else:
+            cell[HELD] = held
+        write_notebook(ws, nb)
+    _emit(workspace, cell)
+    return cell
 
 
 # --- the card's history ---
@@ -2708,6 +2675,7 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
         env = kernel_env()
         env.pop("JPY_PARENT_PID", None)  # no parent poller: the kernel outlives this server
         env.setdefault("MATPLOTLIBRC", str(MATPLOTLIBRC))  # thimble's figure defaults, unless the environment names its own
+        env.update(kernel_wrap.NO_SIDE_WRITES)  # nothing a cell runs writes a cache beside a corpus file it reads
         if wrap == config.KERNEL_WRAP_SRT:
             env = kernel_wrap.srt_env(env, home=k.home)
             await asyncio.to_thread(_fresh_home, k)
@@ -3254,6 +3222,7 @@ async def _execute_cell(workspace: str, nb: dict, cell: dict, kernel: str | None
             else:
                 target.pop("reads_more", None)
         _verify_hook("ran", workspace, current, target)
+        _while_measured(target)
         write_notebook(ws, current)
     _emit(workspace, target)
     return target, (target if stored is outputs else {**target, "outputs": outputs})

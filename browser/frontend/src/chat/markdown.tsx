@@ -13,9 +13,9 @@ import { MarkdownCode } from '../components/Code'
 import { findQuote } from '../lib/quoteFind'
 import { plainQuote, type AnswerMark } from './answerComments'
 import { MdImage } from '../components/MdImage'
-import { GlyphCites, RefChip } from '../components/RefChip'
+import { GlyphCites, RefChip, ShownTogether } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
-import { parseRef, shownValue, splitValueRef } from '../lib/refs'
+import { parseRef, refPaths, shownValue, splitValueRef } from '../lib/refs'
 import { Mark, MarkItems } from '../marks/Mark'
 import { asChecked, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
@@ -25,7 +25,8 @@ export interface ChipCtx {
   broken: ReadonlySet<string>
   /** the failure per broken ref */
   why?: ReadonlyMap<string, string>
-  /** the chips carry `data-anchor` (chat prose, where a ⌘-click may start a thread from a chip) */
+  /** the chips and the marks' words carry `data-anchor` (chat prose, where a ⌘-click may start a thread from a chip or a
+   * citation) */
   anchor?: boolean
 }
 
@@ -142,7 +143,7 @@ function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
   const value = (props as Record<string, unknown>)['data-value']
   if (typeof ref === 'string' && typeof value === 'string') {
     const item = cardCitationMark(ref, value, ctx.broken.has(ref) ? (ctx.why?.get(ref) ?? '') : null)
-    if (item) return <Mark k={-1} item={item}>{shownValue(value)}</Mark>
+    if (item) return <Mark k={-1} item={item} anchor={ctx.anchor}>{shownValue(value)}</Mark>
   }
   if (typeof ref === 'string') {
     const broken = ctx.broken.has(ref)
@@ -205,8 +206,9 @@ function wrapPieces(pieces: Piece[], at: number, end: number, m: AnswerMark): vo
   }
 }
 
-/** rehype plugin: each passage of `marks` (a check's comment on this answer) found in the drawn words of one block is
- * wrapped in <mark class="answer-tint"> in its check's color; a passage not found draws nothing. */
+/** rehype plugin: each passage of `marks` (a check's comment on this answer) found in the drawn words of one block has
+ * its words, or all of it when the mark names none, wrapped in <mark class="answer-tint"> in its check's color; a
+ * passage not found draws nothing. */
 export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {}) {
   return (tree: Root) => {
     const marks = options.marks ?? []
@@ -216,9 +218,11 @@ export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {
       if (!q) continue
       for (const b of blocksOf(tree)) {
         const pieces = piecesOf(b)
-        const at = findQuote(pieces.map((p) => p.text).join(''), q)
+        const text = pieces.map((p) => p.text).join('')
+        const at = findQuote(text, q)
         if (!at) continue
-        wrapPieces(pieces, at[0], at[1], m)
+        const words = m.words ? findQuote(text.slice(at[0], at[1]), plainQuote(m.words)) : null
+        wrapPieces(pieces, at[0] + (words?.[0] ?? 0), words ? at[0] + words[1] : at[1], m)
         break
       }
     }
@@ -255,8 +259,9 @@ function MdMark(props: JSX.IntrinsicElements['mark'] & ExtraProps) {
 }
 
 function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
+  const ctx = useContext(ChipContext)
   const mark = MARK_HREF.exec(props.href ?? '')
-  if (mark) return <Mark k={Number(mark[1])}>{props.children}</Mark>
+  if (mark) return <Mark k={Number(mark[1])} anchor={ctx.anchor}>{props.children}</Mark>
   const { node: _node, ...rest } = props
   return <a {...rest} target="_blank" rel="noreferrer" />
 }
@@ -282,31 +287,42 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { 
 /** Assistant markdown with chips and marks. `streaming`: the text is still growing and renders per completed block.
  * `checks`: what the check found of each of its marks, by their order in the text. `marks`: the passages the checks
  * commented on, tinted (rehypeAnswerMarks). A bare citation in it is its target's glyph alone, its name in the hover,
- * as in a card, and a card's its chip with the card's name (components/RefChip GlyphCites). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[] }) {
+ * as in a card, and a card's its chip with the card's name (components/RefChip GlyphCites). Its file chips are told
+ * apart from each other and from `among`, the records shown with it (an example card's, under its takeaway). */
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks, among }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[]; among?: readonly unknown[] }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
   // once checked, the text reads as the check left it: its rewritten sentences and corrected words in place
   const read = useMemo(() => (checks && !streaming ? asChecked(text, checks) : { text, checks: checks ?? [] }), [text, checks, streaming])
+  // the files shown together, one per line (no path holds a line break), so the chips change only when they do
+  const shown = refPaths([...(among ?? []), ...tokenRefs(read.text)]).join('\n')
+  const together = useMemo(() => (shown ? shown.split('\n') : []), [shown])
   // each mark's href names its order in the whole text, so a block cut from it still finds its check
   const marked = withMarkHrefs(read.text)
   return (
     <MarkItems.Provider value={{ items: read.checks, streaming: !!streaming }}>
       <GlyphCites.Provider value={true}>
-        {!chunked && !streaming ? (
-          <MarkdownBlock text={marked} marks={marks} />
-        ) : (
-          splitMarkdownBlocks(marked).map((chunk, i) => (
-            <Fragment key={i}>
-              {i > 0 && '\n'}
-              <MarkdownBlock text={chunk} marks={marks} />
-            </Fragment>
-          ))
-        )}
+        <ShownTogether.Provider value={together}>
+          {!chunked && !streaming ? (
+            <MarkdownBlock text={marked} marks={marks} />
+          ) : (
+            splitMarkdownBlocks(marked).map((chunk, i) => (
+              <Fragment key={i}>
+                {i > 0 && '\n'}
+                <MarkdownBlock text={chunk} marks={marks} />
+              </Fragment>
+            ))
+          )}
+        </ShownTogether.Provider>
       </GlyphCites.Provider>
     </MarkItems.Provider>
   )
 })
+
+/** The refs of the `[[…]]` citations in `text`, whose file chips are told apart (lib/refs runFolder). */
+function tokenRefs(text: string): string[] {
+  return text.includes('[[') ? [...text.matchAll(BRACKET_RE)].map((m) => splitValueRef(m[1].trim()).ref) : []
+}
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/
 const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/
@@ -352,10 +368,12 @@ export function splitMarkdownBlocks(text: string): string[] {
   return chunks
 }
 
-/** Plain text as typed, with only the `[[ref]]` tokens turned into chips. `cite`: the text is the model's prose (an
- * aside), so a bare ref is a citation, its target's glyph alone as in a reply (ChatMarkdown). */
+/** Plain text as typed, with only the `[[ref]]` tokens turned into chips, its file chips told apart as a reply's are.
+ * `cite`: the text is the model's prose (an aside), so a bare ref is a citation, its target's glyph alone as in a reply
+ * (ChatMarkdown). */
 export function RefText({ text, workspace, cite = false }: { text: string; workspace: string; cite?: boolean }): ReactNode {
   const ctx = useContext(ChipContext)
+  const together = useMemo(() => refPaths(tokenRefs(text)), [text])
   const parts: (string | { ref: string; value?: string })[] = []
   let last = 0
   for (const m of text.matchAll(TOKEN_RE)) {
@@ -365,8 +383,12 @@ export function RefText({ text, workspace, cite = false }: { text: string; works
     last = at + m[0].length
   }
   if (last < text.length) parts.push(text.slice(last))
-  const shown = parts.map((p, i) =>
-    typeof p === 'string' ? <Fragment key={i}>{p}</Fragment> : <RefChip key={i} ref={p.ref} value={p.value} compact anchor={ctx.anchor} workspace={workspace} cite={cite} />,
+  const shown = (
+    <ShownTogether.Provider value={together}>
+      {parts.map((p, i) =>
+        typeof p === 'string' ? <Fragment key={i}>{p}</Fragment> : <RefChip key={i} ref={p.ref} value={p.value} compact anchor={ctx.anchor} workspace={workspace} cite={cite} />,
+      )}
+    </ShownTogether.Provider>
   )
-  return cite ? <GlyphCites.Provider value={true}>{shown}</GlyphCites.Provider> : <>{shown}</>
+  return cite ? <GlyphCites.Provider value={true}>{shown}</GlyphCites.Provider> : shown
 }

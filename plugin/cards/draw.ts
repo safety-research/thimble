@@ -5,12 +5,15 @@
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
 //   frame         the card's frame: its title (a click asks about the card) and, at its right, `a ask · p artifact`
-//                 (the question names the item selected, when one is), the Client (a click on an item selects it as
-//                 its key does; on other words, asks about them: client.tsx, runner.mjs pick; a drawing taller than
-//                 CARD_ROWS + 1 shows CARD_ROWS rows and `+N rows` under them, a click on which opens the rest), a failure; left of it, the
+//                 (the question names the item selected, when one is; a letter only where its key reaches the card:
+//                 none while what holds the keys takes it, core/answerview.ts heldKeys), the Client (a click on an
+//                 item selects it as its key does; on other words, asks about them: client.tsx, runner.mjs pick; a
+//                 drawing taller than CARD_ROWS + 1 shows CARD_ROWS rows and `+N rows` under them, a click on which
+//                 opens the rest), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
-//                 cardHidden)
+//                 cardHidden); for a card that waits for the card check (cards/fit.ts), its title and the Client's
+//                 `drawing…` alone, and no keys
 //   framesUnder   the frames of the cards drawn under an answer
 //   askCard       a request to the runner about a card; a card the runner does not hold is loaded from its copy first
 //   applyAnswer   the runner's answer to an event: the new tree on screen, the state on disk, a failure said
@@ -37,7 +40,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
-import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
+import { cardAsk, cardHidden, heldKeys, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords, titleWords } from '../core/selection'
 import { cut } from '../core/text.js'
@@ -286,7 +289,8 @@ function cardKeys(m: CardMeta, own: string[]): string[] {
 /** The card a key at an empty prompt goes to: among the cards on screen, the focused card when it lists the key, else
  *  the newest that lists it; null when no card does, and the key is typed. A card is on screen when its frame was
  *  drawn since the plugin loaded and the screen shows it now (noteShown), so a card scrolled out of view, and one a
- *  resumed session no longer shows, takes no keys. No card gets one of thimble's own keys (cardKeys). */
+ *  resumed session no longer shows, takes no keys, nor does one that waits for the card check (cards/fit.ts). No
+ *  card gets one of thimble's own keys (cardKeys). */
 export async function keyOwner($: Engine, key: string): Promise<CardMeta | null> {
   const own = ownKeys()
   // a key press reads what cards/store.ts keeps of the cards, no state
@@ -294,7 +298,7 @@ export async function keyOwner($: Engine, key: string): Promise<CardMeta | null>
   for (const id of await keptSeen($)) {
     if (shown.get(id) === false) continue
     const m = await keptMeta($, id)
-    if (m && m.version > 0 && cardKeys(m, own).includes(key)) metas.push(m)
+    if (m && m.version > 0 && !m.held && cardKeys(m, own).includes(key)) metas.push(m)
   }
   const focus = await keptFocus($)
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
@@ -307,7 +311,7 @@ export async function headOwner($: Engine): Promise<CardMeta | null> {
   for (const id of await keptSeen($)) {
     if (shown.get(id) === false) continue
     const m = await keptMeta($, id)
-    if (m && m.version > 0) metas.push(m)
+    if (m && m.version > 0 && !m.held) metas.push(m)
   }
   const focus = await keptFocus($)
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
@@ -357,7 +361,7 @@ export async function cardKeyWords($: Engine): Promise<{ key: string; words: str
   for (const id of await keptSeen($)) {
     if (shown.get(id) === false) continue
     const m = await keptMeta($, id)
-    if (m && m.version > 0 && cardKeys(m, own).length) metas.push(m)
+    if (m && m.version > 0 && !m.held && cardKeys(m, own).length) metas.push(m)
   }
   if (!metas.length) return []
   const focus = await keptFocus($)
@@ -402,8 +406,9 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   const client = rowsKnown(E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) }), heights.get(meta.id))
   // the line a click or a key selected (`▸`, the card guide's marker): `ask` asks about that part of
   // the card, so a click on a bar and then on those words start a thread about the bar
-  const sel = fault ? null : selectedLine(current?.tree, width)
-  const ask = await cardAsk($, meta.id, meta.title, sel?.text ?? '')
+  const sel = fault || meta.held ? null : selectedLine(current?.tree, width)
+  // a card that waits for the card check has nothing to ask about or make an artifact of yet
+  const ask = meta.held ? null : await cardAsk($, meta.id, meta.title, sel?.text ?? '')
   // the title asks about the whole card when clicked, its words underlined under the pointer
   const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
   const title = E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title })
@@ -413,9 +418,13 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   titleWords(meta.id, row, whole && shown.get(meta.id) !== false ? meta.title : '')
   // at the title's right, in thimble's color, its header's keys: ask (a side thread about the card, whose question
   // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
-  // alone; every card's words are clicks
-  const lettered = (await headOwner($))?.id === meta.id
-  const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
+  // alone, each while its key reaches the card: what holds the keys before the card's header takes a while the tray is
+  // open (a ask in its header) or stands on a card (a ask on the bar), and every key while a click gave the squeeze
+  // chips the keyboard, so each key shows once, where it acts. Every card's words are clicks
+  const owner = (await headOwner($))?.id === meta.id
+  const held = owner ? await heldKeys($, ['a', 'p']) : new Set<string>()
+  const lettered = (key: string) => owner && !held.has('*') && !held.has(key)
+  const word = (key: string, words: string) => [...(lettered(key) ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
   // their words, which a click on one leaves selected: no answer's words while the card is on screen
   // (core/selection.ts)
   controlWords(`card ${meta.id}`, shown.get(meta.id) === false ? [] : ['a ask', 'ask', 'p artifact', 'artifact'], { inRow: true })
@@ -430,7 +439,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
     ...(fault ? [] : [width > inside ? E.Box({ key: 'cut', flexDirection: 'column', width: inside, overflow: 'hidden', children: [client] }) : client]),
   ]
   // a drawing taller than CARD_ROWS: its first rows (the Client's `cap`), then the line that opens the rest
-  const more = fault ? 0 : rowsMore(meta, current?.tree, width)
+  const more = fault || meta.held ? 0 : rowsMore(meta, current?.tree, width)
   if (more) {
     rows.push(E.Button({ key: 'more', plain: true, label: `show the other ${rowsWord(more)} of the card`, hover: quiet(`card-more-${meta.id}`),
       onPress: () => { opened.add(openKey(meta)); $.ui.invalidate('ui.render') },
@@ -662,6 +671,8 @@ function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: The
 /** A Client's props in a frame `room` columns wide: the drawing laid out at that width, or none and the drawing it
  *  needs; `cap`, the rows it shows of a drawing taller than CARD_ROWS whose rest the person has not opened (0: all). */
 function propsAt(meta: CardMeta, t: CardTree | null | undefined, room: number, theme: Theme): Any {
+  // a card that waits for the card check: the Client draws `drawing…`, and asks for no drawing
+  if (meta.held) return { tree: null, width: room, need: '', tint: citeTint('verified', theme), accent: accent(), theme, cap: 0 }
   const d = drawingAt(t, meta.gen, room, theme)
   const cap = rowsMore(meta, d?.tree, room) ? CARD_ROWS : 0
   return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme), tint: citeTint('verified', theme), accent: accent(), theme, cap }

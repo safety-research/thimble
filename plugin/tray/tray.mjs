@@ -5,8 +5,7 @@
 // explainer or a heads-up. What it shows is the top of a stack, so a citation inside an explainer
 // opens over it, and 0 returns to the one under it; 0 on the first closes the tray.
 //
-//   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}), with `open: 'code'` while
-//             a citation's whole code and output show in place of its one line of evidence
+//   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id})
 //   a tray    {stack: [frame, ...]} or null
 //   a stop    what ] and [ move through, in reading order: a mark of a row ({row, kind, n | id, at}) or a card ({row,
 //             card}): drawn under a row (v's), or drawn inline at a call of Claude's, with the row next to it
@@ -26,8 +25,27 @@
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
 //   firstSentence(s)                       a check's reason cut to its first sentence, for a citation's card
+//   printableEvidence(ev)                  a citation's evidence as the terminal draws it: each text of the records in
+//                                          it printable (core/text.js)
 //   evidenceLine(ev)                       the one line of a citation's evidence that holds the cited value
 //   lineWindow(line, room)                 that line cut to `room` characters around the value
+//   printLine(code, out, at), printedBy(ev), printedAt(ev)   the line of a check's code that printed the output's
+//                                          line `at`, and its index in the code (printed.mjs)
+//   outputAt(ev)                           which line of a check's output holds the value
+//   around(n, k, size)                     the window of `size` of `n` lines that keeps line `k` in its middle
+//   partLabel(part, n), TABLE_LABEL, placeLabel(file, line), cardLabel(title)
+//                                          the label over each part of a citation's evidence, in the tray, the side pane
+//                                          and the workbench's evidence label: `code · 7 lines`, `output · 62 lines`,
+//                                          `changes.log · line 3`, `card · Runs by status`
+//   cutWords(n, where), SHOW_ALL           the marker where a drawing leaves lines out: `⋯ 5 lines above`, `⋯ 1 line
+//                                          below`; the key the tray's header names while the tray leaves lines out
+//                                          (`+ show all`)
+//   moreLines(n)                           what the claims pane says under a citation's one line of the lines it leaves
+//                                          out
+import { printable } from '../core/text.js'
+import { printIndex, printLine } from './printed.mjs'
+
+export { printLine }
 
 export const sameRef = (a, b) => !!a && !!b && a.row === b.row && a.kind === b.kind && (a.kind === 'citation' ? a.n === b.n : a.id === b.id)
 
@@ -262,7 +280,8 @@ export function drawsHyperlinks(env = {}) {
 /** A file's address, `file:///…/runs.jsonl#L41`, which a ctrl or cmd click opens on this machine. */
 export function fileHref(abs, line) {
   const n = /^(\d+)/.exec(String(line || ''))
-  return `file://${encodeURI(String(abs)).replace(/#/g, '%23').replace(/\?/g, '%3F')}${n ? `#L${n[1]}` : ''}`
+  // a name with a lone half of a surrogate pair (bytes that are no UTF-8) cannot be put in a link: it takes U+FFFD
+  return `file://${encodeURI(String(abs).toWellFormed()).replace(/#/g, '%23').replace(/\?/g, '%3F')}${n ? `#L${n[1]}` : ''}`
 }
 
 /** A check's reason, its first sentence only: a citation's card says why in one sentence (a decimal point or an
@@ -280,6 +299,39 @@ function inRange(n, line) {
 }
 
 /**
+ * A citation's evidence as the terminal draws it (the tray, the evidence pane, the claims pane): each text of the
+ * records in it printable (core/text.js: what does not print as its escape), its highlights moved to match, so the
+ * lines are laid out and cut as they draw. A check's output, a file's line, a card's rows and a file's name are text
+ * thimble did not write; a byte that does not print among them would make Claude Code refuse the whole drawing.
+ */
+export function printableEvidence(ev) {
+  if (!ev || typeof ev !== 'object') return ev
+  const p = v => (typeof v === 'string' ? printable(v) : v)
+  const out = { ...ev }
+  for (const k of ['code', 'file', 'title', 'card', 'value']) if (typeof ev[k] === 'string') out[k] = printable(ev[k])
+  if (typeof ev.output === 'string') {
+    const o = printable(ev.output, Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h)) : [])
+    out.output = o.text
+    if (Array.isArray(ev.highlight)) out.highlight = o.spans
+  }
+  const t = ev.table
+  if (t && typeof t === 'object') {
+    out.table = { ...t, corner: p(t.corner), cols: Array.isArray(t.cols) ? t.cols.map(p) : t.cols,
+      rows: Array.isArray(t.rows) ? t.rows.map(r => (r && typeof r === 'object' ? { ...r, label: p(r.label), values: Array.isArray(r.values) ? r.values.map(p) : r.values } : r)) : t.rows }
+  }
+  if (Array.isArray(ev.lines)) {
+    out.lines = ev.lines.map(l => {
+      if (!l || typeof l !== 'object') return l
+      if (!Array.isArray(l.highlight)) return { ...l, text: printable(String(l.text ?? '')) }
+      const o = printable(String(l.text ?? ''), [l.highlight])
+      return { ...l, text: o.text, highlight: o.spans[0] }
+    })
+  }
+  if (Array.isArray(ev.more)) out.more = ev.more.map(printableEvidence)
+  return out
+}
+
+/**
  * The one line of a citation's evidence that holds the cited value, with the value's spans in it: for code that
  * computed it, the output line where the first highlight starts (else its first line with words); for a file, the
  * cited line that holds the highlight (else the first cited line). `n`: the file's line number. Null without one.
@@ -291,23 +343,29 @@ export function evidenceLine(ev) {
     return { text, spans: text ? [[0, text.length]] : [] }
   }
   if (ev.kind === 'computed' || ev.kind === 'card') {
-    const out = String(ev.output || '')
-    const lines = out.split('\n')
-    const spans = Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h) && h[1] > h[0]) : []
-    let at = 0
-    for (const text of lines) {
-      const end = at + text.length
-      if (spans.length ? spans[0][0] >= at && spans[0][0] <= end : text.trim()) {
-        const mine = spans.map(([a, b]) => [Math.max(a, at) - at, Math.min(b, end) - at]).filter(([a, b]) => b > a)
-        return { text, spans: mine }
-      }
-      at = end + 1
-    }
-    return lines.length && out ? { text: lines[0], spans: [] } : null
+    const hit = outputHit(ev)
+    return hit ? { text: hit.text, spans: hit.spans } : null
   }
   const lines = Array.isArray(ev.lines) ? ev.lines : []
   const l = lines.find(x => x && x.highlight && inRange(x.n, ev.line)) || lines.find(x => x && x.highlight) || lines.find(x => x && inRange(x.n, ev.line)) || lines[0]
   return l ? { n: l.n, text: String(l.text ?? ''), spans: l.highlight ? [l.highlight] : [] } : null
+}
+
+/** The output line evidenceLine gives for printed output, with its number among the output's lines (`i`). */
+function outputHit(ev) {
+  const out = String(ev.output || '')
+  const lines = out.split('\n')
+  const spans = Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h) && h[1] > h[0]) : []
+  let at = 0
+  for (const [i, text] of lines.entries()) {
+    const end = at + text.length
+    if (spans.length ? spans[0][0] >= at && spans[0][0] <= end : text.trim()) {
+      const mine = spans.map(([a, b]) => [Math.max(a, at) - at, Math.min(b, end) - at]).filter(([a, b]) => b > a)
+      return { i, text, spans: mine }
+    }
+    at = end + 1
+  }
+  return lines.length && out ? { i: 0, text: lines[0], spans: [] } : null
 }
 
 /** The output lines a citation's one-line card leaves out: the lines the code printed (a trailing newline ends the
@@ -318,8 +376,35 @@ export function hiddenOutput(ev, shown = 1) {
   return out ? Math.max(0, out.split('\n').length - shown) : 0
 }
 
-/** What a citation's one-line card says of the output lines it leaves out: `+ 3 more lines`, `+ 1 more line`. */
+/** What a citation's one-line card in the claims pane says of the output lines it leaves out: `+ 3 more lines`, `+ 1
+ *  more line`. */
 export const moreLines = n => `+ ${n} more line${n === 1 ? '' : 's'}`
+
+/** `7 lines`, `1 line`. */
+const lineCount = n => `${n} line${n === 1 ? '' : 's'}`
+
+/** The label over a part of a citation's evidence, its whole size after what it is: `code · 7 lines`, `output · 62
+ *  lines`. The tray, the side pane and the workbench's evidence label each draw it over the part. */
+export const partLabel = (part, n) => `${part} · ${lineCount(n)}`
+
+/** The label over printed output that shows as a table, its header over the cited row (marks/table.mjs): the table is
+ *  all of it that shows, in the side pane too. */
+export const TABLE_LABEL = 'output · table'
+
+/** The label over a file's lines: the file, and the line that holds the cited words (`changes.log · line 3`), or the
+ *  cited lines (`lines 8-11`). */
+export const placeLabel = (file, line) => `${file} · ${/\D/.test(String(line)) ? 'lines' : 'line'} ${line}`
+
+/** The label over a value a card shows: the card, by its title. */
+export const cardLabel = title => `card · ${title}`
+
+/** The marker where a drawing leaves `n` lines out, `above` or `below` the lines it shows beside them: `⋯ 5 lines
+ *  above`, `⋯ 1 line below`. */
+export const cutWords = (n, where) => `⋯ ${lineCount(n)} ${where}`
+
+/** The key the tray's header names among its keys, before `a ask`, while the tray leaves lines out: + and its words,
+ *  all of the mark in the side pane (`+ show all · a ask · 0 close`). */
+export const SHOW_ALL = { key: '+', words: 'show all' }
 
 /** A line cut to `room` characters around its first span when it is longer: the span with as much of the line on each
  *  side as fits, cut between words (inside a word only when no space is left between the cut and the span), with `… ` or ` …` only
@@ -352,42 +437,36 @@ export function lineWindow(line, room) {
   return { ...line, text: head + text.slice(from, to) + tail, spans: moved }
 }
 
-// a line that prints: Python's print, a shell's echo or printf, JavaScript's console.log, a write to stdout
-const PRINTS = /\b(print|printf|println|puts|echo)\b|console\.log|\.write\s*\(/
+// the index printedAt gave for a cited output line, by its line, code and output: the tray and the claims pane draw it
+// again with each frame, and reading a long output takes a while
+const printed = new Map()
 
-/** The words a line of code writes out as they are: its string literals, without what f-strings, `{}`, %, a shell's
- *  `$name` and a template's `${}` fill in. */
-function literalBits(line) {
-  const bits = []
-  for (const m of String(line).matchAll(/(["'])((?:\\.|(?!\1).)*)\1/g)) {
-    for (const part of m[2].split(/\$\{[^{}]*\}|\{[^{}]*\}|\$\w+|%[-+ #0]*\d*(?:\.\d+)?[sdifrxXeEgGc%]|\\[ntr]/)) {
-      const t = part.trim()
-      if (t.length >= 2) bits.push(t)
-    }
+/** Which line of a computed citation's code (its index) printed the output line that holds the value (outputAt), or
+ *  -1 (printed.mjs printIndex). */
+export function printedAt(ev) {
+  if (!ev || ev.kind !== 'computed') return -1
+  const at = outputHit(ev)?.i ?? 0
+  const key = `${at}\u0000${ev.code}\u0000${ev.output}`
+  if (!printed.has(key)) {
+    if (printed.size >= 64) printed.delete(printed.keys().next().value)
+    printed.set(key, printIndex(ev.code, ev.output, at))
   }
-  return bits
+  return printed.get(key)
 }
 
-/**
- * The one line of a check's code that printed an output line: of the lines that print, the one with the most of its own
- * words in that output line (the later one on a tie); else, when no such line's words stand there, the last line that
- * prints values alone (`print(n)`, `echo $x`), which may have printed it; else ''. A line whose own words are not in
- * the output did not print it, so it is never shown above that output (a script's `print("totals")` above another
- * print's line, a trailing `echo $TMPDIR` above the script's output).
- */
-export function printLine(code, out) {
-  const lines = String(code || '').split('\n')
-  const said = String(out || '')
-  let best = -1
-  let most = 0
-  let bare = -1
-  lines.forEach((l, i) => {
-    if (!l.trim() || /^\s*(#|\/\/)/.test(l) || !PRINTS.test(l)) return
-    const bits = literalBits(l)
-    if (!bits.length) { bare = i; return }
-    const n = bits.filter(b => said.includes(b)).reduce((a, b) => a + b.length, 0)
-    if (n > 0 && n >= most) { best = i; most = n }
-  })
-  const i = best >= 0 ? best : bare
-  return i >= 0 ? lines[i].trim() : ''
+/** That line of the code as written, or ''. */
+export function printedBy(ev) {
+  const i = printedAt(ev)
+  return i < 0 ? '' : String(ev.code).split('\n')[i].trim()
+}
+
+/** Which line of a citation's printed output (its index) holds the value, as evidenceLine finds it; -1 without one. */
+export const outputAt = ev => outputHit(ev)?.i ?? -1
+
+/** The window of `size` of `n` lines around line `k`, as [from, to): `k` in its middle (a line more before it than
+ *  after when the size is even), moved in from the ends. */
+export function around(n, k, size) {
+  const s = Math.max(0, Math.min(n, size))
+  const from = Math.max(0, Math.min(Math.max(0, k) - Math.floor(s / 2), n - s))
+  return [from, from + s]
 }

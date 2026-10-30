@@ -12,6 +12,7 @@ import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/
 import { claimsStore, claimsToFind, openClaims } from '../claims/term'
 import { registerPanes } from '../core/pane'
 import { failLineNow } from '../bar/notice'
+import { newReply } from '../marks/store'
 import { resetPrompts } from '../prompts/prompts'
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
@@ -193,7 +194,7 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   expect(String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text)).toContain('“w 3 claims”')
   s.$.ui.open = placing
   await take!.later!()
-  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence', focus: true })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims', focus: true })
   // w again while the side pane shows the claims closes it, as r and l close theirs; once more opens it
   const closed: Any[] = []
   s.$.ui.close = async (o: Any) => { closed.push(o) }
@@ -205,7 +206,7 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   expect(s.opened.length).toBe(opens)
   s.$.ui.panes = async () => []
   await (await claimsKey(s.$, 'w', 0))!.later!()
-  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence', focus: true })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims', focus: true })
   expect(paneNow(s)).toMatchObject({ kind: 'claims' })
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 36 } } }, args, els)
   const keysOf = (pane: Any) => buttons(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
@@ -218,7 +219,7 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   }
   const pane = await draw({})
   const t = textOf(pane)
-  expect(t).toContain('Evidence · 3 claims')
+  expect(t).toContain('Claims · 3')
   expect(t).not.toContain('clusters')
   expect(t).toContain('Turn 2 was not read:')
   // a few claims are drawn as a map too, nothing chosen, nothing under it; no caption, and no words about clicks
@@ -363,6 +364,22 @@ test('a claim with several citations: e shows them; k j make the next one curren
   expect(textOf(await draw({ claim: 'c1', open: true, cite: 0 }, 12))).toBe(before)
 })
 
+test("a claim's citation whose check printed bytes that do not print shows them as their escapes in the claims pane, the value marked", async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([reply([{ claim: '12 of 40 runs failed.', quote: '12 of 40', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'How many runs failed?', rows: ['Of the 40 nightly runs, [12 of 40](#) failed.'] })
+  const output = '\u001b[31m12 failed\u001b[0m, 28 passed\u0000'
+  // the reply's citation as its check left it
+  const sentence = 'Of the 40 nightly runs, [12 of 40](#) failed.'
+  await newReply(s.$, { key: 't1-row-0', turnId: 't1', rows: ['t1-row-0'], startedAt: 0, settledAt: 1, items: [{ n: 1, row: 't1-row-0', words: '12 of 40', start: 24, end: 37, sentence, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'print(r.stdout)', output, highlight: [[output.indexOf('12'), output.indexOf('12') + 9]] } }] })
+  const pane = await drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 40 } } }, { claim: 'c1', open: true }, els)
+  const t = textOf(pane)
+  expect(t).toContain('\\x1b[31m12 failed\\x1b[0m, 28 passed\\x00')
+  expect(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(t)).toBe(false)
+})
+
 test("a narrow pane whose keys wrap: the map and the claim's detail keep to the rows the pane gives, keys included", async () => {
   setOptions({ claimsMode: 'auto' })
   const many = Array.from({ length: 10 }, (_, i) => ({ claim: `Run ${i + 1} failed on a long and slow p95 check of the nightly batch.`, quote: `Run ${i + 1} failed`, cluster: i < 5 ? 'failures' : 'slow runs' }))
@@ -432,7 +449,7 @@ test('w in a terminal too narrow for the pane fails in red with the click on the
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
   await openClaims(s.$)
   await settle()
-  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence' })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims' })
   expect(await line()).toBe('')
   // a pane opened once does not quiet the key: w in the narrow terminal fails again
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
@@ -451,7 +468,7 @@ test("a press on the bar's claims item does what w does: it opens the pane, and 
   s.$.ui.panes = async () => []
   const press = async () => { await (await claimsBar(s.$, () => true, false))[0]!.press!() }
   await press()
-  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence', focus: true })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims', focus: true })
   expect(paneNow(s)).toMatchObject({ kind: 'claims' })
   // the side pane shows the claims: the press closes it, and opens nothing
   s.$.ui.panes = async () => [{ id: 'thimble' }]
@@ -475,8 +492,8 @@ test('while the pane shows the claims the bar names w, though no claim was found
   const closed: Any[] = []
   s.$.ui.close = async (o: Any) => { closed.push(o) }
   s.$.ui.panes = async () => []
-  // an answer waits: w evidence opens the pane
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'evidence']])
+  // an answer waits: w claims opens the pane
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'claims']])
   await (await claimsKey(s.$, 'w', 0))!.later!()
   expect(paneNow(s)).toMatchObject({ kind: 'claims' })
   s.$.ui.panes = async () => [{ id: 'thimble' }]
@@ -487,7 +504,7 @@ test('while the pane shows the claims the bar names w, though no claim was found
   await settle()
   expect((await claimsToFind(s.$)).answers).toBe(0)
   expect((await claimsStore(s.$)).claims).toEqual([])
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'evidence']])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'claims']])
   // w, typed while the pane holds the keyboard, reaches the prompt and closes the pane
   await (await claimsKey(s.$, 'w', 0))!.later!()
   expect(closed).toEqual([{ id: 'thimble' }])
@@ -596,26 +613,26 @@ test("x on a failed citation in the pane checks it again in the background, star
 })
 
 
-test('w in a narrow terminal before any claims names the bar\'s item by the bar\'s words, w evidence', async () => {
+test('w in a narrow terminal before any claims names the bar\'s item by the bar\'s words, w claims', async () => {
   setOptions({ explain: false, details: false })
   const s = setup([])
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
   await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed on the p95 check.'] })
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'evidence']])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'claims']])
   s.$.ui.open = async () => ({ isPlaced: false })
   await openClaims(s.$, {}, true)
-  expect(String((await failLineNow(s.$))?.text)).toBe('w needs a wider terminal: widen the window to show the side pane, or click “w evidence”.')
+  expect(String((await failLineNow(s.$))?.text)).toBe('w needs a wider terminal: widen the window to show the side pane, or click “w claims”.')
   setOptions({})
 })
 
-test("the settings' preview of the bar names w by the bar's words: w evidence before any claim, then the bar's count", async () => {
+test("the settings' preview of the bar names w by the bar's words: w claims before any claim, then the bar's count", async () => {
   setOptions({ claimsMode: 'auto' })
   const said = ['Run 2 failed', 'Run 5 failed', 'Run 6 failed']
   const s = setup([reply(said.map(quote => ({ claim: `${quote}.`, quote, cluster: 'failures' })))])
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
   const drawn = async (preview: boolean) => (await barRows(s.$, els, 100, { on: () => true, preview })).map(textOf).join('\n')
   try {
-    expect(await drawn(true)).toContain('w evidence')
+    expect(await drawn(true)).toContain('w claims')
     await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: [said.map(x => `${x}.`).join(' ')] })
     expect(await drawn(false)).toContain('w 3 claims')
     const preview = await drawn(true)
@@ -661,10 +678,10 @@ test('claims on demand: no look reads them after a reply; w shows the pane with 
   expect(s.forks).toEqual([])
   expect((await claimsStore(s.$)).claims).toEqual([])
   // the bar names the pane, with no count, once an answer waits
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'evidence']])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'claims']])
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)
   const empty = await draw({})
-  expect(textOf(empty)).toContain('Evidence · no claims yet')
+  expect(textOf(empty)).toContain('Claims · none yet')
   expect(textOf(empty)).not.toContain('to save tokens')
   const f = buttons(empty).find(b => b.hotkey === 'f')
   expect([f?.key, f?.label]).toEqual(['claims-find', 'extract claims'])
@@ -802,7 +819,7 @@ test('while the look after a reply reads the claims, the pane says they are bein
   for (let i = 0; i < 100 && !(await claimsStore(s.$)).claims.length; i++) await settle()
   await settle()
   const after = await draw()
-  expect(textOf(after)).toContain('Evidence · 1 claim')
+  expect(textOf(after)).toContain('Claims · 1')
   expect(textOf(after)).not.toContain('Finding')
   expect(buttons(after).some(b => b.hotkey === 'f')).toBe(false)
   // the load before this one was finding claims when it stopped: with no look of the claims queued again, the pane

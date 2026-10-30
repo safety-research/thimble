@@ -285,9 +285,8 @@ async def turn(conv: Any, text: str) -> Any:
             _save(path, messages)
             blocks, server_results = runtime_tools.server_blocks_to_records(content)
             usage = final.usage.model_dump(mode="json", exclude_none=True) if getattr(final, "usage", None) else {}
-            for switch in fallback_records(content):
-                conv.emit(switch)
-            conv.emit_assistant(blocks, str(getattr(final, "model", "") or spec.model), usage)
+            conv.emit_assistant(blocks, str(getattr(final, "model", "") or spec.model), usage, asked=spec.model,
+                                told=fallback_records(content))
             conv.live_text(key, None)
             conv.emit_results(server_results)
             said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()

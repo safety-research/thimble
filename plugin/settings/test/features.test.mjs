@@ -22,9 +22,9 @@ test("the manifest's userConfig is the features, each on by default and turned o
       if (s.choices) assert.deepEqual(Object.keys(s.says), s.choices)
     }
     for (const [k, f] of Object.entries({ ...RETIRED, ...DEFAULTS_FIELD })) assert.deepEqual(manifest.userConfig[k], f)
-    // the person reads Squeeze as Rewrite and Claims as Evidence; the keys stay, so a saved setting still applies
+    // the person reads Squeeze as Rewrite, and Claims by its name; the keys stay, so a saved setting still applies
     assert.equal(SWITCHES.find(s => s.key === 'squeezeAnswers').title, 'Rewrite')
-    assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Evidence')
+    assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Claims')
     assert.deepEqual(SWITCHES.find(s => s.key === 'claimsMode').choices, ['auto', 'on demand', 'off'])
   }
   // the heads-ups' switch is named as the tray and the threads name what it gives, and keeps its stored key, so a

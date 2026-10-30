@@ -884,30 +884,162 @@ test("a view's own Button under the pointer: the whole row shows highlighted, it
   expect(elements(named).find(n => n.props?.children === '██')!.props.hover).toEqual({ scope: button.props.hover.scope, color: 'success', backgroundColor: 'text' })
 })
 
-test('a card taller than its frame shows draws its first 30 rows and `+N rows` under them, a click on which opens the rest; the call tells Claude', async ($, on) => {
+// the card check of a card that does not fit (cards/fit.ts): one model call, answered here with `views`, in order, each
+// the view of its replacement ('' for none); a reply waits for `gate` while the test holds it
+const settle = () => new Promise(r => setTimeout(r, 5))
+function checker(on: Any, views: string[]) {
+  const asked: Any[] = []
+  const gate = { open: Promise.resolve() as Promise<unknown>, hold() { let go: (v?: unknown) => void = () => undefined; this.open = new Promise(r => { go = r }); return go } }
+  on('model.complete', async (_$: unknown, e: Any) => {
+    asked.push(e)
+    await gate.open
+    const view = views.shift() ?? ''
+    return { value: { isAnswered: true, text: view ? `<view>\n${view}\n</view>` : '', usage: {} } }
+  })
+  return { asked, gate }
+}
+
+/** The card's Client props once no check holds it: its frame draws the card, not `drawing…`. */
+async function drawnOnce($: Any, row: Any): Promise<Any> {
+  for (let i = 0; i < 200; i++) {
+    const props = elements(await $.ui.render(row)).find(n => n.type === 'Client')?.props.props
+    if (props?.tree) return props
+    await settle()
+  }
+  throw new Error('the card stayed held')
+}
+
+test('a card taller than its frame waits for the card check: its frame draws `drawing…` and takes no keys, then the check\'s replacement draws in its place; the call says nothing of it', async ($, on) => {
   world(on)
+  const { asked, gate } = checker(on, [`${VIEW}\n// failed only`])
+  const go = gate.hold()
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_51', ...input } as never)) as Any
-  expect(String(r.result)).toContain('Note: the card is up to 42 rows tall, and its frame shows its first 30 rows with "+12 rows" under them, which opens the rest')
-  const frame = async () => elements(await $.ui.render(callRow('toolu_made_up_51', input)))
-  let els = await frame()
-  expect(els.find(n => n.type === 'Client')?.props.props.cap).toBe(30)
+  // Claude reads what the card read and what it draws, as for any card, and no note on its size
+  expect(String(r.result)).toContain('run 42  passed')
+  expect(String(r.result)).not.toContain('rows tall')
+  expect(String(r.result)).not.toContain('The analyst')
+  const row = callRow('toolu_made_up_51', input)
+  let els = elements(await $.ui.render(row))
+  expect(els.find(n => n.type === 'Client')?.props.props).toMatchObject({ tree: null, need: '', cap: 0 })
+  expect(els.some(n => n.props?.key === 'more' || n.props?.key === 'head-keys' || n.props?.key === 'title-ask')).toBe(false)
+  // on screen, it takes no keys: the view's `o` is typed
+  await shown($, row)
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  expect((await edit('o')).text).toBe('o')
+  // one model call: the card check, which reads the card as drawn and its view
+  await settle()
+  expect(asked).toHaveLength(1)
+  expect(String(asked[0].prompt)).toContain('run 42  passed')
+  expect(String(asked[0].prompt)).toContain('// TALL')
+  expect(JSON.stringify(asked[0].system)).toContain('PROMPT card-check')
+  go()
+  const props = await drawnOnce($, row)
+  expect(props.tree).toEqual(TREE)
+  els = elements(await $.ui.render(row))
+  expect(els.some(n => n.props?.key === 'more')).toBe(false)
+  expect(asked).toHaveLength(1)
+  // a card that fits from the first draws at once, with no check, and its call says nothing of it
+  const small = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_52', ...small } as never)) as Any
+  expect(String(r3.result)).not.toContain('rows tall')
+  const fits = elements(await $.ui.render(callRow('toolu_made_up_52', small)))
+  expect(fits.find(n => n.type === 'Client')?.props.props).toMatchObject({ tree: TREE, cap: 0 })
+  await settle()
+  expect(asked).toHaveLength(1)
+})
+
+test('a replacement that still does not fit draws its first 30 rows and `+N rows`, a click on which opens the rest, with no second check', async ($, on) => {
+  world(on)
+  const { asked } = checker(on, [`${VIEW}\n// ROWS 35`])
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_55', ...input } as never)
+  const row = callRow('toolu_made_up_55', input)
+  const props = await drawnOnce($, row)
+  expect(props.cap).toBe(30)
+  let els = elements(await $.ui.render(row))
   const more = els.find(n => n.type === 'Button' && n.props?.key === 'more')
-  expect(textOf(more)).toBe('+12 rows')
-  const ui = await $.ui.mount({ plugin: 'thimble', ...(callRow('toolu_made_up_51', input) as Any) })
+  expect(textOf(more)).toBe('+5 rows')
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(row as Any) })
   await ui.press({ key: 'more' })
   await ui.unmount()
-  els = await frame()
+  els = elements(await $.ui.render(row))
   expect(els.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
-  expect(els.some(n => n.props?.key === 'more')).toBe(false)
-  // a card that fits shows whole, with no such line, and its call says nothing of it
+  expect(asked).toHaveLength(1)
+})
+
+test('a version Claude draws while the check reads the one before waits for its own check, and the first check draws nothing', async ($, on) => {
+  const w = world(on)
+  const { asked, gate } = checker(on, [`${VIEW}\n// first check`, `${VIEW}\n// ROWS 20`])
+  const go = gate.hold()
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_56', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  await $.ui.render(callRow('toolu_made_up_56', input))
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_56b', id, edits: [{ old: '// TALL', new: '// ROWS 40' }] } as never)
+  go()
+  const props = await drawnOnce($, callRow('toolu_made_up_56', input))
+  // the second check's replacement: 20 rows
+  expect(props.tree.c).toHaveLength(20)
+  expect(asked).toHaveLength(2)
+  expect(Object.values(w.files).some(v => String(v).includes('// first check'))).toBe(false)
+})
+
+test('a check whose call fails leaves the card as it stands, its rest under `+N rows`, and says so on the failure line', async ($, on) => {
+  world(on)
+  on('model.complete', () => ({ value: { isAnswered: false, reason: 'api-error', status: 529, usage: {} } }))
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_59', ...input } as never)
+  expect((await drawnOnce($, callRow('toolu_made_up_59', input))).cap).toBe(30)
+  expect(textOf(await $.ui.render(BAND))).toContain('The card check of the card “Every run” failed: the API is overloaded.')
+})
+
+test("the check's replacement reaches main once: in its next card call's answer while its turn runs, else beside its next prompt; the call that drew the card waits for nothing", async ($, on) => {
+  world(on)
+  on('prompt.submit', (_$: unknown, e: Any) => ({ text: e.text, ...(e.context ? { context: e.context } : {}) }))
+  checker(on, [`${VIEW}\n// ROWS 12`, `${VIEW}\n// ROWS 8`])
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_61', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  expect(String(r.result)).not.toContain('card check')
+  expect((await drawnOnce($, callRow('toolu_made_up_61', input))).tree.c).toHaveLength(12)
+  // main's turn runs on: its next card call's answer says what the analyst sees in place of the card it drew
   const small = { title: 'Scores', data: 'runs.json', view: VIEW }
-  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_52', ...small } as never)) as Any
-  expect(String(r2.result)).not.toContain('rows tall')
-  const fits = elements(await $.ui.render(callRow('toolu_made_up_52', small)))
-  expect(fits.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
-  expect(fits.some(n => n.props?.key === 'more')).toBe(false)
+  const next = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_62', ...small } as never)) as Any).result)
+  expect(next).toContain(`thimble's card check replaced the card “Every run” (id "${id}") in place, since it did not fit on the analyst's screen, so the analyst sees its version, not yours. It changed the view. What it draws, 92 columns wide:\nrun 1  passed`)
+  expect(next).toContain('run 12  passed')
+  expect(next).not.toContain('run 13  passed')
+  // told once
+  const after = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_64', ...small } as never)) as Any).result)
+  expect(after).not.toContain('card check')
+  // the check of the next card ends after main's turn: main's next prompt carries it, once
+  const stages = { title: 'Every stage', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_63', ...stages } as never)
+  await drawnOnce($, callRow('toolu_made_up_63', stages))
+  const told = String((((await $.prompt.submit({ text: 'And now?', origin: { kind: 'composer' } } as never)) as Any).context ?? []).join('\n'))
+  expect(told).toContain("thimble's report")
+  expect(told).toContain('replaced the card “Every stage”')
+  expect(told).toContain('run 8  passed')
+  expect(String((((await $.prompt.submit({ text: 'And then?', origin: { kind: 'composer' } } as never)) as Any).context ?? []).join('\n'))).not.toContain('card check')
+})
+
+test('a card a resumed session finds waiting for its check draws as it stands', async ($, on) => {
+  const w = world(on)
+  // the card as tool.ts kept it, held, when the session ended
+  const dir = '/made-up/.thimble/conversations/s-cards/cards/c0123456789ab'
+  const meta = { id: 'c0123456789ab', version: 1, title: 'Every run', toolUseId: 'toolu_made_up_57', agentId: null, anchorRow: null, keys: [], read: '42 rows', columns: ['run'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_57: { version: 1 } }, at: 1, held: { since: 1 } }
+  w.files[`${dir}/meta.json`] = JSON.stringify(meta)
+  w.files[`${dir}/v1/view.js`] = `${VIEW}\n// TALL`
+  w.dirs['/made-up/.thimble/conversations/s-cards/cards'] = ['c0123456789ab']
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const client = elements(await $.ui.render(callRow('toolu_made_up_57', { title: 'Every run', data: 'runs.json', view: VIEW }))).find(n => n.type === 'Client')
+  // its Client asks for its drawing, which a held card's never does
+  expect(client?.props.props.need).toBe('1:92')
 })
 
 test("the Client cuts a drawing at the frame's `cap` rows, and draws it whole without one", async () => {
@@ -928,23 +1060,26 @@ test("a border the view gives no color of its own draws dim, as the card's frame
   expect(drawn.map(n => [n.props.borderStyle, n.props.borderDimColor, n.props.borderColor])).toEqual([['round', true, undefined], ['single', undefined, '#80b2ea']])
 })
 
-test('a card one row past 30 draws whole, since a `+1 row` line would take the place of that row; two rows past, it shows 30 and `+2 rows`', async ($, on) => {
+test('a card one row past 30 draws whole, since a `+1 row` line would take the place of that row; two rows past, it waits for the card check, and draws 30 rows and `+2 rows` when the check keeps it', async ($, on) => {
   world(on)
+  const { asked } = checker(on, [''])
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const one = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// ROWS 31` }
   const r1 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_53', ...one } as never)) as Any
-  expect(String(r1.result)).not.toContain('its frame shows its first')
+  expect(String(r1.result)).not.toContain('its frame shows')
   const whole = elements(await $.ui.render(callRow('toolu_made_up_53', one)))
   expect(whole.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
   expect(whole.some(n => n.props?.key === 'more')).toBe(false)
   const two = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// ROWS 32` }
   const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_54', ...two } as never)) as Any
-  expect(String(r2.result)).toContain('Note: the card is up to 32 rows tall, and its frame shows its first 30 rows with "+2 rows" under them')
+  expect(String(r2.result)).not.toContain('its frame shows')
+  // the check writes no replacement: the card draws as it stands
+  expect((await drawnOnce($, callRow('toolu_made_up_54', two))).cap).toBe(30)
   const cut = elements(await $.ui.render(callRow('toolu_made_up_54', two)))
-  expect(cut.find(n => n.type === 'Client')?.props.props.cap).toBe(30)
   const more = cut.find(n => n.type === 'Button' && n.props?.key === 'more')
   expect(textOf(more)).toBe('+2 rows')
   expect(more.props.label).toBe('show the other 2 rows of the card')
+  expect(asked).toHaveLength(1)
 })
 
 test('the line under a cut card says "row" for one', () => {

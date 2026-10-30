@@ -80,8 +80,9 @@ async function toggleClaims($: Engine, byKey = false): Promise<void> {
 }
 
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  // the settings' preview names w by the bar's words, as it names coverage and the labels: the count once there are claims
-  if (preview) return on('claims') ? [{ id: 'claims', key: 'w', words: (await claimCount($).catch(() => 0)) ? await claimsBarWords($) : 'evidence' }] : []
+  // the settings' preview names w by the bar's words, as it names coverage and the labels: `w claims`, with their count
+  // once there are some
+  if (preview) return on('claims') ? [{ id: 'claims', key: 'w', words: await claimsBarWords($).catch(() => 'claims') }] : []
   const items = on('claims') ? await barItems($) : []
   named = items.length > 0
   return items
@@ -98,7 +99,7 @@ async function barItems($: Engine): Promise<BarItem[]> {
   drawnOpen = await paneShows($, 'claims').catch(() => false)
   // no claims yet: the pane finds them on demand, so the item shows, without a count, once an answer waits for it, and
   // while the pane shows (it found none), so that w closes it
-  if (!(await claimCount($))) return (await claimsToFind($)).answers || drawnOpen ? [{ id: 'claims', key: 'w', words: 'evidence', press }] : []
+  if (!(await claimCount($))) return (await claimsToFind($)).answers || drawnOpen ? [{ id: 'claims', key: 'w', words: 'claims', press }] : []
   const words = await claimsBarWords($)
   // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims. The session's
   // first claims: the count pulses

@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -86,7 +87,6 @@ def fixing(on, monkeypatch, tmp_path):
     monkeypatch.setattr(fixes, "kernel", k)
     monkeypatch.setattr(fixes, "srt_ready", lambda: "")
     monkeypatch.setattr(fixes, "prepare", lambda root: "")
-    monkeypatch.setattr(fixes, "changed", lambda work, base: ["browser/frontend/src/canvas/Focus.tsx"])
     restarts: list[tuple[str, Path | None]] = []
 
     async def restart(title: str, *, ticket_id: str | None = None, cwd: Path | None = None) -> None:
@@ -172,15 +172,6 @@ def test_the_words_after_the_command():
     assert fixes.words_of("please /thimble-fix it") is None
 
 
-def test_the_tests_follow_what_the_change_touched():
-    page = fixes.tests_for(["browser/frontend/src/chat/Rows.tsx"])
-    assert "tsc -b" in page and "vitest run --changed HEAD~1" in page and "pytest" not in page
-    server = fixes.tests_for(["browser/backend/app/tools.py"])
-    assert "tests_public" in server and "vitest" not in server
-    assert "pytest plugin" in fixes.tests_for(["plugin/core/answers.ts"])
-    assert fixes.tests_for(["docs/notes.md"]) == "true"
-
-
 async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_checks_pass(fixing, monkeypatch, analyst):
     work = fixing.home / "fixes" / "work" / "1"
     client = api_key(monkeypatch, [
@@ -206,12 +197,14 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
     # it wrote its copy, and nothing else
     assert (work / "browser" / "note.txt").read_text() == "rows\n"
 
-    # the kernel's checks, with the tests of what the change touched; the fix is ready and nothing goes on by itself
+    # the kernel's checks of what the change touched, which it chooses as it does for the fixes an update puts back,
+    # with this server's Python; the fix is ready and nothing goes on by itself
     verbs = [c[0] for c in fixing.calls]
     assert verbs[:1] == ["new"] and "done" in verbs and "apply" not in verbs and fixing.restarts == []
     done = fixing.calls[verbs.index("done")]
     assert done[done.index("--title") + 1] == "Card says how many rows"
-    assert "vitest" in fixing.envs[verbs.index("done")]["THIMBLE_FIX_TESTS"]
+    env = fixing.envs[verbs.index("done")]
+    assert "THIMBLE_FIX_TESTS" not in env and env["THIMBLE_PYTHON"] == sys.executable
     assert not (fixes.fixes_home() / "asks" / "1.json").exists()
     row = fixes.status()["fixes"][0]
     assert (row["kind"], row["said"], row["state"], row["phase"]) == (
@@ -724,29 +717,6 @@ def test_a_release_checkout_as_the_release_has_it_is_left_alone_and_one_that_is_
     t.join()
     assert (checkout / "bar.txt").read_text() == "as released\n" and not ran.exists()
     assert _git("status", "--porcelain", "--ignored", cwd=checkout) == ""
-
-
-def test_the_files_a_copy_changed_are_read_by_git_on_its_own_entry_never_through_its_git_link(tmp_path, monkeypatch):
-    monkeypatch.setenv(fixes.PLUGIN_HOME_ENV, str(tmp_path / "home"))
-    live = tmp_path / "home" / "fixes" / "live"
-    live.mkdir(parents=True)
-    (live / "bar.txt").write_text("as released\n")
-    _git("init", "-q", cwd=live)
-    _git("add", "-A", cwd=live)
-    _git("commit", "-q", "-m", "made-up release", cwd=live)
-    work = tmp_path / "home" / "fixes" / "work" / "1"
-    _git("worktree", "add", "-q", "--detach", str(work), "HEAD", cwd=live)
-    (work / "notes.md").write_text("a made-up note\n")
-    assert fixes.changed(work, "HEAD") == ["notes.md"]
-    # the fixer's sandbox writes the copy: a git folder of its own there, whose settings would run its command here
-    ran = tmp_path / "ran-outside"
-    (work / "made-up-monitor").write_text(f"#!/bin/sh\ntouch '{ran}'\nexit 1\n")
-    (work / "made-up-monitor").chmod(0o755)
-    (work / ".git").unlink()
-    _git("init", "-q", str(work), cwd=tmp_path)
-    _git("config", "core.fsmonitor", str(work / "made-up-monitor"), cwd=work)
-    assert fixes.changed(work, "HEAD") == []
-    assert not ran.exists()
 
 
 async def test_a_fix_that_needs_a_file_no_fix_may_change_says_so_so_the_page_offers_no_try_again(fixing, monkeypatch):

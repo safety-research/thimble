@@ -15,9 +15,11 @@
 //   squeezeUnderCard($, els, id, cols) what stands under one card: what a squeeze changed of it
 //   squeezeHidesCard($, id)            whether a card is left out of the version of its answer shown now
 //   squeezeHolds($)                    whether the chips are open: their keys come before the tray's and the ask's
+//   squeezeHeld($)                     the keys the open chips take now, which nothing else names (core/answerview.ts
+//                                      heldKeys); '*' while a click gave them the keyboard
 //   squeezeKey($, key, until)          s (and the chips' keys while they are open): a taker as hooks/keys.ts takes it
-//   squeezeBar($, on, preview)         its items at the bar's left (`s rewrite`, `b catch up on N replies`; the
-//                                      chips' keys while they are open)
+//   squeezeBar($, on, preview)         its items at the bar's left (`s rewrite`, `b catch up on N replies`; while the
+//                                      chips are open, what they cannot show, since they name their keys themselves)
 //   registerSqueeze                    its own hooks: /rewrite (what + writes in the prompt box, hidden from the
 //                                      typeahead) and its autocomplete, the chips' Client, the prompt that carries the
 //                                      version told to Claude, a resumed session's cards, the end of main's turn (the
@@ -31,7 +33,7 @@ import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
 import { promptSent, recOf } from './term'
-import { addOwn, answerDone, barItems, type CardsIn, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
+import { addOwn, answerDone, barItems, type CardsIn, chipsHeld, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +59,10 @@ export async function squeezeHidesCard($: Engine, id: string): Promise<boolean> 
 
 export async function squeezeHolds($: Engine): Promise<boolean> {
   return chipsHold($)
+}
+
+export async function squeezeHeld($: Engine): Promise<string[]> {
+  return chipsHeld($)
 }
 
 export async function squeezeKey($: Engine, key: string, _until: number): Promise<Take | null> {

@@ -53,16 +53,16 @@ test('a look places each explainer in the newest message that holds it, adds to 
   assert.deepEqual(Object.keys(r.parts).sort(), ['r1', 'r2'])
   assert.deepEqual(r.parts.r1.order, ['g1'])
   assert.equal(r.parts.r1.items.g1.term, 'retry budget')
-  assert.deepEqual(r.parts.r2.order, ['g1', 'h1', 'g2'])
-  assert.equal(r.parts.r2.items.g2.term, 'p95')
-  assert.deepEqual(r.placed, ['retry budget', 'p95'])
+  // r2 says p95 only inside the heads-up's words, which the heads-up keeps: its explainer is not added
+  assert.deepEqual(r.parts.r2.order, ['g1', 'h1'])
+  assert.deepEqual(r.placed, ['retry budget'])
   assert.deepEqual(r.heads, ['One day'])
   // terms already explained are never explained again
   assert.deepEqual(mergeLook(msgs, { glosses: [{ term: 'p95' }], heads: null }, { glossed: ['P95'] }).placed, [])
 })
 
 
-test('words the analyst asked about over or across marks are one mark, which covers the marks it overlaps; words inside a mark are that mark', () => {
+test('words the analyst asked about over or across explainers are one mark, which covers the explainers it overlaps; a heads-up keeps its words; words inside a mark are that mark', () => {
   const text = 'Requests go through [third-party relays](#) before the heads gateway.'
   const look = { g1: { id: 'g1', term: 'relays' }, h1: { id: 'h1', kind: 'heads', term: 'heads gateway' } }
   assert.deepEqual(placeGlosses(text, { items: look, order: ['g1', 'h1'] }).map(p => at(text, p)), ['relays', 'heads gateway'])
@@ -70,10 +70,14 @@ test('words the analyst asked about over or across marks are one mark, which cov
   const wide = { ...look, a1: { id: 'a1', term: 'third-party relays', asked: true } }
   const placed = placeGlosses(text, { items: wide, order: ['g1', 'h1', 'a1'] })
   assert.deepEqual(placed.map(p => [p.id, at(text, p)]), [['a1', 'third-party relays'], ['h1', 'heads gateway']])
-  // across a heads-up's words too (and, as any mark, over the whole of a citation it touches): what is left of the
-  // heads-up's words beside it is no mark; the newest asked wins over an older one
+  // across a heads-up's words: the heads-up keeps them, and what is left of the asked words beside it is no mark, so
+  // that asked mark draws nothing and the older one stands
   const across = { ...wide, a2: { id: 'a2', term: 'relays before the heads', asked: true } }
-  assert.deepEqual(placeGlosses(text, { items: across, order: ['g1', 'h1', 'a1', 'a2'] }).map(p => [p.id, at(text, p)]), [['a2', '[third-party relays](#) before the heads']])
+  assert.deepEqual(placeGlosses(text, { items: across, order: ['g1', 'h1', 'a1', 'a2'] }).map(p => [p.id, at(text, p)]), [['a1', 'third-party relays'], ['h1', 'heads gateway']])
+  // across an asked mark and a citation (as any mark, over the whole of the citation it touches), the newest asked
+  // wins over an older one
+  const over = { ...across, a3: { id: 'a3', term: 'go through third-party', asked: true } }
+  assert.deepEqual(placeGlosses(text, { items: over, order: ['g1', 'h1', 'a1', 'a2', 'a3'] }).map(p => [p.id, at(text, p)]), [['a3', 'go through [third-party relays](#)'], ['h1', 'heads gateway']])
   // words inside a mark, or on it, are that mark; words over it, across it or outside every mark are none
   assert.equal(markHolding(text, placed, 'third-party')?.id, 'a1')
   assert.equal(markHolding(text, placed, 'third-party relays')?.id, 'a1')
@@ -81,4 +85,70 @@ test('words the analyst asked about over or across marks are one mark, which cov
   assert.equal(markHolding(text, placed, 'the heads gateway'), null)
   assert.equal(markHolding(text, placed, 'relays before'), null)
   assert.equal(markHolding(text, placed, 'Requests go'), null)
+})
+
+test('an explainer and a heads-up never share words: the one already there keeps them, and a new one of the other kind yields', () => {
+  const text = 'Uploads fail when the retry budget runs out: 41 of the 44 failures came 30 seconds after a network drop.'
+  const heads = { term: '30 seconds after a network drop', title: 'One office', bullets: ['x'] }
+  const look = glosses => mergeLook([{ row: 'r1', text, part: null }], { glosses, heads }, { glossed: [] })
+  const drawn = (t, part) => placeGlosses(t, part).map(p => [p.id, at(t, p)])
+  // a look's heads-up comes before its explainers: one inside its words, or across them, is not added nor named placed
+  const r = look([{ term: 'network drop', body: 'b' }, { term: 'retry budget', body: 'c' }, { term: 'failures came 30 seconds', body: 'd' }])
+  assert.deepEqual(r.parts.r1.order, ['h1', 'g2'])
+  assert.deepEqual(r.placed, ['retry budget'])
+  assert.deepEqual(drawn(text, r.parts.r1), [['g2', 'retry budget'], ['h1', '30 seconds after a network drop']])
+  // its term said again outside the heads-up's words: it stands there
+  const again = `${text} A network drop ends each try.`
+  const r2 = mergeLook([{ row: 'r1', text: again, part: null }], { glosses: [{ term: 'network drop', body: 'b' }], heads }, { glossed: [] })
+  assert.deepEqual(drawn(again, r2.parts.r1), [['h1', '30 seconds after a network drop'], ['g1', 'network drop']])
+  // a later look's heads-up on words an explainer already stands on is not added; on other words it is
+  const had = { items: { g1: { id: 'g1', term: 'network drop' } }, order: ['g1'] }
+  assert.deepEqual(mergeLook([{ row: 'r1', text, part: had }], { glosses: [], heads }, { glossed: ['network drop'] }), { parts: {}, placed: [], heads: [] })
+  const beside = mergeLook([{ row: 'r1', text, part: had }], { glosses: [], heads: { term: 'retry budget runs out', title: 't', bullets: ['y'] } }, { glossed: [] })
+  assert.deepEqual(drawn(text, beside.parts.r1), [['h1', 'retry budget runs out'], ['g1', 'network drop']])
+  // an explainer the analyst asked for over a heads-up's words, or across them, is kept, and drawn only on free words
+  const asked = { items: { h1: { id: 'h1', kind: 'heads', term: heads.term }, a1: { id: 'a1', term: 'came 30 seconds', asked: true }, a2: { id: 'a2', term: 'network drop', asked: true } }, order: ['h1', 'a1', 'a2'] }
+  assert.deepEqual(drawn(text, asked), [['h1', '30 seconds after a network drop']])
+  assert.deepEqual(drawn(again, asked), [['h1', '30 seconds after a network drop'], ['a2', 'network drop']])
+})
+
+test("an explainer never stands on what is left of its words beside a mark it keeps apart from, wherever its term is said: it stands where the term is said apart from them, or not at all", () => {
+  const drawn = (t, part) => placeGlosses(t, part).map(p => [p.id, at(t, p)])
+  // the term's first place is under an explainer the analyst asked for, its second runs into the heads-up's words
+  const text = 'We saw the drop in signal at noon; 41 failures came 30 seconds after a drop in signal.'
+  const part = { items: { h1: { id: 'h1', kind: 'heads', term: '30 seconds after a drop' }, a1: { id: 'a1', term: 'the drop in signal', asked: true } }, order: ['h1', 'a1'] }
+  const g1 = { id: 'g1', term: 'drop in signal' }
+  assert.deepEqual(drawn(text, { items: { ...part.items, g1 }, order: [...part.order, 'g1'] }), [['a1', 'the drop in signal'], ['h1', '30 seconds after a drop']])
+  // so a look that gives it adds nothing there
+  assert.deepEqual(mergeLook([{ row: 'r1', text, part }], { glosses: [{ term: 'drop in signal', body: 'b' }], heads: null }, { glossed: [] }), { parts: {}, placed: [], heads: [] })
+  // the term said again, across a citation: the explainer stands there, not on what is left beside the heads-up
+  const again = 'Uploads failed 30 seconds after a drop in signal; a [drop](#) in signal ends each try.'
+  const heads = { items: { h1: { id: 'h1', kind: 'heads', term: '30 seconds after a drop' }, g1 }, order: ['h1', 'g1'] }
+  assert.deepEqual(drawn(again, heads), [['h1', '30 seconds after a drop'], ['g1', '[drop](#) in signal']])
+})
+
+test('only a mark the analyst sees holds words: a look adds an explainer on the words of a heads-up their switch hides, and a heads-up on those of a hidden explainer', () => {
+  const text = 'Uploads fail when the retry budget runs out: 41 of the 44 failures came 30 seconds after a network drop.'
+  const h1 = { id: 'h1', kind: 'heads', term: '30 seconds after a network drop', title: 'One office', bullets: ['x'] }
+  const g1 = { id: 'g1', term: 'network drop', title: 'network drop', body: 'b', here: '' }
+  const isHeads = g => g.kind === 'heads'
+  const drawn = (part, shown) => placeGlosses(text, { items: part.items, order: part.order.filter(id => shown(part.items[id])) }).map(p => [p.id, at(text, p)])
+  // the explainer of a look, on the words of an older heads-up: not added while the heads-up shows
+  const onHeads = [{ row: 'r1', text, part: { items: { h1 }, order: ['h1'] } }]
+  const gloss = { glosses: [{ term: 'network drop', body: 'b' }], heads: null }
+  assert.deepEqual(mergeLook(onHeads, gloss, { glossed: [] }, () => true).placed, [])
+  // Heads-ups off: the analyst sees no heads-up there, so the explainer is added and stands on its words
+  const headsOff = g => !isHeads(g)
+  const r = mergeLook(onHeads, gloss, { glossed: [] }, headsOff)
+  assert.deepEqual(r.placed, ['network drop'])
+  assert.deepEqual(drawn(r.parts.r1, headsOff), [['g1', 'network drop']])
+  // the heads-up of a look (h), on the words of an older explainer: not added while the explainer shows
+  const onGloss = [{ row: 'r1', text, part: { items: { g1 }, order: ['g1'] } }]
+  const tip = { glosses: [], heads: { term: h1.term, title: h1.title, bullets: h1.bullets } }
+  assert.deepEqual(mergeLook(onGloss, tip, { glossed: ['network drop'] }, () => true).heads, [])
+  // Explainers off: it is added and stands on its words
+  const glossOff = g => isHeads(g)
+  const h = mergeLook(onGloss, tip, { glossed: ['network drop'] }, glossOff)
+  assert.deepEqual(h.heads, ['One office'])
+  assert.deepEqual(drawn(h.parts.r1, glossOff), [['h1', '30 seconds after a network drop']])
 })

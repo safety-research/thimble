@@ -26,7 +26,8 @@ true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page
 
 Keys: `agent:<the agent's key>` for an agent of thimble's (agent_key: subagents.py for its runs and starts, dev.py for
 view builds and code tickets, checks.py for report checks), `proposals` for the view proposer (proposer.py),
-`safeguards:<chat>` for a reply Claude's safeguards switched to another model (session.py), `thread:<chat>` and
+`safeguards:<chat>` for a reply Claude's safeguards switched to another model (session.py; the page shows it in that
+chat alone, since it tells of that chat's own replies), `thread:<chat>` and
 `helper:<agent id>` for a side thread's or a helper's API error, `main:api` for main's own (session.py), `card-check`
 (card_check.py) and `label:<id>` (concepts.py). post and clear never raise: a failure to tell is logged.
 

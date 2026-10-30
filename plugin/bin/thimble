@@ -10,10 +10,11 @@ while [ -L "$self" ]; do
 done
 here=$(cd "$(dirname "$self")/.." && pwd)
 # the way back from your fixes runs from the release, which no fix changes (engine/kernel/fixes.py): `thimble fix`,
-# `thimble file`, `thimble update` and `thimble reapply` run the launcher of the release checkout in
-# $THIMBLE_HOME/fixes/release, and that launcher hands the other commands to live's, so a fix to them works. A release
-# checkout from before this hand-off (its launcher names no fixes/release/plugin) runs an older kernel, which does not
-# know this one's commands: this launcher then runs its own kernel, which moves the checkout forward (ensure_live)
+# `thimble file`, `thimble update`, `thimble reapply` and `thimble doctor` (which names a fix that keeps thimble from
+# loading) run the launcher of the release checkout in $THIMBLE_HOME/fixes/release, and that launcher hands the other
+# commands to live's, so a fix to them works. A release checkout from before this hand-off (its launcher names no
+# fixes/release/plugin) runs an older kernel, which does not know this one's commands: this launcher then runs its own
+# kernel, which moves the checkout forward (ensure_live)
 fixes=${THIMBLE_HOME:-$HOME/.thimble}/fixes
 release=$(cd "$fixes/release/plugin" 2>/dev/null && pwd -P)
 # whether the release checkout ($top) is as commit $1 has it: HEAD detached there, and no file changed, untracked or
@@ -41,7 +42,7 @@ if [ -n "$release" ] && [ -x "$release/bin/thimble" ] && grep -q 'fixes/release/
   me=$(cd "$here" && pwd -P)
   [ "$me" = "$release" ] && nobyte=-B
   case "$1" in
-    fix|fixes|file|update|reapply)
+    fix|fixes|file|update|reapply|doctor)
       [ "$me" = "$release" ] || exec "$release/bin/thimble" "$@"
       # the checkout as the release commit (release.json's base) has it, before any of its code runs: a file changed in
       # it is restored and a file added to it removed (fixes.py place_release does the same). A checkout that is so

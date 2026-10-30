@@ -7,7 +7,9 @@
 //   verified   the plain look; a corrected mark shows its corrected words and looks verified too
 //   failed     the check could not confirm it (wrong, not confirmed, or no check could run): red words, underlined,
 //              `×` after them and a soft red tint on hover, as the terminal draws it
-// While the reply streams (`pending`) and while its check runs (`checking`) it has the plain look.
+// While its check runs (`checking`) it has the plain look and a spinner. Before any check said anything of it
+// (`pending`: the reply still streams, or no check has begun on it) its underline is dotted: not checked, so it never
+// reads as a checked mark.
 import { marksIn, plainSentence, rewritesIn, withCorrections } from '../../../../plugin/marks/message.js'
 
 /** A table the evidence shows (evidence.py table_of): the rows around the cited one, the cited cell `at` among them

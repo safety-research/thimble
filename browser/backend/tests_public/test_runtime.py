@@ -469,6 +469,110 @@ async def test_a_thread_is_answered_by_a_fork_of_main(on, monkeypatch):
     assert "Main answered." in json.dumps(client.bodies[1]["messages"])
 
 
+def fork_of_thread() -> runtime.Conv:
+    return next(c for c in runtime._spaces[CORPUS].convs.values() if c.kind == "fork")
+
+
+async def until(cond, what: str) -> None:
+    for _ in range(600):
+        if cond():
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(what)
+
+
+async def test_a_side_thread_s_event_starts_its_fork_and_leaves_main_idle(on, monkeypatch):
+    """A side thread's event starts the thread's fork, not a turn of main's (runtime.deliver), so main is not marked
+    running for it: the page shows main idle while the thread works, and after."""
+    api_key(monkeypatch, [text("Main answered."), text("Because of the deploy.")])
+    await main_turn("What happened?")
+    assert not agents.running(CORPUS, agents.MAIN_ID)
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    assert not agents.running(CORPUS, agents.MAIN_ID)
+    await fork_of_thread().task
+    runtime._spaces[CORPUS].read()
+    assert not agents.running(CORPUS, agents.MAIN_ID) and not agents.running(CORPUS, tid)
+
+
+async def test_main_s_held_notes_wait_for_its_own_next_event_not_a_side_thread_s(on, monkeypatch):
+    """A quiet event, such as what the check of main's reply changed, waits for main's next event. A side thread's event
+    goes to the thread's fork, which never read main's reply, so it carries none of them, nor does the result of a
+    thimble call of the fork's: main reads them with its own next event."""
+    client = api_key(monkeypatch, [text("Main answered."), call("list_cards", {"group": "all"}, "toolu_f"),
+                                   text("From the card."), text("Main again.")])
+    await main_turn("What happened?")
+    events.post(CORPUS, "citations", {"text": '"302 of 439" is corrected to "319 of 460"'})
+    tid = str(agents.new_thread(CORPUS, None, None, "where")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Where does this number come from?"})
+    await fork_of_thread().task
+    assert "319 of 460" not in json.dumps(client.bodies[1:3]), "the thread's fork got main's held note"
+    assert [n["meta"]["kind"] for n in events.held(CORPUS)] == ["citations"]
+    await main_turn("And next?")
+    assert events.MEANWHILE in json.dumps(client.bodies[3]["messages"][-1])
+    assert "319 of 460" in json.dumps(client.bodies[3]["messages"][-1]) and events.held(CORPUS) == []
+
+
+async def test_a_quiet_event_that_comes_while_main_runs_reaches_it_with_its_next_thimble_call(on, monkeypatch):
+    """The analyst answers a label's ask while main's turn runs: the `label_ask` event is quiet, so it waits, and the
+    result of main's next thimble call carries it, as a card's notes join its author's next result
+    (card_size.with_notes). Main does not end the turn saying the label waits for a choice already made."""
+    choice = "The analyst chose a sample of 300 of the label page kind's 4,579 units."
+    seen: dict[str, str] = {}
+
+    def choose_then_call(body: dict[str, Any]) -> list[Block]:
+        events.post(CORPUS, "label_ask", {"text": choice, "name": "page kind", "choice": "sample"})
+        return call("list_cards", {"group": "all"}, "toolu_2")
+
+    def answer(body: dict[str, Any]) -> list[Block]:
+        seen["result"] = json.dumps(body["messages"][-1])
+        return text("The sample runs.")
+
+    api_key(monkeypatch, [call("list_cards", {"group": "all"}), choose_then_call, answer])
+    await main_turn("Sort the pages into kinds.")
+    assert choice in seen["result"] and events.MEANWHILE in seen["result"]
+    assert events.held(CORPUS) == []
+
+
+async def test_a_side_thread_s_answer_is_checked_in_its_chat_and_main_hears_nothing_of_it(on, monkeypatch):
+    """As the terminal checks a side thread's answer (plugin/marks/checker.ts checkAnswer): the run's `done` record names
+    a turn, and the marks of the answer are checked under it, from a fork of main told what holds them. The thread's
+    chat gets the marks records, which the page draws its answer's marks by; main's chat gets none, and main, which
+    never read the answer, hears nothing of the check."""
+    from app import marks
+
+    prompts: list[str] = []
+    code = "runs = ['failed', 'passed', 'failed', 'passed', 'passed', 'failed', 'passed', 'passed']\n" \
+           "print(f\"{runs.count('failed')} of {len(runs)}\")"
+
+    async def fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -> dict[str, Any]:
+        prompts.append(prompt)
+        found = [{"mark": 1, "kind": "computed", "evidence": {"output": "3 of 8"}, "status": "corrected",
+                  "correction": {"words": "3 of 8"}, "reason": "3 of the 8 runs failed"}]
+        return {"answer": "```json\n" + json.dumps(found) + "\n```", "error": None,
+                "calls": [{"command": f"python3 - <<'PY'\n{code}\nPY", "output": "3 of 8\n", "by": "checker"}]}
+
+    monkeypatch.setattr(marks, "run_fork", fork)
+    api_key(monkeypatch, [text("Main answered."), text("It was [4 of 8](#) runs.")])
+    await main_turn("What happened?")
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "How many runs failed?"})
+    await fork_of_thread().task
+
+    def thread_marks() -> list[dict[str, Any]]:
+        return [r for r in agents.read_events(agents.paths(CORPUS, tid)[1]) if r["type"] == "marks"]
+
+    await until(lambda: thread_marks() and thread_marks()[-1]["items"][0]["status"] != "checking", "no check settled")
+    done = [r for r in agents.read_events(agents.paths(CORPUS, tid)[1]) if r["type"] == "done"][-1]
+    assert done.get("turn") and {r["turn"] for r in thread_marks()} == {done["turn"]}
+    (m,) = thread_marks()[-1]["items"]
+    assert m["status"] == "corrected" and m["shown"] == "3 of 8" and m["was"] == "4 of 8", m
+    assert 'a side thread of this session gave the analyst about "why"' in prompts[0]
+    assert "That thread's work is not in your conversation, so find the evidence in the files" in prompts[0]
+    assert not any(r["type"] == "marks" for r in main_records())
+    assert "citations" not in [n["meta"]["kind"] for n in events.held(CORPUS)], "main was told of the thread's check"
+
+
 async def test_write_starts_the_writer_in_the_server(on, monkeypatch):
     api_key(monkeypatch, [text("The report is written.")])
     runtime.ensure(CORPUS)
@@ -877,3 +981,75 @@ async def test_a_reply_claude_s_safeguards_moved_to_another_model_is_told_in_a_n
     await main_turn("What are these episodes?")
     said = [n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
     assert said == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."]
+
+
+class ServedClient(FakeClient):
+    """The Messages API answering each request on the model its scripted reply names, (model, blocks), as sticky routing
+    answers a conversation that fell back: on the fallback model, with no `fallback` block."""
+
+    def stream(self, **body: Any) -> FakeStream:
+        self.bodies.append(json.loads(json.dumps(body, default=str)))
+        model, blocks = self.replies.pop(0) if self.replies else ("claude-opus-5-5", text("(no more)"))
+        final = Final(blocks)
+        final.model = model
+        return FakeStream(final)
+
+
+def safeguard_rows(chat: str) -> list[str]:
+    return [r["text"] for r in agents.read_events(agents.paths(CORPUS, chat)[1])
+            if r["type"] == "notice" and r.get("kind") == "safeguards"]
+
+
+async def test_a_reply_on_another_model_than_the_one_asked_for_is_told_with_it_in_main_and_in_a_side_thread(
+        on, monkeypatch):
+    """A request sticky routing sends straight to the fallback model comes back with no `fallback` block: the reply that
+    moves the composer's model to it brings the notice in main, once per switch, and a side thread's fork that answers on
+    it too is told in its own thread when it answers."""
+    from app import notices
+
+    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    client = ServedClient([("claude-opus-4-8", text("Two incidents happened.")),
+                           ("claude-opus-4-8", text("Both on Monday.")),
+                           ("claude-opus-4-8", text("Because of the deploy.")),
+                           ("claude-opus-5-5", text("Back on the model asked for.")),
+                           ("claude-opus-4-8", text("And on the fallback again."))])
+    monkeypatch.setattr(llm, "client", lambda: client)
+    await main_turn("What happened?")
+    assert client.bodies[0]["model"] == "claude-opus-5-5"
+    assert agents.read_meta(CORPUS, agents.MAIN_ID)["attached"]["model"] == "claude-opus-4-8", "the composer's model"
+    switched = "Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."
+    assert safeguard_rows(agents.MAIN_ID) == [switched], "told in main with the reply"
+    assert [n["chat"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"] == [agents.MAIN_ID]
+    await main_turn("When?")
+    assert safeguard_rows(agents.MAIN_ID) == [switched], "a reply still on it is no new switch"
+
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    await next(c for c in runtime._spaces[CORPUS].convs.values() if c.kind == "fork").task
+    assert safeguard_rows(tid) == ['Claude\'s safeguards switched a reply of the side thread "why" from Opus 5.5 to '
+                                   'Opus 4.8.']
+
+    await main_turn("And now?")
+    await main_turn("And then?")
+    assert safeguard_rows(agents.MAIN_ID) == [switched, switched], "a reply on the model asked for ends the switch"
+
+
+async def test_on_claude_code_sign_in_a_reply_claude_code_moved_to_another_model_is_told_in_main(on, monkeypatch):
+    """Claude Code answers on its fallback model after the model asked for refused: the notice comes with that reply."""
+    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock
+
+    from app import notices
+
+    fake_sdk(monkeypatch, [
+        SystemMessage(subtype="init", data={"session_id": "sess-1"}),
+        SystemMessage(subtype="model_refusal_fallback", data={
+            "type": "system", "subtype": "model_refusal_fallback", "direction": "retry", "scope": "session",
+            "original_model": "claude-opus-5-5", "fallback_model": "claude-opus-4-8"}),
+        AssistantMessage(content=[TextBlock(text="Two incidents happened.")], model="claude-opus-4-8"),
+        ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                      session_id="sess-1"),
+    ], {})
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    await main_turn("What happened?")
+    said = [(n["text"], n["chat"]) for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
+    assert said == [("Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8.", agents.MAIN_ID)]

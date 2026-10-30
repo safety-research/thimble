@@ -4,7 +4,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { accent, themeLast } from '../core/theme'
-import { treeRows } from '../core/trail.mjs'
+import { rowsAt, treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
 import { citeTint } from '../marks/view'
 import { evidenceOpener } from '../tray/tray'
@@ -18,7 +18,7 @@ function textOf(n: Any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
-  return textOf(n.props?.children) + (n.type === 'Markdown' ? String(n.props.text) : '') + textOf(n.children)
+  return textOf(n.props?.children) + (n.type === 'Markdown' ? String(n.props.text) : n.type === 'Code' ? String(n.props.source) : '') + textOf(n.children)
 }
 function all(n: Any, out: Any[] = []): Any[] {
   if (!n || typeof n !== 'object') return out
@@ -46,7 +46,7 @@ const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, tex
 /** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item` (or whose
  *  citations, a list of items); `more`: the turn's cards, the message's parts and kept files to add (a card's meta.json
  *  under cards/<id>/). */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[]; panes?: () => Any[] } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[]; panes?: () => Any[]; deny?: string } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...(more.env ?? {}) })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
@@ -75,7 +75,8 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { c
   on('ui.panes', () => ({ value: more.panes?.() ?? [] }) as never)
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-made-up', agentId: `agent-repair-${spawns.length}` } as never })
+  // `deny`: Claude Code refuses each spawn, saying why
+  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return (more.deny ? { deny: more.deny } : { model: 'claude-made-up', agentId: `agent-repair-${spawns.length}` }) as never })
   on('agent.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('prompt.submit', (_$: unknown, e: Any) => { submitted.push(e); return { text: e.text } })
@@ -101,18 +102,22 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('12 of 40')
   // the header's right: the status, then its keys as the bar draws keys (no kind word); verified says no reason; then
-  // the file's place, dim, and the one line that holds the value, after a rule
+  // the file's place as the label over its lines, dim, and the lines the check read after a rule, all of them while
+  // they fit, so no marker
   expect(band).toContain('✓ verified  a ask · 0 close')
   expect(band).not.toContain('· citation')
   expect(band).not.toContain('Line 4 says')
-  expect(band).toContain('runs/summary.txt:4│failed: 12')
+  expect(band).toContain('runs/summary.txt · line 4│runs: 40│failed: 12│passed: 28')
   expect(band).not.toContain('4 │')
-  expect(band).not.toContain('runs: 40')
-  expect(band).not.toContain('passed: 28')
-  // the value bold in the citations' look, the place dim
+  expect(band).not.toContain('⋯')
+  // the value on the citations' purple tint alone, in the line's own weight and color; the place and the lines around
+  // the cited one dim
   const drawnBand = all(await $.ui.render(above()))
-  expect(drawnBand.some(n => n.type === 'Text' && n.props?.backgroundColor === undefined && (n.hover ?? n.props?.hover)?.backgroundColor === citeTint() && n.props?.underline === true && n.props?.bold === true && textOf(n) === '12')).toBe(true)
-  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'runs/summary.txt:4')?.props).toMatchObject({ dimColor: true })
+  const value = drawnBand.find(n => n.type === 'Text' && textOf(n) === '12' && n.props?.backgroundColor)
+  expect(value?.props).toMatchObject({ backgroundColor: citeTint() })
+  for (const look of ['bold', 'underline', 'color', 'dimColor']) expect(value?.props?.[look]).toBeUndefined()
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'runs/summary.txt · line 4')?.props).toMatchObject({ dimColor: true })
+  for (const around of ['runs: 40', 'passed: 28']) expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === around)?.props).toMatchObject({ dimColor: true })
   // each key once: the bar under it keeps its own keys and names none of the tray's
   expect(band.match(/a ask/g)).toEqual(['a ask'])
   expect(band.match(/0 close/g)).toEqual(['0 close'])
@@ -147,11 +152,24 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('a ask')
 })
 
-test('a corrected value computed by code: drawn in the reply as a verified one, with no sign; the header says corrected, the line under it what it was, then the line that printed it and its output; + shows all the code and output; - goes back', CITES, async ($, on) => {
+/** The rows the bar takes in the band now (its failure line, its row): those under the open tray and the blank row
+ *  under it, in a band with room for all of it (`rows`). A band of maxRows `bar + n` has n rows for the tray over the
+ *  bar. */
+async function barRowsOf($: Any, rows = 60): Promise<number> {
+  const tree = await $.ui.render(above(rows))
+  const tray = rowsAt(tree, 100, (n: Any) => n.props?.key === 'tray-band')[0]
+  return treeRows(tree, 100) - (tray ? tray.row + treeRows(tray.el, 100) + 1 : 1)
+}
+
+test('a corrected value computed by code: drawn in the reply as a verified one, with no sign; the header says corrected, the line under it what it was, then under `code · 4 lines` the code in Claude Code\'s colors for Python, a blank row and under `output · 3 lines` its output, whole while they fit, with no marker, the value on the citations\' purple tint alone and the output\'s other lines dim; in a band too short for them, a marker at each place lines are left out, the labels and the blank row once rows are left for them; + shows all of it in the side pane a opens, in the same parts and order, the value on the same tint, its side thread\'s input at its bottom; - is typed', CITES, async ($, on) => {
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e); return { value: { isPlaced: true } } as never })
+  on('ui.close', () => ({ value: undefined }))
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   const { clock } = await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11. One run was retried.',
     evidence: { kind: 'computed', by: 'checker', code: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', output: 'runs: 40\nfailed: 11\npassed: 29', highlight: [[17, 19]] },
-  }, 's-tray-2')
+  }, 's-tray-2', { panes: () => (opens.length ? [{ id: 'thimble' }] : []) })
   // the corrected words draw as a settled citation: underlined, the purple tint on hover, and no sign after them. What
   // they were shows in the tray alone
   const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
@@ -163,71 +181,237 @@ test('a corrected value computed by code: drawn in the reply as a verified one, 
   expect(textOf(drawn)).not.toContain('*')
   expect(textOf(drawn)).not.toContain('12 of 40')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($)
   let drawnBand = all(await $.ui.render(above()))
   let band = textOf(drawnBand)
-  // the header's status says corrected, in a checked one's color, what it was under it (no reason), the code line that
-  // printed the value, its output line
+  // the header's status says corrected, in a checked one's color, what it was under it (no reason), then each part of
+  // the evidence under its label, whole: no marker
   expect(band).toContain('✓ corrected  a ask · 0 close')
   expect(band).not.toContain('verified')
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === ' corrected')?.props).toMatchObject({ color: 'success' })
-  expect(band).toContain('closewas 12 of 40')
+  expect(band).toContain('close was 12 of 40')
   expect(band).not.toContain('corrected; was')
   expect(band).not.toContain('The output says 11')
-  expect(band).toContain('print(f"failed: {bad}")│failed: 11')
-  // + expand all at the end of the ruled block, dim
-  expect(band).toContain('│failed: 11│+ expand all')
-  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ expand all')?.props?.dimColor).toBe(true)
-  expect(band).not.toContain('runs: 40')
-  expect(band).not.toContain('print("runs:", n)')
-  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'print(f"failed: {bad}")')?.props?.color).toBe('permission')
-  expect(drawnBand.some(n => n.type === 'Code')).toBe(false)
-  expect(band).toContain('+ expand all')
-  // (keys apart, so they are not a word typed)
+  expect(band).toContain('was 12 of 40code · 4 linesimport json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad) output · 3 lines│runs: 40│failed: 11│passed: 29')
+  expect(band).not.toContain('⋯')
+  // the code is one Code, which Claude Code draws in its colors for Python, a line a row, as the side pane draws it,
+  // under its label; one blank row stands between it and the output's label
+  const codes = drawnBand.filter(n => n.type === 'Code')
+  expect(codes.length).toBe(1)
+  expect(codes[0].props).toMatchObject({ source: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', language: 'python', wrap: 'truncate-end' })
+  const body = kidsOf(drawnBand.find(n => n.props?.key === 'tray-body'))
+  const at = body.indexOf(codes[0])
+  expect([body[at - 1], body[at + 1], body[at + 2], body[at + 3]].map(textOf)).toEqual(['code · 4 lines', ' ', 'output · 3 lines', '│runs: 40'])
+  for (const label of [body[at - 1], body[at + 2]]) expect(label.props).toMatchObject({ dimColor: true })
+  // the output's other lines dim; the value on the citations' purple tint alone, in the line's own weight and color
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'passed: 29')?.props).toMatchObject({ dimColor: true })
+  const value = drawnBand.find(n => n.type === 'Text' && textOf(n) === '11' && n.props?.backgroundColor)
+  expect(value?.props).toMatchObject({ backgroundColor: citeTint() })
+  for (const look of ['bold', 'underline', 'color', 'dimColor']) expect(value?.props?.[look]).toBeUndefined()
+  expect(drawnBand.some(n => n.type === 'Input')).toBe(false)
+  // a band with eight rows for the tray: its frame, its header and the blank row under it take four, what it was one, so
+  // three for the evidence: the line that holds the value, the code's four lines and the output's line above it left
+  // out under one marker, the output's line below it under another; the header names + among its keys; the band keeps
+  // to its rows
+  const tree = await $.ui.render(above(bar + 8))
+  band = textOf(tree)
+  expect(treeRows(tree, 100)).toBeLessThanOrEqual(bar + 8)
+  expect(band).toContain('✓ corrected  + show all · a ask · 0 close was 12 of 40⋯ 5 lines above│failed: 11⋯ 1 line below')
+  expect(band).toContain('s rewrite')
+  for (const gone of ['import json', 'print(', 'runs: 40', 'passed: 29', 'code ·', 'output ·', '· + show all']) expect(band).not.toContain(gone)
+  // six rows: the line that printed the value too, a marker at each cut around it; the output's other lines take the
+  // rows of its markers
+  const six = await $.ui.render(above(bar + 11))
+  expect(treeRows(six, 100)).toBeLessThanOrEqual(bar + 11)
+  expect(textOf(six)).toContain('was 12 of 40⋯ 2 lines aboveprint(f"failed: {bad}")⋯ 1 line below│runs: 40│failed: 11│passed: 29')
+  // eight: the blank row between the code and its output, and the output's label; nine: the code's label too
+  expect(textOf(await $.ui.render(above(bar + 13)))).toContain('was 12 of 40⋯ 2 lines aboveprint(f"failed: {bad}")⋯ 1 line below output · 3 lines│runs: 40│failed: 11│passed: 29')
+  expect(textOf(await $.ui.render(above(bar + 14)))).toContain('+ show all · a ask · 0 close was 12 of 40code · 4 lines⋯ 2 lines aboveprint(f"failed: {bad}")⋯ 1 line below output · 3 lines│runs: 40')
+  // +: all of it in the side pane, the pane a opens on the citation (its evidence, with the side thread under it); the
+  // pane takes the keys, its input waiting, and the tray gives way to it
   await clock.advance(2000)
-  // +: all the code (as code), then all the output after the rule, its value still in the tint; no headings
   expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
-  const open = await $.ui.render(above())
-  const code = all(open).find(n => n.type === 'Code')
-  expect(code?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
-  band = textOf(open)
-  expect(band).toContain('│runs: 40│failed: 11│passed: 29')
-  expect(band).not.toContain('expand all')
-  expect(band).toContain('− collapse')
-  expect(band).not.toContain('Output of the code')
-  expect(band).not.toContain('The code')
-  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === undefined && (n.hover ?? n.props?.hover)?.backgroundColor === citeTint() && n.props?.underline === true && n.props?.bold === true && textOf(n) === '11')).toBe(true)
-  // -: back to the one line
+  await clock.advance(1000)
+  expect(opens.map(o => [o.id, o.focus])).toEqual([['thimble', true]])
+  expect(textOf(await $.ui.render(above(bar + 8)))).not.toContain('failed: 11')
+  const pane = all(await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never))
+  for (const words of ['✓ corrected  11 of 40', 'was 12 of 40', 'The output says 11. One run was retried.']) expect(textOf(pane)).toContain(words)
+  // the parts as the tray shows them, in its order and under its labels, all of them, no marker
+  expect(textOf(pane)).toContain('code · 4 linesimport json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad) output · 3 linesruns: 40failed: 11passed: 29')
+  for (const gone of ['⋯', 'Output of the code', 'The code']) expect(textOf(pane)).not.toContain(gone)
+  expect(pane.find(n => n.type === 'Code')?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
+  for (const label of ['code · 4 lines', 'output · 3 lines']) expect(pane.find(n => n.type === 'Text' && textOf(n) === label)?.props).toMatchObject({ dimColor: true })
+  const tinted = pane.find(n => n.type === 'Text' && textOf(n) === '11' && n.props?.backgroundColor)
+  expect(tinted?.props).toMatchObject({ backgroundColor: citeTint() })
+  for (const look of ['bold', 'underline']) expect(tinted?.props?.[look]).toBeUndefined()
+  const input = pane.find(n => n.type === 'Input')
+  expect(input?.props?.placeholder).toBe('Ask about the citation "11 of 40"…')
+  expect(input?.props?.autoFocus).toBeUndefined()
+  // - is no key of the tray: typed
   await clock.advance(2000)
-  expect(await $.prompt.edit(key('-'))).toEqual({ text: '', cursor: 0 })
-  band = textOf(await $.ui.render(above()))
-  expect(band).not.toContain('runs: 40')
-  expect(band).toContain('failed: 11')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key('-'))).toEqual({ text: '-', cursor: 1 })
 })
 
-test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', CITES, async ($, on) => {
+test("a value computed by code shows, above its output line, the line that printed it: not the print of another value beside it, though a literal of its own print is a word of the line", CITES, async ($, on) => {
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'import json\nruns = [json.loads(l) for l in open("runs.jsonl")]\nprint(len(runs))\nprint(sum(r["status"] == "failed" for r in runs))', output: '40\n12', highlight: [[3, 5]] },
+  }, 's-tray-said')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($)
+  // whole, all the code over its output; cut to that line and the value's, the other print not among them
+  expect(textOf(await $.ui.render(above()))).toContain('print(len(runs))\nprint(sum(r["status"] == "failed" for r in runs)) output · 2 lines│40│12')
+  const band = textOf(await $.ui.render(above(bar + 8)))
+  expect(band).toContain('⋯ 3 lines aboveprint(sum(r["status"] == "failed" for r in runs))│40│12')
+  expect(band).not.toContain('print(len(runs))')
+})
+
+test("a check's code that ends in a newline draws as one without it, as Claude Code draws no row for the empty line after the last newline: the tray counts none for it, and one blank row stands before the output; an empty line inside the code keeps its row", CITES, async ($, on) => {
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'rows = load()\n\nprint(len(rows))\nprint(n_failed)\n', output: '40\n12', highlight: [[3, 5]] },
+  }, 's-tray-newline')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const drawn = all(await $.ui.render(above()))
+  expect(drawn.filter(n => n.type === 'Code').map(n => n.props.source)).toEqual(['rows = load()\n \nprint(len(rows))\nprint(n_failed)'])
+  expect(textOf(drawn)).toContain('code · 4 linesrows = load()')
+  expect(textOf(drawn)).toContain('print(n_failed) output · 2 lines│40│12')
+})
+
+test("a value computed by code beside commands that printed other lines: the code does not show which line printed it (`head` may have printed the cited line), so its part shows from its first line, not from the script's print after it, a marker under what it leaves out", CITES, async ($, on) => {
+  const code = 'head -3 runs.csv\nwc -l runs.csv\npython3 -c \'import csv; print(sum(1 for r in csv.DictReader(open("runs.csv")) if r["status"] == "failed"))\''
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'main', code, output: 'id,day,status\nn1,2026-03-01,passed\nn2,2026-03-02,failed\n41 runs.csv\n12', highlight: [[49, 55]] },
+  }, 's-tray-head')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($)
+  // whole: the code under its label, then its output under its own
+  expect(textOf(await $.ui.render(above()))).toContain(`code · 3 lines${code} output · 5 lines│id,day,status│n1,2026-03-01,passed│n2,2026-03-02,failed│41 runs.csv│12`)
+  // cut: the code's first line, the output's line that holds the value
+  const band = textOf(await $.ui.render(above(bar + 12)))
+  expect(band).toContain('code · 3 lineshead -3 runs.csv⋯ 2 lines below output · 5 lines⋯ 2 lines above│n2,2026-03-02,failed⋯ 2 lines below')
+  expect(band).not.toContain('python3 -c')
+})
+
+test("values computed by code whose output opens with Python's warnings, as Claude Code's Bash gives them (stderr first, the output Python held back after): each value shows the print that printed it, the count's above 40 and the sum's above 25", CITES, async ($, on) => {
+  const output = '/made/up/numpy/_core/fromnumeric.py:3862: RuntimeWarning: Mean of empty slice\n  return _methods._mean(a, axis=axis, dtype=dtype,\n/made/up/numpy/_core/_methods.py:142: RuntimeWarning: invalid value encountered in scalar divide\n  ret = ret.dtype.type(ret / rcount)\n40\n25'
+  const code = 'import numpy as np\nimport pandas as pd\nruns = pd.read_csv("runs.csv")\nprint(len(runs))\nskipped_minutes = np.mean(runs[runs.status == "skipped"].minutes.to_numpy())\nprint((runs.status == "failed").sum())'
+  const text = 'The check counted [40 nightly runs](#) in runs.csv, and [25 of them failed](#).'
+  const at = (v: string) => [[output.lastIndexOf(v), output.lastIndexOf(v) + 2]]
+  await resumed($, on, [
+    { n: 1, row: 'row-t1', words: '40 nightly runs', start: 18, end: 38, sentence: text, status: 'verified', shown: '40 nightly runs', evidence: { kind: 'computed', by: 'checker', code, output, highlight: at('40') } },
+    { n: 2, row: 'row-t1', words: '25 of them failed', start: 56, end: 78, sentence: text, status: 'verified', shown: '25 of them failed', evidence: { kind: 'computed', by: 'checker', code, output, highlight: at('25') } },
+  ], 's-tray-warned', { text })
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($)
+  // in a band that keeps only the line that printed the value and the value's line in view, with their markers
+  let band = textOf(await $.ui.render(above(bar + 10)))
+  expect(band).toContain('⋯ 3 lines aboveprint(len(runs))⋯ 2 lines below⋯ 4 lines above│40⋯ 1 line below')
+  expect(band).not.toContain('.sum())')
+  await $.prompt.edit(key(']'))
+  band = textOf(await $.ui.render(above(bar + 10)))
+  expect(band).toContain('print((runs.status == "failed").sum()) output · 6 lines⋯ 5 lines above│25')
+  expect(band).not.toContain('print(len(runs))')
+})
+
+// a check's output that holds bytes a terminal acts on (a color code, a NUL), as a test run's colored output does
+const RAW = {
+  n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+  evidence: { kind: 'computed', by: 'checker', code: 'import subprocess\nprint(subprocess.run(["pytest", "-q"], capture_output=True, text=True).stdout)', output: '\u001b[31mFAILED\u001b[0m 12 of 40\u0000\r\n', highlight: [[16, 24]] },
+}
+/** The strings of a drawing that hold a character Claude Code refuses in a text (a control character). */
+const refused = (n: Any) => all(n).flatMap(x => kidsOf(x)).filter(c => typeof c === 'string' && /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(c))
+
+test('a check\'s output that holds bytes that do not print draws them as their escapes, in the tray whole and cut and in the side pane + opens, the value marked: each keeps drawing', CITES, async ($, on) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('ui.close', () => ({ value: undefined }))
+  const { clock } = await resumed($, on, RAW, 's-tray-raw')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($)
+  for (const rows of [20, bar + 6]) {
+    const drawn = await $.ui.render(above(rows))
+    expect(refused(drawn)).toEqual([])
+    expect(textOf(drawn)).toContain('\\x1b[31mFAILED\\x1b[0m 12 of 40\\x00')
+    expect(all(drawn).some(n => n.type === 'Text' && n.props?.backgroundColor === citeTint() && textOf(n) === '12 of 40')).toBe(true)
+  }
+  // cut, + shows all of it in the side pane
+  expect(textOf(await $.ui.render(above(bar + 6)))).toContain('+ show all · a ask · 0 close ⋯ 2 lines above')
+  expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  expect(refused(pane)).toEqual([])
+  expect(textOf(pane)).toContain('\\x1b[31mFAILED\\x1b[0m 12 of 40\\x00')
+})
+
+test('a file\'s line that holds bytes that do not print (a log\'s color codes) draws them as their escapes in the tray and in the side pane its place opens: both keep drawing', CITES, async ($, on) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  on('ui.close', () => ({ value: undefined }))
+  const line = '\u001b[32mok\u001b[0m failed: 12\u0007'
+  await resumed($, on, { ...QUOTED, evidence: { kind: 'quote', file: 'logs/run.log', line: '4', lines: [{ n: 3, text: 'runs: 40' }, { n: 4, text: line, highlight: [line.indexOf('12'), line.indexOf('12') + 2] }, { n: 5, text: 'passed: 28' }] } }, 's-tray-raw-file')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const ui = await $.ui.mount(above())
+  const band = await ui.drawn()
+  expect(refused(band)).toEqual([])
+  expect(textOf(band)).toContain('\\x1b[32mok\\x1b[0m failed: 12\\x07')
+  await ui.press({ key: 'tray-file' })
+  await ui.unmount()
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  expect(refused(pane)).toEqual([])
+  expect(textOf(pane)).toContain('\\x1b[32mok\\x1b[0m failed: 12\\x07')
+  expect(all(pane).some(n => n.type === 'Text' && n.props?.backgroundColor === citeTint() && textOf(n) === '12')).toBe(true)
+})
+
+test("Claude's own words in a reply with a citation draw as Claude Code draws them, escaped nowhere: a no-break space, an emoji of parts joined by zero-width joiners, a Persian word's zero-width non-joiner, the tabs of a recipe and of a table in code blocks", CITES, async ($, on) => {
+  const sentence = 'Of the 40 nightly runs, [12 of 40](#) failed 👩‍💻, a failure rate of 30 %.'
+  const text = `${sentence}\n\nThe make target the runs call:\n\n\`\`\`make\ntest:\n\tpytest -q\n\tpython3 report.py\n\`\`\`\n\nColumns of runs.tsv:\n\n\`\`\`\nrun\tstatus\tminutes\nnightly-004\tfailed\t18.7\n\`\`\`\n\nIn Persian: می‌خواهم (one word).`
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '12 of 40', start: 24, end: 37, sentence, status: 'verified', shown: '12 of 40',
+    evidence: { kind: 'computed', by: 'checker', code: 'print(len(runs))\nprint(n_failed)', output: '40\n12', highlight: [[3, 5]] },
+  }, 's-tray-own-words', { text })
+  const drawn = await $.ui.render(answer('row-t1', text))
+  // the citation draws, so these are thimble's drawing of the reply, not Claude Code's own
+  expect(all(drawn).some(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))).toBe(true)
+  const words = textOf(drawn)
+  for (const own of [' failed 👩‍💻, a failure rate of 30 %.', 'test:\n\tpytest -q\n\tpython3 report.py', 'run\tstatus\tminutes\nnightly-004\tfailed\t18.7', 'می‌خواهم']) expect(words).toContain(own)
+  expect(words).not.toMatch(/\\x|\\u/)
+})
+
+test('each key of the tray is a click too: each marker of a cut card as +, + show all and 0 close in its header as + and 0, and a click on the citation in the reply or in the tray\'s title closes it', CITES, async ($, on) => {
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.id); return { value: { isPlaced: true } } as never })
+  on('ui.close', () => ({ value: undefined }))
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
     evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nprint(f"failed: {bad}")', output: 'runs: 40\nfailed: 12\npassed: 28', highlight: [[17, 19]] },
   }, 's-tray-clicks')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($)
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('✓ verified')
-  expect(band).toContain('+ expand all')
+  expect(band).not.toContain('⋯')
   expect(band).not.toContain('next prompt')
-  // + expand all: all the output, as +; − collapse: back
-  let tray = await $.ui.mount(above())
-  await tray.press({ key: 'more-press' })
+  // cut, a marker at each place it leaves lines out, dim, none naming +, which the header names, its key as the header
+  // draws a key: a click on any marker shows all of it in the side pane, as +, and the tray gives way to the pane
+  const cut = all(await $.ui.render(above(bar + 7)))
+  const marks = cut.filter(n => n.type === 'Button' && String(n.props?.key).startsWith('tray-cut'))
+  expect(marks.map(textOf)).toEqual(['⋯ 3 lines above', '⋯ 1 line below'])
+  expect(all(marks[0]).find(n => n.type === 'Text' && textOf(n) === '⋯ 3 lines above')?.props).toMatchObject({ dimColor: true })
+  for (const m of marks) expect(all(m).some(n => n.type === 'Text' && textOf(n) === '+')).toBe(false)
+  expect(all(cut.find(n => n.type === 'Button' && n.props?.key === 'tray-+')).find(n => n.type === 'Text' && textOf(n) === '+')?.props).toMatchObject({ bold: true, color: accent() })
+  let tray = await $.ui.mount(above(bar + 7))
+  await tray.press({ key: marks[0].props.key })
   await tray.unmount()
-  band = textOf(await $.ui.render(above()))
-  expect(band).toContain('│runs: 40│failed: 12│passed: 28')
-  expect(band).toContain('− collapse')
-  tray = await $.ui.mount(above())
-  await tray.press({ key: 'more-press' })
-  await tray.unmount()
-  band = textOf(await $.ui.render(above()))
-  expect(band).not.toContain('runs: 40')
-  expect(band).toContain('+ expand all')
+  expect(opens).toEqual(['thimble'])
+  expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
   // a click on the citation's words in the tray's title closes it, as in the reply
+  const opened = all(await $.ui.render(answer('row-t1', TEXT))).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
+  const first = await $.ui.mount(answer('row-t1', TEXT))
+  await first.press({ key: opened.props.key })
+  await first.unmount()
+  expect(textOf(await $.ui.render(above()))).toContain('failed: 12')
   tray = await $.ui.mount(above())
   await tray.press({ key: 'tray-title' })
   await tray.unmount()
@@ -255,6 +439,79 @@ test('each key of the tray is a click too: + expand all and − collapse as + an
   await tray.press({ key: 'tray-0' })
   await tray.unmount()
   expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
+  // again open, cut: `+ show all` in its header shows all of it in the side pane, as + does, and the tray gives way to
+  // the pane
+  reply = await $.ui.mount(answer('row-t1', TEXT))
+  await reply.press({ key: cite.props.key })
+  await reply.unmount()
+  tray = await $.ui.mount(above(bar + 7))
+  expect(textOf(all(await tray.drawn()).find(n => n.type === 'Button' && n.props?.key === 'tray-+'))).toBe('+ show all')
+  await tray.press({ key: 'tray-+' })
+  await tray.unmount()
+  expect(opens).toEqual(['thimble', 'thimble'])
+  expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
+})
+
+/** The words of the tray's title as the band draws them (`tree`): the Text in its press. */
+const titleText = (tree: Any) => all(all(tree).find(n => n.type === 'Button' && n.props?.key === 'tray-title')).find(n => n.type === 'Text')
+
+/** A press on the explainer's link to the lines of conf/limits.toml in the open tray: those lines open over it. */
+async function openLines($: Any): Promise<void> {
+  const ui = await $.ui.mount(above(40))
+  await ui.press({ key: all(await ui.drawn()).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 0'))!.props.key })
+  await ui.unmount()
+}
+
+test("the tray's title is the marked words, bold on their tint and not underlined: a citation's in the text's own color, a failed one's in red on its own tint, a file's lines' place as a citation's words", CITES, async ($, on) => {
+  const { clock } = await resumed($, on, [{ ...QUOTED, sentence: TWO }, { ...SECOND, status: 'failed', failedBy: 'check', reason: 'Line 4 names the p99 check.', evidence: QUOTED.evidence }], 's-tray-title-look', { text: TWO, parts: HEADS, kept: { 'conf/limits.toml': '[limits]\np95_ms = 800\ntimeout_s = 30\n' } })
+  const press = async (k: string) => {
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key(k))).toEqual({ text: '', cursor: 0 })
+  }
+  // ] the heads-up on the first citation's words, ] the citation, verified
+  for (const k of [']', ']']) await press(k)
+  let t = titleText(await $.ui.render(above(40)))
+  expect(textOf(t)).toBe('12 of 40')
+  expect(t.props).toMatchObject({ bold: true, backgroundColor: citeTint() })
+  for (const look of ['underline', 'color']) expect(t.props[look]).toBeUndefined()
+  // ] the explainer on the second one's words, ] the second, which the check found false: red, on the failed ones' tint
+  for (const k of [']', ']']) await press(k)
+  t = titleText(await $.ui.render(above(40)))
+  expect(textOf(t)).toBe('p95 check')
+  expect(t.props).toMatchObject({ bold: true, color: 'error', backgroundColor: citeTint('failed') })
+  expect(t.props.underline).toBeUndefined()
+  // [ the explainer, and its link to a file's lines: their place, as a citation's words
+  await press('[')
+  await openLines($)
+  t = titleText(await $.ui.render(above(40)))
+  expect(textOf(t)).toBe('conf/limits.toml:2-3')
+  expect(t.props).toMatchObject({ bold: true, backgroundColor: citeTint() })
+  for (const look of ['underline', 'color']) expect(t.props[look]).toBeUndefined()
+})
+
+test("a blank row stands under the tray's head before its card, in a citation's tray and in a file's lines', the card's first row two rows under the head's, as an explainer's words stand, which start with a blank row of their own as the reply draws them", CITES, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-gap', { parts: HEADS, kept: { 'conf/limits.toml': '[limits]\np95_ms = 800\ntimeout_s = 30\n' } })
+  // how many rows under the head's row the first element `first` picks stands, and the frame's parts: the head, a blank
+  // row, the body
+  const under = async (first: (n: Any) => boolean) => {
+    const tree = await $.ui.render(above(40))
+    const head = rowsAt(tree, 100, (n: Any) => n.props?.key === 'tray-head')[0]!
+    const parts = kidsOf(all(tree).find(n => n.props?.key === 'tray')).map(k => k.props?.key ?? (k.type === 'Text' && textOf(k) === ' ' ? 'blank' : k.type))
+    return { by: rowsAt(tree, 100, first)[0]!.row - head.row, parts }
+  }
+  // ] the heads-up, ] the citation: the head, a blank row, then the file's place over its lines
+  for (const k of [']', ']']) {
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key(k))).toEqual({ text: '', cursor: 0 })
+  }
+  expect(await under(n => n.props?.key === 'tray-file')).toEqual({ by: 2, parts: ['tray-head', 'blank', 'tray-body'] })
+  // ] the explainer: its words two rows under the head's too, their own blank row over them
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  expect(await under(n => n.type === 'Markdown' && String(n.props.text).startsWith('The time that 95'))).toEqual({ by: 2, parts: ['tray-head', 'tray-body'] })
+  // its link to a file's lines: the head, a blank row, then the lines
+  await openLines($)
+  expect(await under(n => n.props?.key === 'pl0')).toEqual({ by: 2, parts: ['tray-head', 'blank', 'tray-body'] })
 })
 
 test('a citation the check found false: × failed in the header, as any failed one, why in one dim sentence under it, x repair, then its evidence; x starts a check of it again in the background, no turn of main', CITES, async ($, on) => {
@@ -306,7 +563,7 @@ test('a repair that corrected the citation says repaired in its header and what 
   // ] stays on the bar while the tray is open; the header keeps the tray's own keys
   expect(card).toContain('✓ repaired  a ask · 0 close')
   expect(card).toContain('thimble  ] next citation')
-  expect(card).toContain('closewas 12 of 40')
+  expect(card).toContain('close was 12 of 40')
   expect(card).not.toContain('repaired; was')
   expect(card).not.toContain('x repair')
   await $.prompt.edit(key(']'))
@@ -504,6 +761,40 @@ test('a heads-up on a citation\'s words is one ] away; it shows whole, with no p
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
+test('an open tray stays as it is while the person scrolls the transcript under it: the answer showing other rows of itself, or none, closes nothing; ] opens the next mark in its place, and 0 closes it', CITES, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-scroll', { parts: HEADS })
+  // the answer's row as the fullscreen transcript draws it, with the rows of it that its viewport shows
+  const row = (onScreen: Any) => $.ui.render({ ...(answer('row-t1', TEXT) as Any), props: { text: TEXT, isFirstOfReply: true, onScreen } } as never)
+  const band = async () => {
+    await clock.advance(10)
+    return textOf(await $.ui.render(above(40)))
+  }
+  await row({ first: 0, last: 3, of: 4 })
+  // ]: the heads-up on the citation's words
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(await band()).toContain('Retried runs count twice')
+  await row({ first: 0, last: 3, of: 4 })
+  // the person scrolls the transcript back, under a band of the same rows, until the answer leaves the screen, and down
+  // again: the heads-up stays open throughout, and the bar names ] on the citation after it
+  for (const r of [{ first: 1, last: 3, of: 4 }, { first: 0, last: 2, of: 4 }, { first: 0, last: 0, of: 4 }, null, { first: 0, last: 3, of: 4 }]) {
+    await row(r)
+    const now = await band()
+    expect(now).toContain('Retried runs count twice')
+    expect(now).toContain('a ask · 0 close')
+    expect(now).toContain('] next citation')
+  }
+  // ] opens the citation in its place, which a scroll leaves open too; 0 closes it
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(await band()).toContain('failed: 12')
+  await row(null)
+  expect(await band()).toContain('failed: 12')
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(await band()).not.toContain('a ask · 0 ')
+})
+
 // a value code computed, the citation's evidence ten lines of output
 const OUTPUT = ['runs: 40', ...Array.from({ length: 8 }, (_, i) => `run ${i + 1}: ok`), 'failed: 12'].join('\n')
 const TALL = {
@@ -511,156 +802,328 @@ const TALL = {
   evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nfor i, r in enumerate(runs):\n    print(f"run {i + 1}: {r}")\nprint(f"failed: {bad}")', output: OUTPUT, highlight: [[OUTPUT.length - 2, OUTPUT.length]] },
 }
 
-test('a tray taller than the rows the band has over the bar shows its body in a window of them: the band ends with the whole bar, its failure line too, the dim row under the window says how many more lines there are, and the wheel over the band moves the window', CITES, async ($, on) => {
-  const scrolls: Any[] = []
-  const { clock } = await resumed($, on, TALL, 's-tray-tall', { scrolls })
-  const drawn = async (maxRows: number) => {
-    const band = await $.ui.render(above(maxRows))
-    return { band, rows: kidsOf(band), text: textOf(band), window: all(band).find(n => n.props?.key === 'tray-window-in') }
-  }
-  // the band fits its rows, and its last rows are the bar's, whole, under the tray
-  const fits = (d: Awaited<ReturnType<typeof drawn>>, maxRows: number) => {
-    expect(treeRows(d.band, 100)).toBeLessThanOrEqual(maxRows)
-    const tray = d.rows.findIndex(n => n.props?.key === 'tray-band')
-    expect(tray).toBeGreaterThan(-1)
-    expect(d.rows.slice(tray + 1).map(n => n.props?.key)).toContain('bar')
-    expect(String(d.rows.at(-1)?.props?.key)).toMatch(/^bar/)
-  }
-  // the person's wheel over the band, as Claude Code raises it, and the band's scrolls that reached Claude Code's own
-  const wheel = (by: number) => $.ui.scroll({ component: 'AbovePrompt', requestId: 'above', offset: 0, by, bodyRows: 7, contentRows: 8, origin: { kind: 'person' } } as never)
-  const bandScrolls = () => scrolls.filter(e => e?.component === 'AbovePrompt').length
-  // ] then +: all the code and its ten lines of output
-  const open = async () => {
-    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
-    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
-  }
-  await open()
-  // the session's start said the card sandbox cannot start here, a failure line that wraps above the bar: the tray
-  // takes the rows left over all of it
-  fits(await drawn(10), 10)
-  // the next prompt takes that line and closes the tray; opened again, in a band of eight rows
-  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
-  await open()
-  let d = await drawn(8)
-  fits(d, 8)
-  // the tray's head and its keys stay; the body shows from its top, the lines under the window counted
-  expect(d.text).toContain('a ask')
-  expect(d.window?.props?.top).toBeUndefined()
-  expect(Number(/↓ (\d+) more line/.exec(d.text)?.[1])).toBeGreaterThan(5)
-  // the wheel over the band moves the window, a row a tick, and the band itself does not move
-  await wheel(2)
-  d = await drawn(8)
-  fits(d, 8)
-  expect(d.window?.props?.top).toBe(-2)
-  expect(bandScrolls()).toBe(0)
-  // at the last rows the row under the window counts the lines above, and the wheel goes back up
-  await wheel(100)
-  d = await drawn(8)
-  fits(d, 8)
-  const above8 = Number(/↑ (\d+) line/.exec(d.text)?.[1])
-  expect(above8).toBeGreaterThan(5)
-  expect(d.window?.props?.top).toBe(-above8)
-  await wheel(-100)
-  d = await drawn(8)
-  expect(d.window?.props?.top).toBeUndefined()
-  // a band with the rows for all of it shows it whole, with no window
-  const whole = await drawn(40)
-  expect(whole.window).toBeUndefined()
-  expect(whole.text).toContain('│runs: 40│run 1: ok')
-  // and the wheel over it is Claude Code's again
-  await wheel(1)
-  expect(bandScrolls()).toBe(1)
+/** The side pane as Claude Code asks for its drawing, docked, `rows` rows tall. */
+const PANE = (rows: number) => ({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'citation 1', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: rows }, view: {} }, viewport: view }) as never
+
+test('a box taller than the rows the band has over the bar shows as much of it as they hold, the bar under it: a heads-up from its start, its one marker at the bottom, `⋯ N lines below`, N the rows it leaves out, and `+ show all` in its header. Nothing in it scrolls and the band keeps to its rows, so d and u are typed; + shows all of it in the side pane a opens, which takes the keys', CITES, async ($, on) => {
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e); return { value: { isPlaced: true } } as never })
+  on('ui.close', () => ({ value: undefined }))
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  const { clock } = await resumed($, on, QUOTED, 's-tray-cut', { parts: HEADS, panes: () => (opens.length ? [{ id: 'thimble' }] : []) })
+  // ]: the heads-up on the citation's words, three long bullets; in a band of forty rows it shows whole
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const bar = await barRowsOf($)
+  const wholeTree = all(await $.ui.render(above(40)))
+  let band = textOf(wholeTree)
+  expect(band).toContain('but not the failures among the other runs.')
+  expect(band).not.toContain('⋯')
+  expect(textOf(wholeTree.find(n => n.props?.key === 'tray-head'))).toBe('12 of 40a ask · 0 close')
+  // the rows its words take, whole
+  const rows = treeRows(wholeTree.find(n => n.props?.key === 'tray-body'), 93)
+  // with eight rows for it over the bar it takes all eight: its words from their start, in the four rows its frame and
+  // header leave over its one marker, which says how many rows it leaves out; the header names + before a; the band no
+  // taller than its rows, ] on the bar under it
+  const tree = await $.ui.render(above(bar + 8))
+  band = textOf(tree)
+  expect(treeRows(tree, 100)).toBe(bar + 8)
+  const win = all(tree).find(n => n.props?.key === 'tray-window')
+  expect(win?.props).toMatchObject({ height: 4, overflow: 'hidden' })
+  expect(all(win).find(n => n.props?.key === 'tray-window-in')?.props?.top).toBeUndefined()
+  expect(band).toContain('Retried runs count twice')
+  const marks = all(tree).filter(n => n.type === 'Button' && String(n.props?.key).startsWith('tray-cut'))
+  expect(marks.map(textOf)).toEqual([`⋯ ${rows - 4} lines below`])
+  expect(kidsOf(all(tree).find(n => n.props?.key === 'tray-body')).at(-1)).toBe(marks[0])
+  expect(textOf(all(tree).find(n => n.props?.key === 'tray-head'))).toBe('12 of 40+ show all · a ask · 0 close')
+  expect(band).toContain('] next citation')
+  expect(all(tree).some(n => /^tray-(page|scroll)/.test(String(n.props?.key ?? '')))).toBe(false)
+  expect(await $.prompt.edit(key('d'))).toEqual({ text: 'd', cursor: 1 })
+  expect(await $.prompt.edit(key('u'))).toEqual({ text: 'u', cursor: 1 })
+  await clock.advance(2000)
+  // +: the side pane a opens on the heads-up, all its words, the side thread's input under them waiting; the pane takes
+  // the keys, so ↑ ↓ scroll it
+  expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(opens.map(o => [o.id, o.focus])).toEqual([['thimble', true]])
+  const pane = all(await $.ui.render(PANE(40)))
+  for (const words of ['Retried runs count twice', 'heads-up', 'but not the failures among the other runs.']) expect(textOf(pane)).toContain(words)
+  expect(pane.find(n => n.type === 'Input')?.props?.autoFocus).toBeUndefined()
 })
 
-test('a tray cut at a short height pages: ↓ N more lines is a click that moves its window a page, ↑ N lines above one back, and d and u do the same; a word that starts with d is typed', CITES, async ($, on) => {
-  const { clock } = await resumed($, on, TALL, 's-tray-page')
-  const drawn = async (maxRows = 8) => {
-    const band = await $.ui.render(above(maxRows))
-    const top = all(band).find(n => n.props?.key === 'tray-window-in')?.props?.top
-    return { band, text: textOf(band), top: typeof top === 'number' ? -top : 0, button: (id: string) => all(band).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`) }
-  }
-  // a click on the row under the window, in the band as mounted at the same height
-  const click = async (id: string) => {
-    const band = await $.ui.mount(above(8))
-    await band.press({ key: `tray-page-${id}` })
-    await band.unmount()
-  }
-  // ] then +: all the code and its output
-  const open = async () => {
-    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
-    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
-  }
-  await open()
-  await drawn(10)
-  // the failure line of the session's start goes with the next prompt, which closes the tray; opened again
+test('+ on a cut citation computed by code shows all of it in the side pane: what the check found, the sentence, every line of the code and the output, each under its label, the line that holds the value in view as it opens; the wheel and ↑ ↓ scroll it under its input, and a question asked there asks the side thread about the citation, whose conversation shows at the pane\'s end', CITES, async ($, on) => {
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e); return { value: { isPlaced: true } } as never })
+  on('ui.close', () => ({ value: undefined }))
+  const { clock, spawns } = await resumed($, on, TALL, 's-tray-panel', { panes: () => (opens.length ? [{ id: 'thimble' }] : []) })
   await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
-  await open()
-  let d = await drawn()
-  const below = Number(/↓ (\d+) more line/.exec(d.text)?.[1])
-  expect(below).toBeGreaterThan(5)
-  expect(d.top).toBe(0)
-  // a click on ↓ N more lines: a page further down, and ↑ N lines above under the window too
-  const down = d.button('down')
-  expect(textOf(down)).toBe(`d ↓ ${below} more lines`)
-  await click('down')
-  d = await drawn()
-  const page = d.top
-  expect(page).toBeGreaterThan(0)
-  expect(d.text).toContain(`↑ ${page} line${page === 1 ? '' : 's'} above`)
-  // ↑ N lines above: a page back up
-  await click('up')
-  expect((await drawn()).top).toBe(0)
-  // d at an empty prompt pages down, u back up
-  expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
-  expect((await drawn()).top).toBe(page)
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(2000)
-  expect(await $.prompt.edit(key('u'))).toEqual({ text: '', cursor: 0 })
-  expect((await drawn()).top).toBe(0)
-  await clock.advance(2000)
-  // a word that starts with d: the page goes back, and the word is typed
-  expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
-  const word = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'o' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'o' } as never) as Any
-  expect(word.text).toBe('do')
-  expect((await drawn()).top).toBe(0)
+  const bar = await barRowsOf($)
+  // with six rows for it: the line that printed the value and the value's line, with the marker over each, the blank
+  // row between them and the output's label
+  const band = textOf(await $.ui.render(above(bar + 10)))
+  expect(band).toContain('⋯ 3 lines aboveprint(f"failed: {bad}") output · 10 lines⋯ 9 lines above│failed: 12')
+  for (const gone of ['runs: 40', 'print("runs:", n)']) expect(band).not.toContain(gone)
+  // +: every line of the code and the output in the side pane, each under its label, the value's line in view
+  expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  let pane = all(await $.ui.render(PANE(12)))
+  expect(textOf(pane)).toContain(`code · 4 lines${TALL.evidence.code} output · 10 lines${OUTPUT.split('\n').join('')}`)
+  expect(pane.find(n => n.type === 'Code')?.props?.source).toBe(TALL.evidence.code)
+  const by = () => -(pane.find(n => n.props?.key === 'pane-body-in')?.props?.top ?? 0)
+  const at = by()
+  expect(at).toBeGreaterThan(0)
+  // the wheel, and ↑ (a scroll of one row with no pointer): the body moves, the input stays under it
+  await $.ui.scroll({ component: 'Pane', requestId: 'thimble', offset: 0, by: 2, origin: { kind: 'person' }, pointer: { x: 5, y: 5 } } as never)
+  pane = all(await $.ui.render(PANE(12)))
+  expect(by()).toBe(at + 2)
+  await $.ui.scroll({ component: 'Pane', requestId: 'thimble', offset: 0, by: -1, origin: { kind: 'person' } } as never)
+  pane = all(await $.ui.render(PANE(12)))
+  expect(by()).toBe(at + 1)
+  const input = pane.find(n => n.type === 'Input')
+  expect(input?.props?.placeholder).toBe('Ask about the citation "12 of 40"…')
+  // a question asked in the input: a fork answers it in the side thread about the citation, and the pane shows the
+  // thread's conversation after the code, at its end
+  const mounted = await $.ui.mount(PANE(12))
+  await mounted.input({ key: String(input.props.key), text: 'which runs failed?' })
+  await mounted.unmount()
+  await clock.advance(1000)
+  expect(spawns.map(s => s.description)).toEqual(['thread · the citation "12 of 40"'])
+  pane = all(await $.ui.render(PANE(12)))
+  expect(textOf(pane)).toContain('❯ which runs failed?')
+  expect(textOf(pane.find(n => n.props?.key === 'pane-more'))).toMatch(/^↑ \d+ rows above/)
+  // inline in a short terminal, where Claude Code gives the pane a third of the window: the line that says how much more
+  // there is stands beside esc close, and the input bar is its field alone, under the thread's key row
+  const inline = all(await $.ui.render({ ...(PANE(8) as Any), props: { ...(PANE(8) as Any).props, placement: 'inline' } } as never))
+  expect(textOf(inline.find(n => n.props?.key === 'pane-top'))).toMatch(/^↑ \d+ rows above · scroll or ↑esc close$/)
+  expect(treeRows(inline.find(n => n.props?.key === 'pane-under'), 90)).toBeLessThanOrEqual(2)
 })
 
-// a value code computed, the citation's evidence three hundred lines of output
-const LONG_OUTPUT = ['runs: 300', ...Array.from({ length: 300 }, (_, i) => `run ${i + 1}: ok`), 'failed: 12'].join('\n')
-const LONG = { ...TALL, evidence: { ...TALL.evidence, output: LONG_OUTPUT, highlight: [[LONG_OUTPUT.length - 2, LONG_OUTPUT.length]] } }
+// + at the prompt opens no pane below 144 columns either: the line names the click on `show all` in the tray's header,
+// which stays there while the line takes rows of the band
+test('+ on a cut card at a narrow terminal: the line says to click show all in the tray, whose header names it while the line takes rows of the band, and that press opens the side pane', CITES, async ($, on) => {
+  const opens: Any[] = []
+  let wide = false
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.id); return { value: wide ? { isPlaced: true } : { isPlaced: false, reason: 'unasked below 144 columns (118 now)' } } as never })
+  on('ui.close', () => ({ value: undefined }))
+  const { clock } = await resumed($, on, TALL, 's-tray-narrow-plus')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const bar = await barRowsOf($)
+  expect(textOf(await $.ui.render(above(bar + 8)))).toContain('✓ verified  + show all · a ask · 0 close')
+  expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(opens).toEqual(['thimble'])
+  // the line under the tray takes its rows from the band, and the card, cut to fewer rows, still leaves lines out: the
+  // header names + show all, and the frame keeps to the band's rows
+  const tree = await $.ui.render(above(bar + 8))
+  expect(treeRows(tree, 100)).toBeLessThanOrEqual(bar + 8)
+  expect(textOf(tree)).toContain('+ needs a wider terminal: widen the window to show the side pane, or click “show all” in the tray.')
+  expect(textOf(tree)).toContain('✓ verified  + show all · a ask · 0 close')
+  // the press on it: Claude Code places the pane, and the tray gives way to it
+  wide = true
+  const ui = await $.ui.mount(above(bar + 8))
+  await ui.press({ key: 'tray-+' })
+  await ui.unmount()
+  expect(opens).toEqual(['thimble', 'thimble'])
+  expect(textOf(await $.ui.render(above(bar + 8)))).not.toContain('failed: 12')
+})
 
-test('at the narrowest tray, with lines above and below in the hundreds, the row under the window shows both parts whole, each with its key, on its one row', CITES, async ($, on) => {
-  const { clock } = await resumed($, on, LONG, 's-tray-page-narrow')
-  // a band 40 columns wide: the tray at its narrowest, 36 columns inside its frame
-  const narrow = (maxRows: number) => { const a = above(maxRows) as Any; return { ...a, props: { ...a.props, bodyColumns: 40 }, viewport: { ...a.viewport, columns: 40 } } as never }
-  const open = async () => {
-    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
-    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
+/** The tray's body as the terminal shows it, a row each: a Code's lines each a row, a ruled line its rule and words. */
+function bodyRows(tree: Any): string[] {
+  return kidsOf(all(tree).find(n => n.props?.key === 'tray-body')).flatMap((k: Any) => (k.type === 'Code' ? String(k.props.source).split('\n') : [textOf(k)]))
+}
+
+// two values code computed, each printed as the reply's words, so the cited words are a printed line whole: the count
+// of the runs that failed the p95 check, under one line per failed run, and a day's failures in a stage, in the middle
+// of the failures of each day and stage
+const DESIGN = 'Of the 400 nightly runs, [61 failed the p95 check](#), and [14 failures in enrich on Sep 23](#) were the most in a day.'
+const FAILS = Array.from({ length: 61 }, (_, i) => `run ${String(300 + 3 * i).padStart(4, '0')}  night 2026-09-${String((i % 28) + 1).padStart(2, '0')}  p95 ${1000 + i} ms  FAIL`)
+const FAILED = [...FAILS, '61 failed the p95 check'].join('\n')
+const FAILED_CODE = ['import csv', 'rows = list(csv.DictReader(open("runs.csv")))', 'bad = [r for r in rows if int(r["p95_ms"]) > 800]', 'bad.sort(key=lambda r: r["night"])', 'for r in bad:', '    print(f"run {r[\'run\']}  night {r[\'night\']}  p95 {r[\'p95_ms\']} ms  FAIL")', 'print(f"{len(bad)} failed the p95 check")'].join('\n')
+const DAYS = Array.from({ length: 60 }, (_, i) => ({ 44: '0 failures in ingest on Sep 23', 45: '14 failures in enrich on Sep 23', 46: '7 failures in ingest on Sep 24' } as Record<number, string>)[i] ?? `${i % 9} failures in ${['ingest', 'enrich', 'report'][i % 3]} on ${i < 44 ? 'Sep' : 'Oct'} ${Math.floor(i / 3) + 1}`).join('\n')
+const DAYS_CODE = ['import pandas as pd', 'runs = pd.read_csv("runs.csv", parse_dates=["night"])', 'fails = runs[runs.status == "FAIL"]', 'by_day = fails.groupby([fails.night.dt.date, "stage"]).size()', 'for (day, stage), n in by_day.items():', '    print(f"{n} failures in {stage} on {day:%b %-d}")'].join('\n')
+const printed = (n: number, words: string, code: string, output: string) => {
+  const start = DESIGN.indexOf(`[${words}]`)
+  return { n, row: 'row-t1', words, start, end: start + words.length + 5, sentence: DESIGN, status: 'verified', shown: words,
+    evidence: { kind: 'computed', by: 'checker', code, output, highlight: [[output.indexOf(words), output.indexOf(words) + words.length]] } }
+}
+const DESIGN_ITEMS = [printed(1, '61 failed the p95 check', FAILED_CODE, FAILED), printed(2, '14 failures in enrich on Sep 23', DAYS_CODE, DAYS)]
+
+test('a cut citation computed by code: each part under its label, dim, and a marker at each place lines are left out, dim, saying how many: the code cut above, the output cut above; round a line in the middle of the output, cut above and below; no marker names +, which the header names among its keys, drawn as the header draws a key', CITES, async ($, on) => {
+  const { clock } = await resumed($, on, DESIGN_ITEMS, 's-tray-design', { text: DESIGN })
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($, 120)
+  // nine rows for the evidence, the frame, the header and the blank row under it taking four: the line that printed the
+  // count and the line before it, the count's line and the line before it
+  const tree = await $.ui.render(above(bar + 13))
+  expect(treeRows(tree, 100)).toBeLessThanOrEqual(bar + 13)
+  expect(bodyRows(tree)).toEqual([
+    'code · 7 lines',
+    '⋯ 5 lines above',
+    '    print(f"run {r[\'run\']}  night {r[\'night\']}  p95 {r[\'p95_ms\']} ms  FAIL")',
+    'print(f"{len(bad)} failed the p95 check")',
+    ' ',
+    'output · 62 lines',
+    '⋯ 60 lines above',
+    `│${FAILS[60]}`,
+    '│61 failed the p95 check',
+  ])
+  const marks = all(tree).filter(n => n.type === 'Button' && String(n.props?.key).startsWith('tray-cut'))
+  expect(all(marks[0]).find(n => n.type === 'Text' && textOf(n) === '⋯ 5 lines above')?.props).toMatchObject({ dimColor: true })
+  expect(all(marks[1]).filter(n => n.type === 'Text').map(textOf)).toEqual(['⋯ 60 lines above'])
+  expect(all(marks[1]).find(n => n.type === 'Text' && textOf(n) === '⋯ 60 lines above')?.props).toMatchObject({ dimColor: true })
+  // the header: + before a, its key bold in thimble's color and its words dim, as the header draws a key
+  const head = all(tree).find(n => n.props?.key === 'tray-head')
+  expect(textOf(head)).toBe('61 failed the p95 check✓ verified  + show all · a ask · 0 close')
+  const plus = all(head).find(n => n.type === 'Button' && n.props?.key === 'tray-+')
+  expect(all(plus).find(n => n.type === 'Text' && textOf(n) === '+')?.props).toMatchObject({ bold: true, color: accent() })
+  expect(all(plus).find(n => n.type === 'Text' && textOf(n) === ' show all')?.props).toMatchObject({ dimColor: true })
+  // the whole claim printed, on the citations' tint
+  expect(all(tree).find(n => n.type === 'Text' && n.props?.backgroundColor === citeTint() && textOf(n) === '61 failed the p95 check')).toBeDefined()
+  // twelve rows: the day's line in the middle of the output, a line round it, a marker over and under it
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  expect(bodyRows(await $.ui.render(above(bar + 16)))).toEqual([
+    'code · 6 lines',
+    '⋯ 3 lines above',
+    'by_day = fails.groupby([fails.night.dt.date, "stage"]).size()',
+    'for (day, stage), n in by_day.items():',
+    '    print(f"{n} failures in {stage} on {day:%b %-d}")',
+    ' ',
+    'output · 60 lines',
+    '⋯ 44 lines above',
+    '│0 failures in ingest on Sep 23',
+    '│14 failures in enrich on Sep 23',
+    '│7 failures in ingest on Sep 24',
+    '⋯ 13 lines below',
+  ])
+})
+
+/** The tray's head as the band draws it (`tree`): its words, the rows it takes, and whether a blank row stands under it. */
+function headOf(tree: Any): { words: string; rows: number; gap: boolean } {
+  const [head, next] = kidsOf(all(tree).find(n => n.props?.key === 'tray'))
+  return { words: textOf(head), rows: treeRows(head, 93), gap: next?.type === 'Text' && textOf(next) === ' ' }
+}
+
+/** No line of the evidence (`lines` of them in all) is left out without the marker at its place: the rows of the tray's
+ *  body (bodyRows) show each line or count it in a marker, which says how many and where, and nothing more. */
+function eachLineCounted(rows: string[], lines: number): void {
+  const marks = rows.filter(r => r.startsWith('⋯ '))
+  for (const r of marks) expect(r).toMatch(/^⋯ \d+ lines? (above|below)$/)
+  const counted = marks.reduce((n, r) => n + Number(/^⋯ (\d+)/.exec(r)![1]), 0)
+  expect(rows.filter(r => !r.startsWith('⋯ ') && r !== ' ' && !/^(code|output) · \d+ lines?$/.test(r)).length + counted).toBe(lines)
+}
+
+test("the tray leaves no line out without a marker at its place: at every band, from one row under its head to all of it, the lines it shows and its markers' counts add up to all of the evidence's lines, the lines round the key ones, the labels and the blank rows going before any marker; the frame keeps to the band's rows; the header names + exactly while lines are left out, and no marker does", CITES, async ($, on) => {
+  await resumed($, on, DESIGN_ITEMS, 's-tray-every', { text: DESIGN })
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($, 120)
+  const lines = FAILED_CODE.split('\n').length + FAILED.split('\n').length
+  const shown: string[][] = []
+  for (let room = 1; !shown.length || shown.at(-1)!.some(r => r.startsWith('⋯')); room++) {
+    const tree = await $.ui.render(above(bar + 3 + room))
+    const rows = bodyRows(tree)
+    const head = headOf(tree)
+    shown.push(rows)
+    // the band keeps to its rows: under a head of one row, a blank row while a row of the evidence fits under it, then
+    // the evidence
+    expect(treeRows(tree, 100)).toBeLessThanOrEqual(bar + 3 + room)
+    expect(head.rows).toBe(1)
+    expect(head.gap).toBe(room > 1)
+    expect((head.gap ? 1 : 0) + rows.length).toBeLessThanOrEqual(room)
+    eachLineCounted(rows, lines)
+    // + before a while lines are left out, and only then
+    expect(head.words).toMatch(rows.some(r => r.startsWith('⋯ ')) ? /✓ verified {2}\+ show all · a ask · 0 close$/ : /✓ verified {2}a ask · 0 close$/)
+    expect(room).toBeLessThan(90)
   }
-  await open()
-  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
-  await open()
-  await $.ui.render(narrow(8))
-  // the window in the middle of the body, with more than a hundred lines above it and below it
-  await $.ui.scroll({ component: 'AbovePrompt', requestId: 'above', offset: 0, by: 150, bodyRows: 7, contentRows: 8, origin: { kind: 'person' } } as never)
-  const band = await $.ui.render(narrow(8))
-  const row = all(band).find(n => n.props?.key === 'tray-scroll')
-  const text = textOf(row)
-  // both parts, each with its key, in the row's 36 columns
-  expect(text.length).toBeLessThanOrEqual(36)
-  const [, above_, below_] = /^u ↑ (\d+) above · d ↓ (\d+) more$/.exec(text) ?? []
-  expect(Number(above_)).toBeGreaterThanOrEqual(100)
-  expect(Number(below_)).toBeGreaterThanOrEqual(100)
-  // each part still a click named by its whole words
-  expect(all(row).filter(n => n.type === 'Button').map(n => n.props.label)).toEqual([`↑ ${above_} lines above`, `↓ ${below_} more lines`])
-  // a wider tray keeps the whole words
-  const wide = textOf(all(await $.ui.render(above(8))).find(n => n.props?.key === 'tray-scroll'))
-  expect(wide).toMatch(/^u ↑ \d+ lines above · d ↓ \d+ more lines$/)
+  // one row under the head: a marker alone; two: the blank row over it; three: the count's line under the marker of all
+  // that stands above it
+  expect(shown.slice(0, 3)).toEqual([['⋯ 69 lines below'], ['⋯ 69 lines below'], ['⋯ 68 lines above', '│61 failed the p95 check']])
+  // whole: every line, under the labels, no marker, in the first band whose rows under the head hold the blank row and
+  // all of it
+  expect(shown.at(-1)!.filter(r => /^(code|output) · /.test(r))).toEqual(['code · 7 lines', 'output · 62 lines'])
+  expect(shown.length).toBe(1 + shown.at(-1)!.length)
+})
+
+// a citation whose words fill most of the header's row: its status and its keys fit beside them, + show all too does not
+const LONG_WORDS = '61 of the 400 nightly runs failed the p95 check of 800 ms'
+const LONG_TEXT = `The check found that [${LONG_WORDS}](#).`
+
+test("a citation whose words leave no room beside them for + show all: while its card leaves lines out, the title stands on a row of its own over the keys, which name +, and the card takes the rows left under them, so at every band the frame keeps to the band's rows; whole, the header names no +, its title and keys on one row", CITES, async ($, on) => {
+  const start = LONG_TEXT.indexOf('[')
+  const at = FAILED.indexOf('61 failed the p95 check')
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: LONG_WORDS, start, end: start + LONG_WORDS.length + 5, sentence: LONG_TEXT, status: 'verified', shown: LONG_WORDS,
+    evidence: { kind: 'computed', by: 'checker', code: FAILED_CODE, output: FAILED, highlight: [[at, at + 23]] },
+  }, 's-tray-long-head', { text: LONG_TEXT })
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const bar = await barRowsOf($, 120)
+  const lines = FAILED_CODE.split('\n').length + FAILED.split('\n').length
+  const seen: { head: ReturnType<typeof headOf>; rows: string[] }[] = []
+  for (let room = 1; !seen.length || seen.at(-1)!.rows.some(r => r.startsWith('⋯')); room++) {
+    const tree = await $.ui.render(above(bar + 3 + room))
+    const rows = bodyRows(tree)
+    const head = headOf(tree)
+    seen.push({ head, rows })
+    // the band keeps to its rows: a head of two rows takes one from the evidence, and the blank row stands while a row
+    // of the evidence fits under it
+    expect(treeRows(tree, 100)).toBeLessThanOrEqual(bar + 3 + room)
+    expect(head.gap).toBe(room + 1 - head.rows >= 2)
+    expect(head.rows - 1 + (head.gap ? 1 : 0) + rows.length).toBeLessThanOrEqual(room)
+    eachLineCounted(rows, lines)
+    // + named while lines are left out, the title alone on the head's first row and the keys under it; but in a band of
+    // one row under a head of one, which has no row for the evidence under a head of two
+    const named = head.words.includes('+ show all')
+    expect(named).toBe(rows.some(r => r.startsWith('⋯ ')) && room > 1)
+    expect(head).toMatchObject(named ? { words: `${LONG_WORDS}✓ verified  + show all · a ask · 0 close`, rows: 2 } : { words: `${LONG_WORDS}✓ verified  a ask · 0 close`, rows: 1 })
+    expect(room).toBeLessThan(90)
+  }
+  // whole in the first band whose rows under a head of one row hold the blank row and all of it; one band short of it,
+  // the head names + on its second row, and the evidence leaves lines out in the rows left
+  expect(seen.length).toBe(1 + seen.at(-1)!.rows.length)
+  expect(seen.at(-2)!.head.rows).toBe(2)
+  expect(seen.at(-2)!.rows.length + 2).toBeLessThanOrEqual(seen.at(-1)!.rows.length)
+})
+
+test('an explainer taller than the rows it has shows from its start, its one marker at the bottom, `⋯ N lines below`, N the rows it leaves out, and its header names + before a, which it does not while the explainer shows whole; a click on the marker or on `+ show all` shows all of it in the side pane', CITES, async ($, on) => {
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.id); return { value: { isPlaced: true } } as never })
+  on('ui.close', () => ({ value: undefined }))
+  const { clock } = await resumed($, on, QUOTED, 's-tray-explainer-cut', { parts: HEADS })
+  // ] three times: the heads-up, the citation, then the explainer of p95
+  const toExplainer = async () => {
+    for (let k = 0; k < 3; k++) {
+      expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+      await clock.advance(2000)
+    }
+  }
+  await toExplainer()
+  const bar = await barRowsOf($)
+  const whole = all(await $.ui.render(above(40)))
+  expect(textOf(whole)).toContain('The time that 95 of 100 checks stay under.')
+  expect(textOf(whole)).not.toContain('⋯')
+  expect(textOf(whole.find(n => n.props?.key === 'tray-head'))).toBe('p95a ask · 0 close')
+  const rows = treeRows(whole.find(n => n.props?.key === 'tray-body'), 93)
+  // two rows for it: its first row, and the marker under it; + named before a
+  const tree = await $.ui.render(above(bar + 5))
+  expect(treeRows(tree, 100)).toBeLessThanOrEqual(bar + 5)
+  expect(textOf(tree)).toContain('The time that 95 of 100 checks stay under.')
+  const marks = all(tree).filter(n => n.type === 'Button' && String(n.props?.key).startsWith('tray-cut'))
+  expect(marks.map(textOf)).toEqual([`⋯ ${rows - 1} lines below`])
+  expect(textOf(all(tree).find(n => n.props?.key === 'tray-head'))).toBe('p95+ show all · a ask · 0 close')
+  let ui = await $.ui.mount(above(bar + 5))
+  await ui.press({ key: marks[0].props.key })
+  await ui.unmount()
+  expect(opens).toEqual(['thimble'])
+  // open on it again: a click on `+ show all` shows all of it too, and the tray gives way to the pane
+  await toExplainer()
+  ui = await $.ui.mount(above(bar + 5))
+  await ui.press({ key: 'tray-+' })
+  await ui.unmount()
+  expect(opens).toEqual(['thimble', 'thimble'])
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('The time that 95 of 100 checks stay under.')
 })
 
 // a heads-up whose words are a citation's words, or hold them
@@ -749,7 +1212,7 @@ test("an explainer's or a heads-up's links to a file's lines draw as the answer'
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
-test('c cites the selected words in auto cite + verify too: while they wait the bar says c cite beside the claims\' w evidence, and c opens their citation in the tray; with none selected, c is a letter of the prompt, and w opens Evidence', CITES, async ($, on) => {
+test('c cites the selected words in auto cite + verify too: while they wait the bar says c cite beside the claims\' w claims, and c opens their citation in the tray; with none selected, c is a letter of the prompt, and w opens Claims', CITES, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
@@ -761,7 +1224,7 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   // the claims keep their item on the bar while words wait: c and w each name one thing
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('c cite')
-  expect(band).toContain('w evidence')
+  expect(band).toContain('w claims')
   expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
   // the words are a citation of their own, open in the tray, and its check started; the selection no longer waits
@@ -770,7 +1233,7 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   expect(band).toContain('a ask · 0 close')
   expect(spawns.length).toBe(1)
   expect(band).not.toContain('c cite')
-  expect(band).toContain('w evidence')
+  expect(band).toContain('w claims')
   // with nothing selected, c is typed and opens nothing, as q, a letter no one takes (the first such letter reads what
   // the cards' keys need, once); at the key c reads the selection and none of the state: the open tray's citation,
   // which c does not act on, is not read for it
@@ -781,13 +1244,13 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   expect(gets).toBe(0)
   await clock.advance(1000)
   expect(opens).toEqual([])
-  // w opens Evidence
+  // w opens Claims
   expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
-  expect(opens).toEqual(['Evidence'])
+  expect(opens).toEqual(['Claims'])
 })
 
-test('with Evidence off, c cites the selected words, and with none selected c is a letter of the prompt, since nothing on the bar names it', { options: { citations: 'auto cite + verify', claimsMode: 'off' } }, async ($, on) => {
+test('with Claims off, c cites the selected words, and with none selected c is a letter of the prompt, since nothing on the bar names it', { options: { citations: 'auto cite + verify', claimsMode: 'off' } }, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
@@ -852,18 +1315,18 @@ test("c with words selected reads the selection once and no state at the key, ho
 test("a double click on one of the bar's items selects its word, which is the bar's, not the answer's that also has it: the bar names neither c nor e; the answer's words, as its row draws them, still count", CITES, async ($, on) => {
   let selected: Any
   on('ui.selection', () => ({ value: selected }))
-  await resumed($, on, { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40' }, 's-tray-control', { text: 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.' })
-  expect(textOf(await $.ui.render(above()))).toContain('w evidence')
-  // `evidence`, as a double click on the bar's `w evidence` selects it
-  selected = { text: 'evidence' }
+  await resumed($, on, { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40' }, 's-tray-control', { text: 'Of the runs, [12 of 40](#) failed on the p95 check, as the claims show.' })
+  expect(textOf(await $.ui.render(above()))).toContain('w claims')
+  // `claims`, as a double click on the bar's `w claims` selects it
+  selected = { text: 'claims' }
   let band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('c cite')
   expect(band).not.toContain('e explain')
   // the same word in the answer, among others
-  selected = { text: 'as the evidence shows', requestId: 'row-t1' }
+  selected = { text: 'as the claims show', requestId: 'row-t1' }
   expect(textOf(await $.ui.render(above()))).toContain('c cite')
   // the corrected words the row draws in place of the citation's
-  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.')))).toContain('11 of 40 failed')
+  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the claims show.')))).toContain('11 of 40 failed')
   selected = { text: 'runs, 11 of 40 failed', requestId: 'row-t1' }
   band = textOf(await $.ui.render(above()))
   expect(band).toContain('c cite')
@@ -915,39 +1378,6 @@ test("a click on thimble's controls that slid a cell leaves a piece of their wor
   expect(await counts({ text: 'close', requestId: 'row-t1' })).toBe(true)
   expect(await counts({ text: 'ask', requestId: 'row-t1' })).toBe(true)
   expect(await counts({ text: 'as', requestId: 'row-t1' })).toBe(true)
-})
-
-test("a click that slid a cell on the row under a paged tray's window leaves a piece of its words selected: no answer's words, though the answer holds them whole", CITES, async ($, on) => {
-  let selected: Any
-  on('ui.selection', () => ({ value: selected }))
-  const text = 'Of the runs, [12 of 40](#) failed on the p95 check; more lines of its output follow.'
-  const { clock } = await resumed($, on, TALL, 's-tray-slid-page', { text })
-  const counts = async (sel: Any, maxRows: number) => {
-    // a selection made anew: none in between, as the click that makes it takes the one before down
-    selected = undefined
-    await $.ui.render(above(maxRows))
-    selected = sel
-    const band = textOf(await $.ui.render(above(maxRows)))
-    expect(band.includes('c cite')).toBe(band.includes('e explain'))
-    return band.includes('c cite')
-  }
-  // ] then +: all the code and its output, in a band of eight rows: the row under the window names the lines below
-  const open = async () => {
-    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
-    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
-  }
-  await open()
-  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
-  await open()
-  expect(textOf(await $.ui.render(above(8)))).toMatch(/d ↓ \d+ more lines/)
-  // a click on it that slid a cell: its words, with its key and without
-  expect(await counts({ text: 'more' }, 8)).toBe(false)
-  expect(await counts({ text: 'lines' }, 8)).toBe(false)
-  expect(await counts({ text: 'd ↓' }, 8)).toBe(false)
-  // the answer's own words still count
-  expect(await counts({ text: 'failed on the p95 check', requestId: 'row-t1' }, 8)).toBe(true)
 })
 
 test("a click that slid a cell on a card's title, a press that asks about the card, leaves a piece of it selected in the answer's row: the bar names neither c nor e; the card's body, a chart label and a word of the answer that the title holds too still count", CITES, async ($, on) => {
@@ -1020,7 +1450,7 @@ test("c on words selected since the bar last drew reads a few states at most, ho
   expect(spawns.length).toBe(2)
 })
 
-test("the Evidence pane's w close is a click alone: a w typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed, and a question that starts with w is typed whole", CITES, async ($, on) => {
+test("the Claims pane's w close is a click alone: a w typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed, and a question that starts with w is typed whole", CITES, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   on('ui.selection', () => ({ value: undefined }))
   // the side pane as Claude Code keeps it: up from an open until a close
@@ -1029,14 +1459,14 @@ test("the Evidence pane's w close is a click alone: a w typed while the pane hol
   const closes: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); up = true; return { value: { isPlaced: true } } as never })
   on('ui.close', (_$: unknown, e: Any) => { closes.push(e.id); up = false; return { value: undefined } as never })
-  const { clock } = await resumed($, on, QUOTED, 's-tray-wclose', { panes: () => (up ? [{ id: 'thimble', title: 'Evidence' }] : []) })
-  expect(textOf(await $.ui.render(above()))).toContain('w evidence')
+  const { clock } = await resumed($, on, QUOTED, 's-tray-wclose', { panes: () => (up ? [{ id: 'thimble', title: 'Claims' }] : []) })
+  expect(textOf(await $.ui.render(above()))).toContain('w claims')
   expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
-  expect(opens).toEqual(['Evidence'])
+  expect(opens).toEqual(['Claims'])
   // the pane's key row ends with w close, a click alone: no Button of the pane takes w, so Claude Code types a w typed
   // in the pane into the prompt
-  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Evidence', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Claims', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
   const buttons = all(pane).filter(n => n.type === 'Button')
   expect(buttons.filter(b => b.props.hotkey === 'w')).toEqual([])
   const close = buttons.find(b => String(b.key ?? b.props.key) === 'key-w')
@@ -1048,7 +1478,7 @@ test("the Evidence pane's w close is a click alone: a w typed while the pane hol
   // open again: a question that starts with w, typed on, is a word, whole in the prompt, and the pane stays
   expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
-  expect(opens).toEqual(['Evidence', 'Evidence'])
+  expect(opens).toEqual(['Claims', 'Claims'])
   expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   expect(await $.prompt.edit(key('h'))).toEqual({ text: 'wh', cursor: 2 })
   expect(await $.prompt.edit({ ...(key('y') as Any), text: 'wh', cursor: 2, start: 2, end: 2 } as never)).toEqual({ text: 'why', cursor: 3 })
@@ -1198,6 +1628,144 @@ test("while the bar's ] is lit, ] from rest opens the first of the answer's mark
   expect(await rest()).toBe('] show heads up')
   await press(']')
   expect(await shows()).toContain('Retried runs count twice')
+})
+
+test('each key shows once, where it acts: a card on screen names a in its header only while a reaches it; the open tray names a in its header, and on a card ] reached the bar names it', CITES, async ($, on) => {
+  const id = 'c0123456789af'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_7', agentId: 'a-made-up', anchorRow: 'row-t1', keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_7: { version: 1 } }, at: 1 }
+  const { clock } = await resumed($, on, QUOTED, 's-tray-head-a', { kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  // the card's Client says it is on screen, as it does once drawn
+  const shown = await $.ui.mount(answer('row-t1', TEXT))
+  await shown.unmount()
+  const head = async () => textOf(all(await $.ui.render(answer('row-t1', TEXT))).find(n => n.props?.key === 'head-keys'))
+  const band = async () => textOf(await $.ui.render(above(40)))
+  expect(await head()).toBe('a ask · p artifact')
+  // ]: the tray on the citation names a in its header, and a goes there, so the card's header names ask without it;
+  // the bar names ] and the card it goes to
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const open = await band()
+  expect(open).toContain('a ask · 0 close')
+  expect(open.match(/a ask/g)).toEqual(['a ask'])
+  expect(open).toContain('] next card')
+  expect(await head()).toBe('ask · p artifact')
+  // ] again reaches the card: the bar names a, which asks about it, and the card's header still names ask without it
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const stand = await band()
+  expect(stand).toContain('a ask · [ previous citation · 0 back')
+  expect(stand.match(/a ask/g)).toEqual(['a ask'])
+  expect(await head()).toBe('ask · p artifact')
+  // 0 gives the keys back: a reaches the card again, and its header names it
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).not.toContain('a ask')
+  expect(await head()).toBe('a ask · p artifact')
+})
+
+test('each key shows once, where it acts: with Heads-ups on demand, the tray on a citation with a heads-up on its words names h in its header, and the bar leaves its h heads-ups out until the tray closes', { options: { citations: 'auto cite + verify', details: 'on demand' } }, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-h-once', { parts: HEADS })
+  const band = async () => textOf(await $.ui.render(above(40)))
+  expect(await band()).toContain('h heads-ups')
+  // ] reaches the heads-up on the citation's words, and ] again the citation: h opens that heads-up over it, which the
+  // tray's header names alone
+  for (const k of [']', ']']) {
+    expect(await $.prompt.edit(key(k))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  const open = await band()
+  expect(open).toContain('failed: 12')
+  expect(open.match(/h heads-ups?/g)).toEqual(['h heads-up'])
+  // closed: h asks for heads-ups on the answer again, and the bar names it
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).toContain('h heads-ups')
+})
+
+test("each key shows once, where it acts: while a fix's line names y, d and n, which go to it, the bar names a card's own keys less those", CITES, async ($, on) => {
+  const id = 'c0123456789af'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_7', agentId: 'a-made-up', anchorRow: 'row-t1', keys: ['n', 'd', 'o'], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_7: { version: 1 } }, at: 1 }
+  // the fixes as the kernel keeps them, and a fix's line once one is ready
+  const fix = { id: 1, title: 'Bar says read', words: ['make the bar say read'], rounds: 1, made_in: 's-tray-fix-keys', created: 0, state: 'ready', work: null, commit: null, files: [], tests: 'passed', summary: '', error: null }
+  const fixes = { fixes: [fix], on: false, live: '/made-up/live', version: '0.10.7', count_on: 0, pointed: false, gen: 1 }
+  let ready = false
+  on('state.get', async (_$: unknown, e: Any, next: Any) => (ready && e?.key === 'fixLine' ? { value: { value: { id: 1, kind: 'ready' }, version: 1 } } : ready && e?.key === 'fixes' ? { value: { value: fixes, version: 1 } } : next(e)))
+  await resumed($, on, QUOTED, 's-tray-fix-keys', { kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  // the card's Client says it is on screen, as it does once drawn
+  const shown = await $.ui.mount(answer('row-t1', TEXT))
+  await shown.unmount()
+  const band = async () => textOf(await $.ui.render(above(20)))
+  expect(await band()).toContain('n d o card keys')
+  // a fix ready, its line above the bar
+  ready = true
+  const now = await band()
+  expect(now).toContain('y use it now · d what changed · n later')
+  expect(now).toContain('o card keys')
+  expect(now).not.toContain('n d o card keys')
+  expect(now.match(/\bd what changed|\bd o\b|\bn d\b/g)).toEqual(['d what changed'])
+})
+
+test("a repair that did not start: its line says what failed and why; while the tray shows x repair on that citation, the line leaves out the sentence that says to press x, and says it again once the tray closes", CITES, async ($, on) => {
+  const failed = { ...QUOTED, status: 'failed', shown: '12 of 40', reason: 'Line 4 says 11 failed.' }
+  const { clock } = await resumed($, on, failed, 's-tray-repair-line', { deny: 'a made-up refusal' })
+  const band = async () => textOf(await $.ui.render(above(20)))
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).toContain('x repair')
+  expect(await $.prompt.edit(key('x'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  // the tray shows x repair on the citation: the line says what failed, and x once, in the tray
+  const open = await band()
+  expect(open).toContain('The repair did not start (a made-up refusal).')
+  expect(open).not.toContain('Press x')
+  expect(open.match(/x repair/g)).toEqual(['x repair'])
+  // closed: x repair shows nowhere, so the line says how to try again
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const closed = await band()
+  expect(closed).not.toContain('x repair')
+  expect(closed).toContain('The repair did not start (a made-up refusal). Press x on the citation to try again.')
+})
+
+test('each key shows once, where it acts: while the Claims pane shows, its key row names w close, and the bar names the claims without w; w still closes it, and closed, the bar names w again', CITES, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  on('ui.selection', () => ({ value: undefined }))
+  let up = false
+  const closes: Any[] = []
+  on('ui.open', () => { up = true; return { value: { isPlaced: true } } as never })
+  on('ui.close', (_$: unknown, e: Any) => { closes.push(e.id); up = false; return { value: undefined } as never })
+  const { clock } = await resumed($, on, QUOTED, 's-tray-w-once', { panes: () => (up ? [{ id: 'thimble', title: 'Claims' }] : []) })
+  const band = async () => textOf(await $.ui.render(above()))
+  expect(await band()).toContain('w claims')
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(up).toBe(true)
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Claims', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  expect(textOf(pane)).toContain('w: close')
+  const beside = await band()
+  expect(beside).toContain('claims')
+  expect(beside).not.toContain('w claims')
+  // w, typed in the pane, reaches the prompt and closes it
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(closes).toEqual(['thimble'])
+  expect(await band()).toContain('w claims')
+})
+
+test("each key shows once, where it acts: while a click gave the squeeze chips the keyboard, every key goes to them, so the bar's right names its items without their letters, each still a click", CITES, async ($, on) => {
+  await resumed($, on, QUOTED, 's-tray-chips-held')
+  const band = async () => textOf(await $.ui.render(above()))
+  expect(await band()).toContain('w claims')
+  expect(await $.prompt.edit(key('s'))).toEqual({ text: '', cursor: 0 })
+  const ui = await $.ui.mount(answer('row-t1', TEXT))
+  await ui.press({ key: 'lvl-length-1' })
+  await ui.key({ key: 'return' })
+  await ui.unmount()
+  const held = await band()
+  expect(held).toContain('claims')
+  expect(held).not.toContain('w claims')
+  const press = all(await $.ui.render(above())).find(n => n.type === 'Button' && n.props?.key === 'bar-claims')
+  expect(press?.props?.label).toBe('claims')
 })
 
 test('an answer that shows no marks: the bar names no ]', CITES, async ($, on) => {

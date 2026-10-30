@@ -118,8 +118,9 @@ Options:
   `thimble-browser --setup` asks again. `thimble-browser --setup --key-file FILE` takes an API key from a file you
   wrote (so that Claude, when it installs thimble for you, never sees the key), and `--setup --find-wif` lists the
   Workload Identity Federation config files in `~/.anthropic`, `~/.config/anthropic` and `~/.thimble-browser`.
-- `--local`: the plugin from this checkout in place of GitHub, to try a branch. Claude Code then loads the plugin from
-  the checkout's `plugin/` folder.
+- `--local`: for working on thimble's own code or trying a branch. Claude Code loads the plugin from this checkout's
+  `plugin/` folder in place of GitHub, and `thimble update` then follows the checkout, which you pull yourself (it says
+  when the checkout is behind, and never pulls it). Leave it out for a normal install, which updates from GitHub.
 - `--remove-0.9`: remove thimble 0.9 first, after you answer y, in a terminal (see "If you used thimble 0.9").
 
 You can run it again at any time. It installs again what it installed, and updates the plugin and the browser
@@ -169,8 +170,8 @@ The browser workbench:
 
 ## Settings
 
-- **The plugin's features.** Citations, Cards (`v`), Rewrite (`s`), Catch-up (`b`), Explainers, Heads-ups, Evidence
-  (`w`), Labels (`l`) and Coverage (`r`) can each be turned off, and Citations, Explainers, Heads-ups and Evidence can
+- **The plugin's features.** Citations, Cards (`v`), Rewrite (`s`), Catch-up (`b`), Explainers, Heads-ups, Claims
+  (`w`), Labels (`l`) and Coverage (`r`) can each be turned off, and Citations, Explainers, Heads-ups and Claims can
   work after each answer or only when you ask; Minimal sets those four to when you ask. Click `thimble` at the left of
   the bar or run `/thimble-settings`. Claude Code keeps the values in its settings (`pluginConfigs`). With Citations
   off, the checker makes no model call.
@@ -183,13 +184,14 @@ The browser workbench:
 ## Update and uninstall
 
 To update both products, run `thimble update` in a shell (not inside Claude Code). It moves the plugin and the browser
-workbench to the newest release, keeps your fixes (each one that still fits the release stays on; one that does not is
-off, kept in `thimble fixes`, until `thimble reapply` has Claude fit it), and says what to do next; after an install
-with `scripts/install.sh --local`, it moves them to the commit your checkout has, so pull it first. A plugin installed
-without a clone updates with `claude plugin update thimble@thimble` until you use its first fix: from then on, Claude
-Code loads it from your fixes, and only `thimble update` moves it to a new release. Without a clone, your shell does
-not find `thimble`: run `~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place
-of `~/.thimble`). To uninstall the plugin:
+workbench to the newest release, keeps your fixes (each one that still fits the release stays on, once thimble's checks
+pass with it there; one that does not is off, kept in `thimble fixes`, until `thimble reapply` has Claude fit it), and
+says what to do next; after an install with `scripts/install.sh --local` in a git clone, it moves them to the commit
+your checkout has, so pull it first. A plugin installed without a clone updates with
+`claude plugin update thimble@thimble` until you use its first fix: from then on, Claude Code loads it from your fixes,
+and only `thimble update` moves it to a new release. Without a clone, your shell does not find `thimble`: run
+`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of `~/.thimble`). To
+uninstall the plugin:
 
 ```
 claude plugin uninstall thimble@thimble
@@ -197,16 +199,18 @@ claude plugin uninstall thimble@thimble
 
 To remove the browser workbench, delete `~/.local/bin/thimble-browser` and the checkout. Uninstalling leaves your data
 alone. To remove what thimble wrote, delete `~/.thimble` and `~/.thimble-browser` (and a `thimble/` folder that a build
-before 0.10.0 made in a data folder). With `--local`, your fixes also live in the checkout, as the branch `mine` and
-the refs under `refs/thimble/`. After a new install, the first fix you ask for, or a `thimble update` that moves to a
-new commit of your checkout, sets them aside by itself, under `refs/thimble-old/`, when `mine` is one that thimble
-left: no worktree or other thimble home uses it, it tracks no upstream, and thimble made or recorded every commit that
-only `mine` has. Otherwise it asks you to rename `mine`. To remove them, after you delete `~/.thimble`, run
+before 0.10.0 made in a data folder). With `--local` in a git clone, your fixes also live in the checkout, as the branch
+`mine` and the refs under `refs/thimble/`. After a new install, the first fix you ask for, or a `thimble update` that
+moves to a new commit of your checkout, sets them aside by itself, under `refs/thimble-old/`, when `mine` is one that
+thimble left: no worktree or other thimble home uses it, it tracks no upstream, and thimble made or recorded every
+commit that only `mine` has. Otherwise it asks you to rename `mine`. To remove them, after you delete `~/.thimble`, run
 `git worktree prune`, `git branch -D mine`
 and `git for-each-ref --format='delete %(refname)' refs/thimble refs/thimble-old | git update-ref --stdin` in the
 checkout.
 
 ## When something does not work
+
+Run `thimble doctor` in a shell: it checks each part thimble needs, and gives the fix for each problem it finds.
 
 The install:
 
@@ -230,8 +234,9 @@ The terminal plugin:
   something to try. It goes when you type your next prompt.
 - **thimble misbehaves, or does not load, after you used a fix.** `thimble fix off N` in a shell turns off fix N, and
   `thimble fix off` all of them; `sh ~/.thimble/fixes/off.sh` does the same when thimble does not load, and runs no
-  thimble code. Then type `/reload-plugins`. These run from `~/.thimble/fixes/release`, a copy of the release that no
-  fix changes, so a fix cannot break them, not even one that changed the launcher or the sandbox.
+  thimble code. Then type `/reload-plugins`. `thimble doctor` names a fix that keeps Claude Code from loading thimble.
+  These run from `~/.thimble/fixes/release`, a copy of the release that no fix changes, so a fix cannot break them, not
+  even one that changed the launcher or the sandbox.
 - **"Cards cannot draw: cards run only in Anthropic's sandbox runtime, which cannot start here".** Cards never run
   without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
   ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, the command that allows it; when npm

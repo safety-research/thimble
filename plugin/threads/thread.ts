@@ -5,7 +5,7 @@
 // and no answer unless the person sends it there (m in the pane), which starts a turn of main's on it.
 //
 // The mechanism: one fork of main per thread (core/forks.ts spawnFork, kind `thread`), started inside the hook of the
-// person's ↵, no turn of main.
+// person's ↵ (the ui.input hook, registerThreads), no turn of main.
 //   - A fork has main's conversation as context and main's tools (Bash, Read, the card tool), and its calls go through
 //     the same permission checks as main's: Manual mode asks, auto mode classifies.
 //   - Its end never reaches main: its task notification or hand-back is dropped (core/forks.ts). Where no fork starts,
@@ -37,12 +37,12 @@ import { tellAsked } from '../core/engaged'
 import { readKept, rootHere, startDir, writeKept, keptDir } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { narrowNotice, openPane } from '../core/pane'
-import { tellAtNextPrompt } from '../core/tell'
+import { reportOf, takeFor, tellAtNextPrompt, tellFor } from '../core/tell'
 import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { claudeCites } from '../settings/features.mjs'
-import { fieldSettled, fieldShown } from './pane'
+import { fieldShown, fieldSubmitted, ringReleased } from './pane'
 import type { ThreadScope } from './seam'
 import { aboutOf, answerRow, cardPart, display, firstMessage, forkDirective, nextMessage, partAbout, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
 
@@ -165,11 +165,8 @@ export function threadsBright(): boolean {
 async function keep($: Engine, t: Thread): Promise<void> {
   if (retired.has(t)) return
   t.at = new Date().toISOString()
-  const was = threads.get(t.key)
   threads.set(t.key, t)
   if (t.agentId) byAgent.set(t.agentId, t.key)
-  // the drawing of the answer keeps the focus ring on the input bar (pane.tsx)
-  if (was?.status === 'running' && t.status !== 'running') fieldSettled($, t.key)
   try { await $.state.set({ ...THREAD, id: t.key }, { ...t }) } catch { /* drawn from the module's memory */ }
   await writeKept($, `threads/${t.id}.json`, t).catch(() => undefined)
   await bump($)
@@ -263,15 +260,18 @@ export async function askThread($: Engine, ask: { text: string; scope: ThreadSco
     await keep($, t)
     let sent = ''
     let delivered = false
+    // what waits for the thread about a card its fork drew (core/tell.ts tellFor) goes with its next question
+    const told = await takeFor($, `thread:${key}`).catch(() => ({} as Record<string, string>))
+    const withTold = (s: string) => (Object.keys(told).length ? `${s}\n\n${reportOf(Object.values(told))}` : s)
     if (was.agentId && await stillWorking($, was)) {
-      sent = nextMessage({ text, scope, last })
+      sent = withTold(nextMessage({ text, scope, last }))
       const r = await $.session.send({ to: { agentId: was.agentId }, text: sent } as Any).catch((err: unknown) => ({ isDelivered: false, reason: String((err as Error)?.message || err) }))
       delivered = !!(r as Any)?.isDelivered
     }
     if (!delivered) {
       // a first question, or a thread whose fork has ended: a new fork, told the earlier turns
       const earlier = was.turns.map(x => `${x.role === 'person' ? 'Q' : 'A'}: ${x.text}`).join('\n').slice(-EARLIER_CHARS)
-      sent = firstMessage({ text, scope, detail: await detailOf($, scope), root }) + (earlier ? `\n\nEarlier in this thread:\n${earlier}` : '')
+      sent = withTold(firstMessage({ text, scope, detail: await detailOf($, scope), root }) + (earlier ? `\n\nEarlier in this thread:\n${earlier}` : ''))
       const description = `thread · ${aboutOf(scope)}`.slice(0, 60)
       const guide = threadGuide(await promptText($, 'thread').catch(() => ''), claudeCites())
       let r = await spawnFork($, { kind: 'thread', prompt: forkDirective(guide, sent), description })
@@ -282,6 +282,7 @@ export async function askThread($: Engine, ask: { text: string; scope: ThreadSco
         else r = { deny: `${r.deny}; ${bad}` }
       }
       if (r.deny !== undefined || !r.agentId) {
+        for (const [k, v] of Object.entries(told)) await tellFor($, `thread:${key}`, k, v).catch(() => undefined)
         t = { ...t, status: 'failed', error: String(r.deny || 'no agent started').slice(0, 300) }
         await keep($, t)
         return { thread: t, problem: `The side thread did not start (${t.error}). Ask Claude at the prompt instead.` }
@@ -361,6 +362,25 @@ export async function threadCardAnchor($: Engine, agentId: string | undefined, c
   return `thread:${t.key}`
 }
 
+/** The anchor of the cards the thread's fork `agentId` draws, `thread:<key>`, as threadCardAnchor gives it but with no
+ *  card kept: whom a card call of the fork is from (cards/tool.ts). null when the agent is no thread's. */
+export function threadAnchor(agentId: string | undefined): string | null {
+  if (!agentId || forkOf(agentId)?.kind !== 'thread') return null
+  const key = byAgent.get(agentId)
+  return key && threads.has(key) ? `thread:${key}` : null
+}
+
+/** The question a thread's fork answers, the person's last in its thread, with what they asked it about: what the
+ *  card check of a card the fork drew reads as the request (cards/tool.ts), since the fork does not answer main's last
+ *  prompt. null when the agent is no thread's. */
+export function threadQuestion(agentId: string | undefined): string | null {
+  if (!agentId || forkOf(agentId)?.kind !== 'thread') return null
+  const key = byAgent.get(agentId)
+  const t = key ? threads.get(key) : null
+  const last = t?.asks[t.asks.length - 1]
+  return last ? `${last.text} (asked about ${last.scope.about})` : null
+}
+
 /** The cards a thread's fork drew, by the answer they stand under (for the pane). */
 export async function cardsOfTurn($: Engine, ids: string[] | undefined): Promise<Any[]> {
   const out: Any[] = []
@@ -389,12 +409,13 @@ export async function sendToMain($: Engine, key: string): Promise<boolean> {
 }
 
 /** Where a thread opens again: a pane it was asked under (a citation's evidence, a label, coverage, the claims), else
- *  the pane `thread`. `ask`: the input bar takes the keys. False when Claude Code did not place the pane. */
-export async function showThread($: Engine, key: string, o: { from?: string; ask?: boolean } = {}): Promise<boolean> {
+ *  the pane `thread`. `ask`: the input bar takes the keys. `read`: the pane takes them and its input waits, so ↑ ↓ and
+ *  the page keys scroll it (the tray's +). False when Claude Code did not place the pane. */
+export async function showThread($: Engine, key: string, o: { from?: string; ask?: boolean; read?: boolean } = {}): Promise<boolean> {
   const t = threads.get(key)
   if (!t) return false
-  if (o.ask) askNext = key
-  fieldShown($, key)
+  if (o.read) { if (askNext === key) askNext = null } else if (o.ask) askNext = key
+  fieldShown($, key, !!o.read)
   const p = t.scope.pane
   if (p && p.kind !== 'thread' && p.kind !== 'threads') return openPane($, p.kind, p.args, paneTitle(p.kind, p.args, t), { focus: true })
   // a citation's thread stands under its evidence
@@ -409,7 +430,7 @@ export function paneTitle(kind: string, args: unknown, t?: Thread | null): strin
   if (kind === 'evidence') return `citation ${a.n ?? ''}`.trim()
   if (kind === 'labels') return a.label ? `Label ${a.label}` : 'Labels'
   if (kind === 'coverage') return 'Coverage'
-  if (kind === 'claims') return 'Evidence'
+  if (kind === 'claims') return 'Claims'
   return (t?.subject || kind).slice(0, 60)
 }
 
@@ -423,10 +444,11 @@ export function takeAskNext(key: string): boolean {
 }
 
 /** The thread about `scope`: an existing one, or a new one with no turns yet, opened in the side pane, its input bar
- *  taking the keys. `key`: a key at the prompt opened it, and these are the words a click on which opens it where the
- *  key cannot, `where` they are (the bar below by default): Claude Code places a pane at any width only for the
- *  person's press or command, never for a key at the prompt (core/pane.ts). */
-export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
+ *  taking the keys; `read`, the pane taking them, to be read (showThread). `key`: a key at the prompt opened it, and
+ *  these are the words a click on which opens it where the key cannot (`click`, when they are other words), `where`
+ *  they are (the bar below by default): Claude Code places a pane at any width only for the person's press or command,
+ *  never for a key at the prompt (core/pane.ts). */
+export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string; click?: string; where?: string; read?: boolean } = {}): Promise<boolean> {
   await restoreThreads($)
   // a card: the line it selects now, which the pane shows in place of the whole card
   if (scope.card && !scope.part) {
@@ -445,11 +467,11 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   // revealCard). Claude Code moves the chat when a press opened the thread (the bar's `a ask`, the card's margin), not
   // for the a key
   if (scope.card) await revealCard($, scope.card, 'start')
-  const placed = await showThread($, key, { ask: true })
+  const placed = await showThread($, key, o.read ? { read: true } : { ask: true })
   // open: a notice that a key could not open it goes
   if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
-    if (o.key) failNotice($, narrowNotice(o.key.split(' ')[0]!, o.key, o.where), 'pane:threads')
+    if (o.key) failNotice($, narrowNotice(o.key.split(' ')[0]!, o.click ?? o.key, o.where), 'pane:threads')
     else failNotice($, 'Claude Code did not open the side thread here.', 'pane:threads')
   }
   return placed
@@ -476,6 +498,15 @@ export const registerThreads: Register = on => {
 
   // the thread's own type is offered only while a question is asked (a resume checks the offer again)
   on('agent.offer', { agent: TYPE }, async () => ({ isOffered: inFlight > 0 })).catch(($, e, next) => next(e))
+
+  // ↵ in a thread's input bar: the question is asked in this hook, so the plugin's other hooks serve the fork it starts
+  // (core/forks.ts): its tool calls, the card tool's too, its steps and its end. The field's own onSubmit runs beneath
+  // every hook, in no hook, and a fork it started would have the whole plugin as its caller: no hook of the plugin would
+  // hear its calls, and each of its card calls would fail
+  on('ui.input', { kind: 'submit', element: /^ask-/ }, async ($, e, next) => {
+    if (e.plugin !== 'thimble' || !(await fieldSubmitted($, String(e.element), String(e.value ?? '')))) return next(e)
+    return { element: e.element, value: e.value }
+  }).catch(($, e, next) => next(e))
 
   on('turn.start', { agentId: /./ }, async ($, e, next) => {
     const r = await next(e)
@@ -524,4 +555,5 @@ export function resetThreads(): void {
   poll = null
   restoredFor = ''
   askNext = null
+  ringReleased()
 }

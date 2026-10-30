@@ -8,7 +8,11 @@
 //                                      explainers at rest; while it is open, its own (a taker as hooks/keys.ts takes it)
 //   trayHolds($)                       whether it holds the keys now (open, or a card ] reached stands): its keys then
 //                                      come before every other feature's
-//   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most `room` rows
+//   trayHeld($, ask)                   the keys it takes now, which nothing else names (core/answerview.ts heldKeys)
+//   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most the rows the band has
+//                                      over the bar (`room`): as much of the mark as fits, the rest in the side pane
+//   trayShape()                        the tray as last drawn: whether the band's blank row stands between it and the
+//                                      bar
 //   trayBar($, on, preview)            its items at the bar's left while a card ] reached holds the keys (an open
 //                                      tray's keys are in its header); at rest, ] while the answer shows marks
 //   trayFocus($, row)                  what the tray shows on this row, so the row draws it in focus: a citation by its
@@ -26,7 +30,9 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { closeTray, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, trayNow } from './tray'
+import { closeOnRow, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHeld as held, trayHolds as holds, trayKey as key, trayShape as shapeNow, type BandRoom } from './tray'
+
+export type { BandRoom }
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,8 +46,16 @@ export async function trayHolds($: Engine): Promise<boolean> {
   return holds($)
 }
 
-export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
+export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
+  return held($, ask)
+}
+
+export async function trayBand($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
   return band($, els, width, room)
+}
+
+export function trayShape(): { gap: boolean } {
+  return shapeNow()
 }
 
 export async function trayBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
@@ -61,8 +75,7 @@ export async function openTray($: Engine, mark: MarkRef): Promise<boolean> {
 }
 
 export async function trayOffRow($: Engine, row: string): Promise<void> {
-  const tray = await trayNow($)
-  if (tray?.stack[0]?.row === row) await closeTray($)
+  await closeOnRow($, row)
 }
 
 export async function trayGiveWay($: Engine): Promise<() => Promise<void>> {

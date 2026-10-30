@@ -5,7 +5,9 @@
 // faded in once confirmed, and a red ✕ at the takeaway's corner only for a real problem it found (lib/cardCheck
 // checkProblem). The rest of the check, the fix's Undo among it, is in the card's details (CheckDetails).
 // The body shimmers the same way while the card's code runs, as when an edit_card call is changing it, and the card
-// shimmers as in a check while thimble runs it again because a label it read changed.
+// shimmers as in a check while thimble runs it again because a label it read changed. A card that does not fit on the
+// screen, while the card check reads it (`held`, backend card_fit.py), shows as one that still runs: its question and
+// the running line, not its content or its takeaway.
 import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChatMarkdown } from '../chat/markdown'
@@ -26,7 +28,7 @@ import { checkOf, checkProblem } from '../lib/cardCheck'
 import { conceptLabel, ensureConceptName, hasConceptName, onCellNames } from '../lib/cellName'
 import { teleport } from '../lib/teleport'
 import type { Cell, Concept } from '../lib/types'
-import { CardBody, LabelHead, LabelKindTag, LabelMeta, asksQuestion } from './bodies'
+import { CardBody, LabelHead, LabelKindTag, LabelMeta, asksQuestion, exampleRefs } from './bodies'
 import { conceptName, labelsShown, staleLabels, type ConceptDetailState } from './concepts'
 import { CanvasContext } from './context'
 import { editedLabels, labelDraft, setLabelDraft, useLabelDrafts } from './labelDrafts'
@@ -77,12 +79,13 @@ function Face(p: CardFaceProps) {
   const kind = kindOf(cell)
   const payload = (cell.payload ?? {}) as Record<string, unknown>
   const concept = kind === 'label' ? String(payload.concept ?? '') : ''
-  const running = cell.status === 'running'
+  const held = !!cell.held
+  const running = cell.status === 'running' || held
   const failed = cell.status === 'error' && !running
   const check = checkOf(cell)
   const problem = p.onCheckAgain ? checkProblem(check) : ''
   // a plan has no takeaway (bodies.tsx PlanBody): its steps say where the work stands
-  const takeaway = kind === 'plan' ? '' : cell.takeaway
+  const takeaway = kind === 'plan' || held ? '' : cell.takeaway
   const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
   if (check?.state === 'running') cls.push('is-checking')
@@ -117,9 +120,7 @@ function Face(p: CardFaceProps) {
         )}
       </div>
       <CardLabels cell={cell} detail={p.label.concept} />
-      <div className="bcell-body">
-        <CardBody cell={cell} width={p.width} label={p.label} />
-      </div>
+      <div className="bcell-body">{!held && <CardBody cell={cell} width={p.width} label={p.label} />}</div>
       {running && (
         <div className="bcell-run" role="status">
           <Spinner size={10} label="running" />
@@ -144,7 +145,7 @@ function Face(p: CardFaceProps) {
       ) : takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} />
+            <ChatMarkdown text={takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} />
           </div>
           {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
         </div>

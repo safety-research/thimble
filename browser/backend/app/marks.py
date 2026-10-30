@@ -12,8 +12,9 @@
    only as Python (Bash `python3 …`).
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py), checks that evidence with no model call and no
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
-   calls (the fork's or main's) by a part of its output, and that call's real output must show the words. Its result
-   is what the analyst sees.
+   calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
+   lies in the corpus folder or main's, or is a label's definition, which holds the label's rule (_rules_dir); code
+   may also cite the workspace's temp folder. Its result is what the analyst sees.
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
@@ -22,8 +23,8 @@
    autoRepair); a repair's own end starts none, so a mark that fails again waits for Repair.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
-a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
-validator's card_index), and the validator confirms a card's place by reading it (check_card).
+a chart's data row, a label card's count or share, a line of printed output) is written to a file the checker greps
+first (session_cards, the validator's card_index), and the validator confirms a card's place by reading it (check_card).
 
 A card's takeaway is checked the same way: its marks, `[words](#)`, are checked as soon as the card's write lands
 (card_written: after the add_card or edit_card call that wrote it, after the card check that may rewrite it, after the
@@ -32,9 +33,15 @@ notebook.takeaways_to_check); their line names the card, so the check looks in i
 has claimed (_claimed) is never checked twice. What the check found is kept on the card (`takeaway_marks`,
 notebook.set_takeaway_marks), and the page draws the takeaway's marks as it draws the chat's.
 
+A side thread's answer is checked as a reply is, as the terminal checks it (checker.ts checkAnswer): when the thread's
+fork ends a run (session._finish_sub), the marks of its answer are checked under the turn id that the run's `done`
+record names in the thread's chat (answer_ended). The fork of main that checks them never read the answer, so the
+checker's text says what holds them (THREAD_ANSWER), and the Bash calls of the thread's fork are evidence where main's
+are for a reply. Main hears nothing of that check, nor of a repair of one of its marks.
+
 Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`. A reply's marks are kept in
-`<workspace>/marks/<turn>.json`, and each change is written to main's log as a `marks` record {turn, items}, which the
-page reads (the newest record of a turn wins).
+`<workspace>/marks/<turn>.json`, and each change is written to main's log, or to the thread's chat for a side thread's
+answer, as a `marks` record {turn, items}, which the page reads (the newest record of a turn wins).
 
 The fork (run_fork) is the one place that knows main runs in Claude Code; another runtime gives its own.
 """
@@ -83,6 +90,12 @@ FORK_TIMEOUT_S = 900
 CHECKER_TOOLS = ("Read", "Grep", "Glob", "Bash")
 ALLOWED = ("Read", "Grep", "Glob", "Bash(python3:*)", "Bash(python:*)")
 TELL_KIND = "citations"
+# What holds the marks the checker checks (its {{REPLY}}): main's last reply, or a side thread's answer, which the fork
+# of main that checks it never read. The terminal's LAST_REPLY and threadAnswer (plugin/marks/checker.ts), word for
+# word (tests/test_marks.py); a thread is named by its title.
+LAST_REPLY = "your last reply"
+THREAD_ANSWER = ("an answer that a side thread of this session gave the analyst about {about}. That thread's work is "
+                 "not in your conversation, so find the evidence in the files")
 
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 # (workspace, card, takeaway) of the takeaways a check has taken until their marks are on the card, so a check that
@@ -93,14 +106,13 @@ _procs: set[asyncio.subprocess.Process] = set()
 
 # ---- the terminal's texts and validator
 
-def checker_prompt(marks: str, cwd: str, cards: str = "", root: str | None = None) -> str:
-    """The checker's text for `marks`: its shell in `cwd`, its paths from `root` (check_folders; `cwd` when None)."""
+def checker_prompt(marks: str, cwd: str, cards: str = "", root: str | None = None, reply: str = LAST_REPLY) -> str:
+    """The checker's text for `marks`, which `reply` holds (LAST_REPLY, or a side thread's THREAD_ANSWER): its shell in
+    `cwd`, its paths from `root` (check_folders; `cwd` when None)."""
     text = CHECKER.read_text(encoding="utf-8")
     for old, new in CHECKER_CHANGES:
         text = text.replace(old, new)
-    # REPLY: what holds the marks; the browser checks main's replies only (the terminal also a side thread's answers)
-    for slot, value in (("MARKS", marks), ("CWD", cwd), ("ROOT", root or cwd), ("CARDS", cards),
-                        ("REPLY", "your last reply")):
+    for slot, value in (("MARKS", marks), ("CWD", cwd), ("ROOT", root or cwd), ("CARDS", cards), ("REPLY", reply)):
         text = text.replace("{{" + slot + "}}", value)
     return text
 
@@ -119,19 +131,31 @@ def check_folders(c: str, main: dict[str, Any]) -> tuple[str, str]:
 
 
 def session_cards(c: str) -> list[dict[str, Any]]:
-    """The workspace's cards as the validator reads them (evidence.check_card): each card that ran with outputs, its
-    title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html table) or the
-    lines of its printed text, as the card's citations name them (cite.bundle_cells, cite.numbered_lines)."""
-    from . import cite, notebook  # noqa: PLC0415
+    """The workspace's cards as the validator reads them (evidence.check_card): each card that ran with outputs and each
+    label card, its title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html
+    table, a label card's values, concepts.card_output) or the lines of its printed text, as the card's citations name
+    them (cite.bundle_cells, cite.numbered_lines)."""
+    from . import cite, concepts, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
     out: list[dict[str, Any]] = []
     for _, nb in notebook._stored(ws):
         for cell in nb.get("cells") or []:
-            if not notebook.runnable(cell) or not cell.get("outputs") or not cell.get("id"):
+            if not cell.get("id"):
+                continue
+            if cell.get("kind") == "label":
+                try:
+                    label = concepts.card_output(ws, cell)
+                except Exception:  # noqa: BLE001 — a label that cannot be read leaves its card out, not the others
+                    log.exception("%s: the values of label card %s were not read", c, cell["id"])
+                    label = None
+                bundles = [(0, label)] if label else []
+            elif notebook.runnable(cell) and cell.get("outputs"):
+                bundles = list(cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"])))
+            else:
                 continue
             outs: list[dict[str, Any]] = []
-            for i, b in cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"])):
+            for i, b in bundles:
                 if notebook.ERROR_MIME in b:
                     continue
                 cells = cite.bundle_cells(b)
@@ -177,7 +201,8 @@ def evidence() -> ModuleType:
     return mod
 
 
-# ---- a reply's marks: <workspace>/marks/<turn>.json {turn, items, times}
+# ---- a reply's marks: <workspace>/marks/<turn>.json {turn, items, times}, and for a side thread's answer `thread`
+# {chat, about, calls} (answer_ended)
 
 def _path(c: str, turn: str) -> Path:
     if not re.fullmatch(r"[0-9a-f]{8}", turn):
@@ -197,7 +222,11 @@ def _save(c: str, reply: dict[str, Any]) -> None:
     p = _path(c, reply["turn"])
     p.parent.mkdir(parents=True, exist_ok=True)
     ledger.write_json(p, reply)
-    agents.mirror(c, "marks", turn=reply["turn"], items=reply["items"])
+    thread = (reply.get("thread") or {}).get("chat")
+    if thread:  # a side thread's answer, which its chat draws
+        agents.Recorder(c, thread).record("marks", turn=reply["turn"], items=reply["items"])
+    else:
+        agents.mirror(c, "marks", turn=reply["turn"], items=reply["items"])
 
 
 async def marks_of(texts: list[str]) -> list[dict[str, Any]]:
@@ -292,7 +321,8 @@ def _checked(m: dict[str, Any]) -> bool:
 
 async def _edit(c: str, turn: str, change: Callable[[dict[str, Any]], dict[str, Any]], tell: bool = True) -> dict[str, Any] | None:
     """A change of a reply's marks, one at a time; when it settles the last mark the reply's check judges, main is told
-    what the check changed (`tell`; a repair tells main of its own mark, repair_tell_text)."""
+    what the check changed (`tell`; a repair tells main of its own mark, repair_tell_text). Main never read a side
+    thread's answer, so it hears nothing of its check."""
     async with _locks.setdefault((c, turn), asyncio.Lock()):
         reply = stored(c, turn)
         if reply is None:
@@ -304,6 +334,8 @@ async def _edit(c: str, turn: str, change: Callable[[dict[str, Any]], dict[str, 
         if settled:
             reply.setdefault("times", {})["settled"] = time.time()
         _save(c, reply)
+    if reply.get("thread"):
+        return reply
     if tell and was_checked and not any(_checked(m) for m in reply["items"]) and (text := tell_text(reply["items"])):
         _tell(c, text)
     return reply
@@ -390,11 +422,31 @@ def card_written(c: str, cid: str | None) -> None:
         log.exception("%s: the check of card %s's takeaway did not start", c, cid)
 
 
+def answer_ended(c: str, chat: str, turn: str, texts: list[str], calls: str) -> None:
+    """Side thread `chat`'s fork ended a run with these texts, its answer, under the turn that the run's `done` record
+    names (session._finish_sub). Their marks are checked as a reply's are, by a fork of main at its last finished turn
+    whose text says what holds them (THREAD_ANSWER); the Bash calls in `calls`, the transcript of the thread's fork,
+    are evidence where main's are for a reply. No takeaway waiting is checked with them. With no main to fork (a
+    Claude Code session whose first turn still runs), they wait, not checked. Runs on the server's loop; nothing
+    without one."""
+    if not any("](#)" in t for t in texts):
+        return
+    got = _main_now(c)
+    if isinstance(got, str):
+        log.info("%s: the citations of thread %s's answer are not checked: %s", c, chat, got)
+        return
+    main, cut = got
+    about = f'"{(agents.meta_or_none(c, chat) or {}).get("title") or "thread"}"'
+    thread = {"chat": chat, "about": about, "calls": calls}
+    _spawn(start_check(c, main, turn, list(texts), cut, cards=set(), thread=thread))
+
+
 async def start_check(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: str | None,
                       fork: Callable[..., Awaitable[dict[str, Any]]] | None = None,
-                      cards: set[str] | None = None) -> None:
-    """Check the marks of main's `texts` and of the takeaways waiting for a check (only those of `cards` when given,
-    with no reply's record when there are no texts), each takeaway claimed until its marks are on its card."""
+                      cards: set[str] | None = None, thread: dict[str, Any] | None = None) -> None:
+    """Check the marks of main's `texts`, or of side thread `thread`'s answer (answer_ended), whose record keeps it, and
+    of the takeaways waiting for a check (only those of `cards` when given, with no reply's record when there are no
+    texts), each takeaway claimed until its marks are on its card."""
     from . import notebook  # noqa: PLC0415
 
     try:
@@ -406,14 +458,15 @@ async def start_check(c: str, main: dict[str, Any], turn: str, texts: list[str],
     claims = {(c, cid, text) for cid, _, text in takeaways}
     _claimed.update(claims)  # before the first await, so a check starting meanwhile leaves them alone
     try:
-        await _start_check(c, main, turn, texts, cut, fork, takeaways, claims, saved=cards is None or bool(texts))
+        await _start_check(c, main, turn, texts, cut, fork, takeaways, claims, saved=cards is None or bool(texts),
+                           thread=thread)
     finally:
         _claimed.difference_update(claims)
 
 
 async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: str | None,
                        fork: Callable[..., Awaitable[dict[str, Any]]] | None, takeaways: list[tuple[str, str, str]],
-                       claims: set[tuple[str, str, str]], saved: bool) -> None:
+                       claims: set[tuple[str, str, str]], saved: bool, thread: dict[str, Any] | None = None) -> None:
     from . import notebook  # noqa: PLC0415
 
     try:
@@ -431,7 +484,8 @@ async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str]
             cid, title, text = takeaways[m["piece"] - len(texts)]
             takes.append({**m, "card": cid, "title": title, "takeaway": text})
     if chat or (takes and saved):
-        _save(c, {"turn": turn, "items": chat, "times": {"reply_end": time.time()}})
+        reply = {"turn": turn, "items": chat, "times": {"reply_end": time.time()}}
+        _save(c, {**reply, "thread": thread} if thread else reply)
     for cid, text in dict.fromkeys((m["card"], m["takeaway"]) for m in takes):
         mine = [_takeaway_item(m) for m in takes if m["card"] == cid]
         notebook.set_takeaway_marks(c, cid, text, lambda _old, mine=mine: mine)
@@ -499,11 +553,12 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                        auto: bool = False) -> None:
     """One fork's check of a share of the marks. `request`: what follows the checker's text for a repair (Repair in a
     mark's label, the terminal's x, or one this check's end started, `auto`), whose end tells main how its one mark
-    ended. A check that is no repair repairs each mark it found wrong or could not confirm, as soon as it ends.
-    `folders`: the check's (cwd, root), check_folders."""
+    ended, unless the mark is a side thread's. A check that is no repair repairs each mark it found wrong or could not
+    confirm, as soon as it ends. `folders`: the check's (cwd, root), check_folders."""
     takes = [m for m in share if m.get("card")]
     mine = {m["n"] for m in share if not m.get("card")}
     lines = "\n".join(_line(m) for m in share)
+    thread = (stored(c, turn) or {}).get("thread")  # a side thread's answer (answer_ended)
     found: list[dict[str, Any]] = []  # the marks this check failed, which it repairs at its end
 
     async def give_up(why: str) -> None:
@@ -512,7 +567,8 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
 
     try:
         cwd, root = folders
-        prompt = checker_prompt(lines, cwd, index, root)
+        holds = THREAD_ANSWER.format(about=thread["about"]) if thread else LAST_REPLY
+        prompt = checker_prompt(lines, cwd, index, root, holds)
         got = await fork(c, main, cut, f"{prompt}\n\n{request}" if request else prompt)
         if got.get("error"):
             await give_up(f"the check ended: {got['error']}")
@@ -522,11 +578,13 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         answer = str(got.get("answer") or "")
         ev = evidence()
         cited = cited_outputs(answer)
-        mains = [k for k in bash_calls(_transcript_messages(main.get("transcript_path")), "main")
+        # the calls of whoever wrote the marks: main, or the thread's fork for a side thread's answer
+        wrote = thread["calls"] if thread else main.get("transcript_path")
+        mains = [k for k in bash_calls(_transcript_messages(wrote), "main")
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
-                                         answer, calls, cwd, root, str(_temp_dir(c)), cards or [])
+                                         answer, calls, cwd, root, str(_temp_dir(c)), cards or [], str(_rules_dir(c)))
         if not result["parsed"]:
             await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
@@ -546,8 +604,9 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
             return r
 
         reply = await _edit(c, turn, change, tell=not request)
-        if request and reply and (text := repair_tell_text([m for m in reply["items"] if m["n"] in mine], auto)):
-            _tell(c, text)
+        if request and reply and not thread:  # main never read a side thread's answer
+            if text := repair_tell_text([m for m in reply["items"] if m["n"] in mine], auto):
+                _tell(c, text)
 
         def judged_takeaway(m: dict[str, Any]) -> dict[str, Any]:
             res = by_n.get(m["n"])
@@ -595,6 +654,15 @@ def _temp_dir(c: str) -> Path:
     p = config.workspace_dir(c) / "tmp"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _rules_dir(c: str) -> Path:
+    """The workspace's labels' definitions (concepts.concepts_dir), each of which holds its label's rule, as the
+    terminal keeps a `--code` rule in its temp folder: the validator's `rules`. Beside the workspace's temp folder, it
+    is the one folder of the workspace a citation may name: the workspace's answers, marks and chats are no evidence."""
+    from . import concepts  # noqa: PLC0415 — concepts imports much of the app
+
+    return concepts.concepts_dir(config.workspace_dir(c))
 
 
 def cited_outputs(answer: str) -> list[str]:

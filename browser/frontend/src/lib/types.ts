@@ -52,7 +52,7 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
-  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string }
+  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension' | 'thimble'; tray?: boolean; event?: string; run?: number; extension?: string }
   | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
@@ -243,6 +243,9 @@ export interface Cell {
   check?: unknown
   /** the changes checks made to the card, oldest first (lib/cardCheck) */
   fixes?: unknown[]
+  /** set while the card waits for its measure, or does not fit on the analyst's screen and waits for its check
+   * (backend card_fit.py): the card shows as one that still runs */
+  held?: Record<string, unknown> | null
 }
 
 /** A plan card's step status (backend notebook.PLAN_STATUSES). */

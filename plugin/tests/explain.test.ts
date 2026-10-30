@@ -10,11 +10,13 @@ import { spansFor } from '../core/answerview'
 import { resetEngaged } from '../core/engaged'
 import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
-import { resetTheme } from '../core/theme'
+import { accent, resetTheme } from '../core/theme'
+import { SPIN, spinNow } from '../bar/busy'
 import { failLineNow } from '../bar/notice'
-import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
-import { trayBand, trayNow } from '../tray/tray'
+import { explainBar, explainKey, headsKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { trayBand, trayBar, trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
+import { citeTint } from '../marks/view'
 import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
 import { noteRow, startCheck } from '../marks/checker'
@@ -238,7 +240,7 @@ test("words asked for an explainer draw teal at once, before it is written; a fa
   }
 })
 
-test("a quote of a JSON line shows the line as the file holds it, the cited words highlighted in it; w explains the cited words in place", async () => {
+test("a quote of a JSON line shows the line as the file holds it under its place, the cited words on the citations' purple tint in it; w explains the cited words in place", async () => {
   setOptions({})
   const s = setup([LOOK], { complete: reply({ body: 'A page anyone can bump to leave a number for the next copy.', here: '' }) })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
@@ -249,14 +251,15 @@ test("a quote of a JSON line shows the line as the file holds it, the cited word
   const e = { props: { bodyColumns: 80 } }
   const pane = await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els)
   const t = textOf(pane)
-  expect(t).toContain('revisions.jsonl:2')
+  expect(t).toContain('revisions.jsonl · line 2')
   expect(t).toContain('{"rev_id": 3}')
   expect(t).toContain("the line's JSON text, decoded")
-  // the quoted words are in the cited line, in the citations' look (bold)
-  const bold: string[] = []
-  const walk = (n: Any): void => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { if (n.type === 'Text' && n.props?.bold) bold.push(textOf(n)); walk(n.props?.children) } }
+  // the quoted words are in the cited line, on the citations' purple tint alone, as the tray marks them
+  const tinted: Any[] = []
+  const walk = (n: Any): void => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { if (n.type === 'Text' && n.props?.backgroundColor === citeTint()) tinted.push(n); walk(n.props?.children) } }
   walk(pane)
-  expect(bold).toContain('Paste it fast')
+  expect(tinted.map(textOf)).toEqual(['Paste it fast'])
+  for (const look of ['bold', 'underline']) expect(tinted[0].props[look]).toBeUndefined()
   expect(buttonsOf(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])).toEqual([['e', 'explain these words']])
   // w: the cited words' explainer, written now, shows in the pane
   buttonsOf(pane).find(b => b.hotkey === 'e').onPress()
@@ -319,7 +322,7 @@ test('e opens the tray at once on the explainer being written, its words as its 
     await settle()
     // the call has not answered: the tray stands on the words, its title, with nothing else to read yet
     expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain' })
-    const band = textOf(await trayBand(s.$, els, 100, 20))
+    const band = textOf(await trayBand(s.$, els, 100, { rows: 20, at: 0, id: 'above' }))
     expect(band).toContain('the client')
     expect(band).not.toContain('no longer in the session')
     done(ok ? reply({ body: 'The program that sends the uploads.', here: '' }) : { isAnswered: false, reason: 'aborted' })
@@ -330,8 +333,43 @@ test('e opens the tray at once on the explainer being written, its words as its 
     const id = part.order.find(x => part.items[x]!.term === 'the client')!
     expect((await trayNow(s.$))!.stack).toEqual([{ row: 't1-row', kind: 'explain', id }])
     // its words, drawn as the reply draws its words
-    expect(JSON.stringify(await trayBand(s.$, els, 100, 20))).toContain('The program that sends the uploads.')
+    expect(JSON.stringify(await trayBand(s.$, els, 100, { rows: 20, at: 0, id: 'above' }))).toContain('The program that sends the uploads.')
   }
+})
+
+test("the box e opens while the explainer is written is an explainer's from the start, in its teal, with the turning glyph of the bar and of a citation being checked where its words will stand, and no words", async () => {
+  setOptions({})
+  let done: (v: Any) => void = () => undefined
+  const s = setup([LOOK], { complete: new Promise(r => { done = r }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
+  s.$.ui.selection = async () => ({ text: 'the client', requestId: 't1-row' })
+  s.$.ui.open = async () => ({ isPlaced: true })
+  void (await explainKey(s.$, 'e', 0))!.later!()
+  await settle()
+  const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(nodes) : [n, ...nodes(n.props?.children)])
+  const drawn = async () => {
+    const band = await trayBand(s.$, els, 100, { rows: 20, at: 0, id: 'above' })
+    return { frame: nodes(band).find(n => n.props?.key === 'tray'), body: nodes(band).find(n => n.props?.key === 'tray-body') }
+  }
+  const writing = await drawn()
+  // the bar's ] (or [) names the mark it goes to from where its words stand, as once it is written
+  const step = async () => (await trayBar(s.$, () => true, false)).filter(x => x.key === ']' || x.key === '[').map(x => `${x.key} ${x.words}`).join(' · ')
+  const named = await step()
+  expect(named).toMatch(/^(\] next|\[ previous) (citation|explainer|heads up|card)$/)
+  // the body: the turning glyph alone, in thimble's color, the frame of the bar's busy line (bar/busy.ts spinNow)
+  const glyph = nodes(writing.body).find(n => n.props?.key === 'writing')
+  expect(glyph?.props).toMatchObject({ color: accent(), children: await spinNow(s.$) })
+  expect(SPIN).toContain(textOf(writing.body))
+  // written: the same frame, in the explainers' teal, and its words in place of the glyph
+  done(reply({ body: 'The program that sends the uploads.', here: '' }))
+  await settle()
+  await settle()
+  const written = await drawn()
+  expect(JSON.stringify(written.body)).toContain('The program that sends the uploads.')
+  expect(nodes(written.body).some(n => n.props?.key === 'writing')).toBe(false)
+  expect(written.frame.props.borderColor).toBe('planMode')
+  expect(writing.frame.props.borderColor).toBe(written.frame.props.borderColor)
+  expect(await step()).toBe(named)
 })
 
 test('e with nothing selected says to select words with the mouse first, and how outside the fullscreen layout; nothing is written', async () => {
@@ -581,7 +619,7 @@ test('the selected words are trimmed to one line, and a long selection is cut af
   expect((await failLineNow(s.$))?.kind).toBe('failed')
 })
 
-test('selected words inside a mark open it; words over or across marks get one explainer whose mark covers the marks it overlaps', async () => {
+test('selected words inside a mark open it; words over or across marks get one explainer whose mark covers the explainers it overlaps, and never a heads-up', async () => {
   setOptions({})
   const s = setup([LOOK], { complete: reply({ body: 'When the client has used all its tries.', here: '' }) })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
@@ -599,11 +637,74 @@ test('selected words inside a mark open it; words over or across marks get one e
   await pressE(s, { text: 'budget runs', requestId: 't1-row' })
   await settle()
   expect(s.calls.length).toBe(1)
-  // and words over the heads-up and its neighbor get one explainer of their own, which the heads-up gives way to
+  // and words over the heads-up and its neighbor get one explainer of their own, which opens in the tray; the heads-up
+  // keeps its words, and a press on them opens it
   await pressE(s, { text: 'came 30 seconds', requestId: 't1-row' })
   await settle()
   expect(s.calls.length).toBe(2)
-  expect((await spansFor(s.$, 't1-row', ANSWER, [])).map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['a2', 'came 30 seconds']])
+  const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
+  expect(part.items.a2).toMatchObject({ term: 'came 30 seconds', asked: true })
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id: 'a2' })
+  const after = await spansFor(s.$, 't1-row', ANSWER, [])
+  expect(after.map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['h1', '30 seconds after a drop']])
+  await after[1]!.onPress!()
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads', id: 'h1' })
+})
+
+test("an explainer asked for on a heads-up's words, as the evidence pane's e asks for one of a citation's words, never covers the heads-up while it is written or once written", async () => {
+  setOptions({})
+  // the heads-up stands on the citation's words, as a look often puts it
+  const onCite = reply({ glosses: [], heads: { term: '41 of the 44', title: 'One office', bullets: ['[The log covers one office](logs/upload.log).'] } })
+  let done: (v: Any) => void = () => undefined
+  const s = setup([onCite], { complete: new Promise(r => { done = r }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  const drawn = async () => (await spansFor(s.$, 't1-row', ANSWER, marksIn(ANSWER))).map(x => [x.id, ANSWER.slice(x.start, x.end)])
+  expect(await drawn()).toEqual([['h1', '41 of the 44']])
+  const asked = explainTerm(s.$, 't1-row', '41 of the 44')
+  await settle()
+  expect(await drawn()).toEqual([['h1', '41 of the 44']])
+  done(reply({ body: 'The failed uploads the log counts.', here: '' }))
+  // written and kept on the answer, so the pane shows it
+  expect(await asked).toMatchObject({ term: '41 of the 44', asked: true, body: 'The failed uploads the log counts.' })
+  expect((await sessionGlosses(s.$)).map(g => g.term)).toEqual(['41 of the 44'])
+  expect(await drawn()).toEqual([['h1', '41 of the 44']])
+  const [h] = await spansFor(s.$, 't1-row', ANSWER, marksIn(ANSWER))
+  await h!.onPress!()
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads', id: 'h1' })
+})
+
+test('only what the analyst sees keeps its words: h gives no heads-up on the words of an explainer shown there, and gives one on the words of an explainer Explainers hides', async () => {
+  // Heads-ups on demand: the look after each answer gives explainers alone, and h asks for the heads-up
+  setOptions({ details: 'on demand' })
+  try {
+    const s = setup([
+      reply({ glosses: [{ term: 'network drop', body: 'A moment the office network went down.' }] }),
+      reply({ heads: { term: '30 seconds after a network drop', title: 'One office', bullets: ['The log covers one office.'] } }),
+      reply({ glosses: [{ term: 'power cut', body: 'The building lost its power.' }] }),
+      reply({ heads: { term: '20 seconds after a power cut', title: 'One building', bullets: ['Only one building lost power.'] } }),
+    ])
+    s.$.ui = { invalidate: () => undefined }
+    const h = async () => {
+      await (await headsKey(s.$, 'h', 0))!.later!()
+      await settle()
+      await drainNow(s.$)
+      await settle()
+    }
+    const drawn = async (row: string, text: string) => (await spansFor(s.$, row, text, [])).map(x => [x.id, text.slice(x.start, x.end)])
+    const one = 'Uploads fail when the retry budget runs out: 41 of the 44 failures came 30 seconds after a network drop.'
+    await answered(s, { id: 'k1', prompt: 'Why do uploads fail?', text: one })
+    await h()
+    expect(await drawn('k1-row', one)).toEqual([['g1', 'network drop']])
+    // Explainers off: the analyst sees no explainer on the next answer, so h's heads-up takes its words
+    const two = 'The second office lost 12 uploads 20 seconds after a power cut.'
+    await answered(s, { id: 'k2', prompt: 'And the second office?', text: two })
+    setOptions({ details: 'on demand', explain: 'off' })
+    await h()
+    expect((await partOf<ExplainPart>(s.$, 'k2-row', 'explain'))!.order).toEqual(['g1', 'h1'])
+    expect(await drawn('k2-row', two)).toEqual([['h1', '20 seconds after a power cut']])
+  } finally {
+    setOptions({})
+  }
 })
 
 // ------------------------------------------------------------------------------------------------ c: cite

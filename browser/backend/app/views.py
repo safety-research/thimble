@@ -1595,7 +1595,8 @@ def _prepared(c: str, slug: str, version: str | None = None) -> tuple[dict[str, 
     if (c, slug, fp) not in _mirrored:
         from . import notebook  # noqa: PLC0415 — the kernel machinery loads lazily
 
-        # the kernel reads the corpus through its scratch mirror, which must hold a file added since it was made
+        # the kernel reads the corpus through its scratch mirror, which must hold an entry added to the corpus folder
+        # since it was made
         notebook.scratch_dir(c, config.corpus_dir(c), fresh=True)
         _mirrored.add((c, slug, fp))
     cache = cache_dir(c, view)

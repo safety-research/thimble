@@ -48,6 +48,8 @@ SUITE_HOME = Path(tempfile.mkdtemp(prefix="thimble-tests-home-")).resolve()
 atexit.register(shutil.rmtree, SUITE_HOME, True)
 os.environ["THIMBLE_HOME"] = str(SUITE_HOME)
 os.environ["THIMBLE_PLUGIN_HOME"] = str(SUITE_HOME / "plugin-home")
+# the browser workbench's home, which the server reads beside its own (the tour's offer, app/tour.py)
+os.environ["THIMBLE_BROWSER_HOME"] = str(SUITE_HOME / "browser-home")
 
 
 class RealHomeWrite(PermissionError):
@@ -255,6 +257,8 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thimble-home"))
     # the terminal plugin's home, where the person's fixes are kept (app/fixes.py)
     monkeypatch.setenv("THIMBLE_PLUGIN_HOME", str(tmp_path / "plugin-home"))
+    # the browser workbench's home, read beside the server's own (app/tour.py)
+    monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp_path / "browser-home"))
 
 
 PLUGIN_TOKEN = "t0ken-of-the-test-server"
@@ -384,6 +388,24 @@ def mark_open(home: Path, folder: Path | str) -> None:
     d.mkdir(parents=True, exist_ok=True)
     for path in dict.fromkeys((str(folder), os.path.realpath(folder))):
         (d / path.replace("/", "%")).touch()
+
+
+def code_project(folder: Path) -> None:
+    """`folder` made a git repository of its files and of a Python package, `tool` (tool.rows.N is 3), with the file
+    times git's index keeps behind the files' own, as after a copy or a checkout: then `git status` and `git diff`
+    rewrite the index unasked."""
+    import subprocess  # noqa: PLC0415
+
+    (folder / "tool").mkdir()
+    (folder / "tool" / "__init__.py").write_text("")
+    (folder / "tool" / "rows.py").write_text("N = 3\n")
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "files"]):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null",
+                        *args], cwd=folder, check=True, capture_output=True)
+    later = time.time() + 5
+    for p in folder.rglob("*"):
+        if ".git" not in p.relative_to(folder).parts:
+            os.utime(p, (later, later))
 
 
 def earlier_orientation_proposal(c: str, name: str, description: str, claims: list[str], arrangement: str = "") -> str:
@@ -673,6 +695,7 @@ def _no_live_server_probe(monkeypatch):
         return probe
 
     monkeypatch.setattr(cli, "healthy", guarded(cli.healthy, cli.port, False))
+    monkeypatch.setattr(cli, "health_leader", guarded(cli.health_leader, cli.port, None))  # cli.own_server's probe
     monkeypatch.setattr(feedback, "server_answers", guarded(feedback.server_answers, lambda: DEFAULT_PORT, False))
     monkeypatch.setattr(dev, "_health", guarded(dev._health, dev.config_port, None))
 
@@ -715,8 +738,9 @@ def data_tmp(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
-    """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no adoption of a real server: the
-    default port may be a live server's. `up` runs as in a session the launcher started."""
+    """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no server that names its leader
+    (cli.health_leader), so none is taken for this install's own (cli.own_server): the default port may be a live
+    server's. `up` runs as in a session the launcher started."""
     from app import cli, config
 
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))

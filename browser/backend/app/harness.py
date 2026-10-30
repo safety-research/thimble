@@ -278,7 +278,7 @@ def program_env(run: Run) -> dict[str, str]:
     env.update({
         "PATH": os.pathsep.join([str(Path(sys.executable).parent), *[p for p in env.get("PATH", "").split(os.pathsep) if p]]),
         "PYTHONPATH": os.pathsep.join([str(KIT), *([str(lib)] if lib.is_dir() else []), str(part.folder)]),
-        "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1",
+        **kernel_wrap.NO_SIDE_WRITES, "PYTHONUNBUFFERED": "1",
         "THIMBLE_API": api_url(), "THIMBLE_AGENT_TOKEN": run.token, "THIMBLE_SESSION": job.key,
         "THIMBLE_ROLE": "" if job.task else job.role, "THIMBLE_TASK": job.task, "THIMBLE_WORKSPACE": job.c,
         "THIMBLE_WORK": str(job.work),
@@ -953,9 +953,12 @@ def _register(run: Run) -> None:
 
 
 def _unregister(run: Run) -> None:
+    from . import card_fit  # noqa: PLC0415 — card_fit imports the card harness (render)
+
     _runs.pop(run.token_id, None)
     if _by_key.get((run.c, run.job.key)) is run:
         _by_key.pop((run.c, run.job.key), None)
+    card_fit.run_ended(run.c, run.job.key)  # a card the run still holds shows as it stands
 
 
 async def run_in(job: Job, part: roles.Part, rec: agents.Recorder | None) -> str:

@@ -13,17 +13,23 @@
 //                                      with the input bar, which the docked pane keeps at its bottom (core/pane.ts)
 //   threadKnown($, key)                whether the thread `key` is this conversation's, so the side pane can show it
 //                                      again: its way back passes over one that is not (core/pane.ts)
-//   openThread($, scope, {key})        the side pane on the thread about `scope` (a new one, or the one already about
+//   openThread($, scope, {key, read})  the side pane on the thread about `scope` (a new one, or the one already about
 //                                      it), its input taking the keys: the tray's `a` on a mark, a claim's question in
-//                                      the claims pane; true when it opened. `key`: the bar's words that open it where
-//                                      the key at the prompt cannot (a narrow terminal)
+//                                      the claims pane; `read`, the pane taking them (the tray's +, which shows all of
+//                                      a mark there); true when it opened. `key`: the key and the bar's words that open
+//                                      it where the key at the prompt cannot (a narrow terminal); `click`, other words
+//                                      that do
 //   threadAsked($, scope)              the first question of the thread about `scope`, or null when none was asked:
 //                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
 //                                      conversation and its input bar, about what the pane shows (core/pane.ts)
 //   threadUnderSplit($, e, kind, args, els)   the same in two parts: the conversation, and the key row with the input
-//                                      bar, which the docked pane keeps at its bottom (core/pane.ts)
+//                                      bar, which the docked pane keeps at its bottom (core/pane.ts); and whether the
+//                                      pane opened to ask, its input taking the keys
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
+//   threadRing(element)                the ring moved in the side pane onto `element` (core/pane.ts): a thread's input
+//                                      bar it lands on keeps it after each drawing, until the person moves it elsewhere
+//   threadsPaneClosed()                the side pane closed: no thread's input bar keeps the ring
 //   PaneEdit                           a field a pane edits in the input bar under it, in place of a question: the
 //                                      labels pane's (labels/pane.tsx labelEdit), its name, its value, what ↵ does
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
@@ -34,14 +40,18 @@
 //                                      (`element`); each part has a thread of its own
 //   threadCardAnchor($, agentId, id)   where a card a thread's fork drew stands: `thread:<key>`, drawn under its answer
 //                                      in the thread's pane; null for any other agent (cards/tool.ts)
+//   threadAnchor(agentId)              the same anchor, `thread:<key>`, with no card kept: whom a card call of the fork
+//                                      is from, for what thimble keeps for it (core/tell.ts tellFor, cards/tool.ts)
+//   threadQuestion(agentId)            the question a thread's fork answers, which the card check of a card it drew
+//                                      reads as the request; null for any other agent (cards/tool.ts)
 //   registerThreads                    its own hooks (the forks' ends, ...)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
-import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadsBright } from './thread'
+import { askHere, drawThreads, ringMoved, ringReleased, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
+import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadAnchor as anchorOf, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadQuestion as question, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
 type Engine = EngineInterface
@@ -110,7 +120,7 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
   return under($, e, kind, args, els)
 }
 
-export async function threadUnderSplit($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: unknown[]; bottom: unknown[] }> {
+export async function threadUnderSplit($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: unknown[]; bottom: unknown[]; asking: boolean }> {
   return threadUnderParts($, e, kind, args, els)
 }
 
@@ -119,10 +129,21 @@ export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown):
   return roomUnder($, e, kind, args)
 }
 
+/** The ring moved in the side pane onto `element` (none: one of Claude Code's own stops): onto a thread's input bar,
+ *  that field keeps it (threads/pane.tsx ringMoved). */
+export function threadRing(element: string | undefined): void {
+  ringMoved(element)
+}
+
+/** The side pane closed: no thread's input bar keeps the ring. */
+export function threadsPaneClosed(): void {
+  ringReleased()
+}
+
 /** A field a pane edits in the input bar under it (labels/pane.tsx labelEdit). */
 export type { PaneEdit }
 
-export async function openThread($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
+export async function openThread($: Engine, scope: ThreadScope, o: { key?: string; click?: string; where?: string; read?: boolean } = {}): Promise<boolean> {
   return openThreadOn($, scope, o)
 }
 
@@ -156,6 +177,14 @@ export async function threadOnCard($: Engine, id: string, title: string, line = 
 
 export async function threadCardAnchor($: Engine, agentId: string | undefined, cardId: string): Promise<string | null> {
   return anchor($, agentId, cardId)
+}
+
+export function threadAnchor(agentId: string | undefined): string | null {
+  return anchorOf(agentId)
+}
+
+export function threadQuestion(agentId: string | undefined): string | null {
+  return question(agentId)
 }
 
 export const registerThreads: Register = (on, options) => register(on, options)

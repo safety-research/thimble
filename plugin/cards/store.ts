@@ -45,6 +45,9 @@ export type CardMeta = {
   errorWidth?: number | null // the width a drawing failed at, when the failure was a drawing's: it holds only at that width
   calls: Record<string, CardCall> // each call of the card, by its tool_use_id
   at: number
+  // while the version on screen does not fit and the card check reads it (cards/fit.ts): when it was held; its frame
+  // draws `drawing…` in place of the card
+  held?: { since: number } | null
 }
 /** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it.
  *  `width`, `theme` and `tree` are the runner's newest drawing, at the width the runner holds the card at, for a
@@ -269,7 +272,7 @@ export async function turnCards($: Engine): Promise<void> {
 }
 
 /** The cards this conversation drew before (a resumed session, or a reload of the plugin): back in $.state, the
- *  newest drawn card focused. */
+ *  newest drawn card focused, and none held. */
 export async function restoreCards($: Engine): Promise<void> {
   const dir = await cardsDir($)
   let entries: { name: string; kind: string }[] = []
@@ -280,7 +283,8 @@ export async function restoreCards($: Engine): Promise<void> {
     try { metas.push(JSON.parse(String(await $.fs.read(`${dir}/${x.name}/meta.json`))) as CardMeta) } catch { /* a card whose first call never finished */ }
   }
   const at: Record<string, string[]> = {}
-  for (const m of metas.sort((a, b) => a.at - b.at)) {
+  // a card held when the session ended draws as it stands: no check comes for it now (cards/fit.ts)
+  for (const m of metas.sort((a, b) => a.at - b.at).map(x => (x.held ? { ...x, held: null } : x))) {
     await $.state.set({ ...CARD, id: m.id }, m)
     metasKept.set(m.id, m)
     for (const call of Object.keys(m.calls ?? {})) await $.state.set({ ...CALL, id: call }, { id: m.id })

@@ -65,11 +65,11 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   expect((await pane.find({ key: 'switch-citations' }))?.text).toContain('Citations')
   for (const mode of ['auto cite + verify', 'auto cite', 'manual', 'off']) expect(await pane.find({ key: `mode-citations-${mode}` })).toBeDefined()
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('verified when you open it')
-  // the bar's preview shows every item the switches leave on: c cite, as with words selected, beside w evidence
+  // the bar's preview shows every item the switches leave on: c cite, as with words selected, beside w claims
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^c cite$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^w evidence$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^w claims$/ })).toBeDefined()
   await pane.press({ key: 'mode-citations-manual' })
   expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('Select words and press c to cite them.')
@@ -77,8 +77,8 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   // off: no c cite; the claims keep w
   await pane.press({ key: 'mode-citations-off' })
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^w evidence$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^w claims$/ })).toBeDefined()
   // the row picked is the first, Minimal, tinted with no mark; a click on a name picks its row, changing nothing (↑ ↓:
   // tests/pane.test.ts)
   expect((await pane.find({ key: 'sw-minimal' }))?.text).not.toContain('›')
@@ -107,7 +107,7 @@ function settingsWorld(on: Any, rows: Record<string, boolean | string>, store: R
 }
 
 
-test('Minimal is a preset: on, it sets Citations manual and Explainers, Heads-ups and Evidence on demand, which the rows show; off puts back what they had', async ($, on) => {
+test('Minimal is a preset: on, it sets Citations manual and Explainers, Heads-ups and Claims on demand, which the rows show; off puts back what they had', async ($, on) => {
   const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite + verify', explain: 'auto', details: 'off', claimsMode: 'auto', cards: true, defaultsAt: DEFAULTS.at }
   const set = settingsWorld(on, rows)
   await $.command.run({ command: 'thimble-settings', args: '' } as never)

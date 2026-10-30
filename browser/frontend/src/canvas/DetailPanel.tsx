@@ -26,6 +26,7 @@ import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { CardVersion, Cell } from '../lib/types'
 import { shortcutLabel } from '../lib/platform'
+import { exampleRefs } from './bodies'
 import { CheckDetails } from './CheckDetails'
 import { useConceptDetail } from './concepts'
 import { CanvasContext } from './context'
@@ -260,7 +261,7 @@ export function DetailPanel({ cell, cite = null, history = 0, onClose }: { cell:
                 >
                   {cell.takeaway?.trim() ? (
                     <GlyphCites.Provider value={true}>
-                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} />
+                      <ChatMarkdown text={cell.takeaway} checks={takeawayChecks(cell)} among={exampleRefs(cell)} />
                     </GlyphCites.Provider>
                   ) : (
                     <span className="bdetail-take-empty">Add a takeaway</span>

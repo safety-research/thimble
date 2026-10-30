@@ -52,6 +52,22 @@ The card draws the `{{type}}` card type with thimble.card, and the picture shows
 
 The analyst reshaped this card in its graphic and pressed Keep, which set {{kept}} in its thimble.card call. These are the analyst's choice, so give them back as they are, and make the question and the takeaway fit the records they draw.
 
+## too-large
+
+The card does not fit on the analyst's screen, so the analyst sees it only after this check, as your replacement. Assess it against one more criterion, the sixth:
+
+- Does the graphic show only what the question needs, in a form that fits on the screen?
+
+This holds for a look the analyst asked for too: when they asked for more than fits, such as a table of every field of every record, one compact form of all the records, with the ones that answer marked, meets their request. The card's author works from the card guidance and writes a card's code as the toolkit says, and so does its replacement.
+
+The card guidance
+
+{{guidance}}
+
+The toolkit
+
+{{toolkit}}
+
 ## critique
 
 Return your assessment of the card, what fails each criterion, and the card that replaces it.

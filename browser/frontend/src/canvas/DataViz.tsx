@@ -5,6 +5,7 @@ import { useTheme } from '../lib/theme'
 import type { GraphDataset, TimelineDataset } from '../lib/types'
 import { cardStyle } from '../lib/cardStyle'
 import { chartScript, frameStyle, frameTokens, useCardLibs, useFrameFonts, withFrameStyle } from '../lib/frame'
+import { shotScript } from '../lib/frameShot'
 import { useVisibleSize } from '../lib/visibleSize'
 import { inkScript, paperInks } from '../lib/ink'
 import { token, VIZ_SERIES } from '../lib/vizTheme'
@@ -961,8 +962,10 @@ export function Diagram({ dataset, fitWidth }: { dataset: GraphDataset; fitWidth
 export const SIZE_MESSAGE = 'thimble:size'
 // the body's height, and whether the page lays out wider than its frame (`wide`), which the frame cuts at its edge
 // (cardBridge); the height takes in a sideways scroll bar's room where a page still shows one. `width` is the page's
-// laid-out width and `frame` the frame's, which a page wider than its frame tells its author (onWide)
-const SIZER = `<script>(function(){var b=document.body,d=document.documentElement;function s(){var c=getComputedStyle(b),w=d.scrollWidth>d.clientWidth+1;parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:b.offsetHeight+parseFloat(c.marginTop)+parseFloat(c.marginBottom)+(w?Math.max(0,innerHeight-d.clientHeight):0),wide:w,width:d.scrollWidth,frame:d.clientWidth},'*')}addEventListener('load',s);if(window.ResizeObserver){var o=new ResizeObserver(s);o.observe(b);o.observe(d)}s()})()</script>`
+// laid-out width and `frame` the frame's, which a page wider than its frame tells its author (onWide). `inner` is the
+// content the page's own scroll boxes hold past their height (the outermost boxes' summed), and `innerWide` the most
+// one holds past its width: content the analyst scrolls to read as surely as a page past the frame
+const SIZER = `<script>(function(){var b=document.body,d=document.documentElement;function k(){var y=0,x=0,o=[],a=b.getElementsByTagName('*');for(var i=0;i<a.length;i++){var e=a[i];if(o.some(function(p){return p.contains(e)}))continue;var t=getComputedStyle(e),v=/auto|scroll/.test(t.overflowY)&&e.scrollHeight>e.clientHeight+1,h=/auto|scroll/.test(t.overflowX)&&e.scrollWidth>e.clientWidth+1;if(v||h){o.push(e);if(v)y+=e.scrollHeight-e.clientHeight;if(h)x=Math.max(x,e.scrollWidth-e.clientWidth)}}return[y,x]}function s(){var c=getComputedStyle(b),w=d.scrollWidth>d.clientWidth+1,n=k();parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:b.offsetHeight+parseFloat(c.marginTop)+parseFloat(c.marginBottom)+(w?Math.max(0,innerHeight-d.clientHeight):0),wide:w,width:d.scrollWidth,frame:d.clientWidth,inner:n[0],innerWide:n[1]},'*')}addEventListener('load',s);if(window.ResizeObserver){var o=new ResizeObserver(s);o.observe(b);o.observe(d)}s()})()</script>`
 export const CUSTOM_MIN_H = 40
 /** The most of a card's body the canvas shows at rest, px: about one laptop screen with the card's question and
  * takeaway. A body drawn taller shows this much and Show all, and its author is told (backend card_size). */
@@ -986,10 +989,13 @@ export const CUSTOM_OPEN_MAX_H = 8000
  * Show all under them, and `onTall` hears the page's whole height once for each html; a page that lays out wider than
  * its frame, `onWide` hears its width and the frame's once for each html. Each hears only what the page drawn from the
  * html now measured, never a size of the page before it. The frame's `data-height` is that
- * height, which the card harness measures (render.tsx). A page wider than its frame is cut at the frame's edge, and the
+ * height, `data-inner-height` what the page's own scroll boxes hold past their height, and `data-page-width` and
+ * `data-frame-width` the widths of a page, or of a scroll box's content, wider than the frame, which the card harness
+ * measures (render.tsx, bodyHeight). A page wider than its frame is cut at the frame's edge, and the
  * card dragged wider shows more of it. Its head carries the theme, thimble's card stylesheet (lib/cardStyle), the ink that mends text the paper made hard to read (lib/ink), the bridge that tells the page what the ⌘ pointer and the wheel do
- * in the frame (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws`
- * (useCardLibs), before the page's own styles and scripts. */
+ * in the frame (cardBridge), the script that draws the page for a ⌘-click's picture (lib/frameShot), the chart style
+ * (chartScript) and the libraries the card names in workspace `ws` (useCardLibs), before the page's own styles and
+ * scripts. */
 export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[]; onTall?: (height: number) => void; onWide?: (width: number, frame: number) => void }) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [full, setFull] = useState(() => Math.max(CUSTOM_MIN_H, Math.ceil(typeof height === 'number' ? height : 160)))
@@ -997,28 +1003,29 @@ export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide
   // drawn once the page has loaded and said its height, for the card harness
   const [sized, setSized] = useState(false)
   // what the page that last said its size measured: the html it was drawn from (the html of the frame when it said it),
-  // and its width and the frame's when it lays out wider than the frame
+  // its width and the frame's when it lays out wider than the frame, and what its scroll boxes hold past their size
   const htmlNow = useRef(html)
   useEffect(() => {
     htmlNow.current = html
   }, [html])
-  const [measured, setMeasured] = useState<{ html: string; width: number; frame: number } | null>(null)
+  const [measured, setMeasured] = useState<{ html: string; width: number; frame: number; room: number; inner: number; innerWide: number } | null>(null)
   const { resolved, key } = useTheme()
   const fonts = useFrameFonts()
   const head = useCardLibs(ws, libs)
   // the tokens are read at embed time, once per theme. It waits for the page's fonts and libraries, so the page is drawn once
   // inkScript: text the paper made hard to read takes the ink that reads (lib/ink)
-  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + cardStyle() + bridgeScript() + chartScript() + inkScript(paperInks(token)) + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
+  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + cardStyle() + bridgeScript() + shotScript() + chartScript() + inkScript(paperInks(token)) + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       const frame = ref.current
       if (!frame || e.source !== frame.contentWindow) return
-      const d = e.data as { type?: unknown; height?: unknown; wide?: unknown; width?: unknown; frame?: unknown }
+      const d = e.data as { type?: unknown; height?: unknown; wide?: unknown; width?: unknown; frame?: unknown; inner?: unknown; innerWide?: unknown }
       if (d && d.type === SIZE_MESSAGE && typeof d.height === 'number' && Number.isFinite(d.height)) {
         setFull(Math.min(CUSTOM_OPEN_MAX_H, Math.max(CUSTOM_MIN_H, Math.ceil(d.height))))
         setSized(true)
         const over = d.wide === true && typeof d.width === 'number' && typeof d.frame === 'number' && Number.isFinite(d.width) && Number.isFinite(d.frame)
-        setMeasured({ html: htmlNow.current, width: over ? Math.ceil(d.width as number) : 0, frame: over ? Math.floor(d.frame as number) : 0 })
+        const px = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.ceil(v) : 0)
+        setMeasured({ html: htmlNow.current, width: over ? Math.ceil(d.width as number) : 0, frame: over ? Math.floor(d.frame as number) : 0, room: px(d.frame), inner: px(d.inner), innerWide: px(d.innerWide) })
       } else if (d && typeof d === 'object') fromCardPage(frame, d)
     }
     window.addEventListener('message', onMessage)
@@ -1045,9 +1052,13 @@ export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide
     toldWide.current = html
     onWide(measured.width, measured.frame)
   }, [measured, html, onWide])
+  // for the card harness (bodyHeight, bodyWidth), what the page drawn from this html holds past the frame: its width and
+  // the frame's while it, or a scroll box's content, lays out wider, and what its scroll boxes hold past their height
+  const now = measured && measured.html === html ? measured : null
+  const pageWidth = now ? Math.max(now.width > now.frame ? now.width : 0, now.innerWide ? now.room + now.innerWide : 0) : 0
   return (
-    <div className={`canvas-card-frame${capped && !open ? ' is-clipped' : ''}`} data-body="" data-settled={sized ? 'true' : 'false'} data-height={sized ? full : undefined}>
-      {doc != null && <iframe ref={ref} className="canvas-card-html" sandbox="allow-scripts" srcDoc={doc} title={title || 'custom'} style={{ height: h }} onLoad={() => tellCmd(ref.current)} />}
+    <div className={`canvas-card-frame${capped && !open ? ' is-clipped' : ''}`} data-body="" data-settled={sized ? 'true' : 'false'} data-height={sized ? full : undefined} data-inner-height={now?.inner || undefined} data-page-width={now && pageWidth > now.room ? pageWidth : undefined} data-frame-width={now && pageWidth > now.room ? now.room : undefined}>
+      {doc != null && <iframe ref={ref} className="canvas-card-html" sandbox="allow-scripts" srcDoc={doc} title={title || 'custom'} style={{ height: h }} data-shot="" onLoad={() => tellCmd(ref.current)} />}
       {capped && (
         <button type="button" className="bcell-more" onMouseDown={(e) => e.stopPropagation()} onClick={() => setOpen((v) => !v)}>
           {open ? 'Show less' : 'Show all'}

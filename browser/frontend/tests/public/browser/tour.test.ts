@@ -4,7 +4,8 @@
 //   - the first launch asks first (a welcome, "Would you like a short tour? The demo tour uses example data.", with
 //     Skip and Take the tour) and records the answer (Skip, Take the tour or Esc) in thimble's own state (POST
 //     /api/tour/seen); a welcome no one answered is offered again by the next page, and a page loaded after an answer
-//     offers nothing; Settings' Take the tour replays the tour from step 1;
+//     offers nothing; Settings' Take the tour replays the tour from step 1; when no way to reach Claude is chosen, the
+//     step that chooses it opens first, alone, and the welcome follows once it is answered;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
@@ -31,7 +32,7 @@
 //     is counted in the line's ink, and the page's Only these shows as thimble's filter chip with how many events it
 //     hides, which the chip clears;
 //   - step 6: the card is in plain words; on its first entry the demo plays once the card is in place, comes to rest on
-//     08:04 as its source shows, headed by its line, and the card holds still;
+//     08:04 as its source shows, headed by its line of the card's output, and the card holds still;
 //   - step 7: in the ⌘-click demo the key badge stands inside the card and over none of its text; then "⌘-click here"
 //     points at the end of an entry and covers no text and not the popover, until the first try; a real ⌘-drag on the
 //     example card picks only the words dragged over and its ask box lies inside the cutout; Enter closes the box and
@@ -142,11 +143,13 @@ interface Server {
   settings: typeof SETTINGS
   /** the workspace's own views */
   views: unknown[]
+  /** the way thimble reaches Claude, '' while none is chosen; null, as by default, answers its route with a 404 */
+  access: string | null
 }
 
 /** A page on the made-up origin, answered by this file: the app, the tour's example view, the workspace's API. */
-async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean; paper?: string; views?: unknown[]; surface?: string; ref?: string }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
-  const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS }, views: opts.views ?? [] }
+async function open(opts: { W: number; H: number; dpr?: number; chat?: number; seen?: boolean; folded?: boolean; paper?: string; views?: unknown[]; surface?: string; ref?: string; access?: string }): Promise<{ page: Page; server: Server; close: () => Promise<void> }> {
+  const server: Server = { seen: !!opts.seen, writes: [], telemetry: [], settings: { ...SETTINGS }, views: opts.views ?? [], access: opts.access ?? null }
   const ctx = await browser.newContext({ viewport: { width: opts.W, height: opts.H }, deviceScaleFactor: opts.dpr ?? 1 })
   await ctx.addInitScript(
     ({ ws, chat, open, paper, surface }) => {
@@ -197,6 +200,8 @@ function answer(route: Route, server: Server) {
     if (p === `/api/ws/${WS}/labels/ruler`) return json({ path: url.searchParams.get('path') ?? '', total: 3, bins: 400, labels: [] })
     if (method === 'GET' && p === `/api/ws/${WS}/settings`) return json(server.settings)
     if (method === 'GET' && p === `/api/ws/${WS}/views`) return json(server.views)
+    if (method === 'GET' && p === '/api/claude-access' && server.access != null)
+      return json({ how: server.access, describe: server.access ? 'your Claude Code sign-in' : 'not chosen yet', problem: null, key_saved: false, wif_file: '', consent_text: '' })
     if (method === 'GET' && p in GET) return json(GET[p])
     if (method === 'PUT' && p === `/api/ws/${WS}/render/theme`) return json({ paper: 'warm', accent: 'iris' })
     if (method === 'POST' && p === `/api/ws/${WS}/telemetry`) return json({ recorded: 1 }, 201)
@@ -1059,7 +1064,7 @@ async function walk(page: Page, tag: string, send = false) {
   // 5 Cards: the demo shows the source of 08:04; the card is in plain words; a real hover on a value shows its source
   await onStep(page, 5, 'Cards on the Canvas')
   await page.waitForFunction(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .hl')?.textContent === '08:04', null, { timeout: 8000 })
-  assert.equal(await page.evaluate(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .refchip-pop-head')?.textContent), 'line 8', `${tag} 5: the source names its line`)
+  assert.equal(await page.evaluate(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .refchip-pop-head')?.textContent), 'card output line 8', `${tag} 5: the source names its line of the card's output`)
   // on its first entry the demo plays once the card is in place: the pointer shows soon after Next, glides and comes to
   // rest on 08:04 as its source shows, and the card holds still
   const r7 = judge7(await takeLog7(page))
@@ -1361,6 +1366,23 @@ test('the first launch asks first, records the offer in thimble’s own state, a
     assert.equal(await page.$('.tour-root'), null, 'a page loaded after the offer offers nothing')
     assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'nothing else was written')
     assert.deepEqual(tourClicks(server), [], 'no click in the tour reaches telemetry')
+  } finally {
+    await close()
+  }
+}, 60_000)
+
+test('when no way to reach Claude is chosen, the step that chooses it opens first and alone, and the welcome follows once it is answered', async () => {
+  const { page, server, close } = await open({ W: 1440, H: 900, access: '' })
+  try {
+    await page.waitForSelector('.access[role="dialog"]', { timeout: 20000 })
+    await page.waitForSelector('.shell .chat-foot')
+    // longer than the welcome waits once the shell is drawn (its fonts, then 900 ms)
+    await sleep(3000)
+    assert.equal(await page.locator('.tour-root').count(), 0, 'no welcome while the step is open')
+    await page.click('.access-foot button:has-text("Not now")')
+    await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+    assert.equal(await page.locator('.access').count(), 0, 'the step has closed')
+    assert.equal(server.seen, false, 'the welcome waits for its own answer')
   } finally {
     await close()
   }

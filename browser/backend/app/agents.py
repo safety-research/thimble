@@ -48,6 +48,9 @@ EVENT_COALESCE_S = 0.25
 # `by` of the analyst's line: typed in the terminal (the mirror reads it from the transcript) or in the browser (logged
 # when the browser event is posted)
 TERMINAL, BROWSER = "terminal", "browser"
+# `by` of a prompt one of thimble's agents was sent that no one typed: thimble's own text, such as a view build's task
+# (session.translate_sub), which no chat shows as the analyst's
+THIMBLE = "thimble"
 ANCHOR_TEXT_CHARS = 2_000  # of what the pointed-at element showed, kept on the thread's meta
 
 

@@ -1038,6 +1038,15 @@ def base_model(model: str) -> str:
     return (model or "").strip().partition("[")[0]
 
 
+def same_model(a: str, b: str) -> bool:
+    """Whether two names are of the same model: an alias as its id (exact_model), without a `[…]` tag or a date
+    (`claude-haiku-4-5-20251001` is `claude-haiku-4-5`)."""
+    def key(m: str) -> str:
+        return re.sub(r"-\d{8}$", "", base_model(exact_model(m)))
+
+    return bool(key(a)) and key(a) == key(b)
+
+
 def long_context(model: str) -> str:
     """`model` with Claude Code's `[1m]` tag when it has a 1M-token context window (LONG_CONTEXT_MODELS, matched in the
     id as FAST_MODE_MODELS are), else as it is; a model that carries a tag already keeps it."""

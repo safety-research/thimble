@@ -25,10 +25,12 @@ and a few of each folder's are named (`untouched`): a folder of a million screen
 from __future__ import annotations
 
 import fnmatch
+import gc
 import re
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from . import shellcmd as SH
 from . import sources as S
@@ -141,17 +143,17 @@ def _unit(into: dict[str, dict[str, int]], unit: str) -> dict[str, int]:
     return into.setdefault(unit, {"units": 0, "seen": 0, "model": 0, "searched": 0, "computed": 0, "files": 0, "seen_files": 0})
 
 
-def _add_units(into: dict[str, dict[str, int]], o: dict[str, Any]) -> None:
-    """A file's units added to a group's, by unit: all, read, read by a label's model, searched, computed over; and
-    files."""
+def _add_units(into: dict[str, dict[str, int]], o: dict[str, Any], n: int = 1) -> None:
+    """A file's units, or those of `n` files alike, added to a group's, by unit: all, read, read by a label's model,
+    searched, computed over; and files."""
     u = _unit(into, o["unit"])
-    u["units"] += o["units"]
-    u["seen"] += o["seen_units"]
-    u["model"] += o["model_units"]
-    u["searched"] += o["searched_units"]
-    u["computed"] += o["computed_units"]
-    u["files"] += 1
-    u["seen_files"] += int(o["seen"])
+    u["units"] += n * o["units"]
+    u["seen"] += n * o["seen_units"]
+    u["model"] += n * o["model_units"]
+    u["searched"] += n * o["searched_units"]
+    u["computed"] += n * o["computed_units"]
+    u["files"] += n
+    u["seen_files"] += n * int(o["seen"])
 
 
 def _units_list(by: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
@@ -173,6 +175,89 @@ def amounts(units: list[dict[str, Any]], key: str = "seen") -> str:
     return bits[0] if len(bits) == 1 else ", ".join(bits[:-1]) + " and " + bits[-1] if bits else ""
 
 
+# what a file's own calls did, for a file no call of its own touched (only a search or code over many files)
+_NONE: dict[str, Any] = {"lines": (), "hits": (), "pages": (), "whole": False, "model": 0, "labels": (),
+                         "model_labels": (), "computed": 0, "computed_by": ()}
+
+
+def _file_record(f: str, c: dict[str, Any], unit: str, x: dict[str, Any], searched_by: list[str],
+                 computed_by: list[str]) -> dict[str, Any]:
+    """One touched file as coverage gives it (see `coverage`): `x` what its own calls did (the lines read, the pages,
+    a label's reads, the lines code went over), `searched_by` and `computed_by` the programs that searched it or went
+    over all of it."""
+    rows, lines = c.get("rows", 0), c.get("lines", 0)
+    seen_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
+    pages = _merged(x["pages"]) if unit == "pages" and not x["whole"] else ([[1, max(1, rows)]] if unit == "pages" else [])
+    units = 1 if unit == "file" else lines if unit == "lines" else rows
+    if unit == "pages":
+        seen_units = min(rows, _ranges_len([tuple(r) for r in pages]))
+    elif unit == "file":
+        seen_units = int(x["whole"])
+    else:
+        seen_units = 0
+    seen = bool(seen_lines or seen_units)
+    computed = x["computed"]
+    if computed_by:
+        # a program went over all of it: all its rows, one at least
+        computed = max(computed, c.get("rows") or 1)
+    searched = bool(searched_by)
+    status = ("seen" if seen else "model" if x["model"] else "searched" if searched else "computed")
+    computed_rows = min(computed, rows) if rows else computed
+    model = min(x["model"], rows) if rows else x["model"]
+    if unit in ("pages", "file"):
+        share = seen_units / max(1, units)
+    else:
+        share = min(1.0, seen_lines / max(1, lines or rows)) if seen and rows else 0.0
+        if unit == "lines":
+            seen_units = seen_lines
+        elif c.get("kind") == "csv" and lines == rows + 1:
+            # a table's rows are its lines after the header
+            body = [(max(2, a), b) for a, b in x["lines"] if b >= 2]
+            seen_units = min(rows, _ranges_len(body))
+        else:
+            seen_units = max(1, round(share * units)) if seen and units else 0
+    seen_rows = share * rows
+    # the parts of its rows, apart, as the pane draws them: seen, then read by a label's model, then searched (all
+    # of it), then only computed over (each part what the ones before it leave, at most)
+    model_part = max(0.0, min(rows - seen_rows, model - seen_rows)) if rows else 0.0
+    searched_part = max(0.0, rows - seen_rows - model_part) if rows and searched else 0.0
+    computed_part = max(0.0, min(rows - seen_rows - model_part - searched_part, computed_rows - seen_rows - model_part)) if rows else 0.0
+    # the same parts in the file's unit (a Markdown file's rows are its sections, its unit its lines)
+    per_unit = units / rows if rows else 0.0
+    o = {"path": f, "kind": c.get("kind"), "unit": unit, "units": units, "seen_units": seen_units,
+         "model_units": round(model_part * per_unit), "searched_units": round(searched_part * per_unit),
+         "computed_units": round(computed_part * per_unit), "pages": pages, "rows": rows, "lines": lines,
+         # what a label's model read and what code computed over, each whole (not the part the ones before it
+         # leave), in the file's unit, as the coverage pane's detail says them
+         "model_read_units": min(units, round(model * per_unit)) if unit != "file" else int(bool(model)),
+         "computed_over_units": min(units, round(computed_rows * per_unit)) if unit != "file" else int(bool(computed_rows)),
+         "status": status, "seen": seen, "read": seen, "touched": True, "share": share,
+         "seen_lines": seen_lines, "read_lines": seen_lines, "seen_rows": round(seen_rows),
+         "model": model, "model_rows": round(model_part), "computed": computed_rows,
+         "computed_rows": round(computed_part), "labels": sorted(x["labels"]), "model_labels": sorted(x["model_labels"]),
+         "searched": searched, "hits": len(x["hits"]), "searched_by": searched_by,
+         "computed_by": sorted({*x["computed_by"], *computed_by}), "type": type_of(f), "folder": folder_of(f),
+         # which lines entered Claude's context, and which of them a search showed
+         "ranges": _merged(x["lines"]), "hit_lines": sorted({n for n in map(_line_of, x["hits"]) if n})[:HITS_MAX]}
+    o["said"] = file_line(o)
+    o["read_share"], o["counted_share"] = shares(o)
+    return o
+
+
+@contextmanager
+def _collector_waits() -> Iterator[None]:
+    """Python's cycle collector goes over every object the process holds, again each time many more are made: a count
+    that makes millions (a record for each of 150,000 files) spent 1.4 of its 3.5 seconds there. A count makes no
+    cycles, so the collector waits until it ends."""
+    was = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was:
+            gc.enable()
+
+
 def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PER_FOLDER,
              until: float | None = None) -> dict[str, Any]:
     """What this session (or `session`, or all sessions for None) did with every file of the folder. `files` holds
@@ -180,7 +265,16 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
     (`hit_lines`); `groups` and `types` count every file by folder and by file type; `untouched` names at most
     `per_folder` of each folder's files not touched, as columns of path, unit, size and the programs that listed it.
     `until` (time.monotonic()): when to stop counting the files' rows (sources.counts), which then raises
-    sources.Unfinished and keeps what it counted for the next count."""
+    sources.Unfinished and keeps what it counted for the next count.
+
+    The folder is listed once, and each call is read once, for what it did: a search of a folder or code that globs
+    thousands of files adds one set of files to its program's, and a call done again adds nothing. A glob no call used
+    before is tried only on the files that can match it (Known.candidates). Each file is then gone over once."""
+    with _collector_waits():
+        return _coverage(st, session, per_folder, until)
+
+
+def _coverage(st: Store, session: str | None, per_folder: int, until: float | None) -> dict[str, Any]:
     from . import labels as LB
 
     files = S.list_files(st.root)
@@ -196,25 +290,47 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
         c = cnt.get(f)
         return S.UNIT_OF_KIND.get(c["kind"] or "", "file") if c else "file"
 
-    searchable_in: dict[str, list[str]] = {}
+    text_files: set[str] | None = None
 
-    def searchable(folder: str) -> list[str]:
-        """The files a search into a folder (`runs/`, `./`) goes over: its text files, since a search skips a binary
-        file, an image or a PDF. The folder's files are one range of the sorted names (Known.under), found once."""
+    def texts() -> set[str]:
+        """The files a search goes over: the text files, since a search skips a binary file, an image or a PDF."""
+        nonlocal text_files
+        if text_files is None:
+            text_files = {f for f, c in cnt.items() if S.UNIT_OF_KIND.get(c["kind"] or "", "file") not in ("pages", "file")}
+        return text_files
+
+    searchable_in: dict[str, set[str]] = {}
+
+    def searchable(folder: str) -> set[str]:
+        """The files a search into a folder (`runs/`, `./`) goes over: its text files. The folder's files are one range
+        of the sorted names (Known.under), found once."""
         fs = searchable_in.get(folder)
         if fs is None:
-            fs = searchable_in[folder] = [f for f in known.under("." if folder == "./" else folder.rstrip("/"))
-                                          if f in cnt and unit_of(f) not in ("pages", "file")]
+            under = known.under("." if folder == "./" else folder.rstrip("/"))
+            fs = searchable_in[folder] = texts() if len(under) == len(files) else texts().intersection(under)
         return fs
 
-    per: dict[str, dict[str, Any]] = {}  # the touched files
+    def grepped(scope: str, glob: str) -> set[str]:
+        """The files a Grep of `scope` (a file or a folder) with `glob` goes over. The glob matches a file's name or its
+        path (fnmatch), and it is tried only on the files that can match it (Known.candidates): a glob no call used
+        before costs a test of the files that hold its rarest literal part, or of the folder's own files when they are
+        fewer. A name or a path the glob matches ends as the glob ends (`*.json`: `.json`), so only those are tried."""
+        if not glob:
+            if scope in known.set:
+                return {scope} if unit_of(scope) not in ("pages", "file") else set()
+            return searchable("./" if scope == "." else scope.rstrip("/") + "/")
+        match, end = re.compile(fnmatch.translate(glob)).match, re.split(r"[*?\]]", glob)[-1]
+        fs = [scope] if scope in known.set else known.candidates(glob, scope.rstrip("/"))
+        text = texts()
+        return {f for f in fs if f.endswith(end) and f in text and (match(f[f.rfind("/") + 1:]) or match(f))}
+
+    per: dict[str, dict[str, Any]] = {}  # what each file's own calls did
 
     def at(f: str) -> dict[str, Any]:
         x = per.get(f)
         if x is None:
             x = per[f] = {"lines": [], "hits": set(), "pages": [], "whole": False, "model": 0, "labels": set(),
-                          "model_labels": set(), "searched": False, "searched_by": set(), "computed": 0,
-                          "computed_by": set(), "named": set()}
+                          "model_labels": set(), "computed": 0, "computed_by": set(), "named": set()}
         return x
 
     def computed(f: str, span: tuple[int, int] | None, by: str) -> None:
@@ -229,6 +345,11 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
         x["computed"] = max(x["computed"], part)
         x["computed_by"].add(by)
 
+    # the files each program searched, went over whole, or only listed by name: sets that grow by unions, so a search
+    # of a folder of 150,000 files costs one union, and the same search again costs nothing
+    searched_by: dict[str, set[str]] = {}
+    computed_by: dict[str, set[str]] = {}
+    listed_by: dict[str, set[str]] = {}
     # what was only named: a file, or a folder (`runs/`, `./`) for all its files, and the programs that named it
     listed: dict[str, set[str]] = defaultdict(set)
     # the labels this session applied (each label keeps the sessions that defined it): a model's reads of a --prompt
@@ -251,13 +372,11 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
                 x["computed"] = max(x["computed"], ruled)
     root = str(st.root)
     scripts = _Scripts()  # the scripts the session's commands wrote, for the commands after them (shellcmd)
-    # what a search or a command did to a file or a folder, once: done again, it changes nothing. A long session searches
-    # the same folders and runs the same code again and again, and each search of a folder goes over each of its files,
-    # so a count of a big folder took minutes per thousand calls of the session
+    # what a search or a command did to a file or a folder, once: done again, it changes nothing
     done: set[tuple[Any, ...]] = set()
     # each command as shellcmd read it, by its words, its folder and the scripts written before it: run again, only
     # the lines it printed count again (what reached Claude is cut to each run's own output)
-    printed: dict[tuple[str, str | None, int], list[tuple[str, str, tuple[int, int] | None, str]]] = {}
+    printed: dict[tuple[str, str | None, int], list[tuple[Any, str, tuple[int, int] | None, str]]] = {}
     for s in st.seen(session):
         tool = s.get("tool")
         if tool == "Read":
@@ -284,15 +403,9 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
             lines = s.get("mode") == "content" or (s.get("mode") is None and bool(s.get("lines")))
             if ("Grep", scope, glob, lines) not in done:
                 done.add(("Grep", scope, glob, lines))
-                for f in [scope] if scope in known.set else searchable("./" if scope == "." else scope.rstrip("/") + "/"):
-                    if unit_of(f) in ("pages", "file"):
-                        continue
-                    if not glob or fnmatch.fnmatch(f[f.rfind("/") + 1:], glob) or fnmatch.fnmatch(f, glob):
-                        if lines:
-                            at(f)["searched"] = True
-                            at(f)["searched_by"].add("Grep")
-                        else:
-                            computed(f, None, "Grep")
+                fs = grepped(scope, glob)
+                if fs:
+                    (searched_by if lines else computed_by).setdefault("Grep", set()).update(fs)
             for fp, ns in (s.get("lines") or {}).items():
                 f = st.rel(fp)
                 if f in known.set:
@@ -312,20 +425,32 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
             # what reached Claude is at most the lines the command printed (a long output is cut)
             left = s.get("out_lines")
             key = (cmd, s.get("cwd"), scripts.version)
+            if (key, left) in done:
+                continue  # the same command again, with as long an output: it showed nothing new
+            done.add((key, left))
             shown = printed.get(key)
             if shown is None:
-                shown = SH.shows(cmd, known, root, s.get("cwd"), lambda f: count(f).get("lines") or 0, scripts)
+                shown = SH.shows_sets(cmd, known, root, s.get("cwd"), lambda f: count(f).get("lines") or 0, scripts)
                 printed[key] = [x for x in shown if x[1] == "read"]
             for f, how, span, prog in shown:
+                if not isinstance(f, str):
+                    # the files one program searched, went over whole or only listed: those named one by one, and the
+                    # set of each glob once (a glob's set is the one Known.glob keeps, so the key holds no copy of it)
+                    into = (searched_by if how == "searched" else computed_by if how == "computed" else listed_by
+                            ).setdefault(prog, set())
+                    into.update(f.files)
+                    for fs in f.globs:
+                        if (fs, how, prog) not in done:
+                            done.add((fs, how, prog))
+                            into.update(fs)
+                    continue
                 if how != "read":
                     if (f, how, span, prog) in done:
                         continue
                     done.add((f, how, span, prog))
                 if f.endswith("/"):  # a folder, for its files
                     if how == "searched":
-                        for g in searchable(f):
-                            at(g)["searched"] = True
-                            at(g)["searched_by"].add(prog)
+                        searched_by.setdefault(prog, set()).update(searchable(f))
                     else:
                         listed[f].add(prog)
                     continue
@@ -334,8 +459,7 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
                 if how == "computed":
                     computed(f, span, prog)
                 elif how == "searched":
-                    at(f)["searched"] = True
-                    at(f)["searched_by"].add(prog)
+                    searched_by.setdefault(prog, set()).add(f)
                 elif how == "read" and unit_of(f) in ("pages", "file"):
                     at(f)["whole"] = True  # a file with no lines printed whole (cat of an image or a PDF)
                 elif how == "read" and span:
@@ -350,23 +474,40 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
                 else:
                     listed[f].add(prog)
 
-    # a file a call named but showed nothing of (a Read past its end, a search that showed none of its lines) is only
-    # named, not touched
-    for f, x in [(f, x) for f, x in per.items() if not (_ranges_len(x["lines"]) or x["pages"] or x["whole"] or x["model"] or x["searched"] or x["computed"])]:
-        del per[f]
-        listed[f] |= x["named"]
+    # the files touched: those searched or gone over whole, and those whose own calls showed some of them; a file a call
+    # named but showed nothing of (a Read past its end, a search that showed none of its lines) is only named
+    touched: set[str] = set()
+    for fs in (*searched_by.values(), *computed_by.values()):
+        touched |= fs
+    for f, x in per.items():
+        if _ranges_len(x["lines"]) or x["pages"] or x["whole"] or x["model"] or x["computed"]:
+            touched.add(f)
+        elif f not in touched:
+            listed[f] |= x["named"]
 
     # the files not touched, the most of a large folder: one pass over their names, by extension, counted by (folder,
     # type, unit) as [files, units, rows, listed], and the first few of each folder named
-    listed_folders = [d for d in listed if d.endswith("/")]
     folder_listed: dict[str, list[str]] = {}  # the programs that listed each folder, itself or a folder above it
+    listed_progs = sorted(listed_by)
+
+    def listed_folder(folder: str) -> list[str]:
+        """The programs that listed `folder` or a folder above it, each folder looked up once (`./` holds all)."""
+        by = folder_listed.get(folder)
+        if by is None:
+            got = set(listed.get("./", ()))
+            at_ = folder.find("/")
+            while at_ >= 0 and folder != "./":
+                got |= listed.get(folder[:at_ + 1], set())
+                at_ = folder.find("/", at_ + 1)
+            by = folder_listed[folder] = sorted(got)
+        return by
 
     quiet: dict[tuple[str, str, str], list[int]] = defaultdict(lambda: [0, 0, 0, 0])
     sample: dict[str, list[tuple[str, str, int, str]]] = defaultdict(list)
     for ext, fs in known.by_ext.items():
         typ = ext[1:] or "no extension"
         for f in fs:
-            if f in per:
+            if f in touched:
                 continue
             slash = f.rfind("/")
             folder = f[:slash + 1] or "./"
@@ -374,11 +515,11 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
             unit = S.UNIT_OF_KIND.get(c["kind"] or "", "file") if c else "file"
             rows = c["rows"] if c else 1
             units = 1 if unit == "file" else c["lines"] if unit == "lines" else rows
-            by = folder_listed.get(folder)
-            if by is None:
-                by = folder_listed[folder] = sorted({p for d in listed_folders if d == "./" or folder.startswith(d)
-                                                     for p in listed[d]})
+            by = listed_folder(folder)
             own = listed.get(f)
+            for p in listed_progs:
+                if f in listed_by[p]:
+                    own = {p} | own if own else {p}
             if own:
                 by = sorted(own | set(by))
             q = quiet[(folder, typ, unit)]
@@ -391,64 +532,9 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
     named_files = sorted(x for xs in sample.values() for x in xs)
     untouched = {"path": [x[0] for x in named_files], "unit": [x[1] for x in named_files],
                  "units": [x[2] for x in named_files], "by": [x[3] for x in named_files]}
-    out_files = []
-    for f in sorted(per):
-        c, x = count(f), per[f]
-        rows, lines = c.get("rows", 0), c.get("lines", 0)
-        unit = unit_of(f)
-        seen_lines = min(_ranges_len(x["lines"]), lines or _ranges_len(x["lines"]))
-        pages = _merged(x["pages"]) if unit == "pages" and not x["whole"] else ([[1, max(1, rows)]] if unit == "pages" else [])
-        units = 1 if unit == "file" else lines if unit == "lines" else rows
-        if unit == "pages":
-            seen_units = min(rows, _ranges_len([tuple(r) for r in pages]))
-        elif unit == "file":
-            seen_units = int(x["whole"])
-        else:
-            seen_units = 0
-        seen = bool(seen_lines or seen_units)
-        status = ("seen" if seen else "model" if x["model"] else "searched" if x["searched"] else "computed")
-        computed_rows = min(x["computed"], rows) if rows else x["computed"]
-        model = min(x["model"], rows) if rows else x["model"]
-        if unit in ("pages", "file"):
-            share = seen_units / max(1, units)
-        else:
-            share = min(1.0, seen_lines / max(1, lines or rows)) if seen and rows else 0.0
-            if unit == "lines":
-                seen_units = seen_lines
-            elif c.get("kind") == "csv" and lines == rows + 1:
-                # a table's rows are its lines after the header
-                body = [(max(2, a), b) for a, b in x["lines"] if b >= 2]
-                seen_units = min(rows, _ranges_len(body))
-            else:
-                seen_units = max(1, round(share * units)) if seen and units else 0
-        seen_rows = share * rows
-        # the parts of its rows, apart, as the pane draws them: seen, then read by a label's model, then searched (all
-        # of it), then only computed over (each part what the ones before it leave, at most)
-        model_part = max(0.0, min(rows - seen_rows, model - seen_rows)) if rows else 0.0
-        searched_part = max(0.0, rows - seen_rows - model_part) if rows and x["searched"] else 0.0
-        computed_part = max(0.0, min(rows - seen_rows - model_part - searched_part, computed_rows - seen_rows - model_part)) if rows else 0.0
-        # the same parts in the file's unit (a Markdown file's rows are its sections, its unit its lines)
-        per_unit = units / rows if rows else 0.0
-        o = {"path": f, "kind": c.get("kind"), "unit": unit, "units": units, "seen_units": seen_units,
-             "model_units": round(model_part * per_unit), "searched_units": round(searched_part * per_unit),
-             "computed_units": round(computed_part * per_unit), "pages": pages, "rows": rows, "lines": lines,
-             # what a label's model read and what code computed over, each whole (not the part the ones before it
-             # leave), in the file's unit, as the coverage pane's detail says them
-             "model_read_units": min(units, round(model * per_unit)) if unit != "file" else int(bool(model)),
-             "computed_over_units": min(units, round(computed_rows * per_unit)) if unit != "file" else int(bool(computed_rows)),
-             "status": status, "seen": seen, "read": seen, "touched": True, "share": share,
-             "seen_lines": seen_lines, "read_lines": seen_lines, "seen_rows": round(seen_rows),
-             "model": model, "model_rows": round(model_part), "computed": computed_rows,
-             "computed_rows": round(computed_part), "labels": sorted(x["labels"]), "model_labels": sorted(x["model_labels"]),
-             "searched": x["searched"], "hits": len(x["hits"]), "searched_by": sorted(x["searched_by"]),
-             "computed_by": sorted(x["computed_by"]), "type": type_of(f), "folder": folder_of(f),
-             # which lines entered Claude's context, and which of them a search showed
-             "ranges": _merged(x["lines"]), "hit_lines": sorted({n for n in map(_line_of, x["hits"]) if n})[:HITS_MAX]}
-        o["said"] = file_line(o)
-        o["read_share"], o["counted_share"] = shares(o)
-        out_files.append(o)
+
     # the files by folder and by type, each group with the two measures: read and gone over, in its files' unit (when
-    # they share one), else the mean of its files' shares
+    # they share one), else the mean of its files' shares; the files not touched first, by their counts
     folders: dict[str, dict[str, Any]] = {}
     types: dict[str, dict[str, Any]] = {}
 
@@ -470,21 +556,78 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
             u = _unit(G["units"], unit)
             u["units"] += units
             u["files"] += n
-    for e in out_files:
-        for key, name, into in ((e["folder"], "folder", folders), (e["type"], "type", types)):
-            G = group(into, name, key)
-            G["read_sum"] += e["read_share"]
-            G["counted_sum"] += e["counted_share"]
-            _add_units(G["units"], e)
-            G["files"] += 1
-            G["rows"] += e["rows"]
-            G["seen_rows"] += e["share"] * e["rows"]
-            G["model_rows"] += e["model_rows"]
-            G["computed_rows"] += e["computed_rows"]
-            G["touched"] += 1
-            G["seen_files"] += int(e["seen"])
-            G["by_status"][e["status"]] += 1
-            G["computed"] += e["computed"]
+    # then each touched file, in the order of their paths. A file that only a search or code over many files touched
+    # has one of a few shapes (its kind, its size and the programs): its record is worked out once and copied, and its
+    # counts are added to its folder and its type once per shape, after (each share and float sum still in the order
+    # of the paths, so every sum is as one file after another gives it)
+    out_files: list[dict[str, Any]] = []
+    every: dict[str, dict[str, int]] = {}
+    unread: dict[str, dict[str, int]] = {}
+
+    def add(G: dict[str, Any], e: dict[str, Any], n: int = 1) -> None:
+        """A file's counts (`n` files of one shape) added to its folder's or its type's."""
+        _add_units(G["units"], e, n)
+        G["files"] += n
+        G["rows"] += n * e["rows"]
+        G["model_rows"] += n * e["model_rows"]
+        G["computed_rows"] += n * e["computed_rows"]
+        G["touched"] += n
+        G["seen_files"] += n * int(e["seen"])
+        G["by_status"][e["status"]] += n
+        G["computed"] += n * e["computed"]
+
+    s_progs = [(p, searched_by[p]) for p in sorted(searched_by)]
+    c_progs = [(p, computed_by[p]) for p in sorted(computed_by)]
+    shapes: dict[tuple[Any, ...], dict[str, Any]] = {}
+    shaped: dict[tuple[str, str, tuple[Any, ...]], int] = defaultdict(int)  # (folder, type, shape): files
+    for f in sorted(touched):
+        c = cnt.get(f)
+        if c is None:
+            c, unit = S.whole_file(f), "file"
+        else:
+            unit = S.UNIT_OF_KIND.get(c["kind"] or "", "file")
+        sb = [p for p, fs in s_progs if f in fs]
+        cb = [p for p, fs in c_progs if f in fs]
+        x = per.get(f)
+        if x is not None:
+            e = _file_record(f, c, unit, x, sb, cb)
+            out_files.append(e)
+            for G in (group(folders, "folder", e["folder"]), group(types, "type", e["type"])):
+                G["read_sum"] += e["read_share"]
+                G["counted_sum"] += e["counted_share"]
+                G["seen_rows"] += e["share"] * e["rows"]
+                add(G, e)
+            _add_units(every, e)
+            if not e["seen"]:
+                _add_units(unread, e)
+            continue
+        shape = (c.get("kind"), c.get("rows", 0), c.get("lines", 0), unit, tuple(sb), tuple(cb))
+        t = shapes.get(shape)
+        if t is None:
+            t = shapes[shape] = _file_record(f, c, unit, _NONE, sb, cb)
+        e = t.copy()
+        slash = f.rfind("/")  # (type_of and folder_of, written out: they run for each of 150,000 files)
+        name = f[slash + 1:]
+        dot = name.rfind(".")
+        e["path"] = f
+        e["pages"], e["labels"], e["model_labels"], e["searched_by"], e["computed_by"] = [], [], [], sb, cb
+        e["type"] = typ = name[dot + 1:].lower() if 0 < dot < len(name) - 1 else "no extension"
+        e["folder"] = folder = f[:slash + 1] if slash >= 0 else "./"
+        e["ranges"], e["hit_lines"] = [], []
+        out_files.append(e)
+        for G in (group(folders, "folder", folder), group(types, "type", typ)):
+            G["read_sum"] += t["read_share"]
+            G["counted_sum"] += t["counted_share"]
+            G["seen_rows"] += t["share"] * t["rows"]
+            G["by_status"].setdefault(t["status"], 0)  # (each status in the order the files first give it)
+        shaped[(folder, typ, shape)] += 1
+    for (folder, typ, shape), n in shaped.items():
+        t = shapes[shape]
+        add(folders[folder], t, n)
+        add(types[typ], t, n)
+        _add_units(every, t, n)
+        if not t["seen"]:
+            _add_units(unread, t, n)
     for G in [*folders.values(), *types.values()]:
         G["units"] = _units_list(G["units"])
         if len(G["units"]) == 1 and G["units"][0]["units"]:
@@ -520,12 +663,6 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
              "not_seen_rows": sum(o["rows"] for o in not_seen) + quiet_rows,
              "listed_files": listed_files,
              "untouched_files": len(files) - touched_files - listed_files}
-    every: dict[str, dict[str, int]] = {}
-    unread: dict[str, dict[str, int]] = {}
-    for o in out_files:
-        _add_units(every, o)
-        if not o["seen"]:
-            _add_units(unread, o)
     for (_, _, unit), (n, units, _, _) in quiet.items():
         for into in (every, unread):
             u = _unit(into, unit)

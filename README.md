@@ -16,7 +16,7 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 - **Citations**: every claim points to the code output or file line that shows it, and a second Claude checks each one against your files.
 - **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
 - **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
-- **Evidence** (`w`): everything the session has concluded, as a map, with why each claim holds and what was corrected. The claims are found after every reply; set Evidence to on demand to find them only when you ask (`f` in the pane).
+- **Claims** (`w`): everything the session has concluded, as a map, with why each claim holds and what was corrected. thimble pulls the claims out of every reply in the background; set Claims to on demand to pull them out only when you ask (`f` in the pane).
 - **Rewrite** (`s`): the last answer, shorter or longer, for a novice or an expert, or as you describe it.
 - **Side threads** (`t`): ask about a passage or part of a card without derailing the session.
 

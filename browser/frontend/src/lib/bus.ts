@@ -53,8 +53,9 @@ export type Events = {
   wsReset: { workspace: string }
   /** show the surface that owns `ref` and bring the element into view; `browser` opens a file's ref in the File browser
    * at its place, the passage highlighted, rather than in a view that claims the file (an example card's address);
-   * `still` opens a canvas card neither selected nor flashed (a `?ref=` in the page's URL, lib/teleport refFromUrl) */
-  openRef: { ref: string; browser?: boolean; focus?: boolean; still?: boolean }
+   * `still` opens a canvas card neither selected nor flashed (a `?ref=` in the page's URL, lib/teleport refFromUrl);
+   * `comment` names the comment to open there, of those on the passage (Go to it in the Comments sidebar) */
+  openRef: { ref: string; browser?: boolean; focus?: boolean; still?: boolean; comment?: string }
   /** show a surface (shell/panes.ts show): `tab` is Files, Canvas, Report, or a view as `view:<slug>`; `from` is the
      * pane the request came from (lib/surfaces pressedPane), else the pane pressed last */
   showTab: { tab: Tab | `view:${string}`; from?: string | null }

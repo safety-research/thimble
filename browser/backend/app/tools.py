@@ -569,7 +569,7 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
                chat: str | None = None, session: str | None = None, tool_use_id: str | None = None) -> ToolResult:
     """Run one tool for one caller, by its name or an alias. KeyError for a tool the registry does not have; every other
     failure is an is_error result the model reads. `terminal`, `anchor`, `session` and `tool_use_id` go to the Ctx."""
-    from . import canvas_history, undo  # noqa: PLC0415
+    from . import canvas_history, card_check, card_fit, undo  # noqa: PLC0415 — both card modules import the harness
 
     name = canonical(name)
     spec = REGISTRY[name]
@@ -581,12 +581,16 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
         # from the start, and the fork is told about the thread's cards
         fork = await _as_fork(ctx, wait=spec.makes_cards)
         author = fork.cell_author
-        with canvas_history.acting(author):  # who changed a card
+        # who changed a card; and a card add_card or edit_card writes waits for its measure (card_fit.measuring), its
+        # record naming who made it (card_fit.holder), whose turn or run ends its wait
+        who = card_fit.holder(c, name, session, tool_use_id)
+        with canvas_history.acting(author), card_fit.measuring(c, name, who):
             res = await _run(spec, fork if spec.makes_cards else ctx, name, args)
+        # a card add_card or edit_card wrote that does not fit on the analyst's screen is held until its check ends
+        # (card_fit.py); nothing of it joins this result
+        res = await card_fit.after_tool(c, name, args, res, session=session, anchor=anchor, agent=who.get("agent", ""))
         # the card check (card_check.py): a card add_card or edit_card wrote is drawn and read once it has its
         # takeaway; nothing of the check joins this result
-        from . import card_check  # noqa: PLC0415 — card_check imports the harness
-
         res = await card_check.after_tool(c, name, args, res, session=session, anchor=anchor)
         # the citations of the card's takeaway are checked as the write lands, not with main's next reply (marks.py)
         if name in card_check.CHECK_TOOLS and not res.is_error:
@@ -2561,6 +2565,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                  f" to another value count under that value (the label itself gave {before}).")
     if s.get("failed"):
         line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
+    elif s.get("blocked"):
+        line += f" {s['blocked']} {unit}(s) skipped: {s.get('message')}."
     if (s.get("cut") or {}).get("line"):
         line += f" {s['cut']['line']}."
     values = (concepts.find_concept(ctx.ws, s["concept"]) or {}).get("labels") or [None]

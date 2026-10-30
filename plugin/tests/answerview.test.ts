@@ -176,22 +176,22 @@ test('w at an empty prompt is taken only while the bar names it: before any answ
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   const edit = (k: string, text = '') => $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text, cursor: text.length, start: text.length, end: text.length, inputText: k } as never)
   // no answer yet: the bar names no w, so w is the question's first letter, typed, and the pause after it keeps it
-  expect(textOf(await $.ui.render(BAND))).not.toContain('evidence')
+  expect(textOf(await $.ui.render(BAND))).not.toContain('w claims')
   expect(await edit('w')).toEqual({ text: 'w', cursor: 1 })
   await clock.advance(1000)
   expect(await edit('h', 'w')).toEqual({ text: 'wh', cursor: 2 })
   await clock.advance(1000)
   expect(opens).toEqual([])
-  // an answer waits for its claims: the bar names w evidence, and w opens the pane once its word window closed
+  // an answer waits for its claims: the bar names w claims, and w opens the pane once its word window closed
   await $.prompt.submit({ text: 'Which runs failed?', origin: { kind: 'composer' } } as never)
   await $.turn.start({ text: 'Which runs failed?', turnId: 't1' } as never)
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t1' } as never)
   await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
   await clock.advance(1000)
-  expect(textOf(await $.ui.render(BAND))).toContain('w evidence')
+  expect(textOf(await $.ui.render(BAND))).toContain('w claims')
   expect(await edit('w')).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
-  expect(opens).toEqual(['Evidence'])
+  expect(opens).toEqual(['Claims'])
 })
 
 test("the features' letters are thimble's own, so no card takes them", () => {
