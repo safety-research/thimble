@@ -73,6 +73,8 @@ const carried = new Map<string, string>()
 // asked onto again once the pane drew it
 const askedHere = new Set<string>()
 const ringAfterDraw = new Set<string>()
+// the thread each input bar drawn asks, by its field's key: what ↵ there asks (fieldSubmitted)
+const fields = new Map<string, ThreadScope>()
 
 // The focus ring stays on the thread's input bar. Claude Code keeps a pane's ring at its place among the pane's Buttons
 // and fields, and draws a Button the ring is on inverted: the m Button an answer brings above the input bar would take
@@ -107,6 +109,15 @@ function ringDrawn($: Engine, key: string): void {
  *  the pane's last drawing had it. */
 export function fieldShown($: Engine, key: string): void {
   ringOnField($, key)
+}
+
+/** ↵ in an input bar: the thread its field asks is asked `text` (thread.ts asks it in its ui.input hook). False when the
+ *  field `element` is no thread's. */
+export async function fieldSubmitted($: Engine, element: string, text: string): Promise<boolean> {
+  const scope = fields.get(element)
+  if (!scope) return false
+  await askHere($, scope, text)
+  return true
 }
 // the card threads whose card the pane draws whole (e); else its title and the line asked about
 const cardOpen = new Set<string>()
@@ -279,6 +290,7 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
   const key = threadKey(scope)
   const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
   const what = cut(askWords(scope), Math.max(20, w - 24))
+  fields.set(fieldKey(key), scope)
   const row = Box({ key: 'entry-row', flexDirection: 'row', children: [
     Box({ width: 2, flexShrink: 0, children: [Text({ color: 'text', children: '❯ ' })] }),
     Box({ flexGrow: 1, flexShrink: 1, children: [Input({
@@ -286,7 +298,9 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
       ...(focus ? { autoFocus: true } : {}),
       ...(carried.has(key) ? { value: carried.get(key) } : {}),
       onInput: (v: string) => { const was = typed.get(key) ?? ''; typed.set(key, v); if (!was) keyTyped($, key, v, keys) },
-      // the question stays in the field while its thread's fork starts: a second ↵ then asks nothing more
+      // ↵ is asked in thread.ts's ui.input hook, which takes it, so the plugin's other hooks serve the fork it starts;
+      // this runs only where that hook did not answer. The question stays in the field while its thread's fork starts:
+      // a second ↵ then asks nothing more
       onSubmit: (v: string) => { void askHere($, scope, v) },
     })] }),
   ] })

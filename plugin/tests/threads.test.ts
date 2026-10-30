@@ -195,6 +195,34 @@ test('a later question joins the running fork; once it ended, a new fork is told
   expect(s.spawns[1].prompt).toContain('Earlier in this thread:\nQ: why so many?\nQ: and the 3 that passed?\nA: They ran before the change.')
 })
 
+// Claude Code runs an Input's own onSubmit beneath every hook, on no hook's behalf: a fork started there has the whole
+// plugin as its caller, so none of the plugin's hooks hear its calls, and each of its card calls fails (core/forks.ts).
+// So ↵ in a thread's input bar asks the thread in thimble's ui.input hook, which takes the submit
+test("↵ in a thread's input bar asks the thread in the ui.input hook, so its fork starts inside a hook; the field's own onSubmit asks nothing more", async () => {
+  const s = setup()
+  expect(await openThread(s.$, SCOPE)).toBe(true)
+  const field = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)).find(n => n.type === 'Input')
+  // what Claude Code runs beneath the hooks: the field's own onSubmit
+  const beneath: string[] = []
+  const submit = (element: string, value: string) => s.call('ui.input', { plugin: 'thimble', element, component: 'Pane', requestId: 'thimble', surface: 'terminal', kind: 'submit', value }, async (e: Any) => {
+    beneath.push(e.element)
+    if (e.element === field.props.key) field.props.onSubmit(e.value, e)
+    return { element: e.element, value: e.value }
+  })
+  const asked = submit(field.props.key, 'why so many?')
+  await settle()
+  s.go()
+  expect(await asked).toEqual({ element: field.props.key, value: 'why so many?' })
+  expect(beneath).toEqual([])
+  expect(s.spawns.length).toBe(1)
+  expect(s.spawns[0].prompt).toContain('why so many?')
+  expect(threadOf(KEY)!.asks.map(a => a.text)).toEqual(['why so many?'])
+  // the submit of a field that is no thread's (the labels pane's edit) goes on beneath, to that field's own onSubmit
+  await submit('edit-made-up', 'run 4')
+  expect(beneath).toEqual(['edit-made-up'])
+  expect(s.spawns.length).toBe(1)
+})
+
 test("what thimble keeps for a thread about a card its fork drew goes with the thread's next question, to the fork that runs or a new one, once, and never to main", async () => {
   const s = setup()
   const first = askHere(s.$, SCOPE, 'why so many?')
