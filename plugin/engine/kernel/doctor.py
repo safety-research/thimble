@@ -2,13 +2,17 @@
 when it does not, with the step that fixes it on the line below, and – for a part the person chose not to install, with
 the step that adds it. A fix that needs no one's choice it makes itself: the
 card sandbox, when its own files are missing or broken, is installed again, as scripts/install.sh does (setup.mjs
---repair). It looks for a newer release as thimble update --check does, unless --offline."""
+--repair). With the person's fixes on, it checks that Claude Code can load the plugin with them, and names a fix that
+keeps it from loading (blocker). It looks for a newer release as thimble update --check does, unless --offline. It runs
+from the release checkout, as the way back from the fixes does (bin/thimble)."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +25,9 @@ CLAUDE_CODE_MIN = (2, 1, 307)  # as scripts/install.sh, INSTALL.md and CI name i
 Row = tuple[bool | None, str, str]  # works (None: not installed, by choice), what, and the fix or the step that adds it
 
 
-def _run(argv: list[str], timeout: float = 60) -> subprocess.CompletedProcess | None:
+def _run(argv: list[str], timeout: float = 60, env: dict[str, str] | None = None) -> subprocess.CompletedProcess | None:
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, env=env)
     except (OSError, subprocess.TimeoutExpired):
         return None
 
@@ -136,12 +140,91 @@ def your_fixes() -> list[Row]:
     recs = [r for r in FX.records().values() if r.get("state") not in ("removed", "released", "merged")]
     if not recs:
         return []
+    rows = blocker()
+    unchecked = FX._unchecked_on()
+    if unchecked:
+        # an update by an older thimble put them back with no check (fixes.py carry checks them)
+        k = len(unchecked)
+        rows.append((False, f"{k} of your fixes {'is' if k == 1 else 'are'} on with no check on thimble "
+                            f"{FX.release_name()} yet ({', '.join(f'fix {i}' for i in unchecked)})",
+                     f"Check {'it' if k == 1 else 'them'}: thimble fixes (a fix that does not fit goes off)"))
     aside = sum(r.get("state") == "pending" for r in recs)
     if aside:
-        return [(False, f"{aside} of your fixes {'is' if aside == 1 else 'are'} set aside since thimble update",
-                 f"Bring {'it' if aside == 1 else 'them'} back: thimble reapply")]
+        return [*rows, (False, f"{aside} of your fixes {'is' if aside == 1 else 'are'} set aside since thimble update",
+                        f"Bring {'it' if aside == 1 else 'them'} back: thimble reapply")]
     on = sum(r.get("state") == "on" for r in recs) if FX.is_on() else 0
-    return [(True, f"your fixes: {on} on (thimble fixes lists them)", "")]
+    return rows or [(True, f"your fixes: {on} on (thimble fixes lists them)", "")]
+
+
+def blocker() -> list[Row]:
+    """With the person's fixes on in the plugin Claude Code loads (live, once the first fix pointed its marketplace
+    there), whether Claude Code can load it (_cannot_load): when it cannot, and the release alone can, the first fix in
+    mine's order with which it cannot, and the command that turns that fix off. [] when it loads, and when the release
+    alone does not load here either (no fix's doing)."""
+    rel, live = FX.release(), FX.live_dir()
+    if not rel.get("pointed") or not FX.is_on() or not (live / ".git").exists():
+        return []
+    base = str(rel.get("base") or "")
+    commits = FX.git("rev-list", "--reverse", f"{base}..mine", cwd=live, check=False).split() if base else []
+    seen: dict[str, str] = {}
+
+    def why_not(c: str) -> str:
+        if c not in seen:
+            seen[c] = _cannot_load(c)
+        return seen[c]
+
+    if not commits or not why_not(commits[-1]) or why_not(base):
+        return []
+    owner = {}
+    for line in FX.git("for-each-ref", "--format=%(objectname) %(refname)", "refs/thimble/fixes/", cwd=live).splitlines():
+        sha, _, ref = line.partition(" ")
+        owner[sha] = ref.rsplit("/", 1)[1]
+    recs = FX.records()
+    for c in commits:
+        why = why_not(c)
+        if why and owner.get(c, "").isdigit():
+            fid = int(owner[c])
+            title = str((recs.get(fid) or {}).get("title") or "")
+            return [(False, f"fix {fid}{f', {title},' if title else ''} keeps Claude Code from loading thimble: {why}",
+                     f"Turn it off: thimble fix off {fid}")]
+    return []
+
+
+def _cannot_load(commit: str) -> str:
+    """Why Claude Code cannot load the plugin of `commit` in live, '' when it can (or when this cannot tell): its
+    manifest and hooks file (claude plugin validate), and its hooks module (the plugin's smoke test alone, by claude
+    plugin test), in a folder of their own, with a Claude Code config folder of their own."""
+    claude = shutil.which(FX.claude())
+    if not claude:
+        return ""
+    with tempfile.TemporaryDirectory(prefix="thimble-doctor-") as d:
+        tar = Path(d) / "plugin.tar"
+        for argv in (["git", "-C", str(FX.live_dir()), "archive", "--format=tar", "-o", str(tar), commit, "plugin"],
+                     ["tar", "-xf", str(tar), "-C", d]):
+            got = _run(argv)
+            if got is None or got.returncode != 0:
+                return ""
+        plugin = Path(d) / "plugin"
+        smoke = plugin / "tests" / "smoke.test.ts"
+        for t in (plugin / "tests").glob("*.test.ts"):
+            if t != smoke:
+                t.unlink()
+        # no session of the person's: the tests make their own
+        env = {k: v for k, v in os.environ.items() if k not in ("THIMBLE_SESSION", "THIMBLE_CONVERSATION", "THIMBLE_START")}
+        env.update(CLAUDE_CONFIG_DIR=str(Path(d) / "claude"), DISABLE_AUTOUPDATER="1")
+        p = _run([claude, "plugin", "validate", str(plugin)], 60, env)
+        if p is not None and p.returncode != 0:
+            said = [x.strip().lstrip("❯").strip() for x in (p.stdout + p.stderr).splitlines() if x.strip().startswith("❯")]
+            return (said[0] if said else "its manifest or hooks file is not valid").replace(d + "/", "")
+        if not smoke.is_file():
+            return ""
+        p = _run([claude, "plugin", "test", str(plugin)], 180, env)
+        if p is None or p.returncode == 0:
+            return ""
+        out = (p.stdout + p.stderr).replace(d + "/", "")
+        m = re.search(r"hooks module did not load: (.+)", out)
+        fail = next((x.strip() for x in out.splitlines() if x.strip().startswith("(fail)")), "")
+        return m.group(1).strip() if m else fail or "its hooks module does not load"
 
 
 def newest() -> Row:

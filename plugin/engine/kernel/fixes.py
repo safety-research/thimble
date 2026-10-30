@@ -59,9 +59,10 @@ copy is named by its commit; `thimble --version` names the release (version_name
 
 The way back from a fix runs from the release checkout, so no fix can break its own undo, not even one that changes the
 launcher or the kernel's modules: the plugin runs `thimble fix` with release/'s launcher (fix/fixes.ts kernelFix); the
-shell's `thimble` is a link to it (_relink_cli), and the launcher runs `thimble fix`, `thimble file`, `thimble update`
-and `thimble reapply` from release/ and the rest (label, coverage, which Claude runs) from live, so a fix to them works;
-the fixer's shell and the quick tests run in release/'s sandbox (sandbox_dir); off.sh runs no thimble code at all.
+shell's `thimble` is a link to it (_relink_cli), and the launcher runs `thimble fix`, `thimble file`, `thimble update`,
+`thimble reapply` and `thimble doctor` from release/ and the rest (label, coverage, which Claude runs) from live, so a
+fix to them works; the fixer's shell and the quick tests run in release/'s sandbox (sandbox_dir); off.sh runs no
+thimble code at all.
 
 A fix may not change the way back (PROTECTED): the fix flow, which turns fixes off and undoes them, and the privacy scan
 a shared fix goes through. Binary files are refused too. It may change the rest (NOTICE), such as the sandbox, the hooks
