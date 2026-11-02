@@ -52,7 +52,9 @@ shows the words, so a mark is never verified on evidence the checker made up:
             `card:<id>@out<i>#L<n>` (labels percent-encoded as encode_label writes them). The host gives the cards'
             outputs (`cards`: [{id, title, outputs: [{out, corner?, cells: [[col, row, value]]} | {out, lines: [[n,
             text]]}]}]); the place must exist there and show the words as shows() reads them: the cell's value (with
-            its row's label, which names what the value is of), or the line. The person sees the card's title and the
+            its row's label, which names what the value is of), or the line. A count of what a card shows, such as 2 of
+            a diagram's 6 edges, cites the things it counts, two or more, and their number stands for it, as the number
+            of rows of their table stands for a total beside it (counted). The person sees the card's title and the
             table around the cell, the cell tinted.
 
 Printed output that is a table (a printed DataFrame, aligned columns) is also read as one (text_table): computed
@@ -1642,8 +1644,9 @@ def terminal_cards(folder: str | None) -> list[dict[str, Any]]:
 
 def card_refs(ev: Any) -> list[str]:
     """The places card evidence names: one `ref`, or several when the cited words hold several values (a range such as
-    "2.5 to 3.7 hours", a pair such as "243 against 104"): a list of refs, as `ref` or as a list of evidence objects,
-    and a range of lines (`#L7-L8`) as each of its lines."""
+    "2.5 to 3.7 hours", a pair such as "243 against 104") or count things a card shows (the 2 edges of "2 of the 6
+    paths"): a list of refs, as `ref` or as a list of evidence objects, and a range of lines (`#L7-L8`) as each of its
+    lines."""
     out: list[str] = []
     for e in ev if isinstance(ev, list) else [ev]:
         got = e.get("ref", e.get("refs")) if isinstance(e, dict) else e
@@ -1694,7 +1697,8 @@ def _card_place(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, dict
 
 def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     """The evidence to show of the places of one card output: a cell's table with each cited cell marked, or the
-    output's lines with what shows the words highlighted on each cited line (as a table when the output is one)."""
+    output's lines with what shows the words highlighted on each cited line, else the whole line, a thing the words
+    count (as a table when the output is one)."""
     p = ps[0]
     shown: dict[str, Any] = {"kind": "card", "card": p["cid"], "title": p["title"], "ref": p["ref"], "value": p["value"]}
     if len(ps) > 1:
@@ -1708,8 +1712,9 @@ def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     for x in ps:
         start = sum(len(t) + 1 for _, t in lines[:x["at"]])
         line = lines[x["at"]][1]
-        # each cited line highlights what of the words it shows (one value of a range on its own line)
-        spans += [[start + a, start + b] for a, b in spans_of(target, line)] or ([[start, start + len(line)]] if x is p else [])
+        # each cited line highlights what of the words it shows (one value of a range on its own line), else all of it,
+        # as a thing the words count (an edge of a diagram)
+        spans += [[start + a, start + b] for a, b in spans_of(target, line)] or [[start, start + len(line)]]
     shown["output"], shown["highlight"] = window(text, spans, OUTPUT_MAX)
     if table := text_table(text, spans):
         shown["table"] = table
@@ -1741,10 +1746,29 @@ def framed(target: str, places: list[dict[str, Any]], approx: bool = False) -> b
     return shows(target, names, approx)
 
 
+def counted(target: str, places: list[dict[str, Any]], approx: bool = False) -> list[str]:
+    """The number of things cited places count, as values they show: "2 of the 6 paths" cites the 2 edges of a diagram
+    that it counts, and the line that states the 6, since no line states the 2. The things are the cited records (a
+    table's rows, lines of printed output) whose values show none of the words' numbers; [] for fewer than two, since
+    one place alone is a value's own place, never a count of one. Rows of one table also show how many rows the card
+    shows of that table, beside their own number and never alone: "2 of the 6 paths" cites 2 rows of a table of 6."""
+    nums = [v for v, _ in marked_numbers(wordnums(target, counts=True))]
+    things = {(p["cid"], p["out"], p.get("row", p.get("n"))): p for p in places
+              if not any(has_number(v, wordnums(p["value"], counts=True), dates=False, approx=approx) for v in nums)}
+    if len(things) < 2:
+        return []
+    out = [str(len(things))]
+    one = next(iter(things.values()))
+    if one["out"][0] == "cells" and len({(p["cid"], p["out"]) for p in things.values()}) == 1 and out[0] in nums:
+        out.append(str(len(one["rows"])))
+    return out
+
+
 def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
     """The problems of card evidence, and the evidence to show: each cited place must be one of the session's cards,
     and together they show the words (a cell's value, with its row's name; a line of printed output). Words that hold
-    several values (a range, a pair) may cite a place for each: each value must stand in one of them."""
+    several values (a range, a pair) may cite a place for each: each value must stand in one of them. A count of what a
+    card shows cites the things it counts, whose number stands for it (counted)."""
     refs = card_refs(ev)
     if not refs:
         return ["the check named no value or line of a card"], None
@@ -1760,7 +1784,7 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     shown_all = [_card_shown(target, g) for g in groups.values()]
     shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
     values, texts = [p["value"] for p in places], [p["text"] for p in places]
-    said = "\n".join(texts)
+    said = "\n".join(texts + counted(target, places, approx))
     one = places[0]
     if not (shows(target, "\n".join(values), approx) or shows(target, said, approx) or framed(target, places, approx)):
         if len(places) > 1:

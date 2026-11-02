@@ -256,6 +256,46 @@ def test_a_takeaway_s_marks_are_checked_with_main_s_reply_and_a_card_s_cell_is_t
     assert notebook.takeaways_to_check(CORPUS) == []
 
 
+def test_a_diagram_card_s_count_is_verified_at_the_edges_it_counts(_fresh):
+    """R5: a count that only follows from a diagram card (made up), "2 of the 6 paths", cited at the listing line that
+    states the 6 edges and at the 2 edges it counts, failed, since no line states the 2. It is verified in the card's
+    takeaway, and the reply's wrong count, cited at the same lines, still fails."""
+    from app import kernel_thimble, notebook
+
+    shown: list[dict] = []
+    real, kernel_thimble._show = kernel_thimble._show, shown.append
+    try:
+        kernel_thimble.diagram(["draft", "lint", "review", "merge", "deploy"],
+                               [("draft", "lint", "submit"), ("lint", "review", "clean"), ("lint", "draft", "lint errors"),
+                                ("review", "draft", "changes requested"), ("review", "merge", "approved"), ("merge", "deploy", "release")])
+    finally:
+        kernel_thimble._show = real
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "Board", role="exploration")
+    cell = notebook.new_cell("diagram", "run", "How a change moves through review", nb["id"], code="thimble.diagram(nodes, edges)")
+    cell.update(status="ok", outputs=shown, takeaway="A change ends in deploy, and [2 of the 6 paths](#) send it back to the draft.")
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+
+    async def fork(c, main, cut, prompt):
+        index = next(w for w in prompt.split("`") if w.endswith("cards-index.tsv"))
+        places = [line.split("\t") for line in Path(index).read_text(encoding="utf-8").splitlines() if "\t" in line]
+        refs = [ref for ref, value in places if value.startswith("diagram:") or "-> draft" in value]
+        out = [{"mark": n, "kind": "card", "evidence": {"ref": refs}, "status": "verified", "correction": None,
+                "reason": "the listing counts 6 edges, and 2 of them go back to draft"} for n in (1, 2)]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    asyncio.run(marks.start_check(CORPUS, main, turn, ["Only [3 of the 6 paths](#) send a change back."], "cut", fork=fork))
+    (reply,) = marks.stored(CORPUS, turn)["items"]
+    assert (reply["status"], reply["reason"]) == ("failed", "None of the 3 cited lines of the card's output shows 3.")
+    (take,) = notebook.get_cell(CORPUS, cell["id"])["takeaway_marks"]["items"]
+    assert take["status"] == "verified", take
+    ev = take["evidence"]
+    assert [ev["output"][a:b] for a, b in ev["highlight"]] == ["6", "lint -> draft (lint errors)", "review -> draft (changes requested)"]
+
+
 def test_a_check_s_index_is_its_own_while_another_check_writes_one(_fresh):
     """A card rewritten while a reply's check runs starts a check of its own, which writes the cards' index as the card
     now stands. The reply's checker keeps reading the index of the cards its validator holds, so a place it finds there
