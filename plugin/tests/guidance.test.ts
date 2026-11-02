@@ -4,6 +4,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { resetPrompts } from '../prompts/prompts'
+import { PRESET } from '../settings/features.mjs'
 import { test } from './kit'
 import { tempRun } from './stubs'
 
@@ -99,13 +100,13 @@ test('with Citations manual, the guidance ends with one sentence that says what 
   expect(text.endsWith('These come only when the analyst asks: citations (they select words and press c).')).toBe(true)
 })
 
-test('with Minimal on, the guidance ends with one sentence that says nothing runs after a reply and names what the analyst asks for', { options: { minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' } }, async ($, on) => {
+test('with on-demand mode on, the guidance ends with one sentence that says nothing runs after a reply and names what the analyst asks for', { options: { minimal: true, ...PRESET } }, async ($, on) => {
   const text = await thimbleText($, world(on))
-  expect(text.endsWith('Minimal mode is on: nothing runs after your replies. These come only when the analyst asks: citations (they select words and press c), explainers (e) and heads-ups (h).')).toBe(true)
+  expect(text.endsWith('On-demand mode is on: nothing runs after your replies. These come only when the analyst asks: citations (they select words and press c), explainers (e) and heads-ups (h).')).toBe(true)
 })
 
 test('with every mode after each reply, the guidance adds no sentence of modes', { options: { citations: 'auto cite' } }, async ($, on) => {
   const text = await thimbleText($, world(on))
   expect(text).not.toContain('These come only')
-  expect(text).not.toContain('Minimal mode')
+  expect(text).not.toContain('On-demand mode')
 })

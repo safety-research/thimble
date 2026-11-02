@@ -9,14 +9,14 @@
 // The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a
 // switched-off feature is left out; while Claude does not cite (Citations manual or off), the citations in the other
 // sections' examples read as plain words. A mode that changes what the analyst does adds one sentence at the end (modesNow):
-// Citations manual, and Minimal. A switch changed later makes a different text, which the next prompt carries beside
-// the copy the conversation holds.
+// Citations manual, and on-demand mode. A switch changed later makes a different text, which the next prompt carries
+// beside the copy the conversation holds.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
-import { choiceOf, claudeCites, featureOn, minimalOn } from '../settings/features.mjs'
+import { choiceOf, claudeCites, featureOn, onDemandOn } from '../settings/features.mjs'
 
 type Engine = EngineInterface
 
@@ -40,7 +40,7 @@ export function guidanceFor(text: string, on: (feature: string) => boolean, mode
 }
 
 /** One sentence on what comes only when the analyst asks for it, so Claude can say how thimble works now; with
- *  Minimal on, that nothing runs after Claude's replies. */
+ *  on-demand mode on, that nothing runs after Claude's replies. */
 export function modesNow(): string[] {
   const asked = [
     choiceOf('citations') === 'manual' && 'citations (they select words and press c)',
@@ -49,7 +49,7 @@ export function modesNow(): string[] {
   ].filter(Boolean) as string[]
   if (!asked.length) return []
   const list = asked.length > 1 ? `${asked.slice(0, -1).join(', ')} and ${asked.at(-1)}` : asked[0]
-  return [`${minimalOn() ? 'Minimal mode is on: nothing runs after your replies. ' : ''}These come only when the analyst asks: ${list}.`]
+  return [`${onDemandOn() ? 'On-demand mode is on: nothing runs after your replies. ' : ''}These come only when the analyst asks: ${list}.`]
 }
 
 /** The guidance's `## Cards` section, its temp folder filled in: what the card check of a card that does not fit holds

@@ -10,8 +10,8 @@
 
 import { ALIASES, EFFORTS, modelById, modelNamed, modelOf, shownName } from '../core/models.js'
 
-/** What Minimal does, as the settings pane says it under its row. */
-const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.'
+/** What On demand does, as the settings pane says it under its row. */
+const ON_DEMAND_SAYS = 'Plain answers, with nothing running in the background: citations, explainers, heads-ups and cards come only when you ask. Claims, Labels and Coverage are off.'
 
 /** Words in a list: `a, b or c`. */
 const listed = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(', ')} or ${ws.at(-1)}` : ws.join(''))
@@ -21,8 +21,9 @@ const CHECKER_MODELS = ALIASES.map(shownName)
 
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `group`:
  *  the heading the pane lists it under, with the others of its group (Answers, Comments on an answer's words, Panes;
- *  a key keeps its name, so a saved setting still applies); Minimal, first, has none: it stands over the others; `does`: one line on what the person gets
- *  and what it costs, the field's description (a test checks). `choices`: the modes of a feature that has more than on
+ *  a key keeps its name, so a saved setting still applies); On demand, first, has none: it stands over the others (its
+ *  key, `minimal`, is the name it had until 0.10.8, so a saved setting still applies); `does`: one line on what the
+ *  person gets and what it costs, the field's description (a test checks). `choices`: the modes of a feature that has more than on
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
  *  look runs while one such feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims:
  *  `auto`; in `on demand`, a look of their own runs when the person asks). `says`: what each mode
@@ -34,9 +35,9 @@ const CHECKER_MODELS = ALIASES.map(shownName)
  *  and what it holds does nothing. */
 export const SWITCHES = [
   {
-    key: 'minimal', title: 'Minimal', default: false,
-    does: MINIMAL_SAYS,
-    says: { on: MINIMAL_SAYS, off: MINIMAL_SAYS },
+    key: 'minimal', title: 'On demand', default: false,
+    does: ON_DEMAND_SAYS,
+    says: { on: ON_DEMAND_SAYS, off: ON_DEMAND_SAYS },
   },
   {
     key: 'citations', title: 'Citations', group: 'Answers', default: 'auto cite + verify', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
@@ -65,9 +66,13 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'cards', title: 'Cards', group: 'Answers', default: true,
-    does: 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.',
-    says: { on: 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.', off: 'No cards.' },
+    key: 'cards', title: 'Cards', group: 'Answers', default: 'auto', choices: ['auto', 'on demand', 'off'],
+    does: 'auto: Claude draws charts and tables as cards in its answers. on demand: Claude draws a card only when you ask for one. Press v to visualize the last answer. off: no cards.',
+    says: {
+      'auto': 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.',
+      'on demand': 'Claude draws a card only when you ask for one. Press v to visualize the last answer.',
+      'off': 'No cards.',
+    },
   },
   {
     key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
@@ -140,9 +145,10 @@ export const RETIRED = {
  *  the first session saves the new one (term.ts). */
 export const RENAMED = {
   citations: { 'auto cite + check': 'auto cite + verify' },
-  // a switch until 0.10.4, now modes: on is auto, off is off
+  // a switch until 0.10.4 (Cards until 0.10.8), now modes: on is auto, off is off
   explain: { true: 'auto', false: 'off' },
   details: { true: 'auto', false: 'off' },
+  cards: { true: 'auto', false: 'off' },
   // the 0.10.6 test branch saved a model by its alias (haiku); now by its name with the version (Haiku 5.5)
   checkerModel: Object.fromEntries(ALIASES.map(a => [a, shownName(a)])),
 }
@@ -227,16 +233,21 @@ export function valueIn(values, key) {
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
 
-/** Minimal: the modes it sets, so nothing runs after a reply and each of these waits to be asked. Turning it on saves
- *  them (settings/term.ts), and the rows show them; a row changed away from them turns it off. */
-export const PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
+/** On demand: the modes it sets, so nothing runs after a reply, each of these waits to be asked, and the session-wide
+ *  panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts), and the rows show them; a row
+ *  changed away from them turns it off. */
+export const PRESET = { citations: 'manual', cards: 'on demand', explain: 'on demand', details: 'on demand', claimsMode: 'off', labels: false, coverage: false }
 
-/** Whether `values` hold Minimal's modes. */
-export const atPreset = values => Object.entries(PRESET).every(([k, v]) => valueIn(values, k) === v)
+/** The modes it set as Minimal (0.10.4 to 0.10.7): rows that still hold them stand for it, and the first session sets
+ *  the rest (settings/term.ts settleOnDemand). */
+export const MINIMAL_PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
+
+/** Whether `values` hold a preset's modes: On demand's, or `preset`. */
+export const atPreset = (values, preset = PRESET) => Object.entries(preset).every(([k, v]) => valueIn(values, k) === v)
 
 /** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
- *  its mode is `off`), as Minimal leaves it. The settings pane asks it with the values Claude Code holds now; featureOn
- *  is it with the plugin's options. */
+ *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the
+ *  plugin's options. */
 export function switchesFrom(values) {
   return key => {
     // c on selected words, a citation the analyst asks for, works in every mode of Citations but off
@@ -286,8 +297,8 @@ export function lensesAfterReply(key) {
   return switchesFrom(current)(key) && (!s?.lensesIn || valueIn(current, s.key) === s.lensesIn)
 }
 
-/** Whether Minimal is on: the modes it set (PRESET) stand. */
-export const minimalOn = () => valueIn(current, 'minimal') === true
+/** Whether On demand is on: the modes it set (PRESET) stand. */
+export const onDemandOn = () => valueIn(current, 'minimal') === true
 
 /** The values this load runs with now, the retired fields' included. */
 export const currentValues = () => ({ ...current })

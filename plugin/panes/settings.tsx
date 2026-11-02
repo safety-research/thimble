@@ -1,9 +1,9 @@
 // settings.tsx: the settings pane (core/pane.ts kind `settings`): /thimble-settings, or a click on `thimble` in the
 // bar, opens it. Its top row says `Settings` (core/pane.ts); under it the bar as the settings leave it (bar.tsx, drawn as
-// a preview in a frame: nothing in it presses), then Minimal, then the settings under their headings (Answers,
+// a preview in a frame: nothing in it presses), then On demand, then the settings under their headings (Answers,
 // Comments, Panes), every row the same: the name in a column of its own, its choices (`on · off` for a switch; the one
-// set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
-// `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
+// set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). On demand reads
+// `ON-DEMAND MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
 // tinted across the pane, with no mark of its own (a `›` there read as a row that opens), and the pane keeps that row
 // and its line in view at any height (core/pane.ts keepsInView), as the pick moves with ↑ and ↓. A setting that
@@ -39,8 +39,8 @@ const SEL_TINT = 'userMessageBackground'
 /** Where the choices start: the row's indent and the name's column. */
 const NAME = 11
 const IN = 2 + NAME + 1
-/** Minimal's name, wider than the column: its choices, and the line under them, start after it. */
-const MINIMAL_TITLE = 'MINIMAL MODE '
+/** On demand's name, wider than the column: its choices, and the line under them, start after it. */
+const ON_DEMAND_TITLE = 'ON-DEMAND MODE '
 
 const ROWS = SWITCHES as Switch[]
 /** A feature's choices as the pane offers them with `values` (Effort: the levels of the model Checker names): its
@@ -133,15 +133,15 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
       ] }),
       ...(k < options.length - 1 ? [Text({ key: 'sep', dimColor: true, children: ' · ' })] : []),
     ] }))
-    // Minimal stands over the rows as a heading would, what it does under it
-    const minimal = s.key === 'minimal'
-    const says = minimal ? s.says?.on : s.says?.[set]
-    const at = minimal ? 2 + MINIMAL_TITLE.length + 1 : IN
+    // On demand stands over the rows as a heading would, what it does under it
+    const onDemand = s.key === 'minimal'
+    const says = onDemand ? s.says?.on : s.says?.[set]
+    const at = onDemand ? 2 + ON_DEMAND_TITLE.length + 1 : IN
     return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'column', width, ...(here ? { backgroundColor: SEL_TINT } : {}), children: [
       Box({ key: 'line', flexDirection: 'row', children: [
         Text({ key: 'mark', children: '  ' }),
         Button({ key: `switch-${s.key}`, plain: true, label: `${s.title}: ${set}`, onPress: () => pick($, s), children: [
-          Text({ key: 'title', bold: true, children: minimal ? MINIMAL_TITLE : s.title.padEnd(NAME) }),
+          Text({ key: 'title', bold: true, children: onDemand ? ON_DEMAND_TITLE : s.title.padEnd(NAME) }),
         ] }),
         Text({ key: 'gap', children: ' ' }),
         // the choices take the rest of the line, named, so the pane measures the rows they wrap onto as drawn

@@ -39,8 +39,8 @@
 // A lens whose feature has a mode (Claims: auto, on demand, off) joins the look after each reply only in its `auto` mode;
 // else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims have not read,
 // for a look of that lens alone. While a look reads the claims, either way, the pane says they are being found
-// (claims/seam.ts claimsFindStart) in place of f. While Minimal is on no lens joins the look after each reply; h asks
-// for a look of the heads lens alone at one answer (headsUpsNow).
+// (claims/seam.ts claimsFindStart) in place of f. While on-demand mode is on no lens joins the look after each reply
+// (Claims is off); h asks for a look of the heads lens alone at one answer (headsUpsNow).
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import { update, type EngineInterface, type Register } from 'claude-code'
 

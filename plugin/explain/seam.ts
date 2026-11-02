@@ -35,9 +35,10 @@
 //                                      that holds them, opened in the tray. Words inside an explainer or a heads-up (or on it) open that one; words
 //                                      over or across marks get one explainer, whose mark covers the explainers it
 //                                      overlaps; a heads-up keeps its words
-//   headsKey($, key), headsBar         h at an empty prompt, `h heads-ups` on the bar, while Minimal is on (nothing is
-//                                      marked by itself then): one look of the heads lens alone at the answer the
-//                                      keys act on (observer/observer.ts headsUpsNow), once per answer
+//   headsKey($, key), headsBar         h at an empty prompt, `h heads-ups` on the bar, while Heads-ups is on demand (as
+//                                      on-demand mode sets it; nothing is marked by itself then): one look of the heads
+//                                      lens alone at the answer the keys act on (observer/observer.ts headsUpsNow),
+//                                      once per answer
 //   registerExplain                    the watch of the selection, which draws the bar again when one starts or ends
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
@@ -445,7 +446,7 @@ export async function explainBar($: Engine, on: (key: string) => boolean, previe
 
 // ------------------------------------------------------------------------------------------------ heads-ups on demand
 
-/** The bar's key that asks for heads-ups on an answer, while Minimal is on. */
+/** The bar's key that asks for heads-ups on an answer, while Heads-ups is on demand. */
 export const HEADS_KEYS = ['h']
 
 /** The answers h asked heads-ups for in this load: each once. */
@@ -467,14 +468,14 @@ async function askHeadsNow($: Engine, row: string): Promise<void> {
   } else await hintUsed($, 'heads')
 }
 
-/** h at an empty prompt, while Minimal is on and an answer has no heads-ups asked for yet. */
+/** h at an empty prompt, while Heads-ups is on demand and an answer has no heads-ups asked for yet. */
 export async function headsKey($: Engine, key: string, _until: number): Promise<Take | null> {
   if (!HEADS_KEYS.includes(key)) return null
   const row = await headsRow($)
   return row ? { later: () => askHeadsNow($, row) } : null
 }
 
-/** `h heads-ups` on the bar while h acts. The settings' preview shows it while Minimal is on. */
+/** `h heads-ups` on the bar while h acts. The settings' preview shows it while Heads-ups is on demand. */
 export async function headsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('heads')) return []
   if (preview) return [{ id: 'heads', key: 'h', words: 'heads-ups' }]

@@ -5,9 +5,9 @@
 //   heldValues($)          each feature's value as Claude Code holds it now (a change made a moment ago included)
 //   settingsAction($, a)   turn a feature on or off (`toggle`; a feature with modes goes to its next mode), or set its
 //                          mode (`set`), through Claude Code ($.config.set), which keeps the value and loads the plugin
-//                          again with the new options; a refusal is one line with its fix. Minimal is a preset: on, it
-//                          sets its rows' modes (features.mjs PRESET), keeping theirs (store: beforeMinimal); off puts
-//                          them back; one of its rows changed away from its mode turns it off
+//                          again with the new options; a refusal is one line with its fix. On-demand mode is a preset:
+//                          on, it sets its rows' modes (features.mjs PRESET), keeping theirs (store: beforeMinimal);
+//                          off puts them back; one of its rows changed away from its mode turns it off
 //   firstPartyApi($)       whether Claude Code reaches Claude through Anthropic's first-party API, not Bedrock, Vertex
 //                          or Foundry: a setting that names its model ids (features.mjs `firstParty`) works only there
 //
@@ -20,7 +20,7 @@
 import type { ConfigRow, EngineInterface, Register } from 'claude-code'
 
 import { firstParty } from '../core/models.js'
-import { DEFAULTS, DEFAULTS_FIELD, PRESET, RENAMED, RETIRED, SWITCHES, atDefault, atPreset, currentValues, movedFrom, noteChange, noteDefaults, noteSettled, renamedTo, setOptions, switchOf, valueIn } from './features.mjs'
+import { DEFAULTS, DEFAULTS_FIELD, MINIMAL_PRESET, PRESET, RENAMED, RETIRED, SWITCHES, atDefault, atPreset, currentValues, movedFrom, noteChange, noteDefaults, noteSettled, renamedTo, setOptions, switchOf, valueIn } from './features.mjs'
 
 type Engine = EngineInterface
 
@@ -58,7 +58,7 @@ export async function heldValues($: Engine): Promise<Record<string, boolean | st
     const r = rows.get(s.key)
     if (r && (s.choices ? s.choices.includes(r.value as string) : typeof r.value === 'boolean')) values[s.key] = r.value
   }
-  // with defaultsAt, so the values read again (the bar's preview, Minimal's rows) read a moved default as these do
+  // with defaultsAt, so the values read again (the bar's preview, the preset's rows) read a moved default as these do
   const at = typeof values.defaultsAt === 'string' ? { defaultsAt: values.defaultsAt } : {}
   return { ...Object.fromEntries(SWITCHES.map(s => [s.key, valueIn(values, s.key) as boolean | string])), ...at }
 }
@@ -76,17 +76,18 @@ export async function settingsAction($: Engine, a: Record<string, unknown>): Pro
   await moveRetired($, currentValues()).catch(() => undefined)
   await moveDefaults($).catch(() => undefined)
   const held = await heldValues($)
-  if (s.key === 'minimal') return to ? minimalOn($, held) : minimalOff($, held)
+  if (s.key === 'minimal') return to ? onDemandOn($, held) : onDemandOff($, held)
   const denied = await setRow($, s.key, to as boolean | string)
   if (denied) return denied
-  // a row of Minimal's changed away from it: Minimal is off, and this row's new mode stays
-  if (held.minimal === true && s.key in PRESET && to !== (PRESET as Record<string, string>)[s.key]) {
+  // a row of on-demand mode's changed away from it: the mode is off, and this row's new mode stays
+  if (held.minimal === true && s.key in PRESET && to !== (PRESET as Record<string, boolean | string>)[s.key]) {
     await $.store.set(BEFORE, null)
     await setRow($, 'minimal', false)
   }
 }
 
-/** The modes of Minimal's rows from before it went on (store), which turning it off puts back. */
+/** The modes of on-demand mode's rows from before it went on (store, under the mode's name until 0.10.8, so what
+ *  Minimal kept is read), which turning it off puts back. */
 const BEFORE = 'beforeMinimal'
 
 /** Set one feature through Claude Code; this load acts on it at once, before the plugin loads again with it. A
@@ -103,9 +104,10 @@ async function setRow($: Engine, key: string, to: boolean | string): Promise<str
   $.ui.invalidate('ui.render')
 }
 
-/** Minimal on: the modes of its rows now are kept, its modes set (PRESET), then Minimal. */
-async function minimalOn($: Engine, held: Record<string, boolean | string>): Promise<string | void> {
-  if (!atPreset(held)) await $.store.set(BEFORE, Object.fromEntries(Object.keys(PRESET).map(k => [k, held[k]])))
+/** On-demand mode on: the modes of its rows now are kept, over them the earlier modes Minimal kept of its own rows
+ *  (`kept`), its modes set (PRESET), then the mode. */
+async function onDemandOn($: Engine, held: Record<string, boolean | string>, kept: Record<string, boolean | string> = {}): Promise<string | void> {
+  if (!atPreset(held)) await $.store.set(BEFORE, { ...Object.fromEntries(Object.keys(PRESET).map(k => [k, held[k]])), ...kept })
   for (const [k, v] of Object.entries(PRESET)) {
     const denied = await setRow($, k, v)
     if (denied) return denied
@@ -113,9 +115,9 @@ async function minimalOn($: Engine, held: Record<string, boolean | string>): Pro
   return setRow($, 'minimal', true)
 }
 
-/** Minimal off: the modes its rows had before it went on come back (their defaults when none were kept), where a row
- *  still holds Minimal's mode. */
-async function minimalOff($: Engine, held: Record<string, boolean | string>): Promise<string | void> {
+/** On-demand mode off: the modes its rows had before it went on come back (their defaults when none were kept), where
+ *  a row still holds the mode it set. */
+async function onDemandOff($: Engine, held: Record<string, boolean | string>): Promise<string | void> {
   const denied = await setRow($, 'minimal', false)
   if (denied) return denied
   const kept = ((await $.store.get(BEFORE)) ?? {}) as Record<string, boolean | string>
@@ -127,12 +129,15 @@ async function minimalOff($: Engine, held: Record<string, boolean | string>): Pr
   await $.store.set(BEFORE, null)
 }
 
-/** Minimal saved on while its rows hold other modes: from before it was a preset (0.10.4), its modes are set once,
- *  what the rows held kept; once it was (the modes kept), a row changed elsewhere (/config) turns it off. */
-export async function settleMinimal($: Engine): Promise<void> {
+/** On-demand mode saved on while its rows hold other modes: from before Minimal was a preset (0.10.4), its modes are
+ *  set once, what the rows held kept; as Minimal left them (its modes kept, its rows at MINIMAL_PRESET), the rest of
+ *  its modes are set once, what Minimal kept still kept; else a row changed elsewhere (/config) turns it off. */
+export async function settleOnDemand($: Engine): Promise<void> {
   const held = await heldValues($)
   if (held.minimal !== true || atPreset(held)) return
-  if ((await $.store.get(BEFORE)) == null) await minimalOn($, held)
+  const kept = (await $.store.get(BEFORE)) as Record<string, boolean | string> | null | undefined
+  if (kept == null) await onDemandOn($, held)
+  else if (atPreset(held, MINIMAL_PRESET)) await onDemandOn($, held, kept)
   else { await $.store.set(BEFORE, null); await setRow($, 'minimal', false) }
 }
 
@@ -198,7 +203,7 @@ export const registerSettings: Register = (on, options) => {
     const r = await next(e)
     await moveRetired($, currentValues()).catch(() => undefined)
     await moveDefaults($).catch(() => undefined)
-    await settleMinimal($).catch(() => undefined)
+    await settleOnDemand($).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 }

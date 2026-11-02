@@ -1,6 +1,6 @@
 {
   "name": "thimble",
-  "description": "thimble for Claude Code: select words in a reply and press c to cite them (a second Claude finds and checks their source), or set Citations to have Claude cite each claim you would check; a click on a citation opens its evidence. Claude draws interactive cards of the data, and v visualizes the last answer as a card. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s rewrites a reply shorter or longer, more novice or more expert, and b catches up on several; after each reply an observer explains terms you may not know and points out important details; w lists the session's claims; t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read. Minimal makes everything on demand.",
+  "description": "thimble for Claude Code: select words in a reply and press c to cite them (a second Claude finds and checks their source), or set Citations to have Claude cite each claim you would check; a click on a citation opens its evidence. Claude draws interactive cards of the data, and v visualizes the last answer as a card. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s rewrites a reply shorter or longer, more novice or more expert, and b catches up on several; after each reply an observer explains terms you may not know and points out important details; w lists the session's claims; t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read. On demand gives plain answers and runs nothing in the background.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -11,8 +11,8 @@
   "userConfig": {
     "minimal": {
       "type": "boolean",
-      "title": "Minimal",
-      "description": "No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.",
+      "title": "On demand",
+      "description": "Plain answers, with nothing running in the background: citations, explainers, heads-ups and cards come only when you ask. Claims, Labels and Coverage are off.",
       "default": false
     },
     "citations": {
@@ -55,10 +55,15 @@
       "default": "same as Claude"
     },
     "cards": {
-      "type": "boolean",
+      "type": "string",
       "title": "Cards",
-      "description": "Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.",
-      "default": true
+      "description": "auto: Claude draws charts and tables as cards in its answers. on demand: Claude draws a card only when you ask for one. Press v to visualize the last answer. off: no cards.",
+      "options": [
+        "auto",
+        "on demand",
+        "off"
+      ],
+      "default": "auto"
     },
     "squeezeAnswers": {
       "type": "boolean",

@@ -10,7 +10,7 @@ import { registerAnswers, resetAnswers } from '../core/answers'
 import { registerTurn } from '../core/turn'
 import { headsBar, headsKey } from '../explain/seam'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
-import { setOptions } from '../settings/features.mjs'
+import { PRESET, setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
@@ -126,8 +126,8 @@ test('with every feature it serves off, no look runs; one lens off has no sectio
   setOptions({})
 })
 
-test('with Explainers, Heads-ups and Claims on demand (as Minimal sets them), no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
-  setOptions({ minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' })
+test('with on-demand mode on (Explainers and Heads-ups on demand, Claims off), no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
+  setOptions({ minimal: true, ...PRESET })
   try {
     const s = setup([{ isAnswered: true, text: '{"heads": null}', usage: { input_tokens: 10, output_tokens: 5 } }])
     s.$.ui = { invalidate: () => undefined }

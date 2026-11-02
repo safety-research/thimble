@@ -2,8 +2,8 @@
 // a switch turns it off through Claude Code ($.config.set). All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
-import { DEFAULTS, choiceOf, citationsFrom, featureOn, noteChange, setOptions, valueIn } from '../settings/features.mjs'
-import { registerSettings, settingsAction, settleMinimal } from '../settings/term'
+import { DEFAULTS, PRESET, choiceOf, citationsFrom, featureOn, noteChange, setOptions, valueIn } from '../settings/features.mjs'
+import { registerSettings, settingsAction, settleOnDemand } from '../settings/term'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,7 +79,7 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^w claims$/ })).toBeDefined()
-  // the row picked is the first, Minimal, tinted with no mark; a click on a name picks its row, changing nothing (↑ ↓:
+  // the row picked is the first, On demand, tinted with no mark; a click on a name picks its row, changing nothing (↑ ↓:
   // tests/pane.test.ts)
   expect((await pane.find({ key: 'sw-minimal' }))?.text).not.toContain('›')
   await pane.press({ key: 'switch-claimsMode' })
@@ -107,54 +107,62 @@ function settingsWorld(on: Any, rows: Record<string, boolean | string>, store: R
 }
 
 
-test('Minimal is a preset: on, it sets Citations manual and Explainers, Heads-ups and Claims on demand, which the rows show; off puts back what they had', async ($, on) => {
-  const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite + verify', explain: 'auto', details: 'off', claimsMode: 'auto', cards: true, defaultsAt: DEFAULTS.at }
+test('On demand is a preset: on, it sets Citations manual, Cards, Explainers and Heads-ups on demand, and Claims, Labels and Coverage off, which the rows and the preview show; Rewrite and Catch-up stay; off puts back what they had', async ($, on) => {
+  const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite + verify', cards: 'auto', explain: 'auto', details: 'off', claimsMode: 'auto', labels: true, coverage: true, squeezeAnswers: true, catchUp: false, defaultsAt: DEFAULTS.at }
   const set = settingsWorld(on, rows)
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   const pane = await $.ui.mount(PANE)
-  expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^\s*MINIMAL MODE\s+on · off/)
-  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('No background tokens. Cards are enabled')
+  // first, its name and what it does in plain words
+  expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^\s*ON-DEMAND MODE\s+on · off/)
+  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('Plain answers, with nothing running in the background')
   expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeDefined()
   await pane.press({ key: 'mode-minimal-on' })
-  expect(rows).toMatchObject({ minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand', cards: true })
-  // the rows show the modes set, with no note of Minimal's
+  expect(rows).toMatchObject({ minimal: true, ...PRESET, squeezeAnswers: true, catchUp: false })
+  expect(set.some(e => /\.(squeezeAnswers|catchUp)$/.test(String(e.key)))).toBe(false)
+  // the rows show the modes set, with no note of the mode's
   expect((await pane.find({ key: 'sw-citations' }))?.text).not.toContain('→')
   expect((await pane.find({ key: 'says-explain' }))?.text).toContain('press e')
-  // h acts while Heads-ups is on demand: the preview names it
+  expect((await pane.find({ key: 'says-cards' }))?.text).toContain('only when you ask for one')
+  expect((await pane.find({ key: 'says-claimsMode' }))?.text).toContain('No Claims pane.')
+  // the preview: h acts while Heads-ups is on demand, v and c still act; the session-wide panes' keys are gone
   expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeDefined()
+  for (const w of [/^ visualize$/, /^ cite$/, /^ explain$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
+  for (const w of [/^ claims$/, /^ coverage$/, /^ labels$/]) expect(await pane.find({ type: 'Text', text: w })).toBeUndefined()
   await pane.press({ key: 'mode-minimal-off' })
-  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', explain: 'auto', details: 'off', claimsMode: 'auto' })
+  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', explain: 'auto', details: 'off', claimsMode: 'auto', labels: true, coverage: true })
   expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeUndefined()
-  expect(set.some(e => String(e.key).endsWith('.cards'))).toBe(false)
+  expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeDefined()
   await pane.unmount()
   setOptions({})
 })
 
-test("a row of Minimal's changed away from its mode turns Minimal off and keeps the new mode; the rest stay as Minimal set them", async ($, on) => {
-  const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite', explain: 'auto', details: 'auto', claimsMode: 'auto', defaultsAt: DEFAULTS.at }
+test("a row of on-demand mode's changed away from its mode turns the mode off and keeps the new mode; the rest stay as the mode set them", async ($, on) => {
+  const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite', cards: 'auto', explain: 'auto', details: 'auto', claimsMode: 'auto', labels: true, coverage: true, defaultsAt: DEFAULTS.at }
   settingsWorld(on, rows)
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   const pane = await $.ui.mount(PANE)
   await pane.press({ key: 'mode-minimal-on' })
   expect(rows.minimal).toBe(true)
   await pane.press({ key: 'mode-explain-auto' })
-  expect(rows).toMatchObject({ minimal: false, explain: 'auto', citations: 'manual', details: 'on demand', claimsMode: 'on demand' })
-  // off with nothing kept: a row still at Minimal's mode takes its default
+  expect(rows).toMatchObject({ minimal: false, explain: 'auto', citations: 'manual', cards: 'on demand', details: 'on demand', claimsMode: 'off', labels: false, coverage: false })
+  // a pane turned on again (a switch, not a mode) turns it off too
   await pane.press({ key: 'mode-minimal-on' })
+  expect(rows.minimal).toBe(true)
+  await pane.press({ key: 'mode-coverage-on' })
+  expect(rows).toMatchObject({ minimal: false, coverage: true, explain: 'on demand', labels: false, claimsMode: 'off' })
+  // on and off again: each row comes back to what it held when the mode went on
+  await pane.press({ key: 'mode-minimal-on' })
+  expect(rows.coverage).toBe(false)
   await pane.press({ key: 'mode-minimal-off' })
-  expect(rows).toMatchObject({ minimal: false, explain: 'auto', citations: 'manual', details: 'on demand', claimsMode: 'on demand' })
+  expect(rows).toMatchObject({ minimal: false, explain: 'on demand', citations: 'manual', cards: 'on demand', details: 'on demand', claimsMode: 'off', labels: false, coverage: true })
   await pane.unmount()
   setOptions({})
 })
 
-test('Explainers and Heads-ups saved as the switches they were read as auto (on) and off (off), and the first session saves their modes; Minimal saved on before it was a preset sets its modes once', async ($, on) => {
-  const rows: Record<string, boolean | string> = { minimal: true, citations: 'auto cite', explain: true, details: false, claimsMode: 'auto', defaultsAt: DEFAULTS.at }
-  settingsWorld(on, rows)
-  expect(valueIn(rows, 'explain')).toBe('auto')
-  expect(valueIn(rows, 'details')).toBe('off')
-  // the first session's settling, with what it reaches of the engine
-  const store = new Map<string, unknown>()
-  const engine: Any = {
+/** The first session's settling, with what it reaches of the engine: rows Claude Code keeps, and the plugin's store. */
+function settleEngine(rows: Record<string, boolean | string>, store: Map<string, unknown>): Any {
+  return {
     plugin: { name: 'thimble' },
     store: { get: async (k: string) => store.get(k), set: async (k: string, v: unknown) => void store.set(k, v) },
     config: {
@@ -163,15 +171,59 @@ test('Explainers and Heads-ups saved as the switches they were read as auto (on)
     },
     ui: { invalidate: () => undefined },
   }
-  await settleMinimal(engine)
-  expect(rows).toMatchObject({ minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' })
+}
+
+test('Explainers, Heads-ups and Cards saved as the switches they were read as auto (on) and off (off), and the first session saves their modes; Minimal saved on before it was a preset sets its modes once', async ($, on) => {
+  const rows: Record<string, boolean | string> = { minimal: true, citations: 'auto cite', cards: true, explain: true, details: false, claimsMode: 'auto', labels: true, coverage: false, defaultsAt: DEFAULTS.at }
+  settingsWorld(on, rows)
+  expect(valueIn(rows, 'explain')).toBe('auto')
+  expect(valueIn(rows, 'details')).toBe('off')
+  expect(valueIn(rows, 'cards')).toBe('auto')
+  const engine = settleEngine(rows, new Map())
+  await settleOnDemand(engine)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET })
   // turned off, what the rows held before comes back, in their new modes
   setOptions(rows)
   await settingsAction(engine, { do: 'set', key: 'minimal', value: false })
-  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite', explain: 'auto', details: 'off', claimsMode: 'auto' })
+  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite', cards: 'auto', explain: 'auto', details: 'off', claimsMode: 'auto', labels: true, coverage: false })
   // settled once: a session after it changes nothing
-  await settleMinimal(engine)
+  await settleOnDemand(engine)
   expect(rows.minimal).toBe(false)
+  setOptions({})
+})
+
+test("Minimal saved on by 0.10.7 is on-demand mode: the first session after the update sets the rest of its modes, and off puts back the modes Minimal kept and what the other rows held; a row changed elsewhere since turns it off", async () => {
+  const hooks: Record<string, Any[]> = {}
+  const on: Any = (event: string, a: Any, b?: Any) => {
+    ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
+    const reg: Any = { catch: () => reg }
+    return reg
+  }
+  const session = async (engine: Any) => {
+    const chain = hooks['session.start'] ?? []
+    const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i](engine, ev, (x: Any) => run(i + 1, x)) : ev)
+    await run(0, { isInteractive: true })
+  }
+  // as 0.10.7 left them: Minimal on, its four rows at its modes, Cards still the switch it was, and the modes Minimal
+  // kept of its rows in the store
+  const rows: Record<string, boolean | string> = { minimal: true, citations: 'manual', cards: true, explain: 'on demand', details: 'on demand', claimsMode: 'on demand', labels: true, coverage: true, squeezeAnswers: true, catchUp: true, defaultsAt: DEFAULTS.at }
+  const store = new Map<string, unknown>([['beforeMinimal', { citations: 'auto cite + verify', explain: 'auto', details: 'auto', claimsMode: 'auto' }]])
+  const engine = settleEngine(rows, store)
+  registerSettings(on, { ...rows } as never)
+  await session(engine)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET, squeezeAnswers: true, catchUp: true })
+  expect(featureOn('claims')).toBe(false)
+  expect(featureOn('coverage')).toBe(false)
+  expect(choiceOf('cards')).toBe('on demand')
+  await settingsAction(engine, { do: 'set', key: 'minimal', value: false })
+  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', explain: 'auto', details: 'auto', claimsMode: 'auto', labels: true, coverage: true })
+  // Minimal on, its modes kept, and a row changed elsewhere (/config) since: off, as before
+  Object.assign(rows, { minimal: true, citations: 'manual', cards: 'auto', explain: 'auto', details: 'on demand', claimsMode: 'on demand' })
+  store.set('beforeMinimal', { citations: 'auto cite', explain: 'auto', details: 'auto', claimsMode: 'auto' })
+  for (const k of Object.keys(hooks)) delete hooks[k]
+  registerSettings(on, { ...rows } as never)
+  await session(engine)
+  expect(rows).toMatchObject({ minimal: false, citations: 'manual', explain: 'auto', details: 'on demand', claimsMode: 'on demand', labels: true, coverage: true })
   setOptions({})
 })
 
@@ -187,7 +239,7 @@ test('a mode saved under the old fields moves to Citations at the first session,
     const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i]!.fn($, ev, (x: Any) => run(i + 1, x)) : base(ev))
     return run(0, e)
   }
-  const rows: Record<string, boolean | string> = { citations: 'auto cite', cards: true }
+  const rows: Record<string, boolean | string> = { citations: 'auto cite', cards: 'auto' }
   const set: Any[] = []
   const $: Any = {
     plugin: { name: 'thimble' },
@@ -198,7 +250,7 @@ test('a mode saved under the old fields moves to Citations at the first session,
     },
   }
   // checks after each reply, saved before Citations had its modes
-  registerSettings(on, { citations: 'auto cite', marks: true, citationChecks: 'auto', cards: true } as never)
+  registerSettings(on, { citations: 'auto cite', marks: true, citationChecks: 'auto', cards: 'auto' } as never)
   expect(choiceOf('citations')).toBe('auto cite + verify')
   await call('session.start', { isInteractive: true })
   expect(set.map(e => [e.key, e.value])).toEqual([['thimble@inline.citations', 'auto cite + verify'], ['thimble@inline.citationChecks', 'on demand']])
@@ -296,7 +348,7 @@ test('a default that moves is saved once, where the old default stands, with def
     const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i]!.fn($, ev, (x: Any) => run(i + 1, x)) : ev)
     return run(0, e)
   }
-  const rows: Record<string, boolean | string> = { citations: 'auto cite', cards: true, defaultsAt: 'none' }
+  const rows: Record<string, boolean | string> = { citations: 'auto cite', cards: 'auto', defaultsAt: 'none' }
   const set: Any[] = []
   const $: Any = {
     plugin: { name: 'thimble' },
