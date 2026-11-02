@@ -24,7 +24,8 @@
 //                    mode would refuse it (checker.ts allowsCheck)
 //   tool.check       a checker's Read or Grep of one file the person let thimble's checks read with that tool (x):
 //                    Claude Code's own ask answered allow (checker.ts allowsRead); never a Glob, which lists a folder
-//   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
+//   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone;
+//                    while Minimal is on, plain: its marks show for the paragraph under the pointer (view.ts `plain`).
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
 //                    citation the tray shows, the lines under its words (the labels it used), a press on a citation,
@@ -40,7 +41,7 @@ import { shownWords } from '../core/selection'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
-import { checkerEffort, checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
+import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
 import { AGAIN_DESCRIPTION, allowsCheck, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
@@ -86,9 +87,9 @@ export function looksByWords(marks: { words: string }[], items: MarkItem[], runs
   })
 }
 
-/** The looks of a row's marks while Citations is manual (Minimal holds its auto modes there): the citations Claude
- *  wrote are quiet (view.ts MarkLook), the words the analyst cited with c stand as they are. `own`: the looks follow
- *  the items by place (the text is Claude's own), else by their numbers. In any other mode the looks as they are. */
+/** The looks of a row's marks while Citations is manual: the citations Claude wrote are quiet (view.ts MarkLook), the
+ *  words the analyst cited with c stand as they are. `own`: the looks follow the items by place (the text is Claude's
+ *  own), else by their numbers. In any other mode the looks as they are. */
 export function quietLooks(looks: MarkLook[], items: MarkItem[], own: boolean): MarkLook[] {
   if (choiceOf('citations') !== 'manual') return looks
   const asked = new Set(items.filter(it => it.asked).map(it => it.n))
@@ -317,6 +318,8 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
       spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
+      // Minimal: plain words at rest, each row's marks under the pointer (view.ts)
+      plain: minimalOn(),
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
       // a press on a citation's words, or on the sign after them (view.ts markEl)

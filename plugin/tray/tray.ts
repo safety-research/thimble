@@ -375,15 +375,14 @@ async function itemOf($: Engine, row: string, n: number): Promise<MarkItem | nul
   return (await rowMarks($, row))?.items.find(x => x.n === n) ?? null
 }
 
-/** An explainer or a heads-up of the row; an explainer still being written (explain/seam.ts pendingGloss) is its words
- *  alone. */
+/** An explainer or a heads-up of the row; one still being written (explain/seam.ts pendingGloss) is its words alone. */
 async function glossOf($: Engine, row: string, id: string): Promise<Gloss | null> {
   return (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id] ?? pendingGloss(row, id)
 }
 
-/** Whether the frame is an explainer still being written: the tray stands on its words until it is (explain/seam.ts
- *  pendingGloss). */
-const beingWritten = (f: Frame): boolean => f.kind === 'explain' && !!pendingGloss(f.row, f.id)
+/** Whether the frame is an explainer or a heads-up still being written: the tray stands on its words until it is
+ *  (explain/seam.ts pendingGloss). */
+const beingWritten = (f: Frame): boolean => (f.kind === 'explain' || f.kind === 'heads') && !!pendingGloss(f.row, f.id)
 
 /** What the tray and the side thread read of a frame. */
 async function infoOf($: Engine, f: Frame): Promise<Info> {
@@ -404,9 +403,9 @@ function engagedMark(f: Frame, info: Info): Any {
   return f.kind === 'heads' ? { kind: 'heads', row: f.row, term: g?.term ?? '', title: g?.title ?? '' } : { kind: 'explain', row: f.row, term: g?.term ?? '' }
 }
 
-/** The person opened a mark: main hears it with their next prompt (an explainer still being written, once written). */
+/** The person opened a mark: main hears it with their next prompt (one still being written, once written). */
 async function told($: Engine, f: Frame): Promise<void> {
-  if (f.kind === 'explain' && pendingGloss(f.row, f.id)) return
+  if (beingWritten(f)) return
   const info = await infoOf($, f)
   await tellOpened($, engagedMark(f, info), info.begins).catch(() => undefined)
 }
@@ -1083,8 +1082,9 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
     const heads = f.kind === 'heads'
     title = String(g?.term || g?.title || (heads ? 'heads-up' : 'explainer'))
     if (!g) units = [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: `This ${heads ? 'heads-up' : 'explainer'} is no longer in the session.` }) }]
-    // an explainer still being written (explain/seam.ts pendingGloss): its box is an explainer's, and where its words
-    // will stand the turning glyph turns with the bar's and a citation's being checked (bar/busy.ts spinNow), no words
+    // an explainer or a heads-up still being written (explain/seam.ts pendingGloss): its box is its kind's, and where
+    // its words will stand the turning glyph turns with the bar's and a citation's being checked (bar/busy.ts spinNow),
+    // no words
     else if (beingWritten(f)) units = [{ h: 1, el: Text({ key: 'writing', color: accent(), children: await spinNow($) }) }]
     else words = { text: explainerText(g) }
   }

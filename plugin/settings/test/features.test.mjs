@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { ALIASES, EFFORTS, modelOf, shownName } from '../../core/models.js'
-import { DEFAULTS, DEFAULTS_FIELD, RETIRED, defaultsFrom, SWITCHES, checkerEffort, checkerModel, choiceOf, choicesIn, citationsFrom, claudeCites, featureOn, lensesAfterReply, minimalOn, PRESET, atPreset, currentValues, noteChange, noteDefaults, setOptions, switchesFrom } from '../features.mjs'
+import { DEFAULTS, DEFAULTS_FIELD, RETIRED, defaultsFrom, SWITCHES, checkerEffort, checkerModel, choiceOf, choicesIn, citationsFrom, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, atPreset, currentValues, noteChange, noteDefaults, setOptions, switchesFrom } from '../features.mjs'
 
 test("the manifest's userConfig is the features, each on by default and turned off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
@@ -48,6 +48,22 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cards'), false)
     setOptions({ cards: 'yes' })
     assert.equal(featureOn('cards'), true)
+    setOptions({})
+  }
+  // Cards: auto by default; on demand still draws (v, and a card Claude is asked for), off draws none; saved as the
+  // switch it was until 0.10.8, on is auto and off is off
+  {
+    assert.deepEqual(SWITCHES.find(s => s.key === 'cards').choices, ['auto', 'on demand', 'off'])
+    setOptions({})
+    assert.equal(choiceOf('cards'), 'auto')
+    setOptions({ cards: 'on demand' })
+    assert.equal(featureOn('cards'), true)
+    setOptions({ cards: 'off' })
+    assert.equal(featureOn('cards'), false)
+    setOptions({ cards: true })
+    assert.equal(choiceOf('cards'), 'auto')
+    setOptions({ cards: 'false' })
+    assert.equal(choiceOf('cards'), 'off')
     setOptions({})
   }
   // Citations: auto cite + verify by default; Claude cites in the two auto modes, c cites selected words in every mode
@@ -134,27 +150,38 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(choiceOf('claimsMode'), 'off')
     setOptions({})
   }
-  // Minimal is a preset: its modes (PRESET) keep every lens from the look after each reply, Claude from citing, and the
-  // claims waiting for f; h acts while Heads-ups is on demand. Explainers and Heads-ups saved as the switches they were
-  // read as auto (on) and off (off)
+  // Minimal is a preset: its modes (PRESET) keep Claude citing, each citation verified when it is opened, and the
+  // explainers and heads-ups in the look after each reply; Cards on demand; Rewrite, Catch-up and the session-wide
+  // panes (Claims, Labels, Coverage) off. h on the last answer acts while Heads-ups is on demand. Explainers and
+  // Heads-ups saved as the switches they were read as auto (on) and off (off)
   {
     setOptions({})
     assert.equal(minimalOn(), false)
     assert.equal(choiceOf('explain'), 'auto')
     assert.equal(featureOn('heads'), false)
     assert.equal(atPreset({}), false)
+    assert.deepEqual(PRESET, { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false })
     setOptions({ minimal: true, ...PRESET })
     assert.equal(minimalOn(), true)
     assert.equal(atPreset(currentValues()), true)
-    assert.equal(featureOn('observer'), false)
-    assert.equal(lensesAfterReply('explain'), false)
+    assert.equal(featureOn('observer'), true)
+    assert.equal(lensesAfterReply('explain'), true)
+    assert.equal(lensesAfterReply('details'), true)
     assert.equal(lensesAfterReply('claims'), false)
-    assert.equal(claudeCites(), false)
+    assert.equal(claudeCites(), true)
+    assert.equal(choiceOf('citations'), 'auto cite')
     assert.equal(featureOn('cite'), true)
     assert.equal(featureOn('explain'), true)
-    assert.equal(featureOn('heads'), true)
+    assert.equal(featureOn('details'), true)
+    assert.equal(featureOn('heads'), false)
     assert.equal(featureOn('cards'), true)
-    // h is Heads-ups' on demand, Minimal or not
+    assert.equal(choiceOf('cards'), 'on demand')
+    for (const k of ['claims', 'labels', 'coverage', 'squeezeAnswers', 'catchUp']) assert.equal(featureOn(k), false, k)
+    // the modes Minimal set from 0.10.4 to 0.10.7 are not its modes now
+    setOptions({ minimal: true, ...OLD_PRESET })
+    assert.equal(atPreset(currentValues()), false)
+    assert.equal(atPreset(currentValues(), OLD_PRESET), true)
+    // h on the last answer is Heads-ups' on demand, Minimal or not
     setOptions({ details: 'on demand' })
     assert.equal(featureOn('heads'), true)
     assert.equal(lensesAfterReply('details'), false)

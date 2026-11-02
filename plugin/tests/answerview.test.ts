@@ -6,7 +6,7 @@ import { expect, mock } from 'claude-code/testing'
 import { checkSpans, restoredKeys, type Span } from '../core/answerview'
 import { ownKeys } from '../hooks/keys'
 import { marksIn } from '../marks/message.js'
-import { messageEl } from '../marks/view'
+import { citeTint, messageEl, rowScope } from '../marks/view'
 import { test } from './kit'
 import { promptStub } from './stubs'
 
@@ -72,6 +72,61 @@ test('each passage of a reply drawn here has a margin that asks a side thread ab
   // with no passages, the rows draw as before: Claude Code's ● and no press
   const plain = messageEl(ELS, { text, marks: marksIn(text), looks: [{ n: 1, status: 'verified' }], key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined })
   expect(all(plain).some(n => n.type === 'Button' && /ask about/.test(n.props.label))).toBe(false)
+})
+
+test('a plain reply (Minimal) draws its marks as its plain words at rest; each row is a hover group that shows its marks faintly in their colors; a click opens one; the one the tray shows stands as in any reply', () => {
+  const text = 'Two runs [failed](#) on the p95 check.\n\nThe cache key changed, so [every run](#) fetched again.'
+  const at = (w: string) => text.indexOf(w)
+  const TEAL_FILL = { backgroundColor: '#1e4d47', hoverBg: '#2b7068' }
+  const ORANGE_FILL = { backgroundColor: '#5c3a17', hoverBg: '#80521f' }
+  const spans = [
+    { start: at('cache key'), end: at('cache key') + 9, look: TEAL_FILL, label: 'explain cache key', onPress: () => opened.push('explainer') },
+    { start: at('fetched again'), end: at('fetched again') + 13, look: ORANGE_FILL, label: 'heads up fetched again', onPress: () => opened.push('heads-up') },
+  ]
+  const opened: Any[] = []
+  const looks = [{ n: 1, status: 'deferred' as const }, { n: 2, status: 'failed' as const }]
+  const draw = (o: Any = {}) => messageEl(ELS, { text, marks: marksIn(text), looks, key: 'k', cols: 100, first: true, spin: '⠋', spans, onMark: k => opened.push(k), plain: true, ...o })
+  const drawn = draw()
+  // at rest: the words alone, no sign after a citation, nothing underlined, filled or red
+  expect(textOf(drawn)).toContain('Two runs failed on the p95 check.')
+  expect(textOf(drawn)).toContain('The cache key changed, so every run fetched again.')
+  expect(textOf(drawn)).not.toMatch(/[?×]/)
+  const texts = all(drawn).filter(n => n.type === 'Text')
+  for (const t of texts) {
+    expect(t.props.underline).toBeUndefined()
+    expect(t.props.backgroundColor).toBeUndefined()
+    expect(t.props.color).toBeUndefined()
+  }
+  // each row of blocks is a hover group: its Box joins it, so the pointer anywhere over the row lights its marks
+  const row = (k: number) => all(drawn).find(n => n.type === 'Box' && n.props.key === `k-b${k}`)!
+  expect(row(0).props.hover).toEqual({ scope: rowScope('k', 0) })
+  expect(row(1).props.hover).toEqual({ scope: rowScope('k', 1) })
+  expect(rowScope('k', 0)).not.toBe(rowScope('k', 1))
+  // under the pointer, in the row's group: a citation underlined, with no fill (citations underline, comments
+  // highlight), a failed one red; an explainer on its teal, a heads-up on its orange
+  const hoverOf = (w: string) => texts.find(t => textOf(t) === w)!.props.hover
+  expect(hoverOf('failed')).toEqual({ scope: rowScope('k', 0), underline: true })
+  expect(hoverOf('every run')).toEqual({ scope: rowScope('k', 1), underline: true, color: 'error' })
+  expect(hoverOf('cache key')).toEqual({ scope: rowScope('k', 1), backgroundColor: TEAL_FILL.backgroundColor })
+  expect(hoverOf('fetched again')).toEqual({ scope: rowScope('k', 1), backgroundColor: ORANGE_FILL.backgroundColor })
+  // each mark is a press in its row's group, with no inverse under the pointer, which opens it as at any time
+  const press = (label: string) => all(drawn).find(n => n.type === 'Button' && String(n.props.label).startsWith(label))!
+  expect(press('citation 2:').props.hover).toEqual({ scope: rowScope('k', 1), inverse: false })
+  press('citation 2:').props.onPress()
+  press('explain cache key').props.onPress()
+  press('heads up fetched again').props.onPress()
+  expect(opened).toEqual([1, 'explainer', 'heads-up'])
+  // the citation the tray shows stands bold on its tint, its sign after it; the explainer the tray shows on its fill
+  const open = draw({ focus: 0, spans: [{ ...spans[0], open: true }, spans[1]] })
+  const shown = all(open).filter(n => n.type === 'Text')
+  expect(shown.find(t => textOf(t) === 'failed')!.props).toMatchObject({ bold: true, underline: true, backgroundColor: citeTint('deferred') })
+  expect(textOf(open)).toContain('failed ?')
+  expect(shown.find(t => textOf(t) === 'cache key')!.props.backgroundColor).toBe(TEAL_FILL.backgroundColor)
+  expect(shown.find(t => textOf(t) === 'fetched again')!.props.backgroundColor).toBeUndefined()
+  // not plain: every mark at rest as before
+  const before = all(draw({ plain: false })).filter(n => n.type === 'Text')
+  expect(before.find(t => textOf(t) === 'failed')!.props.underline).toBe(true)
+  expect(before.find(t => textOf(t) === 'cache key')!.props.backgroundColor).toBe(TEAL_FILL.backgroundColor)
 })
 
 test('a key at an empty prompt reads no state once the plugin has read it: its hook has a few milliseconds of its own time', async ($, on) => {
@@ -195,7 +250,7 @@ test('w at an empty prompt is taken only while the bar names it: before any answ
 })
 
 test("the features' letters are thimble's own, so no card takes them", () => {
-  expect(restoredKeys()).toEqual(['s', 'b', 'e', 'h', 'c', 'w', 't'])
+  expect(restoredKeys()).toEqual(['s', 'b', 'e', 'h', 'c', 'w', 't', 'a'])
   for (const k of restoredKeys()) expect(ownKeys()).toContain(k)
 })
 

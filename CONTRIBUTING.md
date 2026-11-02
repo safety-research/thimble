@@ -55,7 +55,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 
 | What | Where |
 |---|---|
-| the manifest: name, the switches (Minimal, Citations (its modes), Cards, Rewrite, Catch-up, Comments (Explainers, Heads-ups, with their modes), Claims (its modes), Labels, Coverage; the old fields they replaced, and defaultsAt, stay, hidden); no version, since a release names its version by its tag: `scripts/install.sh` writes it in the copy Claude Code installs (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit, or `unknown` in a folder with no git) | `plugin/.claude-plugin/plugin.json` |
+| the manifest: name, the switches (Minimal, Citations (its modes), Cards (its modes), Rewrite, Catch-up, Comments (Explainers, Heads-ups, with their modes), Claims (its modes), Labels, Coverage; the old fields they replaced, and defaultsAt, stay, hidden); no version, since a release names its version by its tag: `scripts/install.sh` writes it in the copy Claude Code installs (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit, or `unknown` in a folder with no git) | `plugin/.claude-plugin/plugin.json` |
 | the `thimble` command (`label`, `coverage`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, the command hook that lets Claude read thimble's temp folder without a dialog (`temp_allow.py`), which files Claude read (for coverage), a `thimble` command in Claude Code's Bash sandbox run outside it (`handoff.ts`, with `engine/kernel/handoff.py`), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
@@ -105,6 +105,7 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 | observer | `prompts/observer.md`, `prompts/observer-turn.md` | `observer/observer.ts` | the prompt of the look after each answer: its frame, then the messages to read and what thimble already gave |
 | lenses | `prompts/lens-explain.md`, `prompts/lens-heads.md`, `prompts/lens-claims.md` | `observer/observer.ts` | the sections of the look's prompt, one per switch that is on |
 | explainer on demand | `prompts/explain-expand.md` | `explain/expand.ts` | one model call when the person asks what words of an answer mean |
+| heads-up on demand | `prompts/heads-expand.md` | `explain/expand.ts` | one model call when the person asks for a heads-up on words of an answer |
 | squeeze | `prompts/squeeze.md` | `squeeze/term.ts` | one model call per change of an answer's chips |
 | side thread | `prompts/thread.md` | `threads/thread.ts` | the prompt of the fork that answers a side thread |
 

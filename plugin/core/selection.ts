@@ -1,7 +1,8 @@
-// selection.ts: the words the analyst selected with the mouse that e (explain/seam.ts) and c (marks/cite.ts) act on:
-// words of Claude's answers only. Claude Code answers the last selection ($.ui.selection, fullscreen layout only) until
-// the person selects again, dismisses it, or sends their next prompt, wherever it was made; so a selection in thimble's
-// pane (a setting's name) or the prompt is none of theirs, and one the pane held is dropped when the pane closes.
+// selection.ts: the words the analyst selected with the mouse that c (marks/cite.ts), e and h (explain/seam.ts) and a
+// (threads/seam.ts) act on: words of Claude's answers only. Claude Code answers the last selection ($.ui.selection,
+// fullscreen layout only) until the person selects again, dismisses it, or sends their next prompt, wherever it was
+// made; so a selection in thimble's pane (a setting's name) or the prompt is none of theirs, and one the pane held is
+// dropped when the pane closes.
 //
 // A line of the selection is an answer's when its words stand in the words of one of Claude's text rows, compared word
 // by word (runs of letters and digits: a table's borders, a list's bullet, a link's brackets and the signs after a
@@ -29,8 +30,12 @@
 //   selectionNow($), selectionKey(sel)   Claude Code's selection as it answers it, and what tells one selection from
 //                        another ('' for none)
 //   dropSelection($)     the pane closes: a selection outside the transcript (the pane's) is dropped
-//   selectionUsed($, by, sel), usedBy($, by, sel)   e or c took this selection, so the bar stops naming that key
-//                        for it until words are selected anew
+//   selectionUsed($, by, sel), usedBy($, by, sel)   c, e, h or a took this selection, so the bar stops naming that
+//                        key for it until words are selected anew
+//   selectionWaits($, by, raw), waitsNow($, by)   whether words of the answers stand selected that a key has not taken
+//                        yet: worked out, and kept for the selection; a key's hook reads what was kept while the
+//                        selection is the same
+//   pickedWords(text)    the words of a selection a key acts on: one line, at most PICK_MAX characters
 //   shownWords(row, raw, text)   the words a row of Claude's draws now in place of the ones it holds (`raw`;
 //                        marks/register.ts), kept in memory
 //   controlWords(at, words, o) the words of thimble's own controls drawn now `at` the bar, a card's header, the chips
@@ -39,19 +44,22 @@
 //   titleWords(card, row, title)   the title a card draws now in a row of the transcript, a press that asks about the
 //                        card (none once the card leaves the screen), kept in memory
 //
-// state: selectionDone, the selection dropped and the ones e and c took, by row and words: kept across the plugin's
-// loads, since a change in the settings loads it again while the same selection stands
+// state: selectionDone, the selection dropped and the ones c, e, h and a took, by row and words: kept across the
+// plugin's loads, since a change in the settings loads it again while the same selection stands
 import type { EngineInterface } from 'claude-code'
 
+import { termOf } from '../explain/place.mjs'
 import { rewritesIn, withAsked, withCorrections, withoutLinks } from '../marks/message.js'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageOf, textRows } from './answers'
 
 type Engine = EngineInterface
 export type Sel = { text: string; requestId?: string }
+/** The keys that act on the selected words: c, e, h and a. */
+export type By = 'cite' | 'explain' | 'heads' | 'ask'
 
 const DONE = { plugin: 'thimble', key: 'selectionDone' } as const
-type Done = { dropped?: string; explain?: string; cite?: string }
+type Done = { dropped?: string } & { [by in By]?: string }
 const selKey = (sel: Sel) => `${sel.requestId ?? ''}\n${sel.text}`
 
 /** What tells a selection from another: its row and its words; '' for none. */
@@ -220,10 +228,51 @@ export async function dropSelection($: Engine): Promise<void> {
   if (sel?.text && !sel.requestId) await noteDone($, 'dropped', sel)
 }
 
-export async function selectionUsed($: Engine, by: 'explain' | 'cite', sel: Sel | undefined): Promise<void> {
-  if (sel) await noteDone($, by, sel)
+export async function selectionUsed($: Engine, by: By, sel: Sel | undefined): Promise<void> {
+  if (!sel) return
+  await noteDone($, by, sel)
+  if (waitKept.words === selKey(sel)) waitKept = { ...waitKept, by: { ...waitKept.by, [by]: false } }
 }
 
-export async function usedBy($: Engine, by: 'explain' | 'cite', sel: Sel | undefined): Promise<boolean> {
+export async function usedBy($: Engine, by: By, sel: Sel | undefined): Promise<boolean> {
   return !!sel && (await doneNow($))[by] === selKey(sel)
+}
+
+/** The most of a selection a key acts on: as long a term as an explainer or a heads-up can stand on (explain/place.mjs
+ *  anchorTerm). */
+const PICK_MAX = 120
+
+/** The words of a selection a key acts on: on one line, without the space and quotes around them, at most PICK_MAX
+ *  characters, cut after a whole word (`cut`). */
+export function pickedWords(text: string): { words: string; cut: boolean } {
+  const quotes = /^[\s"“”'‘’`]+|[\s"“”'‘’`]+$/g
+  const all = termOf(String(text ?? '')).replace(/\s+/g, ' ').replace(quotes, '')
+  if (all.length <= PICK_MAX) return { words: all, cut: false }
+  const head = all.slice(0, PICK_MAX + 1)
+  const at = head.lastIndexOf(' ')
+  return { words: (at > PICK_MAX / 2 ? head.slice(0, at) : head.slice(0, PICK_MAX)).replace(quotes, '').replace(/[,;:]$/, ''), cut: true }
+}
+
+// whether words wait for each key, as last worked out for the selection then (`sel`, its key; `words`, the answers'
+// words it holds): the bar works it out as it draws, the selection's watch as one is made (explain/seam.ts), and a
+// key's hook, which has a few milliseconds of its own time, reads it while the selection is the same, since working it
+// out reads the answers' words (as marks/cite.ts keeps c's)
+let waitKept: { sel: string; words: string; by: { [by in By]?: boolean } } = { sel: '', words: '', by: {} }
+
+/** Whether words of Claude's answers stand selected (`raw`, the selection as read: selectionNow) that `by` has not
+ *  taken yet (Claude Code answers the last selection until the person selects again or sends their next prompt, so
+ *  once a key took it, the bar stops naming that key for it): worked out, and kept for the selection. */
+export async function selectionWaits($: Engine, by: By, raw: Sel | undefined): Promise<boolean> {
+  const sel = await answerSelectionOf($, raw)
+  const waits = !!pickedWords(sel?.text ?? '').words && !(await usedBy($, by, sel))
+  const key = selectionKey(raw)
+  waitKept = { sel: key, words: sel ? selKey(sel) : '', by: { ...(waitKept.sel === key ? waitKept.by : {}), [by]: waits } }
+  return waits
+}
+
+/** selectionWaits for a key's hook: one read of the selection, and what was kept for it while it is the same. */
+export async function waitsNow($: Engine, by: By): Promise<boolean> {
+  const raw = await selectionNow($)
+  const kept = waitKept.sel === selectionKey(raw) ? waitKept.by[by] : undefined
+  return kept ?? selectionWaits($, by, raw)
 }

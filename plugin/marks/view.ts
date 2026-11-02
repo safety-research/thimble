@@ -45,6 +45,13 @@
 // Where side threads can be asked about its passages (`passages`), each row of blocks is a passage (a heading's, its
 // whole section), and its margin cell asks about it (core/askcell.js): a purple ? while the pointer is over the row, a
 // purple ↳ once a thread was asked about it.
+//
+// A plain reply (`plain`, while Minimal is on: marks/register.ts) draws its marks and spans as its plain words at rest,
+// with no sign after a citation: each row of blocks is one hover group (rowScope), and the pointer anywhere over the
+// row shows its marks in their colors: a citation underlined (a failed one red), an explainer on its teal and a heads-up
+// on its orange (their fills at rest elsewhere). A click opens one as
+// at any time, and the mark the tray shows stands in its look, its sign after it, as in any reply. Only Claude Code's
+// fullscreen layout reports the pointer; elsewhere the marks show only as the tray opens each (] and [).
 import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
@@ -55,8 +62,8 @@ import { blocks, cardRef, inline, marksWithin, runsText, tableOf, withoutCardLin
 type Any = any
 type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; span?: number; tag?: string }
 type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean; tint?: string; hoverBg?: string }
-/** Words a feature draws as a press of its own (core/answerview.ts Span). */
-export type ViewSpan = { start: number; end: number; look: SpanLook; label: string; onPress?: () => unknown }
+/** Words a feature draws as a press of its own (core/answerview.ts Span); `open`: the tray shows it. */
+export type ViewSpan = { start: number; end: number; look: SpanLook; label: string; onPress?: () => unknown; open?: boolean }
 type Mark = { start: number; end: number; words: string }
 
 export type MarkStatus = 'pending' | 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed' | 'unchecked'
@@ -96,7 +103,12 @@ export type MessageOpts = {
    *  and the margin cell of each row, 4 wide, draws one ▎ per row the row takes, its gap above it too. Nothing is
    *  placed absolutely, so the rule ends where the block ends at any width */
   rule?: string
+  /** the marks and spans show only while the pointer is over their row, faintly (a plain reply: the header) */
+  plain?: boolean
 }
+
+/** The options a row of blocks is laid out with: in a plain reply, `row` names the row's hover group (rowScope). */
+type RowOpts = MessageOpts & { row?: string }
 
 /** A passage of a reply: its words, and a few of them that name it. */
 export type Passage = { text: string; label: string }
@@ -184,9 +196,9 @@ function narrowRuns(runs: Run[], shown: string): Run[] {
 }
 
 /** Each mark's runs as its status draws them: a correction's words in place of the marked ones (a narrowing's part of
- *  them), and the glyph after a mark that is checked or failed as a run of the mark's own; after any other mark, a
- *  `gap` run as wide, which the lines are cut with and which is not drawn (lineEl), so the glyph's coming and going
- *  moves no word to another line. */
+ *  them), and the glyph after a mark that is checked or failed as a run of the mark's own; after any other mark, and
+ *  after each but the one the tray shows in a plain reply, a `gap` run as wide, which the lines are cut with and which
+ *  is not drawn (lineEl), so the glyph's coming and going moves no word to another line. */
 function withLooks(runs: Run[], o: MessageOpts): Run[] {
   const out: Run[] = []
   for (let k = 0; k < runs.length; k++) {
@@ -205,9 +217,10 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     else out.push(...own)
     // a quiet citation shows no sign, so it holds no room for one
     if (look?.quiet) { k = e; continue }
-    if (look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
-    else if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
-    else if (look?.status === 'deferred') out.push({ s: ' ?', mark: r.mark, tag: 'wait' })
+    const signed = !o.plain || o.focus === r.mark
+    if (signed && look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
+    else if (signed && look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
+    else if (signed && look?.status === 'deferred') out.push({ s: ' ?', mark: r.mark, tag: 'wait' })
     else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
     k = e
   }
@@ -233,16 +246,27 @@ export function spanScope(replyKey: string, k: number): string {
   return citeScope(`${replyKey}:s${k}`).replace(/^cite-/, 'span-')
 }
 
+/** A hover group's name for a row of a reply's blocks (`<reply key>:r<index>`), as citeScope names a citation's: in a
+ *  plain reply, the row's marks show while the pointer is over any of it. */
+export function rowScope(replyKey: string, k: number): string {
+  return citeScope(`${replyKey}:r${k}`).replace(/^cite-/, 'row-')
+}
+
 /** A span's run as a press of the feature's, drawn in the span's look. A span split into runs (inline code, bold, the
  *  lines it wraps to) is a press per run, every one in the span's hover group, so the pointer over any piece lights the
  *  whole span with its `hoverBg` and underlines it (no inverse: Claude Code draws a plain Button inverse under the
- *  pointer). */
-function spanEl(els: Any, o: MessageOpts, r: Run, key: string) {
+ *  pointer). In a plain reply, but the one the tray shows, each run is in its row's group, which puts the span's fill
+ *  behind it. */
+function spanEl(els: Any, o: RowOpts, r: Run, key: string) {
   const sp = o.spans?.[r.span as number]
   const { tint: _tint, hoverBg, ...look } = sp?.look ?? {}
-  const scope = spanScope(o.key, r.span as number)
-  const hover = { scope, ...(hoverBg ? { backgroundColor: hoverBg } : {}), ...(sp?.onPress ? { underline: true } : {}) }
-  const p: Any = { children: r.s, ...look, hover }
+  // in a plain reply, its words read as the reply's at rest, its fill behind them while the pointer is over its row
+  const plain = !!o.row && !sp?.open
+  const scope = plain ? o.row! : spanScope(o.key, r.span as number)
+  const hover = plain
+    ? { scope, ...(look.backgroundColor ? { backgroundColor: look.backgroundColor } : {}) }
+    : { scope, ...(hoverBg ? { backgroundColor: hoverBg } : {}), ...(sp?.onPress ? { underline: true } : {}) }
+  const p: Any = { children: r.s, ...(plain ? {} : look), hover }
   if (r.b) p.bold = true
   if (r.it) p.italic = true
   if (r.code && !p.color) p.color = 'permission'
@@ -251,7 +275,7 @@ function spanEl(els: Any, o: MessageOpts, r: Run, key: string) {
 }
 
 /** A mark's run as a press that opens its evidence, drawn by its status. */
-function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
+function markEl(els: Any, o: RowOpts, r: Run, key: string) {
   const look: MarkLook = o.looks[r.mark as number] ?? { n: (r.mark as number) + 1, status: 'pending' }
   const p: Any = { children: r.s }
   if (r.b) p.bold = true
@@ -272,6 +296,17 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   // citation's other words keep its press
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
+  const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
+  // in a plain reply (but the one the tray shows, or the span on its words it shows), its words read as the reply's at
+  // rest; while the pointer is over its row, underlined (on the fill of a span on its words, if any), a failed one red:
+  // citations underline and comments highlight. Its press is the span's, else the citation's, as at any time
+  if (o.row && o.focus !== r.mark && !sp?.open) {
+    const q: Any = { children: r.s, hover: { scope: o.row, underline: true, ...(bg ? { backgroundColor: bg } : {}), ...(look.status === 'failed' ? { color: 'error' } : {}) } }
+    if (r.b) q.bold = true
+    if (r.it) q.italic = true
+    const span = sp?.onPress ? sp : null
+    return els.Button({ key, plain: true, label: span ? String(span.label || r.s).slice(0, 120) : label, hover: { scope: o.row, inverse: false }, children: [els.Text(q)], onPress: () => (span ? span.onPress!() : o.onMark(r.mark as number)) })
+  }
   if (bg) p.backgroundColor = bg
   // the one the tray shows: bold, and its tint kept, so the open one is easy to find
   if (o.focus === r.mark) { p.bold = true; if (!r.tag) p.backgroundColor = tint.backgroundColor }
@@ -280,7 +315,6 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
     const hover = { scope, inverse: false, underline: true, ...(sp.look.hoverBg ? { backgroundColor: sp.look.hoverBg } : {}) }
     return els.Button({ key, plain: true, label: String(sp.label || r.s).slice(0, 120), hover, children: [els.Text(p)], onPress: () => sp.onPress!() })
   }
-  const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   // no inverse under the pointer (Claude Code inverts a plain Button): the tint shows the hover
   const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false, ...(look.quiet ? { underline: true } : {}) }
   return els.Button({ key, plain: true, label, hover, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
@@ -289,14 +323,14 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
 /** One laid-out line: its runs, each mark a press. A line with marks is a row of its words and presses, cut at its end
  *  when the column narrows before the next drawing arrives (a piece of words wrapping in its own narrow column would
  *  break the text into columns). */
-function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] = []) {
+function lineEl(els: Any, o: RowOpts, runs: Run[], key: string, lead: Any[] = []) {
   const kids: Any[] = [...lead]
   drawnRuns(runs).forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : r.span !== undefined ? spanEl(els, o, r, `${key}-s${r.span}-${j}`) : runText(els, r, 'truncate-end', !!o.dim)))
   return els.Box({ key, flexDirection: 'row', children: kids })
 }
 
 /** A block that holds marks, as lines laid out here. */
-function blockLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): Any[] {
+function blockLines(els: Any, o: RowOpts, b: Any, key: string, w: number): Any[] {
   if (b.type === 'table') return tableLines(els, o, b, key, w)
   const runs = withLooks(inline(o.text, b.from, b.to, o.marks, o.spans ?? []), o)
   if (b.type === 'heading') runs.forEach(r => { r.b = true })
@@ -314,7 +348,7 @@ function blockLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
  *  draw whole is a list of its rows instead, each row a block of `header: cell` lines (a blank line between rows): the
  *  header bold, the cell's words wrapped beside it, each mark a press as in a paragraph. A header wider than half the
  *  column stands on a line of its own, its cell under it, indented. */
-function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): Any[] {
+function tableLines(els: Any, o: RowOpts, b: Any, key: string, w: number): Any[] {
   const rows: Run[][][] = tableOf(o.text, b, o.marks, o.spans ?? []).map((cells: Run[][]) => cells.map(c => withLooks(c, o)))
   const n = Math.max(...rows.map(r => r.length))
   const widths = Array.from({ length: n }, (_, c) => Math.max(1, ...rows.map(r => textWidth(runsText(r[c] || [])))))
@@ -385,8 +419,9 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     const words = bs[i].type === 'heading' ? sectionOf(o.text, bs, i) : o.text.slice(bs[i].start, bs[j].end)
     return { text: words, label: passageLabel(words) }
   }
-  // the reply's ● (or its lead) stands beside its first words: a card placed before them draws beside none
-  const push = (content: Any[], gap: boolean, p: Passage, card = false) => {
+  // the reply's ● (or its lead) stands beside its first words: a card placed before them draws beside none. `scope`:
+  // the row's hover group in a plain reply, which the pointer anywhere over the row lights
+  const push = (content: Any[], gap: boolean, p: Passage, card = false, scope?: string) => {
     const key = `${o.key}-b${k++}`
     const wait = card && hasWords
     const lead = dot && !wait && o.lead
@@ -403,7 +438,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
       const n = Math.max(1, treeRows(body, w))
       const ruled = Box({ width: 4, flexShrink: 0, children: [Text({ color: o.rule, children: Array.from({ length: n }, () => '▎').join('\n') })] })
       rows.push(Box({ key, flexDirection: 'row', children: [ruled, body] }))
-    } else rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+    } else rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, ...(scope ? { hover: { scope } } : {}), children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     if (!wait) dot = false
   }
   // a block laid out here: one that holds marks, and every item of a list one of whose items holds marks, so a nested
@@ -435,7 +470,8 @@ export function messageEl(els: Any, o: MessageOpts): Any {
       continue
     }
     if (laidOut(i)) {
-      push(blockLines(els, o, b, `${o.key}-l${i}`, w), b.gap && i > 0, passageOf(i, i))
+      const row: RowOpts = o.plain ? { ...o, row: rowScope(o.key, k) } : o
+      push(blockLines(els, row, b, `${o.key}-l${i}`, w), b.gap && i > 0, passageOf(i, i), false, row.row)
       i++
       continue
     }

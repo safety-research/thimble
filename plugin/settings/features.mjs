@@ -11,7 +11,7 @@
 import { ALIASES, EFFORTS, modelById, modelNamed, modelOf, shownName } from '../core/models.js'
 
 /** What Minimal does, as the settings pane says it under its row. */
-const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.'
+const MINIMAL_SAYS = 'Plain answers: citations, explainers and heads-ups show only while the pointer is over their paragraph, and Claude draws cards only when you ask. Rewrite, Catch-up, Claims, Labels and Coverage are off.'
 
 /** Words in a list: `a, b or c`. */
 const listed = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(', ')} or ${ws.at(-1)}` : ws.join(''))
@@ -65,9 +65,13 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'cards', title: 'Cards', group: 'Answers', default: true,
-    does: 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.',
-    says: { on: 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.', off: 'No cards.' },
+    key: 'cards', title: 'Cards', group: 'Answers', default: 'auto', choices: ['auto', 'on demand', 'off'],
+    does: 'auto: Claude draws charts and tables as cards in its answers. on demand: Claude draws a card only when you ask for one. Press v to visualize the last answer. off: no cards.',
+    says: {
+      'auto': 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.',
+      'on demand': 'Claude draws a card only when you ask for one. Press v to visualize the last answer.',
+      'off': 'No cards.',
+    },
   },
   {
     key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
@@ -140,9 +144,10 @@ export const RETIRED = {
  *  the first session saves the new one (term.ts). */
 export const RENAMED = {
   citations: { 'auto cite + check': 'auto cite + verify' },
-  // a switch until 0.10.4, now modes: on is auto, off is off
+  // a switch until 0.10.4 (Cards until 0.10.8), now modes: on is auto, off is off
   explain: { true: 'auto', false: 'off' },
   details: { true: 'auto', false: 'off' },
+  cards: { true: 'auto', false: 'off' },
   // the 0.10.6 test branch saved a model by its alias (haiku); now by its name with the version (Haiku 5.5)
   checkerModel: Object.fromEntries(ALIASES.map(a => [a, shownName(a)])),
 }
@@ -227,16 +232,23 @@ export function valueIn(values, key) {
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
 
-/** Minimal: the modes it sets, so nothing runs after a reply and each of these waits to be asked. Turning it on saves
- *  them (settings/term.ts), and the rows show them; a row changed away from them turns it off. */
-export const PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
+/** Minimal: the modes it sets. Its answers are plain: Claude still cites, each citation verified when it is opened
+ *  (auto cite), and the look after each answer still writes explainers and heads-ups, but they show only for the
+ *  paragraph under the pointer (marks/register.ts, view.ts `plain`); Claude draws a card only when asked; Rewrite,
+ *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts),
+ *  and the rows show them; a row changed away from them turns it off. */
+export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false }
 
-/** Whether `values` hold Minimal's modes. */
-export const atPreset = values => Object.entries(PRESET).every(([k, v]) => valueIn(values, k) === v)
+/** The modes Minimal set from 0.10.4 to 0.10.7: rows that still hold them stand for it, and the first session sets its
+ *  modes now (settings/term.ts settleMinimal). */
+export const OLD_PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
+
+/** Whether `values` hold a preset's modes: Minimal's, or `preset`. */
+export const atPreset = (values, preset = PRESET) => Object.entries(preset).every(([k, v]) => valueIn(values, k) === v)
 
 /** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
- *  its mode is `off`), as Minimal leaves it. The settings pane asks it with the values Claude Code holds now; featureOn
- *  is it with the plugin's options. */
+ *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the
+ *  plugin's options. */
 export function switchesFrom(values) {
   return key => {
     // c on selected words, a citation the analyst asks for, works in every mode of Citations but off

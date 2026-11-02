@@ -10,7 +10,7 @@ import { registerAnswers, resetAnswers } from '../core/answers'
 import { registerTurn } from '../core/turn'
 import { headsBar, headsKey } from '../explain/seam'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
-import { setOptions } from '../settings/features.mjs'
+import { PRESET, setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
@@ -126,8 +126,21 @@ test('with every feature it serves off, no look runs; one lens off has no sectio
   setOptions({})
 })
 
-test('with Explainers, Heads-ups and Claims on demand (as Minimal sets them), no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
-  setOptions({ minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' })
+test('with Minimal on, the look after each reply reads the answer with the explain and heads lenses, not the claims', async () => {
+  setOptions({ minimal: true, ...PRESET })
+  try {
+    const s = setup([READ])
+    await answered(s, { id: 't1', prompt: 'Why did the build fail?', rows: ['The cache key changed, so every run fetched again.'] })
+    expect(s.forks.length).toBe(1)
+    expect(s.forks[0]).toContain('OBSERVER\nPROMPT lens-explain\n\nPROMPT lens-heads')
+    expect(s.forks[0]).not.toContain('PROMPT lens-claims')
+  } finally {
+    setOptions({})
+  }
+})
+
+test('with Explainers, Heads-ups and Claims on demand, no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
+  setOptions({ explain: 'on demand', details: 'on demand', claimsMode: 'on demand' })
   try {
     const s = setup([{ isAnswered: true, text: '{"heads": null}', usage: { input_tokens: 10, output_tokens: 5 } }])
     s.$.ui = { invalidate: () => undefined }

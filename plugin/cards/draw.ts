@@ -6,7 +6,8 @@
 //
 //   frame         the card's frame: its title (a click asks about the card) and, at its right, `a ask · p artifact`
 //                 (the question names the item selected, when one is; a letter only where its key reaches the card:
-//                 none while what holds the keys takes it, core/answerview.ts heldKeys), the Client (a click on an
+//                 none while what holds the keys takes it, core/answerview.ts heldKeys, nor a while it asks about the
+//                 selected words, selectionAsks), the Client (a click on an
 //                 item selects it as its key does; on other words, asks about them: client.tsx, runner.mjs pick; a
 //                 drawing taller than CARD_ROWS + 1 shows CARD_ROWS rows and `+N rows` under them, a click on which
 //                 opens the rest), a failure; left of it, the
@@ -40,7 +41,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
-import { cardAsk, cardHidden, heldKeys, textView, underCard } from '../core/answerview'
+import { cardAsk, cardHidden, heldKeys, selectionAsks, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords, titleWords } from '../core/selection'
 import { cut } from '../core/text.js'
@@ -419,10 +420,12 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // at the title's right, in thimble's color, its header's keys: ask (a side thread about the card, whose question
   // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
   // alone, each while its key reaches the card: what holds the keys before the card's header takes a while the tray is
-  // open (a ask in its header) or stands on a card (a ask on the bar), and every key while a click gave the squeeze
-  // chips the keyboard, so each key shows once, where it acts. Every card's words are clicks
+  // open (a ask in its header) or stands on a card (a ask on the bar), and while words are selected (a ask on the bar,
+  // about them), and every key while a click gave the squeeze chips the keyboard, so each key shows once, where it
+  // acts. Every card's words are clicks
   const owner = (await headOwner($))?.id === meta.id
   const held = owner ? await heldKeys($, ['a', 'p']) : new Set<string>()
+  if (owner && (await selectionAsks($))) held.add('a')
   const lettered = (key: string) => owner && !held.has('*') && !held.has(key)
   const word = (key: string, words: string) => [...(lettered(key) ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
   // their words, which a click on one leaves selected: no answer's words while the card is on screen

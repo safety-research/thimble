@@ -73,24 +73,25 @@ async function pickedNow($: Engine, rows?: Switch[]): Promise<string> {
   return shown.some(s => s.key === under) ? under! : shown[0]!.key
 }
 
-/** Set a choice: on and off are a switch's true and false. */
-async function choose($: Engine, s: Switch, c: string): Promise<void> {
+/** Set a choice: on and off are a switch's true and false. Whether it was taken (a refusal is a toast). */
+async function choose($: Engine, s: Switch, c: string): Promise<boolean> {
   const said = await settingsAction($, { do: 'set', key: s.key, value: s.choices ? c : c === 'on' })
   if (typeof said === 'string' && said) $.ui.toast(said)
+  return !(typeof said === 'string' && said)
 }
 
-/** A click on a choice: its row is picked and the ring lands on the choice now set, as ← → leave it; a click does not
- *  move the ring by itself, which stayed on the row picked before and drew there as a second choice set. */
+/** A click on a choice: its row is picked and the ring lands on the choice chosen, as ← → leave it (Minimal's is set
+ *  last, after the rows it sets: settings/term.ts), or on the one set when it was refused; a click does not move the
+ *  ring by itself, which stayed on the row picked before and drew there as a second choice set. */
 async function chooseHere($: Engine, s: Switch, c: string): Promise<void> {
-  await choose($, s, c)
-  await pick($, s)
+  await pick($, s, (await choose($, s, c)) ? c : undefined)
 }
 
-/** Pick a row, and land the ring on its choice set. */
-async function pick($: Engine, s: Switch): Promise<void> {
+/** Pick a row, and land the ring on `c`, else its choice set. */
+async function pick($: Engine, s: Switch, c?: string): Promise<void> {
   await $.state.set(PICKED, s.key)
   const v = (await heldValues($))[s.key]
-  await $.ui.focus({ requestId: PANE_ID, key: choiceKey(s, shownOf(s, v)) } as Any).catch(() => undefined)
+  await $.ui.focus({ requestId: PANE_ID, key: choiceKey(s, c ?? shownOf(s, v)) } as Any).catch(() => undefined)
   $.ui.invalidate('ui.render')
 }
 

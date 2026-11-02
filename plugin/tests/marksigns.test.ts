@@ -4,6 +4,9 @@
 // On a resumed session whose replies' citations are kept as their check left them. All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
+
+import { rowScope } from '../marks/view'
+import { PRESET } from '../settings/features.mjs'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -138,4 +141,32 @@ test('a narrowed citation keeps its words and has no sign; its tray says correct
   const band = textOf(await $.ui.render(above))
   expect(band).toContain('✓ corrected')
   expect(band).toContain('narrowed; was 15 of 40')
+})
+
+test("with Minimal on, a reply's citations read as its plain words, with no sign, until the pointer is over their paragraph; a press on one opens the tray, and the one it shows stands with its sign", { options: { minimal: true, ...PRESET } }, async ($, on) => {
+  await resumed($, on, [
+    { n: 1, row: 'row-t1', words: '15 of 40', ...at('15 of 40'), sentence: TEXT, status: 'verified', shown: '15 of 40', reason: 'Counted.' },
+    { n: 2, row: 'row-t1', words: 'p95 check', ...at('p95 check'), sentence: TEXT, status: 'deferred', shown: 'p95 check' },
+  ])
+  const drawn = await $.ui.render(answer)
+  expect(textOf(drawn)).toContain('Of the runs, 15 of 40 failed, most on the p95 check.')
+  expect(signAfter(drawn, 2).sign).toBe('')
+  const textNode = (d: Any, w: string) => all(d).find(x => x.type === 'Text' && textOf(x) === w)
+  const words = (d: Any, w: string) => textNode(d, w)?.props ?? {}
+  for (const w of ['15 of 40', 'p95 check']) {
+    expect(words(drawn, w).underline).toBeUndefined()
+    // the paragraph's hover group shows it: underlined, with no fill
+    const n = textNode(drawn, w)
+    expect(n?.hover ?? n?.props?.hover).toMatchObject({ scope: rowScope('mk-row-t1', 0), underline: true })
+  }
+  // a press on one opens the tray on it, which shows it as in any mode: bold on its tint, its ? after it
+  const cite = all(drawn).find(x => x.type === 'Button' && String(x.props?.label).startsWith('citation 2:'))
+  const ui = await $.ui.mount(answer)
+  await ui.press({ key: cite.props.key })
+  await ui.unmount()
+  expect(textOf(await $.ui.render(above))).toContain('p95 check')
+  const open = await $.ui.render(answer)
+  expect(words(open, 'p95 check')).toMatchObject({ bold: true, underline: true })
+  expect(signAfter(open, 2).sign).toBe('?')
+  expect(words(open, '15 of 40').underline).toBeUndefined()
 })

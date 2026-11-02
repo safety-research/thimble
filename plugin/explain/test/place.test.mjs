@@ -85,6 +85,12 @@ test('words the analyst asked about over or across explainers are one mark, whic
   assert.equal(markHolding(text, placed, 'the heads gateway'), null)
   assert.equal(markHolding(text, placed, 'relays before'), null)
   assert.equal(markHolding(text, placed, 'Requests go'), null)
+  // a heads-up the analyst asked for over or across a look's heads-up is one mark, the newest asked one, and the look's
+  // under it draws nothing, not even the rest of its words beside it
+  const asked = { ...look, ah1: { id: 'ah1', kind: 'heads', term: 'before the heads', asked: true } }
+  assert.deepEqual(placeGlosses(text, { items: asked, order: ['g1', 'h1', 'ah1'] }).map(p => [p.id, at(text, p)]), [['g1', 'relays'], ['ah1', 'before the heads']])
+  const again = { ...asked, ah2: { id: 'ah2', kind: 'heads', term: 'the heads gateway', asked: true } }
+  assert.deepEqual(placeGlosses(text, { items: again, order: ['g1', 'h1', 'ah1', 'ah2'] }).map(p => [p.id, at(text, p)]), [['g1', 'relays'], ['ah2', 'the heads gateway']])
 })
 
 test('an explainer and a heads-up never share words: the one already there keeps them, and a new one of the other kind yields', () => {

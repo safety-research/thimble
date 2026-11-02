@@ -7,6 +7,9 @@
 //   THREADS_KEYS                       its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   threadsKey($, key, until)          t: the thread list in the side pane (a taker as hooks/keys.ts takes it)
 //   threadsBar($, on, preview)         its items at the bar's right (`t 2 threads`)
+//   askKey($, key, until), askBar      a at an empty prompt, `a ask` at the bar's left (blue), while words of an answer
+//                                      are selected (core/selection.ts; fullscreen layout only): a side thread about
+//                                      them, as the tray's a opens one about a mark (askSelection)
 //   drawThreadsPane($, e, kind, args, els)   the side pane of kind `threads` (the list) or `thread` (one thread: what
 //                                      it is about, its turns, its input)
 //   threadPaneParts($, e, args, els)   one thread's pane in two parts: what it is about with its turns, and the key row
@@ -48,7 +51,14 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { howTo, hintUsed } from '../bar/hints'
+import { hintLine } from '../bar/notice'
+import { fullscreenNow } from '../cards/draw'
+import { messageOf } from '../core/answers'
 import type { MarkRef } from '../core/answerview'
+import { passageLabel } from '../core/askcell.js'
+import { answerSelection, pickedWords, selectionNow, selectionUsed, selectionWaits, waitsNow } from '../core/selection'
+import { rowHolding } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { askHere, drawThreads, ringMoved, ringReleased, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadAnchor as anchorOf, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadQuestion as question, threadsBright } from './thread'
@@ -58,7 +68,11 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export const THREADS_KEYS = ['t']
+export const THREADS_KEYS = ['t', 'a']
+
+/** The color of `a ask`, the key that asks a side thread about the selected words: Claude Code's blue (the theme key of
+ *  its IDE's), beside the purple, teal and orange of c, e and h. */
+const ASK_COLOR = 'ide'
 
 /** What a thread is about, as the feature that opens it names it: in words (`about`, as the list and main read it),
  *  and the thing itself: a mark of a row, a card, or a pane of thimble's with its arguments (a claim of the claims
@@ -78,6 +92,44 @@ export async function threadsKey($: Engine, key: string, _until: number): Promis
   await restoreThreads($)
   if (!threadCount()) return null
   return { later: () => listThreads($, { fromKey: true }) }
+}
+
+/** a, or a click on `a ask`: a side thread about the words the analyst last selected with the mouse, all of them, on
+ *  the answer they lie in (else the newest answer that holds them), as a passage of it: the side pane opens on it with
+ *  its input taking the keys, as the tray's a opens one about a mark. The same words again open the same thread.
+ *  `byKey`: a at the prompt, which opens no pane in a narrow terminal; the line then says to click `a ask`. */
+export async function askSelection($: Engine, byKey = false): Promise<void> {
+  const sel = await answerSelection($)
+  await selectionUsed($, 'ask', sel)
+  const text = String(sel?.text ?? '').replace(/\s+/g, ' ').trim()
+  const { words } = pickedWords(text)
+  if (!words) {
+    if (fullscreenNow() === false) hintLine($, 'selecting a passage needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).', 'ask')
+    else await howTo($, 'ask', 'select a passage in an answer and press a to ask about it.', 'ask')
+    return
+  }
+  const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
+  const row = own ?? (await rowHolding($, words))
+  if (!row) { await howTo($, 'ask', 'ask Claude something, then select a passage in its answer and press a to ask about it.', 'ask'); return }
+  await hintUsed($, 'ask')
+  await openThreadOn($, { about: passageLabel(text), passage: { row, text: text.slice(0, 4000) } }, byKey ? { key: 'a ask' } : {})
+}
+
+/** a at an empty prompt while words wait to be asked about (core/selection.ts waitsNow): after the word window (an a
+ *  that starts a word is typed), a side thread about them. With none selected, a goes on to a card's header
+ *  (cards/head.ts), else it is typed. */
+export async function askKey($: Engine, key: string, _until: number): Promise<Take | null> {
+  if (key !== 'a' || !(await waitsNow($, 'ask'))) return null
+  return { later: () => askSelection($, true) }
+}
+
+/** `a ask` at the bar's left, in blue, while words are selected that a has not asked about yet; a click does what a
+ *  does. The settings' preview shows it, as it would show with words selected. */
+export async function askBar($: Engine, _on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  const item = { id: 'ask', key: 'a', words: 'ask', color: ASK_COLOR }
+  if (preview) return [item]
+  if (!(await selectionWaits($, 'ask', await selectionNow($)))) return []
+  return [{ ...item, press: () => askSelection($) }]
 }
 
 /** `t 2 threads` at the bar's right, while the session has threads: a click lists them, as t does. */
