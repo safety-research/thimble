@@ -57,9 +57,10 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
      --find-wif`, which lists the files it can use, by path only. Run `thimble-browser --setup --how wif --wif-file
      <path>`. Never print the file.
 
-   Each command ends with a check that Claude answers. When the check fails, tell the user what failed and the next
-   step, and run the command again after the fix. Say that the page asks at its first start only when the user
-   chooses to skip this step.
+   Each command ends with a check that Claude answers. Its line says the login that Claude Code uses (with the Claude
+   Code sign-in), and names the `ANTHROPIC_*` variables set in the shell, which the workbench never uses. When the check
+   fails, tell the user what failed and the next step, and run the command again after the fix. Say that the page asks
+   at its first start only when the user chooses to skip this step.
 5. While something the user chose does not work yet, the install is not done: the script's notes, its sandbox line
    and the checks of steps 3 and 4 say what. Fix it, with the user's yes, or give them the step that only they can
    take. Once it works, end with a short reply on how to use what was installed, and when to use each:
