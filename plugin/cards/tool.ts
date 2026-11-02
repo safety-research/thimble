@@ -338,7 +338,7 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
     const temps = [await tempDir($), await claudeTempDir($).catch(() => '')].filter(Boolean)
     const got = await readyData($, {
       input, kind, last: lastData, file: named ? { path: named.path!, name: String(input.data) } : null,
-      cwd: await $.session.cwd(), roots: await roots($, temps), refused: path => refusedRead($, path),
+      cwd: await $.session.cwd(), start: await startDir($), roots: await roots($, temps), refused: path => refusedRead($, path),
     })
     if (got.bad) return refuse(got.bad)
     ready = got.data

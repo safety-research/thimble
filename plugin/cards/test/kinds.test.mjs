@@ -288,6 +288,15 @@ test("an example draws each record under its file and place, the passage bold in
   assert.ok(code > 0)
   assert.deepEqual(r.lines.slice(code + 1, code + 4).map(l => l.slice(0, 6)), ['  40  ', '  41  ', '  42  '])
   assert.deepEqual(lines[code + 3].filter(x => x.bold).map(x => x.text), ['prev.status != "completed"'])
+  // the lines of one field (a command's output in a JSON record) show without numbers, since they are no lines of the
+  // file; a passage past the card's edge brings its line's start near it, with …
+  const output = 'running the checks\n==> [3/5] Unit tests\n62 passed in 0.09s\nALL CHECKS PASSED ✓'
+  const field = await load({ kind: 'example', answer: 'The last check passed.', refs: [passage({ ref: 't.jsonl#L3958', path: 't.jsonl', line: 3958, field: 'message.content', text: output }, 'ALL CHECKS PASSED ✓')] }, 60)
+  assert.deepEqual(field.lines.slice(3), ['  running the checks', '  ==> [3/5] Unit tests', '  62 passed in 0.09s', '  ALL CHECKS PASSED ✓'])
+  const long = 'x'.repeat(120) + ' the quote ' + 'y'.repeat(40)
+  const far = await load({ kind: 'example', answer: 'Far.', refs: [passage({ ref: 'a.log#L1-L2', path: 'a.log', line: 1, end: 2, text: `first line\n${long}` }, 'the quote')] }, 60)
+  assert.match(far.lines[4], /^ {2}2 {2}…x+ the quote y+…?$/)
+  assert.ok(runs(far.tree)[4].some(x => x.bold && x.text === 'the quote'))
   // records that take more than a page: a page of them, j for the next
   const many = await load({ ...SAMPLES.example, refs: Array.from({ length: 6 }, () => SAMPLES.example.refs[0]) }, 50)
   assert.equal(many.keys, 'jk')

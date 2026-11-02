@@ -46,7 +46,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string>; stat?: (path: string) => Any; prompts?: Record<string, string> } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string>; stat?: (path: string) => Any; prompts?: Record<string, string>; cwd?: string } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -60,7 +60,8 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   on('config.list', () => ({ value: [{ key: 'theme', value: look.theme, isLocked: false }] }) as never)
   const laidOut = () => ({ t: 'Text', p: {}, c: [`${sorted ? 'sorted' : 'rows'} at ${runnerWidth}${look.runner === 'light' ? ' light' : ''}`] })
   on('session.id', () => ({ value: 's-cards' }))
-  on('session.cwd', () => ({ value: DATA }))
+  // the shell's working folder, which a `cd` moves (`cwd`), and the folder the session started in
+  on('session.cwd', () => ({ value: o.cwd ?? DATA }))
   on('session.root', () => ({ value: DATA }))
   on('session.usage', () => ({ value: {} }))
   on('session.messages', () => ({ value: [] }))
@@ -1302,4 +1303,18 @@ test("an example's record in a file too large to read whole is read a line range
   ])
   expect(w.runs.some(a => a[0] === 'sed' && a[2] === '3,3p;3q')).toBe(true)
   expect(w.runs.find(a => a[0] === 'grep')!.slice(5, 7)).toEqual(['--', 'bought a domain for $12.99'])
+})
+
+test("an example's record is found from the folder the session started in when the shell has moved on, and a range a quote names is read as the one line that holds it, by its field", async ($, on) => {
+  const chat = [
+    JSON.stringify({ speaker: 'o3', content: 'Nothing to report today.' }),
+    JSON.stringify({ speaker: 'o3', request_id: 'req_011CeNhasyfVVd4eNcwv3Anm', content: 'I bought a domain for $12.99 with the credits.' }),
+  ].join('\n')
+  const w = world(on, { cwd: `${DATA}/build`, stat: p => (p === `${DATA}/chat.jsonl` ? { kind: 'file', size: chat.length, mtimeMs: 0, isLink: false, realPath: p } : undefined) })
+  w.files[`${DATA}/chat.jsonl`] = chat
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const r = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_kr', title: 'Did an agent spend money?', kind: 'example', refs: [{ ref: 'chat.jsonl#L1-L2', quote: 'bought a domain for $12.99' }] } as never)) as Any).result)
+  expect(r).toContain('It is an example of 1 record')
+  // its id is no context for the analyst
+  expect(versionOf(w, 1).data.refs).toEqual([{ ref: 'chat.jsonl#L1-L2', path: 'chat.jsonl', line: 2, field: 'content', text: 'I bought a domain for $12.99 with the credits.', spans: [[2, 28]], context: 'speaker o3' }])
 })

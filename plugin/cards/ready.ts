@@ -81,8 +81,10 @@ export type ReadyIn = {
   last: Any | null
   /** the data file the call names, its real path and its name as the call gave it */
   file: { path: string; name: string } | null
-  /** the session's working folder, which a record's path is read from */
+  /** the folders a record's relative path is read from, in order: the shell's working folder (a `cd` moves it), then
+   *  the folder the session started in */
   cwd: string
+  start: string
   /** the folders a record may be in, each a real path */
   roots: string[]
   /** why the person's permission rules refuse reading a file, or null */
@@ -222,7 +224,9 @@ function stringsOf(v: unknown, path = '', out: { path: string; text: string }[] 
 
 /** A line of a JSON record's other short fields, which say whose and when it is: names and times first. */
 function contextOf(rec: Record<string, unknown>, skip: string): string {
-  const short = Object.entries(rec).filter(([k, v]) => k !== skip && (typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.trim() && v.length <= 40 && !/^[0-9a-f-]{20,}$/i.test(v))))
+  // an id or a hash (a run of 16 or more letters and digits, mixed, with no space) says nothing to the analyst
+  const opaque = (v: string) => /^[0-9a-f-]{20,}$/i.test(v) || (v.length >= 16 && !/\s/.test(v) && /\d/.test(v) && /[a-z]/i.test(v) && !/^\d{4}-\d{2}-\d{2}/.test(v))
+  const short = Object.entries(rec).filter(([k, v]) => k !== skip && (typeof v === 'number' || typeof v === 'boolean' || (typeof v === 'string' && v.trim() && v.length <= 40 && !opaque(v))))
   const rank = (k: string) => (/time|date|_at$|^at$|^ts$/i.test(k) ? 0 : /name|role|speaker|author|user|agent|sender|from|model|type|kind|status/i.test(k) ? 1 : 2)
   return short.sort((a, b) => rank(a[0]) - rank(b[0])).slice(0, 4).map(([k, v]) => `${k} ${String(v).replace(/\s+/g, ' ')}`).join(' · ')
 }
@@ -265,6 +269,14 @@ type Passage = { ref: string; path: string; line: number; end?: number; text: st
 /** One record's passage: where `quote` stands in the lines `from` to `to` (a JSON record's field, or the lines' text),
  *  or the record whole when no quote is given; null when the lines do not hold the quote. */
 function passageIn(ref: string, path: string, from: number, lines: string[], quote: string): Passage | null {
+  // a range that a quote names: the line that holds it, as a record of its own (a JSON line by its field), unless the
+  // quote runs across lines
+  if (quote && lines.length > 1) {
+    for (const [i, l] of lines.entries()) {
+      const one = passageIn(ref, path, from + i, [l], quote)
+      if (one) return one
+    }
+  }
   const end = from + lines.length - 1
   const one = lines.length === 1 ? lines[0]! : null
   let rec: unknown = null
@@ -300,8 +312,11 @@ async function readRecords($: Engine, refs: Any[], o: ReadyIn): Promise<{ refs?:
     const ref = String(typeof item === 'string' ? item : item.ref).trim()
     const quote = typeof item === 'string' ? '' : String(item.quote ?? '').trim()
     const place = placeOf(ref)
-    const full = place.path.startsWith('/') ? place.path : `${o.cwd}/${place.path}`
-    const st = await $.fs.stat(full, { resolve: true }).catch(() => null)
+    let st: { kind: string; size: number; realPath?: string } | null = null
+    for (const dir of place.path.startsWith('/') ? [''] : [o.cwd, o.start]) {
+      st = await $.fs.stat(dir ? `${dir}/${place.path}` : place.path, { resolve: true }).catch(() => null)
+      if (st?.kind === 'file') break
+    }
     if (!st || st.kind !== 'file' || !st.realPath) return { bad: `${name}: there is no file at ${place.path}` }
     const real = st.realPath
     if (!o.roots.some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${name}: ${place.path} is outside this folder and the temp folder ($TMPDIR)` }

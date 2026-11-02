@@ -1100,7 +1100,9 @@ export function readyKinds(api) {
       if (r.context) lines.push([gray(cut(`  ${flat(r.context)}`, W))])
       const text = String(r.text ?? '')
       const spans = list(r.spans).filter(s => isArray(s) && s[1] > s[0]).sort((a, b) => a[0] - b[0])
-      lines.push(...(text.includes('\n') ? numbered(text, r.line || 1, spans, W) : flowWords(wordsOf(around(text, spans, (W - 2) * 5)), W, '  ', '  ', 5)))
+      // lines of a file with their numbers; the lines of one field (a command's output in a JSON record) without them,
+      // since they are no lines of the file
+      lines.push(...(text.includes('\n') ? numbered(text, r.field ? null : r.line || 1, spans, W) : flowWords(wordsOf(around(text, spans, (W - 2) * 5)), W, '  ', '  ', 5)))
       return { lines }
     })
     return { before: [], blocks, unit: 'records' }
@@ -1160,23 +1162,28 @@ export function readyKinds(api) {
     return words.map(w => w.map(({ k, ...r }) => r))
   }
 
-  /** Lines of a file with their numbers, at most 8, from the line before the first passage on: the passages bold, the
-   *  rest gray; lines in the default look when no passage is marked. */
+  /** Lines of a record, at most 8, from the line before the first passage on, each with its number in the file when
+   *  `first` gives the first one's: the passages bold, the rest gray; lines in the default look when no passage is
+   *  marked. A line whose passage stands past the card's edge starts a little before it, with … */
   function numbered(text, first, spans, W) {
     const rows = []
     let at = 0
     for (const t of text.split('\n')) { rows.push({ t, a: at, b: at + t.length }); at += t.length + 1 }
     const start = spans.length && rows.length > 8 ? Math.max(0, rows.findIndex(r => r.b >= spans[0][0]) - 1) : 0
     const shown = rows.slice(start, start + 8)
-    const nw = String(first + start + shown.length - 1).length
+    const nw = first === null ? 0 : String(first + start + shown.length - 1).length
+    const lead = first === null ? 2 : nw + 4
     const out = shown.map((r, i) => {
-      const runs = [gray(`  ${padStart(String(first + start + i), nw)}  `)]
-      const t = r.t.replace(/\t/g, '    ')
-      if (!spans.length) runs.push(t)
+      const runs = [gray(first === null ? '  ' : `  ${padStart(String(first + start + i), nw)}  `)]
+      const mine = spans.filter(s => s[1] > r.a && s[0] < r.b)
+      // the line from a little before its first passage, when that passage would stand past the card's edge
+      const from = mine.length && mine[0][0] - r.a > W - lead - 12 ? Math.max(r.a, mine[0][0] - 12) : r.a
+      if (from > r.a) runs.push(gray('…'))
+      if (!spans.length) runs.push(text.slice(from, r.b).replace(/\t/g, '    '))
       else {
-        let pos = r.a
-        for (const s of spans) {
-          const a = Math.max(s[0], r.a)
+        let pos = from
+        for (const s of mine) {
+          const a = Math.max(s[0], pos)
           const b = Math.min(s[1], r.b)
           if (b <= a) continue
           if (a > pos) runs.push(gray(text.slice(pos, a)))
@@ -1185,7 +1192,7 @@ export function readyKinds(api) {
         }
         if (pos < r.b) runs.push(gray(text.slice(pos, r.b)))
       }
-      return fitLine(runs, W)
+      return fitLine(runs.map(x => (typeof x === 'string' ? x.replace(/\t/g, '    ') : { ...x, text: x.text.replace(/\t/g, '    ') })), W)
     })
     if (rows.length > start + 8) out.push([gray(`  +${rows.length - start - 8} more lines`)])
     return out
