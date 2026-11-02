@@ -2603,10 +2603,9 @@ def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str
 
 
 def _fresh_home(k: _Kernel) -> None:
-    """The kernel's HOME for srt (k.home), empty, with the TMPDIR kernel_wrap.srt_env puts in it: what a cell left there
-    does not reach the next start."""
+    """The kernel's HOME for srt (k.home), empty: what a cell left there does not reach the next start."""
     shutil.rmtree(k.home, ignore_errors=True)
-    (k.home / "tmp").mkdir(parents=True, exist_ok=True)
+    k.home.mkdir(parents=True, exist_ok=True)
 
 
 LEASE_TRIES = 20  # _hold_lease: 50 ms apart, so a watchdog's own probe (lock, unlock) never costs the server the lease
@@ -2676,6 +2675,9 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
         env.pop("JPY_PARENT_PID", None)  # no parent poller: the kernel outlives this server
         env.setdefault("MATPLOTLIBRC", str(MATPLOTLIBRC))  # thimble's figure defaults, unless the environment names its own
         env.update(kernel_wrap.NO_SIDE_WRITES)  # nothing a cell runs writes a cache beside a corpus file it reads
+        # the workspace's temp folder (config.temp_dir), main's Bash's TMPDIR too, by the path the wrappers bind
+        tmp = await asyncio.to_thread(config.temp_dir, workspace)
+        env["TMPDIR"] = str(tmp.resolve())
         if wrap == config.KERNEL_WRAP_SRT:
             env = kernel_wrap.srt_env(env, home=k.home)
             await asyncio.to_thread(_fresh_home, k)

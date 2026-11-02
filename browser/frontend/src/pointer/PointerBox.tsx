@@ -1,7 +1,8 @@
 // The pointer box: the overlay beside the highlight, never over it, holding only the input ("Ask about this…"); its
 // accessible label names what was picked. A span of text or a tab takes the box under its last line (or over it); a
 // region takes it to its right, or its left when that stays inside the region's pane, else under; a region inside a
-// cell takes it beside the cell. ↵ sends, esc closes; the caller releases the highlight on close.
+// cell takes it beside the cell. Wherever it goes, it keeps clear of the controls that float over a pane (FLOATING),
+// such as the board's bars. ↵ sends, esc closes; the caller releases the highlight on close.
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { TextArea } from '../components/Field'
@@ -10,7 +11,7 @@ import type { Box } from './anchors'
 export const BOX_WIDTH = 236
 /** What the box's field says while it is empty; its accessible label names what was picked. */
 export const ASK_PLACEHOLDER = 'Ask about this…'
-/** The box stays this far (px) inside the viewport. */
+/** The box stays this far (px) inside the viewport, and this far from a control that floats over a pane. */
 export const MARGIN = 8
 /** The gap (px) between a line of text or a tab and the box under it. */
 export const GAP_UNDER = 8
@@ -18,6 +19,8 @@ export const GAP_UNDER = 8
 export const GAP_BESIDE = 12
 /** How far (px) below a tall region's top the box beside it starts. */
 export const BESIDE_DROP = 8
+/** The controls that float over a pane, such as the board's bars (canvas/Controls.tsx), which the box keeps clear of. */
+export const FLOATING = '[data-floating]'
 
 /** Where the box goes: under the rect (a span of text, a tab), else beside it, or beside the cell (`host`) it sits in;
  * `pane` is the box of the scrolling pane the element sits in, whose left edge a box at its left keeps inside. */
@@ -29,25 +32,44 @@ export interface Place {
 
 /**
  * Where the box goes, in viewport coordinates, for a box `w` by `h` in a viewport `vw` by `vh` (see the module comment
- * for the placement order). Always MARGIN inside the viewport. `under` is true when the box went under or over the
- * rect rather than beside it.
+ * for the placement order). Always MARGIN inside the viewport, and MARGIN clear of the boxes `clear` (the floating
+ * controls on screen, floatingBoxes): a place that would cover one moves down past it, or up when that is nearer or
+ * there is no room below, and a side with no clear place is passed over. `under` is true when the box went under or
+ * over the rect rather than beside it.
  */
-export function boxPlace(rect: Box, w: number, h: number, vw: number, vh: number, place: Place): { left: number; top: number; under: boolean } {
+export function boxPlace(rect: Box, w: number, h: number, vw: number, vh: number, place: Place, clear: readonly Box[] = []): { left: number; top: number; under: boolean } {
   const clampY = (y: number) => Math.max(MARGIN, Math.min(y, vh - h - MARGIN))
+  // the top nearest `top` at which the box, its left at `left`, keeps MARGIN clear of each box of `avoid` and stays
+  // inside the viewport; null when there is none
+  const clearTop = (left: number, top: number, avoid: readonly Box[]): number | null => {
+    const covers = (t: number) => avoid.some((c) => left < c.right + MARGIN && left + w > c.left - MARGIN && t < c.bottom + MARGIN && t + h > c.top - MARGIN)
+    if (!covers(top)) return top
+    const tops = avoid.flatMap((c) => [c.bottom + MARGIN, c.top - MARGIN - h]).filter((t) => t >= MARGIN && t + h <= vh - MARGIN && !covers(t))
+    return tops.length ? tops.reduce((a, b) => (Math.abs(b - top) < Math.abs(a - top) ? b : a)) : null
+  }
   const under = () => {
     const left = Math.max(MARGIN, Math.min(rect.left, vw - w - MARGIN))
     const below = rect.bottom + GAP_UNDER
-    return { left, top: below + h <= vh - MARGIN ? below : Math.max(MARGIN, rect.top - GAP_UNDER - h), under: true }
+    const top = below + h <= vh - MARGIN ? below : Math.max(MARGIN, rect.top - GAP_UNDER - h)
+    // moved past a control, it stays off the rect too
+    return { left, top: (clear.length ? clearTop(left, top, [...clear, rect]) : null) ?? top, under: true }
   }
   if (place.under) return under()
   const host = place.host ?? null
   const side = host ?? rect
   const top = host ? Math.max(host.top, Math.min(rect.top, host.bottom - h)) : rect.top + Math.max(0, Math.min(rect.bottom - rect.top - h, BESIDE_DROP))
   const right = side.right + GAP_BESIDE
-  if (right + w <= vw - MARGIN) return { left: right, top: clampY(top), under: false }
+  const atRight = right + w <= vw - MARGIN ? clearTop(right, clampY(top), clear) : null
+  if (atRight != null) return { left: right, top: atRight, under: false }
   const left = side.left - GAP_BESIDE - w
-  if (left >= Math.max(MARGIN, place.pane?.left ?? 0)) return { left, top: clampY(top), under: false }
+  const atLeft = left >= Math.max(MARGIN, place.pane?.left ?? 0) ? clearTop(left, clampY(top), clear) : null
+  if (atLeft != null) return { left, top: atLeft, under: false }
   return under()
+}
+
+/** The boxes of the floating controls on screen (FLOATING); one that is not drawn (on another tab) has none. */
+export function floatingBoxes(): Box[] {
+  return Array.from(document.querySelectorAll(FLOATING), (c) => c.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
 }
 
 /** The cell an element sits in (its nearest enclosing cell anchor other than itself), whose side the box takes. */
@@ -113,7 +135,7 @@ export function PointerBox({ rect, place, focus, hidden = false, label, draft, o
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose, hidden])
 
-  // beside the rect, never on it (boxPlace)
+  // beside the rect, never on it, nor on a control that floats over a pane (boxPlace)
   useLayoutEffect(() => {
     const el = boxEl.current
     if (!el) return
@@ -121,7 +143,7 @@ export function PointerBox({ rect, place, focus, hidden = false, label, draft, o
     const vh = window.innerHeight
     const w = Math.min(BOX_WIDTH, vw - 2 * MARGIN)
     el.style.width = `${w}px`
-    const { left, top } = boxPlace(rect, w, el.offsetHeight, vw, vh, place)
+    const { left, top } = boxPlace(rect, w, el.offsetHeight, vw, vh, place, floatingBoxes())
     el.style.left = `${left}px`
     el.style.top = `${top}px`
   }, [rect, place, boxEl, hidden])

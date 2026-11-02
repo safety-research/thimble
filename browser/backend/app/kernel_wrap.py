@@ -13,8 +13,8 @@ Both draw the same boundary:
            export merges), the registry folder (REGISTRY_DIR), the views' state (VIEWS_DIR), the workspace's local
            extension (LOCAL_DIR) and the folder of the files thimble's agents' hooks trust (TRUSTED_DIR), which it can
            read only, and the lock of subagents.json's writers (LOCK_FILES), which it can neither read nor write.
-           HOME and TMPDIR are fresh at each start: a private /tmp under bwrap, the kernel's kernels/<key>.home folder
-           under srt
+           HOME is fresh at each start: a folder on a private /tmp under bwrap, the kernel's kernels/<key>.home folder
+           under srt. TMPDIR is the workspace's temp folder (TEMP_DIR), which main's Bash has on the Messages API too
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
@@ -83,6 +83,9 @@ LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), wh
 # request a plugin start claims, or credit its call to an agent
 TRUSTED_DIR = "trusted"
 READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR, TRUSTED_DIR)
+# the workspace's temp folder (config.temp_dir): every kernel's TMPDIR, and that of main's and its thread forks' shell
+# commands on the Messages API (runtime.Spec.temp), so a card's code reads what such a command wrote in $TMPDIR
+TEMP_DIR = "tmp"
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
@@ -227,11 +230,10 @@ def _outermost(deny: Sequence[str], allow: Sequence[str]) -> list[str]:
 
 
 def srt_env(env: dict[str, str], *, home: str | Path) -> dict[str, str]:
-    """`env` for a kernel under srt: HOME `home` (a folder of the workspace, since the kernel may write nowhere else)
-    with TMPDIR inside it, and no XDG_* folders."""
+    """`env` for a kernel under srt: HOME `home` (a folder of the workspace, since the kernel may write nowhere else),
+    and no XDG_* folders."""
     out = {k: v for k, v in env.items() if k not in UNSET_ENV}
     out["HOME"] = str(home)
-    out["TMPDIR"] = str(Path(home) / "tmp")
     return out
 
 
