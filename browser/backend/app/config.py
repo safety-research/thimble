@@ -930,6 +930,15 @@ def registry_dir(name: str) -> Path:
     return private_dir(workspace_dir(name) / kernel_wrap.REGISTRY_DIR)
 
 
+def temp_dir(name: str) -> Path:
+    """The workspace's temp folder, created on demand (private_dir): the TMPDIR of every kernel and of main's and its
+    thread forks' shell commands on the Messages API (kernel_wrap.TEMP_DIR), and the temp folder the citations'
+    validator reads as the session's (marks)."""
+    from . import kernel_wrap  # noqa: PLC0415
+
+    return private_dir(workspace_dir(name) / kernel_wrap.TEMP_DIR)
+
+
 def safe_corpus_path(corpus: Path, rel: str) -> Path:
     """Resolve a corpus-relative path and refuse anything outside the corpus dir."""
     p = (corpus / rel).resolve()

@@ -433,6 +433,34 @@ async def test_the_api_key_s_bash_runs_in_its_sandbox_with_long_folder_names(tmp
     assert not (corpus / "new.txt").exists() and (ws / "w").is_file()
 
 
+@pytest.mark.parametrize("wrap", ["srt", "bwrap", "none"])
+async def test_a_card_reads_what_main_s_bash_wrote_in_its_tmpdir(wrap, on, monkeypatch):
+    """Main's Bash on the Messages API and the kernel its card runs on, in whichever wrapper, have the same TMPDIR (the
+    workspace's temp folder, config.temp_dir): a file a command writes in $TMPDIR, the card's code opens at $TMPDIR."""
+    import sys
+
+    from app import kernel_wrap, notebook, runtime_tools
+
+    if why := runtime_tools.sandbox_reason():
+        pytest.skip(why)
+    if wrap == "bwrap" and not (sys.platform.startswith("linux") and kernel_wrap.works()):
+        pytest.skip("bwrap can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    card = "import os\nprint(open(os.path.join(os.environ['TMPDIR'], 'probe.csv')).read())"
+    client = api_key(monkeypatch, [
+        call("Bash", {"command": "printf 'config,runs\\nv1,22\\n' > \"$TMPDIR/probe.csv\" && echo written"}),
+        call("add_card", {"kind": "code", "question": "What did Bash write?", "code": card}, "toolu_2"),
+        text("The card read it.")])
+    try:
+        await main_turn("Write a file in your temp folder, then read it in a card.")
+    finally:
+        await notebook.shutdown_all()
+    said = [json.dumps(b["messages"][-1]["content"]) for b in client.bodies[1:3]]
+    assert "written" in said[0], said[0]
+    assert "v1,22" in said[1] and "FileNotFoundError" not in said[1], said[1]
+    assert (config.temp_dir(CORPUS) / "probe.csv").read_text() == "config,runs\nv1,22\n"
+
+
 async def test_a_thimble_call_in_a_headless_session_runs_as_its_caller(on, monkeypatch):
     seen: dict[str, Any] = {}
     fake_sdk(monkeypatch, [], seen)

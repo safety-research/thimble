@@ -112,7 +112,8 @@ class Box:
     read_roots: list[Path]
     write_roots: list[Path]
     private: list[Path] = field(default_factory=list)
-    home: Path | None = None  # HOME and TMPDIR of its commands, inside a write root
+    home: Path | None = None  # HOME of its commands, and their TMPDIR unless `temp` names one, inside a write root
+    temp: Path | None = None  # Spec.temp: the TMPDIR of its commands when not inside `home`, inside a write root
     no_write: list[Path] = field(default_factory=list)  # never written, inside a write root or not (runtime.protected)
     corpus_edits: bool | None = None  # Spec.corpus_edits: what a refused write in the corpus tells the agent
 
@@ -392,11 +393,12 @@ async def _bash(box: Box, a: dict[str, Any]) -> Out:
         return Out("the command is empty", True)
     timeout = min(max(int(a.get("timeout") or BASH_TIMEOUT_S * 1000), 1000), BASH_TIMEOUT_MAX_S * 1000) / 1000
     home = box.home or box.write_roots[0]
-    (home / "tmp").mkdir(parents=True, exist_ok=True)
+    tmp = box.temp or home / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
     argv = kernel_wrap.srt_argv(["/bin/bash", "-c", command], node=str(srt.node()),
                                 srt_dir=srt.package(config.REPO_ROOT) or config.REPO_ROOT, rules=_rules(box))
     env = {k: v for k in ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME") if (v := os.environ.get(k))}
-    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(home / "tmp"), npm_config_cache=str(home / ".npm-cache"),
+    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(tmp), npm_config_cache=str(home / ".npm-cache"),
                **kernel_wrap.NO_SIDE_WRITES)
     proc = await asyncio.create_subprocess_exec(*argv, cwd=str(box.cwd), env=env, stdin=asyncio.subprocess.DEVNULL,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,

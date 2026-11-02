@@ -164,6 +164,10 @@ class Spec:
     write_roots: list[Path]
     private: list[Path]
     home: Path
+    # the TMPDIR of its commands on the Messages API (runtime_tools.Box) when not inside `home`: main's and its thread
+    # forks' share the workspace's temp folder with the kernels (config.temp_dir), so a card's code reads what Bash wrote
+    # in $TMPDIR. A headless Claude Code session's commands have the session's short TMPDIR (runtime_cc.short_tmp)
+    temp: Path | None = None
     fast: bool = False
     # whether the corpus is among write_roots (Settings' "Claude can edit files in this folder"): True or False for
     # main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
@@ -439,6 +443,7 @@ class Space:
 
         tmp = self.dir / "tmp" / conv.id
         tmp.mkdir(parents=True, exist_ok=True)
+        temp: Path | None = None
         reads = [self.corpus, self.ws, config.REPO_ROOT / "docs", config.REPO_ROOT / "plugin" / "viewers",
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
         if conv.kind in ("main", "fork"):
@@ -452,7 +457,8 @@ class Space:
             choice = _main_choice(self.ws)
             model = str(choice.get("model") or MAIN_MODEL)
             effort = str(choice.get("effort") or MAIN_EFFORT)
-            writes = [*([self.corpus] if edits else []), self.ws / "card-libs", tmp]
+            temp = config.temp_dir(self.c)  # their commands' TMPDIR, the kernels' too (Spec.temp)
+            writes = [*([self.corpus] if edits else []), self.ws / "card-libs", tmp, temp]
             fast = bool(choice.get("fast"))
         else:
             role = subagents.roles(self.c).get(conv.role) or {}
@@ -484,7 +490,7 @@ class Space:
             from . import fixes  # noqa: PLC0415
 
             work, more, writes = fixes.fixer_roots(int(conv.values.get("fix") or 0))
-            writes = [*writes, tmp]
+            writes, temp = [*writes, tmp], None
             reads = [*reads, *more]
             builtins = [*builtins, *(b for b in ("Edit", "Write") if b not in builtins)]
             edits = None
@@ -498,7 +504,7 @@ class Space:
         no_write = [p for p in protected(self.ws) if not any(p in w.parents for w in writes)]
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
                     thimble=names, model=model, effort=effort, cwd=cwd, workspace=self.ws,
-                    read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast,
+                    read_roots=reads, write_roots=writes, private=self.private(), home=tmp, temp=temp, fast=fast,
                     corpus_edits=edits, no_write=no_write)
 
 

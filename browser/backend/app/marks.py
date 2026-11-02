@@ -651,9 +651,7 @@ def _found_failed(res: dict[str, Any] | None) -> bool:
 
 
 def _temp_dir(c: str) -> Path:
-    p = config.workspace_dir(c) / "tmp"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return config.temp_dir(c)
 
 
 def _rules_dir(c: str) -> Path:

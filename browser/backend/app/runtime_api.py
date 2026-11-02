@@ -195,7 +195,7 @@ async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, al
     # main's tool list as it is (the cache), but no write of the corpus: a checker or proposer fork is no thread's
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
                             write_roots=[w for w in spec.write_roots if w != spec.cwd], private=spec.private,
-                            home=spec.home, no_write=spec.no_write)
+                            home=spec.home, temp=spec.temp, no_write=spec.no_write)
     client = await asyncio.to_thread(llm.client)  # the SDK's first import and the credentials take seconds
     out: list[str] = []
     texts: list[str] = []
@@ -253,7 +253,7 @@ async def turn(conv: Any, text: str) -> Any:
     messages.append({"role": "user", "content": text})
     _save(path, messages)
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
-                            write_roots=spec.write_roots, private=spec.private, home=spec.home,
+                            write_roots=spec.write_roots, private=spec.private, home=spec.home, temp=spec.temp,
                             no_write=spec.no_write, corpus_edits=spec.corpus_edits)
     reply = ""
     piece, key = 0, ""
