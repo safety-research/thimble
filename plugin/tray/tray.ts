@@ -28,8 +28,10 @@
 //               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
 //               for one whose check did not run, its check; the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
-//               card too (this module's ui.press hook, so the fork starts inside a hook). Not while Claude Code's
-//               refusal of thimble's checks stands (marks/checker.ts checksRun): the failure line says why instead
+//               card too (this module's ui.press hook, so the fork starts inside a hook). Where its check needs the
+//               person's OK (Claude Code's refusal of thimble's checks, which g answers too; a file its check could
+//               not read, where Claude Code asked nobody), x gives it first (marks/checker.ts repairOk); where nothing
+//               the person does here lets the check run, x is not offered, and the failure line or the card says why
 //   0 close     back to the mark under it, or close
 //   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
 //               are, in their look
@@ -79,7 +81,7 @@ import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, pendingGloss, pendingSpans, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
-import { checkOpened, checksRun, launchRepair, repairOf } from '../marks/checker'
+import { checkOpened, launchRepair, repairOf, repairOk } from '../marks/checker'
 import { highlighted, statusEls } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
@@ -92,7 +94,7 @@ import { openThread } from '../threads/seam'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
   indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
-  stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top, wasLine,
+  stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top, unreadLine, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -562,19 +564,21 @@ async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Pro
 /** The Button keys of `x repair`: in the citation's card, and in the bar (bar.tsx draws an item as `bar-<id>`). */
 const REPAIR_KEYS = new Set(['repair', 'bar-tray-x'])
 
-/** Whether x repairs this citation now (tray.mjs canRepair): Claude Code's answers to thimble's checks (marks/checker.ts
- *  checksRun) are read for a failed one only, since a key's hook has a few milliseconds of its own time. */
+/** Whether x repairs this citation now (tray.mjs canRepair, marks/checker.ts repairOk), read for a failed one only,
+ *  since a key's hook has a few milliseconds of its own time. */
 async function repairsNow($: Engine, m: MarkItem | null): Promise<boolean> {
-  return canRepair(m, m?.status === 'failed' && (await checksRun($)))
+  return canRepair(m, m?.status === 'failed' && !!(await repairOk($, m)))
 }
 
-/** x, or a click on `x repair`, on the citation the tray shows: a check of it again in the background
- *  (marks/checker.ts). The repair starts inside the hook that calls this; `hold` waits out a key's word window. */
-async function repair($: Engine, f: Frame, hold: { until: number; cancelled: boolean }): Promise<boolean> {
-  if (f.kind !== 'citation' || !(await repairsNow($, await itemOf($, f.row, f.n)))) return false
-  const r = await repairOf($, f.row, f.n)
-  if (r === null) return false
-  const why = typeof r === 'string' ? r : await launchRepair($, r, hold)
+/** A click on `x repair` on the citation the tray shows: the OK its check needs (marks/checker.ts repairOk), then a
+ *  check of it again in the background. The repair starts inside the hook that calls this. */
+async function repair($: Engine, f: Frame): Promise<boolean> {
+  if (f.kind !== 'citation') return false
+  const ok = await repairOk($, await itemOf($, f.row, f.n))
+  const r = ok ? await repairOf($, f.row, f.n) : null
+  if (!ok || r === null) return false
+  if (typeof r !== 'string') await ok.give()
+  const why = typeof r === 'string' ? r : await launchRepair($, r, { until: 0, cancelled: false })
   if (why) failNotice($, why, 'tray:repair')
   return true
 }
@@ -613,17 +617,24 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   if (key === '+' && cutNow?.ref === frameKey(f)) return { later: () => showAll($, f, true) }
   if (f.kind === 'citation') {
     // only the keys that act on the citation read it: a key's hook has a few milliseconds of its own time
-    if (key === 'x' && (await repairsNow($, await itemOf($, f.row, f.n)))) {
+    const ok = key === 'x' ? await repairOk($, await itemOf($, f.row, f.n)) : null
+    if (ok) {
       const r = await repairOf($, f.row, f.n)
       if (r === null) return null
       if (typeof r === 'string') return { later: async () => failNotice($, r, 'tray:repair') }
-      // the spawn is made while this key's hook runs (launchRepair's first call), and waits out the word window
-      // (marks/register.ts); a word refuses it
+      // the OK its check needs, then the spawn, made while this key's hook runs, which waits out the word window
+      // (marks/register.ts); a word takes the OK back and refuses the spawn
       const hold = { until, cancelled: false }
       const failed = (err: unknown) => failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
       return {
-        now: async () => { void launchRepair($, r, hold).then(why => { if (why) failNotice($, why, 'tray:repair') }, failed) },
-        undo: async () => { hold.cancelled = true },
+        now: async () => {
+          await ok.give()
+          void launchRepair($, r, hold).then(why => { if (why) failNotice($, why, 'tray:repair') }, failed)
+        },
+        undo: async () => {
+          hold.cancelled = true
+          await ok.undo()
+        },
       }
     }
     if (key === 'h') {
@@ -814,8 +825,9 @@ type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit; g
 /** A citation's card under its header (the status is in the header): what it says over its evidence (`top`), then its
  *  evidence in parts (Block), each under its label. A corrected one says what it was (`was 15 of 40`; a rewritten
  *  sentence or a narrowed citation says which, as the header says only corrected or repaired); a failed one why in one
- *  sentence; after a repair (x) that verified it as written, why; all dim, and under it `x repair` (repairRow) while a
- *  check can start (`runs`, marks/checker.ts checksRun). For a value code computed: the code under `code · 7 lines`,
+ *  sentence, and each file its check could not read (tray.mjs unreadLine); after a repair (x) that verified it as
+ *  written, why; all dim, and under it `x repair` (repairRow) while something the person does here lets its check run
+ *  (`runs`, marks/checker.ts repairOk). For a value code computed: the code under `code · 7 lines`,
  *  in Claude Code's colors for Python (unitEls), around the line that printed the value (tray.mjs printedAt; from its
  *  start when the code does not show which line printed it), a blank row, then under `output · 62 lines` the printed
  *  output around the line that holds it in the ruled block; printed output that is a table shows as its header over
@@ -837,6 +849,8 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
+  // a file its check could not read: what x asks for, or why no x
+  if (m.status === 'failed') for (const [k, u] of (m.unread ?? []).entries()) dim(`unread-${k}`, unreadLine(u.file))
   // a check that did not run: x starts it
   const unrun = m.status === 'failed' && m.failedBy === 'none'
   if (canRepair(m, runs)) top.push(repairRow(els, m))
@@ -1060,7 +1074,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
     await themeNow($)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
-    parts = citationParts(els, m, inner, await fileLinkEl($, els, f, m), m?.status === 'failed' && (await checksRun($)))
+    parts = citationParts(els, m, inner, await fileLinkEl($, els, f, m), await repairsNow($, m))
   } else if (f.kind === 'place') {
     title = f.id
     units = await placeBody($, els, f, inner)
@@ -1210,7 +1224,7 @@ export const registerTray: Register = on => {
     try {
       if (e.plugin !== 'thimble' || !REPAIR_KEYS.has(String(e.element))) return next(e)
       const f = top(await trayNow($)) as Frame | null
-      if (!f || !(await repair($, f, { until: 0, cancelled: false }))) return next(e)
+      if (!f || !(await repair($, f))) return next(e)
       return { element: e.element }
     } catch (err) {
       failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')

@@ -43,7 +43,7 @@ import { closePane, openPane, paneNow, scrollsOwn } from '../core/pane'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, themeNow } from '../core/theme'
-import { checkOpened, checksRun, launchRepair, repairOf } from '../marks/checker'
+import { checkOpened, launchRepair, repairOf, repairOk } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
 import { citeHeat, wordsLook, type MarkStatus } from '../marks/view'
 import { plainSentence } from '../marks/message.js'
@@ -154,7 +154,7 @@ function placeOf(m: MarkItem): { place?: string; line?: string } {
 }
 
 /** The claims' sources with their marks as they stand now: status, words shown, place, the mark's number, what it was
- *  and why (the check's reason), and its evidence. */
+ *  and why (the check's reason), the files its check could not read, and its evidence. */
 async function withMarks($: Engine, data: Any): Promise<Any> {
   const rows = new Map<string, Awaited<ReturnType<typeof rowMarks>>>()
   for (const c of data.claims) {
@@ -169,7 +169,7 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
       return {
         ...s, n: m.n, status: m.status, failedBy: m.failedBy, shown: m.shown.replace(/\*\*|`/g, ''), ...placeOf(m),
         ...(m.was ? { was: m.was.replace(/\*\*|`/g, '') } : {}), ...(m.narrowed ? { narrowed: true } : {}), ...(m.rewrite ? { was: plainSentence(m.sentence), now: plainSentence(m.rewrite), rewritten: true } : {}), ...(m.reason ? { reason: m.reason } : {}), ...(m.evidence ? { evidence: printableEvidence(m.evidence) } : {}),
-        ...(m.repair ? { repair: true } : {}),
+        ...(m.repair ? { repair: true } : {}), ...(m.unread ? { unread: m.unread } : {}),
       }
     }))
   }
@@ -233,9 +233,9 @@ const ARROW: Record<string, string> = { k: ' ↑', j: ' ↓' }
  *  repair's fork starts inside a hook (core/forks.ts). */
 export const CLAIMS_REPAIR = 'claims-repair'
 
-/** x in the Claims pane, or a click on `repair`: a check again, in the background, of the failed citation the pane
- *  shows (marks/checker.ts). Call it inside a hook: the spawn is launchRepair's first call. Answers whether the press
- *  was a repair's (a repair started, or a notice says why none did). */
+/** x in the Claims pane, or a click on `repair`: the OK its check needs (marks/checker.ts repairOk), then a check again,
+ *  in the background, of the failed citation the pane shows (marks/checker.ts). Call it inside a hook, which makes the
+ *  spawn. Answers whether the press was a repair's (a repair started, or a notice says why none did). */
 export async function repairShown($: Engine): Promise<boolean> {
   const now = await paneNow($)
   if (now?.kind !== 'claims') return false
@@ -250,10 +250,11 @@ export async function repairShown($: Engine): Promise<boolean> {
   const s = cites[at]
   // a citation not checked yet (auto cite, manual): x checks it, as opening it in the reply does
   if (a.open && checkable(s)) { await checkOpened($, s.row, s.n); return true }
-  if (!repairable(s) || !(await checksRun($))) return false
-  const r = await repairOf($, s.row, s.n)
-  if (r === null) return false
+  const ok = repairable(s) ? await repairOk($, s) : null
+  const r = ok ? await repairOf($, s.row, s.n) : null
+  if (!ok || r === null) return false
   // no word window in a pane that holds the keyboard: x is a key of the pane's, never a letter of the prompt
+  if (typeof r !== 'string') await ok.give()
   const why = typeof r === 'string' ? r : await launchRepair($, r, { until: 0, cancelled: false })
   if (why) failNotice($, why, 'claims:repair')
   // with the evidence hidden, it shows on that citation, so the person sees it checked again
@@ -394,10 +395,11 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (view.fixes) key('h', a.history ? 'hide corrections' : 'corrections', () => onClaim({ history: !a.history }))
     if (a.open && (view.cut || a.whole)) key('c', a.whole ? 'shorter' : 'all code and output', () => onClaim({ whole: !a.whole }))
     // the press is the ui.press hook's (seam.ts), which starts the repair inside a hook; while the check runs again, x
-    // says so (a second x is not typed into the prompt). No repair while Claude Code's refusal of thimble's checks
-    // stands (marks/checker.ts checksRun): the failure line says why
+    // says so (a second x is not typed into the prompt). No repair where nothing the person does here lets its check
+    // run (marks/checker.ts repairOk): the failure line, or the citation's card, says why
+    const failed = a.open ? shown : cites.find(repairable)
     if (a.open && checkable(shown)) key('x', 'check', () => undefined, CLAIMS_REPAIR)
-    else if ((a.open ? repairable(shown) : cites.some(repairable)) && (await checksRun($))) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
+    else if (repairable(failed) && (await repairOk($, failed))) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
     else if (a.open && shown?.repair && shown.status === 'checking') key('x', 'checking again', () => undefined)
   } else if (view.chosen && cs.length) {
     // a cluster chosen: k j move the current claim of its list (the ends hold), e opens it; p n the other clusters

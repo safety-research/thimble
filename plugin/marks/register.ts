@@ -14,13 +14,16 @@
 //   turn.complete    the checker's turn ended: validate, write the statuses
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
 //                    autoRepair), as x does
-//   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script
+//   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of a file that
+//                    Claude Code refused is noted as it ends (checker.ts readEnded)
 //   turn.step        the checker's requests: the model and the effort the setting Checker names
 //   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
 //                    refused when a word came (a repair thimble starts itself has no word window)
-//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g): Claude Code's
-//                    own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask mode
-//                    would refuse it (checker.ts allowsCheck)
+//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g, or x): Claude
+//                    Code's own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask
+//                    mode would refuse it (checker.ts allowsCheck)
+//   tool.check       a checker's read of a file the person let thimble's checks read (x): Claude Code's own ask
+//                    answered allow (checker.ts allowsRead)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
@@ -39,7 +42,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { AGAIN_DESCRIPTION, allowsCheck, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -50,8 +53,9 @@ type Any = any
 
 /** The spawns a key started that wait out its word window: x's repair, and a check g starts again. */
 const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
-/** Why thimble answers allow to Claude Code at tool.check on a check of its own. */
+/** Why thimble answers allow to Claude Code at tool.check on a check of its own, and on its read of a file. */
 const CHECKS_ALLOWED = "thimble's check of citations, which the person allowed this session"
+const READ_ALLOWED = "a file the person let thimble's check of citations read this session"
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
  *  words of one of the row's checked marks looks as that one does, and opens its evidence. A rewrite may word a
@@ -158,9 +162,9 @@ export const registerMarks: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // a reply's check ended (the hook under this one): the citations it failed are repaired at once, as x repairs them.
-  // A hook of its own, around endCheck's: a fork skips the hooks its spawn was made in, so the repair's end still
-  // reaches endCheck below
+  // a reply's check ended (the hook under this one): the citations it failed are repaired at once, as x repairs them
+  // (checker.ts autoRepair says which). A hook of its own, around endCheck's: a fork skips the hooks its spawn was made
+  // in, so the repair's end still reaches endCheck below
   on('turn.complete', { agentId: /./ }, async ($, e, next) => {
     const r = await next(e)
     if (forkOf(e.agentId)?.kind === 'checker') {
@@ -177,10 +181,14 @@ export const registerMarks: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // fails closed: a guard that throws before `next` refuses the checker's call in its place
+  // fails closed: a guard that throws before `next` refuses the checker's call in its place. A read Claude Code refused
+  // is noted as it ends: the file the check could not read
   on('tool.call', { agentId: /./ }, async ($, e, next) => {
     const no = denial(e)
-    return no ? { deny: no } : next(e)
+    if (no) return { deny: no }
+    const r = await next(e)
+    if (forkOf(e.agentId)?.kind === 'checker') await readEnded($, e as never, r).catch(() => undefined)
+    return r
   }).catch(($, e, next) => {
     if (next.called) return next(e)
     const no = denial(e)
@@ -216,6 +224,14 @@ export const registerMarks: Register = on => {
   on('tool.check', { tool: 'Agent' }, async ($, e, next) => {
     const v = await next(e)
     return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v
+  }).catch(($, e, next) => next(e))
+
+  // a checker's read of a file the person let thimble's checks read (x, checker.ts allowsRead): Claude Code's own ask,
+  // which don't ask mode would refuse or auto mode's classifier settle, is answered allow; a deny, and an ask a rule, a
+  // hook, a setting or another plugin made, stand
+  on('tool.check', { tool: /^(Read|Grep|Glob)$/, agentId: /./ }, async ($, e, next) => {
+    const v = await next(e)
+    return forkOf(e.agentId)?.kind === 'checker' && (await allowsRead($, e, v)) ? { ...v, decision: 'allow', reason: READ_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
   // fails safe (core/rowhook.ts): a throw here answers the drawing beneath, which the hooks around this one draw on
