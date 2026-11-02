@@ -28,9 +28,11 @@ declare module 'claude-code' {
        *  { kind: 'repair', repair } (marks/checker.ts Held) */
       checksHeld: unknown
       /** the line of Claude Code's last refusal of a check that stands for the session (auto mode's classifier gave no
-       *  verdict, don't ask mode), until a check starts: { text, notice, kind, offers? }; while it stands, x gives the OK
-       *  it offers, and is not offered where it offers none (marks/checker.ts repairOk) */
-      checksRefusing: { text: string; notice: boolean; kind: string; offers?: boolean } | null
+       *  verdict or judged the check, don't ask mode, a deny rule), until a check starts or the session is seen in
+       *  another mode than the one that refused it (`mode`, as Claude Code's hooks name it: `auto`, `dontAsk`; none for
+       *  a rule): { text, notice, kind, offers?, mode? }; while it stands, x gives the OK it offers, and is not offered
+       *  where it offers none (marks/checker.ts repairOk, modeSeen) */
+      checksRefusing: { text: string; notice: boolean; kind: string; offers?: boolean; mode?: string } | null
       /** the files the person let thimble's checks read this session, each by the tool its check was refused (x on a
        *  citation whose check could not read one, where Claude Code asked nobody): thimble answers Claude Code's own ask
        *  on a checker's read of one by that tool with allow (marks/checker.ts allowsRead) */

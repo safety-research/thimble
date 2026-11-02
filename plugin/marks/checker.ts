@@ -19,7 +19,7 @@
 //   refusalOf(deny)           what Claude Code's refusal of a check says: auto mode's classifier gave no verdict on it
 //                             and gives none on such a call this session (`unreviewed`), could not answer for now
 //                             (`unavailable`), refused it (`judged`), a mode that refuses what no rule allows refused it
-//                             (`mode`: don't ask mode), or another cause (`other`)
+//                             (`mode`: don't ask mode), a deny rule refused it (`rule`), or another cause (`other`)
 //   cannotStart(deny, o)      the line a check that Claude Code refused gives: what refused it, and for `unreviewed` and
 //                             `mode` the key that lets thimble start its checks (g, ALLOW_KEY), until the person gave that
 //                             OK, where Claude Code takes thimble's allow
@@ -30,6 +30,8 @@
 //                             session while a refusal for the session stands (`unreviewed`, `mode`) whose line offers
 //                             that OK, and each file the citation's check could not read where Claude Code asked
 //                             nobody; null where nothing the person does here lets its check run, so x is not offered
+//   modeSeen($, mode)         the session's permission mode as a classic hook gives it (marks/register.ts): a refusal
+//                             of a mode the session is no longer in stands no more, so x comes back
 //   allowsCheck($, e, o, v)   whether thimble answers allow to Claude Code's verdict `v` on a spawn (tool.check,
 //                             marks/register.ts): a checker's spawn of thimble's own, once the person gave that OK,
 //                             where Claude Code itself would ask, never where a rule, a hook, a setting or another
@@ -68,8 +70,11 @@
 // (opening a citation, x) cannot start. A line that offers the person's OK says it at each check it stops, until they
 // give it: that OK is what lets the checks run. While Claude Code's refusal stands for the session (no verdict, don't
 // ask mode; until a check starts), x on a failed citation gives that OK, as g does, and starts the repair (repairOk).
-// Where no OK lets the check start (auto mode in a remote Cowork session, or a refusal that came after the OK), x is
-// not offered, and a failed citation opened says that line again.
+// Where no OK lets the check start (auto mode in a remote Cowork session, a refusal that came after the OK, auto mode's
+// classifier that judged the check, a deny rule), x is not offered, and a failed citation opened says that line again.
+// A refusal by a mode stands until a check starts or thimble sees the session in another mode (modeSeen); Claude Code
+// raises nothing when the person changes the mode, so thimble sees it in the next hook that gives the mode: the
+// person's next prompt, or the end of main's turn.
 //
 // A check whose read of a file Claude Code refused leaves that file on each citation it fails whose check needed it
 // (readEnded, MarkItem `unread`): a check of one citation needed each file it could not read; a check of several, each
@@ -107,8 +112,8 @@
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent),
 // checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about), checksRefusing (the line
-// of a refusal that stands for the session), checksReads (the files the person let thimble's checks read, each by the
-// tool that reads it); the marks themselves are in store.ts
+// of a refusal that stands for the session, and the mode that refused it), checksReads (the files the person let
+// thimble's checks read, each by the tool that reads it); the marks themselves are in store.ts
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -335,8 +340,15 @@ export function refusingMode(deny: string): string | null {
  *  ask for one`, or a failure it calls hard). `unavailable`: it could not answer for now (busy, rate-limited, told to
  *  wait): a later check may run. `judged`: it judged the check and refused it, `reason` why. `mode`: a permission mode
  *  that refuses each call no rule allows refused it (`mode`, don't ask mode: `Claude Code is running in don't ask
- *  mode`). `other`: another cause (a deny rule, another plugin's hook), `reason` the refusal's first sentence. */
-export type Refusal = { kind: 'unreviewed' | 'unavailable' | 'judged' | 'mode' | 'other'; reason: string; mode?: string }
+ *  mode`). `rule`: a deny rule refused it (DENY_RULE), `reason` the refusal's first sentence. `other`: another cause
+ *  (another plugin's hook), `reason` the refusal's first sentence. */
+export type Refusal = { kind: 'unreviewed' | 'unavailable' | 'judged' | 'mode' | 'rule' | 'other'; reason: string; mode?: string }
+
+/** Claude Code's words where a deny rule refused a call (Claude Code 2.1.312): a rule on the whole tool (`Permission to
+ *  use Agent has been denied.`, and nothing after it), on what it is called with (`Permission to use Agent with fork
+ *  has been denied.`), and the rule named (`… has been denied by your rule …`, `Agent type 'fork' has been denied by
+ *  permission rule 'Agent(fork)' from userSettings.`). */
+const DENY_RULE = /^Permission to use \S+ has been denied\.\s*$|^Permission to use \S+ with .+ has been denied\.|\bhas been denied by (?:your rule|permission rule)\b/
 
 export function refusalOf(deny: string | undefined): Refusal {
   const said = String(deny || '')
@@ -349,6 +361,7 @@ export function refusalOf(deny: string | undefined): Refusal {
     if (/\bgave no verdict\b|\bhard failure\b/.test(said)) return { kind: 'unreviewed', reason: reasonOf(said) }
   }
   if (mode === "don't ask mode") return { kind: 'mode', mode, reason: reasonOf(said) }
+  if (DENY_RULE.test(said)) return { kind: 'rule', reason: reasonOf(said) }
   return { kind: 'other', reason: reasonOf(said || 'no reason given') }
 }
 
@@ -376,7 +389,8 @@ const outside = (mode: string) => `Outside ${mode}, thimble can check them.`
  *  until the person gave that OK (`allowed`), and where Claude Code takes thimble's allow: not in auto mode in a remote
  *  Cowork session (`cowork`). There, and after the OK, the line says what refused the check and that thimble checks
  *  outside that mode, and offers no key that could not work. A refusal by a mode is the person's mode at work, not
- *  thimble's failure, so its line is a notice. */
+ *  thimble's failure, so its line is a notice; so is one by auto mode's classifier or a deny rule, which the line
+ *  names. */
 export function cannotStart(deny: string | undefined, o: { allowed?: boolean; cowork?: boolean } = {}): Line {
   const r = refusalOf(deny)
   if (r.kind === 'unreviewed') return !o.allowed && !o.cowork ? { kind: r.kind, notice: true, offers: true, text: UNREVIEWED_LINE } : { kind: r.kind, notice: true, text: `${UNREVIEWED} ${outside('auto mode')}` }
@@ -386,6 +400,7 @@ export function cannotStart(deny: string | undefined, o: { allowed?: boolean; co
   }
   if (r.kind === 'unavailable') return { kind: r.kind, notice: true, text: `Auto mode's classifier was unavailable for thimble's check of citations${r.reason ? ` (${r.reason})` : ''}, so Claude Code refused it. Open a citation to check it.` }
   if (r.kind === 'judged') return { kind: r.kind, notice: true, text: `Auto mode's classifier refused thimble's check of citations (${reasonOf(r.reason)}), so they are not checked.` }
+  if (r.kind === 'rule') return { kind: r.kind, notice: true, text: `A permission rule refused thimble's check of citations (${r.reason}), so they are not checked.` }
   return { kind: 'other', notice: false, text: `The check of the citations could not start (${r.reason}), so they are not checked. ${OPEN_ONE}` }
 }
 
@@ -430,12 +445,21 @@ async function remoteCowork($: Engine): Promise<boolean> {
   }
 }
 
+/** The refusals that stand for the session, each kept with its line: no verdict, don't ask mode, and those no OK of
+ *  the person's answers, auto mode's classifier that judged the check and a deny rule. */
+const STANDING: Refusal['kind'][] = ['unreviewed', 'mode', 'judged', 'rule']
+/** The permission modes a refusal names (refusingMode), as Claude Code's hooks name the session's mode
+ *  (`permission_mode`). */
+const MODE_NAMES: Record<string, string> = { 'auto mode': 'auto', "don't ask mode": 'dontAsk' }
+
 /** The line Claude Code's refusal `deny` of a check gives now: with the person's OK as it stands, and where Claude Code
- *  takes thimble's allow. A refusal that stands for the session (`unreviewed`, `mode`) is kept, with its line, until a
- *  check starts (repairOk). */
+ *  takes thimble's allow. A refusal that stands for the session (STANDING) is kept, with its line and the mode that
+ *  refused it (`mode`, none for a rule), until a check starts or the session is seen in another mode (repairOk,
+ *  modeSeen). */
 async function refusedLine($: Engine, deny: string | undefined): Promise<Line> {
   const line = cannotStart(deny, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
-  if (line.kind === 'unreviewed' || line.kind === 'mode') await $.state.set(REFUSING, line as never)
+  const mode = MODE_NAMES[refusingMode(String(deny ?? '')) ?? '']
+  if (STANDING.includes(line.kind)) await $.state.set(REFUSING, (mode ? { ...line, mode } : line) as never)
   return line
 }
 
@@ -443,6 +467,16 @@ async function refusedLine($: Engine, deny: string | undefined): Promise<Line> {
 async function checkStarted($: Engine): Promise<void> {
   await failCleared($, START)
   if ((await $.state.get(REFUSING)).value) await $.state.set(REFUSING, null)
+}
+
+/** The session's permission mode as a classic hook gives it (`permission_mode`, marks/register.ts): a refusal kept for
+ *  the session by another mode no longer stands, so x comes back on a failed citation. Claude Code raises nothing when
+ *  the mode changes, so thimble sees the change at the next hook that gives the mode. A rule's refusal stands in every
+ *  mode. */
+export async function modeSeen($: Engine, mode: unknown): Promise<void> {
+  if (typeof mode !== 'string' || !mode) return
+  const line = ((await $.state.get(REFUSING)).value ?? null) as { mode?: string } | null
+  if (line?.mode && line.mode !== mode) await $.state.set(REFUSING, null)
 }
 
 /** What x gives before a failed citation's repair starts: the person's OK (`give`), which a word typed after x takes
@@ -512,18 +546,18 @@ export async function allowsCheck($: Engine, e: { input?: unknown }, origin: { p
 /** What lets a check read a file whose read Claude Code refused with the words `said` (Claude Code 2.1.312's), as x acts
  *  on it (Unread `fix`): `ok`, the person's OK, where Claude Code asked nobody (don't ask mode; auto mode's classifier
  *  gave no verdict, but in a remote Cowork session (`cowork`), where Claude Code takes no plugin's allow; no prompt it
- *  could show); `ask`, Claude Code's own ask again, where the person did not say yes to it; null where a rule, a
- *  setting or the classifier's judgment refused it. Undefined for a refusal that is no permission's (a file that is not
- *  there), and for a classifier that could not answer for now, which a later check may get past. */
+ *  could show); `ask`, Claude Code's own ask again, where the person did not say yes to it; null where a deny rule
+ *  (DENY_RULE), a setting or the classifier's judgment refused it. Undefined for a refusal that is no permission's (a
+ *  file that is not there), and for a classifier that could not answer for now, which a later check may get past. */
 export function readFix(said: string, cowork = false): Unread['fix'] | undefined {
   const r = refusalOf(said)
   if (r.kind === 'mode') return 'ok'
   if (r.kind === 'unreviewed') return cowork ? null : 'ok'
-  if (r.kind === 'judged') return null
+  if (r.kind === 'judged' || r.kind === 'rule') return null
   if (r.kind === 'unavailable') return undefined
   if (/\btool use was rejected\b/.test(said)) return 'ask'
-  if (/^Permission to use \S+ has been denied\.(?:\s|$)|\bpermission prompts are not available\b/.test(said)) return 'ok'
-  if (/^Permission to use \S+ (?:with .+ )?has been denied\b|\bare blocked \(permissions\.\w+\)/.test(said)) return null
+  if (/^Permission to use \S+ has been denied\.\s|\bpermission prompts are not available\b/.test(said)) return 'ok'
+  if (/\bare blocked \(permissions\.\w+\)/.test(said)) return null
   return undefined
 }
 
@@ -844,7 +878,8 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     if (held === hold) held = null
     if (hold.cancelled) return ''
     if (!fork.agentId) {
-      // a mode refused it: its line, as any check the person asked for says it, which g answers for this repair
+      // a mode, auto mode's classifier or a deny rule refused it: its line, as any check the person asked for says it,
+      // which g answers for this repair where it offers g
       const line = await refusedLine($, fork.deny)
       if (line.kind !== 'other') { await sayCannotStart($, line, true, { kind: 'repair', repair: r }); return '' }
       return `The repair did not start (${reasonOf(fork.deny || 'no reason given')}). Press x on the citation to try again.`

@@ -13,7 +13,10 @@
 // let its check run: while those two refusals stand, x gives the OK g gives and starts the repair; where a check could
 // not read a file, the citation's card names the file, and x gives the OK to read it where Claude Code asked nobody,
 // or starts the repair, whose read Claude Code asks about again, where it asked the person. Where nothing the person
-// does lets the check run, x is not offered. All data is made up. `claude plugin test plugin`.
+// does lets the check run (auto mode in a remote Cowork session, a refusal after the OK, auto mode's classifier that
+// judged the check, a deny rule), x is not offered, and the line says what refused it; a refusal by a mode stands until
+// the person's prompt or the end of main's turn shows the session in another mode, when x is offered again. All data is
+// made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
@@ -68,6 +71,11 @@ const WAIT = "The API told auto mode's safety classifier (claude-made-up-classif
 const JUDGED = "Permission for this action was denied by the Claude Code auto mode classifier. Reason: The fork reads the made-up vault's keys. If you have other tasks that don't depend on this action, continue working on those. "
 /** Its refusal in don't ask mode, of a call no rule allows. */
 const DONT_ASK = "Permission to use Agent has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. "
+/** Its refusals by a deny rule of the person's: on the fork's agent type, on the whole tool, and on what it is called
+ *  with. */
+const RULE = "Agent type 'fork' has been denied by permission rule 'Agent(fork)' from userSettings."
+const RULE_TOOL = 'Permission to use Agent has been denied.'
+const RULE_WITH = 'Permission to use Agent with fork has been denied.'
 /** A refusal for another cause: a made-up plugin's hook. */
 const HOOK = 'Subagent spawn denied by a plugin: lab-sync holds every new agent while it copies the workspace to the shared drive of the team. Try again in a minute.'
 /** Claude Code's refusals of a check's read of a file outside the session's folders: in don't ask mode, the person's
@@ -362,6 +370,70 @@ test("auto mode in a remote Cowork session, where Claude Code takes no plugin's 
   expect(await band($)).toEqual({ status: '× failed', x: false, line: NO_VERDICT_OUTSIDE, presses: [] })
 })
 
+for (const [what, deny, line] of [
+  ["auto mode's classifier judged the check", JUDGED, "Auto mode's classifier refused thimble's check of citations (The fork reads the made-up vault's keys), so they are not checked."],
+  ["a deny rule of the person's", RULE, "A permission rule refused thimble's check of citations (Agent type 'fork' has been denied by permission rule 'Agent(fork)' from userSettings), so they are not checked."],
+] as const) {
+  test(`${what}, which no OK of the person's answers: a citation whose check did not run offers x until Claude Code refuses the check x starts; then x is not offered, a second x is typed, and the line says what refused it, with no key; a failed citation opened later says that line again`, OPTIONS, async ($, on) => {
+    const { spawns, clock } = await session($, on, deny)
+    await reply($, clock, 't1', 'row-a1', 'aborted')
+    await openCitation($, 'row-a1', 1)
+    expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
+    expect(await pressX($, clock)).toBe('')
+    expect(spawns.length).toBe(1)
+    expect(await band($)).toEqual({ status: '× failed', x: false, line, presses: [] })
+    expect(await pressX($, clock)).toBe('x')
+    expect(spawns.length).toBe(1)
+    await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
+    await openCitation($, 'row-a1', 2)
+    expect(await band($)).toEqual({ status: '× failed', x: false, line, presses: [] })
+  })
+}
+
+/** The person's prompt as Claude Code raises it: thimble's prompt.submit, then the classic hook, which gives the
+ *  session's permission mode, `mode`. */
+async function promptIn($: Any, mode: string): Promise<void> {
+  await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
+  await $.classic.UserPromptSubmit({ prompt: 'and the mirror?', permission_mode: mode } as never)
+}
+
+test("a refusal by a mode, which no OK answers, stands while the session is in that mode: once the person's prompt, or the end of main's turn, shows another mode, x is offered on the failed citation again and starts the repair", OPTIONS, async ($, on) => {
+  on('classic.UserPromptSubmit', () => ({}) as never)
+  on('classic.Stop', () => ({}) as never)
+  // auto mode in a remote Cowork session: Claude Code refuses the check x starts, and takes no OK of the person's
+  const { spawns, clock } = await session($, on, AUTO, { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' })
+  await reply($, clock, 't1', 'row-a1', 'aborted')
+  await openCitation($, 'row-a1', 1)
+  expect(await pressX($, clock)).toBe('')
+  expect((await band($)).x).toBe(false)
+  // a prompt in auto mode: the refusal stands
+  await promptIn($, 'auto')
+  await openCitation($, 'row-a1', 2)
+  expect(await band($)).toEqual({ status: '× failed', x: false, line: NO_VERDICT_OUTSIDE, presses: [] })
+  // the person left auto mode: their next prompt shows it, and x is offered again
+  await promptIn($, 'default')
+  await openCitation($, 'row-a1', 2)
+  expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
+  expect(await pressX($, clock)).toBe('')
+  expect(spawns.length).toBe(2)
+  // in auto mode again, Claude Code refuses it again; the end of main's turn in another mode shows that mode too
+  expect((await band($)).x).toBe(false)
+  await $.classic.Stop({ stop_hook_active: false, permission_mode: 'acceptEdits' } as never)
+  expect((await band($)).x).toBe(true)
+})
+
+test("a deny rule's refusal stands in every mode: a prompt in another mode leaves x away", OPTIONS, async ($, on) => {
+  on('classic.UserPromptSubmit', () => ({}) as never)
+  const { spawns, clock } = await session($, on, RULE)
+  await reply($, clock, 't1', 'row-a1', 'aborted')
+  await openCitation($, 'row-a1', 1)
+  expect(await pressX($, clock)).toBe('')
+  await promptIn($, 'default')
+  await openCitation($, 'row-a1', 2)
+  expect((await band($)).x).toBe(false)
+  expect(spawns.length).toBe(1)
+})
+
 test("don't ask mode, its refusal standing: a failed citation opened later offers x, with no line; x gives the OK g gives and starts its repair, and a word typed after x takes both back", OPTIONS, async ($, on) => {
   let taken = false
   const { spawns, clock } = await session($, on, e => (taken && e.description === REPAIR_DESCRIPTION ? null : DONT_ASK))
@@ -413,7 +485,7 @@ test('a check refused for another cause: one failure line with the refusal\'s fi
   expect(spawns.length).toBe(1)
 })
 
-test("Claude Code's refusals, as thimble reads them: the permission mode a refusal names; no verdict on such a call, a classifier that could not answer for now, one that judged the check, don't ask mode; any other by its first sentence, cut at a word only when that sentence is too long", () => {
+test("Claude Code's refusals, as thimble reads them: the permission mode a refusal names; no verdict on such a call, a classifier that could not answer for now, one that judged the check, don't ask mode, a deny rule; any other by its first sentence, cut at a word only when that sentence is too long", () => {
   expect(refusingMode(AUTO)).toBe('auto mode')
   expect(refusingMode(DONT_ASK)).toBe("don't ask mode")
   expect(refusingMode("Permission to use Agent has been denied because Claude Code is running in don't ask mode. Try something else.")).toBe("don't ask mode")
@@ -433,6 +505,13 @@ test("Claude Code's refusals, as thimble reads them: the permission mode a refus
   expect(cannotStart(BUSY)).toEqual({ kind: 'unavailable', notice: true, text: "Auto mode's classifier was unavailable for thimble's check of citations (rate-limited), so Claude Code refused it. Open a citation to check it." })
   expect(cannotStart(WAIT)).toEqual({ kind: 'unavailable', notice: true, text: "Auto mode's classifier was unavailable for thimble's check of citations (overloaded), so Claude Code refused it. Open a citation to check it." })
   expect(cannotStart(JUDGED)).toEqual({ kind: 'judged', notice: true, text: "Auto mode's classifier refused thimble's check of citations (The fork reads the made-up vault's keys), so they are not checked." })
+  // a deny rule, in each of Claude Code's words for it: what refused the check, and no key
+  for (const said of [RULE, RULE_TOOL, RULE_WITH]) {
+    expect(refusalOf(said).kind).toBe('rule')
+    expect(cannotStart(said)).toEqual({ kind: 'rule', notice: true, text: `A permission rule refused thimble's check of citations (${reasonOf(said)}), so they are not checked.` })
+  }
+  // Claude Code's same words with its advice after them are no rule's: no prompt it could show
+  expect(refusalOf("Permission to use Agent has been denied. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. ").kind).toBe('other')
   expect(cannotStart(HOOK)).toMatchObject({ kind: 'other', notice: false })
   expect(cannotStart(HOOK).offers).toBeUndefined()
   expect(cannotStart(undefined).text).toContain('(no reason given)')
@@ -457,6 +536,7 @@ test("Claude Code's refusals of a check's read of a file, as x acts on them: the
   expect(readFix("The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.")).toBe('ask')
   // a rule, a setting, the classifier's judgment
   expect(readFix(READ_RULE)).toBeNull()
+  expect(readFix('Permission to use Read has been denied.')).toBeNull()
   expect(readFix('Permission to use Read with //made-up/elsewhere/runs.csv has been denied.')).toBeNull()
   expect(readFix('Reads outside the working directories are blocked (permissions.blockReadsOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.')).toBeNull()
   expect(readFix(JUDGED)).toBeNull()

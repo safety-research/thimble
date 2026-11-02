@@ -24,6 +24,10 @@
 //                    mode would refuse it (checker.ts allowsCheck)
 //   tool.check       a checker's Read or Grep of one file the person let thimble's checks read with that tool (x):
 //                    Claude Code's own ask answered allow (checker.ts allowsRead); never a Glob, which lists a folder
+//   classic.UserPromptSubmit, classic.Stop
+//                    the session's permission mode at the person's prompt and at the end of main's turn: a refusal of
+//                    a check by a mode the session is no longer in stands no more, so x comes back (checker.ts
+//                    modeSeen)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone;
 //                    while Minimal is on, plain: its marks show for the paragraph under the pointer (view.ts `plain`).
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
@@ -43,7 +47,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { AGAIN_DESCRIPTION, allowsCheck, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, modeSeen, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -233,6 +237,19 @@ export const registerMarks: Register = on => {
   on('tool.check', { tool: /^(Read|Grep)$/, agentId: /./ }, async ($, e, next) => {
     const v = await next(e)
     return forkOf(e.agentId)?.kind === 'checker' && (await allowsRead($, e, v)) ? { ...v, decision: 'allow', reason: READ_ALLOWED } : v
+  }).catch(($, e, next) => next(e))
+
+  // the session's permission mode, which Claude Code gives its classic hooks: at the person's prompt and at the end of
+  // main's turn, a refusal of a check by a mode the session is no longer in stands no more (checker.ts modeSeen)
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    const r = await next(e)
+    try { await modeSeen($, e.permission_mode) } catch { /* the refusal stands until a check starts */ }
+    return r
+  }).catch(($, e, next) => next(e))
+  on('classic.Stop', async ($, e, next) => {
+    const r = await next(e)
+    try { await modeSeen($, e.permission_mode) } catch { /* the refusal stands until a check starts */ }
+    return r
   }).catch(($, e, next) => next(e))
 
   // fails safe (core/rowhook.ts): a throw here answers the drawing beneath, which the hooks around this one draw on
