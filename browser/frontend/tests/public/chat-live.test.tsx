@@ -112,8 +112,14 @@ describe("main's model", () => {
     expect(mainModel(moved, 'claude-opus-5-5')).toBe('claude-opus-4-8')
   })
 
-  test('its menu offers the current models, Sonnet 5.5 and Opus 4.8 among them, whatever the settings name', () => {
+  test('its menu offers the current models, Sonnet 5.5 and Opus 4.8 among them, and not Sonnet 5', () => {
     expect(modelChoices(null, 'claude-opus-5-5')).toEqual(expect.arrayContaining(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-4-8']))
+    expect(modelChoices(null, 'claude-opus-5-5')).not.toContain('claude-sonnet-5')
+  })
+
+  test('its menu still offers Sonnet 5 where main runs on it or the settings name it, as any model outside the current ones', () => {
+    expect(modelChoices(null, 'claude-sonnet-5')[0]).toBe('claude-sonnet-5')
+    expect(modelChoices({ models: { writer: { model: 'claude-sonnet-5', effort: 'high', fast: false } } }, 'claude-opus-5-5')).toContain('claude-sonnet-5')
   })
 
   describe('at the composer', () => {

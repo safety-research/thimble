@@ -350,7 +350,8 @@ async def test_thimble_s_config_switches_extensions_off_and_sets_their_agents(co
     assert counter["tools"] == ["Read", "Grep", "WebFetch"] and counter["effort"] == "low"
     assert counter["disallowedTools"] == ["Bash"], "its network is off while the session's is on"
     row = ledger.with_features({}, CORPUS)["models"]["ext-min:counter"]
-    assert row == {"model": "claude-sonnet-5", "effort": "low", "fast": False, "extension": "ext-min"}, "a Settings row"
+    assert row == {"model": "claude-sonnet-5-5", "effort": "low", "fast": False,
+                   "extension": "ext-min"}, "a Settings row"
     ledger.put_settings(CORPUS, {"models": {"ext-min:counter": {"model": "claude-opus-5-5", "effort": ""}}})
     assert json.loads(userconf.global_file().read_text())["agents"]["ext-min:counter"] == {
         "web": "ask", "network": "off", "model": "claude-opus-5-5"}

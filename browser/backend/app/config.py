@@ -995,9 +995,10 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
 }
 ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the analyst's own settings name none
-# Claude Code's model aliases and the ids they stand for, as Claude Code 2.1.282 resolves them. A role whose model is an
-# alias is kept as the id, so the popover names the version and the session runs the model shown.
-MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5", "haiku": "claude-haiku-4-5-20251001"}
+# Claude Code's model aliases and the ids they stand for: `opus` and `haiku` as Claude Code 2.1.282 resolves them,
+# `sonnet` as the plugin has it (plugin/core/models.js). A role whose model is an alias is kept as the id, so the
+# popover names the version and the session runs the model shown.
+MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-4-5-20251001"}
 # The agent file a role's defaults come from: prompts/<name>.md (prompts.AGENT_FILES), or a plugin agent's file
 # (plugin/agents/<name>.md) for `plugin:<name>`.
 ROLE_AGENTS: dict[str, str] = {"writer": "writer", "checks": "check"}
