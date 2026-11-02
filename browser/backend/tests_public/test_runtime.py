@@ -531,11 +531,49 @@ async def test_r2_main_s_short_tmpdir_stays_from_turn_to_turn_and_another_agent_
     shell = runtime_cc.shell_tmp(CORPUS)
     assert shell == main / f"claude-{os.getuid()}" and stat.S_IMODE(os.stat(shell).st_mode) == 0o700
     # a link another user planted in its place is no folder of this user's own: none is used
+    (main / runtime_cc.TMP_OWNER).unlink()
     for p in (shell, main):
         p.rmdir()
     main.symlink_to(tmp_path)
     monkeypatch.setattr(runtime_cc, "tempfile", SimpleNamespace(gettempdir=lambda: "/" + "x" * 80, mkdtemp=None))
     assert runtime_cc.workspace_tmp(CORPUS) is None and runtime_cc.shell_tmp(CORPUS) is None
+
+
+async def test_r2_a_workspace_s_short_folder_goes_with_it_and_a_server_s_start_removes_those_of_workspaces_gone(on, tmp_path):
+    """The workspace's own short folder on Claude Code sign-in (workspace_tmp) holds the temp folder of main's sessions
+    and the card kernels' TMPDIR, and stays from turn to turn. Before, nothing removed it, even once its workspace was
+    deleted. Now it names its workspace's folder and goes when `thimble purge` deletes the workspace (the server's
+    DELETE, or the disk when no server runs), and a server's start removes each one whose workspace is gone, and no
+    other."""
+    from fastapi.testclient import TestClient
+
+    from app import ledger, runs
+    from app.main import app
+
+    folder = config.workspace_dir(CORPUS).resolve()
+    short = runtime_cc.workspace_tmp(CORPUS)
+    (runtime_cc.shell_tmp(CORPUS) / "rows-made-up.csv").write_text("night,minutes\n1,18.1\n")
+    assert (short / runtime_cc.TMP_OWNER).read_text() == str(folder)
+    assert await ledger.reset_workspace(CORPUS) == {"ok": True}
+    assert not folder.exists() and not short.exists()
+    # the disk, when no server runs
+    short = runtime_cc.workspace_tmp(CORPUS)
+    row = runs.Row(id=CORPUS, kind="workspace", workspace=CORPUS, folder=None, path=folder, sidecar=None, corpus_dir=None,
+                   last_used=None)
+    assert runs._delete_workspace(row, config.WORKSPACES_DIR, False) is None
+    assert not folder.exists() and not short.exists()
+    # a server's start: the folder of a workspace deleted by hand goes; those of a workspace that is there, of a session
+    # (short_tmp), and one that names no workspace stay
+    short = runtime_cc.workspace_tmp(CORPUS)
+    root = Path(runtime_cc.TMP_ROOT)
+    gone = runtime_cc._own(root / f"{runtime_cc.TMP_PREFIX}0badf00d")
+    (gone / runtime_cc.TMP_OWNER).write_text(str(tmp_path / "workspaces" / "deleted-by-hand"))
+    unnamed = runtime_cc._own(root / f"{runtime_cc.TMP_PREFIX}12345678")
+    own = runtime_cc.short_tmp()
+    with TestClient(app):
+        pass
+    assert not gone.exists()
+    assert short.is_dir() and unnamed.is_dir() and own is not None and own.is_dir()
 
 
 async def test_a_thimble_call_in_a_headless_session_runs_as_its_caller(on, monkeypatch):

@@ -33,17 +33,23 @@ function timeWords(ms) {
   return s === 1 ? '1 second' : `${s} seconds`
 }
 
-/** Why a `$.process.run` of thimble's gave no result, as words. Claude Code's error names its own call and the
- *  command's path (`thimble: $.process.run(/…/bin/thimble) aborted`), which tells the person nothing: it is said as
- *  what happened. An error that is not one of these comes back as it was. */
+/** A run of thimble's that Claude Code stopped before its end. */
+export const STOPPED_WHY = 'Claude Code stopped it before it finished, as it does when thimble reloads or the session ends'
+
+/** A run of thimble's stopped at its time limit, `ms`. */
+export const lateWhy = ms => `it ran longer than ${timeWords(ms)}, the most it may take, and was stopped`
+
+/** Why a `$.process.run` or `$.process.spawn` of thimble's gave no result, as words. Claude Code's error names its own
+ *  call and the command's path (`thimble: $.process.run(/…/bin/thimble) aborted`), which tells the person nothing: it
+ *  is said as what happened. An error that is not one of these comes back as it was. */
 export function runWhy(err) {
   const said = String(err?.message ?? err ?? '')
-  const m = /\$\.process\.run\([^)]*\)\s*([\s\S]*)$/.exec(said)
+  const m = /\$\.process\.(?:run|spawn)\([^)]*\)\s*([\s\S]*)$/.exec(said)
   if (!m) return said
   const rest = m[1].trim()
   const late = /^aborted: still running after (\d+)\s*ms/.exec(rest)
-  if (late) return `it ran longer than ${timeWords(late[1])}, the most it may take, and was stopped`
-  if (/^aborted\b/.test(rest)) return 'Claude Code stopped it before it finished, as it does when thimble reloads or the session ends'
+  if (late) return lateWhy(late[1])
+  if (/^aborted\b/.test(rest)) return STOPPED_WHY
   const start = /^failed to start:\s*([\s\S]*)$/.exec(rest)
   if (start) return `the thimble command could not start (${start[1].trim()})`
   return rest || said

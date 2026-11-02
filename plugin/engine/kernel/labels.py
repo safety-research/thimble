@@ -34,6 +34,9 @@ it (hold_for_ask): run all, run on a random sample, or cancel, which their answe
 
 Every change bumps `rev`. Writes take a lock (the model's reads, the person's checks and Claude's commands may write
 at once).
+
+The code a caller gives (a --code rule, a --where expression) runs in this process, except in a run the plugin made
+for a command in Claude Code's sandbox, which runs it in thimble's own sandbox instead (codebox.py; code_here).
 """
 from __future__ import annotations
 
@@ -49,6 +52,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Iterator
 
+from . import codebox as CB
 from . import refs as R
 from . import regextext as RT
 from . import sources as S
@@ -64,6 +68,14 @@ SESSIONS_MAX = 50  # sessions a label keeps as the ones that applied it
 
 class LabelError(ValueError):
     pass
+
+
+def code_here() -> None:
+    """Before code a caller gave runs in this process: a run the plugin made for a command in Claude Code's sandbox
+    runs such code only in thimble's sandbox (codebox.py, which runs the command again there without the mark), so it
+    is refused here, whatever path led to it."""
+    if CB.handed():
+        raise LabelError(CB.OUTSIDE)
 
 
 def slug(name: str) -> str:
@@ -339,6 +351,8 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
             tables = S.table_names(st.root, rel)
             if table not in tables:
                 raise LabelError(f"{rel} has no table {table!r}; its tables: {', '.join(tables) or 'none'}")
+    if where:
+        code_here()
     cond = compile(where, "<where>", "eval") if where else None
     inside = None
     if within:
@@ -491,6 +505,7 @@ def _unit_of(row: S.Row) -> dict[str, Any]:
 
 
 def _code_fn(code: str):
+    code_here()
     ns: dict[str, Any] = {"re": re, "json": json, "__name__": "__thimble_label__"}
     exec(compile(code, "<label>", "exec"), ns)
     fn = ns.get("label")
@@ -1085,6 +1100,7 @@ _traced_code: dict[str, Any] = {}
 
 def _traced_fn(rule: str) -> tuple[Any, dict[str, Any]]:
     """The code label's label(unit), run with a `re` that notes the matches it makes ({calls, matches, patterns})."""
+    code_here()
     if rule in _traced_code:
         return _traced_code[rule]
     import builtins

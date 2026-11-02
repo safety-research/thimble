@@ -131,6 +131,7 @@ PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
     "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/cards/ask.ts", "plugin/cards/runner.mjs",
+                    "plugin/hooks/handoff.ts", "plugin/engine/kernel/handoff.py", "plugin/engine/kernel/codebox.py",
                     "browser/backend/app/kernel_wrap.py", "browser/backend/app/kernel_srt.mjs",
                     "browser/backend/app/srt.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
@@ -1911,8 +1912,8 @@ def check_ask(fid: int, secret: str | None) -> None:
 
 def at_person_terminal() -> bool:
     """A person typing in a terminal: a terminal on stdin and stdout, outside a command Claude Code runs (its Bash
-    tool sets CLAUDECODE and gives a command no terminal)."""
-    return sys.stdin.isatty() and sys.stdout.isatty() and not os.environ.get("CLAUDECODE")
+    tool sets CLAUDECODE and gives a command no terminal; in_claude_code)."""
+    return sys.stdin.isatty() and sys.stdout.isatty() and not in_claude_code()
 
 
 def apply_typed(fid: int | str, answer=input) -> dict[str, Any] | None:
@@ -2573,8 +2574,9 @@ def all_on() -> dict[str, Any]:
 
 def in_claude_code() -> bool:
     """Whether a Claude Code session runs this command (its Bash tool, or the person's ! in it): Claude Code sets
-    CLAUDECODE for the commands it runs."""
-    return bool(os.environ.get("CLAUDECODE"))
+    CLAUDECODE for the commands it runs, and the plugin sets THIMBLE_HANDED_OFF for one it runs outside Claude Code's
+    sandbox for a command there (hooks/handoff.ts), whatever its own process has."""
+    return bool(os.environ.get("CLAUDECODE") or os.environ.get("THIMBLE_HANDED_OFF"))
 
 
 def key_in_terminal(question: str) -> str | None:
