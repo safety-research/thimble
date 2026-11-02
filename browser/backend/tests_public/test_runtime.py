@@ -259,9 +259,10 @@ async def test_claude_code_sign_in_runs_a_headless_session_with_the_same_records
 async def test_a_headless_session_s_bash_sandbox_gets_a_short_tmpdir_and_fails_closed(data_tmp, on, monkeypatch,
                                                                                        tmp_path):
     """Claude Code's sandbox puts its sockets in TMPDIR, and did not start with one of 76 characters or more, which the
-    workspace's runtime/tmp/<conv> is with a long user or workspace name: the session gets a short private TMPDIR of
-    its own, removed after the turn, its sandbox is required, a refused Bash call tells the person, and the empty
-    .claude/.cc-writes/ the sandbox makes in the corpus goes when the turn ends."""
+    workspace's runtime/tmp/<conv> is with a long user or workspace name: main's session gets a short private TMPDIR,
+    the workspace's own, which stays from turn to turn (R2: its commands' temp folder is the kernels' too), its sandbox
+    is required, a refused Bash call tells the person, and the empty .claude/.cc-writes/ the sandbox makes in the
+    corpus goes when the turn ends."""
     import os
     import stat
 
@@ -311,7 +312,8 @@ async def test_a_headless_session_s_bash_sandbox_gets_a_short_tmpdir_and_fails_c
     home = runtime._spaces[CORPUS].main.spec().home
     assert len(str(home)) >= 76, "the workspace's tmp is as long as the one that broke the sandbox"
     assert len(during["tmp"]) <= runtime_cc.TMP_MAX and during["mode"] == 0o700
-    assert not Path(during["tmp"]).exists(), "the TMPDIR goes when the turn ends"
+    assert during["tmp"] == str(runtime_cc.workspace_tmp(CORPUS)) == opts.env["CLAUDE_CODE_TMPDIR"]
+    assert Path(during["tmp"]).is_dir(), "main's TMPDIR stays when the turn ends"
     box = json.loads(opts.settings)["sandbox"]
     assert box["failIfUnavailable"] is True and box["allowUnsandboxedCommands"] is False
     assert during["tmp"] in box["filesystem"]["allowWrite"] and str(home) in box["filesystem"]["allowWrite"]
@@ -461,6 +463,79 @@ async def test_a_card_reads_what_main_s_bash_wrote_in_its_tmpdir(wrap, on, monke
     assert "written" in said[0], said[0]
     assert "v1,22" in said[1] and "FileNotFoundError" not in said[1], said[1]
     assert (config.temp_dir(CORPUS) / "probe.csv").read_text() == "config,runs\nv1,22\n"
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap", "none"])
+async def test_r2_on_claude_code_sign_in_a_card_reads_what_main_s_sandboxed_bash_wrote_in_its_tmpdir(wrap, on, monkeypatch):
+    """R2: Claude Code's sandbox gives main's commands its own temp folder as their TMPDIR, claude-<uid> in the
+    session's short TMPDIR, which was a new folder in /tmp at each turn, removed at its end, and hidden from the
+    kernels. Now it is the workspace's own (runtime_cc.workspace_tmp), and every kernel of the workspace has that temp
+    folder as its TMPDIR, in whichever wrapper: a file main's command wrote in $TMPDIR, a card's code opens at $TMPDIR
+    and at the path the command printed, and writes a file beside it."""
+    import os
+    import sys
+
+    from claude_agent_sdk import ResultMessage
+
+    from app import kernel_wrap, notebook, srt
+
+    if wrap == "srt" and not kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)):
+        pytest.skip("srt can't sandbox a process here")
+    if wrap == "bwrap" and not (sys.platform.startswith("linux") and kernel_wrap.works()):
+        pytest.skip("bwrap can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    seen: dict[str, Any] = {}
+    fake_sdk(monkeypatch, [ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                                         num_turns=1, session_id="sess-1")], seen)
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    await main_turn("Write a file in your temp folder.")
+    env = seen["options"].env
+    assert env["TMPDIR"] == env["CLAUDE_CODE_TMPDIR"] == str(runtime_cc.workspace_tmp(CORPUS))
+    # what main's command wrote in $TMPDIR, the temp folder Claude Code keeps in CLAUDE_CODE_TMPDIR
+    shell = Path(env["CLAUDE_CODE_TMPDIR"]) / f"claude-{os.getuid()}"
+    (shell / "probe.csv").write_text("config,runs\nv1,22\n")
+    card = ("import os, tempfile\n"
+            "print(open(os.path.join(os.environ['TMPDIR'], 'probe.csv')).read().split()[1])\n"
+            f"print(open({str(shell / 'probe.csv')!r}).read().split()[1])\n"
+            "with tempfile.NamedTemporaryFile() as f:\n"
+            "    print(os.path.dirname(f.name) == os.environ['TMPDIR'])\n")
+    try:
+        cell = await notebook.run_code(CORPUS, card, "main")
+    finally:
+        await notebook.shutdown_all()
+    said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
+    assert said == ["v1,22", "v1,22", "True"], cell["outputs"]
+
+
+async def test_r2_main_s_short_tmpdir_stays_from_turn_to_turn_and_another_agent_s_goes(on, monkeypatch, tmp_path):
+    """On Claude Code sign-in the workspace's own short folder is the TMPDIR of main's and its thread forks' sessions
+    (Spec.temp names theirs), the same at each turn, private and short, and stays when the turn ends; any other agent's
+    session has one of its own, removed when its turn ends."""
+    import os
+    import stat
+    from types import SimpleNamespace
+
+    seen: list[Path] = []
+    monkeypatch.setattr(runtime_cc, "options", lambda conv, spec, pending, tmp: seen.append(tmp))
+
+    async def session(conv: Any, spec: Any, text: str, opts: Any) -> None:
+        return None
+
+    monkeypatch.setattr(runtime_cc, "_session", session)
+    for temp in (tmp_path / "shell", tmp_path / "shell", None):
+        await runtime_cc.turn(SimpleNamespace(c=CORPUS, id="x", spec=lambda t=temp: SimpleNamespace(temp=t, cwd=tmp_path)), "hi")
+    main, again, other = seen
+    assert main == again == runtime_cc.workspace_tmp(CORPUS) and main.is_dir() and len(str(main)) <= runtime_cc.TMP_MAX
+    assert stat.S_IMODE(os.stat(main).st_mode) == 0o700
+    assert other != main and not other.exists()
+    shell = runtime_cc.shell_tmp(CORPUS)
+    assert shell == main / f"claude-{os.getuid()}" and stat.S_IMODE(os.stat(shell).st_mode) == 0o700
+    # a link another user planted in its place is no folder of this user's own: none is used
+    for p in (shell, main):
+        p.rmdir()
+    main.symlink_to(tmp_path)
+    monkeypatch.setattr(runtime_cc, "tempfile", SimpleNamespace(gettempdir=lambda: "/" + "x" * 80, mkdtemp=None))
+    assert runtime_cc.workspace_tmp(CORPUS) is None and runtime_cc.shell_tmp(CORPUS) is None
 
 
 async def test_a_thimble_call_in_a_headless_session_runs_as_its_caller(on, monkeypatch):

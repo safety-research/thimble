@@ -152,6 +152,17 @@ test("the validator gets the fork's calls and main's (it keeps main's whose outp
   expect(JSON.parse(seen.stdin[0]!).calls.map((c: Any) => [c.command, c.by])).toEqual([["python3 - <<'PY'\nprint('12 of 40')\nPY", 'checker'], ['python3 count.py', 'main'], ['ls', 'main']])
 })
 
+test("R2: the validator finds Claude's own code in thimble's temp folder and in Claude Code's, which a command in its Bash sandbox gets as its TMPDIR", async () => {
+  const { $, seen } = engine(VALIDATED)
+  const env = $.env.get
+  // Claude Code keeps its own temp folder, claude-<uid>/ (a made-up user 1000's), in CLAUDE_CODE_TMPDIR
+  $.env.get = async (k: string) => (k === 'CLAUDE_CODE_TMPDIR' ? '/made-up/cc' : env(k))
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(JSON.parse(seen.stdin[0]!).tmp).toEqual(['/made-up/tmp/thimble', '/made-up/cc/claude-1000'])
+})
+
 test('a refused check leaves the marks failed, says so once, and nothing spins', async () => {
   const { $, seen } = engine(VALIDATED)
   await noteRow($, 'row-1', REPLY)

@@ -931,9 +931,9 @@ def registry_dir(name: str) -> Path:
 
 
 def temp_dir(name: str) -> Path:
-    """The workspace's temp folder, created on demand (private_dir): the TMPDIR of every kernel and of main's and its
-    thread forks' shell commands on the Messages API (kernel_wrap.TEMP_DIR), and the temp folder the citations'
-    validator reads as the session's (marks)."""
+    """The workspace's temp folder, created on demand (private_dir): on the Messages API the TMPDIR of every kernel and
+    of main's and its thread forks' shell commands (kernel_wrap.TEMP_DIR, runtime.shell_temp), and a temp folder the
+    citations' validator reads as the session's (marks)."""
     from . import kernel_wrap  # noqa: PLC0415
 
     return private_dir(workspace_dir(name) / kernel_wrap.TEMP_DIR)

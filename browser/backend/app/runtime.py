@@ -107,6 +107,19 @@ def uses_api() -> bool:
     return enabled() and engine() != "cc"
 
 
+def shell_temp(c: str) -> Path:
+    """The TMPDIR of the shell commands of main and its thread forks in workspace `c`, which every card kernel of the
+    workspace shares (notebook), so a card's code reads what such a command wrote in $TMPDIR: on the Messages API, the
+    workspace's temp folder, which runtime_tools.Box gives them (config.temp_dir); on Claude Code sign-in, the temp
+    folder Claude Code's sandbox gives them in the workspace's short folder (runtime_cc.shell_tmp), or the workspace's
+    temp folder when there is none."""
+    from . import config, runtime_cc  # noqa: PLC0415
+
+    if engine() == "cc" and (t := runtime_cc.shell_tmp(c)) is not None:
+        return t
+    return config.temp_dir(c)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
@@ -166,9 +179,10 @@ class Spec:
     write_roots: list[Path]
     private: list[Path]
     home: Path
-    # the TMPDIR of its commands on the Messages API (runtime_tools.Box) when not inside `home`: main's and its thread
-    # forks' share the workspace's temp folder with the kernels (config.temp_dir), so a card's code reads what Bash
-    # wrote in $TMPDIR. A headless Claude Code session's commands have the session's short TMPDIR (runtime_cc.short_tmp)
+    # main's and its thread forks' commands' TMPDIR, which they share with the kernels (shell_temp), so a card's code
+    # reads what Bash wrote in $TMPDIR: on the Messages API runtime_tools.Box gives it them (when not inside `home`),
+    # and in a headless Claude Code session its sandbox does, in the workspace's short TMPDIR
+    # (runtime_cc.workspace_tmp). None for thimble's other agents, whose commands have a TMPDIR of their own
     temp: Path | None = None
     fast: bool = False
     # whether the corpus is among write_roots (Settings' "Claude can edit files in this folder"): True or False for
@@ -517,7 +531,7 @@ class Space:
             # the composer's effort, else the one Claude Code in a terminal runs the model at by the analyst's
             # settings, as the level it runs at (ultracode's is xhigh)
             effort = config.effort_level(choice.get("effort") or cc_settings.session_effort(self.corpus, model))
-            temp = config.temp_dir(self.c)  # their commands' TMPDIR, the kernels' too (Spec.temp)
+            temp = shell_temp(self.c)  # their commands' TMPDIR, the kernels' too (Spec.temp)
             writes = [*([self.corpus] if edits else []), self.ws / "card-libs", tmp, temp]
             fast = bool(choice.get("fast"))
         else:

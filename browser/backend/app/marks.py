@@ -14,7 +14,8 @@
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
    lies in the corpus folder or main's, or is a label's definition, which holds the label's rule (_rules_dir); code
-   may also cite the workspace's temp folder. Its result is what the analyst sees.
+   may also cite the workspace's temp folder, and the one Claude Code's sandbox gives main's commands on Claude Code
+   sign-in (_temp_dirs). Its result is what the analyst sees.
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
@@ -584,7 +585,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
-                                         answer, calls, cwd, root, str(_temp_dir(c)), cards or [], str(_rules_dir(c)))
+                                         answer, calls, cwd, root, _temp_dirs(c), cards or [], str(_rules_dir(c)))
         if not result["parsed"]:
             await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
@@ -652,6 +653,15 @@ def _found_failed(res: dict[str, Any] | None) -> bool:
 
 def _temp_dir(c: str) -> Path:
     return config.temp_dir(c)
+
+
+def _temp_dirs(c: str) -> list[str]:
+    """The temp folders Claude's own code may lie in, the validator's `tmp`: the workspace's, and the TMPDIR of main's
+    shell commands (runtime.shell_temp), which is the temp folder Claude Code's sandbox gives them on Claude Code
+    sign-in."""
+    from . import runtime  # noqa: PLC0415
+
+    return [str(p) for p in dict.fromkeys((_temp_dir(c), runtime.shell_temp(c)))]
 
 
 def _rules_dir(c: str) -> Path:

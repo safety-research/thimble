@@ -2570,9 +2570,17 @@ def _guarded_files(workspace: str) -> None:
                 p.chmod(0o600)  # srt's placeholder from a kernel that did not end cleanly
 
 
-def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_file: Path, source: str = "settings") -> list[str]:
-    """`argv` inside bubblewrap (kernel_wrap.kernel_wrap_argv). RuntimeError when bwrap is not on PATH: a workspace set
-    to bwrap never runs unwrapped."""
+def _temp_writes(workspace: str, temp: Path | None) -> list[Path]:
+    """The kernel's TMPDIR (`temp`, runtime.shell_temp) when it lies outside the workspace, which a wrapper then lets it
+    write too: Claude Code's temp folder of main's sessions on Claude Code sign-in."""
+    ws = _ws_dir(workspace).resolve()
+    return [] if temp is None or temp == ws or ws in temp.parents else [temp]
+
+
+def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_file: Path, source: str = "settings",
+                 temp: Path | None = None) -> list[str]:
+    """`argv` inside bubblewrap (kernel_wrap.kernel_wrap_argv), `temp` its TMPDIR. RuntimeError when bwrap is not on
+    PATH: a workspace set to bwrap never runs unwrapped."""
     bwrap = shutil.which("bwrap")
     if bwrap is None:
         log.error("kernel for %s: %s is bwrap (%s) but bwrap is not on PATH; the kernel is not started — %s",
@@ -2582,12 +2590,13 @@ def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_fi
     _guarded_files(workspace)
     return kernel_wrap.kernel_wrap_argv(argv, corpus_dir=Path(corpus).resolve(), workspace_dir=_ws_dir(workspace).resolve(),
                                         connection_dir=connection_file.parent.resolve(), venv=_venv(), python=PYTHON,
-                                        read=_kernel_reads(), bwrap=bwrap)
+                                        read=_kernel_reads(), write=_temp_writes(workspace, temp), bwrap=bwrap)
 
 
-def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings") -> list[str]:
-    """`argv` inside Anthropic's sandbox runtime (kernel_wrap.srt_argv with kernel_wrap.srt_rules). RuntimeError when
-    node or the runtime's package is missing: a workspace set to srt never runs unwrapped."""
+def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings",
+                   temp: Path | None = None) -> list[str]:
+    """`argv` inside Anthropic's sandbox runtime (kernel_wrap.srt_argv with kernel_wrap.srt_rules), `temp` its TMPDIR.
+    RuntimeError when node or the runtime's package is missing: a workspace set to srt never runs unwrapped."""
     node, srt_dir = srt.node(), srt.package(config.REPO_ROOT)
     if node is None or srt_dir is None:
         missing = ("node is not on PATH" if node is None else
@@ -2598,7 +2607,8 @@ def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str
     _guarded_files(workspace)
     rules = kernel_wrap.srt_rules(corpus_dir=Path(corpus).resolve(), workspace_dir=_ws_dir(workspace).resolve(),
                                   venv=_venv(), python=PYTHON, srt_dir=srt_dir, read=_kernel_reads(),
-                                  hide=_kernel_hides(), home=Path(os.path.realpath(Path.home())), platform=sys.platform)
+                                  write=_temp_writes(workspace, temp), hide=_kernel_hides(),
+                                  home=Path(os.path.realpath(Path.home())), platform=sys.platform)
     return kernel_wrap.srt_argv(argv, node=node, srt_dir=srt_dir, rules=rules)
 
 
@@ -2648,14 +2658,18 @@ async def _launch(k: _Kernel, workspace: str) -> None:
     wrapped = wrap in config.KERNEL_WRAPPED
     argv = kernel_argv(k.conn, k.record, roots=(str(cwd), str(Path(corpus).resolve())), lease=k.lease if wrapped else None,
                        workspace=_ws_dir(workspace).resolve())
+    from . import runtime  # noqa: PLC0415
+
+    # its TMPDIR: main's shell commands' (runtime.shell_temp), by the path the wrappers bind
+    tmp = (await asyncio.to_thread(runtime.shell_temp, workspace)).resolve()
     # paths only so far: a missing wrapper fails here, before any file is written
     if wrap == config.KERNEL_WRAP_BWRAP:
-        argv = wrapped_argv(argv, workspace=workspace, corpus=corpus, connection_file=k.conn, source=source)
+        argv = wrapped_argv(argv, workspace=workspace, corpus=corpus, connection_file=k.conn, source=source, temp=tmp)
     elif wrap == config.KERNEL_WRAP_SRT:
-        argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source)
+        argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp)
     for tries_left in range(LAUNCH_TRIES - 1, -1, -1):
         try:
-            k.kc = await _launch_process(k, workspace, cwd, corpus, argv, wrap, source)
+            k.kc = await _launch_process(k, workspace, cwd, corpus, argv, wrap, source, tmp)
             return
         except RuntimeError as e:
             if PORT_TAKEN not in str(e) or not tries_left:
@@ -2665,8 +2679,8 @@ async def _launch(k: _Kernel, workspace: str) -> None:
 
 
 async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, argv: list[str], wrap: str,
-                          source: str) -> AsyncKernelClient:
-    """_launch's kernel process on new ports, and its client once it answers."""
+                          source: str, tmp: Path) -> AsyncKernelClient:
+    """_launch's kernel process on new ports, with `tmp` its TMPDIR, and its client once it answers."""
     wrapped = wrap in config.KERNEL_WRAPPED
     kc: AsyncKernelClient | None = None
     try:  # from the first file written: a failure anywhere leaves no process, channels, lease or file behind (_kill)
@@ -2675,9 +2689,7 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
         env.pop("JPY_PARENT_PID", None)  # no parent poller: the kernel outlives this server
         env.setdefault("MATPLOTLIBRC", str(MATPLOTLIBRC))  # thimble's figure defaults, unless the environment names its own
         env.update(kernel_wrap.NO_SIDE_WRITES)  # nothing a cell runs writes a cache beside a corpus file it reads
-        # the workspace's temp folder (config.temp_dir), main's Bash's TMPDIR too, by the path the wrappers bind
-        tmp = await asyncio.to_thread(config.temp_dir, workspace)
-        env["TMPDIR"] = str(tmp.resolve())
+        env["TMPDIR"] = str(tmp)
         if wrap == config.KERNEL_WRAP_SRT:
             env = kernel_wrap.srt_env(env, home=k.home)
             await asyncio.to_thread(_fresh_home, k)

@@ -14,7 +14,9 @@ Both draw the same boundary:
            extension (LOCAL_DIR) and the folder of the files thimble's agents' hooks trust (TRUSTED_DIR), which it can
            read only, and the lock of subagents.json's writers (LOCK_FILES), which it can neither read nor write.
            HOME is fresh at each start: a folder on a private /tmp under bwrap, the kernel's kernels/<key>.home folder
-           under srt. TMPDIR is the workspace's temp folder (TEMP_DIR), which main's Bash has on the Messages API too
+           under srt. TMPDIR is main's Bash's (runtime.shell_temp): the workspace's temp folder (TEMP_DIR) on the
+           Messages API, and on Claude Code sign-in the temp folder Claude Code's sandbox gives main's commands, outside
+           the workspace, which the kernel may write too (`write`)
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
@@ -83,8 +85,8 @@ LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), wh
 # request a plugin start claims, or credit its call to an agent
 TRUSTED_DIR = "trusted"
 READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR, TRUSTED_DIR)
-# the workspace's temp folder (config.temp_dir): every kernel's TMPDIR, and that of main's and its thread forks' shell
-# commands on the Messages API (runtime.Spec.temp), so a card's code reads what such a command wrote in $TMPDIR
+# the workspace's temp folder (config.temp_dir): on the Messages API every kernel's TMPDIR, and that of main's and its
+# thread forks' shell commands (runtime.shell_temp), so a card's code reads what such a command wrote in $TMPDIR
 TEMP_DIR = "tmp"
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
@@ -192,16 +194,17 @@ def interpreter_dirs(python: str | Path) -> list[Path]:
 
 
 def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | Path | None, python: str | Path,
-              srt_dir: str | Path, read: Sequence[str | Path] = (), hide: Sequence[str | Path] = (), home: str | Path,
-              platform: str) -> dict:
+              srt_dir: str | Path, read: Sequence[str | Path] = (), write: Sequence[str | Path] = (),
+              hide: Sequence[str | Path] = (), home: str | Path, platform: str) -> dict:
     """srt's filesystem rules for the kernel (module docstring). `python` is the interpreter the kernel runs (a venv's
-    bin/python); `read` more paths it reads (the fonts, matplotlibrc, kernel_thimble.py); `hide` thimble's folders and
-    Claude Code's config, hidden besides `home` and SRT_HIDDEN[platform] (sys.platform: linux or darwin)."""
+    bin/python); `read` more paths it reads (the fonts, matplotlibrc, kernel_thimble.py); `write` more folders it reads
+    and writes (its TMPDIR outside the workspace); `hide` thimble's folders and Claude Code's config, hidden besides
+    `home` and SRT_HIDDEN[platform] (sys.platform: linux or darwin)."""
     ws = Path(workspace_dir)
     system = "darwin" if platform == "darwin" else "linux"
     hidden = [str(ws / name) for name in (*HIDDEN_FILES, *LOCK_FILES)]
     deny_read = [str(home), *SRT_HIDDEN[system], *map(str, hide), *hidden]
-    allow_read = [str(corpus_dir), str(ws), *map(str, interpreter_dirs(python)), *map(str, read)]
+    allow_read = [str(corpus_dir), str(ws), *map(str, interpreter_dirs(python)), *map(str, read), *map(str, write)]
     if venv is not None:
         allow_read += [str(venv), os.path.realpath(venv)]  # a venv install.sh --python linked: also where it lies
     if system == "linux":
@@ -211,7 +214,7 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
     return {"filesystem": {
         "denyRead": list(dict.fromkeys(deny_read)),
         "allowRead": list(dict.fromkeys(allow_read)),
-        "allowWrite": [str(ws)],
+        "allowWrite": [str(ws), *map(str, write)],
         "denyWrite": [*hidden, *read_only, *SRT_NO_WRITE[system]],
     }}
 
@@ -243,10 +246,11 @@ def _under(p: Path, root: Path) -> bool:
 
 def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_dir: str | Path,
                      connection_dir: str | Path, venv: str | Path | None, python: str | Path,
-                     read: Sequence[str | Path] = (), bwrap: str = "bwrap") -> list[str]:
+                     read: Sequence[str | Path] = (), write: Sequence[str | Path] = (), bwrap: str = "bwrap") -> list[str]:
     """The kernel's argv wrapped in bubblewrap. `python` is the interpreter the kernel runs; each of its installation
     folders (interpreter_dirs) is bound read-only when it lies outside the system folders; `venv` None binds no venv;
-    `read` names more paths bound read-only. `--ro-bind-try` skips what does not exist. Each of HIDDEN_FILES must exist,
+    `read` names more paths bound read-only, `write` more folders bound writable (its TMPDIR outside the workspace, on
+    the private /tmp too). `--ro-bind-try` and `--bind-try` skip what does not exist. Each of HIDDEN_FILES must exist,
     or bwrap creates it empty in the real workspace, and each of READ_ONLY_DIRS, or bwrap fails."""
     corpus, ws, conn = Path(corpus_dir), Path(workspace_dir), Path(connection_dir)
     out: list[str] = [*SIGINT_PREFIX, bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns",  # --unshare-user spelled out: --disable-userns checks for it by name (bwrap 0.9.0)
@@ -268,6 +272,8 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
         out += ["--ro-bind", str(venv), str(venv)]
     for p in read:
         out += ["--ro-bind-try", str(p), str(p)]
+    for p in write:
+        out += ["--bind-try", str(p), str(p)]
     out += ["--ro-bind", str(corpus), str(corpus), "--bind", str(ws), str(ws), "--bind", str(conn), str(conn)]
     for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]

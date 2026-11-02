@@ -30,9 +30,13 @@ main's chat logs it (Conv.heard); the turn goes on until each message handed on 
 The sandbox. Claude Code puts its sandbox's proxy sockets in TMPDIR (claude-http-<16 hex>.sock), and a Unix socket's
 path holds at most 104 (macOS) or 108 (Linux) bytes, so with a long TMPDIR (the workspace's runtime/tmp/<conv>, 76
 characters and more) the sandbox did not start, and Claude Code then ran Bash outside it. So each turn's session gets a
-short TMPDIR of its own (short_tmp: a 0700 folder under /tmp, removed when the turn ends), and its sandbox is required
-(cc_settings.offline_sandbox's `required`): a sandbox that still cannot start refuses each Bash call, and the person
-gets a notice (SANDBOX_NOTICE). The agent's own files stay in the workspace (Spec.home), as before.
+short TMPDIR (a 0700 folder under /tmp), and its sandbox is required (cc_settings.offline_sandbox's `required`): a
+sandbox that still cannot start refuses each Bash call, and the person gets a notice (SANDBOX_NOTICE). The sandbox gives
+a command Claude Code's own temp folder as its TMPDIR, claude-<uid> in CLAUDE_CODE_TMPDIR, which the session gets as its
+TMPDIR too. Main's and its thread forks' sessions have the workspace's own short folder (workspace_tmp), kept from turn
+to turn, so their commands' TMPDIR (shell_tmp) is the same folder at each turn, which the card kernels share (notebook);
+any other agent's session has one of its own (short_tmp), removed when the turn ends. The agent's own files stay in the
+workspace (Spec.home), as before.
 
 Claude Code's sandbox makes an empty .claude/.cc-writes/ folder in the session's working folder (the corpus) when it
 starts, and no setting moves it, so the last session of a corpus to end removes that folder, and .claude/ when the
@@ -42,11 +46,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import secrets
 import shutil
+import stat
 import tempfile
 import uuid
 import warnings
@@ -59,9 +65,10 @@ log = logging.getLogger("thimble.runtime_cc")
 warnings.filterwarnings("ignore", message="can_use_tool will not be invoked")
 
 SERVER = "plugin_thimble_thimble"  # tools.thimble_tool: mcp__plugin_thimble_thimble__<tool>
-TMP_ROOT = "/tmp"  # short_tmp's parent where it exists, else the system's temp folder
+TMP_ROOT = "/tmp"  # short_tmp's and workspace_tmp's parent where it exists, else the system's temp folder
 TMP_PREFIX = "thimble-cc-"
 TMP_MAX = 60  # short_tmp's path at most: Claude Code's sandbox starts with a TMPDIR of up to 74 characters
+TMP_TAG = 8  # workspace_tmp's name: TMP_PREFIX and this many hex digits of a hash of the workspace's folder
 CC_WRITES = (".claude", ".cc-writes")  # what Claude Code's sandbox makes in the session's working folder
 SANDBOX_FAILED = "Sandbox is required but failed to initialize"  # Claude Code's Bash result when it refuses the call
 SANDBOX_KEY = "cc-sandbox"  # the notice's key (notices.py)
@@ -107,6 +114,46 @@ def short_tmp() -> Path | None:
         with contextlib.suppress(OSError):
             return Path(tempfile.mkdtemp(prefix=TMP_PREFIX, dir=root))
     return None
+
+
+def workspace_tmp(c: str) -> Path | None:
+    """Workspace `c`'s own short private folder (module note, the sandbox): /tmp/thimble-cc-<a hash of the workspace's
+    folder>, else under the system's temp folder, the same at each turn and for each server, so a card kernel that
+    outlives a server still finds it; None when neither can hold one that is this user's own folder."""
+    from . import config  # noqa: PLC0415
+
+    tag = hashlib.sha256(str(config.workspace_dir(c).resolve()).encode()).hexdigest()[:TMP_TAG]
+    for root in dict.fromkeys((TMP_ROOT, tempfile.gettempdir())):
+        p = Path(root) / f"{TMP_PREFIX}{tag}"
+        if len(str(p)) > TMP_MAX or not os.path.isdir(root):
+            continue
+        with contextlib.suppress(OSError):
+            return _own(p)
+    return None
+
+
+def shell_tmp(c: str) -> Path | None:
+    """The TMPDIR Claude Code's sandbox gives the commands of main's and its thread forks' sessions: Claude Code's own
+    temp folder, claude-<uid> in workspace_tmp, made as Claude Code makes it, so a card kernel that starts before main's
+    first turn shares it too (runtime.shell_temp). None when there is no workspace_tmp."""
+    base = workspace_tmp(c)
+    if base is None:
+        return None
+    with contextlib.suppress(OSError):
+        return _own(base / f"claude-{os.getuid()}")
+    return None
+
+
+def _own(p: Path) -> Path:
+    """`p`, made when missing: a folder this user owns and no link, then mode 0700, as Claude Code checks its temp
+    folder; OSError for anything else, such as a folder another user made in its place."""
+    with contextlib.suppress(FileExistsError):
+        os.mkdir(p, 0o700)
+    st = os.lstat(p)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        raise OSError(f"{p} is not a folder of this user's own")
+    os.chmod(p, 0o700)
+    return p
 
 
 def _enter(cwd: Path) -> None:
@@ -237,7 +284,8 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         setting_sources=["user"],
         strict_mcp_config=True,
         add_dirs=[str(w) for w in spec.write_roots],
-        env=sdk.call_env({"TMPDIR": str(tmp or spec.home)}),
+        # Claude Code keeps its own temp folder in the short TMPDIR too, whatever CLAUDE_CODE_TMPDIR the server has
+        env=sdk.call_env({"TMPDIR": str(tmp or spec.home), **({"CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}),
         # main's session echoes each message it reads, so a message handed to it mid-turn is known read (_hand)
         extra_args={"safe-mode": None, **({"replay-user-messages": None} if conv.kind == "main" else {})},
         hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])],
@@ -275,17 +323,19 @@ def _result(b: Any) -> dict[str, Any] | None:
 
 
 async def turn(conv: Any, text: str) -> Any:
-    """One turn of `conv` on `text` in a session with a short TMPDIR of its own (module note)."""
+    """One turn of `conv` on `text` in a session with a short TMPDIR (module note): the workspace's own for main and its
+    thread forks (Spec.temp), which stays; any other agent's own, removed when the turn ends."""
     spec = conv.spec()
     pending: dict[str, list[str]] = {}
-    tmp = short_tmp()
+    kept = workspace_tmp(conv.c) if spec.temp is not None else None
+    tmp = kept or short_tmp()
     if tmp is None:
         log.warning("%s: no short TMPDIR for %s's session; its sandbox may not start", conv.c, conv.id)
     _enter(spec.cwd)
     try:
         return await _session(conv, spec, text, options(conv, spec, pending, tmp))
     finally:
-        if tmp is not None:
+        if tmp is not None and tmp != kept:
             shutil.rmtree(tmp, ignore_errors=True)
         _tidy(spec.cwd)
 
