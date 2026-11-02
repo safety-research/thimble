@@ -559,7 +559,7 @@ test('the line at the first session goes by itself after a few seconds, and stay
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
 })
 
-test("in a session without Claude Code's terminal interface (a host that runs it through its SDK, such as the desktop app's Code tab), /thimble-settings is thimble's command too, so it never reaches Claude as a prompt; where no surface places the settings, its answer says so at once", async ($, on) => {
+test("in a session without Claude Code's terminal interface (a host that runs it through its SDK, such as the desktop app's Code tab), /thimble-settings is thimble's command too, so it never reaches Claude as a prompt; where no surface places the settings, its answer says so at once, and names Claude Code's command that changes a plugin's options outside its terminal interface", async ($, on) => {
   // beneath the plugin, before the made-up session's own hooks of the same events: every command registered, and no
   // surface that places the pane
   const registered: string[] = []
@@ -570,7 +570,7 @@ test("in a session without Claude Code's terminal interface (a host that runs it
   mock.store(on)
   await $.session.start({ cwd: '/made-up/data', surface: null, isInteractive: false } as never)
   expect(registered).toContain('thimble-settings')
-  expect(await $.command.run({ command: 'thimble-settings', args: '' } as never)).toEqual({ text: 'Claude Code did not open the settings here.' })
+  expect(await $.command.run({ command: 'thimble-settings', args: '' } as never)).toEqual({ text: 'Claude Code did not open the settings here; in a terminal, `claude plugin configure thimble@thimble` lists them and says how to change them.' })
 })
 
 test('a hint above the bar goes by itself after a few seconds, or at the next key thimble takes; a failure stays', async () => {

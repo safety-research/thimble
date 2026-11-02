@@ -2,9 +2,9 @@
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
 //                aboveBar). /thimble-settings and a click on `thimble` open the settings (the command is one in every
-//                session, and its answer says when no pane opened); the person's next prompt takes the failure line and
-//                the line at the first session's start (intro.ts); the counts at each load of the plugin and after each
-//                of main's turns (counts.ts)
+//                session, and when no pane opened its answer says so and names Claude Code's command that changes
+//                them); the person's next prompt takes the failure line and the line at the first session's start
+//                (intro.ts); the counts at each load of the plugin and after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Each pane takes the keys its key row names (coverage's j k ↵, the labels' number keys that check
 //                records), and esc closes it; coverage's r close is a click, so an r typed in it reaches the prompt,
@@ -62,6 +62,12 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false)
 /** What the person reads when Claude Code did not place the settings pane. */
 const SETTINGS_UNPLACED = 'Claude Code did not open the settings here.'
 
+/** The command's answer where no surface of the session places the pane: Claude Code's own command for a plugin's
+ *  options, which runs outside its terminal interface. It takes the plugin's full id, thimble@thimble (the marketplace
+ *  keeps the name thimble after a first fix too); the person's run lists the options and says how to set them
+ *  (--values-stdin), and the next session takes the new values. */
+const SETTINGS_ELSEWHERE = 'Claude Code did not open the settings here; in a terminal, `claude plugin configure thimble@thimble` lists them and says how to change them.'
+
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). Whether Claude Code
  *  placed them. */
 function placeSettings($: Engine): Promise<boolean> {
@@ -104,8 +110,9 @@ export const registerBar: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // the settings pane; where Claude Code did not place it (no surface of the session places panes: a `-p` run, a host
-  // that runs Claude Code through its SDK), the command's answer says so, since no bar shows the failure line there
-  on('command.run', { command: 'thimble-settings' }, async $ => ((await placeSettings($)) ? {} : { text: SETTINGS_UNPLACED }))
+  // that runs Claude Code through its SDK), the command's answer says so and how to change them there, since no bar
+  // shows the failure line there
+  on('command.run', { command: 'thimble-settings' }, async $ => ((await placeSettings($)) ? {} : { text: SETTINGS_ELSEWHERE }))
 
   // the end of main's turn: the counts
   on('turn.complete', { turnId: /./ }, async ($, e, next) => {
