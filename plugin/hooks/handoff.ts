@@ -12,6 +12,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { claudeTempFolder } from '../core/home'
+import { runWhy } from '../core/why.js'
 
 type Engine = EngineInterface
 type Ask = { argv: string[]; cwd: string; env: Record<string, string>; stdin: string }
@@ -58,9 +59,11 @@ async function run($: Engine, at: string): Promise<void> {
   const bin = `${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`
   await $.process.run(['sh', '-c', TAKE, 'sh', at, String(ask.cwd), bin, ...ask.argv.map(String)], {
     env: { ...ask.env, THIMBLE_HANDOFF: '' }, stdin: String(ask.stdin ?? ''), timeoutMs: RUN_MS,
-  }).catch(async () => {
-    // stopped before its end (it ran too long, or the plugin reloaded): the command ends with an error
-    if ((await $.fs.exists(`${at}.took`)) && !(await $.fs.exists(`${at}.done`))) await $.fs.write(`${at}.done`, '1\n')
+  }).catch(async (err: unknown) => {
+    // stopped before its end (it ran too long, or the plugin reloaded): the command ends with an error that says why
+    if (!(await $.fs.exists(`${at}.took`)) || (await $.fs.exists(`${at}.done`))) return
+    await $.fs.write(`${at}.err`, `thimble: ${runWhy(err)}\n`)
+    await $.fs.write(`${at}.done`, '1\n')
   })
 }
 

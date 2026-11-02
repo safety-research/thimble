@@ -123,7 +123,7 @@ test('a call in the background is served after it returns, for as long as a Bash
   expect(w.runs.length).toBe(1)
 })
 
-test('a command that took itself back is not run; one stopped before its end ends with an error', async () => {
+test('a command that took itself back is not run; one stopped before its end ends with an error that says why', async () => {
   const w = setup({ stops: true })
   await w.bash({ command: 'thimble label' }, async () => {
     w.ask('90-ij', ['label'])
@@ -137,4 +137,5 @@ test('a command that took itself back is not run; one stopped before its end end
   })
   expect(w.runs.map(r => r.args)).toEqual([['label', 'x', '--wait']])
   expect(w.files.get(`${BOX}/91-kl.done`)).toBe('1\n')
+  expect(w.files.get(`${BOX}/91-kl.err`)).toBe('thimble: Claude Code stopped it before it finished, as it does when thimble reloads or the session ends\n')
 })
