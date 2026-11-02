@@ -3978,8 +3978,12 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     elif off_ids:
         nxt.append((f"thimble fix on {off_ids[0]}", "turn a fix on (it asks for your key here)"))
     if can_share():
-        nxt.append((f"thimble file issue {first}",
-                    f"a link to GitHub's new-issue form with fix {first}'s text, to read and submit"))
+        from .share import STATES  # noqa: PLC0415 — share imports this module
+        # the first fix that thimble file issue takes: not one Claude still works on, nor one an update set aside
+        shared = [r["id"] for r in fixes if r.get("state") in STATES]
+        if shared:
+            nxt.append((f"thimble file issue {shared[0]}",
+                        f"a link to GitHub's new-issue form with fix {shared[0]}'s text, to read and submit"))
         code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
         if code:
             nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))

@@ -1243,6 +1243,26 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
 
 
+def test_what_next_names_thimble_file_issue_only_for_a_fix_it_takes(world, capsys, monkeypatch):
+    """R1: while Claude still works on the only fix, thimble fixes names no `thimble file issue`, which refuses a fix
+    that is not done; once another fix is ready, the line names that one, and the command takes it."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.setattr(FX, "can_share", lambda: True)
+    w = made(world, words="make the minimap smaller", edit=False)
+    assert cli.main(["fixes"]) == 0
+    out = capsys.readouterr().out
+    assert f"thimble fix show {w['id']}" in out and "thimble file issue" not in out
+    assert cli.main(["file", "issue", str(w["id"])]) == 1 and "nothing to share yet" in capsys.readouterr().err
+    r = made(world)
+    FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")
+    assert cli.main(["fixes"]) == 0
+    issue = [x.split()[:4] for x in capsys.readouterr().out.split("What next\n")[1].splitlines() if "file issue" in x]
+    assert issue == [["thimble", "file", "issue", str(r["id"])]]
+    assert cli.main(issue[0][1:]) == 0 and "Share fix" in capsys.readouterr().out
+
+
 def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_live(world, tmp_path, monkeypatch):
     """scripts/install.sh links bin/thimble to the plugin's command and names the link in cli-link; once Claude Code
     loads thimble from live, the link runs the release checkout's launcher, which runs thimble fix, file, update,
