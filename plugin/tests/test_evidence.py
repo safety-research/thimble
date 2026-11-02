@@ -425,6 +425,29 @@ def test_claudes_own_code_counts_in_each_temp_folder_of_the_session(tmp_path: Pa
     assert json.loads(r.stdout)["results"][0]["status"] == "verified"
 
 
+def test_of_the_files_a_check_could_not_read_validate_names_those_no_evidence_may_cite(tmp_path: Path):
+    """N1/N8: given the files the check could not read (`unread`), validate.py names those no evidence may cite
+    (`outside`), by the folders a cited file may lie in: the folder the session started in, the shell's folder, and the
+    temp folders where Claude's own code counts. A link in the session's folder to a file outside it is outside; a path
+    in it that names no file is not. A citation of such a file fails with the reason the citation keeps."""
+    root, data, ours, cc, elsewhere = (tmp_path / p for p in ("start", "start/data", "tmp/thimble", "cc/claude-1000", "elsewhere"))
+    for d in (data, ours, cc, elsewhere):
+        d.mkdir(parents=True)
+    for f in (root / "notes.md", data / "runs.csv", ours / "count.py", cc / "rule.py", elsewhere / "deploys.log"):
+        f.write_text("deploy cart-6 rolled back\n")
+    (data / "link.log").symlink_to(elsewhere / "deploys.log")
+    taken = [root / "notes.md", data / "runs.csv", ours / "count.py", cc / "rule.py", data / "gone.csv"]
+    unread = [str(p) for p in (*taken, elsewhere / "deploys.log", data / "link.log")]
+    answer = "```json\n" + json.dumps([{"mark": 1, **quote(str(elsewhere / "deploys.log"), 1, "deploy cart-6 rolled back")}]) + "\n```"
+    req = {"cwd": str(data), "root": str(root), "tmp": [str(ours), str(cc)], "marks": [mark('"deploy cart-6 rolled back"')], "answer": answer, "calls": [], "unread": unread}
+    out = json.loads(subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True).stdout)
+    assert out["outside"] == [str(elsewhere / "deploys.log"), str(data / "link.log")]
+    assert out["results"][0]["reason"] == f"{elsewhere / 'deploys.log'} is outside the folder this session works in."
+    # with no file it could not read, the answer is as it was
+    del req["unread"]
+    assert "outside" not in json.loads(subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True).stdout)
+
+
 RULE = 'def label(r):\n    body = (r.get("body") or "").strip()\n    if not body:\n        return None\n    return "yes" if "REVIEW WANTED" in body else "no"\n'
 
 

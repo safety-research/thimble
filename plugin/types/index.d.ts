@@ -20,17 +20,19 @@ declare module 'claude-code' {
       /** the lines of checks that could not start that this session showed, so a reply's check says each once, but
        *  for a line that offers the person's OK (marks/checker.ts sayCannotStart) */
       checksRefused: string[]
-      /** the person's OK (g) for thimble to start its checks of citations this session, which Claude Code refused where
-       *  nobody was asked (auto mode's classifier gave no verdict, don't ask mode): thimble answers Claude Code's own ask
-       *  on them with allow (marks/checker.ts allowsCheck) */
+      /** the person's OK (g, x) for thimble to start its checks of citations this session, which Claude Code refused
+       *  where nobody was asked (auto mode's classifier gave no verdict, don't ask mode): thimble answers Claude Code's
+       *  own ask on them, and on their Python, with allow (marks/checker.ts allowsCheck, allowsPython) */
       checksAllowed: boolean | null
       /** the check the line that offers g is about, which g starts again: { kind: 'check', whole, reply, note? } or
        *  { kind: 'repair', repair } (marks/checker.ts Held) */
       checksHeld: unknown
       /** the line of Claude Code's last refusal of a check that stands for the session (auto mode's classifier gave no
-       *  verdict, don't ask mode), until a check starts: { text, notice, kind, offers? }; while it stands, x gives the OK
-       *  it offers, and is not offered where it offers none (marks/checker.ts repairOk) */
-      checksRefusing: { text: string; notice: boolean; kind: string; offers?: boolean } | null
+       *  verdict or judged the check, don't ask mode, a deny rule), until a check starts or the session is seen in
+       *  another mode than the one that refused it (`mode`, as Claude Code's hooks name it: `auto`, `dontAsk`; none for
+       *  a rule): { text, notice, kind, offers?, mode? }; while it stands, x gives the OK it offers, and is not offered
+       *  where it offers none (marks/checker.ts repairOk, modeSeen) */
+      checksRefusing: { text: string; notice: boolean; kind: string; offers?: boolean; mode?: string } | null
       /** the files the person let thimble's checks read this session, each by the tool its check was refused (x on a
        *  citation whose check could not read one, where Claude Code asked nobody): thimble answers Claude Code's own ask
        *  on a checker's read of one by that tool with allow (marks/checker.ts allowsRead) */

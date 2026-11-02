@@ -547,7 +547,7 @@ test('a citation the check found false: × failed in the header, as any failed o
   // (the test kit names no agent it starts, so the fork's run and end are marks.test.ts's)
 })
 
-// a citation whose check could not read a file outside the session's folders, as Claude Code refused that read: where
+// a citation whose check could not read a file it needed, as Claude Code refused that read: where
 // it asked nobody (`ok`, x gives the person's OK for the file), where the person said no to its ask (`ask`, x checks
 // again and Claude Code asks again), where a rule refused it (none: nothing the person does here)
 const ELSEWHERE = '/made-up/elsewhere/runs.csv'

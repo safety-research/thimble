@@ -19,25 +19,29 @@
 //   refusalOf(deny)           what Claude Code's refusal of a check says: auto mode's classifier gave no verdict on it
 //                             and gives none on such a call this session (`unreviewed`), could not answer for now
 //                             (`unavailable`), refused it (`judged`), a mode that refuses what no rule allows refused it
-//                             (`mode`: don't ask mode), or another cause (`other`)
+//                             (`mode`: don't ask mode), a deny rule refused it (`rule`), or another cause (`other`)
 //   cannotStart(deny, o)      the line a check that Claude Code refused gives: what refused it, and for `unreviewed` and
 //                             `mode` the key that lets thimble start its checks (g, ALLOW_KEY), until the person gave that
 //                             OK, where Claude Code takes thimble's allow
 //   checkKey($, key, until)   g while that line shows: the person's OK for this session, and the check it is about
 //                             starts again (hooks/keys.ts)
 //   repairOk($, m)            x on a failed citation: the person's OK that its check needs, which x gives before the
-//                             repair starts (`give`; `undo`, as a word typed after x undoes g): thimble's checks this
-//                             session while a refusal for the session stands (`unreviewed`, `mode`) whose line offers
-//                             that OK, and each file the citation's check could not read where Claude Code asked
-//                             nobody; null where nothing the person does here lets its check run, so x is not offered
+//                             repair starts, so one press is enough (`give`; `undo`, as a word typed after x undoes g):
+//                             thimble's checks this session (their spawn and their Python), as g gives it, and each
+//                             file the citation's check could not read where Claude Code asked nobody; null where
+//                             nothing the person does here lets its check run, so x is not offered
+//   modeSeen($, mode)         the session's permission mode as a classic hook gives it (marks/register.ts): a refusal
+//                             of a mode the session is no longer in stands no more, so x comes back
 //   allowsCheck($, e, o, v)   whether thimble answers allow to Claude Code's verdict `v` on a spawn (tool.check,
 //                             marks/register.ts): a checker's spawn of thimble's own, once the person gave that OK,
 //                             where Claude Code itself would ask, never where a rule, a hook, a setting or another
 //                             plugin decides
+//   allowsPython($, e, v)     the same for a call of a checker fork's (tool.check): a Bash call that runs Python as the
+//                             browser workbench's checker may (runsPython), under the same OK and on the same terms
 //   readEnded($, e, r)        a checker's read of one file that Claude Code refused (tool.call, marks/register.ts): the
 //                             file its check could not read, by the tool that read it (oneRead), and what lets it
 //                             (readFix); endCheck gives it to the failed citations whose check needed it (MarkItem
-//                             `unread`)
+//                             `unread`), unless no evidence may cite it (the validator's `outside`)
 //   allowsRead($, e, v)       whether thimble answers allow to Claude Code's verdict `v` on a checker's read (tool.check):
 //                             the same tool's read of one file the person let thimble's checks read this session
 //                             (repairOk), where Claude Code itself would ask
@@ -66,10 +70,14 @@
 // marks wait, not checked (`deferred`, a dim ? after each), opening one checks it, and one line says why (cannotStart):
 // once a session for each cause while the replies' own checks run into it, and each time a check the person asked for
 // (opening a citation, x) cannot start. A line that offers the person's OK says it at each check it stops, until they
-// give it: that OK is what lets the checks run. While Claude Code's refusal stands for the session (no verdict, don't
-// ask mode; until a check starts), x on a failed citation gives that OK, as g does, and starts the repair (repairOk).
-// Where no OK lets the check start (auto mode in a remote Cowork session, or a refusal that came after the OK), x is
-// not offered, and a failed citation opened says that line again.
+// give it: that OK is what lets the checks run. x on a failed citation gives that OK, as g does, before it starts the
+// repair (repairOk), whether or not Claude Code refused a check yet, so one press starts a repair that Claude Code would
+// refuse without it (no verdict, don't ask mode), and lets its Python run.
+// Where no OK lets the check start (auto mode in a remote Cowork session, a refusal that came after the OK, auto mode's
+// classifier that judged the check, a deny rule), x is not offered, and a failed citation opened says that line again.
+// A refusal by a mode stands until a check starts or thimble sees the session in another mode (modeSeen); Claude Code
+// raises nothing when the person changes the mode, so thimble sees it in the next hook that gives the mode: the
+// person's next prompt, or the end of main's turn.
 //
 // A check whose read of a file Claude Code refused leaves that file on each citation it fails whose check needed it
 // (readEnded, MarkItem `unread`): a check of one citation needed each file it could not read; a check of several, each
@@ -80,7 +88,12 @@
 // asked the person, who did not say yes, x starts the repair, whose read Claude Code asks about again in its own
 // dialog; where a rule, a setting or auto mode's classifier refused it, x is not offered. Only a read of one file
 // counts (oneRead): a Read, or a Grep of one regular file. A Grep of a folder reads each file in it, and a Glob lists
-// a folder, so their refusal names no file, and no OK covers them.
+// a folder, so their refusal names no file, and no OK covers them. A file no evidence may cite goes on no citation:
+// one outside every folder the validator takes a cited file from (the session's folders, and the temp folders where
+// Claude's own code counts), as the validator itself answers for the files the check could not read (its `outside`,
+// engine/kernel/evidence.py uncitable). No read of it would count, so its citations keep the validator's reason (`…
+// is outside the folder this session works in`) and are repaired as any are, since a repair may find evidence inside
+// those folders.
 //
 // Claude Code decides the fork's spawn as it decides a call of Claude's (Claude Code 2.1.307). In auto mode it lets a
 // plugin's own call run without auto mode's classifier, unless the person's settings give the classifier rules of
@@ -93,7 +106,9 @@
 // only tighten a subagent's call. So the line names what refused the check and, where Claude Code takes that answer,
 // offers g: the person's OK lets thimble answer Claude Code's own ask on its own checks with allow this session
 // (checksAllowed, allowsCheck), never a deny (a deny rule wins) or an ask a rule, a hook or another plugin made, and the
-// check the line is about starts again. A classifier that judged the check, or could not answer for now, is said as
+// check the line is about starts again. The same OK, on the same terms, lets its checker forks run Python (allowsPython),
+// which don't ask mode refuses too: a Bash call that runs one script with python3 or python, as the browser workbench's
+// checker runs with `--allowedTools Bash(python3:*) Bash(python:*)`; never main's call or another agent's. A classifier that judged the check, or could not answer for now, is said as
 // such; the mode stays the person's. No other line or card takes g (hooks/keys.ts ownKeys), so a press meant for
 // another never gives this OK.
 //
@@ -102,8 +117,8 @@
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent),
 // checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about), checksRefusing (the line
-// of a refusal that stands for the session), checksReads (the files the person let thimble's checks read, each by the
-// tool that reads it); the marks themselves are in store.ts
+// of a refusal that stands for the session, and the mode that refused it), checksReads (the files the person let
+// thimble's checks read, each by the tool that reads it); the marks themselves are in store.ts
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -330,8 +345,15 @@ export function refusingMode(deny: string): string | null {
  *  ask for one`, or a failure it calls hard). `unavailable`: it could not answer for now (busy, rate-limited, told to
  *  wait): a later check may run. `judged`: it judged the check and refused it, `reason` why. `mode`: a permission mode
  *  that refuses each call no rule allows refused it (`mode`, don't ask mode: `Claude Code is running in don't ask
- *  mode`). `other`: another cause (a deny rule, another plugin's hook), `reason` the refusal's first sentence. */
-export type Refusal = { kind: 'unreviewed' | 'unavailable' | 'judged' | 'mode' | 'other'; reason: string; mode?: string }
+ *  mode`). `rule`: a deny rule refused it (DENY_RULE), `reason` the refusal's first sentence. `other`: another cause
+ *  (another plugin's hook), `reason` the refusal's first sentence. */
+export type Refusal = { kind: 'unreviewed' | 'unavailable' | 'judged' | 'mode' | 'rule' | 'other'; reason: string; mode?: string }
+
+/** Claude Code's words where a deny rule refused a call (Claude Code 2.1.312): a rule on the whole tool (`Permission to
+ *  use Agent has been denied.`, and nothing after it), on what it is called with (`Permission to use Agent with fork
+ *  has been denied.`), and the rule named (`… has been denied by your rule …`, `Agent type 'fork' has been denied by
+ *  permission rule 'Agent(fork)' from userSettings.`). */
+const DENY_RULE = /^Permission to use \S+ has been denied\.\s*$|^Permission to use \S+ with .+ has been denied\.|\bhas been denied by (?:your rule|permission rule)\b/
 
 export function refusalOf(deny: string | undefined): Refusal {
   const said = String(deny || '')
@@ -344,6 +366,7 @@ export function refusalOf(deny: string | undefined): Refusal {
     if (/\bgave no verdict\b|\bhard failure\b/.test(said)) return { kind: 'unreviewed', reason: reasonOf(said) }
   }
   if (mode === "don't ask mode") return { kind: 'mode', mode, reason: reasonOf(said) }
+  if (DENY_RULE.test(said)) return { kind: 'rule', reason: reasonOf(said) }
   return { kind: 'other', reason: reasonOf(said || 'no reason given') }
 }
 
@@ -371,7 +394,8 @@ const outside = (mode: string) => `Outside ${mode}, thimble can check them.`
  *  until the person gave that OK (`allowed`), and where Claude Code takes thimble's allow: not in auto mode in a remote
  *  Cowork session (`cowork`). There, and after the OK, the line says what refused the check and that thimble checks
  *  outside that mode, and offers no key that could not work. A refusal by a mode is the person's mode at work, not
- *  thimble's failure, so its line is a notice. */
+ *  thimble's failure, so its line is a notice; so is one by auto mode's classifier or a deny rule, which the line
+ *  names. */
 export function cannotStart(deny: string | undefined, o: { allowed?: boolean; cowork?: boolean } = {}): Line {
   const r = refusalOf(deny)
   if (r.kind === 'unreviewed') return !o.allowed && !o.cowork ? { kind: r.kind, notice: true, offers: true, text: UNREVIEWED_LINE } : { kind: r.kind, notice: true, text: `${UNREVIEWED} ${outside('auto mode')}` }
@@ -381,6 +405,7 @@ export function cannotStart(deny: string | undefined, o: { allowed?: boolean; co
   }
   if (r.kind === 'unavailable') return { kind: r.kind, notice: true, text: `Auto mode's classifier was unavailable for thimble's check of citations${r.reason ? ` (${r.reason})` : ''}, so Claude Code refused it. Open a citation to check it.` }
   if (r.kind === 'judged') return { kind: r.kind, notice: true, text: `Auto mode's classifier refused thimble's check of citations (${reasonOf(r.reason)}), so they are not checked.` }
+  if (r.kind === 'rule') return { kind: r.kind, notice: true, text: `A permission rule refused thimble's check of citations (${r.reason}), so they are not checked.` }
   return { kind: 'other', notice: false, text: `The check of the citations could not start (${r.reason}), so they are not checked. ${OPEN_ONE}` }
 }
 
@@ -425,12 +450,21 @@ async function remoteCowork($: Engine): Promise<boolean> {
   }
 }
 
+/** The refusals that stand for the session, each kept with its line: no verdict, don't ask mode, and those no OK of
+ *  the person's answers, auto mode's classifier that judged the check and a deny rule. */
+const STANDING: Refusal['kind'][] = ['unreviewed', 'mode', 'judged', 'rule']
+/** The permission modes a refusal names (refusingMode), as Claude Code's hooks name the session's mode
+ *  (`permission_mode`). */
+const MODE_NAMES: Record<string, string> = { 'auto mode': 'auto', "don't ask mode": 'dontAsk' }
+
 /** The line Claude Code's refusal `deny` of a check gives now: with the person's OK as it stands, and where Claude Code
- *  takes thimble's allow. A refusal that stands for the session (`unreviewed`, `mode`) is kept, with its line, until a
- *  check starts (repairOk). */
+ *  takes thimble's allow. A refusal that stands for the session (STANDING) is kept, with its line and the mode that
+ *  refused it (`mode`, none for a rule), until a check starts or the session is seen in another mode (repairOk,
+ *  modeSeen). */
 async function refusedLine($: Engine, deny: string | undefined): Promise<Line> {
   const line = cannotStart(deny, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
-  if (line.kind === 'unreviewed' || line.kind === 'mode') await $.state.set(REFUSING, line as never)
+  const mode = MODE_NAMES[refusingMode(String(deny ?? '')) ?? '']
+  if (STANDING.includes(line.kind)) await $.state.set(REFUSING, (mode ? { ...line, mode } : line) as never)
   return line
 }
 
@@ -440,22 +474,34 @@ async function checkStarted($: Engine): Promise<void> {
   if ((await $.state.get(REFUSING)).value) await $.state.set(REFUSING, null)
 }
 
+/** The session's permission mode as a classic hook gives it (`permission_mode`, marks/register.ts): a refusal kept for
+ *  the session by another mode no longer stands, so x comes back on a failed citation. Claude Code raises nothing when
+ *  the mode changes, so thimble sees the change at the next hook that gives the mode. A rule's refusal stands in every
+ *  mode. */
+export async function modeSeen($: Engine, mode: unknown): Promise<void> {
+  if (typeof mode !== 'string' || !mode) return
+  const line = ((await $.state.get(REFUSING)).value ?? null) as { mode?: string } | null
+  if (line?.mode && line.mode !== mode) await $.state.set(REFUSING, null)
+}
+
 /** What x gives before a failed citation's repair starts: the person's OK (`give`), which a word typed after x takes
  *  back (`undo`), as it takes back g's (hooks/keys.ts). */
 export type RepairOk = { give: () => Promise<void>; undo: () => Promise<void> }
 
-/** x on failed citation `m`: the person's OK that its check needs first. While a refusal that stands for the session
- *  stands (refusedLine) and its line offers the OK, the OK for thimble's checks this session, as g gives it; and for each
- *  file its check could not read where Claude Code asked nobody (MarkItem `unread`, `ok`), the OK for thimble's checks
- *  to read that file with the tool that was refused (allowsRead). A file Claude Code asked the person about needs no OK
- *  here: Claude Code asks again as the repair reads it. Null where nothing the person does here lets the check run: a
- *  refusal no OK answers (its line says why), a file nobody here can let it read (the citation's card names it), or a
- *  citation that did not fail; the tray and the Claims pane offer x only where it is not null. */
+/** x on failed citation `m`: the person's OK that its check needs, which x gives before the repair starts, so that one
+ *  press is enough. The OK for thimble's checks this session, as g gives it (their spawn and their Python: allowsCheck,
+ *  allowsPython), unless given already, whether or not Claude Code refused a check yet: where Claude Code takes it (auto
+ *  mode's classifier gave no verdict, don't ask mode), the repair starts and runs its Python at the first press; and for
+ *  each file its check could not read where Claude Code asked nobody (MarkItem `unread`, `ok`), the OK for thimble's
+ *  checks to read that file with the tool that was refused (allowsRead). A file Claude Code asked the person about needs
+ *  no OK here: Claude Code asks again as the repair reads it. Null where nothing the person does here lets the check
+ *  run: a refusal no OK answers (its line says why), a file nobody here can let it read (the citation's card names it),
+ *  or a citation that did not fail; the tray and the Claims pane offer x only where it is not null. */
 export async function repairOk($: Engine, m: MarkItem | null): Promise<RepairOk | null> {
   if (m?.status !== 'failed') return null
   const line = ((await $.state.get(REFUSING)).value ?? null) as Line | null
   if ((line && !line.offers) || m.unread?.some(u => u.fix === null)) return null
-  const allow = !!line && !(await checksAllowed($))
+  const allow = !(await checksAllowed($))
   const have = ((await $.state.get(FILES)).value ?? []) as OneRead[]
   // each read once, and only one not let before, so a word after x takes back only what x gave
   const reads = (m.unread ?? []).filter(u => u.fix === 'ok').map(({ tool, file }) => ({ tool, file }))
@@ -504,21 +550,38 @@ export async function allowsCheck($: Engine, e: { input?: unknown }, origin: { p
   return checksAllowed($)
 }
 
+/** Whether a checker's Bash command runs Python as the browser workbench's checker may (`Bash(python3:*)`,
+ *  `Bash(python:*)`): one Python script (oneScript), whose program is python3 or python by that name. */
+function runsPython(command: string): boolean {
+  const program = String(command).trimStart().replace(/^cd\s+\S+[ \t]*(?:&&|;|\n)\s*/, '')
+  return oneScript(command) && /^python3?\s/.test(program)
+}
+
+/** Whether thimble answers allow at tool.check (marks/register.ts, for a checker fork's call) to Claude Code's verdict
+ *  `v` on a call `e`: a Bash call that runs Python (runsPython), once the person gave the OK for thimble's checks (g,
+ *  x), where Claude Code itself would ask (and don't ask mode refuse it, or auto mode's classifier settle it). A deny,
+ *  and an ask a rule, a hook, a setting or another plugin made, stand. */
+export async function allowsPython($: Engine, e: { tool?: unknown; input?: unknown }, v: Verdict): Promise<boolean> {
+  if (v.decision !== 'ask' || v.plugin !== undefined || v.rule || v.hook || v.setting) return false
+  if (String(e.tool) !== 'Bash' || !runsPython(String((e.input as { command?: unknown } | undefined)?.command ?? ''))) return false
+  return checksAllowed($)
+}
+
 /** What lets a check read a file whose read Claude Code refused with the words `said` (Claude Code 2.1.312's), as x acts
  *  on it (Unread `fix`): `ok`, the person's OK, where Claude Code asked nobody (don't ask mode; auto mode's classifier
  *  gave no verdict, but in a remote Cowork session (`cowork`), where Claude Code takes no plugin's allow; no prompt it
- *  could show); `ask`, Claude Code's own ask again, where the person did not say yes to it; null where a rule, a
- *  setting or the classifier's judgment refused it. Undefined for a refusal that is no permission's (a file that is not
- *  there), and for a classifier that could not answer for now, which a later check may get past. */
+ *  could show); `ask`, Claude Code's own ask again, where the person did not say yes to it; null where a deny rule
+ *  (DENY_RULE), a setting or the classifier's judgment refused it. Undefined for a refusal that is no permission's (a
+ *  file that is not there), and for a classifier that could not answer for now, which a later check may get past. */
 export function readFix(said: string, cowork = false): Unread['fix'] | undefined {
   const r = refusalOf(said)
   if (r.kind === 'mode') return 'ok'
   if (r.kind === 'unreviewed') return cowork ? null : 'ok'
-  if (r.kind === 'judged') return null
+  if (r.kind === 'judged' || r.kind === 'rule') return null
   if (r.kind === 'unavailable') return undefined
   if (/\btool use was rejected\b/.test(said)) return 'ask'
-  if (/^Permission to use \S+ has been denied\.(?:\s|$)|\bpermission prompts are not available\b/.test(said)) return 'ok'
-  if (/^Permission to use \S+ (?:with .+ )?has been denied\b|\bare blocked \(permissions\.\w+\)/.test(said)) return null
+  if (/^Permission to use \S+ has been denied\.\s|\bpermission prompts are not available\b/.test(said)) return 'ok'
+  if (/\bare blocked \(permissions\.\w+\)/.test(said)) return null
   return undefined
 }
 
@@ -839,7 +902,8 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     if (held === hold) held = null
     if (hold.cancelled) return ''
     if (!fork.agentId) {
-      // a mode refused it: its line, as any check the person asked for says it, which g answers for this repair
+      // a mode, auto mode's classifier or a deny rule refused it: its line, as any check the person asked for says it,
+      // which g answers for this repair where it offers g
       const line = await refusedLine($, fork.deny)
       if (line.kind !== 'other') { await sayCannotStart($, line, true, { kind: 'repair', repair: r }); return '' }
       return `The repair did not start (${reasonOf(fork.deny || 'no reason given')}). Press x on the citation to try again.`
@@ -956,8 +1020,9 @@ function giveUpLine(reason: string): string {
   return `The check of the citations stopped on an error, so they are not checked. ${CHECK_ONE}`
 }
 
-/** The validator's result for a fork's answer, or why there is none. */
-async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[]): Promise<{ results?: Any[]; problem?: string }> {
+/** The validator's result for a fork's answer, or why there is none; `outside`, those of the files the check could not
+ *  read (`unread`) that no evidence may cite, by the validator's own folders (engine/kernel/evidence.py uncitable). */
+async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[], unread: string[]): Promise<{ results?: Any[]; outside?: string[]; problem?: string }> {
   // main's calls too: the check may cite what main printed (the validator keeps the calls whose output the answer cites)
   // a side thread's answer: the thread's calls are its own code, as main's are a reply's
   const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(c.thread ? { agentId: c.thread } : undefined), 'main')]
@@ -966,13 +1031,13 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   const tmp = [await tempDir($), await claudeTempDir($).catch(() => '')].filter(Boolean)
   const ran = await $.process.run(validateArgv($), {
     cwd: c.cwd, timeoutMs: 120000,
-    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
+    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls, ...(unread.length ? { unread } : {}) }),
   })
-  let out: { parsed: boolean; results: Any[] } | null = null
+  let out: { parsed: boolean; results: Any[]; outside?: unknown } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
   if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${reasonOf(String(ran.stderr || 'no output').trim().split('\n').pop())}), so they are not checked. ${CHECK_ONE}` }
   if (!out.parsed) return { problem: `The check of the citations gave no answer thimble could read, so they are not checked. ${CHECK_ONE}` }
-  return { results: out.results }
+  return { results: out.results, outside: Array.isArray(out.outside) ? out.outside.map(String) : [] }
 }
 
 /** Whether the answer for failed citation `m` names `file`, so its check needed that file: its reason or note, or a
@@ -1003,9 +1068,11 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     }
     const mine = new Set(c.marks)
     const items = ((await replyOf($, c.key))?.items ?? []).filter(m => mine.has(m.n))
-    let v: { results?: Any[]; problem?: string }
+    // the files the check could not read (readEnded)
+    const reads = unreadBy.get(e.agentId) ?? []
+    let v: { results?: Any[]; outside?: string[]; problem?: string }
     try {
-      v = await validate($, c, e, items)
+      v = await validate($, c, e, items, [...new Set(reads.map(u => u.file))])
     } catch (err) {
       v = { problem: `thimble could not validate the check of the citations (${reasonOf(err)}), so they are not checked. ${CHECK_ONE}` }
     }
@@ -1016,10 +1083,12 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     }
     const byN = new Map(v.results.map(r => [Number(r.n), r]))
     const settled = Number(await $.clock.now())
-    // the files the check could not read (readEnded), each on a citation it leaves failed (but one it found wrong) whose
-    // check needed it: a check of one citation needed each; a check of several, each file its answer for the citation
-    // names. Its other citations are repaired as any are
-    const unread = unreadBy.get(e.agentId) ?? []
+    // the files the check could not read, each on a citation it leaves failed (but one it found wrong) whose check
+    // needed it: a check of one citation needed each; a check of several, each file its answer for the citation names.
+    // A file no evidence may cite (the validator's `outside`) it did not need: no read of it would count. Its other
+    // citations are repaired as any are
+    const outside = new Set(v.outside ?? [])
+    const unread = reads.filter(u => !outside.has(u.file))
     const reply = await edit($, c, r => settle(r, settled, r.items.map(m => {
       if (!mine.has(m.n)) return m
       const res = byN.get(m.n)

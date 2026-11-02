@@ -93,6 +93,8 @@ module cannot judge, fails as a check that did not run (`failedBy` `none`), whic
                                                                      for the checker
   terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
                                                                      rows.json) as `cards`
+  uncitable(files, cwd, root, tmp, rules)                        -> those of the files no evidence may cite: outside
+                                                                     every folder a cited file may lie in
   parse_answer(text)                               -> the last ```json array of the checker's answer, or None
 """
 from __future__ import annotations
@@ -1289,6 +1291,28 @@ def paths_of(file: str, cwd: str, root: str | None, also: list[str], calls: list
     return [p for p in named_paths(file, cwd, root, calls) if inside(p, folders)]
 
 
+def outside(file: str, cwd: str, root: str | None, also: list[str], calls: list[dict[str, Any]] = ()) -> bool:
+    """Whether a cited file lies outside the session's folders and the folders `also` names, so place() takes no
+    evidence from it: no path it may name lies inside them, or it names a file only through a link out of them, which
+    names a file outside them, not none."""
+    paths = paths_of(file, cwd, root, also, calls)
+    return not paths or (not any(os.path.isfile(p) for p in paths) and any(os.path.isfile(p) for p in named_paths(file, cwd, root, calls)))
+
+
+def also_of(kind: str, tmp: str | list[str] | None, rules: str | None) -> list[str]:
+    """The folders a cited file of evidence of `kind` may lie in besides the session's: for what code does, the temp
+    folders `tmp` (one, or a list), where Claude keeps its own code; for both kinds, a folder of labels' rules."""
+    temps = [tmp] if isinstance(tmp, str) else list(tmp or [])
+    return [f for f in (*(temps if kind == "code" else []), rules) if f]
+
+
+def uncitable(files: list[str], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, rules: str | None = None) -> list[str]:
+    """The files no evidence may cite: those outside every folder a cited file may lie in (outside()), the session's
+    folders and those of code, which hold those of a quote. A check that could not read such a file lost no evidence by
+    it, since no read of it would count."""
+    return [f for f in files if outside(str(f), cwd, root, also_of("code", tmp, rules))]
+
+
 ADJACENT = re.compile(r"([\"'])\s+\1")
 
 
@@ -1317,11 +1341,9 @@ def place(ev: dict[str, Any], cwd: str, root: str | None, also: list[str] = (), 
     file, line, sub = ev.get("file"), ev.get("line", ev.get("lines")), ev.get("substring")
     if not file or line is None or not sub:
         return ["the check named no line of a file to look at"], None, []
-    paths = paths_of(str(file), cwd, root, also, calls)
-    files = [p for p in paths if os.path.isfile(p)]
-    # a path that names a file only through a link out of the session's folders names a file outside them, not none
-    if not paths or (not files and any(os.path.isfile(p) for p in named_paths(str(file), cwd, root, calls))):
+    if outside(str(file), cwd, root, also, calls):
         return [Named(f"{file} is outside the folder this session works in")], None, []
+    files = [p for p in paths_of(str(file), cwd, root, also, calls) if os.path.isfile(p)]
     if not files:
         return [f"there is no file {file} in this session's folder"], None, []
     looks = [look(p, str(file), line, str(sub), cwd, root) for p in files]
@@ -1385,8 +1407,7 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     shown: list[dict[str, Any]] = []
     hay: list[str] = []
     # the folders a cited file may lie in besides the session's: Claude's own code for code, labels' rules for both
-    temps = [tmp] if isinstance(tmp, str) else list(tmp or [])
-    also = [f for f in (*(temps if kind == "code" else []), rules) if f]
+    also = also_of(kind, tmp, rules)
     for ev in evs:
         p, s, h = place(ev, cwd, root, also, calls)
         problems += p
