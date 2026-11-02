@@ -36,7 +36,10 @@
 // frame draws only the one laid out at its own width. So is the answer to a Client's post: the drawing at the width the
 // Client's frame draws at now (siteWidth), never at the width the post named. A post the Client sent before its frame
 // narrowed (a side pane opened) can be answered after the frame's new drawing came, and the wider drawing it named
-// would then stay in the narrower frame, each row's last column wrapped onto a line of its own.
+// would then stay in the narrower frame, each row's last column wrapped onto a line of its own. For the same reason each
+// drawing is kept at the width the runner laid it out at, as its answer says (applyAnswer): the runner holds the card
+// at the width of the last drawing it was asked for, so a key draws it at the width of whichever frame asked last; a
+// frame at the other width then asks for its own (needOf).
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
@@ -208,11 +211,13 @@ export async function askCard($: Engine, meta: CardMeta, op: string, body: Recor
 /** The runner's answer to an event of the person's, or to a drawing at a new `width`: the new tree drawn, the state
  *  kept, and a failure line about the card gone; a failure on the card and in the failure line, since the person sees
  *  the card stop. The runner keeps the card as it was before a failure (its state, width and keys), so a drawing that
- *  failed at one width holds only there: at another width the card draws again (frame). */
+ *  failed at one width holds only there: at another width the card draws again (frame). The tree is kept at the width
+ *  the answer says the runner laid it out at (runner.mjs), never at the width of the newest drawing kept here: while the
+ *  card shows at two widths, a request for the other frame's drawing moves the runner to its width, and its answer can
+ *  come after the next key's, which the runner drew at that width. */
 export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: number, drawing = false): Promise<void> {
   if (r?.ok) {
-    const before = await treeOf($, meta.id)
-    await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0, theme: await themeNow($) }, !drawing)
+    await setTree($, meta.id, { gen: meta.gen, width: Number(r.width) || width || cardWidth(), tree: r.tree, seq: Number(r.seq) || 0, theme: await themeNow($) }, !drawing)
     if (typeof r.state === 'string') void saveState($, meta.id, meta.version, r.state).catch(() => undefined)
     if (meta.error) await saveMeta($, { ...meta, error: null, errorWidth: null })
     await failCleared($, about(meta.id))
@@ -661,11 +666,14 @@ async function atWidth($: Engine, meta: CardMeta, width: number): Promise<void> 
 }
 
 /** The drawing a Client asks for: one at this width (none there, or one that failed at another width), or one in this
- *  theme's colors (the drawing it has was made for the other theme); '' when it has the one it needs. */
-function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: Theme): string {
+ *  theme's colors (the drawing it has was made for the other theme); '' when it has the one it needs. It names the
+ *  state the drawing is of (`state`, the answer that last changed the card: store.ts CardTree `since`), so the Client
+ *  asks again once a key changed the card, also at a width it asked for before: the drawing that ask brought shows the
+ *  card before the key, and is dropped. */
+function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: Theme, state: number): string {
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
-  if (!d || failedElsewhere) return `${meta.gen}:${width}`
-  return (d.theme ?? 'dark') !== theme ? `${meta.gen}:${width}:${theme}` : ''
+  if (!d || failedElsewhere) return `${meta.gen}:${width}:${state}`
+  return (d.theme ?? 'dark') !== theme ? `${meta.gen}:${width}:${state}:${theme}` : ''
 }
 
 /** A Client's props in a frame `room` columns wide: the drawing laid out at that width, or none and the drawing it
@@ -675,7 +683,7 @@ function propsAt(meta: CardMeta, t: CardTree | null | undefined, room: number, t
   if (meta.held) return { tree: null, width: room, need: '', tint: citeTint('verified', theme), accent: accent(), theme, cap: 0 }
   const d = drawingAt(t, meta.gen, room, theme)
   const cap = rowsMore(meta, d?.tree, room) ? CARD_ROWS : 0
-  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme), tint: citeTint('verified', theme), accent: accent(), theme, cap }
+  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme, t?.gen === meta.gen ? t.since ?? 0 : 0), tint: citeTint('verified', theme), accent: accent(), theme, cap }
 }
 
 /** A Client's post: the events it has not had an answer for, each handled once, in order. After a press or a click,

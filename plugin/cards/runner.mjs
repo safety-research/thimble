@@ -33,12 +33,16 @@
 //                                     before any pointer listener): the item on its line, as pointer picks one;
 //                                     `handled` false, the card as it was, when it stands on no item
 //   undo     {id, n}                  the state as it was before the last n keys
-//   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was
+//   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was, at
+//                                     `width`, which the card is drawn at from now on
 //   ping
 // Any request may also name `theme`, 'dark' or 'light' (Claude Code's theme): the palette surface.colors gives every
 // card from then on (the hooks send it with each request, and draw the cards again when it changes).
-// Each event answers the plain tree (`{t, p, c}`: Box, Text and Button nodes, a Button's onPress a number), and the state
-// to keep. A card the runner does not hold answers {ok: false, missing: true}: the hooks load it again from its copy.
+// Each event answers the plain tree (`{t, p, c}`: Box, Text and Button nodes, a Button's onPress a number), the `width`
+// it is laid out at, and the state to keep. A card shows at two widths at once when a side pane holds its copy, and the
+// runner draws an event at the width of the last drawing it was asked for, which may be the other frame's: the hooks
+// keep each drawing at the width its answer names. A card the runner does not hold answers {ok: false, missing: true}:
+// the hooks load it again from its copy.
 // Every answer carries `seq`, which grows with each request, so the hooks keep the newest drawing when two answers come
 // back out of order. It grows across runners too: a runner started again (the hooks module reloaded, which stops the
 // runner it started; the last runner stopped) starts from the time it started, so its answers are newer than any the
@@ -475,7 +479,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       if (op === 'key') undoable = undoable.concat([before]).slice(-16)
       else if (before) undoable = []
       const d = op === 'copy' ? peek(a.width) : draw()
-      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, notes: d.notes, state: saved(), cells: !!pointer }))
+      return stringify(Object.assign({ ok: true }, r, { tree: d.tree, width: op === 'copy' ? a.width : columns, notes: d.notes, state: saved(), cells: !!pointer }))
     } catch (e) {
       try {
         columns = was
@@ -514,9 +518,9 @@ function inContext(card, op, args, ms) {
     return { ok: false, phase: op, error: 'the view gave no drawing thimble can read' }
   }
   const r = JSON.parse(out)
-  // blank rows between the card's parts (space.js), in the places the version's first drawing gave them, so no key moves
-  // them; a view that reads clicks by cell keeps its rows where it drew them
-  if (r.ok && r.tree && !r.cells) r.tree = spaced(r.tree, Number(args.width) || card.width || 80, card.plan)
+  // blank rows between the card's parts (space.js), in the places the version's first drawing at its width gave them, so
+  // no key moves them; a view that reads clicks by cell keeps its rows where it drew them
+  if (r.ok && r.tree && !r.cells) r.tree = spaced(r.tree, r.width, card.plan)
   // and its tree says so (`cells` on its top node), so the Client leaves its clicks to the view (client.tsx)
   else if (r.ok && r.tree && typeof r.tree === 'object') r.tree = { ...r.tree, p: { ...(r.tree.p || {}), cells: true } }
   delete r.cells
@@ -674,11 +678,17 @@ function pick(card, y) {
   return r.ok ? { ...r, handled: true } : null
 }
 
+/** The drawing an answer gave as the one the card holds now, at the width it is laid out at: what a click reads. */
+function keep(card, r) {
+  card.tree = r.tree
+  if (r.width) card.width = r.width
+}
+
 function event(a, op, args) {
   const card = cards.get(a.id)
   if (!card) return { ok: false, missing: true }
   const r = inContext(card, op, args, EVENT_MS)
-  if (r.ok) card.tree = r.tree
+  if (r.ok) keep(card, r)
   return r
 }
 
@@ -705,7 +715,11 @@ function buttonWith(n, words) {
 function act(a) {
   const card = cards.get(a.id)
   if (!card) return { ok: false, missing: true }
-  card.width = a.width || card.width
+  // the copies are at the width the actions name: the card is drawn there first
+  if (a.width && a.width !== card.width) {
+    const at = event(a, 'draw', { width: a.width })
+    if (!at.ok) return at
+  }
   const before = inContext(card, 'save', {}, EVENT_MS)
   if (!before.ok) return before
   const copies = []
@@ -736,23 +750,19 @@ function act(a) {
       continue
     }
     if (r.ok) {
-      card.tree = r.tree
+      keep(card, r)
       copies.push({ what, note: r.note, ...copy(r.tree, card.width) })
     } else copies.push({ what, error: r.error })
   }
   const back = inContext(card, 'restore', { saved: before.saved }, EVENT_MS)
-  if (back.ok) card.tree = back.tree
-  return { ok: true, copies, tree: card.tree, state: back.ok ? back.state : before.saved }
+  if (back.ok) keep(card, back)
+  return { ok: true, copies, tree: card.tree, width: card.width, state: back.ok ? back.state : before.saved }
 }
 
 const OPS = {
   ping: () => ({ ok: true }),
   load,
-  draw: a => {
-    const r = event(a, 'draw', { width: a.width })
-    if (r.ok && a.width) cards.get(a.id).width = a.width
-    return r
-  },
+  draw: a => event(a, 'draw', { width: a.width }),
   copy: textCopy,
   key: a => event(a, 'key', { key: String(a.key ?? '').slice(0, 1) }),
   press: a => event(a, 'press', { button: Number(a.button) }),
@@ -760,7 +770,7 @@ const OPS = {
     const card = cards.get(a.id)
     if (!card) return { ok: false, missing: true }
     const r = click(card, { down: a.down, up: a.up ?? a.down, button: a.button })
-    if (r.ok) card.tree = r.tree
+    if (r.ok) keep(card, r)
     return r
   },
   undo: a => event(a, 'undo', { n: Number(a.n) || 0 }),
@@ -770,7 +780,7 @@ const OPS = {
     const y = rowOf(card.tree, card.width, Array.isArray(a.path) ? a.path : [])
     const r = y >= 0 && !(card.tree && card.tree.p && card.tree.p.cells) ? pick(card, y) : null
     if (!r) return { ok: true, handled: false }
-    if (r.ok) card.tree = r.tree
+    if (r.ok) keep(card, r)
     return r
   },
   act,
