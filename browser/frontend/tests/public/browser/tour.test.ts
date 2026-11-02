@@ -1215,7 +1215,7 @@ async function walk(page: Page, tag: string, send = false) {
     return {
       q: first?.querySelector('.wu-fig-q')?.textContent?.trim(),
       rows: first?.querySelectorAll('tbody tr').length ?? 0,
-      check: [...root.querySelectorAll<HTMLElement>('.wu-check')].filter((e) => /Alternative explanations/.test(e.textContent ?? '') && getComputedStyle(e).display !== 'none').length,
+      check: [...document.querySelectorAll<HTMLElement>('.tour-ex-side [data-category="alternative-explanations"]')].filter((e) => getComputedStyle(e).display !== 'none').length,
     }
   })
   assert.deepEqual(fig, { q: 'How close did the database come to its limit of 200 connections?', rows: 4, check: 0 }, `${tag} 7: the first figure is the small table, and the check is not made yet`)

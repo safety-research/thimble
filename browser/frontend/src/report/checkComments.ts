@@ -1,7 +1,8 @@
-// The checks and comments of a document, pure: the checks the Comments pane lists with their colours, the open
-// comments a document carries, which passages they tint, the ruler's lanes, the margin's stacking so comment cards
-// never overlap, and the edits the pane makes to its list. A check covers the documents, the cards or both; its runs on
-// the cards are `runs['@canvas']` (CANVAS).
+// The checks and comments of a document, pure: the checks a Comments list shows with their colours and their runs, the
+// open comments a document carries, which passages they tint, the ruler's lanes, the margin's stacking so comment
+// cards never overlap, and the edits a list makes to the checks. A check covers the documents, the cards, Claude's
+// answers or several; its runs are by document slug, on the cards `runs['@canvas']` (CANVAS) and on the answers
+// `runs['@answers']`.
 import { colourVar, LABEL_ORDER } from '../files/labels'
 import type { RulerColumn, RulerTick } from '../files/Ruler'
 import { hhmm } from '../lib/time'
@@ -213,6 +214,18 @@ export const coversSurface = (check: Pick<Check, 'covers'>, surface: string): bo
 
 /** The checks a surface's Comments pane lists, in the server's order. */
 export const checksFor = <T extends Pick<Check, 'covers'>>(checks: readonly T[], surface: string): T[] => checks.filter((c) => coversSurface(c, surface))
+
+/** Whether a run target is a document's slug, not the cards (CANVAS) or Claude's answers (`@answers`). */
+export const isDocument = (surface: string): boolean => !!surface && !surface.startsWith('@')
+
+/** A check's runs on the documents, as the top bar's Comments shows them: none when it does not cover the documents;
+ * else its run on each written document (`written`, in the type bar's order), or, while the written documents are not
+ * known, its run on each document it has one on. Pure. */
+export function docRuns(check: Pick<Check, 'covers' | 'runs'>, written: readonly string[] | null): { doc: string; run: CheckRun }[] {
+  if (!coversOf(check).includes('documents')) return []
+  const runs = check.runs ?? {}
+  return (written ?? Object.keys(runs).filter(isDocument)).flatMap((doc) => (runs[doc] ? [{ doc, run: runs[doc] }] : []))
+}
 
 /** What a Checks pane row shows in its count's place: null while running or with no result, else the count. */
 export function rowCount(run: Pick<CheckRun, 'status'> | null, open: number): number | null {

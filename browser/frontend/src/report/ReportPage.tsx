@@ -109,7 +109,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
   useEffect(() => {
     if (active && !shown.some((c) => c.id === active)) setActive(null)
   }, [active, shown])
-  // the comment open is looked at, so the new comments' dot on the Comments pane leaves its run out
+  // the comment open is looked at, so the new comments' dot on the top bar's Comments leaves its run out
   useLookedAt(ws, shown.find((c) => c.id === active)?.run)
 
   // a click on a tinted passage opens its card (the next one of the passage's when one of them is open); a click

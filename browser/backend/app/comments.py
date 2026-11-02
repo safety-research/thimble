@@ -1,6 +1,6 @@
 """Comments and checks from the chat: main's own note beside a passage of a written document or beside a card or a plan
 step (`add_comment` from main's shim), a comment resolved or opened again (`resolve_comment`), and a check turned off
-(`stop_check`), the chat counterparts of the margin's Comment and ✓ and the Comments pane's switch.
+(`stop_check`), the chat counterparts of the margin's Comment and ✓ and a check's switch in Comments.
 
 A note on a card goes to the cards' comments (canvas_comments.add) with author `claude`; `resolve_comment` takes such a
 comment's id, or `card:<id>` (`#step-<n>`) for every open comment there.

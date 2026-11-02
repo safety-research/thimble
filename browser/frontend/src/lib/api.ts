@@ -914,7 +914,7 @@ export const undoApi = {
   redo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/redo`, { method: 'POST' }),
 }
 
-// --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
+// --- report checks: the lists of the checks (report/Checks.tsx, shell/LabelsSidebar.tsx; backend checks.py) ---
 import type { CardCheckStatus, CardDrawn, Check, CheckCover, CheckPatch, CheckRun } from './types'
 
 export const marksApi = {

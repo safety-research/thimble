@@ -42,14 +42,15 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
                              in main's chat and in the fix's thread, at the time it ended (note: a `fix` chip): a ready
                              fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself
     the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
-                             terminal's key press makes one; then the page of live's browser/ is built and the server
-                             starts again from live, dev._do_restart; a page that does not build takes the fix off
-                             again; once it is on, a row says so), Later (the row asks no more, the fix stays ready in
-                             Your fixes), Undo (`fix undo`, then a restart), Try again (`fix redo`, a new fixer with the
-                             earlier change, redo) and, on a fix that did not pass, Ask Claude, which shows what it
-                             tried and puts its failure in main's composer for the person to send, once, with its change
-                             and the end of its tests' output (tried_route), since main's sandbox cannot read the copy
-                             (FixStrip.tsx)
+                             terminal's key press makes one; then live's browser/ gets its page, the one the fix's
+                             checks built in the sandbox when live has the sources they built it from, else a build,
+                             prepare, and the server starts again from live, dev._do_restart; a page that does not
+                             build takes the fix off again; once it is on, a row says so), Later (the row asks no
+                             more, the fix stays ready in Your fixes), Undo (`fix undo`, then a restart), Try again
+                             (`fix redo`, a new fixer with the earlier change, redo) and, on a fix that did not pass,
+                             Ask Claude, which shows what it tried and puts its failure in main's composer for the
+                             person to send, once, with its change and the end of its tests' output (tried_route),
+                             since main's sandbox cannot read the copy (FixStrip.tsx)
 
 What the last row of each fix says lives in the browser's home (fixes.json, by fix id), so it is still there after the
 restart; the newest row of a fix shows its state now, with the clicks it takes.
@@ -650,6 +651,9 @@ async def settle(fid: int, answer: str) -> None:
         env = {"THIMBLE_PYTHON": sys.executable, "THIMBLE_FIX_READ": os.pathsep.join(map(str, lent_reads()))}
         args = ["done", str(fid), "--summary", "-", *(["--title", end["title"]] if end["title"] else []),
                 *(["--request"] if end["request"] else [])]
+        # the checks build the page into the fix's temp folder, which its fixer writes too: what is there once they end
+        # is their build (checks_page)
+        await asyncio.to_thread(shutil.rmtree, checks_page(fid), True)
         # the tests run for one fix at a time, and once more when they fail (the kernel's run_tests)
         r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=2400, env=env)
         done = json.loads(r.out) if r.ok else {}
@@ -669,12 +673,15 @@ async def settle(fid: int, answer: str) -> None:
     else:
         _phase_set(fid, None)
         tests = str(done.get("tests") or "")
-        note(fid, "ready", f"thimble fixed: {title}" + (" · tests pass" if tests == "passed" else ""))
+        page = await asyncio.to_thread(built_tree, fid, str(done.get("commit") or ""))
+        note(fid, "ready", f"thimble fixed: {title}" + (" · tests pass" if tests == "passed" else ""),
+             **({"page": page} if page else {}))
 
 
 async def apply(fid: int) -> None:
     """The person's click on a ready fix (Use it now, or Use it in Your fixes): the secret of this click to
-    `fix apply`, then live's page is built and the server starts again from live. Raises when the kernel refuses."""
+    `fix apply`, then live's page is made ready, from the page the fix's checks built when live has the sources they
+    built it from (prepare), and the server starts again from live. Raises when the kernel refuses."""
     _phase_set(fid, "applying")
     try:
         secret = await asyncio.to_thread(press, fid)
@@ -690,7 +697,7 @@ async def apply(fid: int) -> None:
 
 
 async def _go_on(fid: int, title: str) -> None:
-    why = await asyncio.to_thread(prepare, target_root())
+    why = await asyncio.to_thread(prepare, target_root(), checks_build(fid))
     if why:
         await asyncio.to_thread(kernel, ["undo", str(fid)], timeout=300)
         _phase_set(fid, None)
@@ -748,18 +755,24 @@ def target_root() -> Path:
     return live if (live / "backend" / "app" / "main.py").is_file() else config.REPO_ROOT
 
 
-def prepare(root: Path) -> str:
-    """`root` ready to run: the packages lent, and its page built when its sources are newer than the build. '' when
-    ready, else why not."""
-    if root.resolve() != config.REPO_ROOT.resolve():
+def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
+    """`root` ready to run: the packages lent, and its page built when its sources are newer than the build. A build of
+    the very sources it has, made before, takes the build's place rather than a build after the person's click: the
+    page the checks of the fix that goes on built (`built`: its folder, and the git tree of the sources it was built
+    from, checks_build), or this install's own page, while `root` has the install's page sources (a fix that changes
+    none). '' when ready, else why not."""
+    here = root.resolve() == config.REPO_ROOT.resolve()
+    if not here:
         lend(root)
     fe = root / "frontend"
-    built = fe / "dist" / "index.html"
-    if built.is_file():
-        stamp = built.stat().st_mtime
-        newer = any(p.stat().st_mtime > stamp for d in (fe / "src",) for p in d.rglob("*") if p.is_file())
-        if not newer and (fe / "index.html").stat().st_mtime <= stamp:
-            return ""
+    if page_built(fe):
+        return ""
+    tree = page_tree(fe)
+    own = config.REPO_ROOT / "frontend"
+    if tree and built and built[1] == tree and put_page(built[0], fe / "dist"):
+        return ""
+    if tree and not here and page_built(own) and page_tree(own) == tree and put_page(own / "dist", fe / "dist"):
+        return ""
     npm = shutil.which("npm")
     if not npm:
         return "the page was not built: npm is not on the PATH"
@@ -773,6 +786,73 @@ def prepare(root: Path) -> str:
         err = next((ln for ln in tail if "error" in ln.lower()), tail[-1] if tail else "no message")
         return f"the page did not build: {err.strip()[:300]}"
     return ""
+
+
+def page_built(fe: Path) -> bool:
+    """Whether the page folder `fe` (a browser/ folder's frontend/) holds a build no source of it is newer than."""
+    built = fe / "dist" / "index.html"
+    if not built.is_file():
+        return False
+    stamp = built.stat().st_mtime
+    newer = any(p.stat().st_mtime > stamp for p in (fe / "src").rglob("*") if p.is_file())
+    return not newer and (fe / "index.html").stat().st_mtime <= stamp
+
+
+def git_tree(cwd: Path, rev: str) -> str:
+    """The id of the git tree `rev` names (`<commit>:<path>`) in the checkout at `cwd`, '' when it names none."""
+    try:
+        p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(cwd), "rev-parse",
+                            rev], capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return p.stdout.strip() if p.returncode == 0 else ""
+
+
+def page_tree(fe: Path) -> str:
+    """The git tree of the page sources in `fe` (a browser/ folder's frontend/), when they are as their checkout's
+    commit has them; '' when they are not (a change not committed), or are in no checkout."""
+    try:
+        st = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(fe), "status",
+                             "--porcelain", "--", "."], capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return git_tree(fe, "HEAD:./") if st.returncode == 0 and not st.stdout.strip() else ""
+
+
+def checks_page(fid: int) -> Path:
+    """Where the checks of fix `fid` build its page when its change touched the page: the kernel's PAGE_CHECKS build
+    it into "$TMPDIR/page", the fix's temp folder."""
+    return fixes_home() / "tmp" / str(int(fid)) / "page"
+
+
+def built_tree(fid: int, commit: str) -> str:
+    """The git tree of the page sources the checks of fix `fid` built its page from: those of its commit, which they
+    checked, when they built the page (settle clears checks_page before they run); '' when they did not."""
+    if not commit or not (checks_page(fid) / "index.html").is_file():
+        return ""
+    return git_tree(fixes_home() / "live", f"{commit}:browser/frontend")
+
+
+def checks_build(fid: int) -> tuple[Path, str] | None:
+    """The page the checks of ready fix `fid` built, and the git tree of the sources they built it from (settle), for
+    prepare; None when they built none."""
+    tree = str((_notes().get(str(int(fid))) or {}).get("page") or "")
+    return (checks_page(fid), tree) if tree else None
+
+
+def put_page(src: Path, dist: Path) -> bool:
+    """A copy of the page build `src` in place of the build `dist`, its files newer than the sources (page_built).
+    False when `src` holds no build, and, with no build left at `dist`, when the copy failed."""
+    if not (src / "index.html").is_file():
+        return False
+    shutil.rmtree(dist, ignore_errors=True)
+    try:
+        shutil.copytree(src, dist, copy_function=shutil.copy)
+    except OSError:
+        log.exception("copying the page built at %s failed", src)
+        shutil.rmtree(dist, ignore_errors=True)
+        return False
+    return True
 
 
 # ------------------------------------------------------------------ requests

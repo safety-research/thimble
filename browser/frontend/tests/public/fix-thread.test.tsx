@@ -3,7 +3,10 @@
 // fixes.fixer_chat): the tree lists it by the fix's name (`fixing <name>`, `changing <name>` for a round of a fix they
 // have), and main's chat shows the person's message as they typed it, then the fixer's card where main started it, with
 // its steps and a link to its thread. A round of the fix is the card of that run alone. A message typed in the fix's
-// thread is a round of that fix.
+// thread is a round of that fix. The fixer's last message, its Title line and its What it does line, reads as two lines
+// there, as the terminal prints it.
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { foldRecords } from '../../src/chat/model.ts'
@@ -87,5 +90,24 @@ describe("main's chat", () => {
     // how the first run ended is a row between the two cards, in the order it happened
     const order = [...el.querySelectorAll('.chat-agent, .chat-fix, .chat-fix-said')].map((n) => n.getAttribute('data-role') ?? n.getAttribute('data-kind'))
     expect(order).toEqual(['fixer', 'ready', 'fixer'])
+  })
+})
+
+describe("the fix's thread", () => {
+  test("the fixer's last message shows its Title and its What it does on lines of their own", async () => {
+    const end = 'Title: Card counts its rows\nWhat it does: The card says how many rows its table has.'
+    const log = [
+      { type: 'user', ts: '2026-10-23T10:01:00Z', text: 'make the card count its rows', by: 'browser' },
+      { type: 'text', ts: '2026-10-23T10:02:00Z', delta: end },
+    ] as unknown as ChatRecord[]
+    const el = await mount(<Rows rows={foldRecords(log)} ws="w" chat="f1" streaming={false} />)
+    // one paragraph, which holds the line break the fixer wrote between the two lines
+    const p = [...el.querySelectorAll('.chat-assistant .chat-text p')]
+    expect(p.map((x) => x.textContent)).toEqual([end])
+    // and a reply's paragraph shows the line breaks it holds (white-space: pre-line), as the terminal prints them
+    const css = readFileSync(path.resolve(__dirname, '../../src/styles/chat.css'), 'utf8')
+    const at = css.indexOf('\n.chat-text p {')
+    expect(at).toBeGreaterThan(-1)
+    expect(css.slice(at, css.indexOf('}', at))).toMatch(/white-space: pre-line/)
   })
 })

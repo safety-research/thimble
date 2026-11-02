@@ -1,6 +1,6 @@
 // The board's controls. At the top right, the bar that adds to the board (Card · Group, and Group ⌘G for a multiple
-// selection) and Comments, which lists the checks that comment on the cards with their switches and counts, as the
-// Report's Comments pane does (report/Checks.tsx CheckRows), and + for a new one; it carries the accent dot while a
+// selection) and Comments, which lists the checks that comment on the cards with their switches and counts
+// (report/Checks.tsx CheckRows), and + for a new one; it carries the accent dot while a
 // check's run left comments on the cards that the analyst has not looked at, until the menu opens
 // (report/newComments.ts). At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and
 // the minimap, where a press or drag moves the view. While a filter is set the minimap draws the kept cards in ink, the
