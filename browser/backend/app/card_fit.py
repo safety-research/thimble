@@ -22,9 +22,8 @@ wide). No model takes part in the measure. A body past card_size.BODY_MAX, or co
    as a thread's fork (`agent`); neither for main's own call. Every held card shows when the server starts again
    (notebook.mark_interrupted_cells).
 
-Where no card can be drawn (render.down, or the harness failed on this card), outside browser mode, where no server
-hears main's turn end, or where the workspace does not check cards by itself (card_check.auto), nothing is held. Each
-step is one line of workspaces/<c>/card-fit.jsonl.
+Where no card can be drawn (render.down, or the harness failed on this card), or where the workspace does not check
+cards by itself (card_check.auto), nothing is held. Each step is one line of workspaces/<c>/card-fit.jsonl.
 """
 from __future__ import annotations
 

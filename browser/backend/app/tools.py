@@ -812,7 +812,7 @@ def _format_cell_result(cell: dict, lines: int = RESULT_LINES) -> str:
     if body:
         out.append(body)
     if extras:
-        out.append(f"(rendered a chart/table; thimble shows it as [[card:{cid}]])")  # mode-neutral: both modes draw it
+        out.append(f"(rendered a chart/table; thimble shows it as [[card:{cid}]])")
     return "\n".join(out)
 
 

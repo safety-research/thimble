@@ -706,7 +706,7 @@ def _answers_after(records: list[dict[str, Any]], start: int) -> bool:
 def unread(c: str, meta: dict[str, Any]) -> bool:
     """Whether the thread has an answer (a reply or a finished run) the analyst has not opened since it came: one in
     its log after the records SEEN_KEY counts. A thread never opened counts from its start. Kept on the meta, so it
-    holds across a restart and in both modes."""
+    holds across a restart."""
     try:
         records = agents.read_events(agents.paths(c, str(meta["id"]))[1])
     except Exception:  # noqa: BLE001 — a thread that cannot be read shows nothing new
