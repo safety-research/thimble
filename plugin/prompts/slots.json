@@ -1,1 +1,10 @@
-{}
+{
+  "CHECK_LABEL_VALUES": {
+    "terminal": " Label values come from `thimble label NAME --csv`.",
+    "browser": ""
+  },
+  "RULE_SOURCE": {
+    "terminal": "its `--code` file or `--regex` command",
+    "browser": "the code or regex its apply_label call gave"
+  }
+}
