@@ -331,6 +331,63 @@ def test_r2_a_command_whose_run_gives_no_result_ends_with_one_plain_line(tmp_pat
 
 
 @ROOT_SKIP
+def test_r2_stdin_from_a_slow_pipe_reaches_the_command_the_plugin_runs(tmp_path: Path) -> None:
+    # `(sleep 0.3; printf …) | thimble label NAME --set`: before, the command waited 0.1 s for stdin and handed the
+    # plugin none, so the plugin's run had nothing to set (exit 2); now it waits as long as the command itself does
+    data, home, box, env = session(tmp_path)
+    values = json.dumps({"runs.csv#row=2": "failed", "runs.csv#row=3": "failed"})
+    home.chmod(0o500)
+    stop = threading.Event()
+    plugin(box, home, stop)
+    try:
+        r = subprocess.run(["sh", "-c", f"(sleep 0.3; printf '%s' '{values}') | \"$0\" \"$1\" label run_status --set",
+                            sys.executable, str(ENGINE / "thimble.py")], cwd=data, env=env, capture_output=True, text=True,
+                           timeout=60)
+    finally:
+        stop.set()
+        home.chmod(0o700)
+    assert r.returncode == 0, r.stdout + r.stderr
+    lab = json.loads(next((home / "conversations" / "c-1").glob("folders/*/labels/run_status.json")).read_text())
+    assert {ref: u["v"] for ref, u in lab["units"].items()} == {"runs.csv#row=2": "failed", "runs.csv#row=3": "failed"}
+
+
+def test_r2_a_command_handed_to_the_plugin_reads_stdin_as_long_as_it_would_itself(capsys: pytest.CaptureFixture[str]) -> None:
+    from kernel.cli import stdin_wait
+
+    # input it cannot go on without: 5 s, as the command waits; argparse's short forms too
+    for argv in (["label", "x", "--in", "a.csv", "--code"], ["label", "x", "--in", "a.csv", "--cod"],
+                 ["label", "x", "--answers", "-"], ["file", "issue", "3", "--draft", "-"]):
+        assert stdin_wait(argv) == 5.0, argv
+    # what it reads when it is there: stdin_text's 1 s
+    for argv in (["label", "x", "--set"], ["fix", "done", "3", "--cannot", "-"], ["fix", "new"]):
+        assert stdin_wait(argv) == 1.0, argv
+    # no stdin: no wait, and stdin is left alone; nor for what does not parse, which says nothing here
+    for argv in (["label", "x", "--in", "a.csv", "--code", "rule.py"], ["label", "x", "--set", "a.csv#row=1=yes"],
+                 ["label", "x", "--csv"], ["coverage"], ["fixes"], ["label", "--help"], ["no-such-command"],
+                 ["label", "x", "--limit", "many"]):
+        assert stdin_wait(argv) == 0, argv
+    assert capsys.readouterr() == ("", "")
+
+
+@ROOT_SKIP
+def test_r2_a_command_the_plugin_does_not_take_runs_here_with_its_stdin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # nothing served it (a script whose Bash call names no thimble, a `!` command): before, it ran here with its stdin
+    # already read, and a label's code on stdin was "no code"
+    _, home, box, env = session(tmp_path)
+    for k in ("THIMBLE_HOME", "THIMBLE_HANDOFF"):
+        monkeypatch.setenv(k, env[k])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(CODE))
+    monkeypatch.setattr(H, "TAKE_S", 0.2)
+    home.chmod(0o500)
+    try:
+        assert H.handed_off(["label", "run_status", "--in", "runs.csv", "--code"]) is None
+    finally:
+        home.chmod(0o700)
+    assert sys.stdin.read() == CODE
+    assert list(box.iterdir()) == []
+
+
+@ROOT_SKIP
 def test_a_command_the_plugin_does_not_take_takes_itself_back_and_runs_here(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _, home, box, env = session(tmp_path)
     home.chmod(0o500)
