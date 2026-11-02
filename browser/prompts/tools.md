@@ -585,10 +585,6 @@ This card errored. Fix the code with `edit_card`.
 
 The code was stopped after {limit}. Make it faster and run it again with `edit_card`.
 
-## card-run
-
-The card's code did not run yet. Run this command with Bash next: `{command}`. It runs the code and prints the card's result with the start of each output. thimble shows the card when its code has run.
-
 ## card-tall
 
 card:{cid}'s body draws {height} px tall at the card's width, and about {limit} px of a card's body fit on the analyst's screen with its question and takeaway, so they never see the whole card at once.
@@ -713,14 +709,6 @@ The takeaway of its card card:{cid} was written for the run before; write it aga
 
 {cards} read this label before it changed. Once its counts are final, thimble runs each of them again on the label as it is now, so leave them as they are.
 
-## label-run
-
-The label's code did not run yet. Run this command with Bash next: `{command}`. It runs your function on each unit and prints the label's result with its counts.
-
-## cards-stale
-
-{cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with Bash: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.
-
 ## show_label-not-files
 
 {label} is a label over {units}, which Files does not show. To show it, filter {where} by one of its values.
@@ -813,18 +801,6 @@ The analyst laid out no frame, so the shape is yours.
 
 {what}, so screenshot cannot take it. `read_ref` on it reads what the analyst sees.
 
-## screenshot-frames
-
-The film of {ref}, {duration} s long, its lines at {windows} s.
-
-## screenshot-frames-errors
-
-The film reported: {errors}
-
-## screenshot-terminal
-
-screenshot cannot take this picture in terminal mode. There it draws only a card, and only when Chromium and thimble's built page are installed, which `thimble doctor` shows. `read_ref` on the card reads what the analyst sees.
-
 ## propose_view-proposed
 
 Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
@@ -832,14 +808,6 @@ Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building 
 ## propose_view-unmatched
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
-
-## propose_view-cap
-
-{view} was not proposed: a workspace gets at most {n} views from the orientation, and it has had {views}, counting any the analyst deleted. To improve one, propose it again under its name.
-
-## propose_view-deleted
-
-{view} was not proposed: the analyst deleted it, so it is not proposed again.
 
 ## propose_view-near
 
@@ -896,10 +864,6 @@ thimble gave these words to the fork that is already fixing "{fix}". Tell the pe
 ## fix_thimble-failed
 
 thimble started no fix: {why} Tell the person in one short line.
-
-## ticket-terminal
-
-This call filed nothing: code tickets run only in browser mode for now, since the analyst allows each one on its card there. Tell the analyst so in one line: to file it, they quit, run `thimble mode browser`, start `thimble` again and ask again.
 
 ## view-media-unplayable
 
@@ -1035,18 +999,6 @@ The claims expect files the corpus lacks, which the analyst sees above the view 
 
 {count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `color.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
 
-## view-term-error
-
-The view's program failed {where}: {what}. It must draw the view with no error, also when a fetch fails or a file is missing.
-
-## view-term-timeout
-
-The view's program did not end its draw {where} within {s} s: {what}. Draw when an answer or an event comes, and do not draw on a timer.
-
-## view-term-overflow
-
-The view's program draws past the panel {where}: {what}. The panel cuts a row at its right edge and drops the rows below its last row. Fit each row in `d.cols` and the rows in `d.left`, with `cut`, `columns` and the list.
-
 ## view-robust-reader
 
 With {what}, the reader failed: {error}. A real corpus can lack a file or hold a line cut short, so read what is there, and report each line you cannot parse with problems().
@@ -1102,22 +1054,6 @@ its text and graphics span {used} of its {width} px, so the rest of the pane is 
 ## view-derived-unlisted
 
 Fields of the records the reader answered hold values that the lines they cite do not, and they are not listed as derived: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in view.json's `records` with its `type` and `"derived": "cleaned"`, or `"computed"` for a value the files do not state, and give it `from` and `how`, each a short plain phrase without semicolons, or return it from the reader's derived(index).
-
-## check-unread
-
-{n} of {total} files were opened by no card and no Read call, {files}.
-
-## check-unused
-
-In {file}, no card names the field `{field}`, filled in {filled} of {sampled} sampled records.
-
-## check-unused-kind
-
-In {file}, no card names `{value}`, a value of `{field}` in {count} of {sampled} sampled records.
-
-## check-none
-
-No check found anything.
 
 ## start_job-subagent
 
@@ -1424,10 +1360,6 @@ No cards in these turns.
 
 The session's calls above show what it read.
 
-## orient-no-request
-
-The analyst asked for nothing in particular, so cover the whole corpus.
-
 ## orient-subagent-prompt
 
 [thimble request {request_id}]
@@ -1435,96 +1367,6 @@ The analyst asked for nothing in particular, so cover the whole corpus.
 The analyst's request: {request}
 
 Start the orientation.
-
-## orient-finished
-
-The orientation has finished: {made}.
-
-## orient-stopped
-
-The orientation was stopped: {made}.
-
-## orient-failed
-
-The orientation failed: {made}. Its error: {error}
-
-## orient-made-views
-
-{views} proposed
-
-## orient-views-built
-
-{views} built
-
-## orient-views-failed
-
-{views} failed
-
-## orient-views-building
-
-{views} building
-
-## orient-views-stopped
-
-{views} stopped
-
-## orient-views-suggested
-
-{views} suggested for file types
-
-## orient-made-nothing
-
-no outputs, only its thread
-
-## orient-follow-up
-
-The analyst's side sent you this after you finished. Follow it up as `### Follow-ups` says.
-
-{messages}
-
-## orient-from-main
-
-This message is from the analyst's own session.
-
-## orient-from-analyst
-
-This message is from the analyst, typed in your thread.
-
-## orient-from-extension
-
-The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
-
-## orient-followed-up
-
-The orientation's follow-up has finished: {changed}.
-
-## orient-follow-up-stopped
-
-The orientation's follow-up was stopped: {changed}.
-
-## orient-follow-up-failed
-
-The orientation's follow-up failed: {changed}. Its error: {error}
-
-## orient-changed-added
-
-{cards} added
-
-## orient-changed-revised
-
-{cards} revised
-
-## orient-changed-deleted
-
-{cards} deleted
-
-## orient-changed-nothing
-
-nothing changed
-
-## message_orientation-started
-
-The orientation has the message, and thimble shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
 
 ## orient-subagent-message
 
@@ -1539,10 +1381,6 @@ This orientation ran in an earlier Claude Code session. To continue it, quit and
 ## orient-continue-earlier-version
 
 This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.
-
-## orient-continue-stopped-by-user
-
-This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. A message to it starts a new run in its thread that takes up its work.
 
 ## message_orientation-continues
 
@@ -1569,34 +1407,6 @@ Its transcript, which you can read for what it did and found:
 The analyst's message:
 
 {message}
-
-## orient-continuation-none
-
-none
-
-## message_orientation-none
-
-No orientation has run in this workspace. Answer the analyst yourself, or call `start_orientation` for a new orientation.
-
-## message_orientation-gone
-
-Claude Code no longer keeps this orientation's transcript, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
-
-## message_orientation-precached
-
-This orientation ran in advance, before this workspace was installed, and its session was not kept, so it cannot continue. Answer from its cards and the report yourself, or call `start_orientation` for a new orientation that takes up the message.
-
-## precached-context
-
-This workspace was installed from a pre-cache: its orientation ran in advance on these same files ({made}), and its Claude Code session was not kept, so `message_orientation` cannot reach it. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
-
-## precached-context-kept
-
-This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), as a subagent of the exporter's Claude Code session, so `message_orientation` cannot reach it, though its thread shows every step it took. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
-
-## thimble-terminal-home
-
-thimble: this session runs in terminal mode, so thimble shows this workspace here in the terminal and starts no server. To switch to browser mode, quit, run `thimble mode browser` and start `thimble` again.
 
 ## agents-none
 
@@ -1644,38 +1454,6 @@ thimble: the analyst pressed Stop in thimble and ended your turn, and any comman
 
 thimble: the analyst pressed Stop in thimble on the side thread {thread}, which stopped its fork `{agent_id}`. Leave it stopped: do not message, continue or restart it unless the analyst asks.
 
-## message_orientation-empty
-
-The message is empty. Pass what the analyst asks the orientation as `message`.
-
-## session-unfinished
-
-Your session ended while agents or workflows you started in the background were still running, and they stopped with it. It has now been resumed. Continue each stopped agent with SendMessage, or start again what cannot be continued, then wait for all their results and use them before you finish.
-
-## session-mode-changed
-
-The analyst changed your permission mode, so your session was paused and has now been resumed with all its work. The call you were making when it paused may have been interrupted before it ran, so make it again if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-mode-stopped
-
-The agents that were running stopped with it: {agents}. Continue each with SendMessage to its id, which keeps what it has done, and run a stopped workflow again from its run with `resumeFromRunId`, then use their results as before.
-
-## session-model-fallback
-
-A safety classifier stopped {model}'s responses in your session, so it has been resumed on {fallback} with all its work. Make again any call that did not run, if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-server-stopped
-
-thimble's server stopped while this session ran, which ended it before its task was done.
-
-## session-restarted
-
-thimble's server restarted while your session ran, which stopped it, and it has now been resumed with all its work. Make again any call that did not run, if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-not-resumed
-
-It could not be resumed: {why}
-
 ## session-scratch
 
 Your own scratch folder is {folder}. Put the files you make for your own work there, such as a script or an intermediate result, rather than in $TMPDIR or /tmp, which the session's other agents share.
@@ -1683,10 +1461,6 @@ Your own scratch folder is {folder}. Put the files you make for your own work th
 ## work-budget
 
 The session's work folder {folder} now holds {size}, more than {budget}. Delete the extracts and copies there that you no longer need, and read the corpus in place rather than copying it.
-
-## session-mode-switching
-
-This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
 
 ## session-unproven
 
@@ -1696,6 +1470,3 @@ This call did not run, because the analyst is switching your permission mode, wh
 
 This call's ref is `{ref}`.
 
-## digest-more
-
-[{total} lines in all. read_ref {ref} reads the next page.]
