@@ -1274,9 +1274,9 @@ async function walk(page: Page, tag: string, send = false) {
   await page.waitForFunction(() => (window as any).__tour().state().demo === 'done', null, { timeout: 25000 })
   await sleep(700)
   assert.equal(
-    await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.tour-ex-report .wu-check')].filter((e) => /Alternative explanations/.test(e.textContent ?? '') && getComputedStyle(e).display !== 'none').length),
+    await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.tour-ex-side [data-category="alternative-explanations"]')].filter((e) => getComputedStyle(e).display !== 'none').length),
     1,
-    `${tag} 8: the check is in the Checks pane`,
+    `${tag} 8: the check is in the Comments sidebar`,
   )
   await measure(page, `${tag} 8`)
   const before = await commentsLevel(page)

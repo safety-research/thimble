@@ -544,10 +544,11 @@ function RunLine({ ws, check, doc, line, running }: { ws: string; check: Check; 
   )
 }
 
-/** The head's + opens this card beside the pane, laid out as a label's edit card in Files: the colour the server will
+/** The head's + opens this card beside the pane (and "+ New check" at the end of the top bar's Comments,
+ * shell/LabelsSidebar.tsx, beside that sidebar), laid out as a label's edit card in Files: the colour the server will
  * give the check and its name, its prompt, then Cancel and Run. Enter in the name goes to the prompt; ⌘↵ in the prompt
  * or Run adds the check, which the server turns on and runs. Run waits for a name no other check has and a prompt. */
-function NewCheckCard({ colour, taken, onAdd, onClose }: { colour: string; taken: (name: string) => boolean; onAdd: (name: string, prompt: string) => Promise<void>; onClose: () => void }) {
+export function NewCheckCard({ colour, taken, onAdd, onClose }: { colour: string; taken: (name: string) => boolean; onAdd: (name: string, prompt: string) => Promise<void>; onClose: () => void }) {
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)

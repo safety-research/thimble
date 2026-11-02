@@ -1,4 +1,4 @@
-// The report: the card sidebar with its Checks pane (Sidebar.tsx; over the page when the pane is narrow), then the page:
+// The report: the card sidebar (Sidebar.tsx; over the page when the pane is narrow), then the page:
 // the block editor in a card-wide column, the margin of comment cards (Margin.tsx), and at the right the ruler and
 // scrollbar (files/Ruler PageRuler) with a lane per check that is on. The checks (Checks.tsx useChecks), the active
 // comment and the analyst's new comment live here; their tints go to the editor as flags.
@@ -197,7 +197,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
     <div className="wu-report" ref={side.row}>
       <ReadProbe probe={side.probe} />
       {side.shown ? (
-        <Sidebar ws={ws} cells={cells} groups={groups} used={used} onInsert={(id) => editor.current?.insertCard(id)} onHide={side.hide} over={side.over} doc={slug} checks={checks} comments={open} />
+        <Sidebar ws={ws} cells={cells} groups={groups} used={used} onInsert={(id) => editor.current?.insertCard(id)} onHide={side.hide} over={side.over} />
       ) : (
         <SidebarShow onShow={side.show} />
       )}
