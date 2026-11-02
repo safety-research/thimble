@@ -117,6 +117,11 @@ test('a table sizes each column to its longest value, puts numbers at the right 
   assert.deepEqual(lines[4].filter(x => x.text === '×').map(x => x.color), ['#f59183'])
 })
 
+test("a table's first column names its rows: a number there shows as given, as a PR's number reads, while the other numbers get their separators", async () => {
+  const r = await load({ kind: 'table', answer: 'Two PRs.', rows: [{ PR: 65368, reviews: 1200, minute: 67.5 }, { PR: 64302, reviews: 3, minute: 9 }] }, 60)
+  assert.deepEqual(r.lines.slice(2), ['PR     reviews  minute', '65368    1,200    67.5', '64302        3     9.0'])
+})
+
 test('every ✓ in a cell is green and every × that marks a failure red, but a multiplication sign keeps the text\'s color', async () => {
   const r = await load({ kind: 'table', answer: 'Statuses.', rows: [{ day: 'Mon', statuses: '✓ ✓ forgiven ×missed ✓', note: '2× faster, 3 × 4' }] }, 80)
   const glyphs = runs(r.tree)[3].filter(x => /^[✓×]$/.test(x.text)).map(x => [x.text, x.color])
@@ -242,6 +247,10 @@ test('a timeline puts events in time order, a few lanes as columns side by side,
   const days = await load({ kind: 'timeline', answer: 'Two days.', events: [['2025-11-03 18:49:21', 'asks for the card'], ['2025-11-03 19:02:10', 'the card is declined'], ['2025-11-04 09:14:00', 'the rule is set'], ['2026-02-11 15:30:00', 'a domain is bought']] }, 70)
   assert.deepEqual(days.lines.slice(2).map(l => l.slice(0, 13)), [' Nov 3 18:49 ', '       19:02 ', ' Nov 4 09:14 ', '             ', 'Feb 11 15:30 '])
   assert.match(days.lines[5], /⋮ 99 days later/)
+  // times that are plain numbers: an end said as where it ends, and no wait said in units the times do not have
+  const minutes = await load({ kind: 'timeline', answer: 'Claims came first.', events: [{ time: 0, label: 'agents start' }, { time: 4.6, end: 19.6, label: 'claims' }, { time: 30, label: 'first merge' }, { time: 31, label: 'second merge' }] }, 70)
+  assert.ok(minutes.lines.includes('4.6  ● claims · to 19.6'), minutes.lines.join('\n'))
+  assert.ok(!minutes.lines.some(l => /later/.test(l)))
 })
 
 test('a diagram draws a chain on one line when it fits, else straight down; a node with more ways on branches with each edge\'s label, and a node drawn already is named with ↑', async () => {
@@ -258,6 +267,9 @@ test('a diagram draws a chain on one line when it fits, else straight down; a no
     '   └─ a rule fails ─▶ × Missed: the streak resets',
     '      └─ next day ─▶ A scheduled day ends ↑',
   ])
+  // an edge with no label: its branch points straight at its node
+  const bare = await load({ ...SAMPLES.diagram, edges: [['day', 'done', 'has a completion'], ['day', 'check']] }, 90)
+  assert.ok(bare.lines.includes('└─▶ Forgiveness check'), bare.lines.join('\n'))
   // a long edge label wraps under its branch, its node after it
   const long = await load({ ...SAMPLES.diagram, edges: [['day', 'check', 'no completion, and the day is past, and the habit was not archived that day'], ['day', 'done', 'done']] }, 40)
   assert.ok(long.lines.every(l => textWidth(l) <= 40))

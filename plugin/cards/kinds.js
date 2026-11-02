@@ -356,14 +356,15 @@ export function readyKinds(api) {
   // ------------------------------------------------------------------------------------------------- table
 
   /** Rows as a table: each key a column in the order the rows first give it, sized to its longest value, numbers at
-   *  the right with one count of decimals, ✓ and × in their colors; the first column names each row. When the columns
+   *  the right with one count of decimals, ✓ and × in their colors; the first column names each row, its values as
+   *  given (a PR's number is a name, not an amount). When the columns
    *  do not fit, text columns are cut, the widest first, keeping the part of each value that tells it apart, the first
    *  column no narrower than a third of the card; the last columns that still do not fit are named under the table. */
   function table(spec, W) {
     const rows = list(spec.rows).map(r => (r && typeof r === 'object' && !isArray(r) ? r : { value: r }))
     const cols = []
     for (const r of rows) for (const k of Object.keys(r)) if (!cols.includes(k)) cols.push(k)
-    const numeric = cols.map(c => rows.some(r => isNum(r[c])) && rows.every(r => r[c] == null || r[c] === '' || isNum(r[c])))
+    const numeric = cols.map((c, i) => i > 0 && rows.some(r => isNum(r[c])) && rows.every(r => r[c] == null || r[c] === '' || isNum(r[c])))
     const decimals = cols.map((c, i) => (numeric[i] ? Math.min(2, Math.max(0, ...rows.map(r => (isNum(r[c]) && !Number.isInteger(r[c]) ? (String(r[c]).split('.')[1] || '').length : 0)))) : 0))
     const text = (v, i) => (v == null || v === '' ? '' : typeof v === 'boolean' ? (v ? '✓' : '×') : numeric[i] ? num(v, decimals[i]) : flat(v))
     const body = rows.map(r => cols.map((c, i) => text(r[c], i)))
@@ -921,8 +922,9 @@ export function readyKinds(api) {
   // ------------------------------------------------------------------------------------------------- timeline
 
   /** Events in time order, one under another, each with its time and words: lanes, when the events name a few, as
-   *  columns side by side; a wide gap between two events said as its length; an event with an end, how long it lasted.
-   *  Times are dates, times of day or numbers; events whose times are none of these keep their order. */
+   *  columns side by side; a wide gap between two events said as its length; an event with an end, how long it lasted
+   *  (or, for times that are plain numbers, where it ends). Times are dates, times of day or numbers; events whose times
+   *  are none of these keep their order. */
   function timeline(spec, W) {
     const evs = list(spec.events).map((e, i) => {
       const o = isArray(e) ? { time: e[0], label: e[1], lane: e[2] } : e && typeof e === 'object' ? e : { label: e }
@@ -970,12 +972,13 @@ export function readyKinds(api) {
     const blocks = evs.map((e, k) => {
       const gap = k && placed ? gaps[k - 1] : 0
       const lines = []
-      if (gap > 0 && gap >= 4 * usual && gap >= span / 10 && evs.length > 2) {
+      // times that are plain numbers show their spacing themselves, and have no unit to say a wait in
+      if (form !== 'number' && gap > 0 && gap >= 4 * usual && gap >= span / 10 && evs.length > 2) {
         lines.push([' '.repeat(timeW + 2), ...tracks, ...(asColumns ? [] : [gray('⋮ ')]), gray(`${lasting(gap, form)} later`)])
       }
       // its words, their ✓ and × in their colors, and how long it lasted after them
       const words = wordsOf(glyphParts(e.label || '(no words)'))
-      if (e.e && e.t) words.push([gray('·')], ...lasting(e.e.at - e.t.at, form).split(' ').map(x => [gray(x)]))
+      if (e.e && e.t) words.push([gray('·')], ...(form === 'number' ? `to ${num(e.e.at)}` : lasting(e.e.at - e.t.at, form)).split(' ').map(x => [gray(x)]))
       const lane = lanes.indexOf(e.lane)
       flowWords(words, textW, '', '').forEach((w, j) => {
         const line = [gray(padStart(j ? '' : cut(times[k], timeW), timeW)), '  ']
@@ -1068,9 +1071,9 @@ export function readyKinds(api) {
       }
       ways.forEach((e, i) => {
         const last = i === ways.length - 1
-        const branch = [...rest, gray(`${last ? '└' : '├'}─ `)]
+        const branch = [...rest, gray(`${last ? '└' : '├'}─${e.label ? ' ' : '▶ '}`)]
         const under = [...rest, gray(last ? '   ' : '│  ')]
-        const edge = e.label ? [...plain(e.label).map(w => w.map(r => ({ ...r, color: colors.gray }))), [gray('─▶')]] : [[gray('▶')]]
+        const edge = e.label ? [...plain(e.label).map(w => w.map(r => ({ ...r, color: colors.gray }))), [gray('─▶')]] : []
         if (drawn.has(e.t)) put([...edge, ...named(nodes.get(e.t)), [gray('↑')]], branch, under)
         else walk(e.t, branch, under, edge)
       })
