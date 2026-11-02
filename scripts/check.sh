@@ -11,7 +11,8 @@
 #
 #   the browser workbench (browser/, thimble 0.8's browser mode):
 #   parity     the browser's prompts: each renders and names only the hints the code has, and the API's names are
-#              American (browser/backend/tests_public/test_prompts.py, test_american_names.py)
+#              American; what each mode's models read is as its fingerprints say (browser/backend/tests_public/
+#              test_prompts.py, test_american_names.py, test_renders.py)
 #   server     the server's tests (browser/backend/tests_public), in parallel, without the caller's THIMBLE_* settings;
 #              the sandbox tests need scripts/install.sh to have run
 #   page       the page's type check, unit tests and build (browser/frontend), after npm ci when its packages are missing
@@ -60,7 +61,7 @@ for step in "${steps[@]}"; do
         limit=(--timeout=120 --timeout-method=thread -o faulthandler_timeout=110)  # every thread's stack, a little before
       else echo "pytest-timeout is not installed, so a test that hangs holds the run"; fi
       "$THIMBLE_PYTHON" -m pytest plugin -q -p no:cacheprovider ${limit[@]+"${limit[@]}"} ;;
-    parity) browser_tests tests_public/test_prompts.py tests_public/test_american_names.py ;;
+    parity) browser_tests tests_public/test_prompts.py tests_public/test_american_names.py tests_public/test_renders.py ;;
     server)
       # one worker per CPU, at most 8 (THIMBLE_TEST_WORKERS sets another count): the tests that time a page, a kernel or
       # a hold fail when more workers than CPUs share the machine, as on CI's 4-CPU runner
