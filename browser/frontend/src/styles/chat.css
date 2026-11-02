@@ -689,8 +689,8 @@ button.chat-call-chip:hover,
 .chat-user {
   padding-left: 32px;
 }
-/* a message to the orientation on its way, or queued until the run going on ends: the analyst's tile, a step quieter,
-   with a line under it */
+/* a message to the orientation on its way, or queued until the run going on ends, and one to main until main reads it:
+   the analyst's tile, a step quieter, with a line under it */
 .chat-pending,
 .chat-user[data-event='orient-follow-up'] {
   display: flex;

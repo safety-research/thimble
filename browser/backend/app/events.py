@@ -330,10 +330,11 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
          mirror: bool = True, line: str | None = None, event_id: str | None = None) -> dict[str, Any]:
     """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
     as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
-    main's terminal shows instead of terminal_line's. `event_id` is the event's id when the caller recorded it first
-    (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet for
-    (when `check_kind`), or for a message with no text."""
-    from . import agents, session, threads  # noqa: PLC0415
+    main's terminal shows instead of terminal_line's: at once, or, when the server runs main and main's turn runs, where
+    main reads it, and as waiting until then (runtime.deliver). `event_id` is the event's id when the caller recorded it
+    first (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet
+    for (when `check_kind`), or for a message with no text."""
+    from . import agents, runtime, session, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
     payload = dict(payload or {})
@@ -348,9 +349,14 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         words = str(payload.pop("text", "") or "").strip()
         if not words:
             raise HTTPException(400, "empty message")
-        if mirror:
+        # a message that comes while the server's main works waits for main to read it: its line goes in there, so the
+        # rest of the turn does not read as its answer (runtime.deliver)
+        waits = mirror and runtime.enabled() and runtime.ensure(c).main.running
+        if mirror and not waits:
             agents.mirror(c, "user", by=agents.BROWSER, text=words, event=event_id)
         note = build_note(kind, event_id, words, {**payload, **_ultracode(c), **_filters(c)})
+        if waits:
+            note["said"] = words
     elif kind == THREAD:
         words = str(payload.get("text") or "")
         built = threads.event(c, payload, event_id)

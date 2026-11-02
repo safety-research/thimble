@@ -2,8 +2,9 @@
 // model as a menu (`models`, `onModel`), its effort and its fast mode, which main's next turn runs with
 // (events.model_route, events.effort_route, events.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
 // (`chip`, RoleChip). A thread whose run the browser can stop (main's turn, a side thread's fork, the orientation, a
-// writer, a check's run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the send square is
-// its Stop until text is typed (ComposerFrame), as Esc is in Claude Code. Each thread keeps its own draft. Text offered
+// writer, a check's run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the composer
+// carries its Stop, beside the send square once text is typed (ComposerFrame), as Esc is in Claude Code. Each thread
+// keeps its own draft. Text offered
 // from outside the chat (chat/pending offerDraft: a failed fix's Ask Claude) joins its thread's draft.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ComposerFrame, type ComposerFrameProps } from '../components/Composer'

@@ -603,7 +603,8 @@ def chip(c: str, kind: str, text: str, **fields: Any) -> dict:
 
 def mirror(c: str, type_: str, **data: Any) -> dict:
     """A record on main, appended and announced: the mirror's (session.py, `by: terminal`) and a browser message the
-    events module posted (events.py, `by: browser`)."""
+    events module posted (events.py, `by: browser`), or, for one that waited for main's turn, the server's main read
+    (runtime.Space.said_line)."""
     ensure_main(c)
     _, log_path = paths(c, MAIN_ID)
     rec = {"type": type_, "ts": _now(), **data}
@@ -804,11 +805,11 @@ async def instance_route(c: str) -> dict:
 
 
 def _main_state(c: str) -> dict:
-    """What main's meta adds for the browser (module_bridge.main_meta): `module` and `module_why`, which a refused start
-    reads."""
-    from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
+    """What main's meta adds for the browser: `module` and `module_why` (module_bridge.main_meta), which a refused start
+    reads, and `unread`, the analyst's messages that wait for main's running turn (runtime.unread)."""
+    from . import module_bridge, runtime  # noqa: PLC0415 — module_bridge imports the session modules
 
-    return module_bridge.main_meta(c)
+    return {**module_bridge.main_meta(c), "unread": runtime.unread(c)}
 
 
 @router.get("/ws/{c}/chats/main")
@@ -1030,18 +1031,20 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
     which is a click, so the analyst's cookie (403 without it); a stop of an agent that had ended counts as done
     ({stopped, done}); without the module {stopped: false, kind: no-module}, and the card says to press Esc in the
     agent's view. Main's running turn ends through the module as Esc ends it (subagents.stop_main, `$.turn.abort`), and
-    the mirror ends the turn (session.turn_stopped); a side thread's fork stops as an agent does (subagents.stop_fork,
-    TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has none. Both are clicks too, and
-    each that stopped something tells main so, in a line no chat shows. A server task stops as before; the analyst's
-    own subagent of main is main's to stop, so main is asked to."""
+    the mirror ends the turn (session.turn_stopped); when the server runs main, a message the analyst sent while the
+    turn ran is main's next turn then (runtime.after_stop). A side thread's fork stops as an agent does
+    (subagents.stop_fork, TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has none. Both
+    are clicks too, and each that stopped something tells main so, in a line no chat shows. A server task stops as
+    before; the analyst's own subagent of main is main's to stop, so main is asked to."""
     if chat_id == MAIN_ID:
-        from . import session, subagents  # noqa: PLC0415 — each imports this module
+        from . import runtime, session, subagents  # noqa: PLC0415 — each imports this module
 
         subagents.analyst_only(request)
         ans = await subagents.stop_main(c)
         if ans.refused:
             return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
         session.turn_stopped(c, stopped=not ans.get("done"))
+        runtime.after_stop(c)
         return {"stopped": True, **({"done": True} if ans.get("done") else {})}
     meta = read_meta(c, chat_id)
     if meta.get("kind") == KIND_THREAD:

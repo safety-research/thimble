@@ -802,20 +802,22 @@ def _fix_calls(fixing: Any) -> list[tuple[str, ...]]:
 
 async def test_words_typed_while_main_works_last_from_the_turn_that_reads_them_even_behind_another_message(
         fixing, monkeypatch, analyst):
-    # main's turn runs (a command that takes a second); meanwhile the person sends another message, then /thimble-fix:
-    # both wait in main's queue. The words count from the turn that reads them, as the terminal's do from the turn its
-    # command runs in: main asks one short question there, and the person's answer starts the fix
+    # main's turn runs (a command that takes a second, then its last reply); as the reply is written the person sends
+    # another message, then /thimble-fix: both wait in main's queue (a message sent while the command ran would reach
+    # main with the command's result, B14). The words count from the turn that reads them, as the terminal's do from the
+    # turn its command runs in: main asks one short question there, and the person's answer starts the fix
     loop = asyncio.get_running_loop()
     held: dict[str, Any] = {}
 
-    def first(_body: dict[str, Any]) -> Any:
+    def last(_body: dict[str, Any]) -> Any:
         events.post(CORPUS, "main", {"text": "Also, which runs passed?"})
         held["ask"] = loop.create_task(fixes.ask(CORPUS, "the legend hides its last row", PAGE))
-        return call("Bash", {"command": "sleep 1; echo done", "description": "wait"}, tid="toolu_sleep")
+        return text("Runs 3 and 4 failed.")
 
     client = api_key(monkeypatch, scripted(
-        [first, text("Runs 3 and 4 failed."), text("Runs 1 and 2 passed."),
-         text("Is this about one of your fixes, or a new fix?"), call("fix_thimble", {"words": "new"}), text("Started.")],
+        [call("Bash", {"command": "sleep 1; echo done", "description": "wait"}, tid="toolu_sleep"), last,
+         text("Runs 1 and 2 passed."), text("Is this about one of your fixes, or a new fix?"),
+         call("fix_thimble", {"words": "new"}), text("Started.")],
         [text("Title: Legend shows every row\nWhat it does: The legend wraps.")]))
     await main_turn("Which runs failed?")
     await held["ask"]

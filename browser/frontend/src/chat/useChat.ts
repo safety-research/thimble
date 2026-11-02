@@ -4,7 +4,8 @@
 //
 // What the log does not hold yet shows at once (withLive): the analyst's message from its send until the log has it,
 // and the words of main's reply while Claude writes them (the stream's `chat-live` records), until the log has the
-// message they belong to.
+// message they belong to. A message sent to main while main works waits until main reads it (`unread`), and the log
+// holds it from there.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -24,6 +25,9 @@ export interface ChatState {
   writing: boolean
   /** the server says the chat is running: main's turn is open, a thread's event waits or its fork runs */
   running: boolean
+  /** main: the analyst's messages that wait for its running turn, which it has not read yet (meta.unread), after this
+   * page's own on their way while main works */
+  unread: { key: string; text: string }[]
   /** post a message; resolves false when it did not go out (the composer then gets its text back) */
   send: (text: string) => Promise<boolean>
   interrupt: () => Promise<void>
@@ -188,8 +192,18 @@ export function useChat(ws: string, chatId: string | null): ChatState {
     }
   }, [ws, chatId])
 
-  const shown = useMemo(() => withLive(records, sent, live), [records, sent, live])
+  // a message sent while main works waits for main to read it: it shows after the turn's rows until the log holds it
+  // where main read it (backend runtime.unread)
+  const waits = chatId === 'main' && !!meta?.running
+  const shown = useMemo(() => withLive(records, waits ? [] : sent, live), [records, sent, live, waits])
+  const unread = useMemo(
+    () => [
+      ...(waits ? sent.filter((m) => !logged(records, m)).map((m) => ({ key: `sent:${m.ts}`, text: m.text })) : []),
+      ...(meta?.unread ?? []).map((m) => ({ key: m.event, text: m.text })),
+    ],
+    [waits, sent, records, meta?.unread],
+  )
   const rows = useMemo(() => withApiErrors(tidyRows(foldRecords(shown))) as Row[], [shown])
   const writing = live.some((p) => !p.end && p.text.trim() !== '')
-  return { meta, records: shown, rows, loading, error, streaming, writing, running: streaming || writing || !!meta?.running, send, interrupt, reload }
+  return { meta, records: shown, rows, loading, error, streaming, writing, running: streaming || writing || !!meta?.running, unread, send, interrupt, reload }
 }

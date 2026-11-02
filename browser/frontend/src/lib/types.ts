@@ -2204,6 +2204,9 @@ export interface ChatMeta {
   module?: boolean | null
   /** why it does not (module_bridge.why_not), '' while it does */
   module_why?: string | null
+  /** the analyst's messages that came while main's turn ran and that main has not read yet, oldest first, which its
+   * chat shows waiting (backend runtime.unread) */
+  unread?: { event: string; text: string }[]
 }
 
 /** What `thimble demo` installed a workspace from (backend demo.install): the dataset, when its orientation ran and on

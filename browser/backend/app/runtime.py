@@ -22,7 +22,9 @@ view's builder and its reviewer write that view's folder in the protected extens
 (agent_writes), by the slug of the start the server recorded for them, so no other agent writes a view's files.
 
 What 0.8 did through Claude Code's interactive session and thimble's plugin, the server now does in its place:
-- a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end;
+- a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end; a message the
+  analyst types in main's chat reaches main's running turn at its next tool call, as Claude Code gives a message typed
+  mid-turn (Conv.take_waiting), and main's chat shows it waiting until then (unread);
 - a `thread` event starts a fork of main's conversation that answers the thread, or a new turn of its fork;
 - the plugin module's ops (module_bridge.request: spawn, send, stop, abort, note) start, message and stop the agents
   and main here (module_op);
@@ -83,6 +85,7 @@ NEW_CHAT = "New chat"
 RESUMED_CHAT = "Resumed the chat that began with: {first}"
 SID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 EVENT_BODY_RE = re.compile(r'^\s*<thimble-event\s[^>]*?kind="([^"]*)"[^>]*>\n?(.*?)\n?</thimble-event>\s*$', re.S)
+EVENT_ID_RE = re.compile(r'^\s*<thimble-event\s[^>]*?\bevent="([^"]*)"')
 
 
 def enabled() -> bool:
@@ -194,6 +197,9 @@ class Conv:
     key: str = ""  # the key of the start it runs for (subagents' request), such as `view:<slug>` (agent_writes)
     transcript: Transcript | None = None
     queue: list[str] = field(default_factory=list)
+    # set as a message joins the queue (deliver), so a Claude Code session of main's hands it on while its turn runs
+    # (runtime_cc._hand)
+    arrived: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task | None = None
     last_text: str = ""
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
@@ -288,6 +294,32 @@ class Conv:
         if results:
             self.emit({"type": "user", "message": {"role": "user", "content": results}})
 
+    def waiting_messages(self) -> list[str]:
+        """The messages the analyst typed in main's chat while its turn ran (Space.said), in main's queue, oldest first.
+        Every other event, such as a /thimble-fix request, which Claude Code too keeps for the turn's end as it keeps a
+        command, waits for the turn to end, and so does any other conversation's queue."""
+        if self.kind != "main":
+            return []
+        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in self.space.said]
+
+    def take_waiting(self) -> list[str]:
+        """The analyst's messages that wait for main's running turn, read now, with the results of the turn's tool
+        calls, as Claude Code gives a message typed mid-turn to the model at its next tool call (heard)."""
+        got = self.waiting_messages()
+        for text in got:
+            self.heard(text)
+        return got
+
+    def heard(self, text: str) -> None:
+        """Main read `text`, a message that waited in its queue, in its running turn: it leaves the queue, the
+        transcript records it as Claude Code records a message typed mid-turn (a queued_command attachment, which the
+        mirror reads as an event of the turn), and the analyst's line goes into main's chat here (Space.said_line)."""
+        with contextlib.suppress(ValueError):
+            self.queue.remove(text)
+        self.emit({"type": "attachment", "attachment": {"type": "queued_command", "prompt": text,
+                                                       "origin": {"kind": "task-notification"}}})
+        self.space.said_line(text)
+
     def spec(self) -> Spec:
         return self.space.spec_of(self)
 
@@ -348,6 +380,9 @@ class Space:
         self.main = self._main_conv()
         self.convs: dict[str, Conv] = {}
         self.notes: dict[str, list[str]] = {}
+        # by event id, the analyst's words of each message that came while main's turn ran (events.post): main's chat
+        # shows them waiting (unread), and their line goes in where main reads them (said_line)
+        self.said: dict[str, str] = {}
 
     def _main_conv(self) -> Conv:
         tr = Transcript(self.main_path, self.sid)
@@ -355,10 +390,10 @@ class Space:
         return Conv(self, MAIN, "main", transcript=tr)
 
     async def switch(self, sid: str | None) -> bool:
-        """Make chat `sid` main, or a new chat for None: main's running turn stops, runtime/main.json names the chat,
-        the mirror follows its transcript (session.attach, which reads a chat brought back from its end), and main's
-        log gets one line that says so. A new chat while main's chat has no turn yet is that chat. False when
-        nothing changed. ValueError for an id that is no chat of this workspace."""
+        """Make chat `sid` main, or a new chat for None: main's running turn stops and what waited for it goes
+        (drop_waiting), runtime/main.json names the chat, the mirror follows its transcript (session.attach, which reads
+        a chat brought back from its end), and main's log gets one line that says so. A new chat while main's chat has
+        no turn yet is that chat. False when nothing changed. ValueError for an id that is no chat of this workspace."""
         from . import agents  # noqa: PLC0415
 
         if sid is not None and (not SID_OK.match(sid) or not (self.dir / f"{sid}.jsonl").is_file()):
@@ -366,8 +401,8 @@ class Space:
         if sid == self.sid or (sid is None and not _chat_of(self.main_path)["turns"]):
             self.attach()
             return False
+        self.drop_waiting()
         if self.main.running:
-            self.main.queue.clear()
             await _cancel(self.main.task)
         self.sid = sid or str(uuid.uuid4())
         (self.dir / "main.json").write_text(json.dumps({"session": self.sid, "at": _now()}), encoding="utf-8")
@@ -432,6 +467,26 @@ class Space:
 
     def take_notes(self, conv_id: str) -> list[str]:
         return self.notes.pop(conv_id, [])
+
+    # ---- the analyst's messages that wait for main
+
+    def said_line(self, text: str) -> None:
+        """The analyst's line of `text`, a browser event main reads now (Conv.heard, _main_loop) or never will
+        (drop_waiting), into main's chat, when it is a message that waited for main's turn: events.post logs the line of
+        any other as it posts it."""
+        from . import agents  # noqa: PLC0415
+
+        m = EVENT_ID_RE.match(text)
+        words = self.said.pop(m.group(1), None) if m else None
+        if m and words is not None:
+            agents.mirror(self.c, "user", by=agents.BROWSER, text=words, event=m.group(1))
+
+    def drop_waiting(self) -> None:
+        """What waits for main goes unread (main's chat changes, the workspace's folder goes, the server stops): the
+        analyst's messages among it still get their lines in main's chat, as they sent them."""
+        for text in self.main.queue:
+            self.said_line(text)
+        self.main.queue.clear()
 
     # ---- what each agent runs with
 
@@ -666,12 +721,14 @@ def ensure(c: str) -> Space:
 
 
 async def forget(c: str) -> None:
-    """The workspace's folder goes (ledger: moved aside for a new session, or deleted): its conversations' running turns
-    stop, awaited, so none writes into the folder that takes its place, and its runtime is dropped, so the next ensure
-    reads that folder (a new session's empty one, or a session brought back)."""
+    """The workspace's folder goes (ledger: moved aside for a new session, or deleted): what waited for main goes
+    (Space.drop_waiting), its conversations' running turns stop, awaited, so none writes into the folder that takes its
+    place, and its runtime is dropped, so the next ensure reads that folder (a new session's empty one, or a session
+    brought back)."""
     sp = _spaces.pop(c, None)
     if sp is None:
         return
+    sp.drop_waiting()
     for conv in [sp.main, *sp.convs.values()]:
         if conv.running:
             conv.queue.clear()
@@ -787,8 +844,10 @@ def _failure_text(e: BaseException) -> str:
 
 def deliver(c: str, note: dict[str, Any]) -> None:
     """A browser event for main (events._publish): a thread's starts or continues its fork; any other starts a turn of
-    main, or waits for main's running turn to end."""
-    from . import events  # noqa: PLC0415
+    main, or waits for main's running turn: a message the analyst typed in main's chat (`said`, events.post) until the
+    turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat shows such a message
+    waiting until main reads it (unread)."""
+    from . import agents, events  # noqa: PLC0415
 
     sp = ensure(c)
     meta = note.get("meta") or {}
@@ -798,6 +857,13 @@ def deliver(c: str, note: dict[str, Any]) -> None:
         return
     main = sp.main
     main.queue.append(text)
+    if note.get("said"):
+        sp.said[str(meta.get("event") or "")] = str(note["said"])
+        agents.notify(c, agents.MAIN_ID)
+    if _in_loop():
+        main.arrived.set()
+    elif _loop is not None:
+        _loop.call_soon_threadsafe(main.arrived.set)
     if not main.running:
         main.task = _spawn_task(_main_loop(sp), f"main:{c}")
 
@@ -829,6 +895,7 @@ async def _main_loop(sp: Space) -> None:
         text = main.queue.pop(0)
         t0 = time.monotonic()
         main.emit({"type": "user", "message": {"role": "user", "content": text}, "origin": {"kind": "task-notification"}})
+        sp.said_line(text)
         try:
             await _run(main, text)
         except asyncio.CancelledError:
@@ -838,14 +905,37 @@ async def _main_loop(sp: Space) -> None:
 
 
 async def abort_main(c: str) -> bool:
-    """Stop main's running turn; whatever waited for it is dropped. False when no turn ran."""
+    """Stop main's running turn. What waited for it stays, and is main's next turn once the Stop is told (after_stop).
+    False when no turn ran."""
     sp = ensure(c)
     main = sp.main
     if not main.running:
         return False
-    main.queue.clear()
     await _cancel(main.task)
     return True
+
+
+def after_stop(c: str) -> None:
+    """The analyst's Stop of main is told (agents.interrupt_route: the stopped turn ended in main's chat, with its
+    note): what waited for the stopped turn, such as a message the analyst sent while it ran, is main's next turn.
+    Nothing when the runtime is off or nothing waits."""
+    sp = _spaces.get(c) if enabled() else None
+    if sp is not None and sp.main.queue and not sp.main.running:
+        sp.main.task = _spawn_task(_main_loop(sp), f"main:{c}")
+
+
+def unread(c: str) -> list[dict[str, str]]:
+    """The analyst's messages that came while main's turn ran and that main has not read yet, oldest first, for main's
+    chat (agents._main_state): {event, text}. Empty when the runtime is off."""
+    sp = _spaces.get(c) if enabled() else None
+    if sp is None:
+        return []
+    out = []
+    for text in sp.main.queue:
+        m = EVENT_ID_RE.match(text)
+        if m and m.group(1) in sp.said:
+            out.append({"event": m.group(1), "text": sp.said[m.group(1)]})
+    return out
 
 
 async def _cancel(task: Any) -> None:
@@ -1025,13 +1115,15 @@ STOP_WAIT_S = 5.0  # how long the server's stop waits for its agents to end (sto
 async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
     """The server stops (Ctrl-C in thimble-browser, a restart): every agent it runs stops, main's turn, the threads'
     forks and thimble's agents, as a Stop click stops one (_cancel): each ends `stopped` in its chat and in the registry
-    (_agent_loop, _ended). It waits up to `wait_s` for them, then the mirror keeps where each stands
-    (session.keep_places), so the next server neither shows them running nor takes them up again. The ids stopped."""
+    (_agent_loop, _ended), and what waited for main goes (Space.drop_waiting). It waits up to `wait_s` for them, then
+    the mirror keeps where each stands (session.keep_places), so the next server neither shows them running nor takes
+    them up again. The ids stopped."""
     from . import session  # noqa: PLC0415
 
     stopping: list[tuple[str, Any]] = []
     mains = [sp.c for sp in _spaces.values() if sp.main.running]
     for sp in list(_spaces.values()):
+        sp.drop_waiting()
         for conv in [sp.main, *sp.convs.values()]:
             if conv.running:
                 conv.queue.clear()

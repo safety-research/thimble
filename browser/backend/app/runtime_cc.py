@@ -14,6 +14,11 @@ id for it, which the tool's handler takes up, so a call runs as its caller's (Co
 session's id is kept in <workspace>/runtime/convs/<id>.cc.json and resumed at the next turn; a fork resumes main's
 session as a fork of it (fork_session).
 
+A message the analyst sends while main's turn runs goes to main's session at once (_hand), as a message typed in Claude
+Code's prompt mid-turn: Claude Code gives it to the model at the turn's next tool call, or runs it as the session's next
+turn when this one ends first. Main's session echoes each message it reads (`replay-user-messages`), which is when
+main's chat logs it (Conv.heard); the turn goes on until each message handed on is read.
+
 The sandbox. Claude Code puts its sandbox's proxy sockets in TMPDIR (claude-http-<16 hex>.sock), and a Unix socket's
 path holds at most 104 (macOS) or 108 (Linux) bytes, so with a long TMPDIR (the workspace's runtime/tmp/<conv>, 76
 characters and more) the sandbox did not start, and Claude Code then ran Bash outside it. So each turn's session gets a
@@ -27,6 +32,7 @@ sandbox made it, when they are still empty (_tidy).
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -34,6 +40,7 @@ import os
 import secrets
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -182,7 +189,8 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         strict_mcp_config=True,
         add_dirs=[str(w) for w in spec.write_roots],
         env=sdk.call_env({"TMPDIR": str(tmp or spec.home)}),
-        extra_args={"safe-mode": None},
+        # main's session echoes each message it reads, so a message handed to it mid-turn is known read (_hand)
+        extra_args={"safe-mode": None, **({"replay-user-messages": None} if conv.kind == "main" else {})},
         hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])]},
         resume=resume,
         fork_session=fork,
@@ -260,6 +268,31 @@ def _tell_box(conv: Any, why: str) -> None:
         log.exception("%s: the sandbox notice was not told", conv.c)
 
 
+async def _hand(conv: Any, client: Any, handed: dict[str, str], closing: asyncio.Event) -> None:
+    """The analyst's messages that wait for main's running turn (Conv.waiting_messages), each handed to main's session
+    as it comes (Conv.arrived), under a uuid it echoes once it reads the message (`handed`, _session), until the turn
+    ends (`closing`). A message that cannot be handed on stays in main's queue, for main's next turn."""
+    while not closing.is_set():
+        conv.arrived.clear()
+        for text in conv.waiting_messages():
+            if closing.is_set() or text in handed.values():
+                continue
+            uid = str(uuid.uuid4())
+            handed[uid] = text
+            try:
+                await client.query(_message(text, uid))
+            except Exception:  # noqa: BLE001 — it waits for main's next turn
+                handed.pop(uid, None)
+                log.warning("%s: a message for main was not handed to its session", conv.c, exc_info=True)
+                return
+        await conv.arrived.wait()
+
+
+async def _message(text: str, uid: str) -> Any:
+    """`text` as one user message of the session's input, under `uid`, which the session echoes it with."""
+    yield {"type": "user", "message": {"role": "user", "content": text}, "parent_tool_use_id": None, "uuid": uid}
+
+
 async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage, SystemMessage, UserMessage  # noqa: PLC0415
 
@@ -268,6 +301,8 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     path = conv.state_path("cc")
     reply, failed, box, ran = "", "", "", False
     bash_ids: set[str] = set()
+    handed: dict[str, str] = {}  # by uuid, main's messages handed to the session (_hand) that it has not read yet
+    closing = asyncio.Event()
 
     def results(rs: list[dict[str, Any]]) -> None:
         nonlocal box, ran
@@ -278,31 +313,56 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
 
     async with ClaudeSDKClient(opts) as client:
         await client.query(text)
-        async for msg in client.receive_response():
-            if isinstance(msg, SystemMessage) and msg.subtype == "init":
-                sid = (msg.data or {}).get("session_id")
-                if sid:
-                    _save(path, {"session_id": sid})
-            elif isinstance(msg, AssistantMessage):
-                if getattr(msg, "parent_tool_use_id", None):
-                    continue
-                blocks = [b for b in (_block(x) for x in msg.content) if b is not None]
-                bash_ids.update(str(b["id"]) for b in blocks if b.get("type") == "tool_use" and b.get("name") == "Bash")
-                conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {}, asked=spec.model)
-                results([r for r in (_result(x) for x in msg.content) if r is not None])
-                said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
-                reply = said or reply
-                if msg.error:
-                    failed = str(msg.error)
-            elif isinstance(msg, UserMessage):
-                if getattr(msg, "parent_tool_use_id", None) or isinstance(msg.content, str):
-                    continue
-                results([r for r in (_result(x) for x in msg.content) if r is not None])
-            elif isinstance(msg, ResultMessage):
-                if msg.session_id:
-                    _save(path, {"session_id": msg.session_id})
-                if msg.is_error and not failed:
-                    failed = str(msg.result or msg.subtype or "the Claude Code session failed")
+        hand = asyncio.create_task(_hand(conv, client, handed, closing)) if conv.kind == "main" else None
+        try:
+            # the session's reply; then, while a message handed to it is not read yet, its next turn, which reads it
+            while True:
+                ended = False
+                async for msg in client.receive_response():
+                    if isinstance(msg, SystemMessage) and msg.subtype == "init":
+                        sid = (msg.data or {}).get("session_id")
+                        if sid:
+                            _save(path, {"session_id": sid})
+                    elif isinstance(msg, AssistantMessage):
+                        if getattr(msg, "parent_tool_use_id", None):
+                            continue
+                        blocks = [b for b in (_block(x) for x in msg.content) if b is not None]
+                        bash_ids.update(str(b["id"]) for b in blocks
+                                        if b.get("type") == "tool_use" and b.get("name") == "Bash")
+                        conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {}, asked=spec.model)
+                        results([r for r in (_result(x) for x in msg.content) if r is not None])
+                        said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+                        reply = said or reply
+                        if msg.error:
+                            failed = str(msg.error)
+                    elif isinstance(msg, UserMessage):
+                        if getattr(msg, "uuid", None) in handed:  # the session read a message handed to it
+                            conv.heard(handed.pop(str(msg.uuid)))
+                            continue
+                        if getattr(msg, "parent_tool_use_id", None) or isinstance(msg.content, str):
+                            continue
+                        results([r for r in (_result(x) for x in msg.content) if r is not None])
+                    elif isinstance(msg, ResultMessage):
+                        ended = True
+                        if msg.session_id:
+                            _save(path, {"session_id": msg.session_id})
+                        if msg.is_error and not failed:
+                            failed = str(msg.result or msg.subtype or "the Claude Code session failed")
+                if not ended or failed:
+                    break
+                if not handed and hand is not None:  # nothing more is handed on: what comes waits for main's next turn
+                    closing.set()
+                    conv.arrived.set()
+                    with contextlib.suppress(Exception):
+                        await hand
+                    hand = None
+                if not handed:
+                    break
+        finally:
+            if hand is not None:
+                hand.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await hand
     if box or ran:
         _tell_box(conv, box)
     if failed:
