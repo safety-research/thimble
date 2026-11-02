@@ -13,6 +13,7 @@ import { Composer } from '../../src/chat/Composer.tsx'
 import { MAIN_DEFAULT_MODEL, mainModel } from '../../src/chat/ModelLine.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { dispatch } from '../../src/lib/events.ts'
+import { modelChoices } from '../../src/lib/models.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -111,6 +112,10 @@ describe("main's model", () => {
     expect(mainModel(moved, 'claude-opus-5-5')).toBe('claude-opus-4-8')
   })
 
+  test('its menu offers the current models, Sonnet 5.5 and Opus 4.8 among them, whatever the settings name', () => {
+    expect(modelChoices(null, 'claude-opus-5-5')).toEqual(expect.arrayContaining(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-4-8']))
+  })
+
   describe('at the composer', () => {
     beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }))
     afterEach(() => {
@@ -138,6 +143,19 @@ describe("main's model", () => {
       await act(async () => shown!.click())
       await settle()
       expect(picked).toEqual(['claude-sonnet-5', 'claude-opus-5-5'])
+    })
+
+    test('offers Sonnet 5.5, and a pick of it goes to onModel', async () => {
+      const picked: string[] = []
+      const el = await mount(<Composer model="claude-opus-5-5" models={modelChoices(null, 'claude-opus-5-5')} onModel={(m) => picked.push(m)} effort="medium" onEffort={() => undefined} fast={false} onFast={() => undefined} onSend={() => undefined} sending={false} />)
+      await settle()
+      await act(async () => el.querySelector<HTMLButtonElement>('button[aria-label="Model for main and its threads"]')!.click())
+      await settle()
+      const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"], [role="menuitemcheckbox"]')].find((n) => n.textContent?.includes('claude-sonnet-5-5'))
+      expect(item?.textContent).toContain('Sonnet 5.5')
+      await act(async () => item!.click())
+      await settle()
+      expect(picked).toEqual(['claude-sonnet-5-5'])
     })
   })
 })
