@@ -11,6 +11,9 @@ install, the plugin thimble@thimble-local from the marketplace thimble-local, wh
 workspaces in ~/.thimble/app/workspaces; a clone install, the plugin thimble@thimble from the marketplace thimble, which
 is the clone (0.9's tree: backend/ beside plugin/, or plugin.json's version 0.9), with its workspaces in the clone; and,
 for both, its state in ~/.thimble (OLD below). It reads Claude Code's files and runs nothing.
+
+A link into a thimble folder that is gone (a clone deleted, of 0.9 or of 0.10 with --local) says nothing of its
+version, so the report calls it what it is: a link to a thimble folder that is gone. Its removal is the same rm -f.
 """
 import json
 import os
@@ -73,7 +76,7 @@ def find():
         path = src.get("path") if isinstance(src, dict) and src.get("source") == "directory" else ""
         markets[name] = path or markets.get(name, "")
 
-    f = {"release": [], "clone": None, "launcher": None, "runs": False}
+    f = {"release": [], "clone": None, "launcher": None, "runs": False, "gone": False}
     if "thimble@thimble-local" in plugins:
         f["release"].append("plugin")
     if "thimble-local" in markets:
@@ -95,6 +98,8 @@ def find():
             # 0.9's own command; a 0.9 clone pulled to 0.10 leaves the link on 0.10's plugin/bin/thimble, which fails
             f["runs"] = bool(text) and "engine/thimble.py" not in text
             tree = target[: -len("/plugin/bin/thimble")] if target.endswith("/plugin/bin/thimble") else ""
+            # a link into a folder that is gone: nothing there says which thimble it was
+            f["gone"] = bool(tree) and not os.path.isdir(tree)
             if tree and os.path.normpath(tree) != APP and os.path.isdir(tree) and not f["clone"]:
                 f["clone"] = os.path.normpath(tree)
     f["plugins"], f["markets"] = plugins, markets
@@ -129,12 +134,18 @@ def commands(f):
 def report(f):
     plugin = "thimble@thimble-local" in f["plugins"] or (f["clone"] and "thimble@thimble" in f["plugins"] and
                                                          f["markets"].get("thimble"))
+    cmds = [c for c, _ in commands(f)]
+    # the link into a folder that is gone is all there is, and its rm -f all there is to run
+    link_only = f["gone"] and not f["release"] and not f["clone"] and len(cmds) == 1
     if plugin:
         lines = ["thimble 0.9 is installed here. Remove it before you install 0.10: while 0.9's plugin is installed,",
                  "Claude Code loads it and skips 0.10's, with no error. Nothing was installed."]
     elif f["clone"] and f["markets"].get("thimble"):
         lines = ["thimble 0.9's marketplace is still here. Remove it before you install 0.10: it has the name of",
                  "0.10's marketplace, thimble, so adding 0.10's fails. Nothing was installed."]
+    elif link_only:
+        lines = [f"{shown(LAUNCHER)} is a link to a thimble folder that is gone. Remove it before you install 0.10.",
+                 "Nothing was installed."]
     else:
         lines = ["thimble 0.9 left files here, which 0.10 does not use. Remove them before you install 0.10.",
                  "Nothing was installed."]
@@ -149,7 +160,9 @@ def report(f):
         lines.append(f"  - a thimble 0.9 clone, {shown(f['clone'])}" +
                      (", which the marketplace thimble and the plugin thimble@thimble come from" if has else
                       ", which the marketplace thimble comes from" if f["markets"].get("thimble") else ""))
-    if f["launcher"]:
+    if f["launcher"] and f["gone"]:
+        lines.append(f"  - {shown(LAUNCHER)}, a link to {shown(f['launcher'])}, in a thimble folder that is gone")
+    elif f["launcher"]:
         how = "" if f["launcher"] == LAUNCHER else f", a link to {shown(f['launcher'])}"
         lines.append(f"  - {shown(LAUNCHER)}, 0.9's thimble command{how}")
     if "app" in f["release"]:
@@ -165,9 +178,10 @@ def report(f):
         if clone_ws and os.path.isdir(clone_ws):
             lines.append(f"The clone's workspaces, in {shown(clone_ws)}, stay: removing 0.9 leaves the clone alone.")
 
-    cmds = [c for c, _ in commands(f)]
     lines.append("")
-    if f["launcher"] and f["runs"] and not f["new_state"]:
+    if link_only:
+        lines.append("To remove it, run this:")
+    elif f["launcher"] and f["runs"] and not f["new_state"]:
         lines += ["To remove 0.9, run this, and answer y:", "  thimble uninstall",
                   "It removes 0.9's plugin, its marketplace, ~/.local/bin/thimble and all of ~/.thimble, workspaces",
                   "included. If it fails, run these instead:"]

@@ -33,8 +33,8 @@ For the browser workbench:
 - **A way to reach Claude**: an Anthropic API key, Workload Identity Federation, or your Claude Code sign-in, which it
   uses only after you confirm (it then launches headless Claude Code sessions in the background). The install asks;
   see [browser/README.md](browser/README.md).
-- **About 1 GB of disk** in the checkout: the page's packages, the server's Python packages, the sandbox runtime and
-  the built page.
+- **About 1 GB of disk** in the folder you install from: the page's packages, the server's Python packages, the sandbox
+  runtime and the built page.
 
 ## If you tried an earlier 0.10 build
 
@@ -82,14 +82,19 @@ claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
 Claude asks whether you want both products (the default) or the terminal plugin alone, runs the script below, helps
-you fix what is missing, and says how to use what it installed. To do it yourself, clone it into a folder of its own,
-where it stays: the browser workbench builds about 1 GB in the checkout, and runs from it.
+you fix what is missing, and says how to use what it installed. To do it yourself, download the newest release; it
+needs no clone. Its tag is on https://github.com/safety-research/thimble/releases/latest (such as `v0.10.8`), and its
+archive unpacks into a folder of its own in your home folder (`~/thimble-0.10.8` for that tag), where it stays: the
+browser workbench builds about 1 GB in it, and runs from it.
 
 ```
-git clone https://github.com/safety-research/thimble ~/thimble
-cd ~/thimble
+curl -fsSL https://github.com/safety-research/thimble/archive/refs/tags/<tag>.tar.gz | tar -xz -C ~
+cd ~/thimble-<version>
 scripts/install.sh
 ```
+
+To work on thimble's own code or try a branch, clone the repository instead
+(`git clone https://github.com/safety-research/thimble ~/thimble`), and run `scripts/install.sh --local` in the clone.
 
 The script first checks what the products need and says what is missing, one line each; then it installs nothing
 until you fix it and run it again. Then it:
@@ -99,7 +104,7 @@ until you fix it and run it again. Then it:
    the sandbox the plugin's cards run in: the version of Anthropic's sandbox runtime the plugin pins, with `npm ci`, in
    `~/.thimble/srt`. It starts the card runner in it once, and says whether it works; on Linux, when bubblewrap, socat
    or ripgrep is missing, it prints the one command that installs them (it never runs `sudo` itself).
-2. installs the browser workbench (thimble 0.8's browser mode) from the checkout: the server's Python packages (`uv sync`
+2. installs the browser workbench (thimble 0.8's browser mode) in its folder: the server's Python packages (`uv sync`
    in `browser/backend`), and the page with the sandbox runtime (`npm ci` and a build in `browser/frontend`).
 3. writes a `thimble-browser` launcher in `~/.local/bin` (`--bin-dir DIR` puts it elsewhere), and says when that folder
    is not on your `PATH`.
@@ -124,10 +129,10 @@ Options:
 - `--remove-0.9`: remove thimble 0.9 first, after you answer y, in a terminal (see "If you used thimble 0.9").
 
 You can run it again at any time. It installs again what it installed, and updates the plugin and the browser
-workbench to what the checkout and the marketplace hold now. From the first fix you use, or the first update by
+workbench to what its folder and the marketplace hold now. From the first fix you use, or the first update by
 `thimble update`, Claude Code loads the plugin from your fixes, and the script leaves the plugin to `thimble update`.
 
-### The plugin without a clone
+### The plugin with Claude Code's own commands
 
 ```
 claude plugin marketplace add safety-research/thimble
@@ -136,7 +141,10 @@ claude plugin install thimble@thimble
 
 You can do the same inside Claude Code: run `/plugin`, add the marketplace `safety-research/thimble`, and install
 thimble from it. The plugin installs its sandbox runtime at the first session start, in the background; when the
-sandbox cannot work here, the line above the prompt says why and the command that fixes it.
+sandbox cannot work here, the line above the prompt says why and the command that fixes it. After an install from a
+folder (a clone, thimble 0.9, or `--local`), these commands leave Claude Code loading the plugin from that folder: it
+does not add the marketplace from GitHub while its settings name the folder, and the plugin counts as installed.
+`scripts/install.sh` moves it to GitHub.
 
 ### Python
 
@@ -155,8 +163,8 @@ The terminal plugin:
 3. Claude answers with a card, and the numbers in its answer are underlined in purple, each with a spinner until the
    checker is done. The line above the prompt starts with `thimble` and says how much of the folder Claude has read.
 
-`examples/sample/runs.csv` in the checkout holds 40 made-up nightly test runs to try it on. Run `claude` in
-`examples/sample`, and ask: "Did the failures start after the config change? Show it as a card."
+`examples/sample/runs.csv` in the folder you installed from holds 40 made-up nightly test runs to try it on. Run
+`claude` in `examples/sample`, and ask: "Did the failures start after the config change? Show it as a card."
 
 The browser workbench:
 
@@ -188,23 +196,24 @@ To update both products, run `thimble update` in a shell (not inside Claude Code
 workbench to the newest release, keeps your fixes (each one that still fits the release stays on, once thimble's checks
 pass with it there; one that does not is off, kept in `thimble fixes`, until `thimble reapply` has Claude fit it), and
 says what to do next; after an install with `scripts/install.sh --local` in a git clone, it moves them to the commit
-your checkout has, so pull it first. A plugin installed without a clone updates with
+your checkout has, so pull it first. A plugin installed with Claude Code's own commands updates with
 `claude plugin update thimble@thimble` until you use its first fix: from then on, Claude Code loads it from your fixes,
-and only `thimble update` moves it to a new release. Without a clone, your shell does not find `thimble`: run
-`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of `~/.thimble`). To
-uninstall the plugin:
+and only `thimble update` moves it to a new release. With Claude Code's own commands, your shell does not find
+`thimble`: run `~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of
+`~/.thimble`). To uninstall the plugin:
 
 ```
 claude plugin uninstall thimble@thimble
 ```
 
-To remove the browser workbench, delete `~/.local/bin/thimble-browser` and the checkout. Uninstalling leaves your data
-alone. To remove what thimble wrote, delete `~/.thimble` and `~/.thimble-browser` (and a `thimble/` folder that a build
-before 0.10.0 made in a data folder). With `--local` in a git clone, your fixes also live in the checkout, as the branch
-`mine` and the refs under `refs/thimble/`. After a new install, the first fix you ask for, or a `thimble update` that
-moves to a new commit of your checkout, sets them aside by itself, under `refs/thimble-old/`, when `mine` is one that
-thimble left: no worktree or other thimble home uses it, it tracks no upstream, and thimble made or recorded every
-commit that only `mine` has. Otherwise it asks you to rename `mine`. To remove them, after you delete `~/.thimble`, run
+To remove the browser workbench, delete `~/.local/bin/thimble-browser` and the folder you installed it from.
+Uninstalling leaves your data alone. To remove what thimble wrote, delete `~/.thimble` and `~/.thimble-browser` (and a
+`thimble/` folder that a build before 0.10.0 made in a data folder). With `--local` in a git clone, your fixes also live
+in the checkout, as the branch `mine` and the refs under `refs/thimble/`. After a new install, the first fix you ask
+for, or a `thimble update` that moves to a new commit of your checkout, sets them aside by itself, under
+`refs/thimble-old/`, when `mine` is one that thimble left: no worktree or other thimble home uses it, it tracks no
+upstream, and thimble made or recorded every commit that only `mine` has. Otherwise it asks you to rename `mine`. To
+remove them, after you delete `~/.thimble`, run
 `git worktree prune`, `git branch -D mine`
 and `git for-each-ref --format='delete %(refname)' refs/thimble refs/thimble-old | git update-ref --stdin` in the
 checkout.
@@ -219,12 +228,13 @@ The install:
   Claude Code (Homebrew, npm, or your system's packages, such as an AUR or Nix package), and it updates it: the
   install names the command for yours. On a machine that an organization manages, whoever manages it updates Claude
   Code. Then start a new `claude` session: one that was open keeps its version.
-- **Claude Code's own sandbox is on** (`"sandbox": {"enabled": true}` in its settings, so Claude's commands run in
-  it). When Claude installs thimble, the install writes outside the folder (the checkout, such as `~/thimble`, and
-  `~/.claude/plugins`, `~/.thimble`, `~/.thimble-browser`, `~/.local/bin`) and downloads packages, which that sandbox
-  may refuse; Claude then asks to run those commands outside it, or you run `scripts/install.sh` in your own terminal.
-  The install's check of the card sandbox may fail inside Claude Code's sandbox for that reason alone. The check that
-  counts is a card drawn in a new `claude` session: a card that cannot draw says why in the line above the prompt.
+- **Claude Code's own sandbox is on** (`"sandbox": {"enabled": true}` in its settings, so Claude's commands run in it).
+  When Claude installs thimble, the install writes outside the folder (the release's folder, such as `~/thimble-0.10.8`,
+  and `~/.claude/plugins`, `~/.thimble`, `~/.thimble-browser`, `~/.local/bin`) and downloads packages, which that
+  sandbox may refuse; Claude then asks to run those commands outside it, or you run `scripts/install.sh` in your own
+  terminal. The install's check of the card sandbox may fail inside Claude Code's sandbox for that reason alone. The
+  check that counts is a card drawn in a new `claude` session: a card that cannot draw says why in the line above the
+  prompt.
 
 The terminal plugin:
 

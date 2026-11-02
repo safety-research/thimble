@@ -25,16 +25,19 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
    --yes`, since you cannot answer its question; when it fails, the commands it lists after it). Never pass
    `--remove-0.9`: it needs a terminal. When this session had 0.9 loaded, each tool call then reports "Plugin
    directory does not exist": tell the user to type `/reload-plugins`, and go on.
-3. Clone the repository into a folder of its own, such as `~/thimble`, or use the local folder the user names; the
-   folder this session runs in may be their own project. When you cloned it already (to read these notes, say), use that
-   clone, moved into such a folder when it is in a temporary one, and do not clone it again. The checkout stays where it
-   is: the workbench builds about 1 GB in it, and `thimble-browser` runs from it. Run `scripts/install.sh` in the
-   checkout, with `--no-browser` for the plugin alone, and `--no-setup` (step 4 asks instead). Leave out `--local`
-   unless the user is working on thimble's own code or trying a branch: with it, `thimble update` follows that checkout,
-   which the user then pulls themselves. The script prints a few dozen lines, one or two per step, and with the
-   workbench it runs for a few minutes (uv sync, npm ci and a build of the page). It checks what is missing first, one
-   line each, and installs nothing until all of it is there. Tell the user what is missing and the command that fixes
-   it, run that command only when the user agrees, then run the script again.
+3. Download the newest release into a folder of its own; it needs no clone. Its tag (`tag_name`, such as `v0.10.8`)
+   is in `curl -fsSL https://api.github.com/repos/safety-research/thimble/releases/latest`, and `curl -fsSL
+   https://github.com/safety-research/thimble/archive/refs/tags/<tag>.tar.gz | tar -xz -C ~` unpacks it into
+   `~/thimble-<version>`, about 30 MB. Or use the local folder the user names; the folder this session runs in may be
+   their own project. When you cloned it already (to read these notes, say), use that clone, moved into such a folder
+   when it is in a temporary one, and do not clone it again. The folder stays where it is: the workbench builds about
+   1 GB in it, and `thimble-browser` runs from it. Run `scripts/install.sh` in it, with `--no-browser` for the plugin
+   alone, and `--no-setup` (step 4 asks instead). Leave out `--local` unless the user is working on thimble's own code
+   or trying a branch, in a clone: with it, `thimble update` follows that checkout, which the user then pulls
+   themselves. The script prints a few dozen lines, one or two per step, and with the workbench it runs for a few
+   minutes (uv sync, npm ci and a build of the page). It checks what is missing first, one line each, and installs
+   nothing until all of it is there. Tell the user what is missing and the command that fixes it, run that command only
+   when the user agrees, then run the script again.
 
    The script runs in your shell, and its checks pass or fail there. The plugin runs in the `claude` that the user
    starts from a terminal, on the `node` that terminal finds first: a Node that only your own command loads
@@ -50,13 +53,14 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
      that writes it from the clipboard to a file only they can read, such as `(umask 077; pbpaste >
      ~/.thimble-api-key)` on macOS (Linux: `wl-paste` or `xclip -selection clipboard -o`). When they say it is done,
      run `thimble-browser --setup --key-file ~/.thimble-api-key`. Never read, print or copy that file. Offer to delete it, and delete it only on a yes.
-   - **WIF**: ask for the path of its config file, or offer to look for one; on a yes, run `thimble-browser --setup
-     --find-wif`, which lists the files it can use, by path only. Run `thimble-browser --setup --how wif --wif-file
-     <path>`. Never print the file.
+   - **WIF**: ask for the path of its config file, or offer to look for one; on a yes, ask the user to run
+     `thimble-browser --setup --find-wif` with `!` here, which lists the files it can use, by path only, and read what
+     it lists. Run `thimble-browser --setup --how wif --wif-file <path>`. Never print the file.
 
-   Each command ends with a check that Claude answers. When the check fails, tell the user what failed and the next
-   step, and run the command again after the fix. Say that the page asks at its first start only when the user
-   chooses to skip this step.
+   Each command ends with a check that Claude answers. Its line says the login that Claude Code uses (with the Claude
+   Code sign-in), and names the `ANTHROPIC_*` variables set in the shell, which the workbench never uses. When the check
+   fails, tell the user what failed and the next step, and run the command again after the fix. Say that the page asks
+   at its first start only when the user chooses to skip this step.
 5. While something the user chose does not work yet, the install is not done: the script's notes, its sandbox line
    and the checks of steps 3 and 4 say what. Fix it, with the user's yes, or give them the step that only they can
    take. Once it works, end with a short reply on how to use what was installed, and when to use each:
@@ -69,12 +73,12 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
    - The workbench, when they want to work in a web page, with the folder's files and views of them beside the chat, a
      canvas of cards, labels and a report: run `thimble-browser` in a folder of files and open the sign-in link it
      prints.
-6. When the plugin works, offer to show it on the checkout's `examples/sample/runs.csv` (40 made-up nightly test
-   runs), in one short line, and never ask the user to type the question or a path. When the checkout lies outside
+6. When the plugin works, offer to show it on `examples/sample/runs.csv` in the folder of step 3 (40 made-up nightly
+   test runs), in one short line, and never ask the user to type the question or a path. When that folder lies outside
    this session's folder (a citation can name only files in the folder its session works in), or after a change to
    Node or Claude Code, the line gives a command to run in a new terminal, which starts `claude` in the sample's folder
    with the question, such as:
-   `cd ~/thimble/examples/sample && claude "Did the failures start after the config change? Show it as a card."`
+   `cd ~/thimble-0.10.8/examples/sample && claude "Did the failures start after the config change? Show it as a card."`
    Otherwise the line is "Type /reload-plugins, then try it." (You cannot type `/reload-plugins` for them; it loads
    thimble here.) When they answer after the reload, look at the sample yourself and answer: did the failures start
    after the config change? Answer it as thimble's guidance says: one card, and checked citations. If the line above

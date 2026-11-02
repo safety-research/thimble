@@ -1,10 +1,11 @@
 """`thimble-browser --setup` without a terminal, as Claude runs it when it installs thimble for a person
 (claude_access.setup): an API key read from a file the person wrote and never printed, the WIF config files found in the
-usual places, and the Claude Code sign-in check, which runs one headless turn. No model is called: the Messages API
-check is faked, and `claude` is a stand-in script."""
+usual places, and the Claude Code sign-in check, which runs one headless turn and says the login it ran on. No model is
+called: the Messages API check is faked, and `claude` is a stand-in script."""
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 
@@ -126,15 +127,19 @@ def test_find_wif_says_where_it_looked_when_there_is_none(tmp_path, capsys, monk
 # --------------------------------------------------------------------------- the Claude Code sign-in check
 
 
-def fake_cli(tmp_path: Path, monkeypatch, answer: dict, rc: int = 0) -> Path:
-    """A stand-in `claude`: `auth status` says signed in, `-p` prints `answer` as JSON and exits `rc`, and each call's
-    words are kept in calls.txt."""
+def fake_cli(tmp_path: Path, monkeypatch, answer: dict, rc: int = 0, status: dict | None = None) -> Path:
+    """A stand-in `claude`: `auth status` prints `status` (default: signed in), `-p` prints `answer` as JSON and exits
+    `rc`; each call's words are kept in calls.txt, and the names of the ANTHROPIC_* variables it got in env.txt."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
     calls = tmp_path / "calls.txt"
     (tmp_path / "answer.json").write_text(json.dumps(answer))
+    (tmp_path / "status.json").write_text(json.dumps(status or {"loggedIn": True}))
+    (tmp_path / "env.txt").write_text("")
     bin_ = tmp_path / "fake-claude"
     bin_.write_text("#!/bin/sh\n"
                     f'echo "$@" >> {shlex.quote(str(calls))}\n'
-                    'case "$1" in auth) echo \'{"loggedIn": true}\';; '
+                    f'env | sed -n "s/^\\(ANTHROPIC_[A-Z_]*\\)=.*/\\1/p" >> {shlex.quote(str(tmp_path / "env.txt"))}\n'
+                    f'case "$1" in auth) cat {shlex.quote(str(tmp_path / "status.json"))};; '
                     f'-p) cat {shlex.quote(str(tmp_path / "answer.json"))}; exit {rc};; esac\n')
     bin_.chmod(0o755)
     monkeypatch.setattr(config, "CLI_PATH", str(bin_))
@@ -156,3 +161,38 @@ def test_claude_code_check_says_what_failed(tmp_path, capsys, monkeypatch):
     assert rc == 2
     assert "the check failed: Claude Code did not answer: Not logged in · Please run /login" in out
     assert "Run `claude` in a terminal" in out
+
+
+def test_claude_code_check_says_the_login_its_sessions_use(tmp_path, capsys, monkeypatch):
+    """N97: the check says the login `claude auth status` reports for the sessions thimble starts, so that whoever
+    installs thimble sees whether a key stands in for the sign-in, with no check of their own: a key from apiKeyHelper
+    that answers, and a stale key from Claude Code's settings (the shell's ANTHROPIC_API_KEY never reaches it)."""
+    fake_cli(tmp_path / "helper", monkeypatch, {"is_error": False, "result": "ok"},
+             status={"loggedIn": True, "authMethod": "api_key", "apiKeySource": "apiKeyHelper"})
+    rc, out = run_setup(capsys, "--how", "claude-code", "--yes")
+    assert rc == 0
+    assert "thimble: checked: Claude answers, through Claude Code logged in with api_key from apiKeyHelper.\n" in out
+    fake_cli(tmp_path / "stale", monkeypatch, {"is_error": True, "result": "Invalid API key · Fix external API key"},
+             rc=1, status={"loggedIn": True, "authMethod": "api_key", "apiKeySource": "ANTHROPIC_API_KEY"})
+    rc, out = run_setup(capsys, "--how", "claude-code", "--yes")
+    assert rc == 2
+    assert ("thimble: the check failed: Claude Code, logged in with api_key from ANTHROPIC_API_KEY in its settings, did "
+            "not answer: Invalid API key · Fix external API key") in out
+
+
+def test_setup_names_the_shell_s_anthropic_variables_and_uses_none(tmp_path, capsys, monkeypatch):
+    """N97: `thimble-browser --setup` (claude_access.main) takes the shell's ANTHROPIC_* variables out first, so a stale
+    key there reaches neither the check's `claude` nor the workbench, and its check line names them, never a value."""
+    for name in [k for k in os.environ if k.startswith("ANTHROPIC_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_KEY)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://made-up.example")
+    fake_cli(tmp_path, monkeypatch, {"is_error": False, "result": "ok"},
+             status={"loggedIn": True, "authMethod": "claude.ai"})
+    rc = claude_access.main(["setup", "--how", "claude-code", "--yes"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.splitlines()[-1] == ("thimble: checked: Claude answers, through Claude Code logged in with claude.ai. "
+                                    "ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, set in this shell, are not used.")
+    assert FAKE_KEY not in out and "made-up.example" not in out
+    assert (tmp_path / "env.txt").read_text() == ""

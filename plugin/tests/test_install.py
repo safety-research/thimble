@@ -542,12 +542,13 @@ def test_install_md_says_when_each_way_updates_the_plugin():
 
 
 def test_install_md_says_how_a_plugin_without_a_clone_updates_after_its_first_fix():
-    """Without a clone, no thimble command is in the shell; after the first fix, claude plugin update leaves the plugin
-    as it is, and thimble update refuses inside Claude Code. INSTALL.md's update gives what works: live's launcher, run
-    by its path in a shell, which passes update to the release checkout when there is one."""
+    """Installed with Claude Code's own commands (no clone, and no scripts/install.sh), the plugin puts no thimble
+    command in the shell; after the first fix, claude plugin update leaves the plugin as it is, and thimble update
+    refuses inside Claude Code. INSTALL.md's update gives what works: live's launcher, run by its path in a shell, which
+    passes update to the release checkout when there is one."""
     text = " ".join((ROOT / "INSTALL.md").read_text().split())
     update = text.split("## Update and uninstall", 1)[1].split(" ## ", 1)[0]
-    assert ("Without a clone, your shell does not find `thimble`: run "
+    assert ("With Claude Code's own commands, your shell does not find `thimble`: run "
             "`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of "
             "`~/.thimble`).") in update
     assert (ROOT / "plugin" / "bin" / "thimble").is_file()
@@ -609,6 +610,29 @@ def test_the_install_gives_the_workbench_s_claude_code_sign_in_first_and_recomme
     assert "Their Claude Code sign-in (recommended), only after they accept" in note
 
 
+def test_claude_knows_that_the_setup_s_check_says_which_key_is_used():
+    """N97: CLAUDE.md, step 4, says what the check of thimble-browser --setup reports besides an answer: the login
+    Claude Code uses, and the ANTHROPIC_* variables of the shell, which the workbench never uses (claude_access.setup,
+    the browser's server tests). Claude then has no check of its own to write for a stale key."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 4. When the workbench was installed", 1)[1].split(" 5. ", 1)[0]
+    check = step.split("Each command ends with a check that Claude answers.", 1)[1].split(" When the check fails", 1)[0]
+    assert "the login that Claude Code uses" in check, check
+    assert "names the `ANTHROPIC_*` variables set in the shell, which the workbench never uses" in check, check
+
+
+def test_the_user_looks_for_a_wif_file_with_the_bang_and_claude_reads_what_it_lists():
+    """N97: CLAUDE.md, step 4, has the user run thimble-browser --setup --find-wif with `!` in the session, and Claude
+    reads what it lists. Run by Claude, in auto mode, Claude Code's classifier refused it as credential exploration,
+    in each install exercise that came to it."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 4. When the workbench was installed", 1)[1].split(" 5. ", 1)[0]
+    wif = step.split("- **WIF**: ", 1)[1].split(" Each command ends with", 1)[0]
+    assert "on a yes, ask the user to run `thimble-browser --setup --find-wif` with `!` here" in wif, wif
+    assert "and read what it lists." in wif, wif
+    assert "on a yes, run `thimble-browser --setup --find-wif`" not in wif, wif
+
+
 def test_the_install_summary_says_when_to_use_each_product(tmp_path):
     """The install's last lines when it installed both products, in one line, and the reply Claude ends an install with
     (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one product
@@ -637,12 +661,30 @@ def test_the_install_summary_says_once_that_reload_plugins_loads_the_plugin_in_a
 
 
 def test_the_install_uses_a_clone_claude_made_earlier_and_clones_once():
-    """N77b: step 3 of CLAUDE.md, where Claude clones the repository, says to use a clone it made already (to read these
+    """N77b: step 3 of CLAUDE.md, where Claude gets the release, says to use a clone it made already (to read these
     notes), moved out of a temporary folder, and not to clone a second one."""
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
-    step = text.split(" 3. Clone the repository", 1)[1].split(" The checkout stays where it is", 1)[0]
+    step = text.split(" 3. ", 1)[1].split(" The folder stays where it is", 1)[0]
     assert "cloned it already" in step and "use that clone" in step and "do not clone it again" in step, step
     assert "temporary" in step, step
+
+
+def test_the_install_takes_the_newest_release_s_archive_with_no_clone():
+    """N96: step 3 of CLAUDE.md gets the newest release as GitHub's archive of its tag, unpacked into a folder of its
+    own, with no clone of the repository and its history; a clone is for work on thimble's own code or a branch, with
+    --local. INSTALL.md's and the README's install by hand do the same, and run scripts/install.sh there, which moves
+    an earlier install's marketplace to GitHub (N95)."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 3. ", 1)[1].split(" 4. ", 1)[0]
+    assert "it needs no clone" in step and "releases/latest" in step and "`tag_name`" in step, step
+    assert "archive/refs/tags/<tag>.tar.gz | tar -xz -C ~` unpacks it into `~/thimble-<version>`" in step, step
+    assert "Clone the repository" not in step and "git clone" not in step, step
+    assert "Leave out `--local` unless the user is working on thimble's own code or trying a branch, in a clone" in step
+    for doc in ("INSTALL.md", "README.md"):
+        flat = " ".join((ROOT / doc).read_text().split())
+        by_hand = flat.split("## Install", 1)[1].split(" ## ", 1)[0].split("git clone", 1)[0]
+        assert "releases/latest" in by_hand, doc
+        assert "archive/refs/tags/<tag>.tar.gz | tar -xz -C ~ cd ~/thimble-<version> scripts/install.sh" in by_hand, doc
 
 
 def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plugin_in_the_open_sessions():
@@ -962,3 +1004,45 @@ def test_claude_knows_0_9_by_what_the_install_script_finds():
     step = text.split(" 2. thimble 0.9 is here", 1)[1].split(" 3. ", 1)[0]
     when = step.split("Before you remove anything", 1)[0]
     assert "`scripts/install.sh` (step 3) stops with what it found" in when and "~/" not in when, when
+
+
+def test_a_thimble_link_into_a_folder_that_is_gone_is_called_that_and_its_fix_is_still_rm_f(tmp_path):
+    """A ~/.local/bin/thimble that links into a thimble folder that is gone (a 0.10 clone installed with --local, then
+    deleted) says nothing of which thimble it was. The install stops and calls it what it is, a link to a thimble folder
+    that is gone, never 0.9's thimble command, and its fix is rm -f of the link, as before. A link to the command of a
+    0.9 tree is still 0.9's."""
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "node", "echo v22.20.0\n")
+    stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".local" / "bin" / "thimble").symlink_to(home / "thimble" / "plugin" / "bin" / "thimble")
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable,
+           "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"), "THIMBLE_HOME": str(tmp_path / "thimble"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
+
+    def install():
+        return subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
+                              capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+
+    p = install()
+    assert p.returncode == 1, p.stdout + p.stderr
+    lines = p.stdout.splitlines()
+    assert lines[:2] == ["~/.local/bin/thimble is a link to a thimble folder that is gone. Remove it before you install "
+                         "0.10.", "Nothing was installed."], lines
+    assert "  - ~/.local/bin/thimble, a link to ~/thimble/plugin/bin/thimble, in a thimble folder that is gone" in lines
+    fix = lines.index("To remove it, run this:")
+    assert lines[fix + 1:fix + 3] == ["  rm -f ~/.local/bin/thimble", "Then run scripts/install.sh again, and restart the "
+                                      "claude sessions that are open (or run /reload-plugins"], lines
+    # 0.9 only in the name of the option that runs the fix
+    assert "0.9" not in p.stdout.split("Or run scripts/install.sh --remove-0.9", 1)[0], p.stdout
+    # what --remove-0.9 runs: the rm -f alone
+    cmds = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "thimble09.py"), "commands"], cwd="/",
+                          capture_output=True, text=True, env=env).stdout.splitlines()
+    assert [c.split("\t")[0] for c in cmds] == ["rm -f ~/.local/bin/thimble"], cmds
+    # the link to the command of a 0.9 tree that is here: 0.9's
+    stub(home / "thimble" / "plugin" / "bin" / "thimble", "echo 'thimble uninstall'\n")
+    (home / "thimble" / "backend").mkdir()
+    lines = install().stdout.splitlines()
+    assert lines[0] == "thimble 0.9 left files here, which 0.10 does not use. Remove them before you install 0.10.", lines
+    assert "  - ~/.local/bin/thimble, 0.9's thimble command, a link to ~/thimble/plugin/bin/thimble" in lines, lines

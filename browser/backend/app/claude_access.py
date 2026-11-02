@@ -13,7 +13,9 @@ for the choice (`python -m app.claude_access setup`), the page's first-run step 
 
 problem() says, without a network call, what is missing (no choice, no key, a WIF file that cannot be used, no consent,
 no `claude`), in words for the chat's card and the server's start line; check() makes one small call to be sure (with
-Claude Code sign-in, a one-turn headless `claude -p`). Nothing here prints or logs a key, an ID or a token.
+Claude Code sign-in, a one-turn headless `claude -p`, and the login that `claude auth status` reports for it, which
+says whether a key stands in for the sign-in). setup's check line also names the ANTHROPIC_* variables of the shell it
+ran in, which nothing here uses. Nothing here prints or logs a key, an ID or a token.
 
 When an agent (Claude Code) installs thimble for a person, it never sees the key: the person writes it to a file
 themselves, and `setup --key-file FILE` reads it from there. `setup --find-wif` lists the WIF config files in the
@@ -242,8 +244,22 @@ def problem_line() -> str:
     return f"{p['what']} {p['fix']}" if p else ""
 
 
+def _login(status: dict[str, Any] | None) -> str:
+    """The login `claude auth status` reports (config.auth_status), in its own words: its method, and where its key
+    comes from when a key stands in for the sign-in, such as `api_key from apiKeyHelper`; '' when it says none. A
+    `claude` thimble starts gets no ANTHROPIC_* variable of the shell (scrub_env), so an ANTHROPIC_API_KEY it reports
+    comes from its settings."""
+    if not isinstance(status, dict) or not status.get("authMethod"):
+        return ""
+    source = status.get("apiKeySource")
+    if source == "ANTHROPIC_API_KEY":
+        source += " in its settings"
+    return str(status["authMethod"]) + (f" from {source}" if source else "")
+
+
 async def check() -> dict[str, Any]:
-    """problem(), then one small call over the chosen way: {ok, how, describe, problem?}."""
+    """problem(), then one small call over the chosen way: {ok, how, describe, problem?}, and with Claude Code sign-in
+    the login its sessions use (login: _login's words, '' when unknown)."""
     out: dict[str, Any] = {"how": how(), "describe": describe()}
     p = problem()
     if p:
@@ -255,9 +271,11 @@ async def check() -> dict[str, Any]:
         if isinstance(status, dict) and status.get("loggedIn") is False:
             return {**out, "ok": False, "problem": {"what": "Claude Code is not signed in.",
                                                      "fix": "Run `claude` in a terminal and sign in, then check again."}}
+        out["login"] = login = _login(status)
         failed = await asyncio.to_thread(_claude_code_answers)
         if failed:
-            return {**out, "ok": False, "problem": {"what": f"Claude Code did not answer: {failed}",
+            who = f"Claude Code, logged in with {login}," if login else "Claude Code"
+            return {**out, "ok": False, "problem": {"what": f"{who} did not answer: {failed}",
                                                      "fix": "Run `claude` in a terminal and check that it answers, "
                                                             "then check again."}}
         return {**out, "ok": True}
@@ -361,12 +379,14 @@ def _ask(prompt: str, default: str = "") -> str:
     return got or default
 
 
-def setup(argv: list[str] | None = None) -> int:
+def setup(argv: list[str] | None = None, unused: list[str] | None = None) -> int:
     """`python -m app.claude_access setup [--how H] [--key-file F] [--wif-file F] [--yes] [--find-wif]`: ask how to
     reach Claude (1 Claude Code sign-in, the default and recommended, after the consent text; 2 API key; 3 WIF, its
     config file), check it, and save it. The key is read from --key-file, else without echo, or from stdin when it is
-    not a terminal; it is never printed. --find-wif lists the WIF config files found (find_wif) and saves nothing. Exit
-    0 when saved and checked, 1 when not saved, 2 when saved and the check failed."""
+    not a terminal; it is never printed. --find-wif lists the WIF config files found (find_wif) and saves nothing. The
+    check's line says the login Claude Code uses (check's login) and names `unused`, the ANTHROPIC_* variables the
+    shell had (scrub_env took them out, so no value of theirs reaches the check or the workbench). Exit 0 when saved and
+    checked, 1 when not saved, 2 when saved and the check failed."""
     ap = argparse.ArgumentParser(prog="thimble-browser --setup")
     ap.add_argument("--how", choices=CHOICES)
     ap.add_argument("--key-file", help="a file that holds the Anthropic API key alone (implies --how api-key)")
@@ -426,22 +446,25 @@ def setup(argv: list[str] | None = None) -> int:
     if args.no_check:
         return 0
     got = asyncio.run(check())
+    names = sorted(unused or [])
+    shell = f" {', '.join(names)}, set in this shell, {'is' if len(names) == 1 else 'are'} not used." if names else ""
     if got.get("ok"):
-        print("thimble: checked: Claude answers.")
+        login = f", through Claude Code logged in with {got['login']}" if got.get("login") else ""
+        print(f"thimble: checked: Claude answers{login}.{shell}")
         return 0
     p = got.get("problem") or {}
-    print(f"thimble: the check failed: {p.get('what', '')} {p.get('fix', '')}".rstrip())
+    print(f"thimble: the check failed: {p.get('what', '')} {p.get('fix', '')}".rstrip() + shell)
     return 2
 
 
 def main(argv: list[str] | None = None) -> int:
     from . import llm  # noqa: PLC0415
 
-    llm.scrub_env()
+    unused = llm.scrub_env()
     argv = list(sys.argv[1:] if argv is None else argv)
     cmd = argv[0] if argv else "status"
     if cmd == "setup":
-        return setup(argv[1:])
+        return setup(argv[1:], unused)
     if cmd == "status":
         p = problem_line()
         print(f"thimble: Claude access: {describe()}" + (f". {p}" if p else ""))
