@@ -871,6 +871,63 @@ def test_words_no_cited_place_shows_are_said_of_the_places_together_never_with_o
     assert one["reason"] == "Line 6 of the card's output reads “G6: 84 remarks”, not 642."
 
 
+FLOW = ["diagram: 5 nodes, 6 edges", "draft -> lint (submit)", "lint -> review (clean)", "lint -> draft (lint errors)",
+        "review -> draft (changes requested)", "review -> merge (approved)", "merge -> deploy (release)"]
+DIAGRAM = [{"id": "d1a6e7f0", "title": "How a change moves through review", "outputs": [{"out": 0, "lines": [[i, t] for i, t in enumerate(FLOW, 1)]}]}]
+
+
+def test_a_count_of_what_a_diagram_shows_cites_the_things_it_counts():
+    """R5: a count that only follows from a diagram card (made up), "2 of the 6 paths", cited as the line that states the
+    6 edges and the 2 edges it counts. No line states the 2, so it failed; the 2 counted lines show it by their number,
+    each highlighted whole. A wrong count still fails, and one line is a value's own place, never a count of one."""
+    places = {"ref": ["card:d1a6e7f0@out0#L1", "card:d1a6e7f0@out0#L4", "card:d1a6e7f0@out0#L5"]}
+    m = {"n": 1, "words": "2 of the 6 paths", "sentence": "[2 of the 6 paths] send the change back to the draft."}
+    r = check_mark(m, {**card(""), "evidence": places}, [], "/data", cards=DIAGRAM)
+    assert r["status"] == "verified", r
+    ev = r["evidence"]
+    assert [ev["output"][a:b] for a, b in ev["highlight"]] == ["6", "lint -> draft (lint errors)", "review -> draft (changes requested)"]
+    wrong = check_mark({**m, "words": "3 of the 6 paths"}, {**card(""), "evidence": places}, [], "/data", cards=DIAGRAM)
+    assert (wrong["status"], wrong["failedBy"], wrong["reason"]) == ("failed", "evidence", "None of the 3 cited lines of the card's output shows 3.")
+    # the total stands on a line of its own: the counted lines alone do not show it
+    two = check_mark(m, {**card(""), "evidence": {"ref": ["card:d1a6e7f0@out0#L4", "card:d1a6e7f0@out0#L5"]}}, [], "/data", cards=DIAGRAM)
+    assert two["reason"] == "None of the 2 cited lines of the card's output shows 6."
+    one = check_mark({"n": 1, "words": "1 path"}, card("card:d1a6e7f0@out0#L7"), [], "/data", cards=DIAGRAM)
+    assert one["status"] == "failed" and one["reason"] == "Line 7 of the card's output reads “merge -> deploy (release)”, not 1."
+    # an edge that carries a number of its own is counted too, when it is no number of the words
+    runs = [{"id": "e4b8c2a1", "title": "Runs by config and outcome", "outputs": [{"out": 0, "lines": [
+        [1, "diagram: 4 nodes, 3 edges"], [2, "config v1 -> failed (5 runs)"], [3, "config v1 -> passed (15 runs)"], [4, "config v2 -> failed (20 runs)"]]}]}]
+    v1 = {**card(""), "evidence": {"ref": ["card:e4b8c2a1@out0#L2", "card:e4b8c2a1@out0#L3"]}}
+    assert check_mark({"n": 1, "words": "2 different outcomes"}, v1, [], "/data", cards=runs)["status"] == "verified"
+    assert check_mark({"n": 1, "words": "3 different outcomes"}, v1, [], "/data", cards=runs)["status"] == "failed"
+
+
+def test_a_terminal_diagram_card_s_count_is_its_rows_out_of_its_table(tmp_path):
+    """R5 in the terminal's check path (engine/validate.py over the cards folder): a diagram card's rows are its edges
+    (made up), and "2 of the 6 paths" cites the 2 edges back to the draft: 2 rows of the card's table of 6. The table's
+    6 shows only beside a count its rows show, never alone; a wrong count still fails."""
+    d = tmp_path / "cards" / "c5e1a9b20d"
+    (d / "v1").mkdir(parents=True)
+    (d / "meta.json").write_text(json.dumps({"id": "c5e1a9b20d", "title": "How a change moves through review", "version": 1}))
+    edges = [("draft", "lint", "submit"), ("lint", "review", "clean"), ("lint", "draft", "lint errors"),
+             ("review", "draft", "changes requested"), ("review", "merge", "approved"), ("merge", "deploy", "release")]
+    (d / "v1" / "rows.json").write_text(json.dumps([{"from": a, "to": b, "why": w} for a, b, w in edges]))
+    back = ["card:c5e1a9b20d#to/lint%20errors", "card:c5e1a9b20d#to/changes%20requested"]
+    out = tmp_path / "index.tsv"
+    subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"index": str(out), "cards_dir": str(tmp_path / "cards")}), capture_output=True, text=True, check=True)
+    assert all(f"{ref}\tdraft\n" in out.read_text() for ref in back)
+    words = ["2 of the 6 paths", "3 of the 6 paths", "6 paths"]
+    answer = "```json\n" + json.dumps([{"mark": n, **card(""), "evidence": {"ref": back}} for n in (1, 2, 3)]) + "\n```"
+    req = {"marks": [{"n": n, "words": w, "sentence": f"[{w}] go back to the draft."} for n, w in enumerate(words, 1)],
+           "answer": answer, "calls": [], "cwd": "/data", "cards_dir": str(tmp_path / "cards")}
+    ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True)
+    got = {r["n"]: r for r in json.loads(ran.stdout)["results"]}
+    assert got[1]["status"] == "verified", got[1]
+    t = got[1]["evidence"]["table"]
+    assert sorted(t["rows"][x["r"]]["label"] for x in [t["at"], *t["also"]]) == ["changes requested", "lint errors"]
+    assert (got[2]["status"], got[2]["reason"]) == ("failed", "None of the 2 cited cells of the card shows 3 or 6.")
+    assert (got[3]["status"], got[3]["reason"]) == ("failed", "None of the 2 cited cells of the card shows 6.")
+
+
 def test_computed_output_that_is_a_printed_dataframe_carries_its_table():
     out = "            merged  total\nagent                  \nagent-03         4     10\nagent-07        12     40\n"
     r = check_mark(mark("12"), computed("agent-07        12     40"), [call(CODE, out)], "/data")
