@@ -1046,3 +1046,12 @@ def test_a_thimble_link_into_a_folder_that_is_gone_is_called_that_and_its_fix_is
     lines = install().stdout.splitlines()
     assert lines[0] == "thimble 0.9 left files here, which 0.10 does not use. Remove them before you install 0.10.", lines
     assert "  - ~/.local/bin/thimble, 0.9's thimble command, a link to ~/thimble/plugin/bin/thimble" in lines, lines
+
+
+def test_the_guide_says_to_start_the_workbench_in_a_terminal_of_its_own():
+    """N94: under `!` thimble-browser prints its link where Claude reads it, so it withholds the sign-in code; the guide
+    tells the person to run it in a terminal of its own, and says why."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text[text.index("- The workbench, when they want to work in a web page"):text.index("6. When the plugin works")]
+    assert "in a terminal of its own" in step
+    assert "Run with `!` here, its link has no sign-in code" in step
