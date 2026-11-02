@@ -1101,14 +1101,15 @@ function useCallIndex(ws: string, chat: string | null, rows: readonly Row[]): Re
 export const HELD_NOTE = 'Sent when the coverage check ends (at most 2 minutes)'
 
 /** A message on its way to the orientation, or to main while main works, until main reads it (useChat unread): the
- * analyst's tile, with a spinner, or the note that it is held. */
+ * analyst's tile, a step quieter, which alone says that it waits (the strip behind the composer says that the agent
+ * works), with the note under it while the server holds it. */
 function PendingMessage({ text, ws, held }: { text: string; ws: string; held: boolean }) {
   return (
     <div className="chat-msg chat-user chat-pending" data-held={held || undefined}>
       <UserMessage className="chat-message">
         <RefText text={text} workspace={ws} />
       </UserMessage>
-      <Note className="chat-pending-note" spin={!held} text={held ? HELD_NOTE : undefined} />
+      {held && <Note className="chat-pending-note" text={HELD_NOTE} />}
     </div>
   )
 }
