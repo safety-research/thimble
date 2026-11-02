@@ -462,6 +462,7 @@ def list_chats(c: str) -> list[dict]:
         meta["n_messages"] = n
         meta["last_ts"] = last or meta.get("created_at")
         meta["running"] = _running(c, meta["id"])
+        _with_asks(c, meta)
         out.append(meta)
     out.sort(key=lambda m: (m["kind"] != KIND_MAIN, m.get("created_at") or ""))
     return out
@@ -494,6 +495,15 @@ def running(c: str, chat_id: str) -> bool:
     """Whether a chat is running: main while its session's turn is open, a thread while its event waits or its fork
     runs (set_running), an agent chat while its task runs."""
     return _running(c, chat_id)
+
+
+def _with_asks(c: str, meta: dict) -> None:
+    """The asks before a request to a host the analyst has not allowed that wait on the chat, which live in this process
+    (host_asks), put on its meta as it is read."""
+    from . import host_asks  # noqa: PLC0415 — host_asks imports this module
+
+    if asks := host_asks.waiting(c, meta["id"]):
+        meta[host_asks.KEY] = asks
 
 
 _CELL_LINE_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)$", re.M)
@@ -816,6 +826,7 @@ def _main_state(c: str) -> dict:
 async def main_route(c: str) -> Response:
     meta = ensure_main(c)
     meta["running"] = _running(c, MAIN_ID)
+    _with_asks(c, meta)
     meta.update(_main_state(c))
     _, log_path = paths(c, MAIN_ID)
     return chat_response(meta, log_path)
@@ -858,6 +869,7 @@ async def get_route(c: str, chat_id: str) -> Response:
     meta = ensure_main(c) if chat_id == MAIN_ID else read_meta(c, chat_id)
     _, log_path = paths(c, chat_id)
     meta["running"] = _running(c, chat_id)
+    _with_asks(c, meta)
     if chat_id == MAIN_ID:
         meta.update(_main_state(c))
     return chat_response(meta, log_path)

@@ -460,3 +460,19 @@ def test_a_card_shows_the_evidence_chosen_for_its_answer(mode, monkeypatch):
     html = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["html"]["description"]
     assert "plain HTML" in html and "class=" not in html and "tc-" not in html
     assert "its question above the page and its takeaway under it" in html and "does not say the answer again" in html
+
+
+def test_main_says_a_new_host_asks_the_analyst_and_names_no_web_switch(tmp_path, monkeypatch):
+    """In the workbench a command's request to a host the analyst has not allowed asks them first (host_asks.py), and
+    Settings has no web or network switch for main, so main's prompt says the one and names none: it said "The web calls
+    the analyst turned off in thimble's Settings are refused", and when Claude Code's sandbox refused a host, main sent
+    the analyst to that switch. The terminal's own Claude Code asks in its dialog, as its branch says."""
+    from app import events
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    for edits in (True, False):
+        out = events.render_prompts(["main"], str(tmp_path), terminal=False, edits=edits)
+        part = out.split("## Permission requests", 1)[1].split("\n## ", 1)[0]
+        assert "A request to a host the analyst has not allowed asks them first." in part
+        assert "web calls" not in part and "without permission requests" not in part
+    assert "A request to a host the analyst has not allowed" not in prompts.load("main", "terminal")

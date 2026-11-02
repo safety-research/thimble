@@ -19,6 +19,7 @@ import type {
   Filters,
   FilterScope,
   Group,
+  HostAskChoice,
   LabelRowsResponse,
   LabelsForPath,
   NewCellBody,
@@ -448,6 +449,10 @@ export const api = {
      * the rest of the session, and `shown` is how many of the later calls that joined it the card listed. */
   answerSessionPermission: (c: string, chat: string, id: string, allow: boolean, always = false, shown = 0) =>
     j<{ answered: string }>(`${ws(c)}/chats/${enc(chat)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}), shown }) }),
+  /** The analyst's answer to an ask before a request to a host they have not allowed (host_asks.answer_route): once,
+     * always (kept for the workspace) or deny; 404 once the command that asked no longer waits. */
+  answerHostAsk: (c: string, id: string, choice: HostAskChoice) =>
+    j<{ ok: boolean }>(`${ws(c)}/host-asks/${enc(id)}`, { method: 'POST', body: JSON.stringify({ choice }) }),
   /** The orientation thread's composer: a click, through thimble's plugin to the orientation's agent (orient_session.
      * message_route): `sent`, or `held` while the coverage line is measured (it goes when that ends). 409 with the
      * earlier-session text (and for a pre-cache, plan mode, or a module that did not pass it on), 410 with the

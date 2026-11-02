@@ -413,6 +413,46 @@ button.chat-call-chip:hover,
 .chat-call-mark {
   flex: none;
 }
+/* an ask before a request to a host the analyst has not allowed (chat/HostAsk.tsx), under the command that waits for
+   it: the host in mono and its choices in one accent-edged row, which wraps in a narrow column */
+.chat-host-asks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 2px;
+}
+.chat-host-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--accent) 9%, var(--surface-card));
+}
+.chat-host-ask-ico {
+  flex: none;
+  color: var(--text-accent);
+}
+.chat-host-ask-host {
+  min-width: 0;
+  color: var(--text-primary);
+  font: var(--type-mono-sm);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.chat-host-ask-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
 /* the call chip, shared by a folded run of calls, its failed count and a subagent: a filled tonal chip at the size of
    .chip-sans, its words in mono at 11.5, with a chevron that turns while open */
 .chat-callchip {

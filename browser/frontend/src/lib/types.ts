@@ -1271,11 +1271,13 @@ export interface Settings {
 export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
 
 /** thimble's rules for main and its agents (backend ledger.agent_rows `main`): the extensions adding to main's prompt,
- * its web tools and edits of the corpus. */
+ * its web tools and edits of the corpus, and where its shell's network reaches: `ask` on Claude Code sign-in, where a
+ * host the analyst's Claude Code settings do not allow asks first, `on` with an API key or WIF. */
 export interface MainFence {
   additions: string[]
   web?: 'ask' | 'off' | 'allow'
   data?: 'ask' | 'allow' | 'off'
+  network?: 'ask' | 'on'
   config?: string
 }
 
@@ -2128,6 +2130,14 @@ export interface SessionEnded {
   cwd: string
   at: string
 }
+/** An ask before a request to a host the analyst has not allowed (backend host_asks): its id and the host. */
+export interface HostAsk {
+  id: string
+  host: string
+  since?: string
+}
+/** The analyst's answer to a HostAsk: allow it this once, always allow the host in this workspace, or deny it. */
+export type HostAskChoice = 'once' | 'always' | 'deny'
 export interface ChatMeta {
   /** a thread: the fork of main that answers it, once main forked it (backend threads.fork_started); `ended` once it
    * cannot be reached, and the next question forks anew */
@@ -2155,6 +2165,10 @@ export interface ChatMeta {
   /** main: the permission requests waiting, its own and its subagents' (thimble's agents among them, `terminal`); a
    * code ticket's session: its own */
   permissions?: PermissionRequest[]
+  /** main, a thread or one of thimble's agents run on Claude Code sign-in: the asks before a request to a host the
+   * analyst has not allowed, which the server adds as the chat is read while the command that made it waits (backend
+   * host_asks) */
+  hosts?: HostAsk[]
   /** a code ticket's session: what the analyst's "don't ask again" answers added for the rest of it */
   session_rules?: { text: string }[]
   /** the agent a session or a program runs as: thimble's own as `thimble:<role>`, an extension's program's as

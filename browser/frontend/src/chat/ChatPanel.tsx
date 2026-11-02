@@ -4,8 +4,10 @@
 // card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While
 // main or a thread works, a strip of its steps rides behind the composer, and every permission request waits on one
 // card above it (PermissionCard); a message sent to main meanwhile waits under main's rows until main reads it (useChat
-// unread). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a step's
-// parent) runs and the browser can stop it, the composer carries its Stop (composerStopOf). A thread
+// unread); an ask before a request to a host the analyst has not allowed waits at the end of the transcript of the chat
+// whose agent asked, under the command that waits (HostAsks). The composer sends where threads.composerTarget says, and
+// while the agent a thread shows (or a step's parent) runs and the browser can stop it, the composer carries its Stop
+// (composerStopOf). A thread
 // whose run ended without a reply offers Ask again. Main opens empty with its composer, as Claude Code does; a start that
 // did not happen shows its card in main (OrientStart). A view proposal waits above the composer until the analyst
 // answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
@@ -54,7 +56,8 @@ import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
-import { pendingAsks, waitingAt, waitingChats } from './waiting'
+import { hostAsks, pendingAsks, waitingAt, waitingChats } from './waiting'
+import { HostAsks } from './HostAsk'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
 import { LabelAsks } from './LabelAsk'
@@ -872,6 +875,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
             {!chat.loading && !chat.error && kind === 'step' && curMeta && <StepView ws={ws} meta={curMeta} chat={chat} running={running} />}
             {!chat.loading && !chat.error && kind === 'fix' && <Rows rows={chat.rows} ws={ws} chat={current} streaming={chat.streaming} />}
+            {/* an ask about a host waits at the end, under the command that waits for it */}
+            {!chat.loading && !chat.error && <HostAsks ws={ws} asks={hostAsks(chat.meta)} />}
           </div>
           </CallFocusContext.Provider>
         </div>
