@@ -4,6 +4,8 @@
 // rows) as posts with their authors and times; JSON lines that each hold a whole conversation as one card per line,
 // its turns inside; a text or markdown chat log as one card per turn, a turn's lines under its speaker; and a
 // whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it, a page at a time.
+// The words of a message or a turn are drawn as markdown, as the chat draws a reply (common BlockEl `markdown`); a chat
+// log's lines, each a record of its own, a tool call, its result and a raw record are drawn as written.
 // JSON lines in a file the server pages as text are parsed here, line by line. While system records are hidden, a long
 // run of them (HIDDEN_RUN_NOTE or more) says in one line how many it hides, so the view is never blank while the reader
 // pages past them. A record with no words to show (a turn that holds only redacted thinking, a post with an empty body)
@@ -598,7 +600,7 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
                 ))}
               </div>
             ) : own ? (
-              rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} />)
+              rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} markdown />)
             ) : (
               <PostText text={body ?? JSON.stringify(value ?? r)} line={rec.line} target={target} hit={hit} quote={cite} />
             )}
@@ -618,7 +620,7 @@ export function recordKind(r: any): string | null {
 }
 
 function PostText({ text, line, target, hit, quote }: { text: string; line: number; target: Target | null; hit: boolean; quote: string | null }) {
-  return <BlockEl block={{ kind: 'text', text }} line={line} index={0} target={quoteTarget(target, line, 0, text, quote)} hit={hit} />
+  return <BlockEl block={{ kind: 'text', text }} line={line} index={0} target={quoteTarget(target, line, 0, text, quote)} hit={hit} markdown />
 }
 
 /** A text chat log's records as turns: each record whose line starts a turn (the server's `meta.turn`) opens one, and
@@ -782,7 +784,7 @@ function Conversations({ path, page, targetRef, transcript }: ViewProps) {
                   ) : (
                     <div key={k} className="reader-conv-turn">
                       <div className="reader-conv-speaker mono">{[t.speaker, t.time].filter(Boolean).join(' · ') || '(unsigned)'}</div>
-                      <BlockEl block={{ kind: 'text', text: shown }} line={rec.line} index={k} target={at ? { line: rec.line, block: k, start: at[0], end: at[1] } : null} hit={hit} />
+                      <BlockEl block={{ kind: 'text', text: shown }} line={rec.line} index={k} target={at ? { line: rec.line, block: k, start: at[0], end: at[1] } : null} hit={hit} markdown />
                       {t.text.length > shown.length && <div className="reader-msg-empty">Cut at {TURN_TEXT_MAX.toLocaleString()} of {t.text.length.toLocaleString()} characters. Raw shows all of it.</div>}
                     </div>
                   )
@@ -976,7 +978,7 @@ function TurnCard({ path, turn, end, target, hit, quote }: { path: string; turn:
       {blocks ? (
         <MadeBlocks blocks={blocks} line={turn.line} target={target} hit={hit} quote={quote} />
       ) : turn.text.trim() ? (
-        <BlockEl block={block} line={turn.line} index={0} target={quoteTarget(target, turn.line, 0, turn.text, quote)} hit={hit} />
+        <BlockEl block={block} line={turn.line} index={0} target={quoteTarget(target, turn.line, 0, turn.text, quote)} hit={hit} markdown />
       ) : (
         <div className="reader-msg-empty">(empty)</div>
       )}
@@ -1159,7 +1161,7 @@ function MadeBlocks({ blocks, line, target, hit, quote }: { blocks: readonly Age
             <BlockEl block={b} line={line} index={k} target={quoteTarget(target, line, k, b.text, quote)} hit={hit} />
           </Collapsible>
         ) : (
-          <BlockEl key={k} block={b} line={line} index={k} target={quoteTarget(target, line, k, b.text, quote)} hit={hit} />
+          <BlockEl key={k} block={b} line={line} index={k} target={quoteTarget(target, line, k, b.text, quote)} hit={hit} markdown />
         ),
       )}
     </>
@@ -1293,7 +1295,7 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
               <BlockEl block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} />
             </Collapsible>
           ) : (
-            <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} />
+            <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} markdown />
           ),
         )}
       </RecordCard>,

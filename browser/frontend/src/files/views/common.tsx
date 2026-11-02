@@ -1,9 +1,16 @@
-// Shared pieces for the file views: the record row, the line row, the verbatim block with the texts a span label marks,
-// ref targets and the scroll-and-highlight hook. Rows carry `data-anchor="<path>#L<n>"` and the class `reader-card`;
-// a marked text carries its own span anchor (`<path>#L<n>.b<k>:c<a>-<b>`), so ⌘ picks records and spans alike.
-import { useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
+// Shared pieces for the file views: the record row, the line row, the block (verbatim, or a transcript's words as
+// markdown) with the texts a span label marks, ref targets and the scroll-and-highlight hook. Rows carry
+// `data-anchor="<path>#L<n>"` and the class `reader-card`; a marked text carries its own span anchor
+// (`<path>#L<n>.b<k>:c<a>-<b>`), so ⌘ picks records and spans alike.
+import { memo, useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
+import Markdown, { type Components, type Options } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import type { Element, ElementContent, Root, RootContent, Text } from 'hast'
+import { MarkdownCode } from '../../components/Code'
 import { Icon } from '../../components/Icon'
+import { MdImage } from '../../components/MdImage'
 import { Tipped } from '../../components/Tooltip'
+import { rehypeNumericCells } from '../../lib/markdownCells'
 import { findQuote } from '../../lib/quoteFind'
 import { parseRef } from '../../lib/refs'
 import type { Block, SourceKind, SourcePage, SourceRecord, TimeHint, TranscriptHint } from '../../lib/types'
@@ -427,7 +434,110 @@ interface BlockElProps {
   /** show the text from this offset on (a chat line's words after its speaker); anchors keep the whole text's
    * offsets */
   from?: number
+  /** a text block's words are drawn as markdown, as the chat draws a reply (a transcript's words); any other block, and
+   * a text block without it (a line of a text file), is drawn verbatim */
+  markdown?: boolean
 }
+
+/** react-markdown's components for a corpus's markdown: a table that scrolls sideways in a box of its own, a fenced code
+ * block in the colours of the language it names (components/Code.tsx MarkdownCode, as in the chat), and no image loaded
+ * from another host. */
+export const MD_COMPONENTS: Components = {
+  table: ({ node: _node, ...rest }) => (
+    <div className="reader-table-wrap reader-md-table">
+      <table {...rest} />
+    </div>
+  ),
+  code: MarkdownCode,
+  // a corpus's markdown loads no image from another host
+  img: MdImage,
+}
+
+/** The markdown thimble reads, as the chat does (chat/markdown.tsx): GitHub's, where a single ~ is no strikethrough. */
+export const MD_REMARK: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
+
+/** The words `value`, standing at `at` in the block's text, cut at the segments: a piece of a segment with a look (a
+ * label's mark, a class) as a <span data-seg="<k>">, any other piece as text. Pure. */
+function segPieces(value: string, at: number, segs: readonly Seg[]): (Element | Text)[] {
+  const out: (Element | Text)[] = []
+  segs.forEach((s, k) => {
+    const a = Math.max(at, s.start)
+    const b = Math.min(at + value.length, s.start + s.text.length)
+    if (a >= b) return
+    const piece: Text = { type: 'text', value: value.slice(a - at, b - at) }
+    out.push(s.mark || s.cls ? { type: 'element', tagName: 'span', properties: { dataSeg: k }, children: [piece] } : piece)
+  })
+  return out
+}
+
+/** rehype plugin of MarkdownWords: each text node cut at the segments (segPieces), placed in the block's text by its
+ * source position (`from` on, where the parsed words start), or its element's when it has none of its own (a code
+ * block's text), at the first place from there that holds its words. A node whose words do not stand there as written
+ * (an escape, an entity) keeps no segment's look. */
+function rehypeSegments(text: string, from: number, segs: readonly Seg[]) {
+  // where the words `value` of a node at `pos` stand in the block's text, inside its source; -1 for nowhere
+  const place = (value: string, pos: Element['position']): number => {
+    const start = pos?.start.offset
+    const end = pos?.end.offset
+    if (start == null || end == null) return -1
+    const i = text.indexOf(value, from + start)
+    return i >= 0 && i + value.length <= from + end ? i : -1
+  }
+  return () => (tree: Root) => {
+    const cut = (node: Root | Element, pos: Element['position']) => {
+      const out: (RootContent | ElementContent)[] = []
+      for (const child of node.children) {
+        if (child.type === 'element') cut(child, child.position ?? pos)
+        const at = child.type === 'text' && child.value.trim() ? place(child.value, child.position ?? pos) : -1
+        if (child.type === 'text' && at >= 0) out.push(...segPieces(child.value, at, segs))
+        else out.push(child)
+      }
+      node.children = out as typeof node.children
+    }
+    cut(tree, undefined)
+  }
+}
+
+/** What a segment draws: its place and its look. */
+const segKey = (s: Seg): string => `${s.start}+${s.text.length}${s.cls ?? ''}${s.mark ? `/${s.mark.concept}/${s.mark.colour}${s.mark.under ? '/under' : ''}` : ''}`
+
+interface WordsProps {
+  text: string
+  from: number
+  segs: readonly Seg[]
+  path?: string
+  line: number
+  index: number
+}
+
+/** A text block's words as markdown (BlockEl `markdown`): each segment with a look drawn on its words as BlockEl draws
+ * it on the verbatim text, a label's mark as SpanEl with its span anchor and a ref's span as `.hl`, by its offsets in
+ * the block's text (rehypeSegments). A link opens in a tab of its own, as the chat's do. Drawn again only when the
+ * words or what a segment draws change, so a labels update parses no words again. */
+const MarkdownWords = memo(
+  function MarkdownWords({ text, from, segs, path, line, index }: WordsProps) {
+    const components: Components = {
+      ...MD_COMPONENTS,
+      a: ({ node: _node, ...rest }) => <a {...rest} target="_blank" rel="noreferrer" />,
+      span: ({ node: _node, ...rest }) => {
+        const s = segs[Number((rest as Record<string, unknown>)['data-seg'])]
+        if (!s) return <span {...rest} />
+        if (!s.mark) return <span className={s.cls}>{rest.children}</span>
+        return (
+          <SpanEl seg={s} anchor={path ? `${path}#L${line}.b${index}:c${s.start}-${s.start + s.text.length}` : undefined}>
+            {rest.children}
+          </SpanEl>
+        )
+      },
+    }
+    return (
+      <Markdown remarkPlugins={MD_REMARK} rehypePlugins={[rehypeSegments(text, from, segs), rehypeNumericCells]} components={components}>
+        {text.slice(from)}
+      </Markdown>
+    )
+  },
+  (a, b) => a.text === b.text && a.from === b.from && a.path === b.path && a.line === b.line && a.index === b.index && a.segs.map(segKey).join() === b.segs.map(segKey).join(),
+)
 
 /** A piece of text a label marks: the focused label's colour at 24% behind it, another label's colour faintly
  * behind it; its own ⌘ anchor, the span. */
@@ -440,13 +550,21 @@ export function SpanEl({ seg, anchor, children }: { seg: Seg; anchor?: string; c
   )
 }
 
-/** One element per block, the text verbatim, with the texts the labels that are on mark highlighted. */
-export function BlockEl({ block, path, line, index, target, hit, className, from = 0 }: BlockElProps) {
+/** One element per block, the text verbatim, or a text block's words as markdown where the view asks for it
+ * (`markdown`), with the texts the labels that are on mark highlighted. */
+export function BlockEl({ block, path, line, index, target, hit, className, from = 0, markdown = false }: BlockElProps) {
   const isT = !!target && target.line === line && target.block === index
   const hl: [number, number] | null = isT && target!.start != null && target!.end != null ? [target!.start, target!.end] : null
   const marks = useMarksAt(path ?? '', path ? line : 0)
-  const segs = from > 0 ? segmentsFrom(segmentsFor(block, hl, path ? marks.spans : []), from) : segmentsFor(block, hl, path ? marks.spans : [])
-  const cls = ['reader-block', `reader-${block.kind}`, className, isT && 'reader-target', isT && hit && 'reader-hit'].filter(Boolean).join(' ')
+  const md = markdown && block.kind === 'text'
+  const segs = from > 0 && !md ? segmentsFrom(segmentsFor(block, hl, path ? marks.spans : []), from) : segmentsFor(block, hl, path ? marks.spans : [])
+  const cls = ['reader-block', `reader-${block.kind}`, md && 'reader-md', className, isT && 'reader-target', isT && hit && 'reader-hit'].filter(Boolean).join(' ')
+  if (md)
+    return (
+      <div className={cls} data-line={line} data-block={index}>
+        <MarkdownWords text={block.text} from={from} segs={segs} path={path} line={line} index={index} />
+      </div>
+    )
   return (
     <div className={cls} data-line={line} data-block={index}>
       {segs.map((s, i) =>
