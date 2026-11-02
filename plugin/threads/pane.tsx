@@ -36,7 +36,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
 import { failNotice } from '../bar/notice'
-import { cardWidth, frame } from '../cards/draw'
+import { frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { quiet } from '../core/askcell.js'
 import { WORD_MS } from '../hooks/keys'
@@ -462,8 +462,8 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
     const keys: PaneKey[] = [{ k: 'e', label: open ? 'hide the card' : 'show the card', onPress: () => { if (open) cardOpen.delete(t.key); else cardOpen.add(t.key); $.ui.invalidate('ui.render') } }]
     // collapsed: the title and the line asked about (else that it is a card)
     if (!open) return { el: subjectBlock(els, 'subject', meta.title, s.part ? '' : 'card', s.part ? [els.Text({ children: s.part })] : [], 'truncate-end'), rows: 3, keys }
-    // whole: the conversation's drawing of the card, cut at the pane's edge (no row of it wraps)
-    return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'card'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta, { layout: cardWidth() })]), rows: 14, keys }
+    // whole: the card laid out at the pane's width, as the conversation lays it out at its own
+    return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'card'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta)]), rows: 14, keys }
   }
   if (s.mark && (s.mark.kind as string) === 'place') {
     // `id`: the place, `path:from-to`, as the tray shows it

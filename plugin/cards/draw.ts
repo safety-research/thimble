@@ -28,18 +28,18 @@
 //   cardText      a card's text copy as it draws now (for v)
 //   revealCard    the card's row brought into view in the conversation
 //
-// The width a card is drawn at is the screen's columns less its frame. A drawing hook may not write the session's
-// state, so when the frame has no drawing at its width (a resumed session, a resize, a side pane that opens or closes)
-// or for the theme (core/theme.ts: the view's surface.colors give one set for each), its Client asks for one
-// (client.tsx), and that request draws it; the Client also says when the card is first on screen. A card keeps a
-// drawing for each width and theme it shows at (the conversation, its copy in a side pane: store.ts withDrawing), and a
-// frame draws only the one laid out at its own width. So is the answer to a Client's post: the drawing at the width the
-// Client's frame draws at now (siteWidth), never at the width the post named. A post the Client sent before its frame
-// narrowed (a side pane opened) can be answered after the frame's new drawing came, and the wider drawing it named
-// would then stay in the narrower frame, each row's last column wrapped onto a line of its own. For the same reason each
-// drawing is kept at the width the runner laid it out at, as its answer says (applyAnswer): the runner holds the card
-// at the width of the last drawing it was asked for, so a key draws it at the width of whichever frame asked last; a
-// frame at the other width then asks for its own (needOf).
+// The width a card is drawn at is the columns of what holds it (the conversation, a side pane) less its frame. A drawing
+// hook may not write the session's state, so when the frame has no drawing at its width (a resumed session, a resize, a
+// side pane that opens or closes) or for the theme (core/theme.ts: the view's surface.colors give one set for each),
+// its Client asks for one (client.tsx), and that request draws it; the Client also says when the card is first on
+// screen. A card keeps a drawing for each width and theme it shows at (the conversation, its copy in a side pane:
+// store.ts withDrawing), and a frame draws only the one laid out at its own width. So is the answer to a Client's post:
+// the drawing at the width the Client's frame draws at now (siteWidth), never at the width the post named. A post the
+// Client sent before its frame narrowed (a side pane opened) can be answered after the frame's new drawing came, and the
+// wider drawing it named would then stay in the narrower frame, each row's last column wrapped onto a line of its own.
+// For the same reason each drawing is kept at the width the runner laid it out at, as its answer says (applyAnswer):
+// the runner holds the card at the width of the last drawing it was asked for, so a key draws it at the width of
+// whichever frame asked last; a frame at the other width then asks for its own (needOf).
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
@@ -382,9 +382,9 @@ export async function cardKeyWords($: Engine): Promise<{ key: string; words: str
 }
 
 /** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now; under it, what
- *  the features put under a card. `o.layout`: the width the card is laid out at when that is wider than the frame
- *  (a copy in the side pane is the conversation's drawing, cut at the frame's edge, so no row of it wraps). */
-export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: number; indent?: number } = {}): Promise<Any> {
+ *  the features put under a card. The card is laid out at the frame's own width, in the conversation and in a side
+ *  pane alike, so a view that lays out from surface.columns fits each. */
+export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: number } = {}): Promise<Any> {
   const E = $.ui.resolve(e) as Any
   const row = String(e.requestId ?? '')
   // a card the version of its answer shown now leaves out (a squeeze's): nothing in its place
@@ -393,8 +393,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
     return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', children: [] })
   }
   // `indent`: columns the drawing that holds the card takes on its left beyond an answer's (a catch-up's rule)
-  const inside = cardWidth(e.viewport?.columns ? e.viewport.columns - (o.indent ?? 0) : undefined)
-  const width = Math.max(inside, Math.floor(o.layout ?? 0))
+  const width = cardWidth(e.viewport?.columns ? e.viewport.columns - (o.indent ?? 0) : undefined)
   const t = await treeOf($, meta.id)
   const focused = (await focusNow($)) === meta.id
   // only a drawing laid out at this width (for this theme, else the other's until this one's comes): until one comes,
@@ -440,8 +439,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   ] }) : null
   const rows: Any[] = [
     askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
-    // a drawing wider than the frame: its columns past the frame's edge are cut
-    ...(fault ? [] : [width > inside ? E.Box({ key: 'cut', flexDirection: 'column', width: inside, overflow: 'hidden', children: [client] }) : client]),
+    ...(fault ? [] : [client]),
   ]
   // a drawing taller than CARD_ROWS: its first rows (the Client's `cap`), then the line that opens the rest
   const more = fault || meta.held ? 0 : rowsMore(meta, current?.tree, width)
@@ -454,10 +452,10 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   // the frame in the 2 columns of its indent; `ask` at its title's right is how a side thread about it
   // starts, so no ? in the margin asks the same
-  const framed = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: inside + 4, children: rows })
+  const framed = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: width + 4, children: rows })
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
   const made = await artifactLine($, E, meta.id)
-  const under = [...(made ? [made] : []), ...(await underCard($, E, meta.id, inside))]
+  const under = [...(made ? [made] : []), ...(await underCard($, E, meta.id, width))]
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
 }
 
