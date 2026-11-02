@@ -49,6 +49,15 @@ SANDBOX_KEY = "cc-sandbox"  # the notice's key (notices.py)
 SANDBOX_NOTICE = ("{agent}'s shell commands did not run: Claude Code's Bash sandbox could not start ({why}), and thimble "
                   "runs them only inside it. On Linux the sandbox needs bubblewrap and socat; once they are installed, "
                   "send the message again. Settings, Claude access, can switch to an API key instead.")
+# what a call that would ask for anything but a host gets (module note, permissions): word for word the refusal of
+# Claude Code's `dontAsk`, which the session ran in before, so the model reads what it read then
+REFUSED = ("Permission to use {tool} has been denied because Claude Code is running in don't ask mode. IMPORTANT: You "
+           "*may* attempt to accomplish this action using other tools that might naturally be used to accomplish this "
+           "goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious "
+           "ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work "
+           "around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If "
+           "you believe this capability is essential to complete the user's request, STOP and explain to the user what "
+           "you were trying to do and why you need this permission. Let the user decide how to proceed.")
 _open: dict[str, int] = {}  # the sessions running in each working folder (_enter, _tidy)
 _had_claude: dict[str, bool] = {}  # whether .claude/ was in that folder when its first session started
 
