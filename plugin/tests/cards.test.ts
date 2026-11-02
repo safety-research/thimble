@@ -96,8 +96,19 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   let setups = 0
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
     runs.push(e.argv)
-    // a copy of a made-up file (a card's rows into its version's folder) holds what the file holds
+    // a copy of a made-up file (a card's rows into its version's folder) holds what the file holds; sed prints its
+    // lines and grep finds words in it, as ready.ts reads a record of a file too large to read whole
     if (e.argv[0] === 'cp' && e.argv[2]! in files) files[e.argv[3]!] = files[e.argv[2]!]!
+    const lines = (path: string) => files[path]!.split('\n')
+    const ran = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (e.argv[0] === 'sed' && e.argv[4]! in files) {
+      const [, a, b] = /^(\d+),(\d+)p;/.exec(e.argv[2]!)!
+      return ran(lines(e.argv[4]!).slice(Number(a) - 1, Number(b)).map(l => `${l}\n`).join(''))
+    }
+    if (e.argv[0] === 'grep' && e.argv[7]! in files) {
+      const hits = lines(e.argv[7]!).map((l, i) => (l.includes(e.argv[6]!) ? `${i + 1}:${l}\n` : '')).filter(Boolean)
+      return ran(hits.join(''), hits.length ? 0 : 1)
+    }
     // the session start's setup.mjs installs srt on a slow network, and has not answered yet
     if (String(e.argv[1] ?? '').endsWith('/sandbox/setup.mjs') && setups++ === 0 && o.firstSetupHangs) return new Promise(() => undefined) as never
     return { value: { ...(tempRun(e.argv, o.sandbox) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }
@@ -1271,4 +1282,24 @@ test("p on a ready card whose data came in its call gives the artifact's fork a 
   expect(copy[2]).toMatch(new RegExp(`/${id}/v1/rows\\.json$`))
   expect(copy[3]).toMatch(/^\/made-up\/tmp\//)
   expect(w.forks[0].prompt).toBe(`ARTIFACT Runs | ${copy[3]}`)
+})
+
+test("an example's record in a file too large to read whole is read a line range at a time, and a quote without a line is found with grep and checked in its record", async ($, on) => {
+  const big = [
+    JSON.stringify({ speaker: 'o3', content: 'Nothing to report today.' }),
+    JSON.stringify({ speaker: 'o3', content: 'I bought a domain for $12.99 with the credits.' }),
+    JSON.stringify({ speaker: 'Claude', content: 'Please do not spend money.' }),
+  ].join('\n')
+  // larger than the 4 MB thimble reads whole
+  const w = world(on, { stat: p => (p === `${DATA}/big.jsonl` ? { kind: 'file', size: 5_000_000, mtimeMs: 0, isLink: false, realPath: p } : undefined) })
+  w.files[`${DATA}/big.jsonl`] = big
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const r = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_kb', title: 'Did an agent spend money?', kind: 'example', refs: ['big.jsonl#L3', { ref: 'big.jsonl', quote: 'bought a domain for $12.99' }] } as never)) as Any).result)
+  expect(r).toContain('It is an example of 2 records')
+  expect(versionOf(w, 1).data.refs.map((x: Any) => [x.line, x.field, x.text, x.spans])).toEqual([
+    [3, 'content', 'Please do not spend money.', []],
+    [2, 'content', 'I bought a domain for $12.99 with the credits.', [[2, 28]]],
+  ])
+  expect(w.runs.some(a => a[0] === 'sed' && a[2] === '3,3p;3q')).toBe(true)
+  expect(w.runs.find(a => a[0] === 'grep')!.slice(5, 7)).toEqual(['--', 'bought a domain for $12.99'])
 })
