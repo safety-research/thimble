@@ -1183,9 +1183,10 @@ def _cancel_grace(c: str) -> None:
 
 
 def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
-    """events.post logged event `event_id` as it posted it: the mirror skips its record, and main runs until the turn
-    ends. A thread's event is remembered with its thread (thread_for); when the server runs main (runtime.py), it starts
-    the thread's fork and no turn of main's (runtime.deliver), so main does not run for it."""
+    """events.post logged event `event_id` as it posted it, or the server's main logs it where it reads it
+    (runtime.Space.said_line): the mirror skips its record, and main runs until the turn ends. A thread's event is
+    remembered with its thread (thread_for); when the server runs main (runtime.py), it starts the thread's fork and no
+    turn of main's (runtime.deliver), so main does not run for it."""
     from . import runtime  # noqa: PLC0415
 
     _expected.add(event_id)

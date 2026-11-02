@@ -1,10 +1,11 @@
 // The chat column: the thread tree at the top, the transcript of the thread being read, and the composer floating over
 // it. Main is the analyst's Claude Code session and leaves out what shows elsewhere (model.mainSkips). A thread is a
 // fork of main: main's conversation up to where it branched, then its own rows. The orientation and a writer show their
-// card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While a
-// thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
-// it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
-// step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
+// card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While
+// main or a thread works, a strip of its steps rides behind the composer, and every permission request waits on one
+// card above it (PermissionCard); a message sent to main meanwhile waits under main's rows until main reads it (useChat
+// unread). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a step's
+// parent) runs and the browser can stop it, the composer carries its Stop (composerStopOf). A thread
 // whose run ended without a reply offers Ask again. Main opens empty with its composer, as Claude Code does; a start that
 // did not happen shows its card in main (OrientStart). A view proposal waits above the composer until the analyst
 // answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
@@ -271,9 +272,10 @@ export function subagentCount(agents: readonly ToolStep[]): string {
 /** The strip behind the composer while the current thread works: what it is doing, its steps and count, or null. Only
  * subagents are listed and counted; a session with no agents yet, or one that only makes calls, shows just the title
  * and its spinner. A dev thread that builds a view (`view`) says so; a side thread says, in its own words, that it
- * starts and then that it works (`stage`, threadStatus STAGE_TEXT). Pure. */
+ * starts and then that it works (`stage`, threadStatus STAGE_TEXT); main says it works for the whole of its turn, as
+ * Claude Code's working line does. Pure. */
 export function taskStrip(kind: ThreadKind | null, running: boolean, rows: readonly Row[], metas: ReadonlyMap<string, ChatMeta> = new Map(), view = false, stage: ThreadStage | null = null): { title: string; steps: ToolStep[]; count: string } | null {
-  if (!running || kind == null || kind === 'main') return null
+  if (!running || kind == null) return null
   const session = (title: string, own: readonly Row[]) => {
     const steps = sessionSteps(own, metas, true)
     return { title, steps, count: subagentCount(steps) }
@@ -287,7 +289,7 @@ export function taskStrip(kind: ThreadKind | null, running: boolean, rows: reado
   // the thread, never steps, so one that only makes calls has no step list
   if (kind === 'dev') return session(view ? 'Building the view' : 'Working on the ticket', rows)
   if (kind === 'check') return session('Working', rows)
-  // a thread's or an agent's calls are rows in its thread, never steps
+  // main's, a thread's or an agent's calls are rows in its thread, never steps
   return { title: kind === 'thread' && stage ? STAGE_TEXT[stage] : 'Working', steps: [], count: '' }
 }
 
@@ -549,7 +551,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const stopWhat = composerStopOf(kind, curMeta, ticket, stepParent, threadView)
   const stopKey = stopWhat ? (stopWhat.kind === 'ticket' ? `ticket:${stopWhat.ticket}` : stopWhat.kind === 'view' ? `view:${stopWhat.slug}:${stopWhat.review}` : `chat:${stopWhat.chat}`) : null
   // the Stop that is under way, by stopKey, so another thread's composer is not left busy: from the request until the
-  // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass; a failed request clears it at once
+  // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass; a failed request clears it at once. Main's turn has
+  // ended when its Stop answers (backend agents.interrupt_route), so that clears it too: a message that waited for the
+  // turn may start main's next one at once
   const [stopping, setStopping] = useState<string | null>(null)
   useEffect(() => {
     if (stopping && stopping !== stopKey) setStopping(null)
@@ -562,8 +566,11 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const stopNow = () => {
     if (!stopWhat || !stopKey || stopping === stopKey) return
     const key = stopKey
+    const ofMain = stopWhat.kind === 'session' && stopWhat.role === 'main'
     setStopping(key)
-    void stopRun(ws, stopWhat, (t) => setTicket(t as TicketWithShots)).then((ok) => ok || setStopping((s) => (s === key ? null : s)))
+    void stopRun(ws, stopWhat, (t) => setTicket(t as TicketWithShots)).then((ok) => {
+      if (!ok || ofMain) setStopping((s) => (s === key ? null : s))
+    })
   }
   // the orientation and the tickets that run: their steps at their rows' edge, and in main the orientation's strip
   const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'orient' || threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
@@ -577,7 +584,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const reloadOther = other.reload
   useEffect(() => bus.on('notice', (e) => void (e.replay ? undefined : e.chat === 'main' ? reloadMain() : e.chat && e.chat === current ? reloadOther() : undefined)), [reloadMain, reloadOther, current])
   const agentRows = useAgentRows(ws, [...new Set([...runningAgents.map((m) => m.id), ...orientIds])])
-  const orienting = current === 'main' ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
+  // the orientation whose strip main shows while it runs, unless main's own turn runs, whose strip main shows then
+  const orienting = current === 'main' && !running ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
   const metaMap = useMemo(() => new Map(chats.map((m) => [m.id, m])), [chats])
   // a ticket that waits in the queue, or for the analyst's Start, is not at work: its foot says so (TicketStatus)
   const waitingTicket = kind === 'dev' && !curMeta?.view && ticket?.status === 'queued'
@@ -851,6 +859,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'main' && (
               <>
                 <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming || main.writing} retry={mainRetry} />
+                {/* what the analyst sent while main works, until main reads it, after the turn's rows */}
+                {main.unread.map((m) => (
+                  <PendingMessage key={m.key} text={m.text} ws={ws} held={false} />
+                ))}
               </>
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}
@@ -1083,7 +1095,8 @@ function useCallIndex(ws: string, chat: string | null, rows: readonly Row[]): Re
 /** The note under a message the server holds until the coverage line is measured, which goes with it. */
 export const HELD_NOTE = 'Sent when the coverage check ends (at most 2 minutes)'
 
-/** A message on its way to the orientation: the analyst's tile, with a spinner, or the note that it is held. */
+/** A message on its way to the orientation, or to main while main works, until main reads it (useChat unread): the
+ * analyst's tile, with a spinner, or the note that it is held. */
 function PendingMessage({ text, ws, held }: { text: string; ws: string; held: boolean }) {
   return (
     <div className="chat-msg chat-user chat-pending" data-held={held || undefined}>

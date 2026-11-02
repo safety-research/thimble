@@ -2,10 +2,12 @@
 Workload Identity Federation, with no `claude` process.
 
 The loop: send the conversation, streaming; write the reply into the agent's transcript (Conv.emit_assistant); run the
-tools it called (thimble's through Conv.call_thimble, the built-in ones through runtime_tools) and write their results;
-go on until the reply calls no tool. The conversation is kept in <workspace>/runtime/convs/<id>.api.json, so it goes on
-after a restart; a fork starts from a copy of main's, up to main's last finished turn. A stopped turn gives every call
-left without a result one that says so, so the conversation stays valid.
+tools it called (thimble's through Conv.call_thimble, the built-in ones through runtime_tools) and write their results,
+with what the analyst sent main while they ran (Conv.take_waiting), as Claude Code gives a message typed mid-turn at
+the next tool call; go on until the reply calls no tool. The conversation is kept in
+<workspace>/runtime/convs/<id>.api.json, so it goes on after a restart; a fork starts from a copy of main's, up to
+main's last finished turn. A stopped turn gives every call left without a result one that says so, so the conversation
+stays valid.
 """
 from __future__ import annotations
 
@@ -173,6 +175,12 @@ async def _call(conv: Any, box: runtime_tools.Box, block: dict[str, Any]) -> tup
     return rec, msg
 
 
+def _said(conv: Any) -> list[dict[str, Any]]:
+    """What the analyst sent main while its tool calls ran, as text blocks after their results (Conv.take_waiting); none
+    for any other conversation."""
+    return [{"type": "text", "text": t} for t in conv.take_waiting()]
+
+
 REFUSED = "This check may not use that tool."
 
 
@@ -303,13 +311,13 @@ async def turn(conv: Any, text: str) -> Any:
             if final.stop_reason == "max_tokens":
                 cut = [{"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
                         "content": "The reply hit its length limit before this call was complete."} for b in calls]
-                messages.append({"role": "user", "content": cut})
-                _save(path, messages)
                 conv.emit_results(cut)
+                messages.append({"role": "user", "content": [*cut, *_said(conv)]})
+                _save(path, messages)
                 continue
             done = await asyncio.gather(*(_call(conv, box, b) for b in calls))
             conv.emit_results([r for r, _ in done])
-            messages.append({"role": "user", "content": [m for _, m in done]})
+            messages.append({"role": "user", "content": [*(m for _, m in done), *_said(conv)]})
             _save(path, messages)
     except asyncio.CancelledError:
         if key:

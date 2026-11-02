@@ -1,10 +1,11 @@
 // The shared composer: a sheet floating over the work, the text on top, the foot with the model control at the left and
 // the send square at the right (accent once there is something to send). Enter sends and Shift+Enter breaks the line
 // (with `submitOnMod`, ⌘/Ctrl+Enter sends). With `stop` (an agent the browser can stop runs), the square is the stop
-// square while the field is empty, as in Claude; once there is text it is the send square again, so what is typed
-// while the agent runs is sent (where it goes, and whether it waits for the run, is the caller's), and clearing the
-// field brings Stop back. The two squares fill one slot with one component, so React keeps the button and keyboard focus
-// stays on it across the swap. Stop ignores `disabled`, which is about the field: stopping needs nothing a loading or unreadable thread lacks.
+// square while the field is empty, as in Claude; once there is text the send square joins it at the right, so what is
+// typed while the agent runs is sent (where it goes, and whether it waits for the run, is the caller's), and the agent
+// can still be stopped, as Esc stops it in Claude Code while a message waits. Each square keeps its own slot, so React
+// keeps the stop button, and the keyboard focus on it, as the send square comes and goes. Stop ignores `disabled`,
+// which is about the field: stopping needs nothing a loading or unreadable thread lacks.
 import { type FormEvent, type ReactNode, type Ref } from 'react'
 import { Button } from './Button'
 import { TextArea } from './Field'
@@ -27,9 +28,9 @@ export interface ComposerFrameProps {
   tools?: ReactNode
   /** rows above the text (a title field) */
   head?: ReactNode
-  /** the running agent's Stop, which takes the send square's place while the field is empty: `label` names it in the
-   * tooltip and to a screen reader (Stop the orientation), and `busy` shows the ring while the stop request is in
-   * flight */
+  /** the running agent's Stop, which takes the send square's place while the field is empty and stands before it once
+   * text is typed: `label` names it in the tooltip and to a screen reader (Stop the orientation), and `busy` shows the
+   * ring while the stop request is in flight */
   stop?: { label: string; onStop: () => void; busy?: boolean }
   sendIcon?: IconName
   sendLabel?: string
@@ -81,11 +82,8 @@ export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, d
         {model != null && <span className="composer-model">{model}</span>}
         <span className="composer-spacer" />
         {tools}
-        {stop && !value.trim() ? (
-          <Button variant="primary" size="sm" icon="stop" title={stop.label} aria-label={stop.label} type="button" className="composer-send" busy={stop.busy} onClick={stop.onStop} />
-        ) : (
-          <Button variant={ready ? 'primary' : 'secondary'} size="sm" icon={sendIcon} title={sendLabel} aria-label={sendLabel} type="submit" className="composer-send" disabled={!ready} busy={busy} />
-        )}
+        {stop && <Button variant={value.trim() ? 'secondary' : 'primary'} size="sm" icon="stop" title={stop.label} aria-label={stop.label} type="button" className="composer-send" busy={stop.busy} onClick={stop.onStop} />}
+        {(!stop || !!value.trim()) && <Button variant={ready ? 'primary' : 'secondary'} size="sm" icon={sendIcon} title={sendLabel} aria-label={sendLabel} type="submit" className="composer-send" disabled={!ready} busy={busy} />}
       </div>
     </form>
   )
