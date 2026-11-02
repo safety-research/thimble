@@ -235,8 +235,9 @@ function kept(text: string, spans: number[][]): { text: string; spans: number[][
   return { text: text.slice(a, b), spans: spans.map(s => [s[0]! - a, s[1]! - a]).filter(s => s[0]! >= 0 && s[1]! <= b - a) }
 }
 
-/** Lines `from` to `to` (from 1) of a file: read whole when small, else with sed. null when the file is shorter. */
-async function linesOf($: Engine, path: string, size: number, from: number, to: number): Promise<{ lines: string[]; count?: number } | null> {
+/** Lines `from` to `to` (from 1) of a file: read whole when small (`count`, its number of lines), else with sed; none
+ *  when the file is shorter. */
+async function linesOf($: Engine, path: string, size: number, from: number, to: number): Promise<{ lines: string[]; count?: number }> {
   if (size <= WHOLE_BYTES) {
     const all = String(await $.fs.read(path)).split('\n')
     if (all.length && all[all.length - 1] === '') all.pop()
@@ -311,12 +312,12 @@ async function readRecords($: Engine, refs: Any[], o: ReadyIn): Promise<{ refs?:
       if (place.line) {
         const to = Math.min(place.end ?? place.line, place.line + 199)
         const got = await linesOf($, real, st.size, place.line, to)
-        if (!got || !got.lines.length) return { bad: `${name}: ${place.path} has ${got?.count ?? 'fewer'} lines, not ${place.line}` }
+        if (!got.lines.length) return { bad: `${name}: ${place.path} has ${got.count === undefined ? `fewer than ${place.line} lines` : `${got.count} lines, not ${place.line}`}` }
         found = passageIn(ref, place.path, place.line, got.lines, quote)
         if (!found) return { bad: `${name}: the quote "${said(quote)}" is not in ${place.path} at line${got.lines.length > 1 ? `s ${place.line}-${place.line + got.lines.length - 1}` : ` ${place.line}`}. Quote the record's words exactly, or cite the record without a quote` }
       } else if (!quote) {
         const got = await linesOf($, real, st.size, 1, 8)
-        found = got?.lines.length ? passageIn(ref, place.path, 1, got.lines, '') : null
+        found = got.lines.length ? passageIn(ref, place.path, 1, got.lines, '') : null
         if (!found) return { bad: `${name}: ${place.path} is empty` }
       } else if (st.size <= WHOLE_BYTES) {
         const text = String(await $.fs.read(real))
@@ -335,7 +336,7 @@ async function readRecords($: Engine, refs: Any[], o: ReadyIn): Promise<{ refs?:
         if (lines === null) return { bad: `${name}: ${place.path} is too large to search for the quote; give the record's line as well, ${place.path}#L<line>` }
         for (const n of lines) {
           const got = await linesOf($, real, st.size, n, n)
-          if (got?.lines.length) found = passageIn(ref, place.path, n, got.lines, quote)
+          if (got.lines.length) found = passageIn(ref, place.path, n, got.lines, quote)
           if (found) break
         }
         if (!found) return { bad: `${name}: the quote "${said(quote)}" is not in ${place.path}. Quote the record's words exactly, or give the record's line, ${place.path}#L<line>` }
