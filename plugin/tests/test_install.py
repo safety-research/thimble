@@ -542,12 +542,13 @@ def test_install_md_says_when_each_way_updates_the_plugin():
 
 
 def test_install_md_says_how_a_plugin_without_a_clone_updates_after_its_first_fix():
-    """Without a clone, no thimble command is in the shell; after the first fix, claude plugin update leaves the plugin
-    as it is, and thimble update refuses inside Claude Code. INSTALL.md's update gives what works: live's launcher, run
-    by its path in a shell, which passes update to the release checkout when there is one."""
+    """Installed with Claude Code's own commands (no clone, and no scripts/install.sh), the plugin puts no thimble
+    command in the shell; after the first fix, claude plugin update leaves the plugin as it is, and thimble update
+    refuses inside Claude Code. INSTALL.md's update gives what works: live's launcher, run by its path in a shell, which
+    passes update to the release checkout when there is one."""
     text = " ".join((ROOT / "INSTALL.md").read_text().split())
     update = text.split("## Update and uninstall", 1)[1].split(" ## ", 1)[0]
-    assert ("Without a clone, your shell does not find `thimble`: run "
+    assert ("With Claude Code's own commands, your shell does not find `thimble`: run "
             "`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of "
             "`~/.thimble`).") in update
     assert (ROOT / "plugin" / "bin" / "thimble").is_file()
@@ -637,12 +638,30 @@ def test_the_install_summary_says_once_that_reload_plugins_loads_the_plugin_in_a
 
 
 def test_the_install_uses_a_clone_claude_made_earlier_and_clones_once():
-    """N77b: step 3 of CLAUDE.md, where Claude clones the repository, says to use a clone it made already (to read these
+    """N77b: step 3 of CLAUDE.md, where Claude gets the release, says to use a clone it made already (to read these
     notes), moved out of a temporary folder, and not to clone a second one."""
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
-    step = text.split(" 3. Clone the repository", 1)[1].split(" The checkout stays where it is", 1)[0]
+    step = text.split(" 3. ", 1)[1].split(" The folder stays where it is", 1)[0]
     assert "cloned it already" in step and "use that clone" in step and "do not clone it again" in step, step
     assert "temporary" in step, step
+
+
+def test_the_install_takes_the_newest_release_s_archive_with_no_clone():
+    """N96: step 3 of CLAUDE.md gets the newest release as GitHub's archive of its tag, unpacked into a folder of its
+    own, with no clone of the repository and its history; a clone is for work on thimble's own code or a branch, with
+    --local. INSTALL.md's and the README's install by hand do the same, and run scripts/install.sh there, which moves
+    an earlier install's marketplace to GitHub (N95)."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 3. ", 1)[1].split(" 4. ", 1)[0]
+    assert "it needs no clone" in step and "releases/latest" in step and "`tag_name`" in step, step
+    assert "archive/refs/tags/<tag>.tar.gz | tar -xz -C ~` unpacks it into `~/thimble-<version>`" in step, step
+    assert "Clone the repository" not in step and "git clone" not in step, step
+    assert "Leave out `--local` unless the user is working on thimble's own code or trying a branch, in a clone" in step
+    for doc in ("INSTALL.md", "README.md"):
+        flat = " ".join((ROOT / doc).read_text().split())
+        by_hand = flat.split("## Install", 1)[1].split(" ## ", 1)[0].split("git clone", 1)[0]
+        assert "releases/latest" in by_hand, doc
+        assert "archive/refs/tags/<tag>.tar.gz | tar -xz -C ~ cd ~/thimble-<version> scripts/install.sh" in by_hand, doc
 
 
 def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plugin_in_the_open_sessions():

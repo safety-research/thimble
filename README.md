@@ -32,13 +32,15 @@ Claude asks whether you want both the terminal plugin and the browser workbench 
 
 ### Manual installation
 
+Download the newest release, whose tag (such as `v0.10.8`) is on the [releases page](https://github.com/safety-research/thimble/releases/latest), and run its install script:
+
 ```
-git clone https://github.com/safety-research/thimble ~/thimble
-cd ~/thimble
+curl -fsSL https://github.com/safety-research/thimble/archive/refs/tags/<tag>.tar.gz | tar -xz -C ~
+cd ~/thimble-<version>
 scripts/install.sh
 ```
 
-The browser workbench builds about 1 GB in the checkout and runs from it, so keep it in a folder of its own. `scripts/install.sh --no-browser` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
+The browser workbench builds about 1 GB in that folder and runs from it, so keep it where it is. `scripts/install.sh --no-browser` installs the terminal plugin alone. To work on thimble's own code, clone the repository and add `--local`. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
 
 ## Usage
 
