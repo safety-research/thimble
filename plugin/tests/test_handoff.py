@@ -23,12 +23,15 @@ from kernel import handoff as H  # noqa: E402
 ROOT_SKIP = pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")
 RUNS = "run,status,minutes\nnightly-001,passed,18.1\nnightly-002,failed,25.8\nnightly-003,failed,21.4\n"
 CODE = 'def label(u):\n    return u["status"]\n'
+# the variables the plugin takes from a request (hooks/handoff.ts CARRIED)
+CARRIED = ("THIMBLE_SESSION", "THIMBLE_CONVERSATION", "THIMBLE_START", "THIMBLE_ROOT")
 
 
-def plugin(box: Path, home: Path, stop: threading.Event) -> threading.Thread:
+def plugin(box: Path, home: Path, stop: threading.Event, seen: list[dict] | None = None) -> threading.Thread:
     """The plugin's side, made up: each <id>.ask in `box` taken by its rename and run with this kernel outside the
-    sandbox (where `home` may be written), in the command's folder, with its THIMBLE_ variables over the environment,
-    THIMBLE_HANDOFF empty, and its stdin; its output and its exit code left beside it."""
+    sandbox (where thimble's home, `home`, may be written), in the command's folder, with the plugin's environment and
+    the request's CARRIED variables, THIMBLE_HANDOFF empty, and its stdin; its output and its exit code left beside it.
+    `seen` gets each request it took."""
 
     def serve() -> None:
         while not stop.is_set():
@@ -39,11 +42,14 @@ def plugin(box: Path, home: Path, stop: threading.Event) -> threading.Thread:
                 except FileNotFoundError:
                     continue
                 req = json.loads(Path(f"{at}.took").read_text())
+                if seen is not None:
+                    seen.append(req)
                 home.chmod(0o700)
+                env = {**os.environ, "THIMBLE_HOME": str(home), **{k: str(req["env"].get(k) or "") for k in CARRIED},
+                       "THIMBLE_HANDOFF": ""}
                 with open(f"{at}.out", "wb") as out, open(f"{at}.err", "wb") as err:
                     done = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), *req["argv"]], cwd=req["cwd"],
-                                          env={**os.environ, **req["env"], "THIMBLE_HANDOFF": ""}, input=req["stdin"].encode(),
-                                          stdout=out, stderr=err, timeout=60)
+                                          env=env, input=req["stdin"].encode(), stdout=out, stderr=err, timeout=60)
                 home.chmod(0o500)
                 Path(f"{at}.code").write_text(f"{done.returncode}\n")
                 os.replace(f"{at}.code", f"{at}.done")
@@ -85,6 +91,29 @@ def test_r2_a_label_in_claude_codes_sandbox_is_made_by_the_plugin_outside_it(tmp
     assert "run_status: failed 2 · passed 1 of 3 rows" in r.stdout
     assert len(list((home / "conversations" / "c-1").glob("folders/*/labels/run_status.json"))) == 1
     # what the command left is gone with it
+    assert list(box.iterdir()) == []
+
+
+@ROOT_SKIP
+def test_r2_a_request_carries_only_the_variables_that_say_which_session_and_folder_it_is_for(tmp_path: Path) -> None:
+    # before, it carried every THIMBLE_ variable, and the plugin took them all: THIMBLE_PYTHON named the program it ran,
+    # THIMBLE_HOME the launcher, THIMBLE_FIX_TESTS a shell command. Now only the session and the folder go
+    data, home, box, env = session(tmp_path)
+    env.update(THIMBLE_ROOT=str(data), THIMBLE_PYTHON=str(box.parent / "py.sh"), THIMBLE_CLAUDE=str(box.parent / "claude"),
+               THIMBLE_FIX_TESTS="true", THIMBLE_UPDATE_URL=str(box.parent), PYTHONPATH=str(box.parent))
+    home.chmod(0o500)
+    seen: list[dict] = []
+    stop = threading.Event()
+    plugin(box, home, stop, seen)
+    try:
+        r = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), "coverage"], cwd=data, env=env,
+                           capture_output=True, text=True, timeout=60)
+    finally:
+        stop.set()
+        home.chmod(0o700)
+    assert r.returncode == 0, r.stderr
+    assert [s["env"] for s in seen] == [{"THIMBLE_SESSION": "c-1", "THIMBLE_CONVERSATION": "c-1", "THIMBLE_START": str(data),
+                                         "THIMBLE_ROOT": str(data)}]
     assert list(box.iterdir()) == []
 
 

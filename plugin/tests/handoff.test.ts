@@ -85,7 +85,7 @@ test("R2: a thimble command in Claude Code's Bash sandbox, which may not write t
   expect(out.result).toBe('ran label run_failed --in runs.csv --regex failed\n')
   // once, though the folder was read twice; THIMBLE_HANDOFF empty for it, so it never hands itself on
   expect(w.runs).toEqual([{ cwd: '/made-up/cc/claude-1000', bin: BIN, args: ['label', 'run_failed', '--in', 'runs.csv', '--regex', 'failed'],
-    env: { THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_HANDOFF: '' }, stdin: 'def label(u): ...', timeoutMs: 600000 }])
+    env: { THIMBLE_SESSION: '', THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_ROOT: '', THIMBLE_HANDOFF: '' }, stdin: 'def label(u): ...', timeoutMs: 600000 }])
   // once the call ends, nothing more is run: the folder is looked in only while a call that names thimble runs
   w.ask('78-cd', ['coverage'])
   await w.tick()
@@ -93,6 +93,32 @@ test("R2: a thimble command in Claude Code's Bash sandbox, which may not write t
   // the next such call finds the folder already named
   await w.bash({ command: 'thimble coverage' }, async () => { await w.tick(); return { result: 'ok' } })
   expect(w.runs.map(r => r.args)).toEqual([['label', 'run_failed', '--in', 'runs.csv', '--regex', 'failed'], ['coverage']])
+})
+
+test('R2: a request carries only the variables that say which session and folder it is for: the plugin runs its own thimble with its own environment, whatever else the request names', async () => {
+  const w = setup()
+  await w.bash({ command: 'thimble coverage' }, async () => {
+    // a request written by hand in the folder every command in the sandbox may write: other programs, another home, a
+    // library to preload, git settings
+    w.ask('82-mn', ['coverage'], { env: {
+      THIMBLE_SESSION: 's-1', THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_ROOT: '/made-up/data/runs',
+      THIMBLE_PYTHON: '/made-up/cc/claude-1000/py.sh', THIMBLE_HOME: '/made-up/cc/claude-1000/home', THIMBLE_CLAUDE: '/made-up/cc/claude-1000/claude',
+      THIMBLE_GIT: '/made-up/cc/claude-1000/git', THIMBLE_UPDATE_URL: '/made-up/cc/claude-1000/release', PATH: '/made-up/cc/claude-1000/bin',
+      LD_PRELOAD: '/made-up/cc/claude-1000/x.so', PYTHONPATH: '/made-up/cc/claude-1000/py', GIT_CONFIG_COUNT: '1', THIMBLE_HANDOFF: '/made-up/cc/claude-1000/box',
+    } })
+    await w.tick()
+    return { result: 'ok' }
+  })
+  expect(w.runs.map(r => [r.bin, r.env])).toEqual([[BIN, {
+    THIMBLE_SESSION: 's-1', THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_ROOT: '/made-up/data/runs', THIMBLE_HANDOFF: '',
+  }]])
+  // a value that is not text is none
+  await w.bash({ command: 'thimble coverage' }, async () => {
+    w.ask('83-op', ['coverage'], { env: { THIMBLE_CONVERSATION: ['c-1'], THIMBLE_ROOT: 7 } })
+    await w.tick()
+    return { result: 'ok' }
+  })
+  expect(w.runs[1]!.env).toEqual({ THIMBLE_SESSION: '', THIMBLE_CONVERSATION: '', THIMBLE_START: '', THIMBLE_ROOT: '', THIMBLE_HANDOFF: '' })
 })
 
 test('a Bash call that names no thimble command neither names the folder nor looks in it', async () => {

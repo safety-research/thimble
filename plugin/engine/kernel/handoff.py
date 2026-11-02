@@ -4,10 +4,11 @@ Claude Code's Bash sandbox lets a command write only its working folder and Clau
 there may not write thimble's records in $THIMBLE_HOME (the labels, the change feed, the cache). The plugin's hooks
 (hooks/handoff.ts) give the session's commands THIMBLE_HANDOFF, a folder of the session's own in Claude Code's temp
 folder, which the sandbox lets them write. A command that may not write $THIMBLE_HOME leaves itself there as <id>.ask
-(its arguments, its folder, its THIMBLE_ variables and its stdin) and waits: while the Bash call runs, the plugin takes
-it (<id>.took) and runs it with its own bin/thimble outside the sandbox, which leaves its output (<id>.out, <id>.err)
-and its exit code (<id>.done) there. The command prints them and ends with that code. One the plugin does not take
-within TAKE_S runs here, as it would with no plugin.
+(its arguments, its folder, its stdin, and the variables that say which session and folder it is for, CARRIED) and
+waits: while the Bash call runs, the plugin takes it (<id>.took) and runs it with its own bin/thimble and its own
+environment outside the sandbox, which leaves its output (<id>.out, <id>.err) and its exit code (<id>.done) there. The
+command prints them and ends with that code. One the plugin does not take within TAKE_S runs here, as it would with no
+plugin.
 
     handed_off(argv) -> the exit code of the command the plugin ran, or None: it runs here
 """
@@ -26,6 +27,9 @@ from .store import thimble_home
 TAKE_S = 5.0  # how long the command waits for the plugin to take it
 WAIT_S = 0.05  # how often it looks
 STDIN_S = 0.1  # how long it waits for stdin to hold input: a heredoc or a pipe holds it at once (cli.stdin_text)
+# the variables a request carries, which the commands read to know which session and which folder they are for
+# (store.py session_id, conversation_id, find_root); the plugin takes only these from it (hooks/handoff.ts CARRIED)
+CARRIED = ("THIMBLE_SESSION", "THIMBLE_CONVERSATION", "THIMBLE_START", "THIMBLE_ROOT")
 
 
 def _writable(p: Path) -> bool:
@@ -43,7 +47,7 @@ def handed_off(argv: list[str]) -> int | None:
         return None
     at = os.path.join(box, f"{os.getpid()}-{secrets.token_hex(4)}")
     ask = {"argv": list(argv), "cwd": os.getcwd(), "stdin": stdin_text(STDIN_S),
-           "env": {k: v for k, v in os.environ.items() if k.startswith("THIMBLE_") and k != "THIMBLE_HANDOFF"}}
+           "env": {k: os.environ[k] for k in CARRIED if k in os.environ}}
     try:
         with open(f"{at}.part", "w", encoding="utf-8") as f:
             json.dump(ask, f)
