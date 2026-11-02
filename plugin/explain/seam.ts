@@ -110,7 +110,9 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
   const order = (part.order ?? Object.keys(part.items)).filter(id => part.items[id] && shown(part.items[id]!))
   if (!order.length) return []
   const own = (await messageOf($, row))?.text ?? ''
-  const original = text !== own && text !== withoutMarks(own)
+  // a version shown in place of Claude's words (a squeezed one), where a term may stand in another form; not Claude's
+  // words with the citations the analyst asked for (c) written in them
+  const original = withoutMarks(text) !== withoutMarks(own)
   const c = markColors(await themeNow($))
   return (placeGlosses(text, { items: part.items, order }, original) as { id: string; start: number; end: number }[]).map(p => {
     const g = part.items[p.id]!
@@ -271,7 +273,7 @@ export async function pendingSpans($: Engine, row: string, text: string): Promis
   const mine = [...askedOn.entries()].filter(([, a]) => a.row === row && featureOn(a.kind === 'heads' ? 'details' : 'explain'))
   if (!mine.length) return []
   const own = (await messageOf($, row))?.text ?? ''
-  const original = text !== own && text !== withoutMarks(own)
+  const original = withoutMarks(text) !== withoutMarks(own)
   const part = await partOf<ExplainPart>($, row, 'explain')
   const heads = Object.fromEntries(Object.entries(part?.items ?? {}).filter(([, g]) => g.kind === 'heads' && shown(g)))
   const items = { ...heads, ...Object.fromEntries(mine.map(([id, a]) => [id, { id, term: a.words, asked: true, ...(a.kind === 'heads' ? { kind: 'heads' as const } : {}) }])) }

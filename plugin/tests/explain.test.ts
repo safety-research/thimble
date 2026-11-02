@@ -498,6 +498,36 @@ test("h gives a heads-up on the words selected in an answer, from the heads-expa
   setOptions({})
 })
 
+test('after c on the selected words, e and h on them stand on those words, inside the citation c made, not on another word of theirs in the answer', async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK], { complete: reply({ body: 'It reads the last drop alone.', here: '', title: 'One drop only', bullets: ['The log covers one drop.'] }) })
+    const text = 'Uploads fail after the retry budget runs out, only on Mondays. It only looks at the last drop.'
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const words = 'It only looks at the last drop'
+    s.$.ui.selection = async () => ({ text: words, requestId: 't1-row' })
+    await (await citeKey(s.$, 'c', 0))!.later!()
+    await settle()
+    // the answer as it draws: the citation c made written in it
+    const shown = withAsked(text, (await rowMarks(s.$, 't1-row'))!.items).text
+    expect(shown).toContain(`[${words}](#)`)
+    await (await explainKey(s.$, 'e', 0))!.later!()
+    await settle()
+    await settle()
+    // the look's explainer (retry budget) stands beside them
+    const placed = async () => (await spansFor(s.$, 't1-row', shown, marksIn(shown))).map(x => [x.id, shown.slice(x.start, x.end)])
+    expect(await placed()).toEqual([['g1', 'retry budget'], ['a1', words]])
+    // h: the heads-up on the same words stands over the explainer, which yields its words to it
+    await (await headsKey(s.$, 'h', 0))!.later!()
+    await settle()
+    await settle()
+    expect(await placed()).toEqual([['g1', 'retry budget'], ['ah1', words]])
+  } finally {
+    setOptions({})
+  }
+})
+
 test("a asks a side thread about the words selected in an answer, all of them, as a passage of it: the side pane opens on it, its input taking the keys, as the tray's a opens one; with none selected, a is not thimble's", async () => {
   setOptions({})
   resetThreads()
