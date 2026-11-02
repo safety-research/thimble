@@ -1620,7 +1620,7 @@ button.model-line-part[aria-expanded='true'] {
   margin: 0;
 }
 /* the commands a "/" lists (chat/Composer.tsx): the overlay above the composer, as wide as it (over its 1px edge) and
-   never over its text, one row per command, its name and then what it does, cut at the row's end */
+   never over its text, one row per command: its name, then what it does, which wraps to two lines at most */
 .chat-commands {
   position: absolute;
   left: -1px;
@@ -1644,13 +1644,12 @@ button.model-line-part[aria-expanded='true'] {
 .chat-command {
   display: flex;
   flex: none;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
+  box-sizing: border-box;
   min-height: var(--h-row);
-  padding: 0 8px;
+  padding: 5px 8px;
   border-radius: var(--radius-seg);
-  line-height: 1.2;
-  white-space: nowrap;
   cursor: pointer;
 }
 .chat-command.active {
@@ -1659,12 +1658,16 @@ button.model-line-part[aria-expanded='true'] {
 .chat-command-name {
   flex: none;
   font-weight: 500;
+  white-space: nowrap;
 }
 .chat-command-about {
   flex: 1 1 auto;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--text-tertiary);
 }
 

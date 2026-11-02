@@ -8,8 +8,9 @@
 // from outside the chat (chat/pending offerDraft: a failed fix's Ask Claude) joins its thread's draft. A "/" at the start
 // of the text opens the list of the commands the composer handles (commands.ts) above the sheet, one row each, its name
 // and what it does, as Claude Code lists its own; the list follows what is typed. ↑ and ↓ move in it; Enter, Tab or a
-// click puts the command in the text with a space after it, ready for its words; Esc closes it. It closes too when the
-// text is no longer a "/" and part of a name, and when the text loses the focus.
+// click puts the command in the text with a space after it, ready for its words, except that Enter on a command typed
+// in full sends it at once, as without the list; Esc closes it. It closes too when the text is no longer a "/" and part
+// of a name, and when the text loses the focus.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { ComposerFrame, type ComposerFrameProps } from '../components/Composer'
 import type { MainEffort } from '../lib/types'
@@ -99,6 +100,8 @@ export function Composer({ model, models, onModel, effort, onEffort, fast = null
       e.preventDefault()
       setAt((active + (e.key === 'ArrowDown' ? 1 : found.length - 1)) % found.length)
     } else if ((e.key === 'Enter' || e.key === 'Tab') && plain) {
+      // a command typed in full: Enter is the composer's, which sends it
+      if (e.key === 'Enter' && found[active].name === input) return
       e.preventDefault()
       pick(found[active])
     } else if (e.key === 'Escape') {

@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 // The list of commands in the chat's composer (src/chat/Composer.tsx), as Claude Code lists its own: a "/" at the start
 // of the text lists the commands the composer handles (src/chat/commands.ts COMMANDS, the list its send reads them
-// from), one row each, its name and its description (its command file's, plugin/commands/thimble-fix.md). The list
-// follows what is typed; ↑ and ↓ move in it; Enter, Tab or a click puts the command in the text with a space after it,
-// ready for its words; Esc closes it, and so does a text that is no longer a "/" and part of a name, or the focus
-// leaving the text.
+// from), one row each, its name and its description (its command file's, plugin/commands/thimble-fix.md), which wraps
+// to two lines at most. The list follows what is typed; ↑ and ↓ move in it; Enter, Tab or a click puts the command in
+// the text with a space after it, ready for its words, but Enter on a command typed in full sends it at once, as
+// without the list; Esc closes it, and so does a text that is no longer a "/" and part of a name, or the focus leaving
+// the text.
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import fixFile from '../../../../plugin/commands/thimble-fix.md?raw'
@@ -75,7 +78,7 @@ describe('the list a "/" opens', () => {
     expect(c.list()).not.toBeNull()
   })
 
-  test('it follows what is typed: the commands whose name holds it, the ones it starts first; none closes it', async () => {
+  test('it follows what is typed: the commands whose name holds it, the name typed in full first, then the ones it starts; none closes it', async () => {
     const c = await setup()
     await c.type('/thi')
     expect(c.names()).toEqual([FIX_COMMAND])
@@ -91,6 +94,10 @@ describe('the list a "/" opens', () => {
     await m.type('/f')
     expect(m.names()).toEqual(['/fold', '/thimble-fix'])
     expect(m.active()).toBe('/fold')
+    // a name typed in full comes first, before the longer names it starts
+    const n = await setup([{ name: '/fold-all', about: 'fold every thread' }, ...MADE_UP])
+    await n.type('/fold')
+    expect(n.names()).toEqual(['/fold', '/fold-all'])
   })
 
   test('↑ and ↓ move through the rows and round from one end to the other; the keys move no caret', async () => {
@@ -122,6 +129,34 @@ describe('the list a "/" opens', () => {
     // the list is closed, so the next Enter sends the command, alone here
     await c.key('Enter')
     expect(c.onSend).toHaveBeenCalledWith(FIX_COMMAND)
+  })
+
+  test('Enter on a command typed in full sends it at once, as without the list; Tab completes it', async () => {
+    const c = await setup()
+    await c.type(FIX_COMMAND)
+    expect(c.names()).toEqual([FIX_COMMAND])
+    expect((await c.key('Tab')).defaultPrevented).toBe(true)
+    expect(c.box.value).toBe(`${FIX_COMMAND} `)
+    expect(c.onSend).not.toHaveBeenCalled()
+    await c.type(FIX_COMMAND)
+    await c.key('Enter')
+    expect(c.onSend).toHaveBeenCalledTimes(1)
+    expect(c.onSend).toHaveBeenCalledWith(FIX_COMMAND)
+    expect(c.box.value).toBe('')
+    expect(c.list()).toBeNull()
+    // a name in other letters is no command the composer reads (commandIn), so Enter completes it
+    await c.type('/THIMBLE-FIX')
+    await c.key('Enter')
+    expect(c.box.value).toBe(`${FIX_COMMAND} `)
+    expect(c.onSend).toHaveBeenCalledTimes(1)
+    // the arrows moved from the name typed in full to another: Enter picks that one
+    const m = await setup([{ name: '/fold-all', about: 'fold every thread' }, ...MADE_UP])
+    await m.type('/fold')
+    await m.key('ArrowDown')
+    expect(m.active()).toBe('/fold-all')
+    await m.key('Enter')
+    expect(m.box.value).toBe('/fold-all ')
+    expect(m.onSend).not.toHaveBeenCalled()
   })
 
   test('Enter picks the row the arrows moved to', async () => {
@@ -196,6 +231,19 @@ describe('the list a "/" opens', () => {
   })
 })
 
+test("a row's description wraps to two lines at most, and its name stays on one line (styles/chat.css)", () => {
+  const css = readFileSync(path.resolve(__dirname, '../../src/styles/chat.css'), 'utf8')
+  const rule = (selector: string) => {
+    const at = css.indexOf(`\n${selector} {`)
+    expect(at, selector).toBeGreaterThanOrEqual(0)
+    return css.slice(at, css.indexOf('}', at))
+  }
+  expect(rule('.chat-command-about')).toMatch(/-webkit-line-clamp: 2;/)
+  expect(rule('.chat-command-about')).not.toMatch(/nowrap|ellipsis/)
+  expect(rule('.chat-command')).not.toMatch(/nowrap/)
+  expect(rule('.chat-command-name')).toMatch(/white-space: nowrap;/)
+})
+
 describe('the one list of commands (commands.ts)', () => {
   test("a message's command and its words come from the list, as the send reads /thimble-fix (fixWords)", () => {
     expect(commandIn('/thimble-fix make this card say rows')).toEqual({ name: FIX_COMMAND, words: 'make this card say rows' })
@@ -210,10 +258,11 @@ describe('the one list of commands (commands.ts)', () => {
     expect(fixWords('/fold the tree')).toBeNull()
   })
 
-  test('what a "/" can still become: part of a name, case aside, the names it starts first; nothing after a space', () => {
+  test('what a "/" can still become: part of a name, case aside, the name typed in full first, then the names it starts; nothing after a space', () => {
     expect(commandsFor('/', MADE_UP).map((c) => c.name)).toEqual(['/thimble-fix', '/thimble-tour', '/fold'])
     expect(commandsFor('/fi', MADE_UP).map((c) => c.name)).toEqual(['/thimble-fix'])
     expect(commandsFor('/F', MADE_UP).map((c) => c.name)).toEqual(['/fold', '/thimble-fix'])
+    expect(commandsFor('/fold', [{ name: '/fold-all', about: '' }, ...MADE_UP]).map((c) => c.name)).toEqual(['/fold', '/fold-all'])
     for (const text of ['', 'f', ' /f', '/fold ', '/fold now', '/fq']) expect(commandsFor(text, MADE_UP), text).toEqual([])
   })
 

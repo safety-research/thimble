@@ -42,11 +42,13 @@ export function commandIn(text: string, commands: readonly ChatCommand[] = COMMA
 }
 
 /** The commands the composer's text can still become while it is a "/" at the start and part of a name, with no space
- * yet: those whose name holds what follows the slash, the ones it starts first; none for any other text. Pure. */
+ * yet: those whose name holds what follows the slash, the name typed in full first, then the ones it starts; none for
+ * any other text. Pure. */
 export function commandsFor(text: string, commands: readonly ChatCommand[] = COMMANDS): readonly ChatCommand[] {
   const m = /^\/(\S*)$/.exec(text)
   if (!m) return []
   const typed = m[1].toLowerCase()
-  const at = (c: ChatCommand) => c.name.slice(1).toLowerCase().indexOf(typed)
-  return commands.filter((c) => at(c) >= 0).sort((a, b) => Number(at(a) > 0) - Number(at(b) > 0))
+  const name = (c: ChatCommand) => c.name.slice(1).toLowerCase()
+  const rank = (c: ChatCommand) => (name(c) === typed ? 0 : name(c).startsWith(typed) ? 1 : 2)
+  return commands.filter((c) => name(c).includes(typed)).sort((a, b) => rank(a) - rank(b))
 }
