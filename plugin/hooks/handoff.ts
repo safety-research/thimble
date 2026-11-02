@@ -55,7 +55,8 @@ async function serve($: Engine, dir: string): Promise<void> {
  *  empty; THIMBLE_HANDOFF empty, so that it never hands itself on; and the marks of a command in Claude Code, as the
  *  command had them, whatever the plugin's own process has: CLAUDECODE, and THIMBLE_HANDED_OFF, by which the kernel
  *  knows a run for a command in the sandbox (fixes.py in_claude_code: thimble update and reapply refuse it as they
- *  refuse a command in Claude Code). No other key of the request is taken. */
+ *  refuse a command in Claude Code; engine/kernel/codebox.py: a label's code runs in thimble's own sandbox). No other
+ *  key of the request is taken. */
 export function runEnv(asked: unknown): Record<string, string> {
   const given = (asked && typeof asked === 'object' ? asked : {}) as Record<string, unknown>
   const env: Record<string, string> = {}

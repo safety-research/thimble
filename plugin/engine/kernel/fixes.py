@@ -131,6 +131,7 @@ PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
     "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/cards/ask.ts", "plugin/cards/runner.mjs",
+                    "plugin/hooks/handoff.ts", "plugin/engine/kernel/handoff.py", "plugin/engine/kernel/codebox.py",
                     "browser/backend/app/kernel_wrap.py", "browser/backend/app/kernel_srt.mjs",
                     "browser/backend/app/srt.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),

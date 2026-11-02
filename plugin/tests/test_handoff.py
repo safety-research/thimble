@@ -76,23 +76,141 @@ def session(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
 
 @ROOT_SKIP
 def test_r2_a_label_in_claude_codes_sandbox_is_made_by_the_plugin_outside_it(tmp_path: Path) -> None:
-    # Claude's `thimble label … --code` in the sandbox, its code on stdin: before, the kernel failed to write the label
-    # ("Read-only file system"); now the plugin runs it, the label is in thimble's home, and its output is the command's
+    # Claude's `thimble label …` in the sandbox: before, the kernel failed to write the label ("Read-only file system");
+    # now the plugin runs it, the label is in thimble's home, and its output is the command's. (A label's code runs in
+    # thimble's sandbox then: test_r2_a_labels_code_…)
     data, home, box, env = session(tmp_path)
     home.chmod(0o500)
     stop = threading.Event()
     plugin(box, home, stop)
     try:
-        r = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), "label", "run_status", "--in", "runs.csv", "--code",
-                            "--says", "A run's status."], cwd=data, env=env, input=CODE, capture_output=True, text=True, timeout=60)
+        r = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), "label", "run_failed", "--in", "runs.csv", "--regex",
+                            "failed", "--says", "A run that failed."], cwd=data, env=env, capture_output=True, text=True, timeout=60)
     finally:
         stop.set()
         home.chmod(0o700)
     assert r.returncode == 0, r.stderr
-    assert "run_status: failed 2 · passed 1 of 3 rows" in r.stdout
-    assert len(list((home / "conversations" / "c-1").glob("folders/*/labels/run_status.json"))) == 1
+    assert "run_failed: yes 2 · no 1 of 3 rows" in r.stdout
+    assert len(list((home / "conversations" / "c-1").glob("folders/*/labels/run_failed.json"))) == 1
     # what the command left is gone with it
     assert list(box.iterdir()) == []
+
+
+def test_r2_a_labels_code_in_the_plugins_run_for_claude_code_runs_only_in_thimbles_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # --code, --where and --records in the plugin's run of a command from Claude Code's sandbox (THIMBLE_HANDED_OFF):
+    # before, the caller's code ran in the plugin's own process, outside every sandbox, with the person's rights; now the
+    # command runs again in srt, which writes only the label's records and the temp folders and reaches no network
+    from kernel import cli
+    from kernel import codebox as CB
+    from kernel import fixes as FX
+    from kernel import labels as LB
+    from kernel.store import Store
+
+    data, home, _, env = session(tmp_path)
+    temp = tmp_path / "t" / "thimble"
+    temp.mkdir(parents=True)
+    for k in ("THIMBLE_HOME", "THIMBLE_START", "THIMBLE_SESSION", "THIMBLE_CONVERSATION"):
+        monkeypatch.setenv(k, env[k])
+    for k in ("THIMBLE_ROOT", "CLAUDE_CODE_TMPDIR", "THIMBLE_HANDOFF"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("TMPDIR", str(temp.parent))
+    monkeypatch.setenv("THIMBLE_HANDED_OFF", "1")
+    monkeypatch.chdir(data)
+    ran = tmp_path / "ran.txt"
+    rule = data / "rule.py"
+    rule.write_text(f"open({str(ran)!r}, 'w').write('ran')\n{CODE}")
+    started: list[list[str]] = []
+    monkeypatch.setattr(CB, "_sandbox", lambda: {"ok": True, "node": "/made-up/bin/node", "srt": "/made-up/srt/0.0.79",
+                                                 "platform": "linux"})
+    monkeypatch.setattr(CB, "_exec", lambda argv: started.append(argv) or 0)
+    asked = [["label", "run_status", "--in", "runs.csv", "--code", str(rule)],
+             ["label", "run_failed", "--in", "runs.csv", "--regex", "failed", "--where", f"open({str(ran)!r}, 'w')"],
+             ["label", "run_status", "--records"]]
+    for args in asked:
+        assert cli.main(args) == 0
+    assert not ran.exists(), "no code ran in this process"
+    assert len(started) == 3
+    st = Store()
+    feed = home / "events" / "c-1.jsonl"
+    for argv, args in zip(started, asked):
+        rules = json.loads(argv[argv.index("--srt") + 2])
+        assert argv[argv.index("--srt") - 1] == str(ENGINE.parent / "sandbox" / "run.mjs")
+        assert rules["network"] == {"allowedDomains": [], "deniedDomains": []}
+        assert [p["path"] for p in rules["filesystem"]["allowWrite"]] == [str(st.dir.resolve()), str(st.cache.resolve()),
+                                                                         str(feed.resolve()), str(temp.resolve())]
+        assert [p["path"] for p in rules["filesystem"]["denyRead"]] == ["/"]
+        shown = [p["path"] for p in rules["filesystem"]["allowRead"]]
+        assert str(data.resolve()) in shown and str(ENGINE) in shown and str(home.resolve()) not in shown
+        assert rules["bwrapPath"] == str(ENGINE.parent / "sandbox" / "bwrap.sh")
+        # the command again, with an environment of its own: the session and folder it found, and no mark
+        inner = argv[argv.index("--") + 1:]
+        assert inner[:2] == ["/usr/bin/env", "-i"]
+        assert inner[-len(args) - 3:] == [sys.executable, "-B", str(ENGINE / "thimble.py"), *args]
+        assert {f"THIMBLE_ROOT={data.resolve()}", "THIMBLE_CONVERSATION=c-1", "THIMBLE_SESSION=c-1",
+                f"THIMBLE_HOME={home.resolve()}", f"TMPDIR={temp.resolve()}"} <= set(inner)
+        assert not any(x.startswith(("THIMBLE_HANDED_OFF", "THIMBLE_HANDOFF", "CLAUDECODE")) for x in inner)
+    # the folders it writes are there before it starts, so the sandbox can name them
+    assert (st.dir / "labels").is_dir() and st.cache.is_dir() and feed.is_file()
+    # nowhere else in such a run does a caller's code run
+    with pytest.raises(LB.LabelError):
+        LB.define(st, "run_status", "code", rule.read_text(), "runs.csv")
+    with pytest.raises(LB.LabelError):
+        LB.records(st, "runs.csv", where="True")
+    assert not ran.exists()
+    # when the sandbox cannot start, the command does not run, and says why
+    monkeypatch.setattr(CB, "_sandbox", lambda: {"ok": False, "why": "bubblewrap is missing.", "fix": "Install it."})
+    assert cli.main(asked[0]) == 1 and len(started) == 3 and not ran.exists()
+    # the person's own command runs its code here, as before
+    monkeypatch.delenv("THIMBLE_HANDED_OFF")
+    assert cli.main(asked[0]) == 0 and ran.exists() and len(started) == 3
+    # a fix that changes what runs outside Claude Code's sandbox, or how, is a fix to the sandbox
+    paths = ["plugin/hooks/handoff.ts", "plugin/engine/kernel/handoff.py", "plugin/engine/kernel/codebox.py"]
+    assert FX.notice_of(paths) == {"the sandbox": paths}
+
+
+@ROOT_SKIP
+def test_r2_a_labels_code_handed_to_the_plugin_reaches_no_network_and_writes_only_the_label(tmp_path: Path) -> None:
+    # in srt, as a session runs it: the code on stdin gets each record, writes nowhere outside thimble's records and the
+    # temp folders, reads no file beside the folder, and reaches no network
+    srt = os.environ.get("THIMBLE_TEST_SRT")  # a folder with srt installed (sandbox/setup.mjs); skipped without it
+    if not srt:
+        pytest.skip("THIMBLE_TEST_SRT is not set")
+    data, home, box, env = session(tmp_path)
+    pin = json.loads((ENGINE.parent / "sandbox" / "package.json").read_text())["dependencies"]["@anthropic-ai/sandbox-runtime"]
+    (home / "srt").mkdir()
+    (home / "srt" / pin).symlink_to(srt)
+    outside, beside = tmp_path / "outside.txt", tmp_path / "beside" / "notes.txt"
+    beside.parent.mkdir()
+    beside.write_text("made-up\n")
+    # (a write outside lands, if anywhere, in the sandbox's own empty folders, which go with it)
+    code = ("import socket\n"
+            "def label(u):\n"
+            "    try:\n"
+            f"        open({str(outside)!r}, 'w').write('x')\n"
+            "    except OSError:\n"
+            "        pass\n"
+            "    try:\n"
+            "        socket.create_connection(('1.1.1.1', 80), timeout=2).close(); net = 'net'\n"
+            "    except OSError:\n"
+            "        net = 'nonet'\n"
+            "    try:\n"
+            f"        open({str(beside)!r}).read(); read = 'read'\n"
+            "    except OSError:\n"
+            "        read = 'noread'\n"
+            "    return '-'.join((u['status'], net, read))\n")
+    home.chmod(0o500)
+    stop = threading.Event()
+    plugin(box, home, stop)
+    try:
+        r = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), "label", "run_status", "--in", "runs.csv", "--code"],
+                           cwd=data, env=env, input=code, capture_output=True, text=True, timeout=120)
+    finally:
+        stop.set()
+        home.chmod(0o700)
+    assert r.returncode == 0, r.stderr
+    assert "run_status: failed-nonet-noread 2 · passed-nonet-noread 1 of 3 rows" in r.stdout, r.stdout
+    assert not outside.exists()
+    assert len(list((home / "conversations" / "c-1").glob("folders/*/labels/run_status.json"))) == 1
 
 
 @ROOT_SKIP

@@ -48,6 +48,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import codebox as CB
 from . import coverage as CV
 from . import estimate as EST
 from . import labels as LB
@@ -762,6 +763,9 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(a, "fn", None):
         print(_help())
         return 0
+    if CB.needed(a):
+        # the plugin runs it for a command in Claude Code's sandbox, and it runs its caller's code: in thimble's sandbox
+        return CB.run(args)
     try:
         return a.fn(a)
     except BrokenPipeError:
