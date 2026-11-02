@@ -4071,9 +4071,12 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     s = r.get("state")
     if s == "pending":
         acts.append(("thimble reapply", "Claude checks it against the release and brings it back"))
-    if s in ("working", "on", "off", "ready", "sent") and can_share():
-        acts.append((f"thimble file issue {r['id']}",
-                     "a link to GitHub's new-issue form with its text, to read and submit"))
+    if can_share():
+        from .share import STATES  # noqa: PLC0415 — share imports this module
+        # every state that thimble file issue takes, as the list's What next names it
+        if s in STATES:
+            acts.append((f"thimble file issue {r['id']}",
+                         "a link to GitHub's new-issue form with its text, to read and submit"))
     if s in ("on", "ready") and r.get("commit") and not r.get("pr") and can_share():
         acts.append((f"thimble file pr {r['id']}", "open a pull request with its code on the public repo (asks first)"))
     if s == "on" and is_on():

@@ -1324,21 +1324,30 @@ def test_what_next_names_thimble_file_issue_for_a_fix_claude_still_works_on(worl
     assert cli.main(issue[0][1:]) == 0 and "Share fix" in capsys.readouterr().out
 
 
-def test_show_lists_the_command_that_works_for_a_fix_claude_still_works_on(world, capsys, monkeypatch):
-    """R1: thimble fix show N lists the commands that work for a fix in its state; for a fix Claude still works on,
-    that is `thimble file issue N`, in the words the other states use."""
+def test_show_lists_thimble_file_issue_for_each_state_the_command_takes(world, capsys, monkeypatch):
+    """R1: thimble fix show N lists the commands that work for a fix in its state. `thimble file issue N` takes a fix in
+    each state of share.STATES (one Claude still works on, one that failed, a request with no code, ...), so show lists
+    it for each, in the words and the place the other states use; a command that refuses the state stays out."""
     from kernel import cli  # noqa: PLC0415
+    from kernel import share as SH  # noqa: PLC0415
 
     monkeypatch.setattr(FX, "session_terms", lambda st: {})  # the shell stands in thimble's repository here
     w = made(world, words="make the minimap smaller", edit=False)
     n = w["id"]
+    issue = f"  thimble file issue {n}    a link to GitHub's new-issue form with its text, to read and submit"
     assert cli.main(["fix", "show", str(n)]) == 0
     assert capsys.readouterr().out.splitlines() == [
         f"make the minimap smaller · fix {n} · working · {FX._date(FX.get(n)['created'])}, terminal",
         '  You asked     "make the minimap smaller"',
         "",
-        f"  thimble file issue {n}    a link to GitHub's new-issue form with its text, to read and submit"]
-    assert cli.main(["file", "issue", str(n)]) == 0 and "Share fix" in capsys.readouterr().out
+        issue]
+    for state in SH.STATES:
+        FX.put({**FX.get(n), "state": state})
+        shown = FX.show_lines(n)
+        assert issue in shown and shown[shown.index(issue) - 1] == "", state  # the first of its commands
+        if state not in ("on", "off", "ready"):  # whose other commands are thimble fix off and thimble fix on
+            assert shown[-1] == issue, state
+        assert cli.main(["file", "issue", str(n)]) == 0 and "Share fix" in capsys.readouterr().out, state
 
 
 def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_live(world, tmp_path, monkeypatch):
