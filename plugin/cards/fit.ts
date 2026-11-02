@@ -12,7 +12,8 @@
 // still does not fit, or as it stands when the check wrote none or it did not draw. A newer version Claude drew since
 // waits for its own check. The card tool's answer says nothing of it: Claude reads what it read before, and reads of the
 // replacement later, with its next card call's answer or as its next turn starts (tool.ts, core/tell.ts tellFor). A card
-// a resumed session finds held draws as it stands (store.ts restoreCards).
+// a resumed session finds held draws as it stands (store.ts restoreCards). Where thimble's drawing does not show (a host
+// that runs Claude Code through its SDK, core/host.ts), no screen shows the card: no version is held, and none checked.
 import type { EngineInterface } from 'claude-code'
 
 import { modelWhy } from '../core/why.js'

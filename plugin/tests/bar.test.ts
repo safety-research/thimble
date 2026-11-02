@@ -559,6 +559,20 @@ test('the line at the first session goes by itself after a few seconds, and stay
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
 })
 
+test("in a session without Claude Code's terminal interface (a host that runs it through its SDK, such as the desktop app's Code tab), /thimble-settings is thimble's command too, so it never reaches Claude as a prompt; where no surface places the settings, its answer says so at once", async ($, on) => {
+  // beneath the plugin, before the made-up session's own hooks of the same events: every command registered, and no
+  // surface that places the pane
+  const registered: string[] = []
+  on('command.register', { name: /./ }, (_$: unknown, e: { name: string }) => { registered.push(e.name); return { value: { command: e.name } } })
+  on('ui.open', { id: /./ }, () => ({ value: { isPlaced: false, reason: 'no-surface: no surface is attached' } }))
+  on('ui.close', () => ({ value: undefined }))
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: null, isInteractive: false } as never)
+  expect(registered).toContain('thimble-settings')
+  expect(await $.command.run({ command: 'thimble-settings', args: '' } as never)).toEqual({ text: 'Claude Code did not open the settings here.' })
+})
+
 test('a hint above the bar goes by itself after a few seconds, or at the next key thimble takes; a failure stays', async () => {
   const state: Record<string, unknown> = {}
   let now = 0

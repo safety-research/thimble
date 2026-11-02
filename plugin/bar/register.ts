@@ -1,9 +1,10 @@
 // register.ts: the bar above the prompt, and its panes.
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
-//                aboveBar). /thimble-settings and a click on `thimble` open the
-//                settings; the person's next prompt takes the failure line and the line at the first session's start (intro.ts); the counts at each load of the plugin and
-//                after each of main's turns (counts.ts)
+//                aboveBar). /thimble-settings and a click on `thimble` open the settings (the command is one in every
+//                session, and its answer says when no pane opened); the person's next prompt takes the failure line and
+//                the line at the first session's start (intro.ts); the counts at each load of the plugin and after each
+//                of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Each pane takes the keys its key row names (coverage's j k ↵, the labels' number keys that check
 //                records), and esc closes it; coverage's r close is a click, so an r typed in it reaches the prompt,
@@ -58,9 +59,18 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false)
   failNotice($, narrowNotice(key, `${key} ${shown}`), `pane:${kind}`)
 }
 
-/** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */
+/** What the person reads when Claude Code did not place the settings pane. */
+const SETTINGS_UNPLACED = 'Claude Code did not open the settings here.'
+
+/** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). Whether Claude Code
+ *  placed them. */
+function placeSettings($: Engine): Promise<boolean> {
+  return openPane($, 'settings', {}, TITLES.settings, { focus: true })
+}
+
+/** A click on `thimble` in the bar: the settings, or the failure line, which names the command. */
 export async function openSettings($: Engine): Promise<void> {
-  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) failNotice($, 'Claude Code did not open the settings here. Type /thimble-settings to open them.', 'pane:settings')
+  if (!(await placeSettings($))) failNotice($, `${SETTINGS_UNPLACED} Type /thimble-settings to open them.`, 'pane:settings')
 }
 
 /** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. Typed while
@@ -74,10 +84,10 @@ export async function barKey($: Engine, k: string): Promise<{ later: () => Promi
 }
 
 export const registerBar: Register = on => {
-  // /thimble-settings, and the counts of this load (a new or resumed session, a reload, a switch turned on)
-  on('session.start', { isInteractive: true }, async ($, e, next) => {
+  // /thimble-settings, in every session: in a host that runs Claude Code through its SDK (the desktop app's Code tab), a
+  // /thimble-settings that no command answers goes to Claude as a prompt, and Claude spends a turn on it
+  on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
     const r = await next(e)
-    needCounts($)
     try {
       await $.command.register({ name: 'thimble-settings', description: "thimble's settings: turn citations, cards, and the bar's coverage and labels on or off", immediate: true })
     } catch {
@@ -86,10 +96,16 @@ export const registerBar: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  on('command.run', { command: 'thimble-settings' }, async $ => {
-    await openSettings($)
-    return {}
-  })
+  // the counts of this load (a new or resumed session, a reload, a switch turned on), where the bar draws
+  on('session.start', { isInteractive: true }, async ($, e, next) => {
+    const r = await next(e)
+    needCounts($)
+    return r
+  }).catch(($, e, next) => next(e))
+
+  // the settings pane; where Claude Code did not place it (no surface of the session places panes: a `-p` run, a host
+  // that runs Claude Code through its SDK), the command's answer says so, since no bar shows the failure line there
+  on('command.run', { command: 'thimble-settings' }, async $ => ((await placeSettings($)) ? {} : { text: SETTINGS_UNPLACED }))
 
   // the end of main's turn: the counts
   on('turn.complete', { turnId: /./ }, async ($, e, next) => {

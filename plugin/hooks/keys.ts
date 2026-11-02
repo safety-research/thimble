@@ -16,6 +16,10 @@
 // Anything no one takes is typed as usual. A card never gets thimble's own keys (ownKeys); the card tool says so. g, the
 // person's OK, is one of them, so that no line or card shown with its line offers it too.
 //
+// Only where thimble's drawing shows (core/host.ts drawsHere). A host that runs Claude Code through its SDK can send each
+// key of its own prompt box here too (the desktop app's Code tab), where nothing shows what a key would do: there every
+// key types.
+//
 // The word window. Each of these keys is a letter, and a letter also starts a word. So a letter typed within WORD_MS
 // after keys thimble took means the person types a word: the keys are undone and the word goes into the box whole, the
 // keys first. Each taker says how its key acts: `now`, with an `undo` (a card's key, which must answer at once; v, whose
@@ -37,6 +41,7 @@ import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
 import { HEAD_KEYS, headKey } from '../cards/head'
 import { keysReady, restoredKey, restoredKeys } from '../core/answerview'
+import { drawsHere } from '../core/host'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
 import { ALLOW_KEY, checkKey } from '../marks/checker'
@@ -174,6 +179,7 @@ export const registerKeys: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
+    if (!drawsHere()) return next(e)
     // the prompt has the keys: words begun after + in the squeeze chips are let go (esc gave the keys back)
     await promptHasKeys($).catch(() => undefined)
     // the box holds what the person typed: every key types

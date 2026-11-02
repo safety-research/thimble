@@ -68,6 +68,16 @@ test('v at an empty prompt spawns the designer fork with designer.md once the wo
   expect(w.spawns[0].description).toBe('card of the last answer (v)')
 })
 
+test("in a session without Claude Code's terminal interface (a host that runs it through its SDK, such as the desktop app's Code tab, whose prompt box sends its keys too), v at an empty prompt types v and starts no fork, as nothing there shows a card", async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: '/made-up/data', surface: null, isInteractive: false })
+  await answer($)
+  const r = (await $.prompt.edit(press('v') as never)) as Any
+  expect(r.text).toBe('v')
+  await w.clock.advance(1000)
+  expect(w.spawns.length).toBe(0)
+})
+
 test('a click on the bar\'s `v visualize` spawns the designer fork, as v does', async ($, on) => {
   const w = world(on)
   await start($)

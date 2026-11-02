@@ -4,6 +4,8 @@
 //   settings    ../settings/term.ts     the plugin's options; featureOn(key) for every module
 //   telemetry   ../telemetry/telemetry.ts  each model call and turn in the session's events; registered first and last,
 //                                       so its two hooks of each event bracket thimble's others and time them
+//   host        ../core/host.ts         whether thimble's drawing shows in this session (Claude Code's terminal
+//                                       interface): the keys, the look and the card check run only where it does
 //   path        ./path.ts               the session's environment: the plugin's bin/ first on PATH, and a TMPDIR
 //   watch       ./watch.ts              which files Claude's Read, Grep and Bash calls touched, for `thimble coverage`;
 //                                       a /clear or a /resume turns every module over to the new conversation
@@ -44,6 +46,7 @@ import { registerAnswers } from '../core/answers'
 import { registerAnswerView } from '../core/answerview'
 import { registerFeed } from '../core/feed'
 import { registerForks } from '../core/forks'
+import { registerHost } from '../core/host'
 import { registerPanes } from '../core/pane'
 import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
@@ -67,6 +70,7 @@ import { registerWatch } from './watch'
 export const register: Register = (on, options) => {
   registerSettings(on, options)
   registerTelemetry(on, 'first')
+  registerHost(on, options)
   registerPath(on, options)
   registerWatch(on, options)
   registerPrompts(on, options)
