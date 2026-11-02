@@ -22,9 +22,9 @@ view's builder and its reviewer write that view's folder in the protected extens
 (agent_writes), by the slug of the start the server recorded for them, so no other agent writes a view's files.
 
 What 0.8 did through Claude Code's interactive session and thimble's plugin, the server now does in its place:
-- a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end; the analyst's
-  message reaches main's running turn at its next tool call, as Claude Code gives a message typed mid-turn
-  (Conv.take_waiting), and main's chat shows it waiting until then (unread);
+- a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end; a message the
+  analyst types in main's chat reaches main's running turn at its next tool call, as Claude Code gives a message typed
+  mid-turn (Conv.take_waiting), and main's chat shows it waiting until then (unread);
 - a `thread` event starts a fork of main's conversation that answers the thread, or a new turn of its fork;
 - the plugin module's ops (module_bridge.request: spawn, send, stop, abort, note) start, message and stop the agents
   and main here (module_op);
@@ -292,13 +292,12 @@ class Conv:
             self.emit({"type": "user", "message": {"role": "user", "content": results}})
 
     def waiting_messages(self) -> list[str]:
-        """The analyst's messages (`main` events) that wait in main's queue, oldest first; none for any other
-        conversation, whose queue waits for its run to end."""
-        from . import events  # noqa: PLC0415
-
+        """The messages the analyst typed in main's chat while its turn ran (Space.said), in main's queue, oldest first.
+        Every other event, such as a /thimble-fix request, which Claude Code too keeps for the turn's end as it keeps a
+        command, waits for the turn to end, and so does any other conversation's queue."""
         if self.kind != "main":
             return []
-        return [t for t in self.queue if (m := EVENT_BODY_RE.match(t)) and m.group(1) == events.MAIN]
+        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in self.space.said]
 
     def take_waiting(self) -> list[str]:
         """The analyst's messages that wait for main's running turn, read now, with the results of the turn's tool
@@ -834,9 +833,9 @@ def _failure_text(e: BaseException) -> str:
 
 def deliver(c: str, note: dict[str, Any]) -> None:
     """A browser event for main (events._publish): a thread's starts or continues its fork; any other starts a turn of
-    main, or waits for main's running turn: the analyst's message until the turn's next tool call (Conv.take_waiting),
-    any other event until the turn ends. The words of a message that came while main's turn ran (`said`, events.post)
-    show in main's chat as waiting until main reads it (unread)."""
+    main, or waits for main's running turn: a message the analyst typed in main's chat (`said`, events.post) until the
+    turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat shows such a message
+    waiting until main reads it (unread)."""
     from . import agents, events  # noqa: PLC0415
 
     sp = ensure(c)
