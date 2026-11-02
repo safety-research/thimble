@@ -11,13 +11,13 @@
 // to ask). A fix that did not pass offers Ask Claude, once: what it tried, and its failure in main's composer
 // (askClaudeText), with its change and the end of its tests' output, which main's sandbox cannot read from the fix's
 // copy, for the person to send to Claude, who can find why it failed and what to ask for with /thimble-fix N.
+import { commandIn, FIX_COMMAND } from './commands'
 
-export const FIX_COMMAND = '/thimble-fix'
-
-/** The words after /thimble-fix in a chat message, or null when the message is no /thimble-fix. Pure. */
+/** The words after /thimble-fix in a chat message, or null when the message is no /thimble-fix (commands.ts, the
+ * composer's one list of the commands it handles). Pure. */
 export function fixWords(text: string): string | null {
-  const m = /^\s*\/thimble-fix(?:\s+([\s\S]*))?$/.exec(text)
-  return m ? (m[1] ?? '').trim() : null
+  const typed = commandIn(text)
+  return typed?.name === FIX_COMMAND ? typed.words : null
 }
 
 /** The server's line on how to ask for a fix (backend fixes.py EMPTY), as the terminal answers `/thimble-fix` with
