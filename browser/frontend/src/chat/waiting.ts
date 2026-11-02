@@ -1,12 +1,14 @@
 // Which of thimble's sessions wait for the analyst. A session thimble starts beside main has no terminal, so a call
 // that needs permission puts its request on the session's chat meta (`permissions`, backend agent_session.ask) until
 // the analyst answers or its wait passes; one declined unanswered stays there, marked `expired`, until dismissed. Every
-// request waits on PermissionCard.
+// request waits on PermissionCard. On Claude Code sign-in, a command's request to a host the analyst has not allowed
+// asks on the chat whose agent made it, whose meta carries the ask (`hosts`, backend host_asks) while the command
+// waits, and the ask waits under the command (HostAsks).
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { newest, STALE } from '../lib/newest'
-import type { ChatMeta, PermissionRequest } from '../lib/types'
+import type { ChatMeta, HostAsk, PermissionRequest } from '../lib/types'
 
 const REFETCH_DEBOUNCE_MS = 150
 
@@ -21,11 +23,18 @@ export function pendingAsks(m: Pick<ChatMeta, 'status' | 'permissions'> | null |
   return cardAsks(m).filter((p) => !p.expired)
 }
 
-const firstAsk = (m: ChatMeta): string => pendingAsks(m).map((p) => p.since ?? '').sort()[0] ?? ''
+/** A chat's asks before a request to a host the analyst has not allowed, which the server adds to its meta while the
+ * command that made the request waits. Pure. */
+export function hostAsks(m: Pick<ChatMeta, 'hosts'> | null | undefined): readonly HostAsk[] {
+  return m?.hosts ?? []
+}
 
-/** Every chat that waits for the analyst, the one that asked first first. Pure. */
+const firstAsk = (m: ChatMeta): string => [...pendingAsks(m), ...hostAsks(m)].map((p) => p.since ?? '').sort()[0] ?? ''
+
+/** Every chat that waits for the analyst, on a permission request or an ask about a host, the one that asked first
+ * first. Pure. */
 export function waitingChats(metas: Iterable<ChatMeta>): ChatMeta[] {
-  return [...metas].filter((m) => pendingAsks(m).length > 0).sort((a, b) => (firstAsk(a) < firstAsk(b) ? -1 : firstAsk(a) > firstAsk(b) ? 1 : 0))
+  return [...metas].filter((m) => pendingAsks(m).length > 0 || hostAsks(m).length > 0).sort((a, b) => (firstAsk(a) < firstAsk(b) ? -1 : firstAsk(a) > firstAsk(b) ? 1 : 0))
 }
 
 /** The chat that waits for the analyst on behalf of the chat `id`: `id` itself, else the chat under it that asked
@@ -45,7 +54,7 @@ export function waitingAt(id: string | null | undefined, metas: Iterable<ChatMet
     }
   }
   const self = all.find((m) => m.id === id)
-  if (self && pendingAsks(self).length) return self
+  if (self && (pendingAsks(self).length || hostAsks(self).length)) return self
   return waitingChats(all.filter((m) => under.has(m.id)))[0] ?? null
 }
 

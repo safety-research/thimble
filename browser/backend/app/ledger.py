@@ -409,13 +409,15 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
 
 def agent_rows(c: str | None) -> dict[str, Any]:
     """Who runs each agent thimble starts and what it may do. `main`'s row: thimble's rules for main and its agents (web,
-    data) and the extensions that add to main's prompt; and `dev`'s, the fence `thimble fix` and an extension's program
+    data), where their shell's network reaches (`network`: "ask" on Claude Code sign-in, where a host the analyst's
+    Claude Code settings do not allow asks first, host_asks; "on" with an API key or WIF, any host) and the extensions
+    that add to main's prompt; and `dev`'s, the fence `thimble fix` and an extension's program
     that runs the dev agent keep (its sandbox, whether the sandbox can run here, its network, web tools and edits). Each other agent's row
     (orient, writer, critic, checks) names its role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command,
     with the extensions that add to its prompt and a conflict) and its own `web`, "off" or main's. `labels` and
     `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first one an
     extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""
-    from . import roles, tasks, userconf  # noqa: PLC0415
+    from . import roles, runtime, tasks, userconf  # noqa: PLC0415
 
     conf = userconf.load_or_defaults(c)[0]
     runs = conf["sandbox"]["use"] != "never" and userconf.sandbox_runs()
@@ -430,7 +432,7 @@ def agent_rows(c: str | None) -> dict[str, Any]:
 
     main = fence("orientation")
     out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"], "web": main["web"], "data": main["data"],
-                                    "config": main["config"]}}
+                                    "network": "on" if runtime.engine() == "api" else "ask", "config": main["config"]}}
     for agent in userconf.SUBAGENT_ROLES:
         role = by_role.get(agent) or blank
         out[userconf.ROLES[agent]] = {"way": role["way"], "extension": role["extension"],

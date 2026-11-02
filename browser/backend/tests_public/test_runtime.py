@@ -240,7 +240,9 @@ async def test_claude_code_sign_in_runs_a_headless_session_with_the_same_records
     await main_turn("What happened?")
     cc = shape(main_records())
     opts = seen["options"]
-    assert opts.permission_mode == "dontAsk" and "safe-mode" in opts.extra_args
+    # Claude Code's default mode, whose asks go to the callback: a new host's to the analyst, the rest refused
+    # (test_host_asks.py)
+    assert opts.permission_mode == "default" and opts.can_use_tool is not None and "safe-mode" in opts.extra_args
     assert "Agent" not in opts.tools and "Read" in opts.tools
     assert seen["server"][0] == runtime_cc.SERVER
     assert "mcp__plugin_thimble_thimble__list_cards" in opts.allowed_tools

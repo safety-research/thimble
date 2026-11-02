@@ -12,9 +12,9 @@
 // Under the table, "Claude can edit files in this folder", whether main and its thread forks may write the corpus
 // folder of this workspace (on by default; thimble's other agents never write it); the View proposals switch, which a view proposal's Don't ask again turns off; the
 // Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
-// canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the
-// analyst's Claude Code session (web, edits of the data, and whether the session's shell runs in Claude Code's
-// sandbox), with the CLAUDE.md files each agent reads;
+// canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents as the workbench runs
+// them (web, edits of this folder, the shell's sandbox and where its network reaches), with the CLAUDE.md files each
+// agent reads;
 // then the one agent with a permission mode of its own, an extension's program that runs the dev agent, shown only
 // where one does, and its own fence; then labels and the card check, which have no mode; then how long a code
 // ticket's question about thimble's code waits on its card (cardWait); then the extensions added to thimble, each with
@@ -140,25 +140,27 @@ export function agentTip(row: AgentRow): string {
   return [who, ...added, ...reach, box, net, data, "It never reads thimble's key.", `Change these under ${row.config} in thimble's config.`].join('\n')
 }
 
-/** Main's row of thimble's rules, in words: its web, its edits of the data, and its shell (`box` while the session's
- * shell commands run in Claude Code's sandbox, Attached.sandbox). */
-export const WEB_MAIN = { mode: 'web follows your mode', off: 'no web' } as const
-export const DATA_MAIN: Record<NonNullable<MainFence['data']>, string> = { ask: 'data edits follow your mode', allow: 'data edits follow your mode', off: 'never edits data' }
-export const SHELL_MAIN = { box: "shell in Claude Code's sandbox", mode: 'shell follows your mode' } as const
+/** Main's row of thimble's rules, in words, as the workbench runs main and its agents: their web, their edits of this
+ * folder (`edits`, the switch "Claude can edit files in this folder"), their shell, which runs in a sandbox, and where
+ * its network reaches (MainFence `network`: on Claude Code sign-in a host the analyst has not allowed asks first). */
+export const WEB_MAIN = { on: 'web on', off: 'no web' } as const
+export const EDITS_MAIN = { on: 'edits files in this folder', off: 'never edits files in this folder' } as const
+export const SHELL_MAIN = 'shell in a sandbox'
+export const NETWORK_MAIN = { ask: 'asks before a new host', on: 'network on' } as const
 
-/** thimble's rules for main and its agents in words: web, edits of the data and the shell, which runs in Claude Code's
- * sandbox when `sandbox` (the session's Attached.sandbox). Pure. */
-export function fenceLine(f: MainFence | null | undefined, sandbox?: boolean | null): string {
+/** thimble's rules for main and its agents in words: web, edits of this folder while `edits`, the shell and its
+ * network. Pure. */
+export function fenceLine(f: MainFence | null | undefined, edits = true): string {
   if (!f) return ''
-  return [WEB_MAIN[f.web === 'off' ? 'off' : 'mode'], DATA_MAIN[f.data ?? 'ask'], SHELL_MAIN[sandbox ? 'box' : 'mode']].join(' · ')
+  return [WEB_MAIN[f.web === 'off' ? 'off' : 'on'], EDITS_MAIN[edits ? 'on' : 'off'], SHELL_MAIN, NETWORK_MAIN[f.network === 'on' ? 'on' : 'ask']].join(' · ')
 }
 
 /** What thimble's rules for main and its agents mean, one sentence per line, for their tooltip. Pure. */
-export function fenceTip(f: MainFence, sandbox?: boolean | null): string {
-  const web = f.web === 'off' ? 'Web off: no agent fetches pages or searches the web.' : 'Web: a fetch or a search follows your permission mode.'
-  const data = f.data === 'off' ? 'Data off: no agent changes a file of your data.' : 'Data: an edit of a file of your data follows your permission mode.'
-  const shell = sandbox ? "Shell: commands run in Claude Code's sandbox." : sandbox === false ? "Shell: commands follow your permission mode. Claude Code's sandbox is off in this session." : 'Shell: commands follow your permission mode.'
-  return [web, data, shell, 'Everything else follows your Claude Code permission mode.', `Change web and data under ${f.config ?? 'agents.orientation'} in thimble's config.`].join('\n')
+export function fenceTip(f: MainFence, edits = true): string {
+  const web = f.web === 'off' ? 'Web off: no agent fetches pages or searches the web.' : 'Web: a fetch or a search runs without asking you.'
+  const files = edits ? "Files: main and its threads edit files in this folder; thimble's other agents never do." : 'Files: no agent edits files in this folder.'
+  const network = f.network === 'on' ? 'Network: commands reach any host.' : "Network: a command's request to a host you have not allowed asks you first."
+  return [web, files, 'Shell: commands run in a sandbox.', network, `Change web under ${f.config ?? 'agents.orientation'} in thimble's config.`].join('\n')
 }
 
 function AgentLine({ row }: { row: AgentRow }) {
@@ -173,12 +175,12 @@ function AgentLine({ row }: { row: AgentRow }) {
   )
 }
 
-function FenceLine({ fence, sandbox }: { fence: MainFence; sandbox?: boolean | null }) {
-  const { props, tip } = useTooltip(fenceTip(fence, sandbox), 'tip-lines', 'start')
+function FenceLine({ fence, edits }: { fence: MainFence; edits: boolean }) {
+  const { props, tip } = useTooltip(fenceTip(fence, edits), 'tip-lines', 'start')
   return (
     <>
       <span className="settings-agent-line settings-fence-line" tabIndex={0} {...props}>
-        {fenceLine(fence, sandbox)}
+        {fenceLine(fence, edits)}
       </span>
       {tip}
     </>
@@ -654,7 +656,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             </div>
             <div className="settings-row" role="row" data-fence="main">
               <span className="settings-role">Main and its agents</span>
-              <FenceLine fence={fence} sandbox={attached?.sandbox} />
+              <FenceLine fence={fence} edits={edits} />
             </div>
             {(['writer', 'checks'] as const).map((agent) => {
               const row = settings.agents?.[agent]

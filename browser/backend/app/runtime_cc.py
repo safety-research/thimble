@@ -7,7 +7,13 @@ thimble's prompt as the whole system prompt; the role's model and effort. thimbl
 named so that the tools read as 0.8's plugin named them (tools.thimble_tool); Claude Code's built-in tools are the
 same set the Messages API runtime gives (Spec.builtins), Bash in Claude Code's sandbox (no Bash where it cannot run),
 Edit and Write allowed only in the agent's write folders (the corpus among them for main and its thread forks while
-Settings' "Claude can edit files in this folder" is on, runtime.Spec.corpus_edits), and `dontAsk`, so nothing waits on a prompt nobody sees.
+Settings' "Claude can edit files in this folder" is on, runtime.Spec.corpus_edits).
+
+Permissions. The session runs in Claude Code's default mode with a permission callback (options' `ask`), so a command's
+request to a host the analyst's Claude Code settings do not allow asks the analyst in the chat, as Claude Code asks in
+the terminal (host_asks.py), and the hosts the analyst always allowed for the workspace are allowed in the session's
+settings. Every other call that would ask is refused as Claude Code's `dontAsk` refuses it (REFUSED), so nothing else
+waits on a prompt nobody sees.
 
 A PreToolUse hook callback (in this process, not a plugin hook) hears each call of thimble's tools with Claude Code's
 id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8. The
@@ -34,10 +40,14 @@ import os
 import secrets
 import shutil
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger("thimble.runtime_cc")
+# the callback is for the asks the allowed tools leave (module note, permissions), so the Agent SDK's advisory that an
+# allowed tool never reaches it would only print in the analyst's terminal
+warnings.filterwarnings("ignore", message="can_use_tool will not be invoked")
 
 SERVER = "plugin_thimble_thimble"  # tools.thimble_tool: mcp__plugin_thimble_thimble__<tool>
 TMP_ROOT = "/tmp"  # short_tmp's parent where it exists, else the system's temp folder
@@ -112,12 +122,13 @@ def _tidy(cwd: Path) -> None:
             (cwd / CC_WRITES[0]).rmdir()
 
 
-def settings(spec: Any, bash: bool, tmp: Path | None = None) -> dict[str, Any]:
+def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | None = None) -> dict[str, Any]:
     """The session's inline settings: its effort as 0.8's calls pinned it (sdk.cli_settings), the sandbox for Bash
     (required: a sandbox that cannot start refuses the call, module note), the PATH Bash has on the Messages API
     (runtime_tools.shell_path) and the variables that keep its programs from writing caches beside what they read
     (kernel_wrap.NO_SIDE_WRITES), edits only in the write folders, and no reads of thimble's private files. `tmp` is
-    the session's TMPDIR, which its commands may write too."""
+    the session's TMPDIR, which its commands may write too; `hosts` the web rules of the hosts the analyst always
+    allowed for the workspace (host_asks.kept), which the sandbox's network then reaches unasked."""
     from . import cc_settings, kernel_wrap, runtime_tools, sdk  # noqa: PLC0415
 
     out = json.loads(sdk.cli_settings(spec.model, spec.effort or None))
@@ -136,13 +147,22 @@ def settings(spec: Any, bash: bool, tmp: Path | None = None) -> dict[str, Any]:
         out["sandbox"] = {**cc_settings.offline_sandbox(auto_allow=True, network=True, required=True),
                           "filesystem": {"allowWrite": writes,
                                          "denyWrite": [*map(str, spec.private), *map(str, no_write)]}}
+        out["permissions"]["allow"] += list(hosts or [])
     return out
 
 
-def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | None = None) -> Any:
-    from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, SdkMcpTool, create_sdk_mcp_server  # noqa: PLC0415
+def _chat(conv: Any) -> str | None:
+    """The chat a conversation's asks wait on: main's, or the chat the mirror writes a fork or an agent into."""
+    from . import agents, session  # noqa: PLC0415
 
-    from . import cc_settings, config, runtime, sdk, tools  # noqa: PLC0415
+    return agents.MAIN_ID if conv.kind == "main" else session.chat_of_agent(conv.c, conv.agent_id)
+
+
+def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | None = None) -> Any:
+    from claude_agent_sdk import (ClaudeAgentOptions, HookMatcher, PermissionResultAllow,  # noqa: PLC0415
+                                  PermissionResultDeny, SdkMcpTool, create_sdk_mcp_server)
+
+    from . import cc_settings, config, host_asks, runtime, sdk, tools  # noqa: PLC0415
 
     bash = "Bash" in spec.builtins and cc_settings.sandbox_ok()
     builtins = [b for b in spec.builtins if b != "Bash" or bash]
@@ -165,6 +185,13 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
             pending.setdefault(_key(name, (inp or {}).get("tool_input")), []).append(tool_use_id)
         return {}
 
+    async def ask(name: str, inp: dict[str, Any], _ctx: Any) -> Any:
+        if name != host_asks.TOOL:
+            return PermissionResultDeny(message=REFUSED.format(tool=name))
+        if await host_asks.ask(conv.c, _chat(conv), str((inp or {}).get("host") or "")):
+            return PermissionResultAllow()
+        return PermissionResultDeny()
+
     allowed = [b for b in builtins if b not in ("Edit", "Write")]
     allowed += [f"Edit(/{w}/**)" for w in spec.write_roots]
     allowed += [tools.thimble_tool(n) for n in spec.thimble]
@@ -179,12 +206,13 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         cwd=str(spec.cwd),
         tools=builtins,
         allowed_tools=allowed,
-        permission_mode="dontAsk",
+        permission_mode="default",
+        can_use_tool=ask,
         mcp_servers={SERVER: server},
         system_prompt=spec.system,
         model=spec.model,
         effort=sent,
-        settings=json.dumps(settings(spec, bash, tmp)),
+        settings=json.dumps(settings(spec, bash, tmp, host_asks.kept(conv.c))),
         cli_path=config.CLI_PATH,
         max_buffer_size=sdk.MAX_BUFFER_SIZE,
         setting_sources=["user"],
