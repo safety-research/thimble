@@ -35,7 +35,8 @@ shows the words, so a mark is never verified on evidence the checker made up:
             from a file.
   quote     one place or several: the file is inside the folder the session started in or the shell's folder (a
   code      relative path is read from either, since main may have run `cd`; for what code does, also the temp
-            folder, where Claude keeps its own code; and a folder of labels' rules when the host gives one, `rules`,
+            folders, where Claude keeps its own code (`tmp`: thimble's, the one Claude Code's Bash sandbox gives a
+            command, the workbench's); and a folder of labels' rules when the host gives one, `rules`,
             as the browser keeps each label's definition, its rule in it), compared by real paths, a regular file, the
             line (or a range of at most 50 lines) exists, and the place's substring is in it: in the raw line or in
             the line's JSON strings decoded (a JSONL record's, or those of one member of a JSON document written over
@@ -1371,20 +1372,21 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     return problems, {"file": rel, "line": line, "lines": rows}, hay
 
 
-def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, calls: list[dict[str, Any]] = (), was: str = "", rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, calls: list[dict[str, Any]] = (), was: str = "", rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of quote or code evidence, and the cited places to show. The evidence is one place, or several when
     the claim joins places (a value set on one line and used on another): each place holds the words the check gave
     for it, and the places together hold the quoted words of a direct quote and the numbers of the words. A claim about
-    what code does may cite Claude's own code in `tmp`; a quote of a record may not, since a file there holds what
-    Claude derived, not the records. A label's rule in `rules` is evidence of what the label counts and how, as code or
-    as a quote; a quote of it, as any quote, holds the days and numbers of the words in its lines, so a rule shows no
-    count it does not state. For a correction of a quote of a record, `was` is the marked words: the cited lines also
-    show each run of words the correction puts in."""
+    what code does may cite Claude's own code in a temp folder `tmp` names (one, or a list); a quote of a record may
+    not, since a file there holds what Claude derived, not the records. A label's rule in `rules` is evidence of what
+    the label counts and how, as code or as a quote; a quote of it, as any quote, holds the days and numbers of the
+    words in its lines, so a rule shows no count it does not state. For a correction of a quote of a record, `was` is
+    the marked words: the cited lines also show each run of words the correction puts in."""
     problems: list[str] = []
     shown: list[dict[str, Any]] = []
     hay: list[str] = []
     # the folders a cited file may lie in besides the session's: Claude's own code for code, labels' rules for both
-    also = [f for f in (tmp if kind == "code" else None, rules) if f]
+    temps = [tmp] if isinstance(tmp, str) else list(tmp or [])
+    also = [f for f in (*(temps if kind == "code" else []), rules) if f]
     for ev in evs:
         p, s, h = place(ev, cwd, root, also, calls)
         problems += p
@@ -1825,7 +1827,7 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | list[str] | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show. For a correction, `target` is its
     new words and `was` the marked words."""
     if kind == "card":
@@ -2057,7 +2059,7 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     return None
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
     rewrite?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real Bash
     calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
@@ -2213,11 +2215,11 @@ def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> lis
     return out
 
 
-def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
+def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
-    folder; `cards` the session's cards' outputs (check_card); `rules` the folder where the host keeps its labels'
-    rules, when it keeps them apart from the temp folder (the browser's labels' definitions). A mark the validator fails
-    on fails as a check that did not run, with why; the other marks are judged."""
+    folders (one, or a list); `cards` the session's cards' outputs (check_card); `rules` the folder where the host keeps
+    its labels' rules, when it keeps them apart from the temp folders (the browser's labels' definitions). A mark the
+    validator fails on fails as a check that did not run, with why; the other marks are judged."""
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}

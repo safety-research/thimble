@@ -2,7 +2,8 @@
 JSON on stdout. No model call, and no code run: kernel/evidence.py reads the files and the calls' real outputs.
 
     stdin   {"cwd": the working folder, "root": the folder the session started in, which the paths shown start from,
-             "tmp": the session's temp folder, where Claude keeps its own code,
+             "tmp": the session's temp folders, where Claude keeps its own code (a list: thimble's, and the one
+             Claude Code's Bash sandbox gives a command; or one folder),
              "marks": [{"n", "words", "sentence"}], "answer": the checker's last message,
              "calls": [{"command", "output", "by": "checker" | "main"}],
              "cards": the session's cards' outputs (kernel/evidence.py check_card), or "cards_dir": the terminal's

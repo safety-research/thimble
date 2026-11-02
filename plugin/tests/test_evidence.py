@@ -407,6 +407,24 @@ def test_what_code_does_may_cite_claudes_own_code_in_the_temp_folder_a_quote_may
     assert said["status"] == "failed" and "outside the folder" in said["reason"]
 
 
+def test_claudes_own_code_counts_in_each_temp_folder_of_the_session(tmp_path: Path):
+    # R2: a command in Claude Code's Bash sandbox writes its code in Claude Code's own temp folder (claude-<uid>/), not
+    # thimble's; the validator is given both, as a list, through validate.py too
+    data, ours, cc = tmp_path / "data", tmp_path / "tmp" / "thimble", tmp_path / "cc" / "claude-1000"
+    for d in (data, ours, cc):
+        d.mkdir(parents=True)
+    (cc / "count.py").write_text("import json\nrows = [json.loads(l) for l in open('/data/prs.jsonl')]\nprint(sum(r['merged'] for r in rows))\n")
+    ev = quote(str(cc / "count.py"), 3, "sum(r['merged'] for r in rows)", kind="code")
+    assert check_mark(mark("counts the merged ones"), ev, [], str(data), None, [str(ours), str(cc)])["status"] == "verified"
+    # with thimble's folder alone, a file in Claude Code's is outside the folders the session works in
+    alone = check_mark(mark("counts the merged ones"), ev, [], str(data), None, str(ours))
+    assert alone["status"] == "failed" and "outside the folder" in alone["reason"]
+    answer = "```json\n" + json.dumps([{"mark": 1, **ev}]) + "\n```"
+    req = {"cwd": str(data), "tmp": [str(ours), str(cc)], "marks": [mark("counts the merged ones")], "answer": answer, "calls": []}
+    r = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True)
+    assert json.loads(r.stdout)["results"][0]["status"] == "verified"
+
+
 RULE = 'def label(r):\n    body = (r.get("body") or "").strip()\n    if not body:\n        return None\n    return "yes" if "REVIEW WANTED" in body else "no"\n'
 
 
