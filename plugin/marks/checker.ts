@@ -26,10 +26,10 @@
 //   checkKey($, key, until)   g while that line shows: the person's OK for this session, and the check it is about
 //                             starts again (hooks/keys.ts)
 //   repairOk($, m)            x on a failed citation: the person's OK that its check needs, which x gives before the
-//                             repair starts (`give`; `undo`, as a word typed after x undoes g): thimble's checks this
-//                             session while a refusal for the session stands (`unreviewed`, `mode`) whose line offers
-//                             that OK, and each file the citation's check could not read where Claude Code asked
-//                             nobody; null where nothing the person does here lets its check run, so x is not offered
+//                             repair starts, so one press is enough (`give`; `undo`, as a word typed after x undoes g):
+//                             thimble's checks this session (their spawn and their Python), as g gives it, and each
+//                             file the citation's check could not read where Claude Code asked nobody; null where
+//                             nothing the person does here lets its check run, so x is not offered
 //   modeSeen($, mode)         the session's permission mode as a classic hook gives it (marks/register.ts): a refusal
 //                             of a mode the session is no longer in stands no more, so x comes back
 //   allowsCheck($, e, o, v)   whether thimble answers allow to Claude Code's verdict `v` on a spawn (tool.check,
@@ -70,8 +70,9 @@
 // marks wait, not checked (`deferred`, a dim ? after each), opening one checks it, and one line says why (cannotStart):
 // once a session for each cause while the replies' own checks run into it, and each time a check the person asked for
 // (opening a citation, x) cannot start. A line that offers the person's OK says it at each check it stops, until they
-// give it: that OK is what lets the checks run. While Claude Code's refusal stands for the session (no verdict, don't
-// ask mode; until a check starts), x on a failed citation gives that OK, as g does, and starts the repair (repairOk).
+// give it: that OK is what lets the checks run. x on a failed citation gives that OK, as g does, before it starts the
+// repair (repairOk), whether or not Claude Code refused a check yet, so one press starts a repair that Claude Code would
+// refuse without it (no verdict, don't ask mode), and lets its Python run.
 // Where no OK lets the check start (auto mode in a remote Cowork session, a refusal that came after the OK, auto mode's
 // classifier that judged the check, a deny rule), x is not offered, and a failed citation opened says that line again.
 // A refusal by a mode stands until a check starts or thimble sees the session in another mode (modeSeen); Claude Code
@@ -487,18 +488,20 @@ export async function modeSeen($: Engine, mode: unknown): Promise<void> {
  *  back (`undo`), as it takes back g's (hooks/keys.ts). */
 export type RepairOk = { give: () => Promise<void>; undo: () => Promise<void> }
 
-/** x on failed citation `m`: the person's OK that its check needs first. While a refusal that stands for the session
- *  stands (refusedLine) and its line offers the OK, the OK for thimble's checks this session, as g gives it; and for each
- *  file its check could not read where Claude Code asked nobody (MarkItem `unread`, `ok`), the OK for thimble's checks
- *  to read that file with the tool that was refused (allowsRead). A file Claude Code asked the person about needs no OK
- *  here: Claude Code asks again as the repair reads it. Null where nothing the person does here lets the check run: a
- *  refusal no OK answers (its line says why), a file nobody here can let it read (the citation's card names it), or a
- *  citation that did not fail; the tray and the Claims pane offer x only where it is not null. */
+/** x on failed citation `m`: the person's OK that its check needs, which x gives before the repair starts, so that one
+ *  press is enough. The OK for thimble's checks this session, as g gives it (their spawn and their Python: allowsCheck,
+ *  allowsPython), unless given already, whether or not Claude Code refused a check yet: where Claude Code takes it (auto
+ *  mode's classifier gave no verdict, don't ask mode), the repair starts and runs its Python at the first press; and for
+ *  each file its check could not read where Claude Code asked nobody (MarkItem `unread`, `ok`), the OK for thimble's
+ *  checks to read that file with the tool that was refused (allowsRead). A file Claude Code asked the person about needs
+ *  no OK here: Claude Code asks again as the repair reads it. Null where nothing the person does here lets the check
+ *  run: a refusal no OK answers (its line says why), a file nobody here can let it read (the citation's card names it),
+ *  or a citation that did not fail; the tray and the Claims pane offer x only where it is not null. */
 export async function repairOk($: Engine, m: MarkItem | null): Promise<RepairOk | null> {
   if (m?.status !== 'failed') return null
   const line = ((await $.state.get(REFUSING)).value ?? null) as Line | null
   if ((line && !line.offers) || m.unread?.some(u => u.fix === null)) return null
-  const allow = !!line && !(await checksAllowed($))
+  const allow = !(await checksAllowed($))
   const have = ((await $.state.get(FILES)).value ?? []) as OneRead[]
   // each read once, and only one not let before, so a word after x takes back only what x gave
   const reads = (m.unread ?? []).filter(u => u.fix === 'ok').map(({ tool, file }) => ({ tool, file }))

@@ -10,7 +10,7 @@
 // answer for now, or that judged the check, as such;
 // any other refusal by its first sentence whole. g is no other line's key: a fix's line beside it keeps y. The failure
 // line wraps a long text at word edges, no row wider than the line. x on a failed citation stays where the person can
-// let its check run: while those two refusals stand, x gives the OK g gives and starts the repair; where a check could
+// let its check run: it gives the OK g gives before it starts the repair, so one press is enough; where a check could
 // not read a file, the citation's card names the file, and x gives the OK to read it where Claude Code asked nobody,
 // or starts the repair, whose read Claude Code asks about again, where it asked the person. Where nothing the person
 // does lets the check run (auto mode in a remote Cowork session, a refusal after the OK, auto mode's classifier that
@@ -322,31 +322,23 @@ async function pressX($: Any, clock: Any): Promise<string> {
  *  outside which thimble checks; no key. */
 const DONT_ASK_OUTSIDE = "Claude Code's don't ask mode refused thimble's check of citations. Outside don't ask mode, thimble can check them."
 
-for (const [mode, deny, line, outside] of [
-  ['auto mode, no verdict', AUTO, UNREVIEWED_LINE, NO_VERDICT_OUTSIDE],
-  ["don't ask mode", DONT_ASK, DONT_ASK_LINE, DONT_ASK_OUTSIDE],
+for (const [mode, deny, outside] of [
+  ['auto mode, no verdict', AUTO, NO_VERDICT_OUTSIDE],
+  ["don't ask mode", DONT_ASK, DONT_ASK_OUTSIDE],
 ] as const) {
-  test(`${mode}: a citation whose check did not run (the reply was stopped) keeps x when Claude Code refuses the check x starts, and the line says why; x again gives the OK g gives and starts the repair`, OPTIONS, async ($, on) => {
-    // Claude Code refuses every check but a repair asked for once the person gave the OK, which it starts as thimble
-    // answers allow at tool.check (checkallow.test.ts: this kit's spawns ask no tool.check)
-    let taken = false
-    const { spawns, clock } = await session($, on, e => (taken && e.description === REPAIR_DESCRIPTION ? null : deny))
+  test(`${mode}: one x on a citation whose check did not run (the reply was stopped) gives the person's OK before it asks for the repair, so Claude Code, which takes thimble's allow on its checks, starts it at the first press (checkallow.test.ts); the OK stands, as g's, so a later check Claude Code still refuses says what refused it, with no key`, OPTIONS, async ($, on) => {
+    // Claude Code starts the repair, as where thimble answers allow at tool.check (this kit's spawns ask no tool.check),
+    // and refuses every other check
+    const { spawns, clock } = await session($, on, e => (e.description === REPAIR_DESCRIPTION ? null : deny))
     await reply($, clock, 't1', 'row-a1', 'aborted')
     await openCitation($, 'row-a1', 1)
-    // no check has asked Claude Code yet: x starts one
     expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
     expect(await pressX($, clock)).toBe('')
+    // the repair, asked for once (its run is checkallow.test.ts's: this kit names no agent it starts)
     expect(spawns.length).toBe(1)
-    // refused: the line says why and offers g, and x stays
-    expect(await band($)).toEqual({ status: '× failed', x: true, line, presses: ['press g'] })
-    // x again: the person's OK, then the repair, asked for (its run, where Claude Code starts it, is
-    // checkallow.test.ts's: this kit's spawns name no agent)
-    taken = true
-    expect(await pressX($, clock)).toBe('')
-    expect(spawns.length).toBe(2)
-    expect(spawns[1]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
-    expect(String(spawns[1].prompt)).toContain('The analyst pressed x to check citation 1, whose first check did not run.')
-    // the OK stands, as g's: a later check Claude Code still refuses says what refused it, with no key
+    expect(spawns[0]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
+    expect(String(spawns[0].prompt)).toContain('The analyst pressed x to check citation 1, whose first check did not run.')
+    // the OK the first x gave stands, as g's: a later check Claude Code refuses says what refused it, with no key
     await reply($, clock, 't2', 'row-a2')
     const drawn = await $.ui.render(above)
     expect(lineOf(drawn)).toBe(outside)
@@ -434,41 +426,30 @@ test("a deny rule's refusal stands in every mode: a prompt in another mode leave
   expect(spawns.length).toBe(1)
 })
 
-test("don't ask mode, its refusal standing: a failed citation opened later offers x, with no line; x gives the OK g gives and starts its repair, and a word typed after x takes both back", OPTIONS, async ($, on) => {
-  let taken = false
-  const { spawns, clock } = await session($, on, e => (taken && e.description === REPAIR_DESCRIPTION ? null : DONT_ASK))
+test("don't ask mode: x then a letter in its word window is a word, so neither the OK nor the repair stands: the repair is refused before Claude Code starts it, and a later reply's check is refused as before the OK, with g on its line; the next x gives the OK and starts the repair", OPTIONS, async ($, on) => {
+  const { spawns, clock } = await session($, on, e => (e.description === REPAIR_DESCRIPTION ? null : DONT_ASK))
   await reply($, clock, 't1', 'row-a1', 'aborted')
   await openCitation($, 'row-a1', 1)
-  expect(await pressX($, clock)).toBe('')
-  expect(spawns.length).toBe(1)
-  // the prompt sent: the line goes; the next failed citation opened offers x, and says nothing
-  await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
-  expect(lineOf(await $.ui.render(above))).toBe('')
-  await openCitation($, 'row-a1', 2)
-  expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
-  expect(spawns.length).toBe(1)
-  // x, then a letter in its word window: a word, so the repair is refused before Claude Code starts it, and the OK
-  // is taken back: a citation of a later reply, opened, is refused as before the OK, with g on its line
+  // x, then a letter in its word window: a word
   expect(await $.prompt.edit(key('x'))).toMatchObject({ text: '' })
   await clock.advance(WORD_MS / 3)
   expect(await $.prompt.edit(key('o'))).toMatchObject({ text: 'xo' })
   await clock.advance(WORD_MS * 2)
-  expect(spawns.length).toBe(1)
+  expect(spawns.length).toBe(0)
   await $.prompt.submit({ text: 'xo', origin: { kind: 'composer' } } as never)
   await reply($, clock, 't2', 'row-a2')
   await openCitation($, 'row-a2', 1)
-  expect(spawns.length).toBe(3)
+  expect(spawns.length).toBe(2)
   expect(lineOf(await $.ui.render(above))).toBe(DONT_ASK_LINE)
   // x on the failed citation: the OK and its repair
-  taken = true
   await openCitation($, 'row-a1', 2)
   expect(await pressX($, clock)).toBe('')
-  expect(spawns.length).toBe(4)
-  expect(spawns[3]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
-  expect(String(spawns[3].prompt)).toContain('The analyst pressed x to check citation 2, whose first check did not run.')
+  expect(spawns.length).toBe(3)
+  expect(spawns[2]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
+  expect(String(spawns[2].prompt)).toContain('The analyst pressed x to check citation 2, whose first check did not run.')
   // the OK stands: a citation opened later, its check refused, says so with no key
   await openCitation($, 'row-a2', 2)
-  expect(spawns.length).toBe(5)
+  expect(spawns.length).toBe(4)
   expect(await band($)).toMatchObject({ line: DONT_ASK_OUTSIDE, presses: [] })
 })
 

@@ -104,11 +104,11 @@ test("with no OK from the person, Claude Code's ask on thimble's checks stays Cl
 const AUTO = "The server-side auto mode classifier gave no verdict for Agent: the request that produced this action did not ask for one. Issue the action again once, as-is; if it is denied again, continue with other tasks that don't require it and tell the user that auto mode could not evaluate it. Note: reading files, searching code, and other read-only operations do not require the classifier and can still be used."
 const REPLY = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down for [3 nights](#).'
 
-/** An engine with versioned state, the checker's text, and forks that Claude Code refuses with `refused`'s words, or
- *  starts; the validator gives `results` for a check's marks, and names as `outside` each file of `outside` that the
+/** An engine with versioned state, the checker's text, and forks that Claude Code refuses with the words `refused` gives
+ *  for the spawn, or starts; the validator gives `results` for a check's marks, and names as `outside` each file of `outside` that the
  *  check could not read (no evidence may cite it; none unless a test says so); `env`, more of the process's variables;
  *  `kinds`, what each made-up path is (a file or a folder; any other is not there), as it stands when read. */
-function engine(refused: () => string | null, results: (marks: Any[]) => Any[] = () => [], env: Record<string, string> = {}, kinds: Record<string, 'file' | 'dir'> = {}, outside: string[] = []) {
+function engine(refused: (spawn: Any) => string | null | Promise<string | null>, results: (marks: Any[]) => Any[] = () => [], env: Record<string, string> = {}, kinds: Record<string, 'file' | 'dir'> = {}, outside: string[] = []) {
   const state = new Map<string, { value: unknown; version: number }>()
   const spawned: Any[] = []
   let now = 1000
@@ -132,7 +132,7 @@ function engine(refused: () => string | null, results: (marks: Any[]) => Any[] =
         ?? (argv.includes('validate') && o?.stdin ? { exitCode: 0, stdout: JSON.stringify(validated(JSON.parse(o.stdin))), stderr: '' } : { exitCode: 0, stdout: '', stderr: '' }),
     },
     agent: {
-      spawn: async (a: Any) => { spawned.push(a); const deny = refused(); return deny ? { deny } : { model: 'claude-made-up', agentId: `agent-${spawned.length}` } },
+      spawn: async (a: Any) => { spawned.push(a); const deny = await refused(a); return deny ? { deny } : { model: 'claude-made-up', agentId: `agent-${spawned.length}` } },
       list: async () => [],
     },
     state: {
@@ -249,13 +249,16 @@ const FAILED = { n: 1, row: 'row-1', words: '40', start: 7, end: 14, sentence: R
 const failedReply = (items: Any[] = [FAILED]) => ({ key: 'row-1', turnId: 't-1', rows: ['row-1'], startedAt: 1000, settledAt: 1100, items }) as never
 const itemOf = async ($: Any, n = 1) => (await rowMarks($, 'row-1'))!.items.find(m => m.n === n)!
 
-test("x on a failed citation while don't ask mode's refusal of thimble's checks stands: x gives the OK g gives, so thimble answers allow on its checks, and a word after x takes it back; with no refusal x gives none", async () => {
+test("x on a failed citation gives the OK g gives, whether or not Claude Code refused thimble's checks yet (here don't ask mode), so thimble answers allow on its checks, and a word after x takes it back", async () => {
   let refuse = true
   const { $ } = engine(() => (refuse ? DONT_ASK : null))
   await newReply($, failedReply())
   const verdict = () => allowsCheck($, { input: { description: REPAIR_DESCRIPTION, subagent_type: 'fork' } }, THIMBLE, ASK)
-  // no refusal yet: x needs no OK, and gives none
-  await (await repairOk($, await itemOf($)))!.give()
+  // no refusal yet: x gives the OK all the same, and a word after it takes it back
+  const first = (await repairOk($, await itemOf($)))!
+  await first.give()
+  expect(await verdict()).toBe(true)
+  await first.undo()
   expect(await verdict()).toBe(false)
   // x's repair, refused: the refusal stands, and x's OK is g's
   expect(await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
@@ -566,6 +569,27 @@ test("x's OK covers its checker forks' Python too: thimble answers allow on Clau
   // a word typed after x takes the OK back
   await ok.undo()
   expect(await bash(SCRIPT)).toBe('ask')
+})
+
+test("one x is enough: in a session where Claude Code refused none of thimble's checks yet, x on a failed citation gives the person's OK before its repair starts, so where Claude Code takes thimble's allow (auto mode's classifier gives no verdict) the repair starts at the first press, with no line, and its Python runs (don't ask mode would refuse it); a word typed after x takes the OK back", async () => {
+  const at: { $?: Any } = {}
+  // Claude Code's answer on thimble's spawn: allow where thimble's tool.check answers allow, else auto mode's no verdict
+  const { $, spawned } = engine(async (a: Any) => ((await allowsCheck(at.$, { input: { description: a.description, subagent_type: 'fork' } }, THIMBLE, ASK)) ? null : AUTO))
+  at.$ = $
+  const call = hooksOn($)
+  await newReply($, failedReply())
+  const ok = (await repairOk($, await itemOf($)))!
+  await ok.give()
+  expect(await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
+  expect(spawned.map(a => a.description)).toEqual([REPAIR_DESCRIPTION])
+  expect((await itemOf($)).status).toBe('checking')
+  expect(await failLineNow($)).toBeNull()
+  const python = async () => (await call('tool.check', { tool: 'Bash', input: { command: SCRIPT }, tool_use_id: 'toolu_b2', agentId: 'agent-1' }, ASK)).decision
+  expect(await python()).toBe('allow')
+  // a word typed after x takes the OK back: Claude Code's ask on its checks and their Python stands
+  await ok.undo()
+  expect(await allowsCheck($, { input: { description: REPAIR_DESCRIPTION, subagent_type: 'fork' } }, THIMBLE, ASK)).toBe(false)
+  expect(await python()).toBe('ask')
 })
 
 /** A made-up plugin beneath thimble whose hook asks about every new agent: as one only the person may answer
