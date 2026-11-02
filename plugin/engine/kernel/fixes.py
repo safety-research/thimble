@@ -4071,7 +4071,7 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     s = r.get("state")
     if s == "pending":
         acts.append(("thimble reapply", "Claude checks it against the release and brings it back"))
-    if s in ("on", "off", "ready", "sent") and can_share():
+    if s in ("working", "on", "off", "ready", "sent") and can_share():
         acts.append((f"thimble file issue {r['id']}",
                      "a link to GitHub's new-issue form with its text, to read and submit"))
     if s in ("on", "ready") and r.get("commit") and not r.get("pr") and can_share():

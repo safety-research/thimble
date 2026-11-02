@@ -1324,6 +1324,23 @@ def test_what_next_names_thimble_file_issue_for_a_fix_claude_still_works_on(worl
     assert cli.main(issue[0][1:]) == 0 and "Share fix" in capsys.readouterr().out
 
 
+def test_show_lists_the_command_that_works_for_a_fix_claude_still_works_on(world, capsys, monkeypatch):
+    """R1: thimble fix show N lists the commands that work for a fix in its state; for a fix Claude still works on,
+    that is `thimble file issue N`, in the words the other states use."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.setattr(FX, "session_terms", lambda st: {})  # the shell stands in thimble's repository here
+    w = made(world, words="make the minimap smaller", edit=False)
+    n = w["id"]
+    assert cli.main(["fix", "show", str(n)]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"make the minimap smaller · fix {n} · working · {FX._date(FX.get(n)['created'])}, terminal",
+        '  You asked     "make the minimap smaller"',
+        "",
+        f"  thimble file issue {n}    a link to GitHub's new-issue form with its text, to read and submit"]
+    assert cli.main(["file", "issue", str(n)]) == 0 and "Share fix" in capsys.readouterr().out
+
+
 def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_live(world, tmp_path, monkeypatch):
     """scripts/install.sh links bin/thimble to the plugin's command and names the link in cli-link; once Claude Code
     loads thimble from live, the link runs the release checkout's launcher, which runs thimble fix, file, update,
