@@ -261,7 +261,20 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
     monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(tmp_path / "browser-home"))
 
 
-PLUGIN_TOKEN = "t0ken-of-the-test-server"
+# the short folders the server makes for a Claude Code session's TMPDIR (runtime_cc.short_tmp, workspace_tmp) lie in a
+# short folder of the suite's own, removed after the run: a workspace's own one stays after its test
+SHORT_ROOT = Path(tempfile.mkdtemp(prefix="tt-", dir="/tmp" if os.path.isdir("/tmp") else None))
+atexit.register(shutil.rmtree, SHORT_ROOT, True)
+
+
+@pytest.fixture(autouse=True)
+def _short_folders_of_the_suite(monkeypatch):
+    from app import runtime_cc
+
+    monkeypatch.setattr(runtime_cc, "TMP_ROOT", str(SHORT_ROOT))
+
+
+PLUGIN_TOKEN ="t0ken-of-the-test-server"
 UI_COOKIE_VALUE = "cookie-of-the-test-browser"  # the cookie of a browser signed in to the test server (_record_paired)
 UI_KEY_VALUE = "key-of-the-test-browser"  # the key of that browser's path, /b/<key>/api/ (hook_auth.browser_path)
 
