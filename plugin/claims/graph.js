@@ -627,7 +627,7 @@ export function cardOf(s, W, { whole = false } = {}) {
   const dim = t => wrap(t, W).forEach(l => rows.push([{ s: l, tone: 'dim' }]))
   if (s.status === 'corrected' && s.was) dim(wasLine({ rewritten: s.rewritten, narrowed: s.narrowed, was: one(s.was) }))
   else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))
-  if (s.status === 'failed') for (const u of s.unread || []) dim(unreadLine(u.file))
+  if (s.status === 'failed') for (const file of new Set((s.unread || []).map(u => u.file))) dim(unreadLine(file))
   if (s.status === 'checking' || s.status === 'gone' || !s.evidence) return { rows, cut: false }
   if (whole) return { rows: [...rows, ...wholeRows(s.evidence, W)], cut: true }
   const sn = snippetOf(s.evidence, W - 2)

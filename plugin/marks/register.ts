@@ -14,7 +14,7 @@
 //   turn.complete    the checker's turn ended: validate, write the statuses
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
 //                    autoRepair), as x does
-//   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of a file that
+//   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of one file that
 //                    Claude Code refused is noted as it ends (checker.ts readEnded)
 //   turn.step        the checker's requests: the model and the effort the setting Checker names
 //   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
@@ -22,8 +22,8 @@
 //   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g, or x): Claude
 //                    Code's own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask
 //                    mode would refuse it (checker.ts allowsCheck)
-//   tool.check       a checker's read of a file the person let thimble's checks read (x): Claude Code's own ask
-//                    answered allow (checker.ts allowsRead)
+//   tool.check       a checker's Read or Grep of one file the person let thimble's checks read with that tool (x):
+//                    Claude Code's own ask answered allow (checker.ts allowsRead); never a Glob, which lists a folder
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
@@ -226,10 +226,10 @@ export const registerMarks: Register = on => {
     return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
-  // a checker's read of a file the person let thimble's checks read (x, checker.ts allowsRead): Claude Code's own ask,
-  // which don't ask mode would refuse or auto mode's classifier settle, is answered allow; a deny, and an ask a rule, a
-  // hook, a setting or another plugin made, stand
-  on('tool.check', { tool: /^(Read|Grep|Glob)$/, agentId: /./ }, async ($, e, next) => {
+  // a checker's Read or Grep of one file the person let thimble's checks read with that tool (x, checker.ts
+  // allowsRead): Claude Code's own ask, which don't ask mode would refuse or auto mode's classifier settle, is answered
+  // allow; a deny, and an ask a rule, a hook, a setting or another plugin made, stand
+  on('tool.check', { tool: /^(Read|Grep)$/, agentId: /./ }, async ($, e, next) => {
     const v = await next(e)
     return forkOf(e.agentId)?.kind === 'checker' && (await allowsRead($, e, v)) ? { ...v, decision: 'allow', reason: READ_ALLOWED } : v
   }).catch(($, e, next) => next(e))

@@ -6,9 +6,12 @@
 // decides. An ask another plugin made reaches thimble's hook as Claude Code 2.1.307 settles it, naming that plugin: its
 // own ask, and one only the person may answer (`decider: 'person'`) alike. x on a failed citation gives that OK too
 // while Claude Code's refusal of the checks stands. A check that could not read a file, which Claude Code refused,
-// leaves the citations it fails with that file: where Claude Code asked nobody, x gives the person's OK for it, and
-// thimble answers Claude Code's own ask on its checks' reads of that file with allow; where the person said no to its
-// ask, x gives none, and Claude Code asks again. All data is made up. `claude plugin test plugin`.
+// leaves that file on the citations it fails whose check needed it (a check of one citation needed it; of several, the
+// citations whose answer names the file); its other citations are repaired as any are. Where Claude Code asked nobody,
+// x gives the person's OK for the file, and thimble answers Claude Code's own ask on its checks' reads of that file
+// with allow, by the tool that was refused (a Read of it, or a Grep of it alone; a Grep of a folder, or a Glob, gets no
+// OK); where the person said no to its ask, x gives none, and Claude Code asks again. All data is made up. `claude
+// plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
@@ -98,8 +101,9 @@ const AUTO = "The server-side auto mode classifier gave no verdict for Agent: th
 const REPLY = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down for [3 nights](#).'
 
 /** An engine with versioned state, the checker's text, and forks that Claude Code refuses with `refused`'s words, or
- *  starts; the validator gives `results` for a check's marks; `env`, more of the process's variables. */
-function engine(refused: () => string | null, results: (marks: Any[]) => Any[] = () => [], env: Record<string, string> = {}) {
+ *  starts; the validator gives `results` for a check's marks; `env`, more of the process's variables; `kinds`, what each
+ *  made-up path is (a file or a folder; any other is not there), as it stands when read. */
+function engine(refused: () => string | null, results: (marks: Any[]) => Any[] = () => [], env: Record<string, string> = {}, kinds: Record<string, 'file' | 'dir'> = {}) {
   const state = new Map<string, { value: unknown; version: number }>()
   const spawned: Any[] = []
   let now = 1000
@@ -112,6 +116,10 @@ function engine(refused: () => string | null, results: (marks: Any[]) => Any[] =
       write: async () => undefined,
       list: async () => [],
       exists: async () => false,
+      stat: async (p: string) => {
+        if (!kinds[p]) throw Object.assign(new Error(`ENOENT: no such file or directory, stat '${p}'`), { code: 'ENOENT' })
+        return { kind: kinds[p], size: 0, mtimeMs: 0, isLink: false }
+      },
     },
     process: {
       run: async (argv: string[], o?: { stdin?: string }) => tempRun(argv)
@@ -284,8 +292,9 @@ const READ_REJECTED = 'Permission for this tool use was denied. The tool use was
 const READ_RULE = 'Permission to use Read has been denied by your rule Read(//made-up/elsewhere/**).'
 /** A read Claude Code refused, as its tool.call answers it: an error, its words as the model reads them. */
 const refusedRead = (said: string) => ({ result: said, isError: true, text: said })
-/** The validator's results: the first three marks not confirmed, the others verified. */
-const FIRST_THREE = (marks: Any[]) => marks.map(m => (m.n <= 3 ? { n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: 'No record the check read holds it.' } : { n: m.n, status: 'verified', shown: m.words, reason: 'counted' }))
+/** The validator's results: the first three marks not confirmed, for want of ELSEWHERE, which their reason names; the
+ *  others verified. */
+const FIRST_THREE = (marks: Any[]) => marks.map(m => (m.n <= 3 ? { n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: `${ELSEWHERE} holds the runs, but the check could not read it.` } : { n: m.n, status: 'verified', shown: m.words, reason: 'counted' }))
 
 /** The marks module's hooks on `$`: `call(event, e, below)` runs the event's chain over Claude Code's answer `below`
  *  (a verdict, a result), as Claude Code raises it for thimble's own fork. */
@@ -324,7 +333,8 @@ test("a check that could not read a file, which Claude Code refused asking nobod
     expect(spawned.length).toBe(2)
     const items = (await rowMarks($, 'row-1'))!.items
     expect(items.map(m => m.status)).toEqual(['failed', 'failed', 'failed', 'verified', 'verified'])
-    expect(items.map(m => m.unread)).toEqual([[{ file: ELSEWHERE, fix: 'ok' }], [{ file: ELSEWHERE, fix: 'ok' }], [{ file: ELSEWHERE, fix: 'ok' }], undefined, undefined])
+    const unread = [{ tool: 'Read', file: ELSEWHERE, fix: 'ok' }]
+    expect(items.map(m => m.unread)).toEqual([unread, unread, unread, undefined, undefined])
     // none is repaired by itself: what refused the read would refuse the repair's
     await autoRepair($, 'agent-1')
     expect(spawned.length).toBe(2)
@@ -363,15 +373,111 @@ test("a check that could not read a file because the person said no to Claude Co
     const call = hooksOn(asked.$)
     await checkThatReads(asked.$, call, refusedRead(READ_REJECTED))
     const item = await itemOf(asked.$)
-    expect(item.unread).toEqual([{ file: ELSEWHERE, fix: 'ask' }])
+    expect(item.unread).toEqual([{ tool: 'Read', file: ELSEWHERE, fix: 'ask' }])
     await autoRepair(asked.$, 'agent-1')
     expect(asked.spawned.length).toBe(2)
     await (await repairOk(asked.$, item))!.give()
     expect((await call('tool.check', { tool: 'Read', input: { file_path: ELSEWHERE }, tool_use_id: 'toolu_r3', agentId: 'agent-1' }, ASK)).decision).toBe('ask')
     const ruled = engine(() => null, FIRST_THREE)
     await checkThatReads(ruled.$, hooksOn(ruled.$), refusedRead(READ_RULE))
-    expect((await itemOf(ruled.$)).unread).toEqual([{ file: ELSEWHERE, fix: null }])
+    expect((await itemOf(ruled.$)).unread).toEqual([{ tool: 'Read', file: ELSEWHERE, fix: null }])
     expect(await repairOk(ruled.$, await itemOf(ruled.$))).toBeNull()
+  } finally {
+    setOptions({})
+  }
+})
+
+/** The folder that holds ELSEWHERE, and Claude Code's refusal in don't ask mode of a check's call of `tool`. */
+const FOLDER = '/made-up/elsewhere'
+const dontAsk = (tool: string) => refusedRead(READ_DONT_ASK.replace('use Read', `use ${tool}`))
+
+/** x's repair of row-1's failed citation 1, a check of that citation alone (agent-1), whose `reads` (each a call as
+ *  tool.call has it) Claude Code refuses in don't ask mode; the validator fails the citation again. Answers it as the
+ *  check left it. */
+async function repairThatReads($: Any, call: Any, reads: Any[]): Promise<Any> {
+  await newReply($, failedReply())
+  expect(await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
+  for (const [k, read] of reads.entries()) await call('tool.call', { ...read, agentId: 'agent-1', tool_use_id: `toolu_r${k}` }, dontAsk(read.tool))
+  await endCheck($, { agentId: 'agent-1', reason: 'answer', answer: '```json\n[]\n```' })
+  return itemOf($)
+}
+
+test("x's OK covers one file, read by the tool Claude Code refused: a refused Grep of a folder, a Glob, or a read by a relative path names no one file, so x gives no OK for it; a Grep of a regular file is allowed as a Grep of that file alone, and not once the path is a folder; a Read as a Read of it alone; a Glob never, nor its absolute pattern", async () => {
+  const kinds: Record<string, 'file' | 'dir'> = { [FOLDER]: 'dir', [ELSEWHERE]: 'file' }
+  /** Claude Code's ask on agent-1's call of `tool`, as thimble's hooks answer it. */
+  const check = async (call: Any, tool: string, input: Any) => (await call('tool.check', { tool, input, tool_use_id: 'toolu_c1', agentId: 'agent-1' }, ASK)).decision
+  const wide = engine(() => null, FIRST_THREE, {}, kinds)
+  const onWide = hooksOn(wide.$)
+  const item = await repairThatReads(wide.$, onWide, [
+    { tool: 'Grep', pattern: 'failed', path: FOLDER },
+    { tool: 'Glob', pattern: '/made-up/**/*.csv', path: FOLDER },
+    { tool: 'Read', file_path: 'elsewhere/runs.csv' },
+  ])
+  expect(item.status).toBe('failed')
+  expect(item.unread).toBeUndefined()
+  await (await repairOk(wide.$, item))!.give()
+  expect(await check(onWide, 'Grep', { pattern: 'failed', path: FOLDER })).toBe('ask')
+  expect(await check(onWide, 'Glob', { pattern: '/made-up/**/*.csv', path: FOLDER })).toBe('ask')
+  expect(await check(onWide, 'Read', { file_path: 'elsewhere/runs.csv' })).toBe('ask')
+  // a Grep of one regular file
+  const one = engine(() => null, FIRST_THREE, {}, kinds)
+  const onOne = hooksOn(one.$)
+  const grepped = await repairThatReads(one.$, onOne, [{ tool: 'Grep', pattern: 'failed', path: ELSEWHERE }])
+  expect(grepped.unread).toEqual([{ tool: 'Grep', file: ELSEWHERE, fix: 'ok' }])
+  await (await repairOk(one.$, grepped))!.give()
+  expect(await check(onOne, 'Grep', { pattern: 'p95', path: ELSEWHERE, output_mode: 'content' })).toBe('allow')
+  // not a Read of it, nor a Glob of its folder or with its path as the pattern
+  expect(await check(onOne, 'Read', { file_path: ELSEWHERE })).toBe('ask')
+  expect(await check(onOne, 'Glob', { pattern: 'runs.csv', path: FOLDER })).toBe('ask')
+  expect(await check(onOne, 'Glob', { pattern: ELSEWHERE, path: ELSEWHERE })).toBe('ask')
+  // the path is a folder now: a Grep of it reads each file in it
+  kinds[ELSEWHERE] = 'dir'
+  expect(await check(onOne, 'Grep', { pattern: 'p95', path: ELSEWHERE })).toBe('ask')
+  // a Read of the file: a Read of it, not a Grep
+  kinds[ELSEWHERE] = 'file'
+  const read = engine(() => null, FIRST_THREE, {}, kinds)
+  const onRead = hooksOn(read.$)
+  const readOne = await repairThatReads(read.$, onRead, [{ tool: 'Read', file_path: ELSEWHERE }])
+  expect(readOne.unread).toEqual([{ tool: 'Read', file: ELSEWHERE, fix: 'ok' }])
+  await (await repairOk(read.$, readOne))!.give()
+  expect(await check(onRead, 'Read', { file_path: ELSEWHERE, offset: 10 })).toBe('allow')
+  expect(await check(onRead, 'Grep', { pattern: 'p95', path: ELSEWHERE })).toBe('ask')
+})
+
+/** A reply of four citations, which one check (agent-1) checks. */
+const FOUR = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down.'
+
+test("a check of several citations that could not read a file leaves it only on the citations whose answer names it: the others are repaired at once, or x checks them, as before; a check of one citation needed each file it could not read", async () => {
+  setOptions({ citations: 'auto cite + verify' })
+  try {
+    // the check could not confirm 1, 2 and 3, and left 4 out of its answer; it names the file for 1 by its path and
+    // for 2 by its name, and for 3 only a file whose name ends as the file's does
+    const why = [`${ELSEWHERE} could not be read.`, 'runs.csv holds the failures, but the check could not open it.', 'old-runs.csv counts 39 runs, not 40.']
+    const results = (marks: Any[]) => marks.filter(m => m.n !== 4).map(m => ({ n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: why[m.n - 1] }))
+    const { $, spawned } = engine(() => null, results)
+    const call = hooksOn($)
+    await noteRow($, 'row-1', FOUR)
+    await startCheck($, { turnId: 't-1', reason: 'answer' })
+    expect(spawned.length).toBe(1)
+    // a rule of the person's refused the check's read of the file: nothing the person does here lets a check read it
+    await call('tool.call', { tool: 'Read', file_path: ELSEWHERE, agentId: 'agent-1', tool_use_id: 'toolu_r1' }, refusedRead(READ_RULE))
+    await endCheck($, { agentId: 'agent-1', reason: 'answer', answer: '```json\n[]\n```' })
+    const ruled = [{ tool: 'Read', file: ELSEWHERE, fix: null }]
+    const items = (await rowMarks($, 'row-1'))!.items
+    expect(items.map(m => [m.failedBy, m.unread])).toEqual([['evidence', ruled], ['evidence', ruled], ['evidence', undefined], ['none', undefined]])
+    // x is not offered on 1 and 2; on 4 it is, as on any citation whose check did not run
+    expect(await repairOk($, items[0]!)).toBeNull()
+    expect(await repairOk($, items[1]!)).toBeNull()
+    expect(await repairOk($, items[3]!)).not.toBeNull()
+    // 3 alone is repaired at once
+    await autoRepair($, 'agent-1')
+    expect(spawned.slice(1).map(a => a.description)).toEqual([REPAIR_DESCRIPTION])
+    expect(String(spawned[1].prompt)).toContain('repair citation 3.')
+    // that repair checks 3 alone: the file it could not read either is one its check needed, named or not
+    await call('tool.call', { tool: 'Read', file_path: ELSEWHERE, agentId: 'agent-2', tool_use_id: 'toolu_r2' }, refusedRead(READ_RULE))
+    await endCheck($, { agentId: 'agent-2', reason: 'answer', answer: '```json\n[]\n```' })
+    expect((await itemOf($, 3)).unread).toEqual(ruled)
+    expect(await repairOk($, await itemOf($, 3))).toBeNull()
   } finally {
     setOptions({})
   }
