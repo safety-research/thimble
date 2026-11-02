@@ -14,7 +14,9 @@
 //   forks       ../core/forks.ts        the checker and designer forks: spawn, know, end; their reports kept from main
 //   tell        ../core/tell.ts         what Claude reads of thimble's work, with the person's next prompt
 //   feed        ../core/feed.ts         the kernel's change feed, read after each Bash call, for the modules that act on it
-//   answers     ../core/answers.ts      the record of each of main's turns and text rows, for the features below
+//   handoff     ./handoff.ts            a `thimble` command in Claude Code's Bash sandbox, which may not write
+//                                       thimble's home, run outside the sandbox
+//   answers    ../core/answers.ts      the record of each of main's turns and text rows, for the features below
 //   panes       ../core/pane.ts         the one side pane, drawn by the kind it shows
 //   keys        ./keys.ts               thimble's keys at an empty prompt (v, the fix lines', the features', the cards',
 //                                       the bar's)
@@ -60,6 +62,7 @@ import { registerSqueeze } from '../squeeze/seam'
 import { registerTelemetry } from '../telemetry/telemetry'
 import { registerThreads } from '../threads/seam'
 import { registerTray } from '../tray/seam'
+import { registerHandoff } from './handoff'
 import { registerKeys } from './keys'
 import { registerPath } from './path'
 import { registerWatch } from './watch'
@@ -75,6 +78,7 @@ export const register: Register = (on, options) => {
   registerForks(on, options)
   registerTell(on, options)
   registerFeed(on, options)
+  registerHandoff(on, options)
   registerAnswers(on, options)
   registerPanes(on, options)
   registerKeys(on, options)
