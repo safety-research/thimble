@@ -610,6 +610,17 @@ def test_the_install_gives_the_workbench_s_claude_code_sign_in_first_and_recomme
     assert "Their Claude Code sign-in (recommended), only after they accept" in note
 
 
+def test_claude_knows_that_the_setup_s_check_says_which_key_is_used():
+    """N97: CLAUDE.md, step 4, says what the check of thimble-browser --setup reports besides an answer: the login
+    Claude Code uses, and the ANTHROPIC_* variables of the shell, which the workbench never uses (claude_access.setup,
+    the browser's server tests). Claude then has no check of its own to write for a stale key."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 4. When the workbench was installed", 1)[1].split(" 5. ", 1)[0]
+    check = step.split("Each command ends with a check that Claude answers.", 1)[1].split(" When the check fails", 1)[0]
+    assert "the login that Claude Code uses" in check, check
+    assert "names the `ANTHROPIC_*` variables set in the shell, which the workbench never uses" in check, check
+
+
 def test_the_install_summary_says_when_to_use_each_product(tmp_path):
     """The install's last lines when it installed both products, in one line, and the reply Claude ends an install with
     (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one product
