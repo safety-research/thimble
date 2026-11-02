@@ -6,10 +6,12 @@
 // decides. An ask another plugin made reaches thimble's hook as Claude Code 2.1.307 settles it, naming that plugin: its
 // own ask, and one only the person may answer (`decider: 'person'`) alike. x on a failed citation gives that OK too
 // while Claude Code's refusal of the checks stands. A check that could not read a file, which Claude Code refused,
-// leaves the citations it fails with that file: where Claude Code asked nobody, x gives the person's OK for it, and
-// thimble answers Claude Code's own ask on its checks' reads of that file with allow, by the tool that was refused (a
-// Read of it, or a Grep of it alone; a Grep of a folder, or a Glob, gets no OK); where the person said no to its ask,
-// x gives none, and Claude Code asks again. All data is made up. `claude plugin test plugin`.
+// leaves that file on the citations it fails whose check needed it (a check of one citation needed it; of several, the
+// citations whose answer names the file); its other citations are repaired as any are. Where Claude Code asked nobody,
+// x gives the person's OK for the file, and thimble answers Claude Code's own ask on its checks' reads of that file
+// with allow, by the tool that was refused (a Read of it, or a Grep of it alone; a Grep of a folder, or a Glob, gets no
+// OK); where the person said no to its ask, x gives none, and Claude Code asks again. All data is made up. `claude
+// plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
@@ -290,8 +292,9 @@ const READ_REJECTED = 'Permission for this tool use was denied. The tool use was
 const READ_RULE = 'Permission to use Read has been denied by your rule Read(//made-up/elsewhere/**).'
 /** A read Claude Code refused, as its tool.call answers it: an error, its words as the model reads them. */
 const refusedRead = (said: string) => ({ result: said, isError: true, text: said })
-/** The validator's results: the first three marks not confirmed, the others verified. */
-const FIRST_THREE = (marks: Any[]) => marks.map(m => (m.n <= 3 ? { n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: 'No record the check read holds it.' } : { n: m.n, status: 'verified', shown: m.words, reason: 'counted' }))
+/** The validator's results: the first three marks not confirmed, for want of ELSEWHERE, which their reason names; the
+ *  others verified. */
+const FIRST_THREE = (marks: Any[]) => marks.map(m => (m.n <= 3 ? { n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: `${ELSEWHERE} holds the runs, but the check could not read it.` } : { n: m.n, status: 'verified', shown: m.words, reason: 'counted' }))
 
 /** The marks module's hooks on `$`: `call(event, e, below)` runs the event's chain over Claude Code's answer `below`
  *  (a verdict, a result), as Claude Code raises it for thimble's own fork. */
@@ -439,6 +442,45 @@ test("x's OK covers one file, read by the tool Claude Code refused: a refused Gr
   await (await repairOk(read.$, readOne))!.give()
   expect(await check(onRead, 'Read', { file_path: ELSEWHERE, offset: 10 })).toBe('allow')
   expect(await check(onRead, 'Grep', { pattern: 'p95', path: ELSEWHERE })).toBe('ask')
+})
+
+/** A reply of four citations, which one check (agent-1) checks. */
+const FOUR = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down.'
+
+test("a check of several citations that could not read a file leaves it only on the citations whose answer names it: the others are repaired at once, or x checks them, as before; a check of one citation needed each file it could not read", async () => {
+  setOptions({ citations: 'auto cite + verify' })
+  try {
+    // the check could not confirm 1, 2 and 3, and left 4 out of its answer; it names the file for 1 by its path and
+    // for 2 by its name, and for 3 only a file whose name ends as the file's does
+    const why = [`${ELSEWHERE} could not be read.`, 'runs.csv holds the failures, but the check could not open it.', 'old-runs.csv counts 39 runs, not 40.']
+    const results = (marks: Any[]) => marks.filter(m => m.n !== 4).map(m => ({ n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: why[m.n - 1] }))
+    const { $, spawned } = engine(() => null, results)
+    const call = hooksOn($)
+    await noteRow($, 'row-1', FOUR)
+    await startCheck($, { turnId: 't-1', reason: 'answer' })
+    expect(spawned.length).toBe(1)
+    // a rule of the person's refused the check's read of the file: nothing the person does here lets a check read it
+    await call('tool.call', { tool: 'Read', file_path: ELSEWHERE, agentId: 'agent-1', tool_use_id: 'toolu_r1' }, refusedRead(READ_RULE))
+    await endCheck($, { agentId: 'agent-1', reason: 'answer', answer: '```json\n[]\n```' })
+    const ruled = [{ tool: 'Read', file: ELSEWHERE, fix: null }]
+    const items = (await rowMarks($, 'row-1'))!.items
+    expect(items.map(m => [m.failedBy, m.unread])).toEqual([['evidence', ruled], ['evidence', ruled], ['evidence', undefined], ['none', undefined]])
+    // x is not offered on 1 and 2; on 4 it is, as on any citation whose check did not run
+    expect(await repairOk($, items[0]!)).toBeNull()
+    expect(await repairOk($, items[1]!)).toBeNull()
+    expect(await repairOk($, items[3]!)).not.toBeNull()
+    // 3 alone is repaired at once
+    await autoRepair($, 'agent-1')
+    expect(spawned.slice(1).map(a => a.description)).toEqual([REPAIR_DESCRIPTION])
+    expect(String(spawned[1].prompt)).toContain('repair citation 3.')
+    // that repair checks 3 alone: the file it could not read either is one its check needed, named or not
+    await call('tool.call', { tool: 'Read', file_path: ELSEWHERE, agentId: 'agent-2', tool_use_id: 'toolu_r2' }, refusedRead(READ_RULE))
+    await endCheck($, { agentId: 'agent-2', reason: 'answer', answer: '```json\n[]\n```' })
+    expect((await itemOf($, 3)).unread).toEqual(ruled)
+    expect(await repairOk($, await itemOf($, 3))).toBeNull()
+  } finally {
+    setOptions({})
+  }
 })
 
 /** A made-up plugin beneath thimble whose hook asks about every new agent: as one only the person may answer

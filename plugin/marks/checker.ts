@@ -36,7 +36,7 @@
 //                             plugin decides
 //   readEnded($, e, r)        a checker's read of one file that Claude Code refused (tool.call, marks/register.ts): the
 //                             file its check could not read, by the tool that read it (oneRead), and what lets it
-//                             (readFix); endCheck gives them to the citations the check leaves failed (MarkItem
+//                             (readFix); endCheck gives it to the failed citations whose check needed it (MarkItem
 //                             `unread`)
 //   allowsRead($, e, v)       whether thimble answers allow to Claude Code's verdict `v` on a checker's read (tool.check):
 //                             the same tool's read of one file the person let thimble's checks read this session
@@ -49,8 +49,8 @@
 //                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
 //                             (`hold`, marks/register.ts holds it) and is refused when the person typed a word
 //   autoRepair($, agentId)    after a reply's check ended (endCheck): each citation it found wrong or could not confirm
-//                             is repaired at once, as x repairs it, but one whose check could not read a file; a
-//                             repair's own failure starts none. Call it in a hook around endCheck's
+//                             is repaired at once, as x repairs it, but one whose check could not read a file it
+//                             needed; a repair's own failure starts none. Call it in a hook around endCheck's
 //                             (marks/register.ts): the repair's fork skips the hook that spawned it, so its end still
 //                             reaches endCheck
 //
@@ -71,14 +71,16 @@
 // Where no OK lets the check start (auto mode in a remote Cowork session, or a refusal that came after the OK), x is
 // not offered, and a failed citation opened says that line again.
 //
-// A check whose read of a file Claude Code refused leaves the citations it fails with that file (readEnded, MarkItem
-// `unread`): the citation's card names it, and no repair starts by itself (autoRepair), since the same refusal would stop
-// it. Where Claude Code asked nobody (don't ask mode, no verdict in auto mode, no prompt it could show), x gives the
-// person's OK for that one file, read by the same tool, and thimble answers allow on its checks' reads of it
-// (allowsRead); where it asked the person, who did not say yes, x starts the repair, whose read Claude Code asks about
-// again in its own dialog; where a rule, a setting or auto mode's classifier refused it, x is not offered. Only a read
-// of one file counts (oneRead): a Read, or a Grep of one regular file. A Grep of a folder reads each file in it, and a
-// Glob lists a folder, so their refusal names no file, and no OK covers them.
+// A check whose read of a file Claude Code refused leaves that file on each citation it fails whose check needed it
+// (readEnded, MarkItem `unread`): a check of one citation needed each file it could not read; a check of several, each
+// file its answer for the citation names (namesFile). The citation's card names the file, and no repair starts by itself
+// (autoRepair), since the same refusal would stop it; the check's other citations are repaired as any are. Where Claude
+// Code asked nobody (don't ask mode, no verdict in auto mode, no prompt it could show), x gives the person's OK for
+// that one file, read by the same tool, and thimble answers allow on its checks' reads of it (allowsRead); where it
+// asked the person, who did not say yes, x starts the repair, whose read Claude Code asks about again in its own
+// dialog; where a rule, a setting or auto mode's classifier refused it, x is not offered. Only a read of one file
+// counts (oneRead): a Read, or a Grep of one regular file. A Grep of a folder reads each file in it, and a Glob lists
+// a folder, so their refusal names no file, and no OK covers them.
 //
 // Claude Code decides the fork's spawn as it decides a call of Claude's (Claude Code 2.1.307). In auto mode it lets a
 // plugin's own call run without auto mode's classifier, unless the person's settings give the classifier rules of
@@ -520,8 +522,8 @@ export function readFix(said: string, cowork = false): Unread['fix'] | undefined
   return undefined
 }
 
-/** The files each check that runs could not read, by the check's fork, until endCheck gives them to the citations it
- *  leaves failed. */
+/** The files each check that runs could not read, by the check's fork, until endCheck gives them to the citations whose
+ *  check needed them. */
 const unreadBy = new Map<string, Unread[]>()
 
 /** The one file a checker's read names, by the tool that reads it, or null where it names no one file: Read's
@@ -911,8 +913,8 @@ const toRepair = new Map<string, { key: string; marks: number[] }>()
 /** After the check of fork `agentId` ended: a repair of each citation it found wrong or could not confirm, at once,
  *  with x's request, each in a fork of its own; the citation spins as for x, and its end replaces it as x's does. A
  *  repair's own end starts none (endCheck notes only a reply's check), so a citation that fails again stays failed and
- *  waits for x. A citation whose check did not run, or could not read a file, is left to x too: what stopped its check
- *  would stop this one. Call it inside a hook, as launchRepair. */
+ *  waits for x. A citation whose check did not run, or could not read a file it needed, is left to x too: what stopped
+ *  its check would stop this one. Call it inside a hook, as launchRepair. */
 export async function autoRepair($: Engine, agentId: string): Promise<void> {
   const due = toRepair.get(agentId)
   toRepair.delete(agentId)
@@ -973,6 +975,18 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   return { results: out.results }
 }
 
+/** Whether the answer for failed citation `m` names `file`, so its check needed that file: its reason or note, or a
+ *  file its evidence cites, holds the file's name as a whole name (not a part of a longer one), alone or at the end of
+ *  a path. */
+function namesFile(m: MarkItem, file: string): boolean {
+  const name = file.slice(file.lastIndexOf('/') + 1)
+  if (!name) return false
+  const whole = new RegExp(`(?<![\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w/-]|\\.\\w)`)
+  const ev = m.evidence as { file?: unknown; more?: { file?: unknown }[] } | undefined
+  const texts = [m.reason, m.note, ev?.file, ...(Array.isArray(ev?.more) ? ev.more.map(p => p?.file) : [])]
+  return texts.some(t => typeof t === 'string' && whole.test(t))
+}
+
 /** At the end of the checker's turn: its answer validated, each mark's status written, and the timings recorded. */
 export async function endCheck($: Engine, e: { agentId: string; reason: string; answer: string; usage?: unknown }): Promise<void> {
   toRepair.delete(e.agentId)
@@ -1002,18 +1016,22 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     }
     const byN = new Map(v.results.map(r => [Number(r.n), r]))
     const settled = Number(await $.clock.now())
-    // the files the check could not read (readEnded), on each citation it leaves failed but one it found wrong
+    // the files the check could not read (readEnded), each on a citation it leaves failed (but one it found wrong) whose
+    // check needed it: a check of one citation needed each; a check of several, each file its answer for the citation
+    // names. Its other citations are repaired as any are
     const unread = unreadBy.get(e.agentId) ?? []
     const reply = await edit($, c, r => settle(r, settled, r.items.map(m => {
       if (!mine.has(m.n)) return m
       const res = byN.get(m.n)
       const { n: _n, ...rest } = res ?? {}
       const x: MarkItem = res ? { ...m, ...rest, shown: String(res.shown ?? m.words) } : notRun(m, 'Its answer left this citation out.')
-      return unread.length && x.status === 'failed' && x.failedBy !== 'check' ? { ...x, unread } : x
+      if (x.status !== 'failed' || x.failedBy === 'check') return x
+      const needed = c.marks.length === 1 ? unread : unread.filter(u => namesFile(x, u.file))
+      return needed.length ? { ...x, unread: needed } : x
     })))
     if (!reply) return
     // a reply's check: the citations it found wrong or could not confirm are repaired as soon as it ends (autoRepair),
-    // but those whose check could not read a file: what refused that read would refuse the repair's
+    // but those whose check could not read a file it needed: what refused that read would refuse the repair's
     const found = c.repair ? [] : reply.items.filter(m => mine.has(m.n) && m.status === 'failed' && m.failedBy !== 'none' && !m.unread).map(m => m.n)
     if (found.length) toRepair.set(e.agentId, { key: c.key, marks: found })
     const count = (s: string, by?: string) => reply.items.filter(m => mine.has(m.n) && m.status === s && (!by || m.failedBy === by)).length

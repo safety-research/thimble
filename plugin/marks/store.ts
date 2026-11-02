@@ -50,7 +50,8 @@ export type Evidence =
  *  `[words]`), which the reply shows in place of the old one; `sentence` and `was` keep what Claude wrote.
  *  `asked`: words the analyst selected and asked about (c, marks/cite.ts), not a mark Claude wrote:
  *  `start` and `end` are the words' place in the row's text as Claude wrote it (message.js withAsked).
- *  `unread`: the files a failed mark's check could not read, as Claude Code refused them (checker.ts readEnded). */
+ *  `unread`: the files a failed mark's check could not read and needed, as Claude Code refused them (checker.ts
+ *  readEnded, endCheck). */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
   status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]
