@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -24,10 +25,13 @@ PAGE = 'The card open in focus (card:c1), "Incidents by week":\nweek  incidents\
 
 
 class Kernel:
-    """`thimble fix VERB` in memory: new makes the copy's folder, done answers `ends` (ready by default)."""
+    """`thimble fix VERB` in memory: new makes the copy's folder, done answers `ends` (ready by default), and with
+    `page`, done's checks build the page of the fix's commit into its temp folder, as the kernel's PAGE_CHECKS do for a
+    change to the page."""
 
     def __init__(self, home: Path, ends: str = "ready", error: str = "") -> None:
         self.home, self.ends, self.error = home, ends, error
+        self.page = False
         self.recs: dict[int, dict[str, Any]] = {}
         self.calls: list[tuple[str, ...]] = []
         self.envs: list[dict[str, str]] = []
@@ -52,6 +56,10 @@ class Kernel:
                 rec["title"] = args[args.index("--title") + 1]
             rec.update(state=self.ends, tests="passed" if self.ends == "ready" else "failed", error=self.error or None,
                        summary="The card's title now ends with its row count.", files=[{"path": "a"}, {"path": "b"}])
+            if self.page:
+                rec["commit"] = f"c{rec['id']}"
+                fixes.checks_page(rec["id"]).mkdir(parents=True, exist_ok=True)
+                (fixes.checks_page(rec["id"]) / "index.html").write_text(f"the page of c{rec['id']}")
         elif verb == "apply":
             assert stdin and len(stdin) == 64  # the secret of the click, on stdin
             ask = self.home / "fixes" / "asks" / f"{rec['id']}.json"
@@ -86,7 +94,7 @@ def fixing(on, monkeypatch, tmp_path):
     k = Kernel(fixes.plugin_home())
     monkeypatch.setattr(fixes, "kernel", k)
     monkeypatch.setattr(fixes, "srt_ready", lambda: "")
-    monkeypatch.setattr(fixes, "prepare", lambda root: "")
+    monkeypatch.setattr(fixes, "prepare", lambda root, built=None: "")
     restarts: list[tuple[str, Path | None]] = []
 
     async def restart(title: str, *, ticket_id: str | None = None, cwd: Path | None = None) -> None:
@@ -511,7 +519,8 @@ async def test_only_the_click_applies_and_a_refused_apply_says_why(fixing, monke
 
 
 async def test_a_page_that_does_not_build_takes_the_fix_off_again(fixing, monkeypatch, analyst):
-    monkeypatch.setattr(fixes, "prepare", lambda root: "the page did not build: src/x.tsx(3,1): error TS1005")
+    monkeypatch.setattr(fixes, "prepare",
+                        lambda root, built=None: "the page did not build: src/x.tsx(3,1): error TS1005")
     api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows.")])
     await fixes.request(CORPUS, "count the rows", "")
     await _ended()
@@ -524,6 +533,43 @@ async def test_a_page_that_does_not_build_takes_the_fix_off_again(fixing, monkey
     verbs = [c[0] for c in fixing.calls]
     assert verbs.index("undo") > verbs.index("apply") and fixing.restarts == []
     assert fixes.status()["fixes"][0]["said"].endswith("error TS1005; it is off again")
+
+
+async def test_use_it_hands_on_the_page_its_checks_built_so_the_click_waits_for_no_build_of_it(fixing, monkeypatch,
+                                                                                            analyst):
+    """The checks of a change to the page build it in the sandbox (the kernel's PAGE_CHECKS); Use it now hands that
+    build, with the git tree of the sources it was built from, to the page's preparation, which puts it in place when
+    live has those sources (prepare) rather than building the page again after the click."""
+    got: list[Any] = []
+    monkeypatch.setattr(fixes, "prepare", lambda root, built=None: got.append(built) or "")
+    live = fixes.fixes_home() / "live"
+    monkeypatch.setattr(fixes, "git_tree", lambda cwd, rev: f"tree of {rev}" if cwd == live else "")
+    fixing.page = True
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows.")])
+    await fixes.request(CORPUS, "count the rows", "")
+    await _ended()
+    await fixes.apply_route(1, analyst)
+    await _went_on()
+    await _restarted(fixing, "Use it now")
+    assert got == [(fixes.checks_page(1), "tree of c1:browser/frontend")]
+
+
+async def test_a_page_in_the_fix_s_temp_folder_from_before_its_checks_is_never_handed_on(fixing, monkeypatch, analyst):
+    """The fixer writes the fix's temp folder too: a page there from before the checks is gone once they run, so a
+    change they build no page of hands none to the page's preparation, which builds the page when it must."""
+    got: list[Any] = []
+    monkeypatch.setattr(fixes, "prepare", lambda root, built=None: got.append(built) or "")
+    page = fixes.checks_page(1)
+    page.mkdir(parents=True)
+    (page / "index.html").write_text("a page left before the checks\n")
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows.")])
+    await fixes.request(CORPUS, "count the rows", "")
+    await _ended()
+    assert not page.exists()
+    await fixes.apply_route(1, analyst)
+    await _went_on()
+    await _restarted(fixing, "Use it now")
+    assert got == [None]
 
 
 async def test_undo_takes_the_fix_off_and_starts_the_server_again(fixing, monkeypatch, analyst):
@@ -598,6 +644,68 @@ def test_the_tests_read_the_real_packages_also_when_the_server_runs_from_live(tm
     assert set(fixes.lent_reads()) == {(real / "backend" / ".venv").resolve(), (real / "frontend" / "node_modules").resolve()}
     fixes.lend(copy)
     assert os.readlink(copy / "frontend" / "node_modules" / "vite") == str((real / "frontend" / "node_modules" / "vite").resolve())
+
+
+def _page_checkout(top: Path, source: str) -> Path:
+    """A made-up checkout whose browser/frontend holds page sources (`source` in src/a.tsx), committed: its browser/."""
+    fe = top / "browser" / "frontend"
+    (fe / "src").mkdir(parents=True)
+    (fe / "index.html").write_text("<!doctype html>\n")
+    (fe / "src" / "a.tsx").write_text(source)
+    (top / ".gitignore").write_text("browser/frontend/dist/\n")
+    _git("init", "-q", cwd=top)
+    _git("add", "-A", cwd=top)
+    _git("commit", "-q", "-m", "made-up page", cwd=top)
+    return top / "browser"
+
+
+def _built_page(at: Path, said: str) -> Path:
+    """A made-up build of a page at `at`, its index.html saying `said`, newer than the sources made before it."""
+    (at / "assets").mkdir(parents=True)
+    (at / "assets" / "index.js").write_text("made-up chunk\n")
+    (at / "index.html").write_text(said)
+    return at
+
+
+def test_the_page_the_checks_built_takes_the_build_s_place_when_live_has_the_sources_it_was_built_from(tmp_path,
+                                                                                                    monkeypatch):
+    """Use it now puts in place the page the fix's checks built in the sandbox when live's page sources are the ones
+    it was built from (their git tree), and the page is built after the click only for other sources (here no build
+    can run: npm is missing, which prepare says)."""
+    monkeypatch.setattr(config, "REPO_ROOT", tmp_path / "install" / "browser")
+    monkeypatch.setattr(fixes, "lend", lambda root: None)
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
+    live = _page_checkout(tmp_path / "live", "export const rows = 2\n")
+    tree = fixes.git_tree(tmp_path / "live", "HEAD:browser/frontend")
+    page = _built_page(tmp_path / "page", "the page the checks built")
+    assert tree and fixes.prepare(live, (page, tree)) == ""
+    dist = live / "frontend" / "dist"
+    assert (dist / "index.html").read_text() == "the page the checks built" and (dist / "assets" / "index.js").is_file()
+    assert fixes.page_built(live / "frontend")
+    # sources that are not the build's, changed or committed: the page is built after all
+    shutil.rmtree(dist)
+    (live / "frontend" / "src" / "a.tsx").write_text("export const rows = 3\n")
+    assert fixes.prepare(live, (page, tree)) == "the page was not built: npm is not on the PATH"
+    _git("commit", "-q", "-am", "another change", cwd=tmp_path / "live")
+    assert fixes.prepare(live, (page, tree)) == "the page was not built: npm is not on the PATH"
+
+
+def test_a_fix_that_changes_no_file_of_the_page_takes_the_install_s_page(tmp_path, monkeypatch):
+    """The first fix that goes on and changes no file of the page: live's page sources are the install's, whose built
+    page the server serves, so a copy of that page is live's, with no build after the click. An install's page older
+    than its sources is not one."""
+    install = _page_checkout(tmp_path / "install", "export const rows = 2\n")
+    _built_page(install / "frontend" / "dist", "the install's page")
+    monkeypatch.setattr(config, "REPO_ROOT", install)
+    monkeypatch.setattr(fixes, "lend", lambda root: None)
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
+    live = _page_checkout(tmp_path / "live", "export const rows = 2\n")
+    assert fixes.prepare(live) == ""
+    assert (live / "frontend" / "dist" / "index.html").read_text() == "the install's page"
+    shutil.rmtree(live / "frontend" / "dist")
+    later = time.time() + 60
+    os.utime(install / "frontend" / "src" / "a.tsx", (later, later))
+    assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
 
 
 # a release launcher that hands the way back off itself, as the plugin's launcher checks (plugin/bin/thimble)
