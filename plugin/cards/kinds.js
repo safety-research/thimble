@@ -451,7 +451,8 @@ export function readyKinds(api) {
   }
 
   /** How to cut the names of a column `n` cells wide, so that each keeps the part that tells it apart: the start they
-   *  all share said as …, then each cut at its end, or in its middle where cutting at the end makes two alike. */
+   *  all share said as …, then each cut at its end, or in its middle where the start a cut at the end keeps begins
+   *  another name too. */
   function cutter(values, n) {
     const vals = [...new Set(values.map(v => String(v)).filter(Boolean))]
     let shared = ''
@@ -460,20 +461,24 @@ export function readyKinds(api) {
       const edge = Math.max(...['/', '_', '-', ' ', '.', ':'].map(ch => pre.lastIndexOf(ch))) + 1
       if (edge >= 4) shared = pre.slice(0, edge)
     }
+    const rest = t => (shared && t.startsWith(shared) ? t.slice(shared.length) : t)
     const one = (t, middle) => {
       if (cells(t) <= n) return t
-      if (shared && t.startsWith(shared)) return '…' + cut(t.slice(shared.length), n - 1, middle)
+      if (shared && t.startsWith(shared)) return '…' + cut(rest(t), n - 1, middle)
       return cut(t, n, middle)
     }
-    // two names alike once cut read as one name, also when only a … tells them apart
-    const middle = new Set(vals.map(v => one(v, false).replace(/…/g, ''))).size < vals.length
+    const middle = vals.some(v => {
+      const c = one(v, false)
+      const kept = c.replace(/^…/, '').replace(/…$/, '')
+      return c.endsWith('…') && vals.some(o => o !== v && rest(o).startsWith(kept))
+    })
     return v => one(String(v), middle)
   }
 
   /** A chart of the rows by its mark, once each column its x, y, x2 and color name is one the rows have. */
   function chart(spec, W) {
     const mark = flat(spec.mark || 'bar').toLowerCase()
-    const draw = { bar: bars, line: plot, scatter: plot, dots, range: ranges, heatmap }[mark]
+    const draw = { bar: bars, line: lines, scatter: plot, dots, range: ranges, heatmap }[mark]
     if (!draw) throw new Error(`a chart's mark is one of ${MARKS.join(', ')}, not ${flat(spec.mark)}`)
     const rows = list(spec.rows).filter(r => r && typeof r === 'object' && !isArray(r))
     const cols = []
@@ -627,10 +632,6 @@ export function readyKinds(api) {
         v[series] = (v[series] || 0) + 1
         votes.set(c, v)
       },
-      line(x0, y0, x1, y1, series) {
-        const n = Math.max(Math.abs(Math.round(x1) - Math.round(x0)), Math.abs(Math.round(y1) - Math.round(y0)), 1)
-        for (let i = 0; i <= n; i++) this.set(x0 + ((x1 - x0) * i) / n, y0 + ((y1 - y0) * i) / n, series)
-      },
       row(r, color) {
         const out = []
         for (let x = 0; x < w; x++) {
@@ -653,8 +654,79 @@ export function readyKinds(api) {
     }
   }
 
-  /** A line or a scatter chart: y against x (numbers or times) in braille dots, one color for each series of `color`,
-   *  a line joining a series' points in x order. */
+  /** A line chart: y against x (numbers or times) as a filled strip, its height in eighths of a row at each cell of x,
+   *  read on the line between the rows' points. With `color`, a strip for each series, one under another on one scale,
+   *  named at its left with its last value at its right, so series that cross stay apart, and read in the text copy. */
+  function lines(spec, rows, W) {
+    if (!spec.x || !spec.y) throw new Error('a line chart needs x and y, the columns of its two axes')
+    const xs = field(rows, String(spec.x))
+    const ys = field(rows, String(spec.y))
+    if (ys.type !== 'number') throw new Error(`a line chart's y, ${spec.y}, holds values that are not numbers`)
+    if (xs.type === 'text') throw new Error(`a line chart's x, ${spec.x}, holds values that are neither numbers nor times`)
+    const lg = spec.color ? legendOf(rows.map(r => r[spec.color])) : null
+    const names = lg ? lg.order : ['']
+    const pts = rows.map((r, i) => ({ x: xs.type === 'time' ? (timeOf(xs.vals[i]) || {}).at : xs.vals[i], y: ys.vals[i], s: lg ? flat(r[spec.color]) : '' }))
+      .filter(p => isNum(p.x) && isNum(p.y))
+    if (!pts.length) throw new Error('no row has both an x and a y the line chart can place')
+    const series = names.map(k => pts.filter(p => p.s === k).sort((a, b) => a.x - b.x)).filter(ps => ps.length)
+    const x0 = Math.min(...pts.map(p => p.x))
+    const x1 = Math.max(...pts.map(p => p.x))
+    let y0 = Math.min(...pts.map(p => p.y))
+    let y1 = Math.max(...pts.map(p => p.y))
+    // amounts start at zero unless they all lie far above it
+    if (y0 >= 0 && y0 < y1 / 2) y0 = 0
+    if (y1 === y0) y1 = y0 + 1
+    const many = series.length > 1
+    const lastOf = ps => ps[ps.length - 1].y
+    const labelW = many ? Math.min(Math.max(...names.map(k => cells(k || '(none)'))), Math.floor(W * 0.3)) : 0
+    const valueW = many ? Math.max(...series.map(ps => cells(num(lastOf(ps))))) : 0
+    const gutter = many ? 0 : Math.max(cells(short(y1)), cells(short(y0))) + 1
+    const w = Math.max(8, W - (many ? labelW + valueW + 2 : gutter + 1))
+    const h = many ? Math.max(1, Math.min(4, Math.floor((ROWS - 8) / series.length))) : 8
+    // the line's value at each cell of x, read between the points around the cell's middle; none outside the series
+    const valueAt = (ps, c) => {
+      const x = x1 > x0 ? x0 + ((c + 0.5) / w) * (x1 - x0) : x0
+      const half = (x1 - x0) / w / 2
+      if (x < ps[0].x - half || x > ps[ps.length - 1].x + half) return null
+      if (x <= ps[0].x) return ps[0].y
+      for (let i = 1; i < ps.length; i++) {
+        if (x <= ps[i].x) return ps[i].x > ps[i - 1].x ? ps[i - 1].y + ((ps[i].y - ps[i - 1].y) * (x - ps[i - 1].x)) / (ps[i].x - ps[i - 1].x) : ps[i].y
+      }
+      return lastOf(ps)
+    }
+    // a strip's rows, top first: each cell filled from the bottom to its value, in eighths of a row; where the series
+    // runs at the bottom of the scale, a gray dot on the strip's last row, so the strip shows where the series is
+    const strip = (ps, color) => {
+      const eighths = Array.from({ length: w }, (_, c) => { const v = valueAt(ps, c); return v === null ? null : Math.round(((v - y0) / (y1 - y0)) * h * 8) })
+      return Array.from({ length: h }, (_, k) => {
+        const row = h - 1 - k
+        const runs = []
+        for (const e of eighths) {
+          const ch = e === null || (e <= row * 8 && (row || e > 0)) ? ' ' : e <= 0 ? '·' : e >= (row + 1) * 8 ? '█' : '▁▂▃▄▅▆▇'[e - row * 8 - 1]
+          const look = ch === ' ' ? null : ch === '·' ? colors.gray : color
+          const last = runs[runs.length - 1]
+          if (last && last.look === look) last.text += ch
+          else runs.push({ text: ch, look })
+        }
+        return runs.map(r => (r.look ? { text: r.text, color: r.look } : r.text))
+      })
+    }
+    const lines = []
+    if (many) {
+      series.forEach((ps, n) => strip(ps, lg.color[ps[0].s]).forEach((runs, k) => {
+        const lastRow = k === h - 1
+        lines.push([padEnd(lastRow ? cutter(names.map(x => x || '(none)'), labelW)(ps[0].s || '(none)') : '', labelW), ' ', ...runs, ' ', ...(lastRow ? [bold(padStart(num(lastOf(ps)), valueW))] : [])])
+      }))
+    } else {
+      strip(series[0], colors.cat[0]).forEach((runs, k) => lines.push([gray(padStart(k === 0 ? short(y1) : k === h - 1 ? short(y0) : '', gutter - 1) + ' '), ...runs]))
+    }
+    lines.push(axisLine(ticksOf(x0, x1, xs.type === 'time', xs.form), w, many ? labelW + 1 : gutter))
+    lines.push([gray(padStart(cut(String(spec.x), w), (many ? labelW + 1 : gutter) + w))])
+    const scale = many ? `${spec.y}, each strip from ${short(y0)} to ${short(y1)}` : String(spec.y)
+    return { before: [[gray(cut(scale, W))]], blocks: [{ lines }], unit: 'rows' }
+  }
+
+  /** A scatter chart: y against x (numbers or times) in braille dots, one color for each group of `color`. */
   function plot(spec, rows, W, mark) {
     if (!spec.x || !spec.y) throw new Error(`a ${mark} chart needs x and y, the columns of its two axes`)
     const xs = field(rows, String(spec.x))
@@ -679,13 +751,7 @@ export function readyKinds(api) {
     const px = x => (x1 > x0 ? ((x - x0) / (x1 - x0)) * (w * 2 - 1) : 0)
     const py = y => (y1 > y0 ? (1 - (y - y0) / (y1 - y0)) * (h * 4 - 1) : h * 2)
     const series = lg ? lg.order.map((k, s) => pts.filter(p => p.s === s)) : [pts]
-    series.forEach((ps, s) => {
-      const sorted = [...ps].sort((a, b) => a.x - b.x)
-      sorted.forEach((p, i) => {
-        if (mark === 'line' && i) cv.line(px(sorted[i - 1].x), py(sorted[i - 1].y), px(p.x), py(p.y), s)
-        else cv.set(px(p.x), py(p.y), s)
-      })
-    })
+    series.forEach((ps, s) => ps.forEach(p => cv.set(px(p.x), py(p.y), s)))
     const colorOf = s => (lg ? lg.color[lg.order[s]] : colors.cat[0])
     const lines = []
     for (let r = 0; r < h; r++) {
@@ -694,7 +760,7 @@ export function readyKinds(api) {
     }
     lines.push(axisLine(ticksOf(x0, x1, xs.type === 'time', xs.form), w, gutter + 1))
     if (spec.x) lines.push([gray(padStart(cut(String(spec.x), w), gutter + 1 + w))])
-    const before = lg && lg.order.length > 1 ? legend(lg, W, mark === 'line' ? '━' : '●') : []
+    const before = lg && lg.order.length > 1 ? legend(lg, W, '●') : []
     return { before: [...before, [gray(cut(String(spec.y), W))]], blocks: [{ lines }], unit: 'rows' }
   }
 
@@ -793,8 +859,9 @@ export function readyKinds(api) {
   }
 
   /** A grid of x by y, each cell's value (summed over its rows; a count of rows when color is left out) as a shade:
-   *  ░ ▒ ▓ █ by its quarter of the range, in the palette's sequence, darker for more on a light terminal and brighter on
-   *  a dark one, so the text copy shows the pattern too; an empty cell a gray dot. */
+   *  ░ ▒ ▓ █ by its quarter of the cells, ranked by value, so one large cell leaves the pattern of the rest in sight,
+   *  with the range of each shade in the legend; in the palette's sequence, darker for more on a light terminal and
+   *  brighter on a dark one, and in the text copy too; an empty cell a gray dot. */
   function heatmap(spec, rows, W) {
     if (!spec.x || !spec.y) throw new Error('a heatmap needs x and y, the columns of its two sides, and color, the column of each cell\'s value (left out: a count of rows)')
     const val = spec.color ? String(spec.color) : null
@@ -812,17 +879,17 @@ export function readyKinds(api) {
     // times and numbers in their order
     const xt = field(xk.map(v => ({ v })), 'v')
     if (xt.type !== 'text') xk.sort((a, b) => (timeOf(a)?.at ?? 0) - (timeOf(b)?.at ?? 0))
-    const vals = [...sum.values()]
-    const top = Math.max(...vals, 0)
-    const lowest = Math.min(...vals.filter(v => v > 0), top)
+    // the values that end each quarter of the cells, smallest first
+    const ranked = [...sum.values()].filter(v => v > 0).sort((a, b) => a - b)
+    const ends = [0.25, 0.5, 0.75].map(f => ranked[Math.min(ranked.length - 1, Math.floor(f * ranked.length))])
+    const level = v => (v <= ends[0] ? 0 : v <= ends[1] ? 1 : v <= ends[2] ? 2 : 3)
     const labelW = Math.min(Math.max(...yk.map(k => cells(k || '(none)'))), Math.floor(W * 0.35))
     const room = W - labelW - 1
     const wide = Math.max(1, Math.min(4, Math.floor(room / Math.max(1, xk.length))))
     const fits = xk.length * wide <= room
     const xs = fits ? xk : xk.slice(0, Math.floor(room / wide))
-    const share = v => (top > lowest ? (v - lowest) / (top - lowest) : 1)
-    const shade = v => colors.seq(0.15 + 0.85 * share(v))
-    const glyphOf = v => '░▒▓█'[Math.min(3, Math.floor(share(v) * 4))]
+    const shade = v => colors.seq(0.15 + (0.85 * level(v)) / 3)
+    const glyphOf = v => '░▒▓█'[level(v)]
     const name = cutter(yk.map(y => y || '(none)'), labelW)
     const blocks = yk.map(y => {
       const line = [padEnd(name(y || '(none)'), labelW), ' ']
@@ -838,7 +905,10 @@ export function readyKinds(api) {
     const header = allFit
       ? [gray(' '.repeat(labelW + 1) + xs.map(x => padEnd(x, wide)).join(''))]
       : axisLine([0, 0.33, 0.67, 1].map(f => Math.round(f * (xs.length - 1))).filter((v, i, a) => a.indexOf(v) === i).map(i => ({ x: xs.length > 1 ? (i * wide) / (xs.length * wide - 1 || 1) : 0, text: xs[i] })), xs.length * wide, labelW + 1)
-    const scale = [gray(`${val || 'rows'}: `), ...[lowest, lowest + (top - lowest) * 0.375, lowest + (top - lowest) * 0.625, top].filter((v, i, a) => a.indexOf(v) === i).flatMap((v, i) => [...(i ? ['  '] : []), { text: glyphOf(v), color: shade(v) }, ` ${short(v)}`]), gray('  · none')]
+    // each shade the cells take, with the range of their values
+    const shown = [0, 1, 2, 3].map(l => ranked.filter(v => level(v) === l)).filter(vs => vs.length)
+    const range = vs => (vs[0] === vs[vs.length - 1] ? short(vs[0]) : `${short(vs[0])}-${short(vs[vs.length - 1])}`)
+    const scale = [gray(`${val || 'rows'}: `), ...shown.flatMap((vs, i) => [...(i ? ['  '] : []), { text: glyphOf(vs[0]), color: shade(vs[0]) }, ` ${range(vs)}`]), gray('  · none')]
     const left = xk.length - xs.length
     return {
       before: [scale, [], header],

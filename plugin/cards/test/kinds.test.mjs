@@ -180,15 +180,23 @@ test('bars over a time axis go across as columns under the largest value, summed
   assert.match(narrow.lines[narrow.lines.length - 1], /^\d days summed in each column$/)
 })
 
-test('a line chart draws each series in braille in its color, a legend of them, and the axis labels at their ticks', async () => {
+test('a line chart draws each series as a filled strip on one scale, one under another, named at its left with its last value at its right, the axis labels at their ticks', async () => {
   const r = await load(SAMPLES.line, 70)
-  assert.match(r.lines[2], /^━ no manager · PRs only {2}━ manager · PRs only$/)
-  assert.ok(r.lines.some(l => /[⠁-⣿]/.test(l)))
-  const tree = runs(r.tree)
-  const braille = tree.flat().filter(x => /[⠁-⣿]/.test(x.text)).map(x => x.color)
-  assert.deepEqual([...new Set(braille)].sort(), ['#80b2ea', '#ed9a6b'])
-  const axis = r.lines.find(l => /^\s+0\s+20\s+40/.test(l))
-  assert.ok(axis, r.lines.join('\n'))
+  assert.equal(r.lines[2], 'merged, each strip from 0 to 11')
+  const named = r.lines.filter(l => /^(no manager|manager)/.test(l))
+  assert.equal(named.length, 2)
+  // gray dots where a series runs at zero, then its strip
+  assert.match(named[0], /^no manager · PRs only ·*[▁▂▃▄▅▆▇█]+ 11$/)
+  assert.match(named[1], /^manager · PRs only +·+[▁▂▃▄▅▆▇█]+ +2$/)
+  assert.deepEqual([...new Set(runs(r.tree).flat().filter(x => /^·+$/.test(x.text)).map(x => x.color))], ['#85827a'])
+  // each strip in its series' color, its heights in eighths of a row
+  const filled = runs(r.tree).flat().filter(x => /[▁▂▃▄▅▆▇█]/.test(x.text)).map(x => x.color)
+  assert.deepEqual([...new Set(filled)].sort(), ['#80b2ea', '#ed9a6b'])
+  assert.ok(r.lines.some(l => /^\s+0\s+20\s+40/.test(l)), r.lines.join('\n'))
+  // one series: one taller strip, the axis's top and bottom at its left
+  const one = await load({ ...SAMPLES.line, color: undefined, rows: SAMPLES.line.rows.filter(x => x.run.startsWith('manager')) }, 60)
+  assert.match(one.lines[3], /^2 \s*[▁▂▃▄▅▆▇█ ]*$/)
+  assert.match(one.lines[10], /^0 ·+[▁▂▃▄▅▆▇█]+$/)
 })
 
 test('a dots chart draws a dot for each row at its x, a place of several as how many, and never lets two counts touch and read as one number', async () => {
@@ -208,14 +216,17 @@ test("a chart whose column no row has, or whose mark is none of the chart's, doe
   assert.match((await load({ ...SAMPLES.bar, mark: 'pie' })).error, /a chart's mark is one of bar, line, scatter, dots, range, heatmap, not pie/)
 })
 
-test('a range chart draws each span on one axis in its group\'s color; a heatmap shades its cells by their quarter of the range, so the copy shows the pattern', async () => {
+test('a range chart draws each span on one axis in its group\'s color; a heatmap shades its cells by their quarter of the cells, so the copy shows the pattern', async () => {
   const r = await load(SAMPLES.range, 70)
   assert.match(r.lines[2], /^█ Anthropic {2}█ OpenAI {2}█ Google$/)
   assert.match(r.lines.find(l => l.startsWith('GPT-4.1')), /^GPT-4\.1 +█+─+$/)
   assert.match(r.lines[r.lines.length - 1], /Apr 2025/)
+  // the shades by quarter of the cells, so one large value leaves the pattern of the rest in sight
   const h = await load(SAMPLES.heatmap, 120)
-  assert.match(h.lines[2], /^saves: ░ \d+ {2}▒ \d+ {2}▓ \d+ {2}█ 100 {2}· none$/)
+  assert.match(h.lines[2], /^saves: ░ [\d-]+ {2}▒ [\d-]+ {2}▓ [\d-]+ {2}█ [\d-]+100 {2}· none$/)
   assert.ok(h.lines.find(l => l.startsWith('Mon')).includes('█'), 'the peak in the darkest shade')
+  const skewed = await load({ ...SAMPLES.heatmap, rows: SAMPLES.heatmap.rows.map(x => (x.day === 'Mon' && x.hour === '15' ? { ...x, saves: 5000 } : x)) }, 120)
+  assert.ok(skewed.lines.find(l => l.startsWith('Tue')).includes('▓'), skewed.lines.join('\n'))
 })
 
 test('a timeline puts events in time order, a few lanes as columns side by side, a long wait said as its length, and how long an event with an end lasted', async () => {
