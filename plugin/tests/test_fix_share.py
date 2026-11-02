@@ -76,10 +76,41 @@ def test_with_no_draft_the_text_is_the_persons_words_and_what_the_fixer_said(wor
     q = FX.done(FX.new("explain the terms of my field")["id"], "Explain terms of my field", "It needs the person's words.")
     body = SH.share(q["id"])["body"]
     assert "### What it needs\n\nIt needs the person's words." in body and "asked through `thimble fix`" in body
-    # a fix that is still being made has nothing to share
+    # a fix that left the list has nothing to share
+    FX.remove(q["id"])
+    with pytest.raises(FX.FixError, match=f"fix {q['id']} is removed: there is nothing to share yet"):
+        SH.share(q["id"])
+
+
+def test_a_running_fixs_issue_says_that_claude_is_still_working_on_it(world, monkeypatch, opened, tmp_path):
+    """R1: a fix that Claude still works on goes as an issue too: the person's words, that Claude is still working on
+    it, and what it does so far once its fixer ended, never that Claude could not do it in code. Once it is done, its
+    issue says how it was fixed, as any finished fix's does."""
+    monkeypatch.setattr(FX, "session_terms", lambda st: {})
     w = FX.new("make the minimap smaller")
-    with pytest.raises(FX.FixError, match="nothing to share yet"):
-        SH.share(w["id"])
+    r = SH.share(w["id"])
+    assert r["text"] == "record" and r["title"] == "make the minimap smaller"
+    assert r["body"] == ("### What was wrong\n\nmake the minimap smaller\n\n### What it does so far\n\n"
+                         "Claude is still working on this fix.\n\n"
+                         "thimble 0.10.2 · terminal · asked through `thimble fix`\n")
+    assert query(r["url"]) == {"title": "make the minimap smaller", "body": r["body"]}
+    # its fixer ended and its tests run (until the gate is there, at most 20 s): it is still working
+    gate = tmp_path / "tests-may-end"
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", f"for i in $(seq 400); do [ -e '{gate}' ] && break; sleep 0.05; done")
+    p = Path(w["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("coverage", "read"))
+    assert FX.done(w["id"], "Bar says read", "The bar's coverage item says read.", within=0)["testing"]
+    r = SH.share(w["id"])
+    assert r["title"] == "make the minimap smaller" and query(r["url"])["body"] == r["body"]
+    assert r["body"].startswith("### What was wrong\n\nmake the minimap smaller\n\n### What it does so far\n\n"
+                                "Claude is still working on this fix.\n\nThe bar's coverage item says read.\n\n")
+    assert "How it was fixed" not in r["body"] and r["body"].rstrip().endswith("· asked through `thimble fix`")
+    gate.touch()
+    assert FX.done(w["id"], within=30)["state"] == "ready"
+    r = SH.share(w["id"])
+    assert r["title"] == "Bar says read" and "still working" not in r["body"]
+    assert r["body"] == ("### What was wrong\n\nmake the minimap smaller\n\n### How it was fixed\n\n"
+                         "The bar's coverage item says read.\n\nthimble 0.10.2 · terminal · fixed by `thimble fix`\n")
 
 
 def test_the_link_is_githubs_new_issue_page_with_the_text_encoded(world, monkeypatch, opened):

@@ -4000,7 +4000,7 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         nxt.append((f"thimble fix on {off_ids[0]}", "turn a fix on (it asks for your key here)"))
     if can_share():
         from .share import STATES  # noqa: PLC0415 — share imports this module
-        # the first fix that thimble file issue takes: not one Claude still works on, nor one an update set aside
+        # the first fix that thimble file issue takes: one Claude still works on too, not one an update set aside
         shared = [r["id"] for r in fixes if r.get("state") in STATES]
         if shared:
             nxt.append((f"thimble file issue {shared[0]}",
