@@ -22,7 +22,8 @@ FINGERPRINTS = Path(__file__).resolve().parent / "fixtures" / "renders.json"
 
 # the made-up values of the calls whose prompts are fingerprinted with the values a call gives
 MARKS = "1. [12] in: We saw [12] runs."
-FIX = {"id": 3, "title": "Bar says rows", "words": ["make the bar say rows", "and bold"], "work": "/made-up/fixes/work/3"}
+FIX = {"id": 3, "title": "Bar says rows", "words": ["make the bar say rows", "and bold"],
+       "work": "/made-up/fixes/work/3"}
 LOOK = {"lenses": ["explain", "heads"], "row": "(none)",
         "msgs": [{"kind": "answer", "text": "The clean stage drops about 400 trips a night.\n\nIt drops short trips.",
                   "turnNo": 2, "prompt": {"text": "what does the clean stage drop?", "by": "composer"}}],
@@ -58,7 +59,8 @@ def _browser() -> dict[str, str]:
 
 def test_what_each_mode_reads_is_as_its_fingerprints_say(monkeypatch):
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    texts = {**{f"terminal {k}": v for k, v in _terminal().items()}, **{f"browser {k}": v for k, v in _browser().items()}}
+    texts = {**{f"terminal {k}": v for k, v in _terminal().items()},
+             **{f"browser {k}": v for k, v in _browser().items()}}
     now = {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(texts.items())}
     if os.environ.get("THIMBLE_WRITE_RENDERS"):
         FINGERPRINTS.write_text(json.dumps(now, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
