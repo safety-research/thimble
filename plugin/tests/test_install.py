@@ -1004,3 +1004,45 @@ def test_claude_knows_0_9_by_what_the_install_script_finds():
     step = text.split(" 2. thimble 0.9 is here", 1)[1].split(" 3. ", 1)[0]
     when = step.split("Before you remove anything", 1)[0]
     assert "`scripts/install.sh` (step 3) stops with what it found" in when and "~/" not in when, when
+
+
+def test_a_thimble_link_into_a_folder_that_is_gone_is_called_that_and_its_fix_is_still_rm_f(tmp_path):
+    """A ~/.local/bin/thimble that links into a thimble folder that is gone (a 0.10 clone installed with --local, then
+    deleted) says nothing of which thimble it was. The install stops and calls it what it is, a link to a thimble folder
+    that is gone, never 0.9's thimble command, and its fix is rm -f of the link, as before. A link to the command of a
+    0.9 tree is still 0.9's."""
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "node", "echo v22.20.0\n")
+    stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".local" / "bin" / "thimble").symlink_to(home / "thimble" / "plugin" / "bin" / "thimble")
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable,
+           "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"), "THIMBLE_HOME": str(tmp_path / "thimble"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
+
+    def install():
+        return subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
+                              capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+
+    p = install()
+    assert p.returncode == 1, p.stdout + p.stderr
+    lines = p.stdout.splitlines()
+    assert lines[:2] == ["~/.local/bin/thimble is a link to a thimble folder that is gone. Remove it before you install "
+                         "0.10.", "Nothing was installed."], lines
+    assert "  - ~/.local/bin/thimble, a link to ~/thimble/plugin/bin/thimble, in a thimble folder that is gone" in lines
+    fix = lines.index("To remove it, run this:")
+    assert lines[fix + 1:fix + 3] == ["  rm -f ~/.local/bin/thimble", "Then run scripts/install.sh again, and restart the "
+                                      "claude sessions that are open (or run /reload-plugins"], lines
+    # 0.9 only in the name of the option that runs the fix
+    assert "0.9" not in p.stdout.split("Or run scripts/install.sh --remove-0.9", 1)[0], p.stdout
+    # what --remove-0.9 runs: the rm -f alone
+    cmds = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "thimble09.py"), "commands"], cwd="/",
+                          capture_output=True, text=True, env=env).stdout.splitlines()
+    assert [c.split("\t")[0] for c in cmds] == ["rm -f ~/.local/bin/thimble"], cmds
+    # the link to the command of a 0.9 tree that is here: 0.9's
+    stub(home / "thimble" / "plugin" / "bin" / "thimble", "echo 'thimble uninstall'\n")
+    (home / "thimble" / "backend").mkdir()
+    lines = install().stdout.splitlines()
+    assert lines[0] == "thimble 0.9 left files here, which 0.10 does not use. Remove them before you install 0.10.", lines
+    assert "  - ~/.local/bin/thimble, 0.9's thimble command, a link to ~/thimble/plugin/bin/thimble" in lines, lines
