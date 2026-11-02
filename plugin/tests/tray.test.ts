@@ -556,7 +556,7 @@ for (const [fix, offered] of [['ok', true], ['ask', true], [null, false]] as con
   test(`a citation whose check could not read a file (${fix ?? 'a rule refused it'}): the card names the file under why, and x ${offered ? 'repair is offered, and x asks for the repair' : 'is not offered, and is typed'}`, CITES, async ($, on) => {
     // Claude Code types a key thimble does not take into the box
     on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText ?? ''}${e.text.slice(e.end)}`, cursor: e.start + String(e.inputText ?? '').length }) as never)
-    const { clock, spawns } = await resumed($, on, { ...UNREAD, unread: [{ file: ELSEWHERE, fix }] }, `s-tray-unread-${fix}`)
+    const { clock, spawns } = await resumed($, on, { ...UNREAD, unread: [{ tool: 'Read', file: ELSEWHERE, fix }] }, `s-tray-unread-${fix}`)
     expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
     const drawn = all(await $.ui.render(above()))
     const band = textOf(drawn)
@@ -570,6 +570,14 @@ for (const [fix, offered] of [['ok', true], ['ask', true], [null, false]] as con
     expect(spawns.map(s => s.description)).toEqual(offered ? ['checking a citation again (x)'] : [])
   })
 }
+
+test('a citation whose check Claude Code refused both a Read and a Grep of one file: the card names the file once, and x repair is offered', CITES, async ($, on) => {
+  await resumed($, on, { ...UNREAD, unread: [{ tool: 'Read', file: ELSEWHERE, fix: 'ok' }, { tool: 'Grep', file: ELSEWHERE, fix: 'ok' }] }, 's-tray-unread-twice')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const drawn = all(await $.ui.render(above()))
+  expect(drawn.filter(n => n.type === 'Text' && textOf(n) === `The check could not read ${ELSEWHERE}.`).length).toBe(1)
+  expect(textOf(drawn)).toContain('x repair')
+})
 
 const WRONG = { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed.' }
 

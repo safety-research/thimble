@@ -34,12 +34,13 @@
 //                             marks/register.ts): a checker's spawn of thimble's own, once the person gave that OK,
 //                             where Claude Code itself would ask, never where a rule, a hook, a setting or another
 //                             plugin decides
-//   readEnded($, e, r)        a checker's read of a file that Claude Code refused (tool.call, marks/register.ts): the
-//                             file its check could not read, and what lets it (readFix); endCheck gives them to the
-//                             citations the check leaves failed (MarkItem `unread`)
+//   readEnded($, e, r)        a checker's read of one file that Claude Code refused (tool.call, marks/register.ts): the
+//                             file its check could not read, by the tool that read it (oneRead), and what lets it
+//                             (readFix); endCheck gives them to the citations the check leaves failed (MarkItem
+//                             `unread`)
 //   allowsRead($, e, v)       whether thimble answers allow to Claude Code's verdict `v` on a checker's read (tool.check):
-//                             of a file the person let thimble's checks read this session (repairOk), where Claude Code
-//                             itself would ask
+//                             the same tool's read of one file the person let thimble's checks read this session
+//                             (repairOk), where Claude Code itself would ask
 //   awaitsCheck($, row)       whether a row of main's is in the turn that runs or the one whose check starts now
 //   repairOf($, row, n)       x on a failed citation (tray): what a check of that one mark again needs; for a mark
 //                             whose check did not run, the check itself
@@ -73,9 +74,11 @@
 // A check whose read of a file Claude Code refused leaves the citations it fails with that file (readEnded, MarkItem
 // `unread`): the citation's card names it, and no repair starts by itself (autoRepair), since the same refusal would stop
 // it. Where Claude Code asked nobody (don't ask mode, no verdict in auto mode, no prompt it could show), x gives the
-// person's OK for that file, and thimble answers allow on its checks' reads of it (allowsRead); where it asked the person,
-// who did not say yes, x starts the repair, whose read Claude Code asks about again in its own dialog; where a rule, a
-// setting or auto mode's classifier refused it, x is not offered.
+// person's OK for that one file, read by the same tool, and thimble answers allow on its checks' reads of it
+// (allowsRead); where it asked the person, who did not say yes, x starts the repair, whose read Claude Code asks about
+// again in its own dialog; where a rule, a setting or auto mode's classifier refused it, x is not offered. Only a read
+// of one file counts (oneRead): a Read, or a Grep of one regular file. A Grep of a folder reads each file in it, and a
+// Glob lists a folder, so their refusal names no file, and no OK covers them.
 //
 // Claude Code decides the fork's spawn as it decides a call of Claude's (Claude Code 2.1.307). In auto mode it lets a
 // plugin's own call run without auto mode's classifier, unless the person's settings give the classifier rules of
@@ -97,8 +100,8 @@
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent),
 // checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about), checksRefusing (the line
-// of a refusal that stands for the session), checksReads (the files the person let thimble's checks read); the marks
-// themselves are in store.ts
+// of a refusal that stands for the session), checksReads (the files the person let thimble's checks read, each by the
+// tool that reads it); the marks themselves are in store.ts
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -114,7 +117,7 @@ import { fill } from '../prompts/registry.mjs'
 import { choiceOf, claudeCites } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
 import { marksIn, plainSentence, sentenceOf } from './message.js'
-import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, notRun, type Reply, replyKeyOf, replyOf, type Unread } from './store'
+import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, notRun, type OneRead, type Reply, replyKeyOf, replyOf, type Unread } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -442,25 +445,27 @@ export type RepairOk = { give: () => Promise<void>; undo: () => Promise<void> }
 /** x on failed citation `m`: the person's OK that its check needs first. While a refusal that stands for the session
  *  stands (refusedLine) and its line offers the OK, the OK for thimble's checks this session, as g gives it; and for each
  *  file its check could not read where Claude Code asked nobody (MarkItem `unread`, `ok`), the OK for thimble's checks
- *  to read that file (allowsRead). A file Claude Code asked the person about needs no OK here: Claude Code asks again
- *  as the repair reads it. Null where nothing the person does here lets the check run: a refusal no OK answers (its
- *  line says why), a file nobody here can let it read (the citation's card names it), or a citation that did not fail;
- *  the tray and the Claims pane offer x only where it is not null. */
+ *  to read that file with the tool that was refused (allowsRead). A file Claude Code asked the person about needs no OK
+ *  here: Claude Code asks again as the repair reads it. Null where nothing the person does here lets the check run: a
+ *  refusal no OK answers (its line says why), a file nobody here can let it read (the citation's card names it), or a
+ *  citation that did not fail; the tray and the Claims pane offer x only where it is not null. */
 export async function repairOk($: Engine, m: MarkItem | null): Promise<RepairOk | null> {
   if (m?.status !== 'failed') return null
   const line = ((await $.state.get(REFUSING)).value ?? null) as Line | null
   if ((line && !line.offers) || m.unread?.some(u => u.fix === null)) return null
   const allow = !!line && !(await checksAllowed($))
-  const have = ((await $.state.get(FILES)).value ?? []) as string[]
-  const files = [...new Set((m.unread ?? []).filter(u => u.fix === 'ok' && !have.includes(u.file)).map(u => u.file))]
+  const have = ((await $.state.get(FILES)).value ?? []) as OneRead[]
+  // each read once, and only one not let before, so a word after x takes back only what x gave
+  const reads = (m.unread ?? []).filter(u => u.fix === 'ok').map(({ tool, file }) => ({ tool, file }))
+    .filter((r, k, all) => !have.some(h => sameRead(h, r)) && all.findIndex(o => sameRead(o, r)) === k)
   return {
     give: async () => {
       if (allow) await $.state.set(ALLOWED, true)
-      if (files.length) await update($, FILES, cur => [...new Set([...(cur ?? []), ...files])])
+      if (reads.length) await update($, FILES, cur => [...(cur ?? []), ...reads.filter(r => !(cur ?? []).some(h => sameRead(h, r)))])
     },
     undo: async () => {
       if (allow) await $.state.set(ALLOWED, null)
-      if (files.length) await update($, FILES, cur => (cur ?? []).filter(f => !files.includes(f)))
+      if (reads.length) await update($, FILES, cur => (cur ?? []).filter(h => !reads.some(r => sameRead(r, h))))
     },
   }
 }
@@ -519,34 +524,50 @@ export function readFix(said: string, cowork = false): Unread['fix'] | undefined
  *  leaves failed. */
 const unreadBy = new Map<string, Unread[]>()
 
-/** The tools a check reads files with, each naming the file it reads (readFile). */
-const FILE_TOOLS = new Set(['Read', 'Grep', 'Glob'])
-
-/** The file a checker's read names: Read's `file_path`, Grep's and Glob's `path` ('' for none: the shell's folder). */
-function readFile(tool: unknown, a: { file_path?: unknown; path?: unknown } | undefined): string {
-  return String((String(tool) === 'Read' ? a?.file_path : a?.path) ?? '')
+/** The one file a checker's read names, by the tool that reads it, or null where it names no one file: Read's
+ *  `file_path`, and Grep's `path`, which is one file only when it is a regular file (readsAlone). A Grep with no path
+ *  reads the shell's folder. A Glob lists a folder (its `path` must be one), and its absolute `pattern` names a folder of
+ *  its own, as hooks/temp_allow.py says. The path is absolute, as the citation's card shows it: a relative one names a
+ *  file from the shell's folder of the moment. */
+function oneRead(tool: unknown, a: { file_path?: unknown; path?: unknown } | undefined): OneRead | null {
+  const t = String(tool)
+  const file = t === 'Read' ? a?.file_path : t === 'Grep' ? a?.path : undefined
+  return typeof file === 'string' && file.startsWith('/') ? { tool: t as OneRead['tool'], file } : null
 }
 
-/** A checker's read of a file as its call ended (tool.call, marks/register.ts; `r` its result: Claude Code's error, its
- *  words as `text`, or another plugin's `deny`): one Claude Code refused, by a permission (readFix), is noted with what
- *  lets the check read the file, for endCheck. */
+/** Whether a read of one file reads it alone: a Read does; a Grep does when its path is a regular file, not a folder,
+ *  whose every file it would read. */
+async function readsAlone($: Engine, r: OneRead): Promise<boolean> {
+  return r.tool === 'Read' || (await $.fs.stat(r.file).catch(() => null))?.kind === 'file'
+}
+
+/** Whether two reads are one tool's reads of one path. */
+function sameRead(a: OneRead, b: OneRead): boolean {
+  return a.tool === b.tool && a.file === b.file
+}
+
+/** A checker's read as its call ended (tool.call, marks/register.ts; `r` its result: Claude Code's error, its words as
+ *  `text`, or another plugin's `deny`): a read of one file (oneRead, readsAlone) that Claude Code refused, by a
+ *  permission (readFix), is noted with what lets the check read the file, for endCheck. */
 export async function readEnded($: Engine, e: { agentId?: string; tool: unknown; file_path?: unknown; path?: unknown }, r: { deny?: unknown; isError?: unknown; text?: unknown } | undefined): Promise<void> {
-  const file = readFile(e.tool, e)
-  if (!e.agentId || !file || !FILE_TOOLS.has(String(e.tool))) return
+  const read = oneRead(e.tool, e)
+  if (!e.agentId || !read) return
   const said = String(r?.deny ?? (r?.isError ? r.text ?? '' : ''))
   const fix = said ? readFix(said, await remoteCowork($)) : undefined
-  if (fix === undefined) return
+  if (fix === undefined || !(await readsAlone($, read))) return
   const had = unreadBy.get(e.agentId) ?? []
-  if (!had.some(u => u.file === file)) unreadBy.set(e.agentId, [...had, { file, fix }])
+  if (!had.some(u => sameRead(u, read))) unreadBy.set(e.agentId, [...had, { ...read, fix }])
 }
 
 /** Whether thimble answers allow at tool.check (marks/register.ts) to Claude Code's verdict `v` on a checker's read `e`:
- *  of a file the person let thimble's checks read this session (x, repairOk), named as the refused read named it, where
- *  Claude Code itself would ask. A deny, and an ask a rule, a hook, a setting or another plugin made, stand. */
+ *  a read of one file (oneRead, readsAlone) that the person let thimble's checks make this session (x, repairOk), by
+ *  the same tool and named as the refused read named it, where Claude Code itself would ask. A deny, and an ask a rule,
+ *  a hook, a setting or another plugin made, stand. */
 export async function allowsRead($: Engine, e: { tool?: unknown; input?: unknown }, v: Verdict): Promise<boolean> {
-  if (v.decision !== 'ask' || v.plugin !== undefined || v.rule || v.hook || v.setting || !FILE_TOOLS.has(String(e.tool))) return false
-  const file = readFile(e.tool, e.input as { file_path?: unknown; path?: unknown } | undefined)
-  return !!file && (((await $.state.get(FILES)).value ?? []) as string[]).includes(file)
+  if (v.decision !== 'ask' || v.plugin !== undefined || v.rule || v.hook || v.setting) return false
+  const read = oneRead(e.tool, e.input as { file_path?: unknown; path?: unknown } | undefined)
+  if (!read || !(((await $.state.get(FILES)).value ?? []) as OneRead[]).some(h => sameRead(h, read))) return false
+  return readsAlone($, read)
 }
 
 /** The marks split into the forks' shares, in order: one share up to PER_FORK marks, else as many as PER_FORK gives

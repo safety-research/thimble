@@ -7,8 +7,8 @@ declare module 'claude-code' {
       /** a reply's marks and their checks, by the reply's key, its last text row (a session.append uuid of main's; the
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
        *  sentence, status: 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
-       *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair?, narrowed?, rewrite?, unread?: [{ file,
-       *  fix: 'ok' | 'ask' | null }] }] } (marks/store.ts Reply), kept on disk too */
+       *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair?, narrowed?, rewrite?, unread?: [{ tool:
+       *  'Read' | 'Grep', file, fix: 'ok' | 'ask' | null }] }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
       /** the reply each text row with marks belongs to, by the row: the reply's key */
       marksRow: StateFamily<string>
@@ -31,10 +31,10 @@ declare module 'claude-code' {
        *  verdict, don't ask mode), until a check starts: { text, notice, kind, offers? }; while it stands, x gives the OK
        *  it offers, and is not offered where it offers none (marks/checker.ts repairOk) */
       checksRefusing: { text: string; notice: boolean; kind: string; offers?: boolean } | null
-      /** the files the person let thimble's checks read this session (x on a citation whose check could not read one,
-       *  where Claude Code asked nobody): thimble answers Claude Code's own ask on a checker's read of one with allow
-       *  (marks/checker.ts allowsRead) */
-      checksReads: string[] | null
+      /** the files the person let thimble's checks read this session, each by the tool its check was refused (x on a
+       *  citation whose check could not read one, where Claude Code asked nobody): thimble answers Claude Code's own ask
+       *  on a checker's read of one by that tool with allow (marks/checker.ts allowsRead) */
+      checksReads: { tool: 'Read' | 'Grep'; file: string }[] | null
 
       // ---- cards (cards/)
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,

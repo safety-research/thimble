@@ -702,4 +702,8 @@ test('a citation not checked yet (auto cite) reads "not checked", never "× fail
   // a failed one says why
   const bad = cardOf({ label: '419', status: 'failed', reason: 'The forge counts 412. The rest match.', row: 'r1', n: 3 }, 60).rows.map(r => r.map(x => x.s).join('')).join('\n')
   assert.match(bad, /× failed[\s\S]*The forge counts 412\./)
+  // and each file its check could not read, once, whatever tools Claude Code refused on it
+  const unread = [{ tool: 'Read', file: '/made-up/elsewhere/runs.csv', fix: 'ok' }, { tool: 'Grep', file: '/made-up/elsewhere/runs.csv', fix: 'ok' }]
+  const blocked = cardOf({ label: '419', status: 'failed', reason: 'The forge counts 412.', row: 'r1', n: 3, unread }, 60).rows.map(r => r.map(x => x.s).join(''))
+  assert.deepEqual(blocked.filter(r => r.startsWith('The check could not read')), ['The check could not read /made-up/elsewhere/runs.csv.'])
 })

@@ -55,10 +55,12 @@ export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
   status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true; unread?: Unread[]
 }
-/** A file a check could not read, and what lets it read the file (checker.ts readFix): `ok`, the person's OK, where
- *  Claude Code asked nobody about it; `ask`, Claude Code's own ask again, which the person did not say yes to; null,
- *  nothing the person can do here (a rule, a setting or auto mode's classifier refused it). */
-export type Unread = { file: string; fix: 'ok' | 'ask' | null }
+/** A read of one file (checker.ts oneRead): a Read of it, or a Grep of it alone, by its absolute path. */
+export type OneRead = { tool: 'Read' | 'Grep'; file: string }
+/** A file a check could not read, by the tool that read it, and what lets it read the file (checker.ts readFix): `ok`,
+ *  the person's OK, where Claude Code asked nobody about it; `ask`, Claude Code's own ask again, which the person did not
+ *  say yes to; null, nothing the person can do here (a rule, a setting or auto mode's classifier refused it). */
+export type Unread = OneRead & { fix: 'ok' | 'ask' | null }
 /** `thread`: the reply is a side thread's answer (threads/thread.ts), by its agent and what it is about. */
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[]; thread?: { agentId: string; about: string } }
 /** What one row draws: its own marks, and the reply's counts. */

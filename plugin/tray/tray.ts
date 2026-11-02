@@ -849,8 +849,8 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
-  // a file its check could not read: what x asks for, or why no x
-  if (m.status === 'failed') for (const [k, u] of (m.unread ?? []).entries()) dim(`unread-${k}`, unreadLine(u.file))
+  // each file its check could not read, once, whatever tools Claude Code refused on it: what x asks for, or why no x
+  if (m.status === 'failed') for (const [k, file] of [...new Set((m.unread ?? []).map(u => u.file))].entries()) dim(`unread-${k}`, unreadLine(file))
   // a check that did not run: x starts it
   const unrun = m.status === 'failed' && m.failedBy === 'none'
   if (canRepair(m, runs)) top.push(repairRow(els, m))
