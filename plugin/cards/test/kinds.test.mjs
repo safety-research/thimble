@@ -117,6 +117,13 @@ test('a table sizes each column to its longest value, puts numbers at the right 
   assert.deepEqual(lines[4].filter(x => x.text === '×').map(x => x.color), ['#f59183'])
 })
 
+test('every ✓ in a cell is green and every × that marks a failure red, but a multiplication sign keeps the text\'s color', async () => {
+  const r = await load({ kind: 'table', answer: 'Statuses.', rows: [{ day: 'Mon', statuses: '✓ ✓ forgiven ×missed ✓', note: '2× faster, 3 × 4' }] }, 80)
+  const glyphs = runs(r.tree)[3].filter(x => /^[✓×]$/.test(x.text)).map(x => [x.text, x.color])
+  assert.deepEqual(glyphs, [['✓', '#67cda8'], ['✓', '#67cda8'], ['×', '#f59183'], ['✓', '#67cda8']])
+  assert.ok(runs(r.tree)[3].some(x => /2× faster, 3 × 4/.test(x.text) && !x.color))
+})
+
 test('a table too wide for the card cuts its text, the widest column first, each value keeping the part that tells it apart, and names the columns left out', async () => {
   const rows = ['tests/test_streaks_forgiveness.py', 'tests/test_streaks_archive.py', 'tests/test_reminders.py'].map((file, i) => ({ file, tests: 10 + i, error: i ? 'KeyError: archived_at in the habit loader' : 'AssertionError: expected streak 4, got 3', a: 1, b: 2, c: 3, d: 4, e: 5 }))
   const r = await load({ kind: 'table', answer: 'Three files.', rows }, 40)

@@ -181,14 +181,26 @@ export function readyKinds(api) {
     return null
   }
 
-  /** A text whose first glyph is ✓ or ×, as runs: the glyph in its color, the rest as it is. */
-  function glyphRuns(text, style) {
+  /** A text in parts, each ✓ in the palette's green and each × or ✗ in its red where it marks a failure: at the start of
+   *  a word, and not a multiplication sign (2×, 3 × 4). */
+  function glyphParts(text) {
     const t = String(text)
-    const m = /^([✓×✗])/.exec(t)
-    if (!m) return [style ? { text: t, ...style } : t]
-    const rest = t.slice(m[1].length)
-    return [{ text: m[1], color: m[1] === '✓' ? colors.good : colors.bad }, ...(rest ? [style ? { text: rest, ...style } : rest] : [])]
+    const out = []
+    let at = 0
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i]
+      const fails = (ch === '×' || ch === '✗') && !/[\p{L}\p{N}]/u.test(t[i - 1] || '') && !(/\p{N}$/u.test(t.slice(0, i).trimEnd()) && /^\p{N}/u.test(t.slice(i + 1).trimStart()))
+      if (ch !== '✓' && !fails) continue
+      if (i > at) out.push({ text: t.slice(at, i), style: null })
+      out.push({ text: ch, style: { color: ch === '✓' ? colors.good : colors.bad } })
+      at = i + 1
+    }
+    if (at < t.length) out.push({ text: t.slice(at), style: null })
+    return out
   }
+
+  /** A text as runs of a line, its ✓ and × in their colors (glyphParts). */
+  const glyphRuns = text => glyphParts(text).map(p => (p.style ? { text: p.text, ...p.style } : p.text))
 
   // ------------------------------------------------------------------------------------------------- numbers and times
 
@@ -379,9 +391,7 @@ export function readyKinds(api) {
     const blocks = body.map(b => ({
       lines: [b.slice(0, shown).flatMap((v, i) => {
         const t = cell(v, i)
-        const color = !numeric[i] && (v === '✓' || v === '×' || /^[✓×✗]/.test(v)) ? (v.startsWith('✓') ? colors.good : colors.bad) : null
-        const runs = color ? [{ text: t.slice(0, 1), color }, t.slice(1)] : [t]
-        return [...(i ? ['  '] : []), ...runs]
+        return [...(i ? ['  '] : []), ...(numeric[i] ? [t] : glyphRuns(t))]
       })],
     }))
     const left = cols.slice(shown)
@@ -893,8 +903,8 @@ export function readyKinds(api) {
       if (gap > 0 && gap >= 4 * usual && gap >= span / 10 && evs.length > 2) {
         lines.push([' '.repeat(timeW + 2), ...tracks, ...(asColumns ? [] : [gray('⋮ ')]), gray(`${lasting(gap, form)} later`)])
       }
-      // its words, a ✓ or × first in its color, and how long it lasted after them
-      const words = wordsOf([{ text: e.label || '(no words)', look: 'plain' }]).map((w, j) => (j || !/^[✓×✗]$/.test(w[0].text) ? w : [{ text: w[0].text, color: w[0].text === '✓' ? colors.good : colors.bad }]))
+      // its words, their ✓ and × in their colors, and how long it lasted after them
+      const words = wordsOf(glyphParts(e.label || '(no words)'))
       if (e.e && e.t) words.push([gray('·')], ...lasting(e.e.at - e.t.at, form).split(' ').map(x => [gray(x)]))
       const lane = lanes.indexOf(e.lane)
       flowWords(words, textW, '', '').forEach((w, j) => {
@@ -964,7 +974,7 @@ export function readyKinds(api) {
     const lines = []
     const drawn = new Set()
     const plain = t => wordsOf([{ text: t, look: 'plain' }])
-    const named = n => plain(n.label).map((w, j) => (j || !/^[✓×✗]/.test(w[0].text) ? w : [...glyphRuns(w[0].text), ...w.slice(1)]))
+    const named = n => wordsOf(glyphParts(n.label))
     // lines that start with `first` and go on under `rest`, words wrapped between them
     const put = (words, first, rest) => {
       const lead = widthOf(first)
@@ -1059,21 +1069,22 @@ export function readyKinds(api) {
 
   const styleOf = look => (look === 'quote' ? { bold: true } : look === 'context' ? { color: colors.gray } : null)
 
-  /** Parts of one look each as words: each word a list of runs, so a word a passage starts or ends inside keeps both
-   *  looks with no space between them. */
+  /** Parts of one look each ({text, look}, or {text, style}) as words: each word a list of runs, so a word a passage
+   *  starts or ends inside keeps both looks with no space between them. */
   function wordsOf(parts) {
     const words = []
     let cur = null
-    for (const p of parts) {
+    parts.forEach((p, k) => {
+      const style = p.style !== undefined ? p.style : styleOf(p.look)
       for (const ch of p.text) {
         if (/\s/.test(ch)) { cur = null; continue }
         if (!cur) { cur = []; words.push(cur) }
         const last = cur[cur.length - 1]
-        if (last && last.look === p.look) last.text += ch
-        else cur.push({ text: ch, look: p.look })
+        if (last && last.k === k) last.text += ch
+        else cur.push({ k, text: ch, ...(style || {}) })
       }
-    }
-    return words.map(w => w.map(r => ({ text: r.text, ...(styleOf(r.look) || {}) })))
+    })
+    return words.map(w => w.map(({ k, ...r }) => r))
   }
 
   /** Lines of a file with their numbers, at most 8, from the line before the first passage on: the passages bold, the
