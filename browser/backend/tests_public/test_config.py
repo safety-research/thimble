@@ -157,7 +157,8 @@ def test_every_role_resolves_to_a_full_model_id_and_an_explicit_effort(tmp_path,
                       "refusal": {"model": "claude-sonnet-5", "effort": "low"}}})
     models = config.models_for(None)
     assert models["orient"]["effort"] == "xhigh", "a stored ultracode runs at xhigh"
-    assert (models["subagents"]["model"], models["subagents"]["effort"]) == ("claude-sonnet-5", "medium")
+    assert (models["subagents"]["model"], models["subagents"]["effort"]) == ("claude-sonnet-5-5", "medium"), \
+        "sonnet is Sonnet 5.5"
     assert "follows" not in models["subagents"]
     assert models["writer"]["effort"] == "max" and not models["writer"]["fast"]
     assert models["dev"]["fast"], "code tickets keep the dev row's fast mode"
