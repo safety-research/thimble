@@ -68,7 +68,7 @@ test('v at an empty prompt spawns the designer fork with designer.md once the wo
   expect(w.spawns[0].description).toBe('card of the last answer (v)')
 })
 
-test('with Cards on demand (as on-demand mode sets it), the bar still names v, and v still spawns the designer fork', { options: { cards: 'on demand' } }, async ($, on) => {
+test('with Cards on demand (as Minimal sets it), the bar still names v, and v still spawns the designer fork', { options: { cards: 'on demand' } }, async ($, on) => {
   const w = world(on)
   await start($)
   await answer($)

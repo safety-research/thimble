@@ -172,10 +172,10 @@ The browser workbench:
 
 - **The plugin's features.** Citations, Cards (`v`), Rewrite (`s`), Catch-up (`b`), Explainers, Heads-ups, Claims
   (`w`), Labels (`l`) and Coverage (`r`) can each be turned off, and Citations, Cards, Explainers, Heads-ups and
-  Claims can come with each answer or only when you ask; On demand sets the first four to when you ask and turns
-  Claims, Labels and Coverage off, so nothing runs in the background. Click `thimble` at the left of the bar or run
-  `/thimble-settings`. Claude Code keeps the values in its settings (`pluginConfigs`). With Citations off, the checker
-  makes no model call.
+  Claims can come with each answer or only when you ask. Minimal gives plain answers, whose citations, explainers and
+  heads-ups show only while the pointer is over their paragraph; Claude draws cards only when you ask, and Rewrite,
+  Catch-up, Claims, Labels and Coverage are off. Click `thimble` at the left of the bar or run `/thimble-settings`.
+  Claude Code keeps the values in its settings (`pluginConfigs`). With Citations off, the checker makes no model call.
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).

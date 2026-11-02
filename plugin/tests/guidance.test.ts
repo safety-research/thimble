@@ -100,11 +100,12 @@ test('with Citations manual, the guidance ends with one sentence that says what 
   expect(text.endsWith('These come only when the analyst asks: citations (they select words and press c).')).toBe(true)
 })
 
-test('with on-demand mode on (Cards on demand, and citations, explainers and heads-ups when asked), the guidance keeps the Cards section and ends with a sentence that says to draw a card only when the analyst asks, then one that names what else they ask for', { options: { minimal: true, ...PRESET } }, async ($, on) => {
+test('with Minimal on, the guidance keeps the Citing claims and Cards sections and ends with the one sentence that says to draw a card only when the analyst asks', { options: { minimal: true, ...PRESET } }, async ($, on) => {
   const text = await thimbleText($, world(on))
+  expect(text).toContain('## Citing claims')
   expect(text).toContain('## Cards\n\nDraw a card with the `card` tool.')
-  expect(text.endsWith('Draw a card only when the analyst asks for one. These come only when the analyst asks: citations (they select words and press c), explainers (e) and heads-ups (h).')).toBe(true)
-  expect(text).not.toContain('mode is on')
+  expect(text.endsWith('Draw a card only when the analyst asks for one.')).toBe(true)
+  expect(text).not.toContain('These come only')
 })
 
 test('with every mode after each reply, the guidance adds no sentence of modes', { options: { citations: 'auto cite' } }, async ($, on) => {

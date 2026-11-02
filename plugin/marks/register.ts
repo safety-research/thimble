@@ -82,9 +82,9 @@ export function looksByWords(marks: { words: string }[], items: MarkItem[], runs
   })
 }
 
-/** The looks of a row's marks while Citations is manual (as on-demand mode sets it): the citations Claude
- *  wrote are quiet (view.ts MarkLook), the words the analyst cited with c stand as they are. `own`: the looks follow
- *  the items by place (the text is Claude's own), else by their numbers. In any other mode the looks as they are. */
+/** The looks of a row's marks while Citations is manual: the citations Claude wrote are quiet (view.ts MarkLook), the
+ *  words the analyst cited with c stand as they are. `own`: the looks follow the items by place (the text is Claude's
+ *  own), else by their numbers. In any other mode the looks as they are. */
 export function quietLooks(looks: MarkLook[], items: MarkItem[], own: boolean): MarkLook[] {
   if (choiceOf('citations') !== 'manual') return looks
   const asked = new Set(items.filter(it => it.asked).map(it => it.n))

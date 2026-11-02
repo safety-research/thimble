@@ -390,11 +390,11 @@ test('words selected outside Claude\'s answers (a setting\'s name in the pane) a
   try {
     const s = setup([LOOK], { complete: reply({ body: 'never', here: '' }) })
     await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-    s.$.ui.selection = async () => ({ text: 'ON-DEMAND MODE' })
+    s.$.ui.selection = async () => ({ text: 'MINIMAL' })
     expect(await explainBar(s.$, () => true, false)).toEqual([])
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
-    await pressE(s, { text: 'ON-DEMAND MODE' })
+    await pressE(s, { text: 'MINIMAL' })
     expect(String((await failLineNow(s.$))?.text)).toContain('select a passage in an answer')
     expect(s.calls.length).toBe(0)
     // words of the answer selected in the pane: e takes them while it is open, not once it has closed
@@ -413,7 +413,7 @@ test('words selected outside Claude\'s answers (a setting\'s name in the pane) a
   }
 })
 
-test('with on-demand mode on, words selected in an answer put both keys that act on them on the bar: e explain, then c cite', async () => {
+test('with Minimal on, words selected in an answer put both keys that act on them on the bar: e explain, then c cite', async () => {
   setOptions({ minimal: true, ...PRESET })
   try {
     const s = setup([])
@@ -449,7 +449,7 @@ test('a drag over wrapped rows and paragraphs counts its answer lines: one that 
     await pressE(s, { text: '  Ran 3 shell commands\n\n● Uploads fail after the retry\n  budget runs out' })
     expect(s.calls[0].prompt).toContain('The term: Uploads fail after the retry budget runs out')
     // a selection with no line of an answer is still none
-    s.$.ui.selection = async () => ({ text: 'ON-DEMAND MODE  on · off\nCitations  manual' })
+    s.$.ui.selection = async () => ({ text: 'MINIMAL MODE  on · off\nCitations  manual' })
     expect(await explainBar(s.$, () => true, false)).toEqual([])
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
   } finally {
