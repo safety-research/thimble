@@ -1,11 +1,15 @@
 // Cards' hooks (cards/): a card call keeps the card and answers what it read and its text copy; the call's row draws
 // the one Client with the runner's tree; a new version draws in the card's place; a key at an empty prompt, and a burst
-// of keys, reach the card on screen that takes them; a card a designer fork drew draws under its answer. The runner is answered here, at http.fetch (cards/test/runner.test.mjs tests the real one).
+// of keys, reach the card on screen that takes them; a card a designer fork drew draws under its answer; a ready kind's
+// call keeps its data (the call's fields over the last call's, an example's records read from their files) and says
+// what to fix in its data. The runner is answered here, at http.fetch (cards/test/runner.test.mjs and kinds.test.mjs
+// test the real one).
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import Card from '../cards/client'
 import { cardWidth, rowsCut, rowsWord } from '../cards/draw'
+import { STUB } from '../cards/kinds.js'
 import { callLine } from '../cards/register'
 import { treeRows } from '../core/trail.mjs'
 import { test } from './kit'
@@ -42,7 +46,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string>; stat?: (path: string) => Any } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string>; stat?: (path: string) => Any; prompts?: Record<string, string> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -63,7 +67,9 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('session.end', () => ({ sessionId: 's-cards' }) as never)
   on('tool.register', (_$: unknown, e: { name: string }) => ({ value: { tool: `mcp__thimble__${e.name}` } }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
+  // a prompt text a test gives (`prompts`, by its name) with its placeholders, else the stub's
+  const prompt = (path: string) => Object.entries(o.prompts ?? {}).find(([k]) => path.endsWith(`/prompts/${k}.md`))?.[1]
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? prompt(e.path) ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; text: string }) => { files[e.path] = e.text; return { value: undefined } })
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
   const dirs: Record<string, string[]> = {}
@@ -90,6 +96,8 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   let setups = 0
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
     runs.push(e.argv)
+    // a copy of a made-up file (a card's rows into its version's folder) holds what the file holds
+    if (e.argv[0] === 'cp' && e.argv[2]! in files) files[e.argv[3]!] = files[e.argv[2]!]!
     // the session start's setup.mjs installs srt on a slow network, and has not answered yet
     if (String(e.argv[1] ?? '').endsWith('/sandbox/setup.mjs') && setups++ === 0 && o.firstSetupHangs) return new Promise(() => undefined) as never
     return { value: { ...(tempRun(e.argv, o.sandbox) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }
@@ -129,8 +137,9 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (body.theme === 'dark' || body.theme === 'light') look.runner = body.theme
     if (o.wide && op === 'key' && body.key === 'o') sorted = true
     if (o.wide && op !== 'load' && op !== 'copy' && op !== 'ping') return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, handled: body.key === 'o', tree: laidOut(), state: 'null', seq: ++seq }) } }
-    // a view whose tree the terminal refuses: a Text whose bold is not a boolean
-    const tall = String(body.view ?? '').includes('TALL')
+    // a view whose tree the terminal refuses: a Text whose bold is not a boolean; a view, or a ready kind's data, that
+    // says TALL draws taller than the frame
+    const tall = String(body.view ?? '').includes('TALL') || String(files[body.rows] ?? '').includes('TALL')
     // a view of `// ROWS n`: n rows, one per run
     const many = Number(/\/\/ ROWS (\d+)/.exec(String(body.view ?? ''))?.[1] ?? 0)
     const runs = many ? Array.from({ length: many }, (_, i) => `run ${i + 1}  passed`) : null
@@ -1106,4 +1115,160 @@ test('a card one row past 30 draws whole, since a `+1 row` line would take the p
 test('the line under a cut card says "row" for one', () => {
   expect([rowsCut(30), rowsCut(31), rowsCut(32), rowsCut(42)]).toEqual([0, 0, 2, 12])
   expect([rowsWord(1), rowsWord(2), rowsWord(12)]).toEqual(['1 row', '2 rows', '12 rows'])
+})
+
+// ------------------------------------------------------------------------------------------------- ready kinds
+
+/** The data and view of a card's version as the tool kept them. */
+const versionOf = (w: Any, v: number) => {
+  const at = (name: string) => Object.entries(w.files).find(([p]) => new RegExp(`/v${v}/${name}$`).test(p))?.[1] as string | undefined
+  const rows = at('rows\\.json')
+  return { view: at('view\\.js'), data: rows === undefined ? undefined : JSON.parse(rows) }
+}
+const metaIn = (w: Any) => JSON.parse(Object.entries(w.files).find(([p]) => p.endsWith('/meta.json'))![1] as string)
+
+test("a ready kind draws from the data the call gives: its version keeps the kind, the answer and the rows, with thimble's view; the call says what the card is, and so does its line", async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Which agents passed?', kind: 'table', answer: 'Both agents passed.', rows: [{ agent: 'ada', runs: 3 }, { agent: 'bram', runs: 5 }] }
+  const r = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_k1', ...input } as never)) as Any).result)
+  expect(r).toContain('“Which agents passed?” is drawn where this call stands')
+  expect(r).toContain('It is a table of 2 rows, with the columns name, score.')
+  expect(r).not.toContain('The first row:')
+  expect(r).toContain('ada 3\nbram 5')
+  expect(w.asked).toEqual(['ping', 'load'])
+  expect(versionOf(w, 1)).toEqual({ view: STUB, data: { kind: 'table', answer: 'Both agents passed.', rows: input.rows } })
+  expect(metaIn(w).kind).toBe('table')
+  const line = textOf(await $.ui.render(callRow('toolu_made_up_k1', input)))
+  expect(line.startsWith('● Drew card “Which agents passed?” · a table of 2 rows')).toBe(true)
+})
+
+test("a call with a ready card's id changes only what it gives: an answer keeps the rows, rows keep the answer, a kind keeps what the two kinds share; edits are a custom view's", async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const rows = [{ agent: 'ada', runs: 3 }, { agent: 'bram', runs: 5 }]
+  const first = { title: 'Runs per agent', kind: 'table', answer: 'bram ran most.', rows }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_k2', ...first } as never)
+  // the terminal's fullscreen layout, where the card's first place can be drawn again
+  await $.ui.render(callRow('toolu_made_up_k2', first))
+  const id = metaIn(w).id
+  const r2 = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_k2b', id, answer: 'bram ran 5 times.' } as never)) as Any).result)
+  expect(r2).toContain('Version 2 of “Runs per agent” is drawn in place of version 1')
+  expect(versionOf(w, 2).data).toEqual({ kind: 'table', answer: 'bram ran 5 times.', rows })
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_k2b', { id, answer: 'bram ran 5 times.' })))).toBe('● Changed card “Runs per agent” to version 2 (new answer) · ↑ shown in its place above')
+  const more = [...rows, { agent: 'cleo', runs: 1 }]
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_k2c', id, rows: more } as never)
+  expect(versionOf(w, 3).data).toEqual({ kind: 'table', answer: 'bram ran 5 times.', rows: more })
+  // a table's rows drawn as a chart, in its place
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_k2d', id, kind: 'chart', mark: 'bar', x: 'agent', y: 'runs' } as never)
+  expect(versionOf(w, 4)).toEqual({ view: STUB, data: { kind: 'chart', answer: 'bram ran 5 times.', rows: more, mark: 'bar', x: 'agent', y: 'runs' } })
+  expect(metaIn(w).kind).toBe('chart')
+  const r5 = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_k2e', id, edits: [{ old: 'a', new: 'b' }] } as never)) as Any).result)
+  expect(r5).toBe("The card did not draw: `edits` change a custom card's view; a chart card changes by its fields: give the ones that change (answer, rows, mark, x, y, x2, color).")
+  // a custom view in its place, over the data the card has
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_k2f', id, view: VIEW } as never)
+  expect(versionOf(w, 5)).toEqual({ view: VIEW, data: versionOf(w, 4).data })
+  expect(metaIn(w).kind).toBe(undefined)
+})
+
+test('a ready kind whose data lacks what it needs, or names what the rows do not have, draws nothing and says what to fix', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  let k = 0
+  const call = async (input: Record<string, unknown>) => String(((await $.tool.call({ tool: TOOL, tool_use_id: `toolu_made_up_kc${k++}`, title: 'A question', ...input } as never)) as Any).result)
+  const rows = [{ agent: 'ada', runs: 3 }]
+  expect(await call({ rows })).toBe("The card did not draw: give the card's `kind`: example, table, chart, timeline, diagram, note, which thimble draws from their data, or custom, with a `view`.")
+  expect(await call({ kind: 'pie', rows })).toBe('The card did not draw: no kind pie: the kinds are example, table, chart, timeline, diagram, note, or custom, with a `view`.')
+  expect(await call({ kind: 'table' })).toBe('The card did not draw: a table needs `rows`, a list of rows, each an object of its columns.')
+  expect(await call({ kind: 'chart', rows, x: 'agnt', y: 'runs' })).toBe('The card did not draw: the chart\'s x, "agnt", names a column no row has; the rows\' columns are agent, runs.')
+  expect(await call({ kind: 'chart', mark: 'line', rows, x: 'agent' })).toBe('The card did not draw: a line chart needs `y`: the column of its rows to draw there.')
+  expect(await call({ kind: 'chart', mark: 'pie', rows, x: 'agent' })).toBe("The card did not draw: a chart's `mark` is one of bar, line, scatter, dots, range, heatmap, not pie.")
+  expect(await call({ kind: 'timeline', events: [{ time: '09:14', label: 'starts' }, { label: 'ends' }] })).toBe('The card did not draw: event 2 of the timeline has no `time`: each event is {time, label}, or [time, label].')
+  expect(await call({ kind: 'diagram', edges: [['a', 'b'], ['b']] })).toBe('The card did not draw: edge 2 of the diagram has no source or no target: each edge is [source, target, label] or {source, target, label}.')
+  expect(await call({ kind: 'note', text: ' ' })).toBe('The card did not draw: a note needs `text`, a few sentences.')
+  expect(await call({ kind: 'example', refs: [] })).toBe('The card did not draw: an example needs `refs`, the records it shows: "path#L12", "path#L3-L9", or {ref, quote}.')
+  expect(w.asked).not.toContain('load')
+})
+
+test("an example's records are read from their files: a JSON record by the field that holds the quote, with its short fields; lines of a file; two passages of one record in that record; a quote not in its record is refused with the record's place", async ($, on) => {
+  const chat = [
+    JSON.stringify({ id: '0000447e-ad6e-40be-b20c-2b5354bcab08', speaker: 'o3', created_at: '2026-02-11 15:30:12', content: 'Good news everyone! I just bought signal-garden.com for $12.99 using the credits the organizers gave us.' }),
+    JSON.stringify({ speaker: 'Claude', content: 'Please do not spend money.' }),
+  ].join('\n')
+  const code = 'def is_forgiven(day, history):\n    prev = previous_scheduled(day, history)\n    if prev is None or prev.status != "completed":\n        return False\n'
+  const sizes: Record<string, number> = { [`${DATA}/chat.jsonl`]: chat.length, [`${DATA}/app/streaks.py`]: code.length }
+  const w = world(on, { stat: p => (p in sizes ? { kind: 'file', size: sizes[p], mtimeMs: 0, isLink: false, realPath: p } : undefined) })
+  w.files[`${DATA}/chat.jsonl`] = chat
+  w.files[`${DATA}/app/streaks.py`] = code
+  w.files[`${DATA}/secret.json`] = '{"a": 1}'
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const refs = [
+    { ref: 'chat.jsonl#L1', quote: 'I just bought signal-garden.com for $12.99' },
+    { ref: 'chat.jsonl#L1', quote: 'the credits the organizers gave us' },
+    'app/streaks.py#L2-L3',
+    { ref: 'chat.jsonl', quote: 'do not spend money' },
+  ]
+  const r = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_ke', title: 'Did an agent spend money?', kind: 'example', answer: 'o3 bought a domain.', refs } as never)) as Any).result)
+  expect(r).toContain('It is an example of 3 records')
+  const got = versionOf(w, 1).data.refs
+  const record = JSON.parse(chat.split('\n')[0]!).content as string
+  expect(got[0]).toEqual({
+    ref: 'chat.jsonl#L1', path: 'chat.jsonl', line: 1, field: 'content', text: record, context: 'created_at 2026-02-11 15:30:12 · speaker o3',
+    spans: [[record.indexOf('I just'), record.indexOf('I just') + 42], [record.indexOf('the credits'), record.indexOf('the credits') + 34]],
+  })
+  expect(got[1]).toEqual({ ref: 'app/streaks.py#L2-L3', path: 'app/streaks.py', line: 2, end: 3, text: '    prev = previous_scheduled(day, history)\n    if prev is None or prev.status != "completed":', spans: [] })
+  expect(got[2]).toEqual({ ref: 'chat.jsonl', path: 'chat.jsonl', line: 2, field: 'content', text: 'Please do not spend money.', spans: [[7, 25]], context: 'speaker Claude' })
+  let k = 0
+  const call = async (refs: unknown[]) => String(((await $.tool.call({ tool: TOOL, tool_use_id: `toolu_made_up_kx${k++}`, title: 'A question', kind: 'example', refs } as never)) as Any).result)
+  expect(await call([{ ref: 'chat.jsonl#L1', quote: 'I sold the domain' }])).toBe('The card did not draw: refs[1]: the quote "I sold the domain" is not in chat.jsonl at line 1. Quote the record\'s words exactly, or cite the record without a quote.')
+  expect(await call(['chat.jsonl#L9'])).toBe('The card did not draw: refs[1]: chat.jsonl has 2 lines, not 9.')
+  expect(await call(['app/streaks.py#L1', 'none.log#L2'])).toBe('The card did not draw: refs[2]: there is no file at none.log.')
+  expect(await call(['escape.json#L1'])).toBe('The card did not draw: refs[1]: escape.json is outside this folder and the temp folder ($TMPDIR).')
+  expect(await call(['secret.json#L1'])).toBe('The card did not draw: refs[1]: a made-up deny rule.')
+})
+
+test("a ready kind's data may come from a data file Claude's code wrote: a list is its rows, an object its fields; the call's own fields come first", async ($, on) => {
+  const w = world(on)
+  w.files[`${DATA}/runs.json`] = JSON.stringify([{ agent: 'ada', runs: 3 }, { agent: 'bram', runs: 5 }])
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const r = String(((await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_kd', title: 'Runs', kind: 'chart', mark: 'bar', x: 'agent', y: 'runs', answer: 'bram ran most.', data: 'runs.json' } as never)) as Any).result)
+  expect(r).toContain('It is a bar chart of 2 rows from runs.json')
+  expect(versionOf(w, 1).data).toEqual({ kind: 'chart', answer: 'bram ran most.', rows: [{ agent: 'ada', runs: 3 }, { agent: 'bram', runs: 5 }], mark: 'bar', x: 'agent', y: 'runs' })
+  w.files[`${DATA}/runs.json`] = JSON.stringify({ events: [{ time: '09:14', label: 'starts' }], answer: 'It started at 09:14.' })
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_kd2', title: 'When', kind: 'timeline', answer: 'At 09:14.', data: 'runs.json' } as never)
+  expect(versionOf(w, 1).data).toBeDefined()
+  const t = Object.entries(w.files).filter(([p]) => /\/v1\/rows\.json$/.test(p)).map(([, v]) => JSON.parse(v as string)).find(d => d.kind === 'timeline')
+  expect(t).toEqual({ kind: 'timeline', answer: 'At 09:14.', events: [{ time: '09:14', label: 'starts' }] })
+})
+
+test("a ready card that does not fit waits for the card check as any card does; a replacement that keeps thimble's view stays of the card's kind", async ($, on) => {
+  const w = world(on)
+  const { asked } = checker(on, [STUB])
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_kp', title: 'Every run', kind: 'table', answer: 'TALL: every run passed.', rows: [{ run: 1, passed: true }] } as never)
+  const id = metaIn(w).id
+  const metaOf = () => JSON.parse(Object.entries(w.files).find(([p]) => p.endsWith(`/${id}/meta.json`))![1] as string)
+  for (let i = 0; i < 200 && metaOf().version < 2; i++) await settle()
+  expect(asked).toHaveLength(1)
+  expect(String(asked[0].prompt)).toContain(STUB.trim())
+  expect([metaOf().version, metaOf().kind, metaOf().read]).toEqual([2, 'table', 'a table of 1 row'])
+  expect(versionOf(w, 2).view!.trim()).toBe(STUB.trim())
+  expect(versionOf(w, 2).data).toEqual({ kind: 'table', answer: 'TALL: every run passed.', rows: [{ run: 1, passed: true }] })
+})
+
+test("p on a ready card whose data came in its call gives the artifact's fork a copy of the card's data in the temp folder, which it reads without a dialog", async ($, on) => {
+  const w = world(on, { prompts: { artifact: 'ARTIFACT {{TITLE}} | {{FILE}}' } })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Runs', kind: 'table', answer: 'Two agents.', rows: [{ agent: 'ada', runs: 3 }] }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_ka', ...input } as never)
+  const id = metaIn(w).id
+  await (await shown($, callRow('toolu_made_up_ka', input))).unmount()
+  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'p' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'p' } as never)
+  await w.clock.advance(100)
+  await w.clock.advance(300)
+  expect(w.forks.length).toBe(1)
+  const copy = w.runs.find(a => a[0] === 'cp' && String(a[3]).endsWith(`/card-${id}.json`))!
+  expect(copy[2]).toMatch(new RegExp(`/${id}/v1/rows\\.json$`))
+  expect(copy[3]).toMatch(/^\/made-up\/tmp\//)
+  expect(w.forks[0].prompt).toBe(`ARTIFACT Runs | ${copy[3]}`)
 })

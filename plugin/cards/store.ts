@@ -3,8 +3,10 @@
 //
 //   <conversation folder>/cards/<card id>/   (core/layout.mjs)
 //     meta.json           the card: id, version, title, the call that drew it first, its anchor, keys, what it read, ...
-//     v<version>/view.js   the view of the version on screen, and of a later call's version that did not draw
-//     v<version>/rows.json the copy of the rows it read (the file Claude gave can change or go away)
+//     v<version>/view.js   the view of the version on screen, and of a later call's version that did not draw (a
+//                          ready kind's: cards/kinds.js STUB)
+//     v<version>/rows.json the copy of the rows it read (the file Claude gave can change or go away); a ready kind's
+//                          data ({kind, answer, ...}), with the records an example cites as read when it was drawn
 //     state.json          the person's state of that version (what the view set with setState)
 //
 //   $.state: card (meta, by id), cardTree (the runner's drawings, by id: one for each width and theme it is drawn at), cardFocus (the card that takes keys first),
@@ -48,6 +50,9 @@ export type CardMeta = {
   // while the version on screen does not fit and the card check reads it (cards/fit.ts): when it was held; its frame
   // draws `drawing…` in place of the card
   held?: { since: number } | null
+  // the ready kind of the version on screen (kinds.js: a table, a chart, …), which thimble draws from the data in its
+  // rows file; absent for a custom card, whose view Claude wrote
+  kind?: string
 }
 /** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it.
  *  `width`, `theme` and `tree` are the runner's newest drawing, at the width the runner holds the card at, for a

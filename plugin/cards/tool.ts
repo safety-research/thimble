@@ -1,5 +1,7 @@
-// tool.ts: the `card` tool. Claude writes its rows as a JSON file with its own code and calls card with the file's
-// path, a title and a short JavaScript view. One call:
+// tool.ts: the `card` tool. A card is of a ready kind (kinds.js: example, table, chart, timeline, diagram, note), which
+// thimble draws from the data the call gives (ready.ts), or custom: Claude writes its rows as a JSON file with its own
+// code and calls card with the file's path, a title and a short JavaScript view. A ready kind's version is a view too:
+// its data is the version's rows file and its view kinds.js STUB, so everything below holds for every kind. One call:
 //
 //   0. asks the person's permission rules: a deny rule for the card tool, or for reading the data file, refuses the
 //      call, as plan mode's refusal does. An `ask` that a rule of the person's makes refuses it too, since Claude Code
@@ -7,7 +9,9 @@
 //      file outside the working folder) lets it go on, since the card reads only a file of the session's folders or
 //      temp folders, and runs its view in the runner's sandbox
 //   1. checks the file is in the session's folder or a temp folder of the session (thimble's, or Claude Code's own,
-//      where a command in its Bash sandbox writes for `$TMPDIR`), and copies it into the card's folder
+//      where a command in its Bash sandbox writes for `$TMPDIR`), and copies it into the card's folder; for a ready kind,
+//      writes there the version's data instead (ready.ts readyData: the call's fields over the last call's, and the
+//      records an example cites, read from their files)
 //   2. loads the view and the copy into the runner (runner.mjs), which draws the card and makes its text copy
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called; a new version draws in the card's place
@@ -23,9 +27,10 @@
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
 // card in the card's place, under the call that first drew it or under the answer v was pressed on (its view whole, or
-// the view of the last call with `edits`; its rows new, or kept), and keeps the title unless the call gives a new one;
-// the later call shows one line that points to it. A version that fails leaves the one on screen, its view and rows are
-// kept for the next call's `edits`, and the view's error goes back to Claude.
+// the view of the last call with `edits`; its rows new, or kept; a ready kind's fields new where the call gives them,
+// else kept), and keeps the title and the kind unless the call gives new ones; the later call shows one line that
+// points to it. A version that fails leaves the one on screen, its view and rows are kept for the next call's `edits`
+// (a ready kind's data for its next call), and the view's error goes back to Claude.
 // The designer fork changes only the cards it drew under its answer: its call with the id of another card (main's,
 // which it reads in its copy of the conversation) draws a new card of its own from that card's view and rows.
 import type { EngineInterface } from 'claude-code'
@@ -47,6 +52,8 @@ import { record } from '../telemetry/telemetry'
 import { ask, sandboxNotice } from './ask'
 import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidth, cardWidthBesidePane, rowsCut, rowsWord, screenRows } from './draw'
 import { checkCard, fits, shown } from './fit'
+import { KINDS, STUB } from './kinds.js'
+import { CONTENT, kindWords, readyData } from './ready'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
@@ -92,12 +99,17 @@ export async function registerCardTool($: Engine): Promise<void> {
   await $.tool.register({ name: 'card', isDeferred: false, description: await cardGuide($), inputSchema: SCHEMA })
 }
 
+const says = (v: { decision: string; reason?: string; rule?: string }) => v.decision === 'deny' || (v.decision === 'ask' && !!v.rule)
+
 /** Why the person's permission rules refuse this call, or null (step 0 above). */
 async function refused($: Engine, input: Record<string, unknown>, file: string | null): Promise<string | null> {
-  const says = (v: { decision: string; reason?: string; rule?: string }) => v.decision === 'deny' || (v.decision === 'ask' && !!v.rule)
   const card = await $.tool.check({ tool: 'mcp__thimble__card', input })
   if (says(card)) return card.reason || `the permission rule ${card.rule ?? ''} refuses the card tool`.replace('  ', ' ')
-  if (!file) return null
+  return file ? refusedRead($, file) : null
+}
+
+/** Why the person's permission rules refuse reading a file (a data file, a record an example cites), or null. */
+async function refusedRead($: Engine, file: string): Promise<string | null> {
   const read = await $.tool.check({ tool: 'Read', input: { file_path: file } })
   if (says(read)) return read.reason || `the permission rule ${read.rule ?? ''} refuses reading ${file}`.replace('  ', ' ')
   return null
@@ -167,6 +179,26 @@ async function readView($: Engine, last: string): Promise<{ text?: string; bad?:
   try { return { text: String(await $.fs.read(`${last}/view.js`)) } } catch { return { bad: 'the view of your last call cannot be read; give the whole `view`' } }
 }
 
+/** The data of the call whose folder is `last`, when it was of a ready kind (its view kinds.js STUB); else null. */
+async function readyAt($: Engine, last: string): Promise<Any | null> {
+  try {
+    if (String(await $.fs.read(`${last}/view.js`)).trim() !== STUB.trim()) return null
+    const data = JSON.parse(String(await $.fs.read(`${last}/rows.json`)))
+    return data && KINDS.includes(data.kind) ? data : null
+  } catch {
+    return null
+  }
+}
+
+/** A version's kind: the call's; custom when it gives a view, or edits to a custom card's; else the kind of the card's
+ *  last call. '' for a new card that names none. */
+function kindOf(input: Any, lastData: Any | null, update: boolean): string {
+  const named = String(input.kind ?? '').trim()
+  if (named) return named
+  if (String(input.view ?? '').trim() || (Array.isArray(input.edits) && input.edits.length && !lastData)) return 'custom'
+  return lastData?.kind ?? (update ? 'custom' : '')
+}
+
 const baseName = (p: string) => String(p).split('/').filter(Boolean).pop() ?? String(p)
 const oneLine = (s: string, n: number) => { const t = String(s ?? '').replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim(); return [...t].length > n ? `${[...t].slice(0, n - 1).join('')}…` : t }
 
@@ -189,10 +221,10 @@ function besidePane(beside: Any, width: number): string[] {
 
 /** What a call answers when the version did not draw: what to fix, or, when the runner cannot start, that the card is
  *  not the cause (the person sees why in the failure line). */
-function failed(id: string, r: Any, update: boolean): string {
+function failed(id: string, r: Any, update: boolean, ready: boolean): string {
   const error = String(r?.error || 'no answer').slice(0, 800)
-  if (r?.down) return `The card did not draw: ${error}. The view is not the cause, and cards cannot draw in this session until the analyst fixes it; answer in words.`
-  const fix = r?.phase === 'rows' ? 'Fix the data file' : 'Fix the view (`edits` change the view of this call)'
+  if (r?.down) return `The card did not draw: ${error}. The ${ready ? 'data' : 'view'} is not the cause, and cards cannot draw in this session until the analyst fixes it; answer in words.`
+  const fix = ready ? 'Fix the card\'s data (a call with the `id` keeps what it leaves out)' : r?.phase === 'rows' ? 'Fix the data file' : 'Fix the view (`edits` change the view of this call)'
   const kept = update ? ' The version on screen stays.' : ''
   return `The card did not draw: ${error}.${kept}\n${fix} and call card again with id "${id}".`
 }
@@ -207,14 +239,15 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   return told.length ? { ...r, result: [r.result, ...told].join('\n\n') } : r
 }
 
-/** One call of the card tool. Its line in the session's events (telemetry) says how long the call took to draw the
- *  card: `drawn_ms` from the call to the drawing in place, `ms` to the answer with its actions. */
+/** One call of the card tool. Its line in the session's events (telemetry) says the card's kind (`form`: a ready kind,
+ *  or custom) and how long the call took to draw the card: `drawn_ms` from the call to the drawing in place, `ms` to the
+ *  answer with its actions. */
 async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   const t0 = Date.now()
   const input = e ?? {}
   // no argument at all: the call's input did not arrive or did not parse (Claude Code says `input JSON failed to
   // parse`), so no one field is to blame
-  if (!['title', 'data', 'view', 'edits', 'id'].some(k => input[k] != null && String(input[k]).trim() !== '')) {
+  if (![...CONTENT, 'edits', 'id'].some(k => input[k] != null && String(input[k]).trim() !== '')) {
     return { result: 'The card did not draw: the call\'s input was empty or did not parse as JSON. Send the call again, whole.' }
   }
   const toolUseId = String(input.tool_use_id ?? '')
@@ -224,7 +257,7 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   const found = isCardId(target) ? await metaOf($, target) : null
   if (update && !found) return { result: `There is no card "${oneLine(given, 40)}" to replace. Leave out \`id\` to draw a new card.` }
   // `id` alone: the card, as it is, moves to where this call stands (placeCard)
-  const placing = update && !input.agentId && !['title', 'data', 'view'].some(k => String(input[k] ?? '').trim() !== '') && !(Array.isArray(input.edits) && input.edits.length)
+  const placing = update && !input.agentId && !CONTENT.some(k => String(input[k] ?? '').trim() !== '') && !(Array.isArray(input.edits) && input.edits.length)
   if (placing) return placeCard($, found!, toolUseId, t0)
 
   // a card stands at a call of main's, under the answer the running designer fork draws for, or in the side thread
@@ -259,34 +292,65 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   const base = borrowed ?? meta
   const lastNo = base.last ?? base.version
   const last = lastNo > 0 ? await versionDir($, base.id, lastNo) : null
-  const view = await viewOf($, input, last)
-  if (view.bad) return refuse(view.bad)
-  const keep = !String(input.data ?? '').trim() && last
-  const data = keep ? { path: `${last}/rows.json` } : await dataFile($, input.data)
-  if (data.bad) return refuse(data.bad)
-  // the card tool's rules decide every call; the Read rules, a call with new rows (kept rows were read before)
-  const no = await refused($, { title, data: input.data, view: view.text, ...(input.id ? { id: input.id } : {}) }, keep ? null : data.path!)
-  if (no) return refuse(no)
-  const file = keep ? (base.lastFile ?? base.file) : String(input.data)
+  const lastData = last ? await readyAt($, last) : null
+  const kind = kindOf(input, lastData, !!found)
+  if (!kind) return refuse(`give the card's \`kind\`: ${KINDS.join(', ')}, which thimble draws from their data, or custom, with a \`view\``)
+  if (kind !== 'custom' && !KINDS.includes(kind)) return refuse(`no kind ${oneLine(kind, 40)}: the kinds are ${KINDS.join(', ')}, or custom, with a \`view\``)
+  let viewText: string
+  let rowsFrom = ''
+  let ready: Any = null
+  let file: string
+  if (kind === 'custom') {
+    const view = await viewOf($, input, last)
+    if (view.bad) return refuse(view.bad)
+    const keep = !String(input.data ?? '').trim() && last
+    const data = keep ? { path: `${last}/rows.json` } : await dataFile($, input.data)
+    if (data.bad) return refuse(data.bad)
+    // the card tool's rules decide every call; the Read rules, a call with new rows (kept rows were read before)
+    const no = await refused($, { title, data: input.data, view: view.text, ...(input.id ? { id: input.id } : {}) }, keep ? null : data.path!)
+    if (no) return refuse(no)
+    viewText = view.text!
+    rowsFrom = data.path!
+    file = keep ? (base.lastFile ?? base.file) : String(input.data)
+  } else {
+    // a ready kind: its data from the call, its data file and its last call (ready.ts), the view thimble's
+    const named = String(input.data ?? '').trim() ? await dataFile($, input.data) : null
+    if (named?.bad) return refuse(named.bad)
+    const no = await refused($, { title, kind, ...(named ? { data: input.data } : {}), ...(input.id ? { id: input.id } : {}) }, named?.path ?? null)
+    if (no) return refuse(no)
+    const temps = [await tempDir($), await claudeTempDir($).catch(() => '')].filter(Boolean)
+    const got = await readyData($, {
+      input, kind, last: lastData, file: named ? { path: named.path!, name: String(input.data) } : null,
+      cwd: await $.session.cwd(), roots: await roots($, temps), refused: path => refusedRead($, path),
+    })
+    if (got.bad) return refuse(got.bad)
+    ready = got.data
+    viewText = STUB
+    file = named ? String(input.data) : lastData ? (base.lastFile ?? '') : ''
+  }
   const version = meta.version + 1
   const dir = await versionDir($, id, version)
-  await $.fs.write(`${dir}/view.js`, view.text!)
-  const copied = data.path === `${dir}/rows.json` ? { exitCode: 0, stderr: '' } : await $.process.run(['cp', '--', data.path!, `${dir}/rows.json`])
-  if (copied.exitCode !== 0) {
-    const error = `thimble could not copy ${file} (${String(copied.stderr).trim().slice(0, 200)})`
-    await remember(meta, { version: meta.version, error })
-    return { result: `The card did not draw: ${error}.` }
+  await $.fs.write(`${dir}/view.js`, viewText)
+  if (ready) await $.fs.write(`${dir}/rows.json`, JSON.stringify(ready))
+  else {
+    const copied = rowsFrom === `${dir}/rows.json` ? { exitCode: 0, stderr: '' } : await $.process.run(['cp', '--', rowsFrom, `${dir}/rows.json`])
+    if (copied.exitCode !== 0) {
+      const error = `thimble could not copy ${file} (${String(copied.stderr).trim().slice(0, 200)})`
+      await remember(meta, { version: meta.version, error })
+      return { result: `The card did not draw: ${error}.` }
+    }
   }
 
   const width = (await treeOf($, id))?.width ?? cardWidth()
   // a pane open now: the card is drawn at the width it leaves, and no narrower copy is asked for
   const beside = (await paneNow($)) ? 0 : cardWidthBesidePane()
-  const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width, beside })
+  const r = await ask($, 'load', { id, version, title, view: viewText, rows: `${dir}/rows.json`, state: null, width, beside })
   if (!r?.ok) {
-    // the folder stays as the last call's, for the next call's `edits`; the version on screen stays
+    // the folder stays as the last call's, for the next call's `edits` (a ready kind's next call); the version on
+    // screen stays
     await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer'), ...(r?.down ? { down: true } : {}) })
     if (r?.down) sandboxNotice($, `Cards cannot draw: ${String(r.error).slice(0, 600)}`, !!r.machine)
-    return { result: failed(id, r, update && meta.version > 0) }
+    return { result: failed(id, r, update && meta.version > 0, !!ready) }
   }
 
   const asked = [...new Set([...String(r.keys || '')].filter(k => !/\s/.test(k)))]
@@ -299,9 +363,9 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   // a version that does not fit waits for the card check, which draws its replacement in its place (fit.ts)
   const hold = !fits(r.lines.length, Array.isArray(r.cut) ? r.cut.length : 0)
   const next: CardMeta = {
-    ...meta, ...home, version, last: version, lastFile: file, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
+    ...meta, ...home, version, last: version, lastFile: file, title, keys, read: ready ? kindWords(ready) : String(r.summary.read), columns: r.summary.columns, file,
     gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
-    held: hold ? { since: Date.now() } : null,
+    held: hold ? { since: Date.now() } : null, kind: ready ? kind : undefined,
   }
   await remember(next, { version, title, file, read: next.read })
   await setTree($, id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
@@ -319,10 +383,12 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
       : meta.version > 0
         ? `Version ${version} of “${title}” is drawn where this call stands, since the terminal cannot draw the earlier place again; the earlier call shows one line that points here.`
         : `“${title}” is drawn ${next.anchorRow ? placeWords(next.anchorRow) : 'where this call stands, above the words you write after it'}. Its id is "${id}".`,
-    `It read ${r.summary.read} from ${baseName(file)}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
+    ready
+      ? `It is ${kindWords(ready)}${file ? ` from ${baseName(file)}` : ''}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`
+      : `It read ${r.summary.read} from ${baseName(file)}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
-  if (r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)
-  if (r.summary.first) out.push(`The first row: ${r.summary.first}`)
+  if (!ready && r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)
+  if (!ready && r.summary.first) out.push(`The first row: ${r.summary.first}`)
   for (const note of (r.notes ?? []) as string[]) out.push(`Note: ${note}.`)
   const own = asked.filter(k => ownKeys().includes(k))
   if (own.length) out.push(`Note on the view: ${own.join(' ')} ${own.length > 1 ? 'are' : 'is'} thimble's own, so the card does not get ${own.length > 1 ? 'them' : 'it'}; give the card other keys. The analyst has not seen ${own.length > 1 ? 'these keys' : 'this key'} on the card.`)
@@ -347,10 +413,10 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   }
   // the size of a version the check reads is the check's, not Claude's: the analyst sees the check's replacement
   const screen = screenRows()
-  if (hold) void checkHeld($, { id, version, title, question: threadQuestion(input.agentId) ?? (await sinceLast($).catch(() => null))?.prompt?.text ?? '', columns: r.summary.columns, first: String(r.summary.first ?? ''), copy: copyText(r.lines, r.cut, width), width, view: view.text!, rows: `${dir}/rows.json` })
+  if (hold) void checkHeld($, { id, version, title, question: threadQuestion(input.agentId) ?? (await sinceLast($).catch(() => null))?.prompt?.text ?? '', columns: r.summary.columns, first: String(r.summary.first ?? ''), copy: copyText(r.lines, r.cut, width), width, view: viewText, rows: `${dir}/rows.json` })
   else if (rowsCut(tallest)) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(tallest))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
   else if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
-  void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0, ...(hold ? { held: true } : {}) })
+  void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, form: kind, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0, ...(hold ? { held: true } : {}) })
   return { result: out.join('\n') }
 }
 
@@ -434,9 +500,11 @@ export async function personVersion($: Engine, o: { id: string; title: string; v
     return { error: String(r?.error || 'no answer').slice(0, 400) }
   }
   const keys = [...new Set([...String(r.keys || '')])].filter(k => /^\p{L}$/u.test(k) && !ownKeys().includes(k))
+  // a version of a ready kind (a squeeze's that kept the card's view, kinds.js STUB) stays of that kind
+  const ready = await readyAt($, dir)
   const next: CardMeta = {
-    ...meta, version, last: version, title, keys, read: String(r.summary.read), columns: r.summary.columns,
-    gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(),
+    ...meta, version, last: version, title, keys, read: ready ? kindWords(ready) : String(r.summary.read), columns: r.summary.columns,
+    gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), kind: ready ? ready.kind : undefined,
   }
   await saveMeta($, next)
   await setTree($, o.id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })
