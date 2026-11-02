@@ -45,7 +45,7 @@ KEY_FILE = "anthropic-api-key"
 CONSENT = ("This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in "
            "the background.")
 LABELS = {API_KEY: "Anthropic API key", CLAUDE_CODE: "Claude Code sign-in", WIF: "Workload Identity Federation"}
-CHECK_MODEL = "claude-haiku-4-5-20251001"  # the check's one small call
+CHECK_MODEL = "claude-haiku-5-5"  # the check's one small call
 CC_CHECK_MODEL = "haiku"  # the Claude Code sign-in check's one-turn session
 CC_CHECK_TIMEOUT_S = 120.0
 KEY_FILE_MAX = 4096  # bytes: an API key file is one line

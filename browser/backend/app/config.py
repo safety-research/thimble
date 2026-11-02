@@ -99,8 +99,9 @@ def has_fast_mode(model: str | None) -> bool:
     return any(k in m for k in FAST_MODE_MODELS) or m.split("[", 1)[0] == "opus"
 
 
-# the models Claude Code runs with no effort (spike m6, Claude Code's documented behaviour): a call on one passes none
-NO_EFFORT_MODELS = ("haiku",)
+# the models Claude Code runs with no effort (spike m6, Claude Code's documented behaviour): a call on one passes none.
+# Haiku 4.5 and the Claude 3 Haikus; Haiku 5.5 is the first Haiku with effort levels (plugin/core/models.js).
+NO_EFFORT_MODELS = ("haiku-4", "3-5-haiku", "3-haiku")
 
 
 def has_effort(model: str | None) -> bool:
@@ -995,10 +996,10 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
 }
 ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the analyst's own settings name none
-# Claude Code's model aliases and the ids they stand for: `opus` and `haiku` as Claude Code 2.1.282 resolves them,
-# `sonnet` as the plugin has it (plugin/core/models.js). A role whose model is an alias is kept as the id, so the
+# Claude Code's model aliases and the ids they stand for: `opus` as Claude Code 2.1.282 resolves it, `sonnet` and
+# `haiku` as the plugin has them (plugin/core/models.js). A role whose model is an alias is kept as the id, so the
 # popover names the version and the session runs the model shown.
-MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-4-5-20251001"}
+MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 # The agent file a role's defaults come from: prompts/<name>.md (prompts.AGENT_FILES), or a plugin agent's file
 # (plugin/agents/<name>.md) for `plugin:<name>`.
 ROLE_AGENTS: dict[str, str] = {"writer": "writer", "checks": "check"}

@@ -81,6 +81,8 @@ describe('the rules', () => {
     expect(lockedWhy('dev', 'fast', conf('claude-opus-5-5'), { attached: true })).toBeNull()
     expect(lockedWhy('dev', 'fast', conf('claude-haiku-4-5-20251001'), { attached: true })).toMatch(/fast/i)
     expect(lockedWhy('checks', 'effort', conf('claude-haiku-4-5-20251001'), { attached: true })).toBe('Haiku 4.5 runs with no effort')
+    expect(lockedWhy('checks', 'effort', conf('claude-haiku-5-5'), { attached: true })).toBeNull()
+    expect(lockedWhy('dev', 'fast', conf('claude-haiku-5-5'), { attached: true })).toBe('Haiku 5.5 has no fast mode')
   })
 
   test('the roles in order, the refusal row last of thimble\'s', () => {

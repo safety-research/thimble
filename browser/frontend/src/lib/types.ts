@@ -1225,7 +1225,7 @@ export type Effort = (typeof EFFORTS)[number]
 
 export interface ModelConf {
   model: string
-  /** '' for a model Claude Code runs with no effort (Haiku) */
+  /** '' for a model Claude Code runs with no effort (Haiku 4.5) */
   effort: Effort | string
   /** fast mode: the classifiers' rows only (labels, verify, suggest); the agents have none */
   fast: boolean
