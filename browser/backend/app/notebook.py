@@ -2675,7 +2675,7 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
         env.pop("JPY_PARENT_PID", None)  # no parent poller: the kernel outlives this server
         env.setdefault("MATPLOTLIBRC", str(MATPLOTLIBRC))  # thimble's figure defaults, unless the environment names its own
         env.update(kernel_wrap.NO_SIDE_WRITES)  # nothing a cell runs writes a cache beside a corpus file it reads
-        # the workspace's temp folder (config.temp_dir), main's shell commands' TMPDIR too, by the path the wrappers bind
+        # the workspace's temp folder (config.temp_dir), main's Bash's TMPDIR too, by the path the wrappers bind
         tmp = await asyncio.to_thread(config.temp_dir, workspace)
         env["TMPDIR"] = str(tmp.resolve())
         if wrap == config.KERNEL_WRAP_SRT:

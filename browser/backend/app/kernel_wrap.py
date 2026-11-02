@@ -14,7 +14,7 @@ Both draw the same boundary:
            extension (LOCAL_DIR) and the folder of the files thimble's agents' hooks trust (TRUSTED_DIR), which it can
            read only, and the lock of subagents.json's writers (LOCK_FILES), which it can neither read nor write.
            HOME is fresh at each start: a folder on a private /tmp under bwrap, the kernel's kernels/<key>.home folder
-           under srt. TMPDIR is the workspace's temp folder (TEMP_DIR), main's shell commands' TMPDIR on the Messages API
+           under srt. TMPDIR is the workspace's temp folder (TEMP_DIR), which main's Bash has on the Messages API too
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1

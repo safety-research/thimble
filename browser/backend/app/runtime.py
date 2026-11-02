@@ -165,8 +165,8 @@ class Spec:
     private: list[Path]
     home: Path
     # the TMPDIR of its commands on the Messages API (runtime_tools.Box) when not inside `home`: main's and its thread
-    # forks' share the workspace's temp folder with the kernels (config.temp_dir), so a card's code reads what Bash wrote
-    # in $TMPDIR. A headless Claude Code session's commands have the session's short TMPDIR (runtime_cc.short_tmp)
+    # forks' share the workspace's temp folder with the kernels (config.temp_dir), so a card's code reads what Bash
+    # wrote in $TMPDIR. A headless Claude Code session's commands have the session's short TMPDIR (runtime_cc.short_tmp)
     temp: Path | None = None
     fast: bool = False
     # whether the corpus is among write_roots (Settings' "Claude can edit files in this folder"): True or False for
