@@ -32,8 +32,14 @@ LOOK = {"lenses": ["explain", "heads"], "row": "(none)",
 
 
 def _terminal() -> dict[str, str]:
-    """Each text of the plugin's registry as prompts.ts gives it to its reader: the file as it is."""
-    return {p.stem: p.read_bytes().decode("utf-8") for p in sorted(PLUGIN_PROMPTS.glob("*.md"))}
+    """Each text of the plugin's registry as prompts.ts gives it to its reader, as the terminal reads it
+    (plugin/prompts/node.mjs textOf)."""
+    script = (f"import {{ TEXTS }} from {json.dumps((PLUGIN_PROMPTS / 'registry.mjs').as_uri())}\n"
+              f"import {{ textOf }} from {json.dumps((PLUGIN_PROMPTS / 'node.mjs').as_uri())}\n"
+              "const out = {}\nfor (const name of Object.keys(TEXTS)) out[name] = await textOf(name, 'terminal')\n"
+              "process.stdout.write(JSON.stringify(out))")
+    done = subprocess.run(["node", "--input-type=module", "-e", script], capture_output=True, check=True)
+    return json.loads(done.stdout)
 
 
 def _browser() -> dict[str, str]:

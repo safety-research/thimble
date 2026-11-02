@@ -1,9 +1,11 @@
-"""prompts.py and the repository's own prompt files: every one loads and renders with its own slots and no `{{` left;
-every hint the code names is a section of prompts/tools.md with the placeholders the code fills; and the browser's
-Heads up and Explainers checks say what the terminal plugin's lenses say."""
+"""prompts.py and the repository's own prompt files: every one loads and renders with its own slots and no `{{` left; a
+text of the terminal plugin reads as the plugin's registry composes it; every hint the code names is a section of
+prompts/tools.md with the placeholders the code fills; and the browser's Heads up and Explainers checks say what the
+terminal plugin's lenses say."""
 
 import ast
 import itertools
+import json
 import re
 import string
 from pathlib import Path
@@ -20,6 +22,36 @@ def test_real_prompts_render_clean(monkeypatch):
         values = {s: f"<{s}>" for s in prompts.slots(name)}
         out = prompts.render(name, values)
         assert "{{" not in out and "}}" not in out, name
+
+
+def test_a_plugin_text_reads_as_the_plugin_s_registry_composes_it(tmp_path, monkeypatch):
+    """`{{include:plugin:<name>}}` pastes in a text of plugin/prompts as plugin/prompts/registry.mjs composes it, in
+    either mode of the load: the texts it includes in place, each without its closing newline, the workbench's words in
+    each slot that slots.json names, its other slots left for the caller, and a brace that is no directive kept as its
+    words; `plugin:<name>` loads one alone. A slot of slots.json with no words for the workbench, a missing text and a
+    name that is no text of plugin/prompts raise."""
+    browser, plugin = tmp_path / "browser", tmp_path / "plugin"
+    browser.mkdir()
+    plugin.mkdir()
+    (browser / "page.md").write_text("Start {{brief}}.\n\n{{include:plugin:checker}}\n\nEnd.\n")
+    (browser / "broken.md").write_text("{{include:plugin:nope}}\n")
+    (plugin / "checker.md").write_text('Check {{REPLY}} as {{WHO}} does: {"a": {"b": 1}}.\n{{include:part}}\n')
+    (plugin / "part.md").write_text("A part by {{WHO}}.\n\n")
+    slots = {"WHO": {"terminal": "the plugin", "browser": "the workbench"}}
+    (plugin / "slots.json").write_text(json.dumps(slots))
+    monkeypatch.setenv("THIMBLE_PROMPTS_DIR", str(browser))
+    monkeypatch.setattr(prompts, "PLUGIN_DIR", plugin)
+    monkeypatch.setattr(prompts, "PLUGIN_SLOTS", plugin / "slots.json")
+    shown = 'Check {{REPLY}} as the workbench does: {"a": {"b": 1}}.\nA part by the workbench.\n'
+    for mode in prompts.MODES:
+        assert prompts.load("page", mode) == f"Start {{{{brief}}}}.\n\n{shown.rstrip()}\n\nEnd.\n"
+    assert prompts.load("plugin:checker") == shown and prompts.slots("plugin:checker") == {"REPLY"}
+    assert prompts.render("page", {"brief": "now", "REPLY": "the reply"}).startswith("Start now.\n\nCheck the reply as")
+    assert prompts.files("page") == ["page.md", "plugin:checker.md", "plugin:part.md"]
+    (plugin / "slots.json").write_text(json.dumps({"WHO": {"terminal": "the plugin"}}))
+    for bad in ("plugin:checker", "broken", "plugin:../checker"):
+        with pytest.raises(prompts.PromptError):
+            prompts.load(bad)
 
 
 def test_main_renders_with_either_ending(tmp_path, monkeypatch):
