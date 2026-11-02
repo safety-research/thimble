@@ -104,6 +104,26 @@ describe("a transcript's words", () => {
     expect(marked[2].parentElement?.tagName).toBe('CODE')
   })
 
+  test("a tool's output the server reads into a text block stays as written; a post's words draw as markdown", async () => {
+    // a stream in a file the server reads as plain text: a tool result's record comes as one text block, its stdout
+    const out = 'Initialized empty Git repository in /work/.git/\ndone'
+    const result: SourceRecord = {
+      line: 1,
+      record: { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: out }] }, tool_use_result: { stdout: out } },
+      blocks: [{ kind: 'text', text: out }],
+      meta: {},
+    }
+    const raw = await mount(<View workspace="w" path="t.jsonl" kind="text" page={{ path: 't.jsonl', kind: 'text', total_lines: 1, start: 1, records: [result] }} loadMore={() => undefined} transcript={{ format: 'stream', score: 1 }} />)
+    const block = raw.querySelector('.reader-card[data-line="1"] .reader-block')!
+    expect(block.textContent).toBe(out)
+    expect(block.querySelector('p')).toBeNull()
+    unmountAll()
+    const post: SourceRecord = { line: 1, record: { author: 'ana', body: 'We **ship** it on *Friday*.', thread_id: 't1' }, blocks: [{ kind: 'text', text: 'We **ship** it on *Friday*.' }], meta: {} }
+    const board = await mount(<View workspace="w" path="board.jsonl" kind="board" page={{ path: 'board.jsonl', kind: 'board', total_lines: 1, start: 1, records: [post] }} loadMore={() => undefined} transcript={{ format: 'messages', score: 0.95, keys: { speaker: 'author', text: 'body' } }} />)
+    expect(board.querySelector('.reader-card[data-line="1"] strong')?.textContent).toBe('ship')
+    expect(board.querySelector('.reader-card[data-line="1"] em')?.textContent).toBe('Friday')
+  })
+
   test('a line of a text file stays as written', async () => {
     const line = '## not a **heading**'
     const txt: SourcePage = { path: 'notes.txt', kind: 'text', total_lines: 1, start: 1, records: [{ line: 1, record: { text: line }, blocks: [{ kind: 'text', text: line }], meta: {} }] }

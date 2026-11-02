@@ -600,7 +600,7 @@ function Posts({ workspace, path, records, targetRef, hint, derived, quote }: { 
                 ))}
               </div>
             ) : own ? (
-              rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} markdown />)
+              rec.blocks.map((b, k) => <BlockEl key={k} block={b} path={path} line={rec.line} index={k} target={target} hit={hit} markdown={b.text === body} />)
             ) : (
               <PostText text={body ?? JSON.stringify(value ?? r)} line={rec.line} target={target} hit={hit} quote={cite} />
             )}
@@ -995,6 +995,14 @@ export function streamBlocks(r: any): Block[] {
   return [rawBlock(r)]
 }
 
+/** Whether a stream record's text block holds its message's words (the content, or one of its text blocks), which are
+ * drawn as markdown; a text block the server took from another field of a record of a file it reads as plain text (a
+ * tool result's stdout) is drawn as written. Pure. */
+export function messageWords(r: any, b: Block): boolean {
+  const content = r?.message?.content
+  return typeof content === 'string' ? content === b.text : Array.isArray(content) && content.some((c) => c?.type === 'text' && c.text === b.text)
+}
+
 const asText = (x: unknown): string => (x == null ? '' : typeof x === 'string' ? x : JSON.stringify(x))
 const rawBlock = (x: unknown): Block => ({ kind: 'raw', text: JSON.stringify(x, null, 2) ?? '' })
 
@@ -1295,7 +1303,7 @@ function StreamTranscript({ path, page, targetRef, transcript }: ViewProps) {
               <BlockEl block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} />
             </Collapsible>
           ) : (
-            <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} markdown />
+            <BlockEl key={k} block={b} path={blockPath} line={rec.line} index={k} target={blockTarget(rec.line, k, b)} hit={hit} markdown={messageWords(r, b)} />
           ),
         )}
       </RecordCard>,
