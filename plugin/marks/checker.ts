@@ -36,6 +36,8 @@
 //                             marks/register.ts): a checker's spawn of thimble's own, once the person gave that OK,
 //                             where Claude Code itself would ask, never where a rule, a hook, a setting or another
 //                             plugin decides
+//   allowsPython($, e, v)     the same for a call of a checker fork's (tool.check): a Bash call that runs Python as the
+//                             browser workbench's checker may (runsPython), under the same OK and on the same terms
 //   readEnded($, e, r)        a checker's read of one file that Claude Code refused (tool.call, marks/register.ts): the
 //                             file its check could not read, by the tool that read it (oneRead), and what lets it
 //                             (readFix); endCheck gives it to the failed citations whose check needed it (MarkItem
@@ -103,7 +105,9 @@
 // only tighten a subagent's call. So the line names what refused the check and, where Claude Code takes that answer,
 // offers g: the person's OK lets thimble answer Claude Code's own ask on its own checks with allow this session
 // (checksAllowed, allowsCheck), never a deny (a deny rule wins) or an ask a rule, a hook or another plugin made, and the
-// check the line is about starts again. A classifier that judged the check, or could not answer for now, is said as
+// check the line is about starts again. The same OK, on the same terms, lets its checker forks run Python (allowsPython),
+// which don't ask mode refuses too: a Bash call that runs one script with python3 or python, as the browser workbench's
+// checker runs with `--allowedTools Bash(python3:*) Bash(python:*)`; never main's call or another agent's. A classifier that judged the check, or could not answer for now, is said as
 // such; the mode stays the person's. No other line or card takes g (hooks/keys.ts ownKeys), so a press meant for
 // another never gives this OK.
 //
@@ -540,6 +544,23 @@ export async function allowsCheck($: Engine, e: { input?: unknown }, origin: { p
   const input = (e.input ?? {}) as { description?: unknown; subagent_type?: unknown }
   if (![CHECK_DESCRIPTION, OPENED_DESCRIPTION, AGAIN_DESCRIPTION, REPAIR_DESCRIPTION].includes(String(input.description))) return false
   if (input.subagent_type !== undefined && input.subagent_type !== 'fork') return false
+  return checksAllowed($)
+}
+
+/** Whether a checker's Bash command runs Python as the browser workbench's checker may (`Bash(python3:*)`,
+ *  `Bash(python:*)`): one Python script (oneScript), whose program is python3 or python by that name. */
+function runsPython(command: string): boolean {
+  const program = String(command).trimStart().replace(/^cd\s+\S+[ \t]*(?:&&|;|\n)\s*/, '')
+  return oneScript(command) && /^python3?\s/.test(program)
+}
+
+/** Whether thimble answers allow at tool.check (marks/register.ts, for a checker fork's call) to Claude Code's verdict
+ *  `v` on a call `e`: a Bash call that runs Python (runsPython), once the person gave the OK for thimble's checks (g,
+ *  x), where Claude Code itself would ask (and don't ask mode refuse it, or auto mode's classifier settle it). A deny,
+ *  and an ask a rule, a hook, a setting or another plugin made, stand. */
+export async function allowsPython($: Engine, e: { tool?: unknown; input?: unknown }, v: Verdict): Promise<boolean> {
+  if (v.decision !== 'ask' || v.plugin !== undefined || v.rule || v.hook || v.setting) return false
+  if (String(e.tool) !== 'Bash' || !runsPython(String((e.input as { command?: unknown } | undefined)?.command ?? ''))) return false
   return checksAllowed($)
 }
 

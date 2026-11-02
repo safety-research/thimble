@@ -24,6 +24,8 @@
 //                    mode would refuse it (checker.ts allowsCheck)
 //   tool.check       a checker's Read or Grep of one file the person let thimble's checks read with that tool (x):
 //                    Claude Code's own ask answered allow (checker.ts allowsRead); never a Glob, which lists a folder
+//   tool.check       a checker's Bash call that runs Python, once the person allowed thimble's checks (g, or x):
+//                    Claude Code's own ask answered allow, where don't ask mode would refuse it (checker.ts allowsPython)
 //   classic.UserPromptSubmit, classic.Stop
 //                    the session's permission mode at the person's prompt and at the end of main's turn: a refusal of
 //                    a check by a mode the session is no longer in stands no more, so x comes back (checker.ts
@@ -47,7 +49,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { AGAIN_DESCRIPTION, allowsCheck, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, modeSeen, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, modeSeen, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -58,9 +60,11 @@ type Any = any
 
 /** The spawns a key started that wait out its word window: x's repair, and a check g starts again. */
 const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
-/** Why thimble answers allow to Claude Code at tool.check on a check of its own, and on its read of a file. */
+/** Why thimble answers allow to Claude Code at tool.check on a check of its own, on its read of a file, and on its
+ *  Python. */
 const CHECKS_ALLOWED = "thimble's check of citations, which the person allowed this session"
 const READ_ALLOWED = "a file the person let thimble's check of citations read this session"
+const PYTHON_ALLOWED = "Python of thimble's check of citations, which the person allowed this session"
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
  *  words of one of the row's checked marks looks as that one does, and opens its evidence. A rewrite may word a
@@ -237,6 +241,15 @@ export const registerMarks: Register = on => {
   on('tool.check', { tool: /^(Read|Grep)$/, agentId: /./ }, async ($, e, next) => {
     const v = await next(e)
     return forkOf(e.agentId)?.kind === 'checker' && (await allowsRead($, e, v)) ? { ...v, decision: 'allow', reason: READ_ALLOWED } : v
+  }).catch(($, e, next) => next(e))
+
+  // a checker's Bash call that runs Python, once the person let thimble's checks run (g, x; checker.ts allowsPython):
+  // Claude Code's own ask, which don't ask mode would refuse or auto mode's classifier settle, is answered allow; a
+  // deny, and an ask a rule, a hook, a setting or another plugin made, stand. Main's calls and other agents' are not
+  // thimble's checks
+  on('tool.check', { tool: 'Bash', agentId: /./ }, async ($, e, next) => {
+    const v = await next(e)
+    return forkOf(e.agentId)?.kind === 'checker' && (await allowsPython($, e, v)) ? { ...v, decision: 'allow', reason: PYTHON_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
   // the session's permission mode, which Claude Code gives its classic hooks: at the person's prompt and at the end of

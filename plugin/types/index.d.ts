@@ -20,9 +20,9 @@ declare module 'claude-code' {
       /** the lines of checks that could not start that this session showed, so a reply's check says each once, but
        *  for a line that offers the person's OK (marks/checker.ts sayCannotStart) */
       checksRefused: string[]
-      /** the person's OK (g) for thimble to start its checks of citations this session, which Claude Code refused where
-       *  nobody was asked (auto mode's classifier gave no verdict, don't ask mode): thimble answers Claude Code's own ask
-       *  on them with allow (marks/checker.ts allowsCheck) */
+      /** the person's OK (g, x) for thimble to start its checks of citations this session, which Claude Code refused
+       *  where nobody was asked (auto mode's classifier gave no verdict, don't ask mode): thimble answers Claude Code's
+       *  own ask on them, and on their Python, with allow (marks/checker.ts allowsCheck, allowsPython) */
       checksAllowed: boolean | null
       /** the check the line that offers g is about, which g starts again: { kind: 'check', whole, reply, note? } or
        *  { kind: 'repair', repair } (marks/checker.ts Held) */

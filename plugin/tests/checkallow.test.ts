@@ -12,10 +12,13 @@
 // with allow, by the tool that was refused (a Read of it, or a Grep of it alone; a Grep of a folder, or a Glob, gets no
 // OK); where the person said no to its ask, x gives none, and Claude Code asks again. A file no evidence may cite, as
 // the validator says (outside every folder it takes a cited file from), goes on no citation: they keep the validator's
-// reason, x gives no OK for it, and they are repaired as any are. All data is made up. `claude plugin test plugin`.
+// reason, x gives no OK for it, and they are repaired as any are. The OK for thimble's checks also covers its checker
+// forks' Python, which don't ask mode refuses: a Bash call that runs one script with python3 or python, as the browser
+// workbench's checker may, never main's or another agent's. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
+import { spawnFork } from '../core/forks'
 import { AGAIN_DESCRIPTION, allowsCheck, autoRepair, checkKey, endCheck, launchRepair, noteRow, REPAIR_DESCRIPTION, repairOf, repairOk, startCheck, UNREVIEWED_LINE } from '../marks/checker'
 import { registerMarks } from '../marks/register'
 import { newReply, rowMarks } from '../marks/store'
@@ -523,6 +526,46 @@ test("a check that could not read a file no evidence may cite, as the validator 
   } finally {
     setOptions({})
   }
+})
+
+/** A checker's Python, as checker.md asks for it: one script from a here-document, after a `cd` at most. */
+const SCRIPT = "cd /made-up/data && python3 - <<'PY'\nimport csv\nprint(sum(1 for r in csv.DictReader(open('runs.csv')) if r['status'] == 'failed'))\nPY"
+
+test("x's OK covers its checker forks' Python too: thimble answers allow on Claude Code's own ask on a checker's Bash call that runs one script with python3 or python, and on nothing else (main's call, another agent's, another fork's of thimble's, a call that runs no Python or runs it otherwise), never over a deny or an ask a rule, a hook, a setting or another plugin made; a word typed after x takes it back", async () => {
+  let refuse = true
+  const { $, spawned } = engine(() => (refuse ? AUTO : null))
+  const call = hooksOn($)
+  await newReply($, failedReply())
+  // x's repair, refused where auto mode's classifier gives no verdict: then x gives the OK g gives, and the repair runs
+  expect(await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
+  refuse = false
+  const ok = (await repairOk($, await itemOf($)))!
+  await ok.give()
+  expect(await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
+  const checker = `agent-${spawned.length}`
+  const designer = (await spawnFork($, { kind: 'designer', prompt: 'Draw a card of the runs.', description: 'designing a card' })).agentId!
+  /** Claude Code's verdict `v` on a Bash call of `agentId`'s (main's when null), as thimble's hooks answer it. */
+  const bash = async (command: string, agentId: string | null = checker, v: Any = ASK) => (await call('tool.check', { tool: 'Bash', input: { command }, tool_use_id: 'toolu_b1', ...(agentId ? { agentId } : {}) }, v)).decision
+  expect(await bash(SCRIPT)).toBe('allow')
+  expect(await bash("python - <<'PY'\nprint(40)\nPY")).toBe('allow')
+  // main's call, another agent's, another fork's of thimble's
+  expect(await bash(SCRIPT, null)).toBe('ask')
+  expect(await bash(SCRIPT, 'agent-someone')).toBe('ask')
+  expect(await bash(SCRIPT, designer)).toBe('ask')
+  // a call that runs no Python, or runs it otherwise than as one script with python3 or python
+  expect(await bash('ls /made-up/data')).toBe('ask')
+  expect(await bash("python3 -c 'print(40)'")).toBe('ask')
+  expect(await bash("/made-up/bin/python3 - <<'PY'\nprint(40)\nPY")).toBe('ask')
+  expect(await bash("python3 - <<'PY'\nprint(40)\nPY\nrm -r /made-up/data")).toBe('ask')
+  // a deny, and an ask a rule, a hook, a setting or another plugin made, stand
+  expect(await bash(SCRIPT, checker, { decision: 'deny', reason: 'Permission to use Bash with command python3 has been denied.', rule: 'Bash(python3:*)' })).toBe('deny')
+  expect(await bash(SCRIPT, checker, { decision: 'ask', rule: 'Bash(python3:*)' })).toBe('ask')
+  expect(await bash(SCRIPT, checker, { decision: 'ask', hook: 'PreToolUse' })).toBe('ask')
+  expect(await bash(SCRIPT, checker, { decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' })).toBe('ask')
+  expect(await bash(SCRIPT, checker, { decision: 'ask', plugin: 'made-up-guard' })).toBe('ask')
+  // a word typed after x takes the OK back
+  await ok.undo()
+  expect(await bash(SCRIPT)).toBe('ask')
 })
 
 /** A made-up plugin beneath thimble whose hook asks about every new agent: as one only the person may answer
