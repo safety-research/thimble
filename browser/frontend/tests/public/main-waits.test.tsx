@@ -2,8 +2,8 @@
 // While main works (B14, src/chat/ChatPanel.tsx): main's chat says so for the whole turn, with the strip a side thread
 // shows (taskStrip), and the composer keeps main's Stop while the analyst writes (src/components/Composer.tsx). A message
 // sent meanwhile waits until main reads it (backend runtime.unread, main's meta `unread`, src/chat/useChat.ts): the
-// analyst's tile a step quieter, after the turn's rows, so the rest of the turn does not read as its answer; once main
-// reads it, the log holds it where main read it.
+// analyst's tile a step quieter, after the turn's rows, so the rest of the turn does not read as its answer, with no
+// spinner of its own, since the strip says main works; once main reads it, the log holds it where main read it.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
@@ -65,8 +65,10 @@ describe("main's chat while main works", () => {
     const el = await mount(<ChatPanel ws="mini" />)
     await settle()
     expect(el.querySelector('.chat-strip .chat-strip-title')?.textContent).toBe('Working')
+    expect(el.querySelector('.chat-strip .spinner')).not.toBeNull()
     expect(flowTail(el).matches('.chat-pending')).toBe(true)
     expect(flowTail(el).textContent).toContain(SECOND)
+    expect(flowTail(el).querySelector('.spinner')).toBeNull()
     expect(loggedLines(el)).toEqual([FIRST])
     // main reads it with the result of its call: the log holds it there, and nothing waits
     main = { ...main, unread: [] }
@@ -101,6 +103,7 @@ describe("main's chat while main works", () => {
     expect(squares(el)).toEqual(['Stop main'])
     expect(flowTail(el).matches('.chat-pending')).toBe(true)
     expect(flowTail(el).textContent).toContain(SECOND)
+    expect(flowTail(el).querySelector('.spinner')).toBeNull()
     expect(el.querySelectorAll('.chat-pending')).toHaveLength(1)
     expect(loggedLines(el)).toEqual([FIRST])
   })
