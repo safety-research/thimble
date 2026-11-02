@@ -466,7 +466,7 @@ def test_main_says_a_new_host_asks_the_analyst_and_names_no_web_switch(tmp_path,
     """In the workbench a command's request to a host the analyst has not allowed asks them first (host_asks.py), and
     Settings has no web or network switch for main, so main's prompt says the one and names none: it said "The web calls
     the analyst turned off in thimble's Settings are refused", and when Claude Code's sandbox refused a host, main sent
-    the analyst to that switch. The terminal's own Claude Code asks in its dialog, as its branch says."""
+    the analyst to that switch."""
     from app import events
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
@@ -475,4 +475,3 @@ def test_main_says_a_new_host_asks_the_analyst_and_names_no_web_switch(tmp_path,
         part = out.split("## Permission requests", 1)[1].split("\n## ", 1)[0]
         assert "A request to a host the analyst has not allowed asks them first." in part
         assert "web calls" not in part and "without permission requests" not in part
-    assert "A request to a host the analyst has not allowed" not in prompts.load("main", "terminal")
