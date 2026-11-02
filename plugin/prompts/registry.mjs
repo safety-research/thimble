@@ -82,6 +82,11 @@ export const TEXTS = {
     reader: 'threads/thread.ts',
     use: "the prompt of the fork that answers a side thread's question",
   },
+  'fix-request': {
+    about: "name the fix the person's words change, with the fix-thimble skill, or ask one short question first",
+    reader: 'fix/register.ts',
+    use: "beside the person's words after /thimble-fix <words>, which a prompt of thimble's gives Claude as theirs",
+  },
   fixer: {
     about: 'make the change the person asked for to their thimble, in a scratch copy, test it, and say what it does',
     reader: 'fix/fixer.ts',
