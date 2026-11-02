@@ -2438,7 +2438,7 @@ def launch_args(cwd: Path, resume: bool = False, settings: str = "", own_session
     `--plugin-dir`, when it can load, then a tab and the workspace's launch.json, whose `pid` the launcher sets to main's
     `claude` process; the empty fields at its end are left out), the export line (tab-separated NAME=VALUE pairs to
     export: terminal_env and a PATH with the plugin copy's bin/ first in terminal mode, else none), with `resume` the
-    session to resume, then main's prompt, whose turn ending follows that value. thimble adds no permission rule and no
+    session to resume, then main's prompt. thimble adds no permission rule and no
     sandbox to main's session: the plugin's skills carry their own `allowed-tools`, and every other call follows the
     permission mode the analyst starts Claude Code in.
 
@@ -2531,7 +2531,7 @@ def _launch_args(cwd: Path, resume: bool, settings: str, own_session: str | None
     # main's prompt, rendered once launch.json names the session's mode, in the environment the session gets, so that
     # launch_mode.current finds that mode here as in the session
     with with_environ(exports):
-        prompt = events.session_prompt(str(cwd.resolve()), bool(turn_tools))
+        prompt = events.session_prompt(str(cwd.resolve()))
     # the launcher's exports in terminal mode also put this copy's bin/ first on PATH, so main's Bash, and every agent's,
     # runs the card runner the tools name without its install path (cardrun.command); main's --settings `env` leaves
     # PATH alone

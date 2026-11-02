@@ -22,15 +22,16 @@ def test_real_prompts_render_clean(monkeypatch):
         assert "{{" not in out and "}}" not in out, name
 
 
-def test_main_renders_with_either_ending(tmp_path, monkeypatch):
-    """Main's prompt renders with the ending of each Claude Code (terminal_tools.ENDINGS), each found on exactly one
-    line."""
-    from app import events, terminal_tools
+def test_main_ends_a_turn_with_nothing_for_the_analyst_one_way(tmp_path, monkeypatch):
+    """Main's prompt ends a turn that has nothing for the analyst with the end token, which no chat shows, on one line.
+    It had a second ending, a turn that ends on a call with no closing words, for the launcher's Claude Code when it
+    reads terminal_tools.ENV; the server's main never read it."""
+    from app import events, session
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    for terminal in (True, False):
-        out = events.render_prompts(["main"], str(tmp_path), terminal=terminal)
-        assert terminal_tools.ENDINGS[terminal] in out and terminal_tools.ENDINGS[not terminal] not in out
+    out = events.render_prompts(["main"], str(tmp_path))
+    assert [ln for ln in out.splitlines() if session.END_TOKEN in ln and "which thimble never shows" in ln]
+    assert "needs no closing words" not in out and "When a subagent or fork returns" not in out
 
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -471,7 +472,7 @@ def test_main_says_a_new_host_asks_the_analyst_and_names_no_web_switch(tmp_path,
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     for edits in (True, False):
-        out = events.render_prompts(["main"], str(tmp_path), terminal=False, edits=edits)
+        out = events.render_prompts(["main"], str(tmp_path), edits=edits)
         part = out.split("## Permission requests", 1)[1].split("\n## ", 1)[0]
         assert "A request to a host the analyst has not allowed asks them first." in part
         assert "web calls" not in part and "without permission requests" not in part
