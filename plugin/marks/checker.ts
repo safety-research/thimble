@@ -37,7 +37,7 @@
 //   readEnded($, e, r)        a checker's read of one file that Claude Code refused (tool.call, marks/register.ts): the
 //                             file its check could not read, by the tool that read it (oneRead), and what lets it
 //                             (readFix); endCheck gives it to the failed citations whose check needed it (MarkItem
-//                             `unread`)
+//                             `unread`), unless no evidence may cite it (the validator's `outside`)
 //   allowsRead($, e, v)       whether thimble answers allow to Claude Code's verdict `v` on a checker's read (tool.check):
 //                             the same tool's read of one file the person let thimble's checks read this session
 //                             (repairOk), where Claude Code itself would ask
@@ -80,7 +80,12 @@
 // asked the person, who did not say yes, x starts the repair, whose read Claude Code asks about again in its own
 // dialog; where a rule, a setting or auto mode's classifier refused it, x is not offered. Only a read of one file
 // counts (oneRead): a Read, or a Grep of one regular file. A Grep of a folder reads each file in it, and a Glob lists
-// a folder, so their refusal names no file, and no OK covers them.
+// a folder, so their refusal names no file, and no OK covers them. A file no evidence may cite goes on no citation:
+// one outside every folder the validator takes a cited file from (the session's folders, and the temp folders where
+// Claude's own code counts), as the validator itself answers for the files the check could not read (its `outside`,
+// engine/kernel/evidence.py uncitable). No read of it would count, so its citations keep the validator's reason (`…
+// is outside the folder this session works in`) and are repaired as any are, since a repair may find evidence inside
+// those folders.
 //
 // Claude Code decides the fork's spawn as it decides a call of Claude's (Claude Code 2.1.307). In auto mode it lets a
 // plugin's own call run without auto mode's classifier, unless the person's settings give the classifier rules of
@@ -956,8 +961,9 @@ function giveUpLine(reason: string): string {
   return `The check of the citations stopped on an error, so they are not checked. ${CHECK_ONE}`
 }
 
-/** The validator's result for a fork's answer, or why there is none. */
-async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[]): Promise<{ results?: Any[]; problem?: string }> {
+/** The validator's result for a fork's answer, or why there is none; `outside`, those of the files the check could not
+ *  read (`unread`) that no evidence may cite, by the validator's own folders (engine/kernel/evidence.py uncitable). */
+async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[], unread: string[]): Promise<{ results?: Any[]; outside?: string[]; problem?: string }> {
   // main's calls too: the check may cite what main printed (the validator keeps the calls whose output the answer cites)
   // a side thread's answer: the thread's calls are its own code, as main's are a reply's
   const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(c.thread ? { agentId: c.thread } : undefined), 'main')]
@@ -966,13 +972,13 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   const tmp = [await tempDir($), await claudeTempDir($).catch(() => '')].filter(Boolean)
   const ran = await $.process.run(validateArgv($), {
     cwd: c.cwd, timeoutMs: 120000,
-    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
+    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls, ...(unread.length ? { unread } : {}) }),
   })
-  let out: { parsed: boolean; results: Any[] } | null = null
+  let out: { parsed: boolean; results: Any[]; outside?: unknown } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
   if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${reasonOf(String(ran.stderr || 'no output').trim().split('\n').pop())}), so they are not checked. ${CHECK_ONE}` }
   if (!out.parsed) return { problem: `The check of the citations gave no answer thimble could read, so they are not checked. ${CHECK_ONE}` }
-  return { results: out.results }
+  return { results: out.results, outside: Array.isArray(out.outside) ? out.outside.map(String) : [] }
 }
 
 /** Whether the answer for failed citation `m` names `file`, so its check needed that file: its reason or note, or a
@@ -1003,9 +1009,11 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     }
     const mine = new Set(c.marks)
     const items = ((await replyOf($, c.key))?.items ?? []).filter(m => mine.has(m.n))
-    let v: { results?: Any[]; problem?: string }
+    // the files the check could not read (readEnded)
+    const reads = unreadBy.get(e.agentId) ?? []
+    let v: { results?: Any[]; outside?: string[]; problem?: string }
     try {
-      v = await validate($, c, e, items)
+      v = await validate($, c, e, items, [...new Set(reads.map(u => u.file))])
     } catch (err) {
       v = { problem: `thimble could not validate the check of the citations (${reasonOf(err)}), so they are not checked. ${CHECK_ONE}` }
     }
@@ -1016,10 +1024,12 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     }
     const byN = new Map(v.results.map(r => [Number(r.n), r]))
     const settled = Number(await $.clock.now())
-    // the files the check could not read (readEnded), each on a citation it leaves failed (but one it found wrong) whose
-    // check needed it: a check of one citation needed each; a check of several, each file its answer for the citation
-    // names. Its other citations are repaired as any are
-    const unread = unreadBy.get(e.agentId) ?? []
+    // the files the check could not read, each on a citation it leaves failed (but one it found wrong) whose check
+    // needed it: a check of one citation needed each; a check of several, each file its answer for the citation names.
+    // A file no evidence may cite (the validator's `outside`) it did not need: no read of it would count. Its other
+    // citations are repaired as any are
+    const outside = new Set(v.outside ?? [])
+    const unread = reads.filter(u => !outside.has(u.file))
     const reply = await edit($, c, r => settle(r, settled, r.items.map(m => {
       if (!mine.has(m.n)) return m
       const res = byN.get(m.n)

@@ -10,8 +10,9 @@
 // citations whose answer names the file); its other citations are repaired as any are. Where Claude Code asked nobody,
 // x gives the person's OK for the file, and thimble answers Claude Code's own ask on its checks' reads of that file
 // with allow, by the tool that was refused (a Read of it, or a Grep of it alone; a Grep of a folder, or a Glob, gets no
-// OK); where the person said no to its ask, x gives none, and Claude Code asks again. All data is made up. `claude
-// plugin test plugin`.
+// OK); where the person said no to its ask, x gives none, and Claude Code asks again. A file no evidence may cite, as
+// the validator says (outside every folder it takes a cited file from), goes on no citation: they keep the validator's
+// reason, x gives no OK for it, and they are repaired as any are. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
@@ -101,12 +102,14 @@ const AUTO = "The server-side auto mode classifier gave no verdict for Agent: th
 const REPLY = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down for [3 nights](#).'
 
 /** An engine with versioned state, the checker's text, and forks that Claude Code refuses with `refused`'s words, or
- *  starts; the validator gives `results` for a check's marks; `env`, more of the process's variables; `kinds`, what each
- *  made-up path is (a file or a folder; any other is not there), as it stands when read. */
-function engine(refused: () => string | null, results: (marks: Any[]) => Any[] = () => [], env: Record<string, string> = {}, kinds: Record<string, 'file' | 'dir'> = {}) {
+ *  starts; the validator gives `results` for a check's marks, and names as `outside` each file of `outside` that the
+ *  check could not read (no evidence may cite it; none unless a test says so); `env`, more of the process's variables;
+ *  `kinds`, what each made-up path is (a file or a folder; any other is not there), as it stands when read. */
+function engine(refused: () => string | null, results: (marks: Any[]) => Any[] = () => [], env: Record<string, string> = {}, kinds: Record<string, 'file' | 'dir'> = {}, outside: string[] = []) {
   const state = new Map<string, { value: unknown; version: number }>()
   const spawned: Any[] = []
   let now = 1000
+  const validated = (req: Any) => ({ parsed: true, results: results(req.marks), ...(req.unread ? { outside: req.unread.filter((f: string) => outside.includes(f)) } : {}) })
   const $: Any = {
     env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp', ...env } as Any)[k] },
     plugin: { root: '/made-up/plugin', name: 'thimble' },
@@ -123,7 +126,7 @@ function engine(refused: () => string | null, results: (marks: Any[]) => Any[] =
     },
     process: {
       run: async (argv: string[], o?: { stdin?: string }) => tempRun(argv)
-        ?? (argv.includes('validate') && o?.stdin ? { exitCode: 0, stdout: JSON.stringify({ parsed: true, results: results(JSON.parse(o.stdin).marks) }), stderr: '' } : { exitCode: 0, stdout: '', stderr: '' }),
+        ?? (argv.includes('validate') && o?.stdin ? { exitCode: 0, stdout: JSON.stringify(validated(JSON.parse(o.stdin))), stderr: '' } : { exitCode: 0, stdout: '', stderr: '' }),
     },
     agent: {
       spawn: async (a: Any) => { spawned.push(a); const deny = refused(); return deny ? { deny } : { model: 'claude-made-up', agentId: `agent-${spawned.length}` } },
@@ -284,8 +287,9 @@ test("where no OK answers Claude Code's refusal of thimble's checks, x has nothi
   expect(await repairOk(cowork.$, { ...FAILED, status: 'verified' } as never)).toBeNull()
 })
 
-/** A file outside the session's folders, and Claude Code's refusals of a check's read of it: in don't ask mode, the
- *  person's no to its dialog, a rule of theirs. */
+/** A file outside the session's folders, which the made-up validator takes as evidence unless a test names it
+ *  `outside`, and Claude Code's refusals of a check's read of it: in don't ask mode, the person's no to its dialog, a
+ *  rule of theirs. */
 const ELSEWHERE = '/made-up/elsewhere/runs.csv'
 const READ_DONT_ASK = "Permission to use Read has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal. "
 const READ_REJECTED = 'Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). Try a different approach or report the limitation to complete your task.'
@@ -478,6 +482,44 @@ test("a check of several citations that could not read a file leaves it only on 
     await endCheck($, { agentId: 'agent-2', reason: 'answer', answer: '```json\n[]\n```' })
     expect((await itemOf($, 3)).unread).toEqual(ruled)
     expect(await repairOk($, await itemOf($, 3))).toBeNull()
+  } finally {
+    setOptions({})
+  }
+})
+
+/** Claude's own code in the session's temp folder (core/home.ts tempDir), which the validator takes as evidence of what
+ *  code does. */
+const CODE = '/made-up/tmp/thimble/count.py'
+
+test("a check that could not read a file no evidence may cite, as the validator says (outside the session's folder and the temp folders): no citation names it, each keeps the validator's reason, x gives no OK for it and starts the repair, and they are repaired at once, as before the rework; a file the validator takes, Claude's own code in the temp folder, is named as before", async () => {
+  setOptions({ citations: 'auto cite + verify' })
+  try {
+    // the validator: ELSEWHERE lies outside every folder a cited file may lie in, so the first three marks fail on it
+    const reason = `${ELSEWHERE} is outside the folder this session works in.`
+    const results = (marks: Any[]) => marks.map(m => (m.n <= 3 ? { n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason } : { n: m.n, status: 'verified', shown: m.words, reason: 'counted' }))
+    const { $, spawned } = engine(() => null, results, {}, {}, [ELSEWHERE])
+    const call = hooksOn($)
+    await checkThatReads($, call, refusedRead(READ_DONT_ASK))
+    const items = (await rowMarks($, 'row-1'))!.items
+    expect(items.map(m => [m.status, m.reason, m.unread])).toEqual([...Array(3).fill(['failed', reason, undefined]), ['verified', 'counted', undefined], ['verified', 'counted', undefined]])
+    // x is offered, and gives no OK for the file: Claude Code's ask on a check's read of it stands
+    const ok = await repairOk($, items[0]!)
+    expect(ok).not.toBeNull()
+    await ok!.give()
+    expect((await call('tool.check', { tool: 'Read', input: { file_path: ELSEWHERE }, tool_use_id: 'toolu_r3', agentId: 'agent-1' }, ASK)).decision).toBe('ask')
+    // each is repaired at once, as any citation a check could not confirm
+    await autoRepair($, 'agent-1')
+    expect(spawned.slice(2).map(a => [a.description, /repair citation (\d)\./.exec(String(a.prompt))?.[1]])).toEqual([[REPAIR_DESCRIPTION, '1'], [REPAIR_DESCRIPTION, '2'], [REPAIR_DESCRIPTION, '3']])
+    // a repair's check that could not read that file and Claude's own code: the citation names the code alone, and x's
+    // OK covers a check's read of it alone
+    const both = engine(() => null, results, {}, {}, [ELSEWHERE])
+    const onBoth = hooksOn(both.$)
+    const item = await repairThatReads(both.$, onBoth, [{ tool: 'Read', file_path: ELSEWHERE }, { tool: 'Read', file_path: CODE }])
+    expect(item.unread).toEqual([{ tool: 'Read', file: CODE, fix: 'ok' }])
+    await (await repairOk(both.$, item))!.give()
+    const read = async (file: string) => (await onBoth('tool.check', { tool: 'Read', input: { file_path: file }, tool_use_id: 'toolu_c1', agentId: 'agent-1' }, ASK)).decision
+    expect(await read(CODE)).toBe('allow')
+    expect(await read(ELSEWHERE)).toBe('ask')
   } finally {
     setOptions({})
   }
