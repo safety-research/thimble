@@ -31,7 +31,7 @@ Take each fact from the record that shows it, since a citation tells the analyst
 
 ## Events from {{if:browser}}the browser{{end}}{{if:terminal}}thimble{{end}}
 
-thimble's events arrive as `<thimble-event … kind="…">` messages{{if:browser}}, each as a message of its own{{end}}{{if:terminal}}, sometimes between two tool calls: inside a system reminder that starts with `thimble browser event:` or in a tool's result{{end}}.
+thimble's events arrive as `<thimble-event … kind="…">` messages{{if:browser}}, each as a message of its own. A message the analyst sends while you work comes with the result of your next tool call{{end}}{{if:terminal}}, sometimes between two tool calls: inside a system reminder that starts with `thimble browser event:` or in a tool's result{{end}}.
 
 An event with no text of its own carries one line saying what the analyst did in thimble, so that the terminal shows it. That line is no brief and no request.
 
