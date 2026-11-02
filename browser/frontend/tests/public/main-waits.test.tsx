@@ -32,7 +32,9 @@ beforeEach(() => {
     if (init?.method && init.method !== 'GET' && !u.includes('/telemetry')) posted.push(`${init.method} ${u}`)
     const body = u.endsWith('/events')
       ? { id: 'e2', kind: 'main', delivered: 1 }
-      : u.endsWith('/chats/main')
+      : u.endsWith('/interrupt')
+        ? { stopped: true }
+        : u.endsWith('/chats/main')
         ? { meta: main, events }
         : /\/chats(\?|$)/.test(u)
           ? [main]
@@ -101,5 +103,23 @@ describe("main's chat while main works", () => {
     expect(flowTail(el).textContent).toContain(SECOND)
     expect(el.querySelectorAll('.chat-pending')).toHaveLength(1)
     expect(loggedLines(el)).toEqual([FIRST])
+  })
+
+  test("leaves main's Stop free once it answers, as the message that waited starts main's next turn at once", async () => {
+    main = { ...main, unread: [{ event: 'e2', text: SECOND }] }
+    const el = await mount(<ChatPanel ws="mini" />)
+    await settle()
+    // the stopped turn ended, and main reads the message as its next turn (backend runtime.after_stop): main runs on
+    main = { ...main, unread: [] }
+    events = [...events, { type: 'done' }, { type: 'user', text: SECOND, by: 'browser', event: 'e2' }]
+    await act(async () => el.querySelector<HTMLButtonElement>('.chat-composer button.composer-send')!.click())
+    await settle()
+    expect(posted).toEqual(['POST /api/ws/mini/chats/main/interrupt'])
+    await reread()
+    const stop = el.querySelector<HTMLButtonElement>('.chat-composer button.composer-send')!
+    expect(stop.getAttribute('aria-label')).toBe('Stop main')
+    expect(stop.getAttribute('aria-busy')).not.toBe('true')
+    expect(loggedLines(el)).toEqual([FIRST, SECOND])
+    expect(el.querySelector('.chat-pending')).toBeNull()
   })
 })
