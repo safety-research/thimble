@@ -125,6 +125,34 @@ def test_a_reply_s_marks_are_checked_and_the_validator_decides(_fresh, tmp_path)
     assert c == CORPUS and '"15 of 40" is corrected to "12 of 40"' in said and "not confirmed" in said
 
 
+@pytest.mark.parametrize("how", ["claude-code", "api-key"])
+def test_r2_code_main_wrote_in_its_commands_temp_folder_is_evidence_on_either_engine(_fresh, how):
+    """R2: a claim about what main's own code does cites the file main wrote in its commands' TMPDIR: on Claude Code
+    sign-in the temp folder Claude Code's sandbox gives them (runtime_cc.shell_tmp), on the Messages API the workspace's
+    temp folder. The validator finds it in either; before, only in the workspace's."""
+    from app import claude_access, runtime, runtime_cc
+
+    if how == "claude-code":
+        claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    else:
+        claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    shell = runtime.shell_temp(CORPUS)
+    assert shell == (runtime_cc.shell_tmp(CORPUS) if how == "claude-code" else config.temp_dir(CORPUS))
+    code = shell / "count.py"
+    code.write_text("import json\nrows = [json.loads(l) for l in open('runs.jsonl')]\nprint(sum(r['failed'] for r in rows))\n")
+
+    async def fork(c, main, cut, prompt):
+        ev = {"file": str(code), "line": 3, "substring": "sum(r['failed'] for r in rows)"}
+        return {"answer": _answer([{"mark": 1, "kind": "code", "evidence": ev, "status": "verified", "correction": None,
+                                    "reason": "it sums the failed runs"}]), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    asyncio.run(marks.start_check(CORPUS, main, turn, ["The script [sums the failed runs](#)."], "cut", fork=fork))
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "verified", m
+
+
 def test_a_fork_that_fails_leaves_its_marks_unchecked_and_says_so(_fresh):
     async def fork(c, main, cut, prompt):
         return {"error": "Claude Code exited with code 1"}
