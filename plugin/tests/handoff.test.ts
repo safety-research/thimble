@@ -13,6 +13,9 @@ type Any = any
 
 const BOX = '/made-up/cc/claude-1000/thimble-s-1'
 const BIN = '/made-up/plugin/bin/thimble'
+// what every run has besides the request's variables: THIMBLE_HANDOFF empty, so it never hands itself on, and the marks
+// of a command in Claude Code
+const MARKS = { THIMBLE_HANDOFF: '', CLAUDECODE: '1', THIMBLE_HANDED_OFF: '1' }
 
 /** The module's hooks on an engine that keeps the environment, files and timers in memory. Its shell takes and runs a
  *  command as hooks/handoff.ts's TAKE does: the rename that takes it, then the output and the exit code beside it.
@@ -85,7 +88,7 @@ test("R2: a thimble command in Claude Code's Bash sandbox, which may not write t
   expect(out.result).toBe('ran label run_failed --in runs.csv --regex failed\n')
   // once, though the folder was read twice; THIMBLE_HANDOFF empty for it, so it never hands itself on
   expect(w.runs).toEqual([{ cwd: '/made-up/cc/claude-1000', bin: BIN, args: ['label', 'run_failed', '--in', 'runs.csv', '--regex', 'failed'],
-    env: { THIMBLE_SESSION: '', THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_ROOT: '', THIMBLE_HANDOFF: '' }, stdin: 'def label(u): ...', timeoutMs: 600000 }])
+    env: { THIMBLE_SESSION: '', THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_ROOT: '', ...MARKS }, stdin: 'def label(u): ...', timeoutMs: 600000 }])
   // once the call ends, nothing more is run: the folder is looked in only while a call that names thimble runs
   w.ask('78-cd', ['coverage'])
   await w.tick()
@@ -110,7 +113,7 @@ test('R2: a request carries only the variables that say which session and folder
     return { result: 'ok' }
   })
   expect(w.runs.map(r => [r.bin, r.env])).toEqual([[BIN, {
-    THIMBLE_SESSION: 's-1', THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_ROOT: '/made-up/data/runs', THIMBLE_HANDOFF: '',
+    THIMBLE_SESSION: 's-1', THIMBLE_CONVERSATION: 'c-1', THIMBLE_START: '/made-up/data', THIMBLE_ROOT: '/made-up/data/runs', ...MARKS,
   }]])
   // a value that is not text is none
   await w.bash({ command: 'thimble coverage' }, async () => {
@@ -118,7 +121,17 @@ test('R2: a request carries only the variables that say which session and folder
     await w.tick()
     return { result: 'ok' }
   })
-  expect(w.runs[1]!.env).toEqual({ THIMBLE_SESSION: '', THIMBLE_CONVERSATION: '', THIMBLE_START: '', THIMBLE_ROOT: '', THIMBLE_HANDOFF: '' })
+  expect(w.runs[1]!.env).toEqual({ THIMBLE_SESSION: '', THIMBLE_CONVERSATION: '', THIMBLE_START: '', THIMBLE_ROOT: '', ...MARKS })
+})
+
+test("R2: the plugin's run is a command in Claude Code, as the command was, though the request says it is not: thimble update and reapply refuse it", async () => {
+  const w = setup()
+  await w.bash({ command: 'thimble update' }, async () => {
+    w.ask('84-qr', ['update'], { env: { THIMBLE_CONVERSATION: 'c-1', CLAUDECODE: '', THIMBLE_HANDED_OFF: '' } })
+    await w.tick()
+    return { result: 'ok' }
+  })
+  expect(w.runs.map(r => [r.args, r.env.CLAUDECODE, r.env.THIMBLE_HANDED_OFF])).toEqual([[['update'], '1', '1']])
 })
 
 test('a Bash call that names no thimble command neither names the folder nor looks in it', async () => {

@@ -52,7 +52,10 @@ async function serve($: Engine, dir: string): Promise<void> {
 }
 
 /** The variables of a run, over the plugin's own environment: each of CARRIED as the request gives it as text, else
- *  empty, and THIMBLE_HANDOFF empty, so that it never hands itself on. No other key of the request is taken. */
+ *  empty; THIMBLE_HANDOFF empty, so that it never hands itself on; and the marks of a command in Claude Code, as the
+ *  command had them, whatever the plugin's own process has: CLAUDECODE, and THIMBLE_HANDED_OFF, by which the kernel
+ *  knows a run for a command in the sandbox (fixes.py in_claude_code: thimble update and reapply refuse it as they
+ *  refuse a command in Claude Code). No other key of the request is taken. */
 export function runEnv(asked: unknown): Record<string, string> {
   const given = (asked && typeof asked === 'object' ? asked : {}) as Record<string, unknown>
   const env: Record<string, string> = {}
@@ -60,7 +63,7 @@ export function runEnv(asked: unknown): Record<string, string> {
     const v = given[k]
     env[k] = typeof v === 'string' ? v : ''
   }
-  return { ...env, THIMBLE_HANDOFF: '' }
+  return { ...env, THIMBLE_HANDOFF: '', CLAUDECODE: '1', THIMBLE_HANDED_OFF: '1' }
 }
 
 /** One command, `at` its path without the ending: the plugin's bin/thimble with its arguments, in its folder, with the

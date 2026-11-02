@@ -30,8 +30,9 @@ CARRIED = ("THIMBLE_SESSION", "THIMBLE_CONVERSATION", "THIMBLE_START", "THIMBLE_
 def plugin(box: Path, home: Path, stop: threading.Event, seen: list[dict] | None = None) -> threading.Thread:
     """The plugin's side, made up: each <id>.ask in `box` taken by its rename and run with this kernel outside the
     sandbox (where thimble's home, `home`, may be written), in the command's folder, with the plugin's environment and
-    the request's CARRIED variables, THIMBLE_HANDOFF empty, and its stdin; its output and its exit code left beside it.
-    `seen` gets each request it took."""
+    the variables hooks/handoff.ts runEnv gives (the request's CARRIED ones, THIMBLE_HANDOFF empty, the marks of a
+    command in Claude Code), and its stdin; its output and its exit code left beside it. `seen` gets each request it
+    took."""
 
     def serve() -> None:
         while not stop.is_set():
@@ -46,7 +47,7 @@ def plugin(box: Path, home: Path, stop: threading.Event, seen: list[dict] | None
                     seen.append(req)
                 home.chmod(0o700)
                 env = {**os.environ, "THIMBLE_HOME": str(home), **{k: str(req["env"].get(k) or "") for k in CARRIED},
-                       "THIMBLE_HANDOFF": ""}
+                       "THIMBLE_HANDOFF": "", "CLAUDECODE": "1", "THIMBLE_HANDED_OFF": "1"}
                 with open(f"{at}.out", "wb") as out, open(f"{at}.err", "wb") as err:
                     done = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), *req["argv"]], cwd=req["cwd"],
                                           env=env, input=req["stdin"].encode(), stdout=out, stderr=err, timeout=60)
@@ -115,6 +116,18 @@ def test_r2_a_request_carries_only_the_variables_that_say_which_session_and_fold
     assert [s["env"] for s in seen] == [{"THIMBLE_SESSION": "c-1", "THIMBLE_CONVERSATION": "c-1", "THIMBLE_START": str(data),
                                          "THIMBLE_ROOT": str(data)}]
     assert list(box.iterdir()) == []
+
+
+def test_r2_update_and_reapply_refuse_a_command_the_plugin_runs_for_claude_code_as_they_refuse_one_in_it(tmp_path: Path) -> None:
+    # the plugin's run of a command handed to it is marked THIMBLE_HANDED_OFF (hooks/handoff.ts runEnv), whether or not
+    # the plugin's own process has CLAUDECODE: thimble update and reapply, which change the thimble the session runs,
+    # and file pr, which posts code publicly, still say to run them in a shell. Before, they went on
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE", "THIMBLE_ROOT")}
+    env.update(THIMBLE_HOME=str(tmp_path / "th"), THIMBLE_HANDED_OFF="1", THIMBLE_UPDATE_URL=str(tmp_path / "no-release"))
+    for argv, what in ((["update"], "thimble update"), (["reapply"], "thimble reapply"), (["file", "pr", "1"], "thimble file pr 1")):
+        r = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), *argv], cwd=tmp_path, env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+        assert r.returncode == 1 and f"{what} runs in a shell, not inside Claude Code" in r.stderr, (argv, r.stdout, r.stderr)
 
 
 @ROOT_SKIP
