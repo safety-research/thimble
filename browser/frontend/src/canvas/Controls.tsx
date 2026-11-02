@@ -5,7 +5,8 @@
 // (report/newComments.ts). At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and
 // the minimap, where a press or drag moves the view. While a filter is set the minimap draws the kept cards in ink, the
 // rest faint. The minimap folds into the zoom bar where the board is too narrow to show it beside a card (minimapOpen),
-// and the bar's map button opens or folds it; the viewer's choice is kept in this browser.
+// and the bar's map button opens or folds it; the viewer's choice is kept in this browser. Both float over the board, so
+// the box a ⌘-click opens keeps clear of them (data-floating, pointer/PointerBox.tsx).
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -102,7 +103,7 @@ export function Controls(p: ControlsProps) {
   const hold = { onMouseDown: (e: MouseEvent) => e.stopPropagation(), onWheel: (e: WheelEvent<HTMLDivElement>) => e.stopPropagation() }
   return (
     <>
-      <div className="bctl bctl-top" {...hold}>
+      <div className="bctl bctl-top" data-floating {...hold}>
         <div className="bctl-bar bctl-add">
           <button type="button" className="bctl-btn" onClick={p.onCell}>
             <Icon name="cell-add" size={14} />
@@ -127,7 +128,7 @@ export function Controls(p: ControlsProps) {
           )}
         </div>
       </div>
-      <div className="bctl" {...hold}>
+      <div className="bctl" data-floating {...hold}>
         <div className="bctl-nav">
           <div className="bctl-bar bctl-zoom" role="group" aria-label="Search and zoom">
             <FilterButton {...p} set={set} />
