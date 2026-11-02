@@ -9,7 +9,8 @@ that fork; and once when the first run of an orientation ends done
 (orient_session). Each trigger merges into the workspace's pending job (JOB_FILE's `job`: the reasons, main's session
 and its cut), so a restarted server runs it. One loop per workspace (_loop) waits DEBOUNCE_MAIN_S after a main turn,
 else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an orientation's end merges with main's `↳` turn),
-and runs the job once main is idle; a main turn still open leaves it pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job.
+and runs the job once main is idle; a main turn still open leaves it pending until that turn ends. A running fork is
+never cancelled; a trigger that comes meanwhile is the next job.
 
 The gate (due): view proposals are on (views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
 Claude can be reached the way chosen (claude_access.problem; the chat's card says what is missing, so no notice

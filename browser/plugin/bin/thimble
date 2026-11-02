@@ -681,8 +681,8 @@ export THIMBLE_LAUNCHED=1
 export CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT="${CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT:-14400000}"
 # Claude Code watches a --plugin-dir folder in an interactive session, as a plugin being written: it reloads it on a save
 # and writes each hook of it that fails into the transcript, main's chat here. thimble's plugin is not being written in
-# the analyst's session, so it loads as an installed plugin does, unwatched, and such a line goes to the debug log alone.
-# A value the analyst set is kept (1 for a thimble developer who wants the reloads).
+# the analyst's session, so it loads as an installed plugin does, unwatched, and such a line goes to the debug log
+# alone. A value the analyst set is kept (1 for a thimble developer who wants the reloads).
 export CLAUDE_CODE_PLUGIN_DIR_WATCH="${CLAUDE_CODE_PLUGIN_DIR_WATCH:-0}"
 # Claude Code asks for no reply after a turn that ends on one of these tools; empty when this `claude` does not read the
 # variable (backend/app/terminal_tools.py).

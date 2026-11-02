@@ -8,7 +8,8 @@ Main answers by forking with description and prompt `thread:<name>`, the thread'
 question as a slug, which Claude Code's agent tray shows; the event's line in main's terminal names the thread by its
 first question, line_name);
 the mirror (session.py) matches the fork's transcript, copies its tool calls and its text into the thread's chat, with
-the messages the analyst typed to it in Claude Code's agent view, and calls fork_finished when it stops. The fork replies with `reply_in_thread` or its text.
+the messages the analyst typed to it in Claude Code's agent view, and calls fork_finished when it stops. The fork
+replies with `reply_in_thread` or its text.
 
 A fork lives only as long as its session: after that, the next event forks anew and carries the earlier turns. A
 message typed while the first event waits for its fork is queued (`queued`) and sent once the fork is known (flush)."""
