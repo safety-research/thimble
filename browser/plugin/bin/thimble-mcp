@@ -32,6 +32,11 @@ shim checks at each keep-alive.
 Protocol: the shim serves only the initialize-handshake protocol (2025-11-25 and earlier); a 2026-07-28
 `server/discover` probe is refused, and Claude Code falls back to the handshake.
 
+Lifetime: the shim serves its session until Claude Code closes its stdin, as the session ends. It also ends once its
+plugin folder is gone (gone_with_plugin), as an uninstall or a deleted checkout leaves it, so a session left open after
+an uninstall keeps no shim running; it looks every RETRY_S, and exits at once, since the MCP SDK reads stdin in a thread
+that no cancel ends.
+
 `thimble-mcp --list` prints the tool list as JSON and `thimble-mcp --instructions` the instructions, without MCP.
 """
 import hmac
@@ -40,6 +45,8 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 import urllib.parse
 from pathlib import Path
 from typing import Annotated, Any
@@ -87,7 +94,9 @@ PROGRESS_S = 60.0  # how often a call in flight reports progress (with_progress)
 PROGRESS_ENV = "THIMBLE_MCP_PROGRESS_S"
 SESSION_ENV = "THIMBLE_SESSION"  # the session this shim serves: `orient`, `writer:<doc>` or `critique:<id>` for a session thimble started (agent_session.py)
 TOKEN_ENV = hook_auth.SESSION_TOKEN_ENV  # what proves SESSION_ENV (module note, session)
-RETRY_S = 2.0  # between subscriptions, and between looks whether the folder is a workspace yet (in_workspace)
+# between subscriptions, between looks whether the folder is a workspace yet (in_workspace), and between looks whether
+# the plugin folder is still there (gone_with_plugin)
+RETRY_S = 2.0
 TOOL_USE_META = "claudecode/toolUseId"  # the key of Claude Code's id for a call in the request's `_meta`
 CTX_PARAM = "thimble_mcp_context"  # the generated handler's MCP context parameter (_tool), which no tool's schema lists
 _JSON_TYPES = {"string": str, "number": float, "integer": int, "boolean": bool, "array": list, "object": dict}
@@ -470,6 +479,18 @@ def build_server() -> MCPServer:
     return MCPServer(tools.SERVER_NAME, instructions=instructions() or None, tools=[_tool(e) for e in tool_entries()])
 
 
+def gone_with_plugin(folder: Path = HERE.parents[1]) -> None:
+    """End this process once `folder`, the plugin folder this shim belongs to, is gone (module note, Lifetime): a thread
+    that looks every RETRY_S."""
+
+    def watch() -> None:
+        while folder.is_dir():
+            time.sleep(RETRY_S)
+        os._exit(0)
+
+    threading.Thread(target=watch, name="thimble-mcp-plugin", daemon=True).start()
+
+
 if __name__ == "__main__":
     if "--list" in sys.argv[1:]:  # a debugging aid: the tool list as JSON, no server involved
         json.dump(tool_entries(), sys.stdout, indent=1)
@@ -478,4 +499,5 @@ if __name__ == "__main__":
     if "--instructions" in sys.argv[1:]:  # a debugging aid: the instructions text, fetched as the server would be
         sys.stdout.write(instructions() + "\n")
         sys.exit(0)
+    gone_with_plugin()
     anyio.run(serve, build_server())
