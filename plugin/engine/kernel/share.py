@@ -5,7 +5,8 @@ Claude tried; for a fix Claude still works on, that Claude still works on it and
 with the thimble version and the mode. It is Claude's text when the plugin or the browser gives one (`--draft -`, the
 JSON fix-draft.md asks for), else the one given before for this fix, else the fix's own record: the person's words and
 what the fixer said the fix does. The privacy scan (privacy.py, as `thimble fix draft` runs it) takes the names and
-values of the person's folder and machine out of the draft first.
+values of the person's folder and machine out of the draft first: out of the person's words and Claude's, while
+thimble's own headings and lines stay as they are.
 
 The command prints GitHub's new-issue link with the title and the text in it; `--open` opens the link in the person's
 browser too. On GitHub's page the person reads the text, pastes a screenshot if they want and presses Submit. thimble
@@ -41,7 +42,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, urlencode
 
 from . import fixes as FX
@@ -115,38 +116,41 @@ def _given(rec: dict[str, Any], given: dict[str, Any] | None) -> tuple[dict[str,
     return {"title": str(rec.get("title") or ""), "wrong": words, "fixed": " ".join(str(rec.get("summary") or "").split())}, "record"
 
 
-def _body(rec: dict[str, Any], d: dict[str, str]) -> str:
+def _body(rec: dict[str, Any], d: dict[str, str], hold: Callable[[str], str] = str) -> str:
     """The issue's text, in GitHub Markdown: what was wrong, then how it was fixed, or what it needs (a request with no
     code), or, for a fix that failed, why it could not be done here and what Claude tried (a refused try's change), or,
     for a fix Claude still works on, that Claude still works on it and what the fix does so far (what its fixer said,
-    when one ended)."""
+    when one ended). thimble's own text in it (each heading, fixed sentence and the last line) goes through hold(), so
+    that _scan can leave it out of the privacy scan (FX._holder)."""
     failed = rec.get("state") == "failed"
     working = rec.get("state") == "working"
     request = failed or working or rec.get("state") == "request" or not rec.get("commit")
     rel = FX.release()
     version = rel.get("version") or str(rel.get("base") or "")[:7] or "?"
     if failed:
-        why = " ".join(str(rec.get("error") or "").split()) or "(say what stopped it)"
-        middle = f"### Why it could not be done here\n\n{why}\n\n" + (
-            f"### What Claude tried\n\n{d['fixed']}\n\n" if d["fixed"] else "")
+        why = " ".join(str(rec.get("error") or "").split()) or hold("(say what stopped it)")
+        middle = f"{hold('### Why it could not be done here')}\n\n{why}\n\n" + (
+            f"{hold('### What Claude tried')}\n\n{d['fixed']}\n\n" if d["fixed"] else "")
     elif working:
-        middle = "### What it does so far\n\nClaude is still working on this fix.\n\n" + (
+        middle = f"{hold('### What it does so far')}\n\n{hold('Claude is still working on this fix.')}\n\n" + (
             f"{d['fixed']}\n\n" if d["fixed"] else "")
     else:
-        fixed = d["fixed"] or ("(no change: Claude could not do it in code)" if request else "(say how it works now)")
-        middle = f"### {'What it needs' if request else 'How it was fixed'}\n\n{fixed}\n\n"
-    return (f"### What was wrong\n\n{d['wrong'] or '(say what you saw)'}\n\n{middle}"
-            f"thimble {version} · {rec.get('made_in') or 'terminal'} · "
-            f"{'asked through' if request else 'fixed by'} `thimble fix`\n")
+        fixed = d["fixed"] or hold("(no change: Claude could not do it in code)" if request else "(say how it works now)")
+        middle = f"{hold('### What it needs' if request else '### How it was fixed')}\n\n{fixed}\n\n"
+    last = (f"thimble {version} · {rec.get('made_in') or 'terminal'} · "
+            f"{'asked through' if request else 'fixed by'} `thimble fix`")
+    return f"{hold('### What was wrong')}\n\n{d['wrong'] or hold('(say what you saw)')}\n\n{middle}{hold(last)}\n"
 
 
-def _scan(text: str, st: Store | None) -> tuple[list[dict[str, Any]], str]:
+def _scan(text: str, st: Store | None, own: list[str] | None = None) -> tuple[list[dict[str, Any]], str]:
     """The privacy scan of the draft, as `thimble fix draft` scans the words: every name from the person's folder goes,
-    even one that thimble's repository has. (hits, the text with them taken out)"""
+    even one that thimble's repository has. It reads only the person's words and Claude's: thimble's own text, held in
+    `own` already (FX._holder), stays as it is, so a folder named like one of thimble's words (fix) takes nothing out
+    of it. (hits, the text with them taken out)"""
     base = FX.release().get("base") or "HEAD"
     have_live = (FX.live_dir() / ".git").exists()
     paths = FX._repo_paths(base, "") if have_live else set()
-    held, keep = FX._protect({"issue": text}, paths)
+    held, keep = FX._protect({"issue": text}, paths, own)
     known = FX._known(base) if have_live else None
     found = FX.session_terms(st)
     terms = FX._widen(found, held["issue"], known, set())
@@ -206,7 +210,8 @@ def share(fid: int | str, given: dict[str, Any] | None = None, st: Store | None 
         st = _store_of(rec)
     d, src = _given(rec, given)
     title = FX.short(d["title"] or rec["title"], 72)
-    hits, text = _scan(f"{title}\n{_body(rec, d)}", st)
+    own: list[str] = []
+    hits, text = _scan(f"{title}\n{_body(rec, d, FX._holder(own))}", st, own)
     title, _, body = text.partition("\n")
     url, shortened = issue_url(title.strip(), body, FX.upstream())
     out_dir = share_dir(rec["id"])
@@ -425,9 +430,10 @@ def pr_preview(fid: int | str, st: Store | None = None) -> dict[str, Any]:
                           f"to make it work on the newest thimble (thimble update moves you to it), then try again")
     d, _src = _given(rec, None)
     title = FX.short(d["title"] or rec["title"], 72)
-    body = (_body(rec, d) + f"\nOpened with `thimble file pr`, on thimble {version} "
-            f"(`{base[:7]}`).\n")
-    hits, text = _scan(f"{title}\n{body}", st)
+    own: list[str] = []
+    hold = FX._holder(own)
+    opened = hold(f"Opened with `thimble file pr`, on thimble {version} (`{base[:7]}`).")
+    hits, text = _scan(f"{title}\n{_body(rec, d, hold)}\n{opened}\n", st, own)
     title, _, body = text.partition("\n")
     title = title.strip()
     files = FX._numstat(FX.live_dir(), f"{rec['commit']}^", rec["commit"])

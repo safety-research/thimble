@@ -102,7 +102,8 @@ def ahead(w, path: str = "plugin/notes.md", text: str = "made-up notes\n" * 400)
 
 def test_it_warns_shows_what_would_go_and_no_sends_nothing(world, gh, monkeypatch, capsys):
     rec = fix_on(world)
-    monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["board-7.jsonl"]})
+    # folders named like words of thimble's own text (B16) take nothing out of it
+    monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["board-7.jsonl"], "folder": ["fix", "terminal", "file"]})
     asked = answer(monkeypatch, "")
     assert CLI.main(["file", "pr", str(rec["id"])]) == 0
     out = capsys.readouterr().out
@@ -116,7 +117,7 @@ def test_it_warns_shows_what_would_go_and_no_sends_nothing(world, gh, monkeypatc
     assert "  Files    plugin/bar/bar.tsx  +1 −1" in lines
     # the body: share's text, the person's data file taken out, with the line that says how it was opened
     assert "    ### What was wrong" in lines and "    After Claude read ‹data file›, the bar's item still said coverage." in lines
-    assert "    ### How it was fixed" in lines
+    assert "    ### How it was fixed" in lines and "    thimble 0.10.2 · terminal · fixed by `thimble fix`" in lines
     assert f"    Opened with `thimble file pr`, on thimble 0.10.2 (`{world['base'][:7]}`)." in lines
     assert "board-7.jsonl" not in out
     assert "  ✓ privacy check: took 1 file name out of the text; nothing of yours in the code" in lines

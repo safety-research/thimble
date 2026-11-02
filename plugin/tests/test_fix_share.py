@@ -195,6 +195,31 @@ def test_in_a_shell_the_scan_takes_out_the_names_of_the_folder_the_fix_was_asked
     assert "board-7.jsonl" not in out["body"] + out["url"] and "after Claude read ‹data file›" in out["body"]
 
 
+def test_a_folder_named_like_thimbles_words_leaves_thimbles_own_text_as_it_is(world, monkeypatch, opened, tmp_path):
+    """B16: the scan reads the person's words and Claude's alone. A folder of theirs named like a word of thimble's issue
+    text (fix, terminal) takes nothing out of thimble's headings, sentences or last line; in their words, a data file's
+    name and such a folder's name still go."""
+    data = tmp_path / "made-up-study"
+    for f in ("fix/notes.md", "terminal/session-3.log", "runs/board-7.jsonl"):
+        (data / f).parent.mkdir(parents=True, exist_ok=True)
+        (data / f).write_text("made-up\n")
+    monkeypatch.setenv("THIMBLE_ROOT", str(data))
+    w = FX.new("the minimap covers the cards of board-7.jsonl")
+    r = SH.share(w["id"])
+    assert r["body"] == ("### What was wrong\n\nthe minimap covers the cards of ‹data file›\n\n### What it does so far\n\n"
+                         "Claude is still working on this fix.\n\nthimble 0.10.2 · terminal · asked through `thimble fix`\n")
+    assert r["took"] == "took 1 file name out of the text"
+    p = Path(w["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("coverage", "read"))
+    assert FX.done(w["id"], "Minimap folds away", "The minimap folds into a button.")["state"] == "ready"
+    r = SH.share(w["id"], {"title": "Minimap folds away", "wrong": "The minimap hid the cards.",
+                           "fixed": "The minimap folds into a button, as in the terminal."})
+    assert r["body"] == ("### What was wrong\n\nThe minimap hid the cards.\n\n### How it was fixed\n\n"
+                         "The minimap folds into a button, as in the ‹folder›.\n\n"
+                         "thimble 0.10.2 · terminal · fixed by `thimble fix`\n")
+    assert r["took"] == "took 1 folder name out of the text" and query(r["url"])["body"] == r["body"]
+
+
 def test_a_fix_asked_in_the_home_folder_lists_none_of_its_files(world, monkeypatch, opened, capsys, tmp_path):
     from kernel import sources  # noqa: PLC0415
 

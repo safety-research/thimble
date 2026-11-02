@@ -4071,9 +4071,12 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     s = r.get("state")
     if s == "pending":
         acts.append(("thimble reapply", "Claude checks it against the release and brings it back"))
-    if s in ("on", "off", "ready", "sent") and can_share():
-        acts.append((f"thimble file issue {r['id']}",
-                     "a link to GitHub's new-issue form with its text, to read and submit"))
+    if can_share():
+        from .share import STATES  # noqa: PLC0415 — share imports this module
+        # every state that thimble file issue takes, as the list's What next names it
+        if s in STATES:
+            acts.append((f"thimble file issue {r['id']}",
+                         "a link to GitHub's new-issue form with its text, to read and submit"))
     if s in ("on", "ready") and r.get("commit") and not r.get("pr") and can_share():
         acts.append((f"thimble file pr {r['id']}", "open a pull request with its code on the public repo (asks first)"))
     if s == "on" and is_on():
@@ -4298,15 +4301,23 @@ _PATHISH = re.compile(r"(?<![\w./~-])[\w.-]+(?:/[\w.-]+)+/?")
 _HELD = re.compile("[\U000F0000-\U000FFFFD]")
 
 
-def _protect(parts: dict[str, str], paths: set[str]) -> tuple[dict[str, str], list[str]]:
-    """The parts with thimble's own text held out of the scan: in the diff each line that is not an added line (file
-    names, hunk headers, thimble's code at the release), and in every part a path of thimble's repository. Each held
-    span becomes one private-use character, which no term matches, until _unprotect puts it back."""
-    held: list[str] = []
+def _holder(held: list[str]):
+    """hold(x): x held out of the scan as one private-use character, which no term matches, until _unprotect puts it
+    back; `held` lists the spans it holds."""
 
     def hold(x: str) -> str:
         held.append(x)
         return chr(0xF0000 + len(held) - 1)
+    return hold
+
+
+def _protect(parts: dict[str, str], paths: set[str], held: list[str] | None = None) -> tuple[dict[str, str], list[str]]:
+    """The parts with thimble's own text held out of the scan: in the diff each line that is not an added line (file
+    names, hunk headers, thimble's code at the release), and in every part a path of thimble's repository. Each held
+    span becomes one private-use character, which no term matches, until _unprotect puts it back. `held`: the spans
+    the parts hold already (_holder), such as the headings of share.py's issue text."""
+    held = [] if held is None else held
+    hold = _holder(held)
 
     def paths_in(text: str) -> str:
         def one(m: re.Match) -> str:
