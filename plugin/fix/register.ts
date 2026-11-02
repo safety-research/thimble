@@ -1,11 +1,13 @@
 // register.ts: thimble fix, the person's changes to their own thimble, in the hooks module.
 //
-//   /thimble-fix <words>   a prompt to Claude: the plugin's prompt command /thimble:thimble-fix (commands/
-//                          thimble-fix.md, left out of the menu) runs with the words, so the transcript shows them as
-//                          typed, and Claude reads the person's fixes beside it (fixesContext: number, name, state).
-//                          Claude names the fix the words change with the fix-thimble skill, `N` when they follow up on
-//                          fix N, `new` when they are about something else, or first asks one short question. Typed
-//                          mid-turn, it waits for the turn's end
+//   /thimble-fix <words>   a prompt to Claude: the words, as the person typed them, are a prompt of thimble's that Claude
+//                          reads as theirs, so the transcript shows them, and the command's answer gives Claude the
+//                          request beside them (prompts/fix-request.md) and the person's fixes (fixesContext: number,
+//                          name, state). Claude names the fix the words change with the fix-thimble skill, `N` when
+//                          they follow up on fix N, `new` when they are about something else, or first asks one short
+//                          question. Typed mid-turn, it waits for the turn's end. The command is thimble's only one of
+//                          that name: a host that runs Claude Code through its SDK lists every command a plugin gives
+//                          (the desktop app's Code tab)
 //   the fix-thimble skill  a request in the person's own words, as they typed them after /thimble-fix: the kernel
 //                          makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer (fixer.ts) works in it in
 //                          the background; N is a round of fix N itself (its fixer's, or in place: the version the
@@ -48,6 +50,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
+import { promptText } from '../prompts/prompts'
+import { fill } from '../prompts/registry.mjs'
 import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
 import { type Fix, carryFixes, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, triesAgain, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen, redrawFor } from './line'
@@ -241,10 +245,11 @@ export const registerFix: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // /thimble-fix alone, a fix's number alone and /thimble-fix update answer here, without a turn; words become the
-  // prompt command's run (commands/thimble-fix.md), whose row in the transcript shows them, a moment after this hook (a
-  // run from inside it would wait on it)
-  on('command.run', { command: /^(?:thimble:)?thimble-fix$/ }, async ($, e, next) => {
+  // /thimble-fix alone, a fix's number alone and /thimble-fix update answer here, without a turn. Words go to Claude as
+  // the person's prompt a moment after this hook (a prompt from inside it would wait on it), and the command's answer,
+  // which Claude Code records before that prompt, gives Claude the request and the person's fixes, to tell a follow-up
+  // from a new fix
+  on('command.run', { command: 'thimble-fix' }, async ($, e) => {
     const words = String(e.args || '').trim()
     if (/^update$/i.test(words)) return { text: UPDATE_IN_SHELL }
     if (!words) return { text: FIX_ALONE }
@@ -254,22 +259,21 @@ export const registerFix: Register = on => {
       const said = await numberAlone($, head.n)
       return said ? { text: said } : {}
     }
+    const notAsked = (err: unknown) => `thimble could not ask Claude for this fix: ${cut(String((err as Error)?.message || err), 160)}`
+    let requestText: string
+    try {
+      requestText = fill(await promptText($, 'fix-request'), { WORDS: words })
+    } catch (err) {
+      return { text: notAsked(err) }
+    }
     await $.state.set(ASKED, 2 as never)
     await $.state.set(ASKED_WORDS, words as never)
-    if (e.command !== 'thimble-fix') {
-      // the prompt command: Claude reads the person's fixes beside it, to tell a follow-up from a new fix
-      const r = await next(e)
-      const list = fixesContext((await refreshFixes($))?.fixes ?? [])
-      return list ? { ...r, context: [...(r?.context ?? []), list] } : r
-    }
+    const list = fixesContext((await refreshFixes($))?.fixes ?? [])
     $.clock.after(0, () => {
-      void $.command.run({ command: 'thimble:thimble-fix', args: words } as never).catch(err => $.ui.toast(`thimble could not ask Claude for this fix: ${cut(String((err as Error)?.message || err), 160)}`))
+      void $.prompt.submit({ text: words, asUser: true }).catch(err => $.ui.toast(notAsked(err)))
     })
-    return {}
+    return { context: [requestText, ...(list ? [list] : [])] }
   })
-
-  // one /thimble-fix in the menu: the prompt command it runs stays out of it
-  on('command.describe', { command: 'thimble:thimble-fix' }, async ($, e, next) => ({ ...(await next(e)), isHidden: true })).catch(($, e, next) => next(e))
 
   // the fix-thimble skill: Claude asks for the same fix, in the skill's argument, and reads what came of it in the
   // skill's place. It is answered at the Skill tool's call, which every person's plugin gets: where an organization

@@ -75,9 +75,11 @@ function setup(o: { keys?: boolean } = {}) {
   const config: { key: string; value: unknown }[] = []
   const copied: string[] = []
   const asked: Any[] = []
-  // the person's prompt box, each fill a plugin made of it, and each time a hook asked for the bar to draw again
+  // the person's prompt box, each fill a plugin made of it, each prompt the plugin gave Claude, and each time a hook
+  // asked for the bar to draw again
   const box = { text: '' }
   const fills: Any[] = []
+  const prompts: Any[] = []
   const redraws: string[] = []
   const fix: Any = { id: 1, title: 'make the bar say read', words: ["make the bar's coverage item say read"], rounds: 1, made_in: 'terminal', created: 1761200000, state: 'working', work: WORK, commit: null, files: [], tests: null, summary: '', error: null }
   // the kernel's records: none until the first request
@@ -206,6 +208,7 @@ function setup(o: { keys?: boolean } = {}) {
         box.text = a.mode === 'append' ? box.text + a.text : a.text
         return { isFilled: true, text: box.text, cursor: box.text.length }
       },
+      submit: async (a: Any) => { prompts.push(a); return { text: a.text } },
     },
     model: { complete: async (req: Any) => { asked.push(req); return { isAnswered: true, text: JSON.stringify({ title: 'Bar says coverage, not read', wrong: 'The bar said coverage after Claude read a file.', fixed: 'The bar says read.' }) } } },
     ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: (ev: string) => { redraws.push(ev) } },
@@ -230,17 +233,27 @@ function setup(o: { keys?: boolean } = {}) {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, redraws }
+  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, prompts, redraws }
 }
 
-/** The person's /thimble-fix <words>: the command runs the plugin's prompt command with the words a moment later, and
- *  Claude, reading it, starts the fix with the fix-thimble skill. What Claude reads in the skill's place. */
+/** The person's /thimble-fix <words>: the command's answer gives Claude the request with the words (prompts/
+ *  fix-request.md), and a moment later the words go to Claude as the person's prompt, with no other command run;
+ *  Claude, reading them, starts the fix with the fix-thimble skill. What Claude reads in the skill's place. */
 async function ask(s: ReturnType<typeof setup>, words: string): Promise<Any> {
+  const ran = s.commands.length
   const own = await s.call('command.run', { command: 'thimble-fix', args: words }, async () => { throw new Error('/thimble-fix with words runs no command of its own') })
-  expect(own).toEqual({})
+  expect(own.context[0]).toBe(`REQUEST ${words}`)
   await s.tick()
-  expect(s.commands.splice(s.commands.indexOf('thimble:thimble-fix'), 1)).toEqual(['thimble:thimble-fix'])
+  expect(s.prompts.splice(0)).toEqual([{ text: words, asUser: true }])
+  expect(s.commands.slice(ran)).toEqual([])
   return skillText(await skillCall(s, words))
+}
+
+/** The answer of /thimble-fix <words>: no text, and the request Claude reads with the person's words, then their fixes
+ *  when they have any. */
+function answersWithRequest(r: Any, words: string): void {
+  expect(r.text).toBeUndefined()
+  expect(r.context[0]).toBe(`REQUEST ${words}`)
 }
 
 /** Claude's call of the fix-thimble skill, through the Skill tool: the skill itself must not run. */
@@ -1218,7 +1231,7 @@ test("a fix-thimble hook that fails tells Claude why, never that thimble's hooks
   expect(String((await caught.call({}, {}, next)).deny)).toContain('made-up failure')
 })
 
-test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of Claude; words go to Claude as the prompt command, and the fix takes them as the person typed them', async () => {
+test("/thimble-fix alone and /thimble-fix update answer at once, with no turn of Claude; words go to Claude as the person's prompt, with the request beside them and no other command, and the fix takes them as the person typed them", async () => {
   const s = setup()
   await s.call('session.start', { cwd: '/made-up/data' })
   const none = async () => { throw new Error('no command runs') }
@@ -1227,17 +1240,14 @@ test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of
   expect(String((await s.call('command.run', { command: 'thimble-fix', args: 'update' }, none)).text)).toContain('thimble update')
   await s.tick()
   expect(s.commands).toEqual([])
-  // words: the prompt command runs with them, the same as /thimble:thimble-fix typed in full
-  const runs: Any[] = []
-  s.$.command.run = async (c: Any) => { runs.push(c); return {} }
-  await s.call('command.run', { command: 'thimble-fix', args: 'the bar is cut' })
+  expect(s.prompts).toEqual([])
+  // words: the command's answer gives Claude the request, and a moment later the words are the person's prompt
+  const own = await s.call('command.run', { command: 'thimble-fix', args: 'the bar is cut' }, none)
+  expect(own).toEqual({ context: ['REQUEST the bar is cut'] })
   await s.tick()
-  expect(runs).toEqual([{ command: 'thimble:thimble-fix', args: 'the bar is cut' }])
-  const passed = await s.call('command.run', { command: 'thimble:thimble-fix', args: 'the bar is cut' }, async (e: Any) => ({ ran: e.args }))
-  expect(passed).toEqual({ ran: 'the bar is cut' })
+  expect(s.prompts).toEqual([{ text: 'the bar is cut', asUser: true }])
+  expect(s.commands).toEqual([])
   expect(s.spawns).toEqual([])
-  // the prompt command stays out of the menu, so the person sees one /thimble-fix
-  expect((await s.call('command.describe', { command: 'thimble:thimble-fix', description: 'd', isHidden: false, immediate: false }, async (e: Any) => ({ description: e.description, isHidden: e.isHidden }))).isHidden).toBe(true)
   // Claude's skill after it: the fixer and the kernel get the words the person typed, never Claude's, and Claude is not
   // told of the fix again
   await skillCall(s, "new The bar's coverage item is cut at narrow widths")
@@ -1273,7 +1283,6 @@ test("/thimble-fix alone, also right after Claude asked whether to start a fix, 
   // Claude's answer asks whether to start a fix: /thimble-fix alone is no yes to it
   await answered(s, 't-1', "The card's legend hides its last row, which is thimble's drawing, not your data. Want me to start a fix?")
   expect(await alone()).toEqual({ text: FIX_ALONE })
-  expect(await alone('', 'thimble:thimble-fix')).toEqual({ text: FIX_ALONE })
   // a fix's number, or new, with no words after it: nothing says what should change
   for (const args of ['1', '#2', '3:', 'new', 'NEW:']) expect(await alone(args)).toEqual({ text: FIX_ALONE })
   await s.tick()
@@ -1286,7 +1295,7 @@ test("the fixer reads the person's own words, not Claude's restatement of them, 
   const s = setup()
   await s.call('session.start', { cwd: '/made-up/data' })
   const mine = 'the coverage thing in the bar should just say read'
-  expect(await s.call('command.run', { command: 'thimble-fix', args: mine }, async () => ({}))).toEqual({})
+  answersWithRequest(await s.call('command.run', { command: 'thimble-fix', args: mine }, async () => ({})), mine)
   await s.tick()
   await skillCall(s, "Change the bar's coverage item label from coverage to read")
   const first = String(s.spawns[0].prompt)
@@ -1294,7 +1303,7 @@ test("the fixer reads the person's own words, not Claude's restatement of them, 
   expect(first).not.toContain("Change the bar's coverage item label")
   // more words while the fixer works: the person's own reach it
   const more = 'and keep the percent'
-  expect(await s.call('command.run', { command: 'thimble-fix', args: more }, async () => ({}))).toEqual({})
+  answersWithRequest(await s.call('command.run', { command: 'thimble-fix', args: more }, async () => ({})), more)
   await s.tick()
   await skillCall(s, 'Also keep the percentage value shown after the word')
   expect(s.sent).toEqual([{ to: { agentId: 'agent-fixer-1' }, text: `The person adds to this fix (round 2): ${more}` }])
@@ -1304,13 +1313,13 @@ test("the fixer reads the person's words without the form's head that names the 
   const s = setup()
   await s.call('session.start', { cwd: '/made-up/data' })
   // new …: a new fix, whose fixer and the kernel get the words after `new`
-  expect(await s.call('command.run', { command: 'thimble-fix', args: "new the pane's title is cut" }, async () => ({}))).toEqual({})
+  answersWithRequest(await s.call('command.run', { command: 'thimble-fix', args: "new the pane's title is cut" }, async () => ({})), "new the pane's title is cut")
   await s.tick()
   await skillCall(s, "new The pane's title is cut off at narrow widths")
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("the pane's title is cut")
   expect(String(s.spawns[0].prompt)).toContain("The person asked for this change to their thimble:\n\nthe pane's title is cut\n")
   // 1 …, while fix 1's fixer works: the words after the number reach it
-  expect(await s.call('command.run', { command: 'thimble-fix', args: '1 also keep the percent' }, async () => ({}))).toEqual({})
+  answersWithRequest(await s.call('command.run', { command: 'thimble-fix', args: '1 also keep the percent' }, async () => ({})), '1 also keep the percent')
   await s.tick()
   await skillCall(s, '1 Also keep the percentage value shown after the title')
   expect(s.sent.at(-1)).toEqual({ to: { agentId: 'agent-fixer-1' }, text: 'The person adds to this fix (round 2): also keep the percent' })
@@ -1503,9 +1512,11 @@ test('the live sequence: apply a fix, follow up on it, and the follow-up is a ro
   await requested(s)
   await (await fixKey(s.$, 'y'))!.later()
   expect(s.verbs()).toContain('apply 1 --ask -')
-  // /thimble-fix: Claude reads the person's fixes beside the command, by name and state, the number as the handle
-  const ran = await s.call('command.run', { command: 'thimble:thimble-fix', args: 'it breaks when I click' }, async () => ({}))
-  expect(ran.context).toEqual(["The person's thimble fixes (start the fix-thimble skill with `N` to change fix N, `new` for a new fix):\n1  \"Bar says read for coverage\" (on): The bar says r read 14%."])
+  // /thimble-fix: Claude reads the person's fixes beside the request, by name and state, the number as the handle
+  const ran = await s.call('command.run', { command: 'thimble-fix', args: 'it breaks when I click' }, async () => ({}))
+  expect(ran.context).toEqual(['REQUEST it breaks when I click', "The person's thimble fixes (start the fix-thimble skill with `N` to change fix N, `new` for a new fix):\n1  \"Bar says read for coverage\" (on): The bar says r read 14%."])
+  await s.tick()
+  expect(s.prompts.splice(0)).toEqual([{ text: 'it breaks when I click', asUser: true }])
   // Claude gives `1 <words>`: a round of fix 1 itself, never a new fix
   const r = await ask(s, '1 it breaks when I click')
   expect(s.verbs().filter(v => v.startsWith('new'))).toEqual(['new --made-in terminal'])
@@ -1576,7 +1587,7 @@ test("the fix takes the person's own words, never Claude's, and the fix they nam
   const s = setup()
   await s.call('session.start', { cwd: '/made-up/data' })
   const mine = 'add a feature to customize the model in charge of citations'
-  expect(await s.call('command.run', { command: 'thimble-fix', args: mine }, async () => ({}))).toEqual({})
+  answersWithRequest(await s.call('command.run', { command: 'thimble-fix', args: mine }, async () => ({})), mine)
   await s.tick()
   await skillCall(s, 'new: Add a way for the analyst to choose the model that checks citations')
   const made = s.ran.find(x => x.argv.includes('new'))!

@@ -5,6 +5,7 @@ const STUBS: Record<string, string> = {
   labels: 'LABEL {{NAME}} | {{VALUES}}\n{{RECORDS}}',
   observer: 'OBSERVER\n{{LENSES}}',
   'observer-turn': 'TURN {{MESSAGES}}\nKEYS {{ROW}}{{SHOWN}}\nCARDS {{OBJECTS}}\nREAD {{COVERAGE}}\nGIVEN {{DIGEST}}{{RULES}}\nREPLY {{SKELETON}}',
+  'fix-request': 'REQUEST {{WORDS}}',
 }
 
 /** The stub text of a registry path (`…/prompts/<text>.md`), or undefined for any other path. */

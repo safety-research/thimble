@@ -905,7 +905,7 @@ def tries_again(rec: dict[str, Any]) -> bool:
 async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     """The person's `/thimble-fix <words>` in main's chat: the message shows there as they typed it, and main reads the
     request with their fixes beside it (prompts/thimble-fix.md), as the terminal's /thimble-fix gives Claude
-    (plugin/commands/thimble-fix.md). Main starts the fix with fix_thimble in the turn that reads it or the next one
+    (plugin/prompts/fix-request.md). Main starts the fix with fix_thimble in the turn that reads it or the next one
     (words_read, main_turn_ended), which takes the words and the page as they were now. Posted as main's event, so words
     typed while main works wait for its turn's end. A fix's number alone tries a fix that failed or no longer fits again
     (redo), as its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a try
