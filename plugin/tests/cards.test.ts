@@ -156,7 +156,8 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
       },
       key: { ok: true, handled: body.key === 'o', tree: SORTED, width: runnerWidth, state: '{"sorted":true}' },
       draw: { ok: true, tree: TREE, width: runnerWidth, state: 'null' },
-      copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
+      // with `wide`, a copy says the width it is laid out at
+      copy: { ok: true, lines: o.wide ? [`copy at ${body.width}`] : ['ada 3', 'bram 5'], cut: [] },
       undo: { ok: true, tree: TREE, width: runnerWidth, state: 'null' },
       // a click on words that stand on no item
       pick: { ok: true, handled: false },
@@ -553,6 +554,38 @@ test('a frame that asked for its drawing before a key changed the card asks agai
   expect((await client(70)).props.tree).toEqual(laid('sorted at 62'))
   await shownMain.unmount()
   await pane.unmount()
+})
+
+// A side thread's pane draws the card at the pane's width, so the runner's newest drawing is the pane's. A text copy
+// Claude reads is laid out at the width of the surface its reader relates to, not at the newest drawing's: main's at the
+// conversation's, the side thread's at its pane's while the pane draws the card
+test("the side pane drew the card last: main's next card call still answers the copy at the conversation's width, and the side thread reads the card as its pane draws it", async ($, on) => {
+  const w = world(on, { wide: true })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_23', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  // the card in the conversation at 92 columns; a side thread about it, whose pane (50 columns) draws it whole at 44
+  const row = await shown($, callRow('toolu_made_up_23', input))
+  await row.press({ key: 'ask-visible' })
+  const pane = await $.ui.mount({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Scores', isFocused: true, bodyColumns: 50, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } } as never)
+  await pane.press({ key: 'thread-key-e' })
+  expect(textOf(await pane.drawn({ in: `card-${id}-1` }))).toContain('rows at 44')
+  // main draws a new version: its copy is the card the conversation shows, not the pane's
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_23b', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
+  expect(String(r2.result)).toContain('What it draws, 92 columns wide:')
+  // a question in the side thread: its fork reads the card as the pane draws it, and once e folded the card to its
+  // title, as the conversation draws it
+  const ask = async (text: string) => {
+    await (pane as Any).input({ key: String((await pane.find({ type: 'Input' }))?.key), text })
+    return String(w.forks.at(-1)?.prompt)
+  }
+  expect(await ask('why is ada first?')).toContain('What the card draws now, as text:\ncopy at 44')
+  await pane.press({ key: 'thread-key-e' })
+  expect(await ask('and bram?')).toContain('What the card draws now, as text:\ncopy at 92')
+  await pane.unmount()
+  await row.unmount()
 })
 
 test('a key at an empty prompt reaches the focused card in view when it lists the key, and other keys type; a card scrolled out of view takes none', async ($, on) => {

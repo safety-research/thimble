@@ -25,7 +25,7 @@
 //                 the person was typing a word
 //   cardPost      what a card's Client sends: Button presses, clicks, and a click on a run of words (the item on its
 //                 line, else its side thread)
-//   cardText      a card's text copy as it draws now (for v)
+//   cardText      a card's text copy as it draws now, on the surface of the one that reads it (copyWidth)
 //   revealCard    the card's row brought into view in the conversation
 //
 // The width a card is drawn at is the columns of what holds it (the conversation, a side pane) less its frame. A drawing
@@ -40,6 +40,9 @@
 // For the same reason each drawing is kept at the width the runner laid it out at, as its answer says (applyAnswer):
 // the runner holds the card at the width of the last drawing it was asked for, so a key draws it at the width of
 // whichever frame asked last; a frame at the other width then asks for its own (needOf).
+// A text copy Claude reads (cardText, the card tool's answer) is laid out at the width of the surface its reader
+// relates to, never at the width of the newest drawing (copyWidth): main and the look read the card as the
+// conversation draws it, a side thread as its pane draws it.
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
@@ -107,6 +110,10 @@ const faulted = new Map<string, { gen: number; seq: number; reason: string }>()
 // a Client's ui.message names too) and the card: what the answer to that Client's post is laid out at
 const siteWidth = new Map<string, number>()
 const siteOf = (site: unknown, id: string) => `${String(site ?? '')}\u0000${id}`
+// the width each card is drawn at on each surface that holds it, by the surface and the card: the conversation (''),
+// and a side thread's pane (`thread:<key>`, the anchor of the cards that thread's fork draws) while the pane draws the
+// card. What a text copy for a reader there is laid out at (copyWidth)
+const drawnOn = new Map<string, number>()
 
 /** The screen's size and layout, as the last drawing of a message or a card saw it. */
 export function noteViewport(v: { columns?: number; rows?: number; isFullscreen?: boolean } | undefined): void {
@@ -383,8 +390,9 @@ export async function cardKeyWords($: Engine): Promise<{ key: string; words: str
 
 /** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now; under it, what
  *  the features put under a card. The card is laid out at the frame's own width, in the conversation and in a side
- *  pane alike, so a view that lays out from surface.columns fits each. */
-export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: number } = {}): Promise<Any> {
+ *  pane alike, so a view that lays out from surface.columns fits each. `pane`: the side thread's pane that draws the
+ *  frame (`thread:<key>`), else the conversation does. */
+export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: number; pane?: string } = {}): Promise<Any> {
   const E = $.ui.resolve(e) as Any
   const row = String(e.requestId ?? '')
   // a card the version of its answer shown now leaves out (a squeeze's): nothing in its place
@@ -400,6 +408,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: num
   // the Client says it is drawing
   const theme = await themeNow($)
   siteWidth.set(siteOf(e.requestId, meta.id), width)
+  drawnOn.set(siteOf(o.pane, meta.id), width)
   const current = drawingAt(t, meta.gen, width, theme)
   const f = faulted.get(meta.id)
   const fault = f && current && f.gen === current.gen && f.seq === current.seq ? f.reason : null
@@ -515,12 +524,28 @@ export async function clientFault($: Engine, key: string, reason: string): Promi
   failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`, about(id))
 }
 
-/** A card's text copy as it draws now: what its newest version shows, at the width it is drawn at (or `width`). */
-export async function cardText($: Engine, id: string, width?: number): Promise<string> {
+/** The width a text copy of a card is laid out at for a reader on `pane` (a side thread's, `thread:<key>`; none for
+ *  main, the look and the others that read the conversation): as that pane draws the card, while it does; else as the
+ *  card draws where it stands, in the conversation or, for a card a side thread's fork drew, in that thread's pane;
+ *  else at the width the conversation draws a card at. Never the width of the newest drawing: a side pane that drew the
+ *  card last would give main a copy of a card the conversation does not show. */
+export function copyWidth(meta: Pick<CardMeta, 'id' | 'anchorRow'>, pane?: string | null): number {
+  const home = meta.anchorRow?.startsWith('thread:') ? meta.anchorRow : ''
+  return (pane ? drawnOn.get(siteOf(pane, meta.id)) : undefined) ?? drawnOn.get(siteOf(home, meta.id)) ?? cardWidth()
+}
+
+/** The side thread's pane `pane` draws its thread without card `id` (the card folded to its title): a reader there
+ *  reads the card where it stands (copyWidth). */
+export function cardOffPane(pane: string, id: string): void {
+  drawnOn.delete(siteOf(pane, id))
+}
+
+/** A card's text copy as it draws now: what its newest version shows, at `o.width`, else at the width of the surface
+ *  its reader relates to (copyWidth: `o.pane`, a side thread's pane, or none for the conversation). */
+export async function cardText($: Engine, id: string, o: { width?: number; pane?: string | null } = {}): Promise<string> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1) return ''
-  const t = await treeOf($, id)
-  const r = await askCard($, meta, 'copy', { width: width ?? t?.width ?? cardWidth() })
+  const r = await askCard($, meta, 'copy', { width: o.width ?? copyWidth(meta, o.pane) })
   return r?.ok ? (r.lines as string[]).join('\n') : `(the card did not draw: ${r?.error ?? 'no answer'})`
 }
 
