@@ -13,10 +13,12 @@ Permissions. The session runs in Claude Code's default mode with a permission ca
 request to a host the analyst's Claude Code settings do not allow asks the analyst in the chat, as Claude Code asks in
 the terminal (host_asks.py), and the hosts the analyst always allowed for the workspace are allowed in the session's
 settings. Every other call that would ask is refused as Claude Code's `dontAsk` refuses it (REFUSED), so nothing else
-waits on a prompt nobody sees.
+waits on a prompt nobody sees. Claude Code's ask about a host names the host alone, under an id of its own, so the ask
+shows the session's Bash call that runs (a session runs one at a time), which the hooks below hear start and end.
 
 A PreToolUse hook callback (in this process, not a plugin hook) hears each call of thimble's tools with Claude Code's
-id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8. The
+id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8, and each
+Bash call with its input, until a PostToolUse or PostToolUseFailure hook callback hears that it ended. The
 session's id is kept in <workspace>/runtime/convs/<id>.cc.json and resumed at the next turn; a fork resumes main's
 session as a fork of it (fork_session).
 
@@ -186,16 +188,26 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
     server = create_sdk_mcp_server(SERVER, tools=[SdkMcpTool(name=n, description=secs[n][0], input_schema=secs[n][1],
                                                              handler=handler(n)) for n in spec.thimble if n in secs])
 
+    shell: dict[str, dict[str, Any]] = {}  # the session's Bash calls that run, by Claude Code's id: {tool, input}
+
     async def pre(inp: Any, tool_use_id: str | None, _ctx: Any) -> dict[str, Any]:
         name = str((inp or {}).get("tool_name") or "")
         if tool_use_id and name.startswith(f"mcp__{SERVER}__"):
             pending.setdefault(_key(name, (inp or {}).get("tool_input")), []).append(tool_use_id)
+        elif tool_use_id and name == "Bash":
+            shell[tool_use_id] = {"tool": name, "input": (inp or {}).get("tool_input") or {}}
+        return {}
+
+    async def ended(_inp: Any, tool_use_id: str | None, _ctx: Any) -> dict[str, Any]:
+        shell.pop(tool_use_id or "", None)
         return {}
 
     async def ask(name: str, inp: dict[str, Any], _ctx: Any) -> Any:
         if name != host_asks.TOOL:
             return PermissionResultDeny(message=REFUSED.format(tool=name))
-        if await host_asks.ask(conv.c, _chat(conv), str((inp or {}).get("host") or "")):
+        # the request is the running Bash call's (module note, permissions): the one started last, should two run
+        call = next(reversed(shell.values()), None)
+        if await host_asks.ask(conv.c, _chat(conv), str((inp or {}).get("host") or ""), call):
             return PermissionResultAllow()
         return PermissionResultDeny()
 
@@ -228,7 +240,9 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         env=sdk.call_env({"TMPDIR": str(tmp or spec.home)}),
         # main's session echoes each message it reads, so a message handed to it mid-turn is known read (_hand)
         extra_args={"safe-mode": None, **({"replay-user-messages": None} if conv.kind == "main" else {})},
-        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])]},
+        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])],
+               "PostToolUse": [HookMatcher(matcher="Bash", hooks=[ended])],
+               "PostToolUseFailure": [HookMatcher(matcher="Bash", hooks=[ended])]},
         resume=resume,
         fork_session=fork,
     )

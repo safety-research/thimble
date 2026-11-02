@@ -414,7 +414,8 @@ button.chat-call-chip:hover,
   flex: none;
 }
 /* an ask before a request to a host the analyst has not allowed (chat/HostAsk.tsx), under the command that waits for
-   it: the host in mono and its choices in one accent-edged row, which wraps in a narrow column */
+   it, in one accent-edged card: what Claude said the command does, the host in mono, the command in mono on one line
+   cut to fit (whole and wrapped once clicked), and the choices, which wrap in a narrow column */
 .chat-host-asks {
   display: flex;
   flex-direction: column;
@@ -425,9 +426,9 @@ button.chat-call-chip:hover,
 }
 .chat-host-ask {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
@@ -435,6 +436,18 @@ button.chat-call-chip:hover,
   border: 1.5px solid var(--accent);
   border-radius: var(--radius-card);
   background: color-mix(in oklab, var(--accent) 9%, var(--surface-card));
+}
+.chat-host-ask-what {
+  margin: 0;
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.chat-host-ask-where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
 }
 .chat-host-ask-ico {
   flex: none;
@@ -447,11 +460,39 @@ button.chat-call-chip:hover,
   font-weight: 500;
   overflow-wrap: anywhere;
 }
+.chat-host-ask-call {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-host-ask-call:hover {
+  color: var(--text-primary);
+}
+.chat-host-ask-call:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
+}
+.chat-host-ask-call[aria-expanded='true'] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .chat-host-ask-acts {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  margin-top: 2px;
 }
 /* the call chip, shared by a folded run of calls, its failed count and a subagent: a filled tonal chip at the size of
    .chip-sans, its words in mono at 11.5, with a chevron that turns while open */

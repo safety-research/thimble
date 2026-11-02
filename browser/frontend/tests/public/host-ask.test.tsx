@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // The ask before a request to a host the analyst has not allowed (src/chat/HostAsk.tsx, backend host_asks.py): under
-// the command that waits, the host and its three choices and nothing else, each choice sent to the server; a chat whose
-// meta carries one waits for the analyst (src/chat/waiting.ts), which the thread tree and the folded chat column's dot
-// show.
+// the command that waits, what Claude said the command does, the host, the command (a tool other than Bash: its URL)
+// and the three choices, and nothing else, each choice sent to the server; a chat whose meta carries one waits for the
+// analyst (src/chat/waiting.ts), which the thread tree and the folded chat column's dot show.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { HOST_CHOICES, HostAsks } from '../../src/chat/HostAsk.tsx'
@@ -17,16 +17,54 @@ afterEach(() => {
 })
 
 const ASK = { id: 'h1', host: 'data.example-lab.test', since: '2026-11-02T10:00:00Z' }
+const CURL = 'curl -sS -m 30 -o "$TMPDIR/runs.json" https://data.example-lab.test/api/runs'
+const CHOICE_WORDS = HOST_CHOICES.map((c) => c.words).join('')
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 const meta = (id: string, extra: Partial<ChatMeta> = {}): ChatMeta => ({ id, kind: 'main', role: 'main', title: '', created_at: '2026-11-02T09:00:00Z', parent: null, anchor: null, anchor_text: null, model: null, effort: null, group: null, ...extra })
+/** The words of each line of an ask's card, top to bottom. */
+const lines = (row: Element) => [...row.children].map((c) => c.textContent)
 
 test('the ask names the host and offers Allow once, Always allow and Deny, with no other words', async () => {
   const el = await mount(<HostAsks ws="mini" asks={[ASK]} />)
   const row = el.querySelector('.chat-host-ask')!
   expect(row.getAttribute('data-host')).toBe('data.example-lab.test')
   expect([...row.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Allow once', 'Always allow', 'Deny'])
-  expect(row.textContent).toBe(`data.example-lab.test${HOST_CHOICES.map((c) => c.words).join('')}`)
+  expect(row.textContent).toBe(`data.example-lab.test${CHOICE_WORDS}`)
   expect((await mount(<HostAsks ws="mini" asks={[]} />)).textContent).toBe('')
+})
+
+test('the ask says first what Claude said its command does, then the host, then the command', async () => {
+  const call = { tool: 'Bash', input: { command: CURL, description: "Fetch the runs from the lab's API" } }
+  const el = await mount(<HostAsks ws="mini" asks={[{ ...ASK, call }]} />)
+  expect(lines(el.querySelector('.chat-host-ask')!)).toEqual(["Fetch the runs from the lab's API", 'data.example-lab.test', CURL, CHOICE_WORDS])
+})
+
+test('a command with no description shows the command alone', async () => {
+  const call = { tool: 'Bash', input: { command: CURL } }
+  const el = await mount(<HostAsks ws="mini" asks={[{ ...ASK, call }]} />)
+  const row = el.querySelector('.chat-host-ask')!
+  expect(row.querySelector('.chat-host-ask-what')).toBeNull()
+  expect(lines(row)).toEqual(['data.example-lab.test', CURL, CHOICE_WORDS])
+})
+
+test('a request of a tool other than Bash shows its URL in place of the command', async () => {
+  const call = { tool: 'WebFetch', input: { url: 'https://data.example-lab.test/api/runs', prompt: 'List the runs' } }
+  const el = await mount(<HostAsks ws="mini" asks={[{ ...ASK, call }]} />)
+  expect(lines(el.querySelector('.chat-host-ask')!)).toEqual(['data.example-lab.test', 'https://data.example-lab.test/api/runs', CHOICE_WORDS])
+})
+
+test('a long command shows on one line as its step line does, and whole once clicked', async () => {
+  const script = "python3 - <<'EOF'\nimport json, urllib.request\nruns = json.load(urllib.request.urlopen('https://data.example-lab.test/api/runs'))\nprint(len(runs))\nEOF"
+  const el = await mount(<HostAsks ws="mini" asks={[{ ...ASK, call: { tool: 'Bash', input: { command: script, description: 'Count the runs' } } }]} />)
+  const cmd = el.querySelector<HTMLButtonElement>('.chat-host-ask-call')!
+  const line = cmd.textContent!
+  expect(line).toMatch(/^python3 - <<'EOF' import json, urllib\.request runs = .*…$/)
+  expect(line.length).toBeLessThanOrEqual(110)
+  expect(cmd.getAttribute('aria-expanded')).toBe('false')
+  await act(async () => cmd.click())
+  expect([cmd.textContent, cmd.getAttribute('aria-expanded')]).toEqual([script, 'true'])
+  await act(async () => cmd.click())
+  expect(cmd.textContent).toBe(line)
 })
 
 test('each choice goes to the server for its ask, and a failed answer can be given again', async () => {

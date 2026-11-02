@@ -12,6 +12,10 @@ card keeps (agent_session.keep_web_rule), which every later session's settings a
 not ask again; it also answers the other asks for that host that wait. Deny refuses the connection, and the command
 fails as Claude Code refuses a host ("user denied").
 
+Claude Code's ask names the host alone, so the ask also carries the call whose request it is (`call`: the session's
+Bash call that runs, runtime_cc.options), and the page shows what Claude said the command does (its `description`)
+over the host and the command.
+
 The asks live in this process, and nothing of them is written: an ask whose session ends (its turn ended or stopped, the
 server stopped) leaves its chat, and an answer that comes after it finds none (404).
 """
@@ -28,11 +32,11 @@ from pydantic import BaseModel
 router = APIRouter()
 
 TOOL = "SandboxNetworkAccess"  # Claude Code's tool name for its sandbox's ask about a host (can_use_tool)
-KEY = "hosts"  # on the asking chat's meta as it is read: [{id, host, since}], the asks that wait (chat/HostAsk.tsx)
+KEY = "hosts"  # on the asking chat's meta as it is read: [{id, host, since, call}], the asks that wait (HostAsk.tsx)
 CHOICES = ("once", "always", "deny")
 HOST_RE = re.compile(r"[A-Za-z0-9_.-]+")  # a host a web rule can name; any other is refused unasked, as before
 RULE_HEAD = "WebFetch(domain:"  # a web rule for a site, as Claude Code's own "don't ask again" for a host names it
-_waits: dict[str, dict[str, Any]] = {}  # ask id -> {c, chat, host, since, answer: the future of the analyst's choice}
+_waits: dict[str, dict[str, Any]] = {}  # ask id -> {c, chat, host, since, call, answer: the analyst's choice to come}
 
 
 def rule(host: str) -> str:
@@ -47,10 +51,10 @@ def kept(c: str) -> list[str]:
     return [r for r in agent_session.web_rules(c) if r.startswith(RULE_HEAD)]
 
 
-async def ask(c: str, chat: str | None, host: str) -> bool:
+async def ask(c: str, chat: str | None, host: str, call: dict[str, Any] | None = None) -> bool:
     """Whether a session of workspace `c` may reach `host`: at once when the workspace keeps it, else when the analyst
-    answers the ask on `chat` (module note). False with no chat to ask on (none, or one with no meta) and for a host no
-    web rule can name."""
+    answers the ask on `chat` (module note), which shows `call`, the call whose request it is ({tool, input}), when it
+    is known. False with no chat to ask on (none, or one with no meta) and for a host no web rule can name."""
     if not HOST_RE.fullmatch(host):
         return False
     if rule(host) in kept(c):
@@ -60,7 +64,7 @@ async def ask(c: str, chat: str | None, host: str) -> bool:
     if not chat or agents.meta_or_none(c, chat) is None:
         return False
     rid = "h" + secrets.token_hex(6)
-    wait = {"c": c, "chat": chat, "host": host, "since": ledger.now_iso(),
+    wait = {"c": c, "chat": chat, "host": host, "since": ledger.now_iso(), "call": call,
             "answer": asyncio.get_running_loop().create_future()}
     _waits[rid] = wait
     agents.notify(c, chat)
@@ -92,9 +96,10 @@ def answer(c: str, ask_id: str, choice: str) -> None:
 
 
 def waiting(c: str, chat: str) -> list[dict[str, Any]]:
-    """The asks that wait on `chat` of workspace `c`, the one asked first first: {id, host, since}."""
-    return [{"id": rid, "host": w["host"], "since": w["since"]} for rid, w in _waits.items()
-            if w["c"] == c and w["chat"] == chat]
+    """The asks that wait on `chat` of workspace `c`, the one asked first first: {id, host, since}, and the call whose
+    request it is (`call`) when it is known."""
+    return [{"id": rid, "host": w["host"], "since": w["since"], **({"call": w["call"]} if w["call"] else {})}
+            for rid, w in _waits.items() if w["c"] == c and w["chat"] == chat]
 
 
 class Answer(BaseModel):

@@ -4,12 +4,14 @@ analyst in the chat (host_asks.py), as Claude Code asks in the terminal in its d
 Claude Code's sandbox hands the callback its ask as the tool SandboxNetworkAccess, the ask waits on the chat of the
 agent that made the request while the callback waits, and the analyst's choice answers it: once, always (kept for the
 workspace, so the next session allows the host in its settings and asks nothing), or deny. Every other ask is refused
-at once, as don't ask mode refused it. The Agent SDK is not started: the callback is called as Claude Code calls it.
-Main's prompt says so (test_prompts.py)."""
+at once, as don't ask mode refused it. Claude Code's ask names the host alone, under an id of its own, so the ask
+carries the session's Bash call that runs, which Claude Code's hooks tell the session. The Agent SDK is not started:
+the callbacks are called as Claude Code calls them. Main's prompt says so (test_prompts.py)."""
 from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from typing import Any
 
 import httpx
@@ -51,8 +53,17 @@ def options(conv: runtime.Conv) -> Any:
 
 
 def network_ask(opts: Any, host: str = HOST) -> asyncio.Task:
-    """Claude Code's sandbox asking the session's callback about `host`, as it does over can_use_tool."""
-    return asyncio.ensure_future(opts.can_use_tool(host_asks.TOOL, {"host": host}, ToolPermissionContext()))
+    """Claude Code's sandbox asking the session's callback about `host`, as it does over can_use_tool: the host alone,
+    under a new id that is no tool call's."""
+    ctx = ToolPermissionContext(tool_use_id=str(uuid.uuid4()))
+    return asyncio.ensure_future(opts.can_use_tool(host_asks.TOOL, {"host": host}, ctx))
+
+
+async def bash(opts: Any, event: str, tool_use_id: str, **tool_input: str) -> None:
+    """Claude Code's hook `event` on a Bash call of the session: PreToolUse before its command runs (with its input),
+    PostToolUse or PostToolUseFailure once it ended."""
+    inp = {"hook_event_name": event, "tool_name": "Bash", **({"tool_input": tool_input} if tool_input else {})}
+    await opts.hooks[event][0].hooks[0](inp, tool_use_id, {"signal": None})
 
 
 async def asks_on(api: httpx.AsyncClient, chat: str) -> list[dict[str, Any]]:
@@ -99,6 +110,36 @@ async def test_a_new_host_asks_in_main_s_chat_and_the_command_waits_for_the_answ
     # the next session asks again
     task = network_ask(options(cc.main))
     assert (await shown(api, "main"))[0]["host"] == HOST
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_the_ask_carries_the_command_that_runs_with_claude_s_description_of_it(cc, api):
+    opts = options(cc.main)
+    curl, what = f"curl -sS -m 30 -o runs.json https://{HOST}/api/runs", "Fetch the runs from the lab's API"
+    await bash(opts, "PreToolUse", "toolu_ls", command="ls runs", description="List the runs")
+    await bash(opts, "PostToolUse", "toolu_ls")
+    await bash(opts, "PreToolUse", "toolu_curl", command=curl, description=what)
+    task = network_ask(opts)
+    ask = (await shown(api, "main"))[0]
+    assert ask["call"] == {"tool": "Bash", "input": {"command": curl, "description": what}}
+    await api.post(f"/api/ws/{CORPUS}/host-asks/{ask['id']}", json={"choice": "deny"})
+    assert isinstance(await task, PermissionResultDeny)
+    await bash(opts, "PostToolUseFailure", "toolu_curl")  # refused, the command failed
+
+    # a command with no description: the command alone
+    await bash(opts, "PreToolUse", "toolu_bare", command=curl)
+    task = network_ask(opts)
+    assert (await shown(api, "main"))[0]["call"] == {"tool": "Bash", "input": {"command": curl}}
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await bash(opts, "PostToolUse", "toolu_bare")
+
+    # no Bash call runs (a command left running in the background asks): the host alone
+    task = network_ask(opts)
+    assert "call" not in (await shown(api, "main"))[0]
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

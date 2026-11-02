@@ -2130,11 +2130,14 @@ export interface SessionEnded {
   cwd: string
   at: string
 }
-/** An ask before a request to a host the analyst has not allowed (backend host_asks): its id and the host. */
+/** An ask before a request to a host the analyst has not allowed (backend host_asks): its id, the host and, when it is
+ * known, the call whose request it is (the asking session's Bash call that runs: its tool, and its input with the
+ * command and Claude's description of it). */
 export interface HostAsk {
   id: string
   host: string
   since?: string
+  call?: { tool: string; input: Record<string, unknown> }
 }
 /** The analyst's answer to a HostAsk: allow it this once, always allow the host in this workspace, or deny it. */
 export type HostAskChoice = 'once' | 'always' | 'deny'
