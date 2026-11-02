@@ -21,7 +21,8 @@
 //   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g): Claude Code's
 //                    own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask mode
 //                    would refuse it (checker.ts allowsCheck)
-//   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
+//   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone;
+//                    while Minimal is on, plain: its marks show for the paragraph under the pointer (view.ts `plain`).
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
 //                    citation the tray shows, the lines under its words (the labels it used), a press on a citation,
@@ -37,7 +38,7 @@ import { shownWords } from '../core/selection'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
-import { checkerEffort, checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
+import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
 import { AGAIN_DESCRIPTION, allowsCheck, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
@@ -301,6 +302,8 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
       spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
+      // Minimal: plain words at rest, each row's marks under the pointer (view.ts)
+      plain: minimalOn(),
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
       // a press on a citation's words, or on the sign after them (view.ts markEl)
