@@ -260,9 +260,9 @@ export const registerFix: Register = on => {
       return said ? { text: said } : {}
     }
     const notAsked = (err: unknown) => `thimble could not ask Claude for this fix: ${cut(String((err as Error)?.message || err), 160)}`
-    let request: string
+    let requestText: string
     try {
-      request = fill(await promptText($, 'fix-request'), { WORDS: words })
+      requestText = fill(await promptText($, 'fix-request'), { WORDS: words })
     } catch (err) {
       return { text: notAsked(err) }
     }
@@ -272,7 +272,7 @@ export const registerFix: Register = on => {
     $.clock.after(0, () => {
       void $.prompt.submit({ text: words, asUser: true }).catch(err => $.ui.toast(notAsked(err)))
     })
-    return { context: [request, ...(list ? [list] : [])] }
+    return { context: [requestText, ...(list ? [list] : [])] }
   })
 
   // the fix-thimble skill: Claude asks for the same fix, in the skill's argument, and reads what came of it in the
