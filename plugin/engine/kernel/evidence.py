@@ -1644,8 +1644,9 @@ def terminal_cards(folder: str | None) -> list[dict[str, Any]]:
 
 def card_refs(ev: Any) -> list[str]:
     """The places card evidence names: one `ref`, or several when the cited words hold several values (a range such as
-    "2.5 to 3.7 hours", a pair such as "243 against 104"): a list of refs, as `ref` or as a list of evidence objects,
-    and a range of lines (`#L7-L8`) as each of its lines."""
+    "2.5 to 3.7 hours", a pair such as "243 against 104") or count things a card shows (the 2 edges of "2 of the 6
+    paths"): a list of refs, as `ref` or as a list of evidence objects, and a range of lines (`#L7-L8`) as each of its
+    lines."""
     out: list[str] = []
     for e in ev if isinstance(ev, list) else [ev]:
         got = e.get("ref", e.get("refs")) if isinstance(e, dict) else e
@@ -1696,7 +1697,8 @@ def _card_place(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, dict
 
 def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     """The evidence to show of the places of one card output: a cell's table with each cited cell marked, or the
-    output's lines with what shows the words highlighted on each cited line (as a table when the output is one)."""
+    output's lines with what shows the words highlighted on each cited line, else the whole line, a thing the words
+    count (as a table when the output is one)."""
     p = ps[0]
     shown: dict[str, Any] = {"kind": "card", "card": p["cid"], "title": p["title"], "ref": p["ref"], "value": p["value"]}
     if len(ps) > 1:
