@@ -53,9 +53,9 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
      that writes it from the clipboard to a file only they can read, such as `(umask 077; pbpaste >
      ~/.thimble-api-key)` on macOS (Linux: `wl-paste` or `xclip -selection clipboard -o`). When they say it is done,
      run `thimble-browser --setup --key-file ~/.thimble-api-key`. Never read, print or copy that file. Offer to delete it, and delete it only on a yes.
-   - **WIF**: ask for the path of its config file, or offer to look for one; on a yes, run `thimble-browser --setup
-     --find-wif`, which lists the files it can use, by path only. Run `thimble-browser --setup --how wif --wif-file
-     <path>`. Never print the file.
+   - **WIF**: ask for the path of its config file, or offer to look for one; on a yes, ask the user to run
+     `thimble-browser --setup --find-wif` with `!` here, which lists the files it can use, by path only, and read what
+     it lists. Run `thimble-browser --setup --how wif --wif-file <path>`. Never print the file.
 
    Each command ends with a check that Claude answers. Its line says the login that Claude Code uses (with the Claude
    Code sign-in), and names the `ANTHROPIC_*` variables set in the shell, which the workbench never uses. When the check

@@ -621,6 +621,18 @@ def test_claude_knows_that_the_setup_s_check_says_which_key_is_used():
     assert "names the `ANTHROPIC_*` variables set in the shell, which the workbench never uses" in check, check
 
 
+def test_the_user_looks_for_a_wif_file_with_the_bang_and_claude_reads_what_it_lists():
+    """N97: CLAUDE.md, step 4, has the user run thimble-browser --setup --find-wif with `!` in the session, and Claude
+    reads what it lists. Run by Claude, in auto mode, Claude Code's classifier refused it as credential exploration,
+    in each install exercise that came to it."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 4. When the workbench was installed", 1)[1].split(" 5. ", 1)[0]
+    wif = step.split("- **WIF**: ", 1)[1].split(" Each command ends with", 1)[0]
+    assert "on a yes, ask the user to run `thimble-browser --setup --find-wif` with `!` here" in wif, wif
+    assert "and read what it lists." in wif, wif
+    assert "on a yes, run `thimble-browser --setup --find-wif`" not in wif, wif
+
+
 def test_the_install_summary_says_when_to_use_each_product(tmp_path):
     """The install's last lines when it installed both products, in one line, and the reply Claude ends an install with
     (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one product
