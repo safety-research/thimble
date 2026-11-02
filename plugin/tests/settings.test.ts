@@ -88,6 +88,12 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   await pane.unmount()
 })
 
+/** What a press on Minimal starts, done: each change of it loads the plugin again, whose session start makes the next
+ *  (settings/term.ts settleMinimal), as many times as it takes. `$`: a test's engine, or one settleEngine made. */
+async function settleAll($: Any): Promise<void> {
+  for (let i = 0; i < 24; i++) await ($.session?.start ? $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true }) : settleMinimal($))
+}
+
 /** A settings pane over made-up rows that Claude Code keeps: config.set changes them, and the plugin's options follow. */
 function settingsWorld(on: Any, rows: Record<string, boolean | string>, store: Record<string, unknown> = {}): Any[] {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
@@ -102,6 +108,18 @@ function settingsWorld(on: Any, rows: Record<string, boolean | string>, store: R
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  // what the other modules' session start reads, as the plugin loads again after each change
+  on('session.id', () => ({ value: 's-settings' }))
+  on('session.messages', () => ({ value: [] }))
+  on('fs.read', () => ({ value: '' }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
+  on('env.set', () => ({ value: {} }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'x' } }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   setOptions(rows)
   return set
 }
@@ -117,6 +135,9 @@ test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Exp
   expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('Plain answers: citations, explainers and heads-ups show only while the pointer is over their paragraph')
   for (const w of [/^ rewrite$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
   await pane.press({ key: 'mode-minimal-on' })
+  // one change per hook, as each loads the plugin again; the new load's session start makes the next
+  expect(set.length).toBe(1)
+  await settleAll($)
   expect(rows).toMatchObject({ minimal: true, ...PRESET })
   // a row that held Minimal's mode already is not saved again (each save loads the plugin again)
   expect(set.some(e => String(e.key).endsWith('.catchUp'))).toBe(false)
@@ -131,6 +152,7 @@ test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Exp
   for (const w of [/^ visualize$/, /^ cite$/, /^ explain$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
   for (const w of [/^ rewrite$/, /^ catch up$/, /^ claims$/, /^ coverage$/, /^ labels$/]) expect(await pane.find({ type: 'Text', text: w })).toBeUndefined()
   await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($)
   expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: false, explain: 'on demand', details: 'off', claimsMode: 'auto', labels: true, coverage: true })
   for (const w of [/^ rewrite$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
   await pane.unmount()
@@ -143,18 +165,22 @@ test("a row of Minimal's changed away from its mode turns Minimal off and keeps 
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   const pane = await $.ui.mount(PANE)
   await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
   expect(rows.minimal).toBe(true)
   await pane.press({ key: 'mode-explain-off' })
   expect(rows).toMatchObject({ minimal: false, explain: 'off', citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, details: 'auto', claimsMode: 'off', labels: false, coverage: false })
   // a switch turned on again turns it off too
   await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
   expect(rows).toMatchObject({ minimal: true, explain: 'auto' })
   await pane.press({ key: 'mode-coverage-on' })
   expect(rows).toMatchObject({ minimal: false, coverage: true, explain: 'auto', labels: false, squeezeAnswers: false, claimsMode: 'off' })
   // on and off again: each row comes back to what it held when Minimal went on
   await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
   expect(rows.coverage).toBe(false)
   await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($)
   expect(rows).toMatchObject({ minimal: false, coverage: true, explain: 'auto', citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, claimsMode: 'off', labels: false })
   await pane.unmount()
   setOptions({})
@@ -173,56 +199,66 @@ function settleEngine(rows: Record<string, boolean | string>, store: Map<string,
   }
 }
 
-test('Explainers, Heads-ups and Cards saved as the switches they were read as auto (on) and off (off), and the first session saves their modes; Minimal saved on before it was a preset sets its modes once', async ($, on) => {
-  const rows: Record<string, boolean | string> = { minimal: true, citations: 'auto cite + verify', cards: true, squeezeAnswers: true, catchUp: true, explain: true, details: false, claimsMode: 'auto', labels: true, coverage: false, defaultsAt: DEFAULTS.at }
-  settingsWorld(on, rows)
-  expect(valueIn(rows, 'explain')).toBe('auto')
-  expect(valueIn(rows, 'details')).toBe('off')
-  expect(valueIn(rows, 'cards')).toBe('auto')
-  const engine = settleEngine(rows, new Map())
-  await settleMinimal(engine)
-  expect(rows).toMatchObject({ minimal: true, ...PRESET })
-  // turned off, what the rows held before comes back, in their new modes
-  setOptions(rows)
-  await settingsAction(engine, { do: 'set', key: 'minimal', value: false })
-  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'off', claimsMode: 'auto', labels: true, coverage: false })
-  // settled once: a session after it changes nothing
-  await settleMinimal(engine)
-  expect(rows.minimal).toBe(false)
-  setOptions({})
-})
-
-test("Minimal saved on by 0.10.4 to 0.10.7: the first session after the update sets its modes now, and off puts back the modes it kept then and what the other rows held; a row changed elsewhere since turns it off", async () => {
+/** registerSettings's session start, with what it reaches of the engine: each call is a load of the plugin's, the
+ *  first session's or the one a change made. */
+function sessions(): { on: Any; start: (engine: Any) => Promise<void>; reset: () => void } {
   const hooks: Record<string, Any[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
     const reg: Any = { catch: () => reg }
     return reg
   }
-  const session = async (engine: Any) => {
+  const start = async (engine: Any) => {
     const chain = hooks['session.start'] ?? []
     const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i](engine, ev, (x: Any) => run(i + 1, x)) : ev)
     await run(0, { isInteractive: true })
   }
+  return { on, start, reset: () => { for (const k of Object.keys(hooks)) delete hooks[k] } }
+}
+
+test('Explainers, Heads-ups and Cards saved as the switches they were read as auto (on) and off (off), and the first session saves their modes; Minimal saved on before it was a preset sets its modes once', async () => {
+  const rows: Record<string, boolean | string> = { minimal: true, citations: 'auto cite + verify', cards: true, squeezeAnswers: true, catchUp: true, explain: true, details: false, claimsMode: 'auto', labels: true, coverage: false, defaultsAt: DEFAULTS.at }
+  expect(valueIn(rows, 'explain')).toBe('auto')
+  expect(valueIn(rows, 'details')).toBe('off')
+  expect(valueIn(rows, 'cards')).toBe('auto')
+  const engine = settleEngine(rows, new Map())
+  const s = sessions()
+  registerSettings(s.on, { ...rows } as never)
+  // the first session's start makes the first change; each change loads the plugin again, whose start makes the next
+  for (let i = 0; i < 24; i++) await s.start(engine)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET })
+  // turned off, what the rows held before comes back, in their new modes
+  await settingsAction(engine, { do: 'set', key: 'minimal', value: false })
+  for (let i = 0; i < 24; i++) await s.start(engine)
+  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'off', claimsMode: 'auto', labels: true, coverage: false })
+  // settled once: a session after it changes nothing
+  await s.start(engine)
+  expect(rows.minimal).toBe(false)
+  setOptions({})
+})
+
+test("Minimal saved on by 0.10.4 to 0.10.7: the first session after the update sets its modes now, and off puts back the modes it kept then and what the other rows held; a row changed elsewhere since turns it off", async () => {
   // as 0.10.7 left them: Minimal on, its four rows at its modes then, Cards still the switch it was, and the modes
   // Minimal kept of its rows in the store
   const rows: Record<string, boolean | string> = { minimal: true, citations: 'manual', cards: true, squeezeAnswers: true, catchUp: true, explain: 'on demand', details: 'on demand', claimsMode: 'on demand', labels: true, coverage: true, defaultsAt: DEFAULTS.at }
   const store = new Map<string, unknown>([['beforeMinimal', { citations: 'auto cite + verify', explain: 'auto', details: 'off', claimsMode: 'auto' }]])
   const engine = settleEngine(rows, store)
-  registerSettings(on, { ...rows } as never)
-  await session(engine)
+  const s = sessions()
+  registerSettings(s.on, { ...rows } as never)
+  for (let i = 0; i < 24; i++) await s.start(engine)
   expect(rows).toMatchObject({ minimal: true, ...PRESET })
   expect(choiceOf('citations')).toBe('auto cite')
   expect(choiceOf('cards')).toBe('on demand')
   for (const k of ['claims', 'labels', 'coverage', 'squeezeAnswers', 'catchUp']) expect(featureOn(k)).toBe(false)
   await settingsAction(engine, { do: 'set', key: 'minimal', value: false })
+  for (let i = 0; i < 24; i++) await s.start(engine)
   expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'off', claimsMode: 'auto', labels: true, coverage: true })
   // Minimal on, its modes kept, and a row changed elsewhere (/config) since: off, as before
   Object.assign(rows, { minimal: true, citations: 'manual', cards: 'auto', explain: 'auto', details: 'on demand', claimsMode: 'on demand' })
   store.set('beforeMinimal', { citations: 'auto cite', explain: 'auto', details: 'auto', claimsMode: 'auto' })
-  for (const k of Object.keys(hooks)) delete hooks[k]
-  registerSettings(on, { ...rows } as never)
-  await session(engine)
+  s.reset()
+  registerSettings(s.on, { ...rows } as never)
+  await s.start(engine)
   expect(rows).toMatchObject({ minimal: false, citations: 'manual', explain: 'auto', details: 'on demand', claimsMode: 'on demand', labels: true, coverage: true })
   setOptions({})
 })
