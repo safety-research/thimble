@@ -1,11 +1,14 @@
 // The checks: one row per check that covers a surface (GET /ws/{c}/checks, built-ins first; CheckRows), which the
 // canvas's Comments button lists for the cards (canvas/Controls.tsx), each with its colour square to show or hide its
-// tints and comments, its count of open comments (or a spinner while it runs, ✕ when it failed), and ⋯ to open its card
-// (CheckCard); and the new-check card (NewCheckCard), which that button's + and the end of the top bar's Comments list
-// open (shell/LabelsSidebar.tsx). Whether a check is on is kept on the server (`shown`), so one switch covers a check's
-// comments in the documents and on the cards, and the server runs what is asked for (backend checks.py); `check` stream
-// records say when a run starts and ends, and `checks` records when a check changes, so every list follows one switch.
-// `useChecks` holds the list; `useSidebar` the state of the report's sidebar (shown or hidden, beside it or over it).
+// tints and comments, its count of open comments (or a spinner while it runs, ✕ when it failed: RunMark), and ⋯ to
+// open its card (CheckCard: its last run with Stop, its prompt, Re-run); under the row, the passages changed since it
+// checked them with Run, and a start that did not happen (RunNotes); and the new-check card (NewCheckCard), which that
+// button's + and the end of the top bar's Comments list open. The top bar's Comments (shell/LabelsSidebar.tsx) shows
+// the same parts for each check's runs on the documents: RunMark, RunNotes, and RunLine with Stop in its Last run.
+// Whether a check is on is kept on the server (`shown`), so one switch covers a check's comments in the documents and
+// on the cards, and the server runs what is asked for (backend checks.py); `check` stream records say when a run starts
+// and ends, and `checks` records when a check changes, so every list follows one switch. `useChecks` holds the list;
+// `useSidebar` the state of the report's sidebar (shown or hidden, beside it or over it).
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Button } from '../components/Button'
 import { TextArea, TextInput } from '../components/Field'
@@ -167,14 +170,33 @@ export function checkRunLabel(name: string, run: { chat?: string | null; waiting
   return `${name} waits for a free session`
 }
 
+/** The tip of a failed run's ✕: why it failed, its summary's own full stop left out, and Open its run when it has a
+ * chat. Pure. */
+export function checkFailedLabel(name: string, run: { chat?: string | null; summary?: string | null }): string {
+  const why = (run.summary ?? '').trim().replace(/\.+$/, '')
+  return `${name} failed${why ? `: ${why}` : ''}${run.chat ? '. Open its run' : ''}`
+}
+
+/** A click that runs `check` on `doc` (POST /checks/{id}/run), which starts its agent through thimble's plugin: a start
+ * that did not happen says why in a toast, and so does a request that failed. `detail` goes with the click's record. */
+export async function runCheck(ws: string, check: Pick<Check, 'id' | 'name'>, doc: string, detail: Record<string, unknown> = {}): Promise<void> {
+  track('ui-click', { target: 'ui:report-check-run', detail: { check: check.id, doc, ...detail } })
+  try {
+    const r = await checksApi.run(ws, check.id, doc)
+    if (r?.refused) bus.emit('toast', { text: `${check.name} didn't start: ${refusalLine(r.refused)}`, kind: 'error' })
+  } catch (e) {
+    toast(`Could not run ${check.name}.`, e)
+  }
+}
+
 /** A check whose passages the analyst changed since it ran: nothing runs by itself (a writer's save runs the checks, the
  * analyst's own edits do not), so the row says how many changed, and Run is a click that starts the check's agent
- * through thimble's plugin on them (POST /checks/{id}/run). */
-function StaleRow({ ws, check, doc, n }: { ws: string; check: Check; doc: string; n: number }) {
+ * on them (runCheck). `where` names the document when the list shows the check's runs on several. */
+function StaleRow({ ws, check, doc, n, where }: { ws: string; check: Check; doc: string; n: number; where?: string }) {
   const [busy, setBusy] = useState(false)
   return (
     <p className="wu-check-stale" data-stale={n}>
-      {`${staleText(n)} · `}
+      {`${where ? `${where}: ` : ''}${staleText(n)} · `}
       <Button
         variant="ghost"
         size="sm"
@@ -182,19 +204,50 @@ function StaleRow({ ws, check, doc, n }: { ws: string; check: Check; doc: string
         busy={busy}
         onClick={() => {
           setBusy(true)
-          track('ui-click', { target: 'ui:report-check-run', detail: { check: check.id, doc, stale: n } })
-          checksApi
-            .run(ws, check.id, doc)
-            .then((r) => {
-              if (r?.refused) bus.emit('toast', { text: `${check.name} didn't start: ${refusalLine(r.refused)}`, kind: 'error' })
-            })
-            .catch((e) => toast(`Could not run ${check.name}.`, e))
-            .finally(() => setBusy(false))
+          void runCheck(ws, check, doc, { stale: n }).finally(() => setBusy(false))
         }}
       >
         Run
       </Button>
     </p>
+  )
+}
+
+/** A check's run on one surface, as its row shows it after its name: while it runs a spinner, which opens the run's
+ * chat (a run that waits has no chat yet: the tip says what it waits for, and a click does nothing); when it failed ✕,
+ * which opens the run's chat, or, for a run that failed before its session started, `onCard` (the tip says why);
+ * otherwise nothing. `name` is the check's, with the document when the list shows the check's runs on several. */
+export function RunMark({ name, run, onCard }: { name: string; run: CheckRun | null | undefined; onCard?: (at: HTMLElement) => void }) {
+  if (run?.status === 'running')
+    return (
+      <IconButton label={checkRunLabel(name, run)} className="wu-check-run" aria-disabled={!run.chat || undefined} onClick={() => run.chat && openThread(run.chat, 'report-check')}>
+        <Spinner size={10} />
+      </IconButton>
+    )
+  if (run?.status === 'failed')
+    return (
+      <IconButton
+        label={checkFailedLabel(name, run)}
+        className="wu-check-run"
+        aria-disabled={(!run.chat && !onCard) || undefined}
+        onClick={(e) => (run.chat ? openThread(run.chat, 'report-check') : onCard?.(e.currentTarget))}
+      >
+        <Mark kind="failed" />
+      </IconButton>
+    )
+  return null
+}
+
+/** Under a check's row, what its run on `doc` leaves to the analyst: the passages changed since it checked them, with
+ * Run (StaleRow), and a start that did not happen, with why. `where` names the document when the list shows the check's
+ * runs on several. */
+export function RunNotes({ ws, check, doc, run, where }: { ws: string; check: Check; doc: string; run: CheckRun | null | undefined; where?: string }) {
+  const stale = staleOf(run)
+  return (
+    <>
+      {stale > 0 && <StaleRow ws={ws} check={check} doc={doc} n={stale} where={where} />}
+      {run?.refused && run.status !== 'running' && <p className="wu-check-refused" role="status">{`${where ? `${where}: ` : ''}Didn't start: ${refusalLine(run.refused)}`}</p>}
+    </>
   )
 }
 
@@ -234,8 +287,8 @@ export function useSidebar(ws: string): DocSidebar {
   return { ...fold, show, hide, row, probe }
 }
 
-/** The accent dot on the canvas's Comments button while a check's run left comments on the cards that the analyst
- * has not looked at (newComments.ts). */
+/** The accent dot on a Comments control while a check's run left comments there that the analyst has not looked at
+ * (newComments.ts): the canvas's Comments button for the cards, the top bar's Comments for the documents. */
 export function NewCommentsDot() {
   return <span className="dot wu-new-dot" role="img" aria-label="New comments" title="New comments" />
 }
@@ -292,35 +345,13 @@ export function CheckRows({ ws, surface, checks, comments, adding, onAdding }: C
                   {count != null && <span className="wu-count">{count}</span>}
                   {notRun && <span className="wu-count wu-count-none">–</span>}
                 </button>
-                {run?.status === 'running' && (
-                  // a run waiting for a free session, queued until the document's writer ends, or held while main is
-                  // in plan mode has no chat yet: the tip says which, and a click does nothing
-                  <IconButton
-                    label={checkRunLabel(c.name, run)}
-                    className="wu-check-run"
-                    aria-disabled={!run.chat || undefined}
-                    onClick={() => run.chat && openThread(run.chat, 'report-check')}
-                  >
-                    <Spinner size={10} />
-                  </IconButton>
-                )}
-                {run?.status === 'failed' && (
-                  // a run that failed before its session started has no chat: its tip says why, and its card runs it
-                  // again
-                  <IconButton
-                    label={`${c.name} failed${run.summary ? `: ${run.summary}` : ''}${run.chat ? '. Open its run' : ''}`}
-                    className="wu-check-run"
-                    onClick={(e) => (run.chat ? openThread(run.chat, 'report-check') : edit(c.id, rowOf(e.currentTarget)))}
-                  >
-                    <Mark kind="failed" />
-                  </IconButton>
-                )}
+                {/* a run that failed before its session started has no chat: its card runs it again */}
+                <RunMark name={c.name} run={run} onCard={(at) => edit(c.id, rowOf(at))} />
                 <IconButton label={`Edit ${c.name}`} className="wu-check-more" aria-expanded={isOpen} onClick={(e) => edit(c.id, rowOf(e.currentTarget))}>
                   <Icon name="more-horizontal" size={14} />
                 </IconButton>
               </div>
-              {staleOf(run) > 0 && <StaleRow ws={ws} check={c} doc={surface} n={staleOf(run)} />}
-              {run?.refused && run.status !== 'running' && <p className="wu-check-refused" role="status">{`Didn't start: ${refusalLine(run.refused)}`}</p>}
+              <RunNotes ws={ws} check={c} doc={surface} run={run} />
             </div>
           )
         })}
@@ -458,9 +489,10 @@ function CheckCard({ ws, doc, check, on, comments, onSave, onClose }: {
   )
 }
 
-/** The check's run on the document shown, in its card: what it does or how it ended and why (runLine), with Stop while
- * it runs or waits (backend checks.stop_route); the stream's `check` record brings the new state to the card. */
-function RunLine({ ws, check, doc, line, running }: { ws: string; check: Check; doc: string; line: string; running: boolean }) {
+/** The check's run on `doc`, its Last run in its card and in the top bar's Comments: what it does or how it ended and
+ * why (runLine), with Stop while it runs or waits (backend checks.stop_route); the stream's `check` record brings the
+ * new state to it. */
+export function RunLine({ ws, check, doc, line, running }: { ws: string; check: Check; doc: string; line: string; running: boolean }) {
   const [busy, setBusy] = useState(false)
   const stop = async () => {
     setBusy(true)
