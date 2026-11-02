@@ -1,12 +1,14 @@
 """A `thimble` command in Claude Code's Bash sandbox, which may not write thimble's home, run by the plugin outside it
 (engine/kernel/handoff.py; the plugin's side is hooks/handoff.ts, tested in handoff.test.ts). The plugin is made up
-here: a thread that takes each command as the plugin's shell does (the rename), runs it with this kernel and leaves its
-output and exit code beside it. The sandbox's read-only home is a home this user may not write. All data is made up."""
+here: a thread that takes each command whose heartbeat goes on as the plugin's shell does (the rename), runs it with
+this kernel and leaves its output and exit code beside it. The sandbox's read-only home is a home this user may not
+write. All data is made up."""
 from __future__ import annotations
 
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -39,6 +41,8 @@ def plugin(box: Path, home: Path, stop: threading.Event, seen: list[dict] | None
             for ask in box.glob("*.ask"):
                 at = str(ask)[: -len(".ask")]
                 try:
+                    if time.time() - os.stat(f"{at}.live").st_mtime > 2:  # (handoff.ts waits)
+                        continue
                     os.rename(ask, f"{at}.took")
                 except FileNotFoundError:
                     continue
@@ -248,6 +252,84 @@ def test_r2_update_and_reapply_refuse_a_command_the_plugin_runs_for_claude_code_
         assert r.returncode == 1 and f"{what} runs in a shell, not inside Claude Code" in r.stderr, (argv, r.stdout, r.stderr)
 
 
+def wait_for(test, limit: float = 10.0) -> bool:
+    t = time.monotonic() + limit
+    while not test():
+        if time.monotonic() > t:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+@ROOT_SKIP
+def test_r2_a_command_stopped_while_it_waits_for_the_plugin_takes_its_request_with_it(tmp_path: Path) -> None:
+    # Esc, or the Bash call's time limit, stops a command that waits for the plugin. Before, its request stayed, and the
+    # next Bash call that named thimble ran it outside the sandbox with nobody to read its output, and its files stayed.
+    # Now the command touches its heartbeat while it waits, by which the plugin knows it waits, and its files go as it ends
+    _, home, box, env = session(tmp_path)
+    home.chmod(0o500)
+    try:
+        p = subprocess.Popen([sys.executable, str(ENGINE / "thimble.py"), "coverage"], cwd=tmp_path, env=env,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            assert wait_for(lambda: list(box.glob("*.ask")) and list(box.glob("*.live")))
+            live = next(box.glob("*.live"))
+            was = live.stat().st_mtime_ns
+            assert wait_for(lambda: live.stat().st_mtime_ns != was, 2.0), "its heartbeat goes on while it waits"
+            p.send_signal(signal.SIGTERM)
+            p.wait(10)
+        finally:
+            p.kill()
+            p.wait(10)
+    finally:
+        home.chmod(0o700)
+    assert p.returncode == 128 + signal.SIGTERM
+    assert list(box.iterdir()) == []
+
+
+@ROOT_SKIP
+def test_r2_a_command_whose_run_gives_no_result_ends_with_one_plain_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    # the plugin took it, and no exit code came (its run died with a reload of the plugin): before, the command waited
+    # until its Bash call's time limit, or forever in the background. Now it ends after RUN_S and says so, and when the
+    # run's files go with no result (the plugin took the command for gone), at once
+    _, home, box, env = session(tmp_path)
+    for k in ("THIMBLE_HOME", "THIMBLE_HANDOFF"):
+        monkeypatch.setenv(k, env[k])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    monkeypatch.setattr(H, "RUN_S", 0.5)
+
+    def taker(also_remove: bool) -> threading.Thread:
+        def take() -> None:
+            assert wait_for(lambda: list(box.glob("*.ask")))
+            ask = next(box.glob("*.ask"))
+            took = ask.with_suffix(".took")
+            os.rename(ask, took)
+            if also_remove:
+                time.sleep(0.1)
+                took.unlink()
+        t = threading.Thread(target=take, daemon=True)
+        t.start()
+        return t
+
+    home.chmod(0o500)
+    try:
+        taker(False)
+        assert H.handed_off(["coverage"]) == 1
+        assert capsys.readouterr().err == ("thimble: no result came back from the plugin within 10 minutes, the most it may "
+                                           "take, and it was stopped\n")
+        assert list(box.iterdir()) == []
+        monkeypatch.setattr(H, "RUN_S", 30.0)
+        taker(True)
+        t = time.monotonic()
+        assert H.handed_off(["coverage"]) == 1
+        assert time.monotonic() - t < 5
+        assert capsys.readouterr().err == "thimble: no result came back from the plugin, and it was stopped\n"
+    finally:
+        home.chmod(0o700)
+    assert list(box.iterdir()) == []
+
+
 @ROOT_SKIP
 def test_a_command_the_plugin_does_not_take_takes_itself_back_and_runs_here(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _, home, box, env = session(tmp_path)
@@ -257,6 +339,13 @@ def test_a_command_the_plugin_does_not_take_takes_itself_back_and_runs_here(tmp_
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     monkeypatch.setattr(H, "TAKE_S", 0.2)
     try:
+        assert H.handed_off(["coverage"]) is None
+        assert list(box.iterdir()) == []
+        # the plugin removed its request (it took the command for gone): it runs here all the same
+        def drop() -> None:
+            assert wait_for(lambda: list(box.glob("*.ask")))
+            next(box.glob("*.ask")).unlink()
+        threading.Thread(target=drop, daemon=True).start()
         assert H.handed_off(["coverage"]) is None
     finally:
         home.chmod(0o700)
