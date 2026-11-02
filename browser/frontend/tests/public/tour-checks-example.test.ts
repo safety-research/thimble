@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-// The tour's captured Comments sidebar and Report checks list (src/tour/examples.json) show the built-in checks as they
-// are now (browser/prompts/checks/<id>.md: name, color, on or off), in their order, and no check thimble retired.
+// The tour's captured Comments sidebar (src/tour/examples.json) shows the built-in checks as they are now
+// (browser/prompts/checks/<id>.md: name, color, on or off), in their order, and no check thimble retired, then New
+// check; the captured Report has no Comments pane of its own, as the Report has none: the top bar's Comments lists the
+// checks.
 import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from 'vitest'
@@ -35,17 +37,13 @@ test('the Comments sidebar example lists the built-in checks as they are now, th
     expect(row.classList.contains('is-off')).toBe(!b.on)
   }
   expect(side.textContent).not.toMatch(/Unverifiable|Important details|none reads the chat yet/)
+  // the list ends in New check, as the sidebar's does (shell/LabelsSidebar.tsx NewCheck)
+  const last = side.querySelector('.lside-section[data-section="comments"]')!.lastElementChild!
+  expect([last.className, last.querySelector('button.lside-add')?.textContent]).toEqual(['lside-new', 'New check'])
 })
 
-test('the Report example lists the same checks in its checks list', () => {
+test('the Report example has no Comments pane of its own: its sidebar holds the cards alone', () => {
   const report = html(snaps.reportPanel)
-  const rows = [...report.querySelectorAll<HTMLElement>('.wu-checks-list .wu-check')]
-  expect(rows.map((r) => r.dataset.check)).toEqual([...ORDER, 'alternative-explanations'])
-  for (const b of builtins) {
-    const row = rows.find((r) => r.dataset.check === b.id)!
-    expect(row.querySelector('.wu-check-name')!.textContent).toBe(b.name)
-    expect(row.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe(String(b.on))
-    expect(row.querySelector<HTMLElement>('.wu-check-sq')!.style.borderColor).toBe(b.color)
-  }
-  expect(report.textContent).not.toMatch(/Unverifiable|Important details/)
+  expect(report.querySelector('.wu-side .wu-side-cards')).not.toBeNull()
+  expect(report.querySelector('.wu-checks, .wu-check')).toBeNull()
 })

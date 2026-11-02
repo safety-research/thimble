@@ -1215,7 +1215,7 @@ async function walk(page: Page, tag: string, send = false) {
     return {
       q: first?.querySelector('.wu-fig-q')?.textContent?.trim(),
       rows: first?.querySelectorAll('tbody tr').length ?? 0,
-      check: [...root.querySelectorAll<HTMLElement>('.wu-check')].filter((e) => /Alternative explanations/.test(e.textContent ?? '') && getComputedStyle(e).display !== 'none').length,
+      check: [...document.querySelectorAll<HTMLElement>('.tour-ex-side [data-category="alternative-explanations"]')].filter((e) => getComputedStyle(e).display !== 'none').length,
     }
   })
   assert.deepEqual(fig, { q: 'How close did the database come to its limit of 200 connections?', rows: 4, check: 0 }, `${tag} 7: the first figure is the small table, and the check is not made yet`)
@@ -1274,9 +1274,9 @@ async function walk(page: Page, tag: string, send = false) {
   await page.waitForFunction(() => (window as any).__tour().state().demo === 'done', null, { timeout: 25000 })
   await sleep(700)
   assert.equal(
-    await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.tour-ex-report .wu-check')].filter((e) => /Alternative explanations/.test(e.textContent ?? '') && getComputedStyle(e).display !== 'none').length),
+    await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.tour-ex-side [data-category="alternative-explanations"]')].filter((e) => getComputedStyle(e).display !== 'none').length),
     1,
-    `${tag} 8: the check is in the Checks pane`,
+    `${tag} 8: the check is in the Comments sidebar's list`,
   )
   await measure(page, `${tag} 8`)
   const before = await commentsLevel(page)

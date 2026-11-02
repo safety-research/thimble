@@ -1,18 +1,16 @@
 // The document views behind one lazy import, so BlockNote loads the first time the tab is shown and switching documents
 // is a prop change. One view per renderer: the report as a page with its sidebar and margin, and a page in its frame.
-// Each has the sidebar with the Checks pane (Checks.tsx). Written documents take comments: a selection offers Comment (SelectComment.tsx)
-// and a click on a tinted sentence holds its evidence card.
+// Written documents take comments: a selection offers Comment (SelectComment.tsx) and a click on a tinted sentence
+// holds its evidence card; the checks that comment are the top bar's Comments (shell/LabelsSidebar.tsx).
 import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { AnyDoc, DeckDoc, PageDoc, StoryDoc, VideoDoc, Writeup, WriteupComment } from '../lib/types'
-import { ReadProbe } from '../shell/dock'
-import { CommentsSidebar, SidebarShow, useChecks, useSidebar } from './Checks'
+import { useChecks } from './Checks'
 import { commentsApi } from './commentsApi'
 import type { DocFilter } from './Editor'
 import { docComments, EvidenceActions, type EvidenceActionsValue } from './Evidence'
 import { PageView } from './Page'
-import { useLookedAt } from './newComments'
 import { ReportPage } from './ReportPage'
 import { SelectComment } from './SelectComment'
 
@@ -42,17 +40,14 @@ export function DocumentView(props: DocumentViewProps) {
 /** A frame, the shape a slides or story type has before a write (GET …/frame), rather than its written document. */
 const isFrame = (doc: AnyDoc | null): doc is Writeup => !!doc && (doc as Writeup).frame === true
 
-/** The slides, the story, a page or a video beside the sidebar's Checks pane. */
+/** The slides, the story, a page or a video. */
 function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, writing = false }: DocumentViewProps) {
-  const side = useSidebar(ws)
   const checks = useChecks(ws)
   const [pickedId, setPickedId] = useState<string | null>(null)
   const comments = useMemo(() => (doc ? docComments(doc) : []), [doc])
   // the comment a click picked, while the document still has it open
   const picked = useMemo(() => comments.find((c) => c.id === pickedId) ?? null, [comments, pickedId])
   const viewRef = useRef<HTMLDivElement | null>(null)
-  // the comment picked is looked at, so the new comments' dot on the Comments pane leaves its run out
-  useLookedAt(ws, picked?.run)
   // a click on a tinted sentence picks its comment, the next one of the sentence's on each click; a click elsewhere in
   // the view lets it go, and a click in the evidence card or the selection's comment keeps it
   const onViewClick = (e: MouseEvent<HTMLDivElement>) => {
@@ -89,13 +84,7 @@ function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, wr
   const shared = { comments, on: checks.on, look: checks.look, picked }
   const view = <PageView ws={ws} slug={slug} doc={(doc as PageDoc | null) ?? null} drawer={drawer} onSaved={onSaved} {...shared} />
   return (
-    <div className={`wu-report wu-arranged${side.shown && !side.over ? '' : ' wu-side-hidden'}`} ref={side.row}>
-      <ReadProbe probe={side.probe} />
-      {side.shown ? (
-        <CommentsSidebar ws={ws} doc={slug} checks={checks} comments={comments} onHide={side.hide} over={side.over} />
-      ) : (
-        <SidebarShow onShow={side.show} />
-      )}
+    <div className="wu-report wu-arranged">
       <div className="wu-arranged-view" ref={viewRef} onClick={onViewClick}>
         <EvidenceActions.Provider value={actions}>{view}</EvidenceActions.Provider>
         {written && <SelectComment ws={ws} slug={slug} root={viewRef} onAdded={added} />}

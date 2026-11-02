@@ -1,7 +1,7 @@
 // The checks in views without the margin (slides, story, a page): a sentence a shown comment is on takes its check's
 // tint, and on hover or pick an opaque card at the pane's top right lists its comments with their refs and, given
-// `EvidenceActions`, ✓ to resolve one. `docComments` gives the Checks pane a document's comments; `useEvidence` gives a
-// view the tints and hover handlers; `EvidencePop` is the card.
+// `EvidenceActions`, ✓ to resolve one. `docComments` gives a view its document's comments; `useEvidence` gives a view
+// the tints and hover handlers; `EvidencePop` is the card.
 import { createContext, useContext, useMemo, useState, type MouseEvent } from 'react'
 import { useRefLabel } from '../components/RefChip'
 import type { AnyDoc } from '../lib/types'

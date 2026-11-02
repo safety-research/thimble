@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-// New comments (src/report/newComments.ts): when a check that is on ends a run that left comments, the Comments pane of
-// the surface they are on carries the accent dot ("New comments"): on the canvas the toolbar's Comments button
-// (canvas/Controls.tsx CommentsButton), beside a document its Comments pane's head (report/Checks.tsx CommentsPane).
-// The runs that had ended when this browser first read the workspace's checks are not news; a run is looked at once the
-// analyst opens its surface's Comments pane, and that holds across a reload.
+// New comments (src/report/newComments.ts): when a check that is on ends a run that left comments on the cards, the
+// canvas's Comments button (canvas/Controls.tsx CommentsButton) carries the accent dot ("New comments"); a run on a
+// document marks nothing there. The runs that had ended when this browser first read the workspace's checks are not
+// news; a run is looked at once the analyst opens the button's menu, and that holds across a reload.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { CommentsButton } from '../../src/canvas/Controls.tsx'
@@ -11,7 +10,7 @@ import { NoticeStrip } from '../../src/chat/Notice.tsx'
 import { dispatch } from '../../src/lib/events.ts'
 import type { Check, CheckRun } from '../../src/lib/types.ts'
 import { storageKey } from '../../src/lib/workspace.ts'
-import { CommentsPane, useChecks } from '../../src/report/Checks.tsx'
+import { useChecks } from '../../src/report/Checks.tsx'
 import { CANVAS } from '../../src/report/checkComments.ts'
 import { newRuns, resetSeen} from '../../src/report/newComments.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -41,7 +40,7 @@ describe('what is new', () => {
   })
 })
 
-describe('the dot on the Comments pane', () => {
+describe("the dot on the canvas's Comments button", () => {
   let server: Check[] = []
   beforeEach(() => {
     server = [check('judgment', false), check('unverified', false), check('important-details', true, { report: run('old', 4, '2026-10-15T09:00:00Z') })]
@@ -56,18 +55,13 @@ describe('the dot on the Comments pane', () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   })
 
-  /** The canvas's Comments button and the Report's Comments pane, each holding the workspace's checks as its surface
-   * does, and the chat's notice strip. */
+  /** The canvas's Comments button, holding the workspace's checks as the canvas does, and the chat's notice strip. */
   const Surfaces = ({ ws }: { ws: string }) => {
     const canvas = useChecks(ws)
-    const report = useChecks(ws)
     return (
       <>
         <div data-surface="canvas">
           <CommentsButton ws={ws} checks={canvas} comments={[]} />
-        </div>
-        <div data-surface="report">
-          <CommentsPane ws={ws} doc="report" checks={report} comments={[]} />
         </div>
         <div data-surface="chat">
           <NoticeStrip ws={ws} current="main" onOpen={() => undefined} />
@@ -87,16 +81,15 @@ describe('the dot on the Comments pane', () => {
     await act(async () => void (await new Promise((res) => setTimeout(res, 250)))) // the list's read again after its debounce
     await settle()
   }
-  /** The surfaces whose Comments pane's control carries the dot named "New comments". */
+  /** The surfaces whose Comments control carries the dot named "New comments": the canvas's button alone. */
   const dots = (el: HTMLElement) => {
     const on: string[] = []
     if (el.querySelector('[data-surface="canvas"] .bctl-comments .dot[aria-label="New comments"]')) on.push('canvas')
-    if (el.querySelector('[data-surface="report"] .wu-checks-head .wu-sec-head .dot[aria-label="New comments"]')) on.push('report')
     return on
   }
   const click = (el: Element | null | undefined) => act(async () => (el as HTMLButtonElement).click())
 
-  test('what ended before this browser read the checks is no news; a run that ends with comments marks the pane of its surface alone', async () => {
+  test('what ended before this browser read the checks is no news; a run that ends with comments on the cards marks the button, one on a document does not', async () => {
     const el = await surfaces('nc-dot')
     expect(dots(el)).toEqual([])
     expect(JSON.parse(window.localStorage.getItem(storageKey('nc-dot', 'comments-seen')) ?? 'null')).toEqual(['old'])
@@ -110,35 +103,30 @@ describe('the dot on the Comments pane', () => {
     await ended('important-details', 'report', run('r3', 0, '2026-10-15T10:02:00Z')) // no comments
     expect(dots(el)).toEqual(['canvas'])
     server = server.map((c) => (c.id === 'judgment' ? { ...c, shown: true } : c)) // the analyst turned it on
-    await ended('judgment', 'slides', run('r4', 2, '2026-10-15T10:03:00Z')) // another document's pane, not the Report's
-    expect(dots(el)).toEqual(['canvas'])
+    await ended('judgment', 'slides', run('r4', 2, '2026-10-15T10:03:00Z'))
     await ended('judgment', 'report', run('r5', 2, '2026-10-15T10:04:00Z'))
-    expect(dots(el)).toEqual(['canvas', 'report'])
+    expect(dots(el)).toEqual(['canvas'])
   })
 
-  test("opening a surface's Comments pane clears its dot alone, across a reload; a later run marks it again", async () => {
+  test("opening the Comments button's menu clears its dot, across a reload; a later run marks it again", async () => {
     const el = await surfaces('nc-open')
-    await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
     await ended('important-details', CANVAS, run('r2', 2, '2026-10-15T10:01:00Z'))
-    expect(dots(el)).toEqual(['canvas', 'report'])
+    expect(dots(el)).toEqual(['canvas'])
 
     await click(el.querySelector('[data-surface="canvas"] .bctl-comments'))
     expect(document.querySelector('.bcomments')).not.toBeNull()
-    expect(dots(el)).toEqual(['report'])
-    // a run that ends on the cards while their pane is open is looked at there
+    expect(dots(el)).toEqual([])
+    // a run that ends on the cards while their menu is open is looked at there
     server = server.map((c) => (c.id === 'judgment' ? { ...c, shown: true } : c))
     await ended('judgment', CANVAS, run('r3', 1, '2026-10-15T10:02:00Z'))
-    expect(dots(el)).toEqual(['report'])
-
-    await click(el.querySelector('[data-surface="report"] .wu-checks-head .wu-sec-head'))
     expect(dots(el)).toEqual([])
 
     unmountAll()
     resetSeen() // a reload reads what this browser kept
     const again = await surfaces('nc-open')
     expect(dots(again)).toEqual([])
-    await ended('important-details', 'report', run('r4', 1, '2026-10-15T10:05:00Z'))
-    expect(dots(again)).toEqual(['report'])
+    await ended('important-details', CANVAS, run('r4', 1, '2026-10-15T10:05:00Z'))
+    expect(dots(again)).toEqual(['canvas'])
   })
 
 })

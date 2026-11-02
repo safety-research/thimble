@@ -14,7 +14,8 @@
 // of where the check comments, with its comments there) and its switch, which shows or hides its comments everywhere.
 // It opens its detail: the definition, editable, Show in, and its open comments, each a link to where it stands (a
 // card, or the passage in the report) with Apply, which sends it to Claude in the chat, Go to it and Done
-// (CommentsList.tsx). The analyst's and Claude's own notes, which no check made, are the category Notes.
+// (CommentsList.tsx). The analyst's and Claude's own notes, which no check made, are the category Notes. The categories
+// end in "+ New check", which opens the new-check card beside it (report/Checks.tsx NewCheckCard).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { LabelAsks } from '../chat/LabelAsk'
@@ -22,6 +23,7 @@ import { CommentRow, useComments, type CommentItem } from './CommentsList'
 import { Button } from '../components/Button'
 import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
+import { Popover } from '../components/Menu'
 import { Switch } from '../components/Switch'
 import { openLabelEditor } from '../files/LabelEditor'
 import { classesOf, colourVar, howMade, labelDefinition, isFilesLabel, mainColour, unitWord } from '../files/labels'
@@ -29,8 +31,8 @@ import { checksApi, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { teleport } from '../lib/teleport'
 import type { Check, CheckCover, Concept, LabelRowText } from '../lib/types'
-import { useChecks, type Checks } from '../report/Checks'
-import { checkColour, coversOf, NOTE_COLOR } from '../report/checkComments'
+import { NewCheckCard, useChecks, type Checks } from '../report/Checks'
+import { checkColour, coversOf, freeColour, nameTaken, NOTE_COLOR } from '../report/checkComments'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 /** the found items a detail lists before "N more" */
@@ -147,6 +149,7 @@ export function LabelsSidebar({ ws, section, onClose }: { ws: string; section: S
               <CategoryRow key={c.key} ws={ws} category={c} checks={checks} onOpen={() => setDetail({ kind: 'comments', id: c.key })} />
             ))}
             {!categories.length && <p className="lside-none lside-section-none">No comments yet.</p>}
+            <NewCheck checks={checks} />
           </section>
         )}
       </div>
@@ -402,6 +405,34 @@ function Definition({ code, text }: { code: boolean; text: string }) {
           {whole ? 'Show less' : `${(lines.length - CODE_SHOWN).toLocaleString('en-US')} more lines`}
         </button>
       )}
+    </div>
+  )
+}
+
+/** "+ New check" at the end of the comment categories: the new-check card beside it, which the server turns on and runs
+ * where a new check comments (the documents, until its Show in says more). */
+function NewCheck({ checks }: { checks: Checks }) {
+  const [at, setAt] = useState<HTMLElement | null>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const close = () => setAt(null)
+  return (
+    <div className="lside-new">
+      <button ref={btn} type="button" className="lside-add" aria-expanded={!!at} onClick={() => setAt(at ? null : btn.current)}>
+        <Icon name="plus" size={13} />
+        New check
+      </button>
+      <Popover anchor={at} open={!!at} onClose={close} side="left" width={340} label="New check" className="check-card">
+        {at && (
+          <NewCheckCard
+            colour={colourVar(freeColour(checks.list))}
+            taken={(name) => nameTaken(checks.list, name)}
+            onClose={close}
+            onAdd={async (name, prompt) => {
+              if (await checks.create(name, prompt)) close()
+            }}
+          />
+        )}
+      </Popover>
     </div>
   )
 }

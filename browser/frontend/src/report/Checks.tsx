@@ -1,12 +1,11 @@
-// The Comments pane, shared by every document type and the canvas: one row per check that covers the surface (GET
-// /ws/{c}/checks, built-ins first; CheckRows), each with its colour square to show or hide its tints and comments, its
-// count of open comments (or a spinner while it runs, ✕ when it failed), and ⋯ to open its card (CheckCard). + opens the
-// new-check card. Whether a check is on is kept on the server (`shown`), so one switch covers a check's comments in the
-// documents and on the cards, and the server runs what the pane asks for (backend checks.py); `check` stream records
-// say when a run starts and ends, and `checks` records when a check changes, so both panes follow one switch. The
-// pane's head carries the accent dot while a check's run left comments on its surface that the analyst has not looked
-// at (newComments.ts); opening the pane looks at them.
-// `useChecks` holds the list; `useSidebar` is the sidebar's state (shown or hidden, beside the document or over it).
+// The checks: one row per check that covers a surface (GET /ws/{c}/checks, built-ins first; CheckRows), which the
+// canvas's Comments button lists for the cards (canvas/Controls.tsx), each with its colour square to show or hide its
+// tints and comments, its count of open comments (or a spinner while it runs, ✕ when it failed), and ⋯ to open its card
+// (CheckCard); and the new-check card (NewCheckCard), which that button's + and the end of the top bar's Comments list
+// open (shell/LabelsSidebar.tsx). Whether a check is on is kept on the server (`shown`), so one switch covers a check's
+// comments in the documents and on the cards, and the server runs what is asked for (backend checks.py); `check` stream
+// records say when a run starts and ends, and `checks` records when a check changes, so every list follows one switch.
+// `useChecks` holds the list; `useSidebar` the state of the report's sidebar (shown or hidden, beside it or over it).
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Button } from '../components/Button'
 import { TextArea, TextInput } from '../components/Field'
@@ -21,12 +20,11 @@ import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { Check, CheckCover, CheckRun } from '../lib/types'
 import { refusalLine } from '../chat/Refused'
-import { readStorage, storageKey, writeStorage } from '../lib/workspace'
+import { readStorage, writeStorage } from '../lib/workspace'
 import { useDock, useFoldingSide, type FoldingSide } from '../shell/dock'
 import { sideKey } from './cards'
-import { useNewComments } from './newComments'
 import { CANVAS, checkColour, checkLook, checksFor, countsByCheck, freeColour, nameTaken, rowCount, runLine, runOf, shownIds, withCheck, withRun, withShown, type CheckLook } from './checkComments'
-import { Chevron, Glyph, IconButton } from './icons'
+import { Glyph, IconButton } from './icons'
 
 const REFETCH_DEBOUNCE_MS = 150
 
@@ -200,7 +198,7 @@ function StaleRow({ ws, check, doc, n }: { ws: string; check: Check; doc: string
   )
 }
 
-/** The width of a document's sidebar, as .wu-side sets it in report.css. */
+/** The width of the report's sidebar, as .wu-side sets it in report.css. */
 const SIDE_WIDTH = 260
 
 export interface DocSidebar extends FoldingSide {
@@ -209,10 +207,10 @@ export interface DocSidebar extends FoldingSide {
   probe: (el: HTMLElement | null) => void
 }
 
-/** A document's sidebar, the same for every type. While the pane holds it beside a column of 60-character lines of
- * the report's text (the row's ReadProbe, report.css), it docks and shows as the analyst left it, per workspace;
- * hidden, a toggle over the page's top left brings it back. In a narrower pane it starts folded to that toggle, which
- * opens it over the document's left edge (shell/dock.tsx useFoldingSide). */
+/** The report's sidebar, its cards (Sidebar.tsx). While the pane holds it beside a column of 60-character lines of the
+ * report's text (the row's ReadProbe, report.css), it docks and shows as the analyst left it, per workspace; hidden, a
+ * toggle over the page's top left brings it back. In a narrower pane it starts folded to that toggle, which opens it
+ * over the report's left edge (shell/dock.tsx useFoldingSide). */
 export function useSidebar(ws: string): DocSidebar {
   const [side, setSide] = useState<boolean>(() => readStorage<boolean>(sideKey(ws), true) !== false)
   const { docks, row, probe } = useDock(SIDE_WIDTH)
@@ -236,63 +234,10 @@ export function useSidebar(ws: string): DocSidebar {
   return { ...fold, show, hide, row, probe }
 }
 
-export interface CommentsPaneProps {
-  ws: string
-  /** the document shown, whose runs the rows show */
-  doc: string
-  checks: Checks
-  /** the document's open comments, whether their check is on or off */
-  comments: readonly { check: string | null }[]
-  /** the sidebar's hide toggle, in the pane's head when the pane is the whole sidebar */
-  onHide?: () => void
-}
-
-/** The accent dot on a Comments pane's control (its head beside a document, the toolbar's Comments button on the
- * canvas) while a check's run left comments there that the analyst has not looked at (newComments.ts). */
+/** The accent dot on the canvas's Comments button while a check's run left comments on the cards that the analyst
+ * has not looked at (newComments.ts). */
 export function NewCommentsDot() {
   return <span className="dot wu-new-dot" role="img" aria-label="New comments" title="New comments" />
-}
-
-/** The Comments pane beside a document: its head (the count of comments shown, the new comments' dot, + for a new
- * check, the sidebar's hide toggle) and the rows of the checks that cover the documents. A click on the head opens or
- * folds the pane, and looks at the document's new comments. */
-export function CommentsPane({ ws, doc, checks, comments, onHide }: CommentsPaneProps) {
-  const key = storageKey(ws, 'report-checks-pane')
-  const [open, setOpen] = useState<boolean>(() => readStorage<boolean>(key, true) !== false)
-  const news = useNewComments(ws, checks, doc)
-  const [adding, setAdding] = useState<HTMLElement | null>(null)
-  const head = useRef<HTMLDivElement | null>(null)
-  const list = useMemo(() => checksFor(checks.list, doc), [checks.list, doc])
-  const counts = useMemo(() => countsByCheck(comments), [comments])
-  const mine = new Set(list.map((c) => c.id))
-  const shownCount = comments.filter((c) => c.check != null && checks.on.has(c.check) && mine.has(c.check)).length
-  const anyResult = list.some((c) => rowCount(runOf(c, doc), counts.get(c.id) ?? 0) != null)
-  const setPane = (next: boolean) => {
-    setOpen(next)
-    writeStorage(key, next)
-    news.look()
-  }
-  return (
-    <div className="wu-checks" aria-label="Comments">
-      <div className="wu-checks-head" ref={head}>
-        <button type="button" className="wu-sec-head" aria-expanded={open} onClick={() => setPane(!open)}>
-          <Chevron open={open} />
-          <span className="wu-sec-name">Comments</span>
-          {anyResult && <span className="wu-count wu-count-inline">{shownCount}</span>}
-          {news.runs.length > 0 && <NewCommentsDot />}
-        </button>
-        <IconButton label="New check" className="wu-checks-add" aria-expanded={!!adding} onClick={() => setAdding((a) => (a ? null : head.current))}>
-          <Icon name="plus" size={14} />
-        </IconButton>
-        {onHide && (
-          <IconButton label="Hide sidebar" onClick={onHide}>
-            <Glyph name="sidebar" />
-          </IconButton>
-        )}
-      </div>
-      <CheckRows ws={ws} surface={doc} checks={checks} comments={comments} adding={adding} onAdding={setAdding} listed={open} />
-    </div>
-  )
 }
 
 export interface CheckRowsProps {
@@ -305,13 +250,11 @@ export interface CheckRowsProps {
   /** what the new-check card stands beside while the head's + holds it open, else null */
   adding: HTMLElement | null
   onAdding: (at: HTMLElement | null) => void
-  /** whether the rows show; the cards a row or + opens show either way */
-  listed?: boolean
 }
 
 /** The rows of the checks that cover a surface, and the card beside a row (its ⋯) or beside the head (+). A check made
- * here covers the surface: the documents beside a document, the cards on the canvas. */
-export function CheckRows({ ws, surface, checks, comments, adding, onAdding, listed = true }: CheckRowsProps) {
+ * here covers the surface: the cards, in the canvas's Comments button. */
+export function CheckRows({ ws, surface, checks, comments, adding, onAdding }: CheckRowsProps) {
   // the check whose card is open, with the element the card stands beside
   const [editing, setEditing] = useState<{ id: string; at: HTMLElement } | null>(null)
   const counts = useMemo(() => countsByCheck(comments), [comments])
@@ -331,59 +274,57 @@ export function CheckRows({ ws, surface, checks, comments, adding, onAdding, lis
   const editCheck = editing ? (list.find((c) => c.id === editing.id) ?? null) : null
   return (
     <>
-      {listed && (
-        <div className="wu-checks-list">
-          {list.map((c) => {
-            const isOn = checks.on.has(c.id)
-            const isOpen = editing?.id === c.id
-            const colour = checkColour(c)
-            const run = runOf(c, surface)
-            const count = rowCount(run, counts.get(c.id) ?? 0)
-            const notRun = count == null && run?.status !== 'running' && run?.status !== 'failed'
-            const rowOf = (el: HTMLElement) => el.closest<HTMLElement>('.wu-check-row')
-            return (
-              <div key={c.id} className="wu-check" data-check={c.id}>
-                <div className={`wu-check-row${isOn ? ' on' : ''}${isOpen ? ' editing' : ''}`}>
-                  <button type="button" className="wu-check-toggle" role="switch" aria-checked={isOn} onClick={() => checks.toggle(c.id)}>
-                    <span className="wu-check-sq" style={{ borderColor: colour, background: isOn ? colour : 'transparent' }} />
-                    <span className="wu-check-name">{c.name}</span>
-                    {count != null && <span className="wu-count">{count}</span>}
-                    {notRun && <span className="wu-count wu-count-none">–</span>}
-                  </button>
-                  {run?.status === 'running' && (
-                    // a run waiting for a free session, queued until the document's writer ends, or held while main is
-                    // in plan mode has no chat yet: the tip says which, and a click does nothing
-                    <IconButton
-                      label={checkRunLabel(c.name, run)}
-                      className="wu-check-run"
-                      aria-disabled={!run.chat || undefined}
-                      onClick={() => run.chat && openThread(run.chat, 'report-check')}
-                    >
-                      <Spinner size={10} />
-                    </IconButton>
-                  )}
-                  {run?.status === 'failed' && (
-                    // a run that failed before its session started has no chat: its tip says why, and its card runs it
-                    // again
-                    <IconButton
-                      label={`${c.name} failed${run.summary ? `: ${run.summary}` : ''}${run.chat ? '. Open its run' : ''}`}
-                      className="wu-check-run"
-                      onClick={(e) => (run.chat ? openThread(run.chat, 'report-check') : edit(c.id, rowOf(e.currentTarget)))}
-                    >
-                      <Mark kind="failed" />
-                    </IconButton>
-                  )}
-                  <IconButton label={`Edit ${c.name}`} className="wu-check-more" aria-expanded={isOpen} onClick={(e) => edit(c.id, rowOf(e.currentTarget))}>
-                    <Icon name="more-horizontal" size={14} />
+      <div className="wu-checks-list">
+        {list.map((c) => {
+          const isOn = checks.on.has(c.id)
+          const isOpen = editing?.id === c.id
+          const colour = checkColour(c)
+          const run = runOf(c, surface)
+          const count = rowCount(run, counts.get(c.id) ?? 0)
+          const notRun = count == null && run?.status !== 'running' && run?.status !== 'failed'
+          const rowOf = (el: HTMLElement) => el.closest<HTMLElement>('.wu-check-row')
+          return (
+            <div key={c.id} className="wu-check" data-check={c.id}>
+              <div className={`wu-check-row${isOn ? ' on' : ''}${isOpen ? ' editing' : ''}`}>
+                <button type="button" className="wu-check-toggle" role="switch" aria-checked={isOn} onClick={() => checks.toggle(c.id)}>
+                  <span className="wu-check-sq" style={{ borderColor: colour, background: isOn ? colour : 'transparent' }} />
+                  <span className="wu-check-name">{c.name}</span>
+                  {count != null && <span className="wu-count">{count}</span>}
+                  {notRun && <span className="wu-count wu-count-none">–</span>}
+                </button>
+                {run?.status === 'running' && (
+                  // a run waiting for a free session, queued until the document's writer ends, or held while main is
+                  // in plan mode has no chat yet: the tip says which, and a click does nothing
+                  <IconButton
+                    label={checkRunLabel(c.name, run)}
+                    className="wu-check-run"
+                    aria-disabled={!run.chat || undefined}
+                    onClick={() => run.chat && openThread(run.chat, 'report-check')}
+                  >
+                    <Spinner size={10} />
                   </IconButton>
-                </div>
-                {staleOf(run) > 0 && <StaleRow ws={ws} check={c} doc={surface} n={staleOf(run)} />}
-                {run?.refused && run.status !== 'running' && <p className="wu-check-refused" role="status">{`Didn't start: ${refusalLine(run.refused)}`}</p>}
+                )}
+                {run?.status === 'failed' && (
+                  // a run that failed before its session started has no chat: its tip says why, and its card runs it
+                  // again
+                  <IconButton
+                    label={`${c.name} failed${run.summary ? `: ${run.summary}` : ''}${run.chat ? '. Open its run' : ''}`}
+                    className="wu-check-run"
+                    onClick={(e) => (run.chat ? openThread(run.chat, 'report-check') : edit(c.id, rowOf(e.currentTarget)))}
+                  >
+                    <Mark kind="failed" />
+                  </IconButton>
+                )}
+                <IconButton label={`Edit ${c.name}`} className="wu-check-more" aria-expanded={isOpen} onClick={(e) => edit(c.id, rowOf(e.currentTarget))}>
+                  <Icon name="more-horizontal" size={14} />
+                </IconButton>
               </div>
-            )
-          })}
-        </div>
-      )}
+              {staleOf(run) > 0 && <StaleRow ws={ws} check={c} doc={surface} n={staleOf(run)} />}
+              {run?.refused && run.status !== 'running' && <p className="wu-check-refused" role="status">{`Didn't start: ${refusalLine(run.refused)}`}</p>}
+            </div>
+          )
+        })}
+      </div>
       <Popover anchor={adding ?? editing?.at ?? null} open={!!adding || !!editCheck} onClose={close} side="aside" width={340} label={editCheck && !adding ? `Edit ${editCheck.name}` : 'New check'} className="check-card">
         {adding ? (
           <NewCheckCard
@@ -544,10 +485,11 @@ function RunLine({ ws, check, doc, line, running }: { ws: string; check: Check; 
   )
 }
 
-/** The head's + opens this card beside the pane, laid out as a label's edit card in Files: the colour the server will
- * give the check and its name, its prompt, then Cancel and Run. Enter in the name goes to the prompt; ⌘↵ in the prompt
- * or Run adds the check, which the server turns on and runs. Run waits for a name no other check has and a prompt. */
-function NewCheckCard({ colour, taken, onAdd, onClose }: { colour: string; taken: (name: string) => boolean; onAdd: (name: string, prompt: string) => Promise<void>; onClose: () => void }) {
+/** The card a + for a new check opens beside it (the canvas's Comments button's, New check at the end of the top bar's
+ * Comments list), laid out as a label's edit card in Files: the colour the server will give the check and its name,
+ * its prompt, then Cancel and Run. Enter in the name goes to the prompt; ⌘↵ in the prompt or Run adds the check, which
+ * the server turns on and runs. Run waits for a name no other check has and a prompt. */
+export function NewCheckCard({ colour, taken, onAdd, onClose }: { colour: string; taken: (name: string) => boolean; onAdd: (name: string, prompt: string) => Promise<void>; onClose: () => void }) {
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
@@ -618,17 +560,7 @@ function NewCheckCard({ colour, taken, onAdd, onClose }: { colour: string; taken
   )
 }
 
-/** The sidebar of the slides, the story and a page: the Comments pane alone, with the hide toggle in its head; `over`
- * when it shows over the view's left edge. */
-export function CommentsSidebar({ onHide, over, ...pane }: CommentsPaneProps & { onHide: () => void; over: boolean }) {
-  return (
-    <aside className={'wu-side wu-side-checks' + (over ? ' is-over' : '')} aria-label="Comments">
-      <CommentsPane {...pane} onHide={onHide} />
-    </aside>
-  )
-}
-
-/** The toggle that brings a hidden sidebar back, over the page's top left. */
+/** The toggle that brings the report's hidden sidebar back, over the page's top left. */
 export function SidebarShow({ onShow }: { onShow: () => void }) {
   return (
     <IconButton label="Show sidebar" className="wu-side-show" onClick={onShow}>

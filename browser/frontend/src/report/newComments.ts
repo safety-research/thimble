@@ -1,11 +1,10 @@
-// New comments: a check that is on ended a run that left comments the analyst has not looked at. The Comments pane of
-// the surface they are on carries the accent dot, named "New comments" (Checks.tsx NewCommentsDot): on the canvas the
-// toolbar's Comments button (canvas/Controls.tsx CommentsButton), beside a document its Comments pane's head
-// (Checks.tsx CommentsPane), so a run that commented on the Report alone marks the Report's pane alone. A run counts
-// once it ends (the stream's `check` record, then the checks' list). The runs looked at are kept per browser and
-// workspace (localStorage), so a reload shows the dot again until the analyst looks: the first time a browser reads a
+// New comments: a check that is on ended a run that left comments on the cards the analyst has not looked at. The
+// canvas's Comments button (canvas/Controls.tsx CommentsButton) carries the accent dot, named "New comments" (Checks.tsx
+// NewCommentsDot); a run that commented on a document alone marks nothing there. A run counts once it ends (the
+// stream's `check` record, then the checks' list). The runs looked at are kept per browser and workspace
+// (localStorage), so a reload shows the dot again until the analyst looks: the first time a browser reads a
 // workspace's checks, every run that has ended counts as looked at, so only later runs are news. A run is looked at
-// once the analyst opens its surface's Comments pane, or one of its comments on the page or on the canvas (markSeen).
+// once the analyst opens the Comments button's menu, or one of its comments on the canvas (markSeen).
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Check } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -109,12 +108,12 @@ export function useLookedAt(ws: string, run: string | null | undefined): void {
 export interface NewComments {
   /** the new runs on the surface, in the order they ended; empty when there is nothing new there */
   runs: NewRun[]
-  /** the analyst opened the surface's Comments pane: its new runs are looked at */
+  /** the analyst opened the surface's Comments menu: its new runs are looked at */
   look: () => void
 }
 
-/** The new comments of workspace `ws` on `surface` (a document's slug, or CANVAS), for the dot on its Comments pane,
- * from the workspace's checks (Checks.tsx useChecks). */
+/** The new comments of workspace `ws` on `surface` (CANVAS for the cards), for the dot on its Comments button, from the
+ * workspace's checks (Checks.tsx useChecks). */
 export function useNewComments(ws: string, checks: { list: readonly RunsOf[]; ready: boolean }, surface: string): NewComments {
   const seen = useSeenRuns(ws)
   const { list, ready } = checks

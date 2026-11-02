@@ -1,14 +1,12 @@
 // The report's sidebar: the card search and the hide toggle, then the canvas's cards in Starred,
 // Orientation and Your work (cards.ts), each draggable into the page or placed at its end with a double-click (or
-// Enter), ✓ once the page shows it; and the Checks pane (Checks.tsx, the same pane every document type's sidebar has)
-// pinned to the bottom.
+// Enter), ✓ once the page shows it. The checks and their comments are the top bar's Comments
+// (shell/LabelsSidebar.tsx).
 import { useMemo, useState, type DragEvent } from 'react'
 import { figureKind } from '../components/Outputs'
 import type { Cell, Group } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
 import { CARD_MIME, cardSections, sectionsKey, type CardSectionKey } from './cards'
-import { CommentsPane, type Checks } from './Checks'
-import type { DocComment } from './checkComments'
 import { Chevron, Glyph, IconButton } from './icons'
 
 const DEFAULT_OPEN: Record<CardSectionKey, boolean> = { starred: true, figures: true, yours: true }
@@ -23,13 +21,9 @@ export interface SidebarProps {
   onHide: () => void
   /** it shows over the page's left edge, the pane being too narrow for it beside the text */
   over: boolean
-  /** the document shown, the workspace's checks, and the document's open comments */
-  doc: string
-  checks: Checks
-  comments: readonly DocComment[]
 }
 
-export function Sidebar({ ws, cells, groups, used, onInsert, onHide, over, doc, checks, comments }: SidebarProps) {
+export function Sidebar({ ws, cells, groups, used, onInsert, onHide, over }: SidebarProps) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<Record<string, boolean>>(() => ({ ...DEFAULT_OPEN, ...readStorage<Record<string, boolean>>(sectionsKey(ws), {}) }))
   const sections = useMemo(() => cardSections(cells, groups, query, figureKind), [cells, groups, query])
@@ -90,7 +84,6 @@ export function Sidebar({ ws, cells, groups, used, onInsert, onHide, over, doc, 
           })}
         </div>
       </div>
-      <CommentsPane ws={ws} doc={doc} checks={checks} comments={comments} />
     </aside>
   )
 }

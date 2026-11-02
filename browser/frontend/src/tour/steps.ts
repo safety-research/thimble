@@ -455,8 +455,6 @@ const reportExample = (api: Api): Example => {
     if (rulerMarks) rulerMarks.style.display = plain ? 'none' : ''
     if (rulerThumb) rulerThumb.className = plain ? 'reader-ruler-thumb plain' : rulerWith.thumb
   }
-  const checkRow = [...w.querySelectorAll<HTMLElement>('.wu-check')].find((e) => /Alternative explanations/.test(e.textContent ?? ''))
-  const checksCount = w.querySelector('.wu-checks-head .wu-count')
   // the Comments sidebar, which the checks step opens: the checks with their comments, the new one among them once made
   const side = sideExample(api, 'comments')
   const sideRow = side.aside.querySelector<HTMLElement>('[data-category="alternative-explanations"]')
@@ -467,8 +465,7 @@ const reportExample = (api: Api): Example => {
     page: w.querySelector<HTMLElement>('.wu-page'),
     real: false,
     k: 1,
-    checkRow,
-    checksCount,
+    checkRow: sideRow,
     checksShown: false,
     side: null as HTMLElement | null,
     hideChecks: () => {},
@@ -515,8 +512,6 @@ const reportExample = (api: Api): Example => {
     w.classList.add('tour-checks-hidden')
     if (rail) rail.style.display = 'none'
     rulerPlain(true)
-    if (checkRow) checkRow.style.display = 'none'
-    if (checksCount) checksCount.textContent = '3'
     if (sideRow) sideRow.style.display = 'none'
     if (sideCount) sideCount.textContent = '0'
   }
@@ -529,8 +524,6 @@ const reportExample = (api: Api): Example => {
     w.classList.remove('tour-checks-hidden')
     if (rail) rail.style.display = ''
     rulerPlain(false)
-    if (checkRow) checkRow.style.display = ''
-    if (checksCount) checksCount.textContent = '4'
     if (sideRow) sideRow.style.display = ''
     if (sideCount) sideCount.textContent = '4'
   }
@@ -558,8 +551,8 @@ const reportExample = (api: Api): Example => {
   return { els, layout, cleanup: () => els.hideSide() }
 }
 /** The captured Report (examples.json) as the Report stands now: no Slides, Story or Video beside it; the cards an
- * orientation made listed under Your work; a figure's caption whole, as text, with no scroll of its own (the capture
- * has the field it was once edited in); and the checks in the sidebar's Comments pane. */
+ * orientation made listed under Your work; and a figure's caption whole, as text, with no scroll of its own (the
+ * capture has the field it was once edited in). */
 const asReportNow = (w: HTMLElement) => {
   w.querySelectorAll('.wu-types .seg-opt').forEach((b) => {
     if (/^(slides|story|video)$/.test(b.querySelector('[data-doc-chip]')?.getAttribute('data-doc-chip') ?? '')) b.remove()
@@ -581,10 +574,6 @@ const asReportNow = (w: HTMLElement) => {
     cap.append(p)
     ta.replaceWith(cap)
   })
-  const checks = w.querySelector('.wu-checks')
-  checks?.setAttribute('aria-label', 'Comments')
-  const name = checks?.querySelector('.wu-checks-head .wu-sec-name')
-  if (name) name.textContent = 'Comments'
 }
 // the page scrolled so `el` stands `above` px (as drawn) from the page's top
 const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth = true) => {
@@ -835,19 +824,23 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'report', example: reportExample, place: 'left', align: 'start', pad: 0, radius: 12,
       anchor: (api) => [reportPanel, ...(api.els.side ? [api.els.side, sideButton('comments')] : [])],
       title: 'Checks',
-      body: 'Checks read the report and the cards, and comment on what they find. Press + under Comments to add one: say what to look for, in a line. Comments, at the top, lists the checks and their comments.',
+      body: 'Checks read the report and the cards, and comment on what they find. Comments, at the top, lists the checks and their comments; New check at its end adds one: say what to look for, in a line.',
       note: 'Reopen this tour from Settings.',
       scroll: (api) => api.els.page ?? null,
       leave: (api) => api.els.hideSide?.(),
-      // + in the Report's Comments pane opens a new check, which is named and described; it runs, its comments sit beside
-      // the passages they are about, and the Comments sidebar opens beside the Report with the check and its comments
+      // the Comments sidebar opens beside the Report, and New check at the end of its list opens a new check, which is
+      // named and described; it runs, it joins the list, and its comments sit beside the passages they are about
       demo: async (api) => {
-        const plus = inReport(api, '.wu-checks-add')
-        const p = api.rectOf(plus)
-        if (!plus || !p) return
         if (api.els.checksShown) return api.els.showSide()
         api.els.hideChecks()
-        api.cursor.show(p.x + 180, p.y - 140)
+        api.els.showSide()
+        // the panes make room for the sidebar before its example is laid over it
+        await api.sleep(700)
+        const side = api.els.side as HTMLElement | null
+        const plus = side?.querySelector<HTMLElement>('.lside-add') ?? null
+        const p = api.rectOf(plus)
+        if (!plus || !p) return
+        api.cursor.show(p.x - 180, p.y - 140)
         await api.sleep(500)
         await api.cursor.move(p.x + p.width / 2, p.y + p.height / 2, 900)
         await api.sleep(250)
@@ -856,9 +849,10 @@ export function tourSteps(key: string, chat = true): Step[] {
         card.dataset.demo = '1'
         card.classList.add('tour-in')
         api.fx.append(card)
-        const aside = api.rectOf(plus.closest('aside') || plus.parentElement)
-        const left = (aside ? aside.x + aside.width : p.x + p.width) + 10
-        Object.assign(card.style, { position: 'absolute', left: `${Math.min(left, innerWidth - 352)}px`, top: `${Math.max(12, Math.min(innerHeight - card.offsetHeight - 12, p.y - 70))}px` })
+        // beside the sidebar, at its left, as thimble's card stands beside New check
+        const aside = api.rectOf(side)
+        const left = (aside ? aside.x : p.x) - card.offsetWidth - 10
+        Object.assign(card.style, { position: 'absolute', left: `${Math.max(12, left)}px`, top: `${Math.max(12, Math.min(innerHeight - card.offsetHeight - 12, p.y - 70))}px` })
         const name = card.querySelector('input'),
           text = card.querySelector('textarea'),
           runBtn = [...card.querySelectorAll('button')].find((b) => /Run/.test(b.textContent ?? ''))
@@ -879,7 +873,7 @@ export function tourSteps(key: string, chat = true): Step[] {
         // the check is on: thimble stands the margin at once, empty until the comments come
         api.els.showMargin()
         await api.sleep(700)
-        // the check is in the pane and its comments appear beside their passages, and stay; then the page goes to the first
+        // the check joins the list, its comments appear beside their passages and stay; then the page goes to the first
         api.els.showChecks()
         const row = api.els.checkRow as HTMLElement | undefined
         if (row) {
@@ -889,10 +883,6 @@ export function tourSteps(key: string, chat = true): Step[] {
         await api.sleep(1300)
         scrollTo(api, inReport(api, '.wu-cm'), 220)
         await api.sleep(1500)
-        // the Comments sidebar, where every check and its comments are listed
-        api.els.showSide()
-        await api.sleep(1200)
-        scrollTo(api, inReport(api, '.wu-cm'), 220)
       },
     },
   ]

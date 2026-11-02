@@ -2,7 +2,8 @@
 // The shared Labels and Comments sidebar (src/shell/LabelsSidebar.tsx, src/shell/CommentsList.tsx): one sidebar that
 // shows the labels or the comment categories, the section the top bar's Labels or Comments button opened; a category's
 // Show in sets where its check comments (Chat: Claude's answers), its detail edits its definition and lists its open
-// comments as links, those on Claude's answers too, and Apply sends a comment to Claude in main's chat.
+// comments as links, those on Claude's answers too, and Apply sends a comment to Claude in main's chat. The categories
+// end in New check, the one place a check is made beside the canvas's Comments button.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { applyText, type CommentItem } from '../../src/shell/CommentsList.tsx'
@@ -127,4 +128,43 @@ test("a category's detail edits its definition and lists its comments as links, 
   await act(async () => apply.click())
   expect(asked).toEqual([{ chatId: 'main', send: 'Apply this comment of the check “Important details” on card:c7: The chart leaves out June.\n\nJune has 40 rows.' }])
   off()
+})
+
+async function type(el: HTMLTextAreaElement | HTMLInputElement, text: string) {
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, text)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+test('the comment categories end in New check, whose card makes a check, which the server turns on and runs', async () => {
+  serve()
+  const made: unknown[] = []
+  const served = globalThis.fetch
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    if (init?.method === 'POST' && url.endsWith('/checks')) {
+      made.push(JSON.parse(String(init.body)))
+      return json({ id: 'causes', name: 'Causes', prompt: 'Look for another cause.', colour: 3, builtin: false, shown: true, covers: ['documents'], runs: {} })
+    }
+    return served(url, init)
+  })
+  // the popover the card shows in watches its size
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const el = await mount(<LabelsSidebar ws="w1" section="comments" onClose={() => undefined} />)
+  await settle()
+  const last = el.querySelector('.lside-section[data-section="comments"]')!.lastElementChild!
+  const add = last.querySelector<HTMLButtonElement>('button.lside-add')!
+  expect(add.textContent).toBe('New check')
+  await act(async () => add.click())
+  const card = document.querySelector<HTMLElement>('.check-card')!
+  expect(card).not.toBeNull()
+  await type(card.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, 'Causes')
+  await type(card.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!, 'Look for another cause.')
+  const run = [...card.querySelectorAll('button')].find((b) => b.textContent === 'Run')!
+  await act(async () => run.click())
+  await settle()
+  expect(made).toEqual([{ name: 'Causes', prompt: 'Look for another cause.' }])
+  expect(document.querySelector('.check-card')).toBeNull()
+  expect([...el.querySelectorAll('[data-category]')].map((r) => r.getAttribute('data-category'))).toContain('causes')
 })
