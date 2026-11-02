@@ -208,6 +208,30 @@ async def test_sonnet_5_5_picked_in_the_menu_runs_main_at_its_own_default_effort
     assert "speed" not in body  # Sonnet 5.5 has no fast mode
 
 
+async def test_haiku_5_5_picked_in_the_menu_runs_main_at_its_own_default_effort_where_haiku_4_5_runs_with_none(
+        on, monkeypatch, tmp_path):
+    """Haiku 5.5 runs at an effort (config.has_effort), Haiku 4.5, which a setting may still name, with none; neither
+    has a server-side fallback or fast mode, and the request names no thinking, which Haiku 5.5 runs adaptive."""
+    from app.main import app
+
+    own_settings(monkeypatch, tmp_path)
+    client = api_key(monkeypatch, [text("one"), text("two")])
+    with TestClient(app, base_url="http://127.0.0.1") as http:
+        assert http.put(f"/api/ws/{CORPUS}/session/fast", json={"fast": True}).status_code == 200
+        r = http.put(f"/api/ws/{CORPUS}/session/model", json={"model": "claude-haiku-5-5"})
+    assert r.status_code == 200 and r.json() == {"model": "claude-haiku-5-5"}, r.text
+    await main_turn("first")
+    body = client.bodies[0]
+    assert (body["model"], body["output_config"]) == ("claude-haiku-5-5", {"effort": "medium"})
+    assert not {"fallbacks", "speed", "thinking"} & set(body), body.keys()
+    with TestClient(app, base_url="http://127.0.0.1") as http:
+        assert http.put(f"/api/ws/{CORPUS}/session/model", json={"model": "claude-haiku-4-5-20251001"}).status_code == 200
+    await main_turn("second")
+    body = client.bodies[1]
+    assert body["model"] == "claude-haiku-4-5-20251001"
+    assert not {"output_config", "fallbacks", "speed", "thinking"} & set(body), body.keys()
+
+
 async def test_the_chip_s_effort_is_the_one_main_runs_at_for_the_model_it_runs_on(on, monkeypatch, tmp_path):
     """Main's `attached.settings_effort`, the effort the composer's chip shows while the composer chose none: the
     analyst's setting for main's model, else Claude Code's default for it, again for the model the menu picks."""

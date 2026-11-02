@@ -113,7 +113,7 @@ async def test_each_structured_call_runs_at_what_settings_shows_for_its_role(con
         if config.has_effort(row["model"]):
             assert (opts.model, opts.effort) == (row["model"], row["effort"]), what
             assert settings["env"]["CLAUDE_CODE_EFFORT_LEVEL"] == row["effort"], what
-        else:  # Haiku runs with no effort (config.NO_EFFORT_MODELS)
+        else:  # Haiku 4.5 runs with no effort (config.NO_EFFORT_MODELS)
             assert (opts.model, opts.effort) == (row["model"], None) and "env" not in settings, what
         assert settings["fastMode"] is row["fast"] and settings["ultracode"] is False, what
 
