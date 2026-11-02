@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -738,6 +739,51 @@ def upstream(world, tmp_path, monkeypatch):
         return sh("git", "rev-parse", "HEAD", cwd=work)
 
     return publish
+
+
+GITHUB_REFUSES = """#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    {private}) echo "fatal: could not read Username for 'https://github.com': terminal prompts disabled" >&2; exit 128;;
+    {gone}) echo "remote: Repository not found." >&2; echo "fatal: repository '{gone}/' not found" >&2; exit 128;;
+  esac
+done
+exec {git} "$@"
+"""
+
+
+def github_refusing(w, monkeypatch) -> dict[str, str]:
+    """git as GitHub answers it where it may read nothing of a repository, first on the PATH: a private one asks git
+    with no sign-in for one, which a command with no terminal cannot give (`private`), and one an account may not read
+    is not found (`gone`), as GitHub's own words go. Any other call is the real git's. The made-up URLs, by case."""
+    urls = {"private": "https://github.com/made-up/private.git", "gone": "https://github.com/made-up/gone.git"}
+    d = w["tmp"] / "github"
+    d.mkdir(exist_ok=True)
+    (d / "git").write_text(GITHUB_REFUSES.format(**urls, git=shutil.which("git")))
+    (d / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{d}:{os.environ['PATH']}")
+    return urls
+
+
+def test_thimble_update_says_why_github_lets_git_read_nothing_and_the_fix(world, upstream, monkeypatch, capsys):
+    """I11: where GitHub lets git read nothing of thimble's repository (it is private, or not there), thimble update says
+    so and how to sign in, not to check the network, which a network that does not answer still says."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    for url in github_refusing(world, monkeypatch).values():
+        monkeypatch.setenv("THIMBLE_UPDATE_URL", url)
+        assert cli.main(["update"]) == 1
+        assert capsys.readouterr().err.strip() == (
+            f"thimble update: thimble could not read its releases from {url}: GitHub did not let git read it, so it is "
+            "private or not there. Sign in with a GitHub account that can read it (gh auth login, then gh auth "
+            "setup-git), then run thimble update again")
+    # a dev install's check of the branch its checkout pulls from, the same way
+    said = "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    assert FX._behind_lines({"upstream": {"name": "origin/main", "error": said}}) == [
+        "thimble could not check whether origin/main has newer commits: GitHub did not let git read it, so it is private "
+        "or not there. Sign in with a GitHub account that can read it (gh auth login, then gh auth setup-git), then run "
+        "thimble update again."]
 
 
 def three_fixes(world) -> tuple[int, int, int]:
