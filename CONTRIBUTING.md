@@ -96,7 +96,7 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 
 | Text | File | Read by | As |
 |---|---|---|---|
-| guidance | `prompts/guidance.md` | `guidance/guidance.ts` | context beside the first prompt of every conversation, without the section of a switched-off feature, or Cards on demand's in Cards' other modes |
+| guidance | `prompts/guidance.md` | `guidance/guidance.ts` | context beside the first prompt of every conversation, without the section of a switched-off feature |
 | card tool | `prompts/card-tool.md` | `cards/tool.ts` | the description of the `card` tool |
 | card check | `prompts/card-check.md` | `cards/fit.ts` | one model call when a version of a card does not fit on the screen, which writes the version the analyst sees |
 | checker | `prompts/checker.md` | `marks/checker.ts` | the prompt of the fork that checks a reply's marks |

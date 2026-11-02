@@ -55,7 +55,7 @@ test('placeholders are filled, a value kept as written, and the card tool text f
 test("each section that guidance/guidance.ts leaves out with its feature off is a heading of guidance.md", () => {
   const src = readFileSync(join(ROOT, 'guidance', 'guidance.ts'), 'utf8')
   const headings = [...(/const SECTIONS[^{]*\{([^}]*)\}/.exec(src)?.[1] ?? '').matchAll(/'([^']+)'/g)].map(m => m[1])
-  assert.deepEqual(headings, ['Citing claims', 'Cards', 'Cards on demand'])
+  assert.deepEqual(headings, ['Citing claims', 'Cards'])
   const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
   for (const h of headings) assert.match(text, new RegExp(`^## ${h}$`, 'm'), `guidance.md has ## ${h}`)
 })
