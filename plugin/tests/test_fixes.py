@@ -1289,18 +1289,33 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
 
 
-def test_what_next_names_thimble_file_issue_only_for_a_fix_it_takes(world, capsys, monkeypatch):
-    """R1: while Claude still works on the only fix, thimble fixes names no `thimble file issue`, which refuses a fix
-    that is not done; once another fix is ready, the line names that one, and the command takes it."""
+def test_what_next_names_thimble_file_issue_for_a_fix_claude_still_works_on(world, capsys, monkeypatch):
+    """R1: while Claude still works on the only fix, thimble fix and thimble fixes name `thimble file issue` for it, and
+    the command gives the link, whose text says that Claude is still working on it; once another fix is ready, the line
+    names that one, the first in the list, and the command takes it."""
+    from urllib.parse import parse_qs, urlsplit  # noqa: PLC0415
+
     from kernel import cli  # noqa: PLC0415
 
     monkeypatch.delenv("CLAUDECODE", raising=False)
     monkeypatch.setattr(FX, "can_share", lambda: True)
+    # the shell stands in thimble's repository here, whose names (fix, terminal) the scan would take out of the text
+    monkeypatch.setattr(FX, "session_terms", lambda st: {})
     w = made(world, words="make the minimap smaller", edit=False)
-    assert cli.main(["fixes"]) == 0
-    out = capsys.readouterr().out
-    assert f"thimble fix show {w['id']}" in out and "thimble file issue" not in out
-    assert cli.main(["file", "issue", str(w["id"])]) == 1 and "nothing to share yet" in capsys.readouterr().err
+    n = w["id"]
+    for verb in (["fix"], ["fixes"]):
+        assert cli.main(verb) == 0
+        assert capsys.readouterr().out.split("What next\n")[1].splitlines() == [
+            f"  thimble fix show {n}      what fix {n} does, in a few lines",
+            f"  thimble file issue {n}    a link to GitHub's new-issue form with fix {n}'s text, to read and submit",
+            f"  thimble fix remove {n}    delete a fix",
+            "  thimble update          get the newest thimble and keep your fixes"]
+    assert cli.main(["file", "issue", str(n)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == f"Share fix {n}: make the minimap smaller"
+    body = parse_qs(urlsplit(out[-1]).query)["body"][0]
+    assert body.startswith("### What was wrong\n\nmake the minimap smaller\n\n### What it does so far\n\n"
+                           "Claude is still working on this fix.\n\n")
     r = made(world)
     FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")
     assert cli.main(["fixes"]) == 0

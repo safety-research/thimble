@@ -1,10 +1,11 @@
 """thimble file issue ID: a fix as a public GitHub issue that the person checks and submits themselves.
 
 The draft is a title, what was wrong and how it was fixed (for a fix that failed, why it could not be done and what
-Claude tried), in plain words, with the thimble version and the mode. It is Claude's text when the plugin or the
-browser gives one (`--draft -`, the JSON fix-draft.md asks for), else the one given before for this fix, else the fix's
-own record: the person's words and what the fixer said the fix does. The privacy scan (privacy.py, as `thimble fix
-draft` runs it) takes the names and values of the person's folder and machine out of the draft first.
+Claude tried; for a fix Claude still works on, that Claude still works on it and what it does so far), in plain words,
+with the thimble version and the mode. It is Claude's text when the plugin or the browser gives one (`--draft -`, the
+JSON fix-draft.md asks for), else the one given before for this fix, else the fix's own record: the person's words and
+what the fixer said the fix does. The privacy scan (privacy.py, as `thimble fix draft` runs it) takes the names and
+values of the person's folder and machine out of the draft first.
 
 The command prints GitHub's new-issue link with the title and the text in it; `--open` opens the link in the person's
 browser too. On GitHub's page the person reads the text, pastes a screenshot if they want and presses Submit. thimble
@@ -49,7 +50,7 @@ from .store import Store
 
 # GitHub takes a new-issue link of about 8,000 characters; thimble keeps its links under this
 URL_MAX = 7000
-STATES = ("on", "off", "ready", "redo", "request", "saved", "sent", "released", "failed")
+STATES = ("working", "on", "off", "ready", "redo", "request", "saved", "sent", "released", "failed")
 
 # what the scan took out, in the person's words: (one, many)
 KIND_WORDS = {
@@ -116,15 +117,21 @@ def _given(rec: dict[str, Any], given: dict[str, Any] | None) -> tuple[dict[str,
 
 def _body(rec: dict[str, Any], d: dict[str, str]) -> str:
     """The issue's text, in GitHub Markdown: what was wrong, then how it was fixed, or what it needs (a request with no
-    code), or, for a fix that failed, why it could not be done here and what Claude tried (a refused try's change)."""
+    code), or, for a fix that failed, why it could not be done here and what Claude tried (a refused try's change), or,
+    for a fix Claude still works on, that Claude still works on it and what the fix does so far (what its fixer said,
+    when one ended)."""
     failed = rec.get("state") == "failed"
-    request = failed or rec.get("state") == "request" or not rec.get("commit")
+    working = rec.get("state") == "working"
+    request = failed or working or rec.get("state") == "request" or not rec.get("commit")
     rel = FX.release()
     version = rel.get("version") or str(rel.get("base") or "")[:7] or "?"
     if failed:
         why = " ".join(str(rec.get("error") or "").split()) or "(say what stopped it)"
         middle = f"### Why it could not be done here\n\n{why}\n\n" + (
             f"### What Claude tried\n\n{d['fixed']}\n\n" if d["fixed"] else "")
+    elif working:
+        middle = "### What it does so far\n\nClaude is still working on this fix.\n\n" + (
+            f"{d['fixed']}\n\n" if d["fixed"] else "")
     else:
         fixed = d["fixed"] or ("(no change: Claude could not do it in code)" if request else "(say how it works now)")
         middle = f"### {'What it needs' if request else 'How it was fixed'}\n\n{fixed}\n\n"
