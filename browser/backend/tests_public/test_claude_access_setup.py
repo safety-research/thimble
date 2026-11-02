@@ -166,7 +166,7 @@ def test_claude_code_check_says_what_failed(tmp_path, capsys, monkeypatch):
 def test_claude_code_check_says_the_login_its_sessions_use(tmp_path, capsys, monkeypatch):
     """N97: the check says the login `claude auth status` reports for the sessions thimble starts, so that whoever
     installs thimble sees whether a key stands in for the sign-in, with no check of their own: a key from apiKeyHelper
-    that answers, and a key from Claude Code's settings that is stale."""
+    that answers, and a stale key from Claude Code's settings (the shell's ANTHROPIC_API_KEY never reaches it)."""
     fake_cli(tmp_path / "helper", monkeypatch, {"is_error": False, "result": "ok"},
              status={"loggedIn": True, "authMethod": "api_key", "apiKeySource": "apiKeyHelper"})
     rc, out = run_setup(capsys, "--how", "claude-code", "--yes")
@@ -176,8 +176,8 @@ def test_claude_code_check_says_the_login_its_sessions_use(tmp_path, capsys, mon
              rc=1, status={"loggedIn": True, "authMethod": "api_key", "apiKeySource": "ANTHROPIC_API_KEY"})
     rc, out = run_setup(capsys, "--how", "claude-code", "--yes")
     assert rc == 2
-    assert ("thimble: the check failed: Claude Code, logged in with api_key from ANTHROPIC_API_KEY, did not answer: "
-            "Invalid API key · Fix external API key") in out
+    assert ("thimble: the check failed: Claude Code, logged in with api_key from ANTHROPIC_API_KEY in its settings, did "
+            "not answer: Invalid API key · Fix external API key") in out
 
 
 def test_setup_names_the_shell_s_anthropic_variables_and_uses_none(tmp_path, capsys, monkeypatch):

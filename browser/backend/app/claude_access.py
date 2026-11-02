@@ -246,10 +246,14 @@ def problem_line() -> str:
 
 def _login(status: dict[str, Any] | None) -> str:
     """The login `claude auth status` reports (config.auth_status), in its own words: its method, and where its key
-    comes from when a key stands in for the sign-in, such as `api_key from apiKeyHelper`; '' when it says none."""
+    comes from when a key stands in for the sign-in, such as `api_key from apiKeyHelper`; '' when it says none. A
+    `claude` thimble starts gets no ANTHROPIC_* variable of the shell (scrub_env), so an ANTHROPIC_API_KEY it reports
+    comes from its settings."""
     if not isinstance(status, dict) or not status.get("authMethod"):
         return ""
     source = status.get("apiKeySource")
+    if source == "ANTHROPIC_API_KEY":
+        source += " in its settings"
     return str(status["authMethod"]) + (f" from {source}" if source else "")
 
 
