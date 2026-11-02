@@ -163,8 +163,8 @@ def trigger(c: str, after: str, *, cut: str | None = None, sid: str | None = Non
 
 def turn_ended(c: str, *, sid: str, analyst: bool, cut: str | None) -> None:
     """A turn of main ended (session._end_turn) at the turn_duration record `cut`. A turn that answered the analyst
-    (`analyst`) triggers the proposer; any other turn (a task notification, a Monitor's re-arm, a start_agent event)
-    starts a job that waited for main to be idle."""
+    (`analyst`) triggers the proposer; any other turn (a task notification, a Monitor's re-arm) starts a job that
+    waited for main to be idle."""
     if analyst and cut:
         trigger(c, MAIN, cut=cut, sid=sid)
     elif pending(c) is not None:

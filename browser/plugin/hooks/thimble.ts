@@ -44,8 +44,8 @@
 //   server did not ask for;
 // - agent.spawn: an Agent call for one of thimble's roles whose prompt's first line names a typed request, main's or a
 //   subagent's (a subagent of main's own may start thimble's agents, as Claude Code lets a subagent start subagents;
-//   a thread's fork makes none: main makes the call for it, tools._ask_main), gets that request's full model id, and
-//   the agent it starts that request's effort, which turn.step sets on its every request;
+//   a thread's fork makes none: the server starts its agents, tools._fork_start), gets that request's full model id,
+//   and the agent it starts that request's effort, which turn.step sets on its every request;
 //   a child of such an agent whose type is not thimble's gets the same effort (its model it inherits already). These
 //   hooks never see a run of an agent this module started, which is why clicks register instead;
 // - turn.start and turn.complete of main's own turns: the id of main's running turn, which abort names;

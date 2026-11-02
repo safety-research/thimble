@@ -37,7 +37,6 @@ An event with no text of its own carries one line saying what the analyst did in
 
 - `main` is a message the analyst typed in thimble's chat. Answer it as if it were typed here.
 - `thread` opens or continues a side thread. thimble gives it to a fork of you that it starts for the thread, `thread:<name>`, and only that fork sees it: as that fork, answer in the thread.
-- `start_agent` asks you to start the dev agent for a ticket or a view, a writer or a check that a thread's fork filed, since a fork cannot start subagents. Make the Agent call its text gives, unchanged.
 - `card` passes on what the analyst wrote at one place, as its text: in the document `doc` after the passage `after` names, or on the card `card` names. When the text asks for a card, make it with `add_card` and the event's `group`, and thimble puts it where the analyst wrote; on a card, do the work in that card with `edit_card`. Otherwise do what the text asks at that place, such as a change to the document with `start_writing` and the event's `after`. It needs no words from you when thimble shows the result.
 - `written` says a writer ended, with its last message as the text. It needs no words from you until the analyst asks.
 - `checked` says a check you started with `run_check` ended on a document, with its last line as the text. Tell the analyst in one line what it found.

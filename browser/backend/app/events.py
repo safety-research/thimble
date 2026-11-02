@@ -72,12 +72,8 @@ PROMPT = "main"  # main's system-prompt append, whose events section names the k
 EVENTS_SECTION = "Events from the browser"
 SESSION_PROMPTS = (PROMPT,)
 MAIN, THREAD = "main", "thread"
-START_AGENT = "start_agent"  # asks main to start the agent of what a thread's fork filed (tools._ask_main)
 ATTR_CHARS = 120  # a payload value longer than this, or with a newline, goes into the body instead of an attribute
-# the event body's ceiling: an event stays in main's context for the rest of the session. A START_AGENT event's body is
-# never cut, since its text is the exact Agent call main makes, which a cut would break (main's own start tool's result
-# carries the same call whole)
-BODY_CHARS = 12_000
+BODY_CHARS = 12_000  # the event body's ceiling: an event stays in main's context for the rest of the session
 PING_S = 15  # the stream's keep-alive, so a proxy or the shim's read timeout never drops an idle subscription
 NOT_LISTENING = ("no Claude Code session is listening in {cwd}. Start thimble with `thimble` in that folder, or say "
                  "/thimble in a Claude Code session there.")
@@ -234,11 +230,10 @@ def _attr_key(key: str) -> str:
     return _KEY_RE.sub("_", str(key)).strip("_")
 
 
-def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
-               cap: int | None = BODY_CHARS) -> dict[str, Any]:
+def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any]) -> dict[str, Any]:
     """{content, meta} of one event: `kind` and `event` (its id) first, then each field as an attribute when
-    it is a short scalar, else as a `<key>: <value>` line under the text, the whole cut at `cap` (none when None). The
-    id is `event`, never `id`, so that no attribute a prompt names by its role reads as "the id"."""
+    it is a short scalar, else as a `<key>: <value>` line under the text, the whole cut at BODY_CHARS. The id is
+    `event`, never `id`, so that no attribute a prompt names by its role reads as "the id"."""
     meta: dict[str, str] = {"kind": kind, "event": event_id}
     lines: list[str] = []
     for k, v in fields.items():
@@ -254,8 +249,8 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
         else:
             lines.append(f"{key}:\n{s}" if "\n" in s else f"{key}: {s}")
     body = "\n".join([t for t in [str(text or "").strip(), *lines] if t])
-    if cap is not None and len(body) > cap:
-        body = body[:cap].rstrip() + "\n…"
+    if len(body) > BODY_CHARS:
+        body = body[:BODY_CHARS].rstrip() + "\n…"
     return {"content": body, "meta": meta}
 
 
@@ -304,9 +299,6 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"a check of the {fields.get('doc') or 'document'} ended"
     elif kind == "citations":
         line = "the check of the last reply's citations changed some"
-    elif kind == START_AGENT:
-        asked = f" (thread {fields['from_thread']})" if fields.get("from_thread") else ""
-        line = f"start {fields.get('agent') or 'the dev agent'} for {fields.get('filed') or 'a thread'}{asked}"
     else:
         line = words
     return _cut(line, LINE_CHARS)
@@ -327,7 +319,7 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
     as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
     main's terminal shows instead of terminal_line's: at once, or, when the server runs main and main's turn runs, where
     main reads it, and as waiting until then (runtime.deliver). `event_id` is the event's id when the caller recorded it
-    first (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet
+    first (fixes.ask keeps it). 409 when no session listens, 400 for a kind main.md names no bullet
     for (when `check_kind`), or for a message with no text."""
     from . import agents, runtime, session, threads  # noqa: PLC0415
 
@@ -364,8 +356,7 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
             line = terminal_line(kind, words, {"name": threads.line_name(c, thread_id, [words])})
     else:
         words = str(payload.pop("text", "") or "").strip()
-        note = build_note(kind, event_id, words or describe(kind, payload), payload,
-                          cap=None if kind == START_AGENT else BODY_CHARS)
+        note = build_note(kind, event_id, words or describe(kind, payload), payload)
     note["terminal"] = terminal_line(kind, words, payload) if line is None else line
     if kind in QUIET_KINDS:
         _keep_held(c, [*held(c), note])

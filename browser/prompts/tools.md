@@ -1053,18 +1053,6 @@ thimble's agents continue only when the analyst asks. If they asked, call messag
 
 Your Claude Code session is in plan mode, where thimble's agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).
 
-## start_agent-fork
-
-Filed {what}. Main is starting {agent}, and the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and main is starting {agent}.
-
-## start_agent-event
-
-The fork of {thread} filed {what}. A fork cannot start subagents, so start {agent} for it now as a subagent of this session, with one Agent call whose input is exactly this:
-
-{input}
-
-Change nothing in it, since thimble lets only this call through. The call needs no words before or after it: the analyst sees it, and the fork told them in the thread.
-
 ## ticket-from-thread
 
 The analyst asked for this in the side thread {thread}, which they opened on this:

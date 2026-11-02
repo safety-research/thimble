@@ -31,9 +31,8 @@ ancestor. The ends of their runs come from their hand-back (the SubagentHandback
 hand-back in main's), a task notification, or the hooks' and the module's turn ends (subagents.run_ended, stopped,
 ended); a message from main or the analyst to one that finished starts its next run (subagents.run_again). For a typed
 start or follow-up the mirror watches main's call (R2: its result) and main's turn (R3: the turn in which main called
-the start tool, or got the `start_agent` event that carries a thread's fork's start, ends without the call), and refuses
-the request when it did not happen; a start_agent event a turn missed is posted once more first (_ask_again). A Workflow
-call is one agent chat whose members are the run's agent transcripts.
+the start tool ends without the call), and refuses the request when it did not happen. A Workflow call is one agent chat
+whose members are the run's agent transcripts.
 
 Main ends a turn with nothing for the analyst without text, or with END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat
 shows END_TOKEN, nor a line that opens with TERMINAL_ONLY."""
@@ -284,8 +283,8 @@ class Live:
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
         # the open turn answers the analyst: opened by a line they typed or their message from the browser, not by a
-        # thread question from the browser (the thread's fork answers it), a task notification, a Monitor's re-arm or a
-        # start_agent event (proposer.turn_ended)
+        # thread question from the browser (the thread's fork answers it), a task notification or a Monitor's re-arm
+        # (proposer.turn_ended)
         self.turn_analyst = False
         self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
         self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
@@ -1291,7 +1290,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     """Main's turn ended: at its turn_duration record, whose uuid is `cut`, or (no cut) when a later record shows that a
     turn never got one."""
     _release_threads(lv)
-    again = _no_call(lv)
+    _no_call(lv)
     _asked(lv, False)  # a relayed prompt the terminal answered before the tail saw the wait
     if lv.flagged and not lv.answered:
         _stopped(lv, SAFETY_STOP_TEXT)
@@ -1303,7 +1302,6 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     was_open = lv.turn_open
     lv.turn_open = lv.fresh = lv.wrote = False
     agents.set_running(lv.c, agents.MAIN_ID, False)
-    _ask_again(lv, again)
     if was_open:
         _fixes_turn(lv)
         _cards_shown(lv)
@@ -1398,43 +1396,22 @@ def _proposer_turn(lv: Live, cut: str | None) -> None:
         log.exception("%s: the view proposer did not hear of main's turn end", lv.c)
 
 
-def _no_call(lv: Live) -> list[tuple[str, str, str]]:
-    """R3 (module note): the turn in which main called a start tool, or message_orientation, or got the `start_agent`
-    event of a thread's fork's start (subagents.ask_main), ended, and the request that call or event stands for was
-    never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's last text in the turn
-    (its first two lines) as the reason. A start_agent event's start is refused only when it was asked for again once
-    already, or the turn was stopped; otherwise it is left pending and returned as (request, event, reason), for
-    _ask_again once the turn has ended."""
+def _no_call(lv: Live) -> None:
+    """R3 (module note): the turn in which main called a start tool, or message_orientation, ended, and the request that
+    call stands for was never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's
+    last text in the turn (its first two lines) as the reason."""
     if not lv.turn_calls:
-        return []
+        return
     from . import subagents  # noqa: PLC0415
 
     try:
         reqs = subagents.read(lv.c).get("requests") or {}
     except Exception:  # noqa: BLE001 — a workspace whose files cannot be read refuses nothing
-        return []
+        return
     said = "\n".join([ln for ln in lv.turn_text.strip().splitlines() if ln.strip()][:2])
-    again: list[tuple[str, str, str]] = []
     for rid, r in list(reqs.items()):
         if (isinstance(r, dict) and r.get("route") == subagents.TYPED and r.get("state") == "pending"
                 and r.get("call") in lv.turn_calls and not r.get("caller_role") and not r.get("caller_agent")):
-            if r.get("via_main") and r.get("ask") and not r.get("asked_again") and not lv.stop_noted:
-                again.append((rid, str(r["call"]), said))
-                continue
-            subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
-    return again
-
-
-def _ask_again(lv: Live, again: list[tuple[str, str, str]]) -> None:
-    """The starts _no_call left for a second event: each start_agent event main's turn missed is posted once more
-    (tools.ask_main_again), since the event may have come in the same turn as the end-the-turn note of an earlier start
-    (`## agent-launched`). A start whose event could not be posted is refused as _no_call refuses."""
-    if not again:
-        return
-    from . import subagents, tools  # noqa: PLC0415
-
-    for rid, call, said in again:
-        if not tools.ask_main_again(lv.c, rid, call):
             subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
 
 
@@ -1510,8 +1487,7 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
         lv.turn_analyst = True
     if kind == "thread" and thread:
         lv.turn_threads.append(thread)
-    if event_id:  # a start_agent event's start is refused when this turn ends without its Agent call (R3, _no_call)
-        lv.turn_calls.add(event_id)
+    if event_id:
         _fixes_read(lv, event_id)
     if event_id and event_id in _expected:
         _expected.discard(event_id)

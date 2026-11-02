@@ -35,7 +35,7 @@ reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
-exact Agent call (tool_run_check), and a thread's fork's gives it to main in a `start_agent` event (tools._ask_main).
+exact Agent call (tool_run_check), and a thread's fork's run the server starts with the fork's call (tools._fork_start).
 The analyst's own edits start nothing: each shown check's run records how many passages changed since it checked them
 (`stale`, mark_stale), and Run is one click.
 
@@ -1541,8 +1541,7 @@ def _plural(k: int, noun: str) -> str:
 async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
     """The `run_check` tool, main's: the check made or changed and turned on, and for each written document a run whose
     agent main starts with the exact Agent call the result gives (`## start_job-subagent`), as a typed start. A thread's
-    fork's call starts each run the same way, by main's Agent call on a `start_agent` event of its own
-    (tools._ask_main), since the fork may not make it."""
+    fork's call starts each run when the server starts it with the fork's call (tools._fork_start)."""
     import json  # noqa: PLC0415
 
     from . import subagents  # noqa: PLC0415
@@ -1586,7 +1585,7 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(before.reason or f"run_check: {before.kind}")
     lines, refused = [], []
     for doc in targets:
-        # a fork's run keeps no call of the fork's: main's Agent call claims it (tools._ask_main)
+        # a fork's run keeps no call of the fork's: the server starts it (tools._fork_start)
         rec = await start_run(ctx.c, check["id"], doc, passages_=docs.get(doc) if docs else None, force=True, notify=True,
                               route=TYPED, call=None if fork is not None else ctx.tool_use_id)
         if rec is None:
@@ -1596,8 +1595,8 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
             refused.append(getattr(ans, "reason", "") or str(rec.get("summary") or "") or "it did not start")
             continue
         if fork is not None:
-            res = await tools._ask_main(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
-                                        thread=fork, agent="the check")
+            res = await tools._fork_start(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
+                                          agent="the check")
             (refused if res.is_error else lines).append(res.text)
             continue
         lines.append(tools.hint("run_check-started", check=check["name"], how=how, doc=target_name(doc),
