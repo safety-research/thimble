@@ -100,12 +100,11 @@ def too_large(cell: dict[str, Any] | None) -> bool:
 
 
 def holds_here(c: str) -> bool:
-    """Whether a card can be held in workspace `c`: the harness can draw it, this is the server, which hears main's turn
-    end (launch_mode: the server runs in browser mode), and the card check reads a card by itself (card_check.auto)."""
-    from . import card_check, launch_mode  # noqa: PLC0415
+    """Whether a card can be held in workspace `c`: the harness can draw it, and the card check reads a card by itself
+    (card_check.auto)."""
+    from . import card_check  # noqa: PLC0415
 
-    return (render.enabled() and not render.down() and launch_mode.current() == launch_mode.BROWSER
-            and card_check.enabled() and card_check.auto(c))
+    return render.enabled() and not render.down() and card_check.enabled() and card_check.auto(c)
 
 
 def holder(c: str, name: str, session: str | None, tool_use_id: str | None) -> dict[str, str]:

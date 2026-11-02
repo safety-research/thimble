@@ -910,8 +910,7 @@ def outputs_key(ws: Path, outputs: list | None) -> str:
 
 def editing(ws: Path):
     """The lock of the workspace's groups (module note): ledger.locked on the notebooks folder, its lock file `.lock`
-    inside it, so `thimble-run`, which may write only that folder in main's sandbox, can take it. Held from the read of
-    a change to its write; never across an await."""
+    inside it. Held from the read of a change to its write; never across an await."""
     d = ws / "notebooks"
     d.mkdir(parents=True, exist_ok=True)
     return ledger.locked(d)

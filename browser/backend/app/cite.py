@@ -1450,9 +1450,8 @@ def is_label_display(display: str) -> bool:
 
 def shows_value(display: str) -> bool:
     """Whether a value-ref's display shows a value its place can be checked for: a number, quoted words or a day and a
-    month in words (mods/thimble-term/hooks/cite.ts showsValue). Other words, such as `its record` or `had the answer
-    cached`, only name the place they link to (live check term-fix6: `[[its record|pages.jsonl#L2]]` was marked red
-    because the line holds no such words)."""
+    month in words. Other words, such as `its record` or `had the answer cached`, only name the place they link to (live
+    check term-fix6: `[[its record|pages.jsonl#L2]]` was marked red because the line holds no such words)."""
     d = (display or "").strip()
     quoted = len(d) > 2 and d[0] in QUOTE_MARKS and d[-1] in QUOTE_MARKS
     return bool(_NUM_RE.search(d)) or quoted or day_month(d) is not None

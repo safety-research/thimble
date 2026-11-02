@@ -7,10 +7,9 @@ Code deletes transcripts after 30 days by default, so the output is stored here.
 Store: `workspaces/<c>/calls/<chat>.jsonl`, append-only: `{n, id, chat, name, input, ts, agent?}` when a call is first
 seen, `{n, result, is_error}` when its result is, and `{n, chat}` when the chat whose log holds the call becomes known.
 Numbering: one sequence per orientation chat, keyed by tool_use_id and never reused. The follower (Numbering) and the
-call-ref hook (hook_route, or in terminal mode the hook itself through calls_file.number) both number calls; whichever
-sees a call first numbers it, under the store's lock (calls_file). Each read goes on from where this process last read
-the file, so a number another process gave is seen. A chat without a store is backfilled from its transcripts on first
-read.
+call-ref hook (hook_route) both number calls; whichever sees a call first numbers it, under the store's lock
+(calls_file). Each read goes on from where this process last read the file, so a number another process gave is seen.
+A chat without a store is backfilled from its transcripts on first read.
 
 read_ref reads a call in pages of at most READ_UNITS (tool_read_ref): its line, its input up to INPUT_UNITS, then the
 lines of its output, numbered, as many as fit, and a line with the ref that reads on. A line too long for a page alone
@@ -65,8 +64,8 @@ def _now() -> str:
 @dataclass
 class _Index:
     """What one chat's store holds, replayed from its file up to `offset` (the end of its last whole line): tool_use_id
-    -> n, each call by n, and the next number. Another process appends to the same file (the hooks number calls in
-    terminal mode, calls_file.number), so each use reads on from `offset` (_load)."""
+    -> n, each call by n, and the next number. Another process may append to the same file (calls_file.number), so
+    each use reads on from `offset` (_load)."""
 
     by_id: dict[str, int] = field(default_factory=dict)
     rows: dict[int, dict[str, Any]] = field(default_factory=dict)

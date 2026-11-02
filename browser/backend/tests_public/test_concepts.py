@@ -691,8 +691,8 @@ async def test_a_run_that_fails_after_labeling_its_examples_still_leaves_them_ou
 
 
 def test_a_scan_worker_ends_once_the_process_that_made_its_pool_is_killed(tmp_path):
-    """The terminal mode's shim makes the scan pool and is ended by a signal as Claude Code quits, before it can end its
-    workers; each worker then ends by itself (concepts._watch_parent; live check T9 found one left)."""
+    """A process that makes the scan pool and is ended by a signal before it can end its workers leaves them; each
+    worker then ends by itself (concepts._watch_parent; live check T9 found one left)."""
     import os
     import signal
     import subprocess

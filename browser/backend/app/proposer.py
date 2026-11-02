@@ -7,10 +7,9 @@ their message from the browser), at the cut of that turn's turn_duration record 
 answered (session._finish_sub), not at the end of main's turn that handed the thread's question, from the browser or
 from /thimble:ask in the terminal, to that fork; and once when the first run of an orientation ends done
 (orient_session). Each trigger merges into the workspace's pending job (JOB_FILE's `job`: the reasons, main's session
-and its cut), so a later pass of the mirror in terminal mode, or a restarted server, runs it. One loop per workspace
-(_loop) waits DEBOUNCE_MAIN_S after a main turn, else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an
-orientation's end merges with main's `↳` turn), and runs the job once main is idle; a main turn still open leaves it
-pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job.
+and its cut), so a restarted server runs it. One loop per workspace (_loop) waits DEBOUNCE_MAIN_S after a main turn,
+else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an orientation's end merges with main's `↳` turn),
+and runs the job once main is idle; a main turn still open leaves it pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job.
 
 The gate (due): view proposals are on (views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
 Claude can be reached the way chosen (claude_access.problem; the chat's card says what is missing, so no notice
@@ -369,7 +368,7 @@ def _now_section(c: str, after: list[str]) -> str:
 def assemble(c: str, job: dict[str, Any]) -> str:
     """The fork's message (module note): the proposer prompt, the threads, the orientation, the views the analyst has
     and what just happened (job's `after`)."""
-    parts = [prompts.load(PROMPT, "browser").strip(), _threads_section(c), _views_section(c),
+    parts = [prompts.load(PROMPT).strip(), _threads_section(c), _views_section(c),
              _now_section(c, list(job.get("after") or []))]
     return "\n\n".join(p for p in parts if p) + "\n"
 

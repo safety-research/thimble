@@ -505,7 +505,7 @@ def test_the_turn_s_cut_and_who_opened_it_are_kept_and_survive_a_pass(cwd, tmp_p
         "role": "assistant", "model": "claude-opus-5-5", "usage": usage, "content": [_say("A and B.")]}}])
     assert lv.turn_analyst and lv.context_tokens == 42_003
     kept = session._turn_state(lv)
-    other = session.Live(CORPUS, SID, cwd, str(p), None)  # the next pass of the mirror in terminal mode
+    other = session.Live(CORPUS, SID, cwd, str(p), None)  # the next pass of the mirror
     session._take_turn(other, kept)
     assert other.turn_analyst and other.context_tokens == 42_003
     _append(p, lv, [_end("cut-9")])

@@ -303,7 +303,7 @@ class Live:
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
         # ran, since a hook (thimble's --agent-check) or auto mode may refuse it
         self.relays: dict[str, tuple] = {}
-        # relays a pass of the mirror in terminal mode handed on as [agent id, input], until their Subs are known
+        # relays an earlier pass of the mirror handed on as [agent id, input], until their Subs are known
         self.pending_relays: dict[str, list] = {}
         self.after_start = False  # main's last call was a start of thimble's or its tool: a bare `Bash true` next is hidden
         self.last_tool: str | None = None  # the name of main's last tool call (_nudged)
@@ -478,7 +478,7 @@ def _turn_state(lv: Live) -> dict:
             "seen": [k for k in lv.seen if k.split(":", 1)[-1] in names],
             "watch_calls": [i for i in lv.watch_calls if i in names], "sends": lv.sends,
             "turn_threads": lv.turn_threads, "forked": sorted(lv.forked),
-            # R2 and R3 (module note), which a pass of the mirror in terminal mode hands to the next
+            # R2 and R3 (module note), which a pass of the mirror hands to the next
             "thimble_calls": lv.thimble_calls, "turn_calls": sorted(lv.turn_calls)[-CURSOR_CALLS:],
             "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "turn_texts": lv.turn_texts, "after_start": lv.after_start, "last_tool": lv.last_tool,
             "last_failed": lv.last_failed,
@@ -829,8 +829,8 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             lv.subs.append(sub)
         elif (meta.get("kind") == agents.KIND_THREAD and fork.get("tool_use_id") and fork.get("session") == lv.sid
               and not fork.get("ended") and not threads.settled(lv.c, str(meta["id"]))):
-            # its Agent call was read and its file not yet found (terminal mode reads each in its own process): the
-            # file, which names the thread by its question only, joins the thread by the call's tool_use id
+            # its Agent call was read and its file not yet found: the file, which names the thread by its question
+            # only, joins the thread by the call's tool_use id
             lv.subs.append(Sub(lv.c, str(meta["id"]), fork.get("tool_use_id"), None, thread=True))
         # a chat of one of thimble's agents (route subagent), its role's or a descendant's step, is followed to its end
         # as any other subagent is, its runs ended through subagents.run_ended
@@ -1815,7 +1815,7 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         lv.forked.discard(tid)
         threads.fork_lost(lv.c, tid)
     relay = lv.relays.pop(tool_use_id, None)
-    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read (terminal mode)
+    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read
         agent_id, inp = lv.pending_relays.pop(tool_use_id)
         held = _sub_by(lv, agent_id=str(agent_id or ""))
         relay = (held, inp if isinstance(inp, dict) else {}) if held is not None else None
@@ -1956,7 +1956,7 @@ def _request_of(lv: Live, tool_use_id: str, name: str, inp: dict) -> str | None:
         return hit
     want = str(inp.get(key) or "")
     # never one another call claimed: a later call with the same text may have claimed it before this pass read the
-    # denied call's result (terminal mode reads in passes)
+    # denied call's result
     found = [rid for rid, r in reqs.items() if isinstance(r, dict) and r.get("kind") == kind and r.get("route") == subagents.TYPED
              and r.get("state") in ("pending", "claimed") and not r.get("claimed_by")
              and str((r.get("input") or {}).get(key) or "") == want]
@@ -2633,9 +2633,9 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
         lv.sub_paths.add(key)
         use = str(meta.get("toolUseId") or "") or None
         followed = _sub_by(lv, tool_use_id=use) or _sub_by(lv, agent_id=agent_id)
-        # a fork's file names its thread by its description; when thimble-term gave the call the thread's question as
-        # its description (threads.fork_ref), by the agent-check hook's record of the call, the call as the fork's file
-        # holds it, or the name main gave it
+        # a fork's file names its thread by its description; when its description is the thread's question
+        # (threads.fork_ref), by the agent-check hook's record of the call, the call as the fork's file holds it, or the
+        # name main gave it
         title = str(meta.get("description") or "")
         if not thread_for(lv.c, title):
             fork = meta.get("isFork") or meta.get("agentType") == sfiles.FORK_TYPE

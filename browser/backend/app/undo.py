@@ -13,9 +13,8 @@ THIMBLE_SESSION; while it runs, Undo passes over them, refusing when one of them
 
 The journal, workspaces/<c>/undo.jsonl, holds `step`, `undo`, `redo` and `ran` lines, replayed into the two stacks
 and
-rewritten to MAX_STEPS per stack past MAX_LINES lines. In terminal mode a second process writes it (`thimble-run`, whose
-runs fill in `ran` lines), so each line is appended under the journal's lock (ledger.locked), and the stacks held in
-memory are replayed again when the file is not as this process left it. POST /ws/{c}/undo and /redo apply a step inside `applying()`,
+rewritten to MAX_STEPS per stack past MAX_LINES lines. Each line is appended under the journal's lock (ledger.locked),
+and the stacks held in memory are replayed again when the file is not as this process left it. POST /ws/{c}/undo and /redo apply a step inside `applying()`,
 so those writes make no step of their own; GET /ws/{c}/undo names {undo, redo, held}."""
 from __future__ import annotations
 
@@ -629,8 +628,8 @@ def undo(c: str, expect: tuple[str, str] | None = None) -> dict[str, Any]:
     """Revert the top step of the undo stack, or its batch, passing over the steps of a running session; 409 when there
     is
     none, a running session holds it, or nothing of it can be reverted (then it is dropped). With `expect` (kind,
-    target), only when that step is the one it reverts, else 409 and nothing changes: the terminal's undo of a label's
-    delete (`thimble act label-undelete`), which must not revert a later change."""
+    target), only when that step is the one it reverts, else 409 and nothing changes, so that it never reverts a later
+    change."""
     with _lock:
         stack, redo = _load(c)
         if not stack:

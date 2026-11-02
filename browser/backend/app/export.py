@@ -346,8 +346,8 @@ def _sessions(w: Writer, ws: Path, chats: list[dict[str, Any]], tickets: list[di
                     meta = _read_json(meta_path) if _own_file(meta_path, side) else None
                     fork = threads.FORK_DESCRIPTION_RE.match(str(meta.get("description") or "")) if isinstance(meta, dict) else None
                     # A thread's fork is described `thread:<fork name>` or `thread:<id>` (threads.FORK_DESCRIPTION_RE),
-                    # which names its thread even when the thread's meta no longer lists it; in terminal mode its
-                    # description is the thread's question, and its name the fork name (threads.fork_ref).
+                    # which names its thread even when the thread's meta no longer lists it; a fork whose
+                    # description is the thread's question has the fork name as its name (threads.fork_ref).
                     named = fork.group(1) if fork else None
                     alias = str(meta.get("name") or "") if isinstance(meta, dict) and meta.get("isFork") else ""
                     by_name = {str(c.get(threads.FORK_NAME_KEY)): str(c["id"]) for c in chats if c.get(threads.FORK_NAME_KEY)}

@@ -578,7 +578,7 @@ _UNREAD: Any = object()  # write_doc's `before` when the caller has not read the
 
 def docs_lock(c: str, inv_id: str = investigation.MAIN):
     """The lock of an investigation's documents (ledger.locked on its folder): held from a document's read to its write
-    by a change that reads it first (comments.py), since more than one process can write documents in terminal mode."""
+    by a change that reads it first (comments.py)."""
     return ledger.locked(_inv(c, inv_id))
 
 
