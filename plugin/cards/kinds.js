@@ -1182,9 +1182,10 @@ export function readyKinds(api) {
    *  `first` gives the first one's: the passages bold, the rest gray; lines in the default look when no passage is
    *  marked. A line whose passage stands past the card's edge starts a little before it, with … */
   function numbered(text, first, spans, W) {
+    // each line's place in the text, a line break of \r\n taken whole
     const rows = []
     let at = 0
-    for (const t of text.split('\n')) { rows.push({ t, a: at, b: at + t.length }); at += t.length + 1 }
+    for (const t of text.split('\n')) { rows.push({ a: at, b: at + t.replace(/\r$/, '').length }); at += t.length + 1 }
     const start = spans.length && rows.length > 8 ? Math.max(0, rows.findIndex(r => r.b >= spans[0][0]) - 1) : 0
     const shown = rows.slice(start, start + 8)
     const nw = first === null ? 0 : String(first + start + shown.length - 1).length

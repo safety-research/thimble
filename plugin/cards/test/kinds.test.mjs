@@ -314,7 +314,7 @@ test("an example draws each record under its file and place, the passage bold in
   assert.deepEqual(lines[code + 3].filter(x => x.bold).map(x => x.text), ['prev.status != "completed"'])
   // the lines of one field (a command's output in a JSON record) show without numbers, since they are no lines of the
   // file; a passage past the card's edge brings its line's start near it, with …
-  const output = 'running the checks\n==> [3/5] Unit tests\n62 passed in 0.09s\nALL CHECKS PASSED ✓'
+  const output = 'running the checks\r\n==> [3/5] Unit tests\r\n62 passed in 0.09s\nALL CHECKS PASSED ✓'
   const field = await load({ kind: 'example', answer: 'The last check passed.', refs: [passage({ ref: 't.jsonl#L3958', path: 't.jsonl', line: 3958, field: 'message.content', text: output }, 'ALL CHECKS PASSED ✓')] }, 60)
   assert.deepEqual(field.lines.slice(3), ['  running the checks', '  ==> [3/5] Unit tests', '  62 passed in 0.09s', '  ALL CHECKS PASSED ✓'])
   const long = 'x'.repeat(120) + ' the quote ' + 'y'.repeat(40)
