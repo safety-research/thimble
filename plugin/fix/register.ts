@@ -259,13 +259,20 @@ export const registerFix: Register = on => {
       const said = await numberAlone($, head.n)
       return said ? { text: said } : {}
     }
+    const notAsked = (err: unknown) => `thimble could not ask Claude for this fix: ${cut(String((err as Error)?.message || err), 160)}`
+    let request: string
+    try {
+      request = fill(await promptText($, 'fix-request'), { WORDS: words })
+    } catch (err) {
+      return { text: notAsked(err) }
+    }
     await $.state.set(ASKED, 2 as never)
     await $.state.set(ASKED_WORDS, words as never)
     const list = fixesContext((await refreshFixes($))?.fixes ?? [])
     $.clock.after(0, () => {
-      void $.prompt.submit({ text: words, asUser: true }).catch(err => $.ui.toast(`thimble could not ask Claude for this fix: ${cut(String((err as Error)?.message || err), 160)}`))
+      void $.prompt.submit({ text: words, asUser: true }).catch(err => $.ui.toast(notAsked(err)))
     })
-    return { context: [fill(await promptText($, 'fix-request'), { WORDS: words }), ...(list ? [list] : [])] }
+    return { context: [request, ...(list ? [list] : [])] }
   })
 
   // the fix-thimble skill: Claude asks for the same fix, in the skill's argument, and reads what came of it in the
