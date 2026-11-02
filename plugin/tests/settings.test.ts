@@ -182,6 +182,15 @@ test("a row of Minimal's changed away from its mode turns Minimal off and keeps 
   await pane.press({ key: 'mode-minimal-off' })
   await settleAll($)
   expect(rows).toMatchObject({ minimal: false, coverage: true, explain: 'auto', citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, claimsMode: 'off', labels: false })
+  // a row changed while Minimal's modes are still being set (one change per load of the plugin) stops them: Minimal
+  // stays off, and the rows hold what they held then
+  Object.assign(rows, { citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true })
+  setOptions(rows)
+  await pane.press({ key: 'mode-minimal-on' })
+  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite', cards: 'auto' })
+  await pane.press({ key: 'mode-cards-off' })
+  await settleAll($)
+  expect(rows).toMatchObject({ minimal: false, citations: 'auto cite', cards: 'off', squeezeAnswers: true, coverage: true })
   await pane.unmount()
   setOptions({})
 })
