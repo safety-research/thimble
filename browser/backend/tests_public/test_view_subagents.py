@@ -992,7 +992,7 @@ async def test_a_build_s_pass_starts_its_review_as_a_follow_on_start(board, brid
 
 def test_a_view_s_builds_and_reviews_take_the_tree_s_names_which_find_each_one(board):
     """Live check L25: a view's two builds and two reviews were four threads all called dev/wiki-page-history. The
-    names the browser's tree gives them (threads.view_names) find each one, as /thimble:ask and rename_thread look."""
+    names the browser's tree gives them (threads.view_names) find each one, as rename_thread looks."""
     from app import threads
 
     made = [agents.new_agent(CORPUS, "dev", title, view="posts", **({"review": True} if title.startswith("review") else {}))

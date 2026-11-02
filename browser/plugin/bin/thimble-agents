@@ -1,14 +1,11 @@
 #!/bin/sh
 ''''exec "$(dirname "$0")/thimble-python" -S "$0" "$@" # '''
-"""thimble's running agents, as its server lists them: the orientation, the writers and the critic with their state,
-the view builds, and the threads and subagents of main's session; on the statusline also the browser's messages the
+"""thimble's running agents on Claude Code's statusline, as its server lists them, and the browser's messages the
 session has not got yet.
 
     thimble-agents --statusline [--chain <command>]
         one line for Claude Code's statusline, read from the statusline's JSON on stdin; with --chain, the analyst's
         own statusline command runs first on the same input and its output comes before thimble's line
-    thimble-agents [--cwd <folder>]
-        the list /thimble:agents prints
 
 The first two lines make this file both a shell script and a Python program, as in thimble-mcp. It uses only the
 standard library and prints nothing of thimble's when no server answers within WAIT_S, or when the answer does not
@@ -110,13 +107,7 @@ def statusline(args: list[str]) -> int:
 
 
 def main() -> int:
-    args = sys.argv[1:]
-    if "--statusline" in args:
-        return statusline(args)
-    cwd = args[args.index("--cwd") + 1] if "--cwd" in args and args.index("--cwd") + 1 < len(args) else os.getcwd()
-    text = str(agents(cwd, None).get("text") or "")
-    print(text or "thimble's server does not answer.")
-    return 0
+    return statusline(sys.argv[1:])
 
 
 if __name__ == "__main__":

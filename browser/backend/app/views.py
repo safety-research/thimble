@@ -3024,8 +3024,8 @@ def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = C
     """What the analyst typed in the thread of the view's build, logged there as they wrote it. About a built view it
     goes to the view's builder, which answers it or changes the view (ask); while the view is not built, or a change to
     it is made, it is a change to the view (revise, `asked`). Either way as part of the click that sent it from the
-    browser; one typed in the terminal (/thimble:ask, threads.tool_message_thread, `by` terminal) is started by main's
-    exact Agent call (`route` typed). 400 for an empty message, 404 for no such view or proposal."""
+    browser, or with `route` typed, started by main's exact Agent call. 400 for an empty message, 404 for no such view
+    or proposal."""
     from . import agents  # noqa: PLC0415
 
     text = str(text or "").strip()

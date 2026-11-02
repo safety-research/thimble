@@ -1,14 +1,11 @@
 """thimble's agents in the analyst's terminal. Each is a subagent of main (subagents.py), so Claude Code's own agent tray
 shows every one of them, its row named by its type and description (`thimble:orientation  orientation: <focus>`). What
-thimble adds is the statusline and /thimble:agents.
+thimble adds is the statusline.
 
 The statusline. The launcher passes main plugin/bin/thimble-agents as its statusline command (statusline_command),
 chained to the analyst's own; it shows the orientation's state and its cards, `thimble · orientation working · 7
 cards`, and the browser's messages main has not got yet (events.queued_line). The other agents show as their own rows in
 Claude Code's tray, so the statusline does not list them.
-
-/thimble:agents lists thimble's running agents from the agent registry (subagent_rows), the code ticket and view builds
-the server runs (dev.running_builds), and main's other subagents and threads' forks (session.running_agents).
 """
 from __future__ import annotations
 
@@ -74,7 +71,7 @@ def subagent_rows(c: str) -> list[dict[str, Any]]:
 
 
 def agent_rows(c: str) -> list[dict[str, Any]]:
-    """Every agent of thimble's running in the workspace, for /thimble:agents: thimble's subagents (subagent_rows), the
+    """Every agent of thimble's running in the workspace, for the statusline: thimble's subagents (subagent_rows), the
     code ticket and view builds (dev.running_builds), and main's other subagents and threads' forks
     (session.running_agents), each {name, label?, state, kind}."""
     from . import dev  # noqa: PLC0415 — dev imports the views module, which imports this one's callers
@@ -94,33 +91,6 @@ def status_line(c: str, rows: list[dict[str, Any]], chars: int = STATUS_CHARS) -
     return ""
 
 
-def plain_state(state: str) -> str:
-    """A row's state as /thimble:agents lists it: starting, working, waiting for you, waiting, done or restarting."""
-    first = state.split()[0].rstrip(",") if state else ""
-    if first == "waiting":
-        return "waiting for you" if "permission" in state else "waiting"
-    return {"done": "done", "idle": "done", "ended": "done", "starting": "starting",
-            "restarting": "restarting"}.get(first, "working")
-
-
-def listing_text(rows: list[dict[str, Any]]) -> str:
-    from . import tools  # noqa: PLC0415
-
-    if not rows:
-        return tools.hint("agents-none")
-    labels = [str(r.get("label") or r["name"]) for r in rows]
-    width = max(len(label) for label in labels)
-    lines = [f"{label:<{width}}  {plain_state(r['state'])}" for label, r in zip(labels, rows)]
-    return "\n".join(lines)
-
-
-async def tool_list_agents(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `list_agents` tool (/thimble:agents): thimble's running agents, answered by this server."""
-    from . import tools  # noqa: PLC0415
-
-    return tools.ok(tools.hint("agents-print", text=listing_text(agent_rows(ctx.c))))
-
-
 class AgentsQuery(BaseModel):
     cwd: str
     session: str | None = None
@@ -129,13 +99,13 @@ class AgentsQuery(BaseModel):
 
 @router.post("/agents")
 async def agents_route(body: AgentsQuery) -> dict[str, Any]:
-    """thimble's agents for the folder's workspace: `{rows, line, text}` for the statusline and /thimble:agents. The
-    statusline's `line` also holds the browser's messages that `session` has not got yet (events.queued_line)."""
+    """thimble's agents for the folder's workspace: `{rows, line}` for the statusline. Its `line` also holds the
+    browser's messages that `session` has not got yet (events.queued_line)."""
     from . import events  # noqa: PLC0415
 
     c = config.workspace_for_cwd(body.cwd)
     if not c:
-        return {"rows": [], "line": "", "text": "", "announce": ""}
+        return {"rows": [], "line": "", "announce": ""}
     rows = agent_rows(c)
     line = "\n".join(x for x in (status_line(c, rows), events.queued_line(c, body.session, STATUS_CHARS)) if x)
-    return {"rows": rows, "line": line, "text": listing_text(rows), "announce": ""}
+    return {"rows": rows, "line": line, "announce": ""}

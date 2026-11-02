@@ -28,7 +28,7 @@ ENV = "CLAUDE_CODE_TERMINAL_MCP_TOOLS"
 BIN_ENV = "THIMBLE_CLAUDE_BIN"  # the `claude` executable to use instead of the one on PATH (cli.claude_code_version)
 BUILTIN = ("Agent", "SendMessage", "TaskStop")  # main starts, continues and stops thimble's subagents with these
 # thimble tools whose result the model reads rather than the browser shows, so a turn that ends on one still needs words
-READS = ("read_ref", "list_cards", "screenshot", "list_agents", "wait_session")
+READS = ("read_ref", "list_cards", "screenshot", "wait_session")
 CACHE = "terminal-tools.json"
 # the meta prompt Claude Code adds when a turn ended without text
 NUDGE = "[Your previous response had no visible output"

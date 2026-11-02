@@ -608,7 +608,7 @@ def dev_session_name(workspace: str | None) -> str:
 
 
 def view_session_name(c: str, slug: str) -> str:
-    """The name a build an extension's program runs goes by for the analyst, as /thimble:agents lists it:
+    """The name a build an extension's program runs goes by for the analyst, as `claude agents` lists it:
     thimble:view-<slug> · <c>."""
     return config.session_name(f"view-{slug}", c)
 

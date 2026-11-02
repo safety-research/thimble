@@ -8,8 +8,7 @@ Main answers by forking with description and prompt `thread:<name>`, the thread'
 question as a slug, which Claude Code's agent tray shows; the event's line in main's terminal names the thread by its
 first question, line_name);
 the mirror (session.py) matches the fork's transcript, copies its tool calls and its text into the thread's chat, with
-the messages the analyst typed to it in Claude Code's agent view and those main sent it for a question typed in the
-terminal, and calls fork_finished when it stops. The fork replies with `reply_in_thread` or its text.
+the messages the analyst typed to it in Claude Code's agent view, and calls fork_finished when it stops. The fork replies with `reply_in_thread` or its text.
 
 A fork lives only as long as its session: after that, the next event forks anew and carries the earlier turns. A
 message typed while the first event waits for its fork is queued (`queued`) and sent once the fork is known (flush)."""
@@ -20,7 +19,6 @@ import base64
 import binascii
 import logging
 import re
-import secrets
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -304,8 +302,7 @@ def event(c: str, payload: dict[str, Any], event_id: str) -> tuple[str, dict[str
     if meta.get("kind") != agents.KIND_THREAD:
         raise HTTPException(400, f"{thread_id} is not a thread")
     _, log_path = agents.paths(c, thread_id)
-    by = agents.TERMINAL if payload.get("by") == agents.TERMINAL else agents.BROWSER  # message_thread's, from the terminal
-    agents.append(log_path, {"type": "user", "ts": _now(), "text": text, "by": by, "event": event_id})
+    agents.append(log_path, {"type": "user", "ts": _now(), "text": text, "by": agents.BROWSER, "event": event_id})
     waits = awaiting_fork(c, thread_id)
     agents.set_running(c, thread_id, True)
     if waits:
@@ -431,11 +428,10 @@ def unanswered(c: str, thread_id: str) -> list[str]:
     return asked[-1:]
 
 
-def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
+def ask_again(c: str, thread_id: str) -> dict[str, Any]:
     """Send the thread's unanswered questions to the session again, with no new line in the thread (the `again`
-    record marks it for the export); with `hand`, the event is returned as `text` for a tool's result instead
-    (events.hand). 400 for a chat that is no thread or has no question, 409 when the thread is working or no session
-    listens."""
+    record marks it for the export). 400 for a chat that is no thread or has no question, 409 when the thread is working
+    or no session listens."""
     from . import events  # noqa: PLC0415
 
     meta = agents.read_meta(c, thread_id)
@@ -450,17 +446,13 @@ def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
         raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     agents.update_agent(c, thread_id, **{QUEUED_KEY: []})
     body, fields, _ = build(c, thread_id, questions)
-    if hand:
-        event_id = secrets.token_hex(4)
-        out = {"text": events.hand(c, event_id, body, fields, thread=thread_id)}
-    else:
-        posted = events.send(c, events.THREAD, body, fields, thread=thread_id,
-                              line=events.terminal_line(events.THREAD, " ".join(questions), {"name": line_name(c, thread_id, questions)}))
-        event_id, out = posted["id"], {}
+    posted = events.send(c, events.THREAD, body, fields, thread=thread_id,
+                         line=events.terminal_line(events.THREAD, " ".join(questions), {"name": line_name(c, thread_id, questions)}))
+    event_id = posted["id"]
     _, log_path = agents.paths(c, thread_id)
     agents.append(log_path, {"type": "again", "ts": _now(), "event": event_id, "questions": len(questions)})
     agents.set_running(c, thread_id, True)
-    return {"asked": thread_id, "event": event_id, "questions": len(questions), **out}
+    return {"asked": thread_id, "event": event_id, "questions": len(questions)}
 
 
 # --------------------------------------------------------------------------- the fork, as the mirror sees it
@@ -862,58 +854,6 @@ async def tool_delete_thread(ctx: Any, args: dict[str, Any]) -> Any:
     ids = await agents.delete_chat(ctx.c, meta["id"])
     steps = f" and its {len(ids) - 1} steps" if len(ids) > 1 else ""
     return tools.ok(f"deleted thread {meta['id']} ({meta.get('name') or meta.get('title')}){steps}")
-
-
-def _ask_target(c: str, name: str) -> tuple[dict | None, str]:
-    """The chat /thimble:ask names (_one_thread), where the builds of one view count as one chat, its latest, since
-    each sends a change to that view."""
-    found = find_threads(c, name)
-    if len(found) > 1 and len({m.get("view") if m.get("role") == "dev" else None for m in found} - {None}) == 1 \
-            and all(m.get("role") == "dev" and m.get("view") for m in found):
-        return max(found, key=lambda m: str(m.get("created_at") or "")), ""
-    return _one_thread(c, "message_thread", name)
-
-
-async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `message_thread` tool (the /thimble:ask command): a message typed in the terminal goes where the thread's
-    composer in the browser would send it (the frontend's threads.composerTarget). A side thread logs it and hands main
-    its `thread` event in the result, so main answers in the same turn (events.hand), and with no message asks its
-    unanswered questions again (ask_again); a view's build thread takes it as a change to the view (views.message). Any other chat's messages go to main."""
-    from . import events, tools, views  # noqa: PLC0415
-
-    text = str(args.get("message") or "").strip()
-    meta, why = _ask_target(ctx.c, str(args.get("thread") or ""))
-    if meta is None:
-        return tools.err(why)
-    tid, name = str(meta["id"]), str(meta.get("name") or meta.get("title") or meta["id"])
-    try:
-        if meta.get("kind") == agents.KIND_THREAD:
-            if not text:
-                again = ask_again(ctx.c, tid, hand=True)
-                return tools.ok(tools.hint("message_thread-again", thread=name, event=again["text"]))
-            if not events.reachable(ctx.c):
-                return tools.err(f"message_thread: {events.NOT_LISTENING.format(cwd=config.corpus_dir(ctx.c))}")
-            event_id = secrets.token_hex(4)
-            built = event(ctx.c, {"thread": tid, "text": text, "by": agents.TERMINAL}, event_id)
-            if built is None:
-                return tools.ok(tools.hint("message_thread-queued", thread=name))
-            body, fields, _ = built
-            return tools.ok(tools.hint("message_thread-event", thread=name,
-                                       event=events.hand(ctx.c, event_id, body, fields, thread=tid)))
-        if not text:
-            return tools.err(tools.hint("message_thread-empty", thread=name))
-        if meta.get("role") == "dev" and meta.get("view"):
-            # a change typed in the terminal: main's exact Agent call starts its builder, as file_dev_ticket's does, so
-            # auto mode judges the start (a browser message is the analyst's click, views.message_route)
-            views._bind_loop()
-            slug = str(meta["view"])
-            views.message(ctx.c, slug, text, by=agents.TERMINAL, route=views.TYPED)
-            return await tools._typed_build(ctx, slug)
-    except HTTPException as e:
-        return tools.err(f"message_thread: {e.detail}")
-    except RuntimeError as e:
-        return tools.err(f"message_thread: {e}")
-    return tools.err(tools.hint("message_thread-main", thread=name))
 
 
 def _file_ref(ref: str) -> bool:

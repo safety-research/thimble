@@ -332,32 +332,6 @@ Post the reply the analyst reads in a thread.
 }
 ```
 
-## message_thread
-
-Send a message the analyst typed in this terminal to a thread, as that thread's own composer sends it: a side thread's follow-up, or with no message its unanswered questions asked again, whose `thread` event, with the thread's anchor, comes back in the result for you to handle at once; a follow-up for the orientation; or a change to a view for the view's build thread. thimble shows the message in that thread. Call it for /thimble:ask.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "thread": {"type": "string", "description": "The thread's name or id as the thread list shows it, such as main/why-the-spike, orient or dev/board."},
-    "message": {"type": "string", "description": "The analyst's message, word for word. Leave it out to ask a side thread's unanswered questions again."}
-  },
-  "required": ["thread"]
-}
-```
-
-## list_agents
-
-List thimble's agents, the subagents of this session that thimble started, with what each is doing and its thread. Claude Code's agent tray lists the same subagents. Call it for /thimble:agents.
-
-```json
-{
-  "type": "object",
-  "properties": {}
-}
-```
-
 ## rename_thread
 
 Rename a thread in thimble's thread list, when the analyst asks you to.
@@ -1407,40 +1381,6 @@ Its transcript, which you can read for what it did and found:
 The analyst's message:
 
 {message}
-
-## agents-none
-
-No agent of thimble's runs now.
-
-## agents-print
-
-Print the text below in a code block, as it is, and add nothing else.
-
-{text}
-
-## message_thread-event
-
-thimble shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
-
-{event}
-
-## message_thread-again
-
-The analyst asks the thread {thread} its questions again. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
-
-{event}
-
-## message_thread-queued
-
-The message is in the thread {thread}, which waits for the fork you started for it and gets the message once that fork is known, so this turn needs no words from you.
-
-## message_thread-empty
-
-{thread} takes no empty message. Pass what the analyst wrote as `message`.
-
-## message_thread-main
-
-{thread} takes no messages of its own: its composer sends them to you. Do what the message asks yourself.
 
 ## stop-subagent
 

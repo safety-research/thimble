@@ -471,15 +471,6 @@ def show(c: str, line: str) -> None:
         _lines.setdefault((c, main), []).append(("", line))
 
 
-def hand(c: str, event_id: str, text: str, fields: dict[str, Any], *, thread: str) -> str:
-    """A thread's event that main gets in a tool's result instead of on a turn of its own (the /thimble:ask command):
-    the event as rendered, with the filters. The mirror counts it as an event of main's turn (session.handed)."""
-    from . import session  # noqa: PLC0415
-
-    session.handed(c, event_id, thread)
-    return render(build_note(THREAD, event_id, text, {**fields, **_filters(c)}))
-
-
 def _ultracode(c: str) -> dict[str, Any]:
     """`ultracode: true` on a browser message to main while the composer's chip has Ultracode on (for this session, else
     as models.main keeps it): a browser message gets none of the keyword's effect in Claude Code, so main.md asks for the

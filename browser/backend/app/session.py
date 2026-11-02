@@ -284,14 +284,13 @@ class Live:
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
         # the open turn answers the analyst: opened by a line they typed or their message from the browser, not by a
-        # thread question from the browser or the terminal's /thimble:ask (the thread's fork answers it), a task
-        # notification, a Monitor's re-arm or a start_agent event (proposer.turn_ended)
+        # thread question from the browser (the thread's fork answers it), a task notification, a Monitor's re-arm or a
+        # start_agent event (proposer.turn_ended)
         self.turn_analyst = False
         self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
         self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
         self.api_failed = False  # a request of the open turn ended in Claude Code's API error line (_main_api_error)
         self.turn_threads: list[str] = []  # the threads whose events reached the turn (_release_threads)
-        self.handed: list[str] = []  # the threads whose events main got in a tool's result (handed)
         self.forked: set[str] = set()  # the threads the turn forked or sent a follow-up to
         self.sends: dict[str, str] = {}  # tool_use id of main's SendMessage to a thread's fork -> the thread
         self.wrote = False  # the turn wrote something to main
@@ -1204,16 +1203,6 @@ def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
         lv.wake.set()
 
 
-def handed(c: str, event_id: str, thread: str) -> None:
-    """A thread's event main got in a tool's result (events.hand): main's turn counts it as an event that reached it
-    (_browser_event), and until the turn ends a turn the tail opens late keeps it."""
-    _event_threads[event_id] = thread
-    lv = _live.get(c)
-    if lv is not None:
-        lv.turn_threads.append(thread)
-        lv.handed.append(thread)
-
-
 def push_event(c: str, kind: str, text: str, **meta: Any) -> bool:
     """Server code's way to send the session an event (a built view's `view`, dev.register_pass): events.post with `text`
     as the body and `meta` as its attributes; False when no session listens."""
@@ -1281,7 +1270,7 @@ def _open_turn(lv: Live) -> None:
     """A record that starts main's turn: the analyst's line, an event, a task notification. Several before the first
     assistant record open the same turn."""
     if not lv.turn_open or not lv.fresh:
-        lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
+        lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, [], set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since, lv.turn_texts = set(), "", _now(), []
         lv.turn_analyst = lv.api_failed = False
@@ -1295,7 +1284,7 @@ def _release_threads(lv: Live) -> None:
     for tid in dict.fromkeys(lv.turn_threads):
         if tid not in lv.forked:
             threads.released(lv.c, tid)
-    lv.turn_threads, lv.forked, lv.handed = [], set(), []
+    lv.turn_threads, lv.forked = [], set()
 
 
 def _end_turn(lv: Live, cut: str | None = None) -> None:
