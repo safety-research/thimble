@@ -596,10 +596,13 @@ def current(c: str) -> Live | None:
 
 
 def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: int | None = None,
-           config_dir: str | None = None, *, follow: bool = False, after: str | None = None) -> Live | None:
+           config_dir: str | None = None, *, follow: bool = False, after: str | None = None,
+           effort: str | None = None) -> Live | None:
     """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR ("" for
     unset, None for what its shim reported); `follow` says the session runs in the process of the one it replaces
-    (_follow); `attached.after` names the previous main when it still runs in another process."""
+    (_follow); `attached.after` names the previous main when it still runs in another process. `attached.settings_effort`
+    is the effort main runs at while the composer chose none, for the composer's chip: `effort`, which the server's
+    runtime gives (runtime.Space.attach), else the analyst's own (cc_settings.analyst_effort)."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
         return None
@@ -645,7 +648,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _live[c] = lv
     if not restored:
         _modes.pop(c, None)  # a session that ended and is resumed may run in another mode than it last reported
-        own = cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None
+        own = effort or (cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None)
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since, **({"settings_effort": own} if own else {}),
                             **({"after": after} if after else {})}
         meta["ended"] = None
@@ -660,6 +663,8 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         # the notice stays as main's meta has it, since the kept mode may be one note_plan only guessed
         now = ({**held, "permission_mode": kept} if kept else
                {k: v for k, v in held.items() if k not in ("permission_mode", MANUAL_KEY)})
+        if effort:  # the effort main runs at now, which the analyst's settings may have changed while no server ran
+            now["settings_effort"] = effort
         if now != held:
             meta["attached"] = now
             agents.write_meta(c, meta)

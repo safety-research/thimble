@@ -76,7 +76,6 @@ ACCESS_KIND = "claude-access"  # the chat's error record when Claude cannot be r
 API_ERROR_KIND = "api-error"
 NOTES_HEAD = "(thimble, since your last turn:)"
 MAIN_MODEL = "claude-opus-5-5"
-MAIN_EFFORT = "high"
 PRIVATE_FILES = ("claude-access.json", "anthropic-api-key", "server.json", "session.key", "paired.json")
 NEW = "new"  # the register route's `chat` for a new chat of main (open_chat)
 CHAT_CHIP = "session"  # the kind of main's line where a chat starts or comes back (session.CHIP_KIND)
@@ -385,11 +384,15 @@ class Space:
         return self.dir / self.sid / "subagents" / f"agent-{agent_id}.jsonl"
 
     def attach(self) -> None:
-        from . import session  # noqa: PLC0415
+        """Main is the mirror's session, with the effort it runs at while the composer chose none (spec_of), for the
+        composer's chip."""
+        from . import cc_settings, session  # noqa: PLC0415
 
         lv = session.current(self.c)
         if lv is None or lv.sid != self.sid:
-            session.attach(self.c, self.sid, str(self.corpus), transcript_path=str(self.main_path))
+            model = str(_main_choice(self.ws).get("model") or MAIN_MODEL)
+            session.attach(self.c, self.sid, str(self.corpus), transcript_path=str(self.main_path),
+                           effort=cc_settings.session_effort(self.corpus, model))
 
     def live(self) -> Any:
         from . import session  # noqa: PLC0415
@@ -435,7 +438,7 @@ class Space:
         return [home / n for n in PRIVATE_FILES]
 
     def spec_of(self, conv: Conv) -> Spec:
-        from . import config, events, ledger, runtime_tools, subagents, tools, userconf  # noqa: PLC0415
+        from . import cc_settings, config, events, ledger, runtime_tools, subagents, tools, userconf  # noqa: PLC0415
 
         tmp = self.dir / "tmp" / conv.id
         tmp.mkdir(parents=True, exist_ok=True)
@@ -451,7 +454,9 @@ class Space:
             builtins = list(MAIN_BUILTINS)
             choice = _main_choice(self.ws)
             model = str(choice.get("model") or MAIN_MODEL)
-            effort = str(choice.get("effort") or MAIN_EFFORT)
+            # the composer's effort, else the one Claude Code in a terminal runs the model at by the analyst's
+            # settings, as the level it runs at (ultracode's is xhigh)
+            effort = config.effort_level(choice.get("effort") or cc_settings.session_effort(self.corpus, model))
             writes = [*([self.corpus] if edits else []), self.ws / "card-libs", tmp]
             fast = bool(choice.get("fast"))
         else:

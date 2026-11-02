@@ -764,17 +764,21 @@ MODEL_ID = re.compile(r"claude-[a-z0-9][a-z0-9.-]{1,62}")  # a model id as the A
 
 def _choose(c: str, choice: dict[str, Any]) -> None:
     """The composer's choice for main, kept in the workspace's settings as models.main and applied at main's next
-    launch (cli.launch_args); on main's `attached` too, as effort_choice and fast_choice, for the chip to show."""
-    from . import agents, ledger  # noqa: PLC0415
+    launch (cli.launch_args); on main's `attached` too, as effort_choice and fast_choice, for the chip to show. A model
+    chosen sets there the effort main runs at on it while the composer chose none (cc_settings.session_effort)."""
+    from . import agents, cc_settings, ledger  # noqa: PLC0415
 
     try:
-        config.corpus_dir(c)
+        corpus = config.corpus_dir(c)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
     ledger.put_settings(c, {config.MODELS_KEY: {"main": choice}})
     meta = agents.ensure_main(c)
     if meta.get("attached"):
-        meta["attached"] = {**meta["attached"], **{f"{k}_choice": v for k, v in choice.items()}}
+        fresh = {f"{k}_choice": v for k, v in choice.items()}
+        if "model" in choice:
+            fresh["settings_effort"] = cc_settings.session_effort(corpus, choice["model"])
+        meta["attached"] = {**meta["attached"], **fresh}
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
 
