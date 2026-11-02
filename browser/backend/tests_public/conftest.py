@@ -263,7 +263,7 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
 
 # the short folders the server makes for a Claude Code session's TMPDIR (runtime_cc.short_tmp, workspace_tmp) lie in a
 # short folder of the suite's own, removed after the run: a workspace's own one stays after its test
-SHORT_ROOT = Path(tempfile.mkdtemp(prefix="tt-", dir="/tmp" if os.path.isdir("/tmp") else None))
+SHORT_ROOT = Path(tempfile.mkdtemp(prefix="thimble-tests-short-", dir="/tmp" if os.path.isdir("/tmp") else None))
 atexit.register(shutil.rmtree, SHORT_ROOT, True)
 
 
