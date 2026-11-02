@@ -35,8 +35,8 @@
 #                                        page; --refresh copies them again (backend/app/demo_examples.py)
 #   thimble launch-args [--cwd <p>] [--settings <s>]
 #                                        what a session starts with: the plugin folder, the --effort and --settings
-#                                        values, the tools that end a turn without text, main's --name, then main's
-#                                        prompt
+#                                        values, the tools after which Claude Code asks for no reply, main's --name,
+#                                        then main's prompt
 #   thimble prompt <name>… [--cwd <p>]   prompt files rendered for a session in <p> (the injected command of the
 #                                        /thimble and shared skills and of the SessionStart hook); in a session
 #                                        thimble started in its own work folder, the ones its server rendered

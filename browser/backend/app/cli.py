@@ -4567,7 +4567,7 @@ def build_parser() -> argparse.ArgumentParser:
     er = exs.add_parser("remove", help="remove an added extension (a folder used in place stays where it is)")
     er.add_argument("name")
     ex.set_defaults(fn=cmd_extension)
-    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the plugin folder, the --effort and --settings values, the tools that end a turn without text, main's --name, the session id, the env, unset and note lines, then main's prompt")
+    la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the plugin folder, the --effort and --settings values, the tools after which Claude Code asks for no reply, main's --name, the session id, the env, unset, note and launch file lines, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
     la.add_argument("--settings", help="the analyst's own --settings, which thimble's are merged into")
