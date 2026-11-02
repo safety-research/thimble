@@ -4298,15 +4298,23 @@ _PATHISH = re.compile(r"(?<![\w./~-])[\w.-]+(?:/[\w.-]+)+/?")
 _HELD = re.compile("[\U000F0000-\U000FFFFD]")
 
 
-def _protect(parts: dict[str, str], paths: set[str]) -> tuple[dict[str, str], list[str]]:
-    """The parts with thimble's own text held out of the scan: in the diff each line that is not an added line (file
-    names, hunk headers, thimble's code at the release), and in every part a path of thimble's repository. Each held
-    span becomes one private-use character, which no term matches, until _unprotect puts it back."""
-    held: list[str] = []
+def _holder(held: list[str]):
+    """hold(x): x held out of the scan as one private-use character, which no term matches, until _unprotect puts it
+    back; `held` lists the spans it holds."""
 
     def hold(x: str) -> str:
         held.append(x)
         return chr(0xF0000 + len(held) - 1)
+    return hold
+
+
+def _protect(parts: dict[str, str], paths: set[str], held: list[str] | None = None) -> tuple[dict[str, str], list[str]]:
+    """The parts with thimble's own text held out of the scan: in the diff each line that is not an added line (file
+    names, hunk headers, thimble's code at the release), and in every part a path of thimble's repository. Each held
+    span becomes one private-use character, which no term matches, until _unprotect puts it back. `held`: the spans
+    the parts hold already (_holder), such as the headings of share.py's issue text."""
+    held = [] if held is None else held
+    hold = _holder(held)
 
     def paths_in(text: str) -> str:
         def one(m: re.Match) -> str:

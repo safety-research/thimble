@@ -1299,7 +1299,7 @@ def test_what_next_names_thimble_file_issue_for_a_fix_claude_still_works_on(worl
 
     monkeypatch.delenv("CLAUDECODE", raising=False)
     monkeypatch.setattr(FX, "can_share", lambda: True)
-    # the shell stands in thimble's repository here, whose names (fix, terminal) the scan would take out of the text
+    # the shell stands in thimble's repository here, every file of which the scan would list
     monkeypatch.setattr(FX, "session_terms", lambda st: {})
     w = made(world, words="make the minimap smaller", edit=False)
     n = w["id"]
