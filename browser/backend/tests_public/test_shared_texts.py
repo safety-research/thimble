@@ -57,7 +57,9 @@ def registry() -> dict:
     urls = {k: json.dumps(str((PLUGIN / p).as_uri())) for k, p in (
         ("lenses", "observer/lenses.mjs"), ("node", "prompts/node.mjs"), ("registry", "prompts/registry.mjs"))}
     done = subprocess.run(["node", "--input-type=module", "-e", NODE % {**urls, "slots": json.dumps(str(SLOTS))}],
-                          capture_output=True, text=True, check=True)
+                          capture_output=True, text=True)
+    assert done.returncode == 0, ("plugin/prompts/registry.mjs or plugin/prompts/slots.json does not read in Node: "
+                                  f"{done.stderr.strip()[-600:]}")
     got = json.loads(done.stdout)
     got["shared"] = sorted(got["renders"])
     return got
