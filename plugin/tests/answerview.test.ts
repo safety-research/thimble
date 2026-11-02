@@ -102,11 +102,11 @@ test('a plain reply (Minimal) draws its marks as its plain words at rest; each r
   expect(row(0).props.hover).toEqual({ scope: rowScope('k', 0) })
   expect(row(1).props.hover).toEqual({ scope: rowScope('k', 1) })
   expect(rowScope('k', 0)).not.toBe(rowScope('k', 1))
-  // under the pointer, in the row's group: a citation underlined on the citations' tint, a failed one red on its soft
-  // red; an explainer on its teal, a heads-up on its orange
+  // under the pointer, in the row's group: a citation underlined, with no fill (citations underline, comments
+  // highlight), a failed one red; an explainer on its teal, a heads-up on its orange
   const hoverOf = (w: string) => texts.find(t => textOf(t) === w)!.props.hover
-  expect(hoverOf('failed')).toEqual({ scope: rowScope('k', 0), underline: true, backgroundColor: citeTint('deferred') })
-  expect(hoverOf('every run')).toEqual({ scope: rowScope('k', 1), underline: true, backgroundColor: citeTint('failed'), color: 'error' })
+  expect(hoverOf('failed')).toEqual({ scope: rowScope('k', 0), underline: true })
+  expect(hoverOf('every run')).toEqual({ scope: rowScope('k', 1), underline: true, color: 'error' })
   expect(hoverOf('cache key')).toEqual({ scope: rowScope('k', 1), backgroundColor: TEAL_FILL.backgroundColor })
   expect(hoverOf('fetched again')).toEqual({ scope: rowScope('k', 1), backgroundColor: ORANGE_FILL.backgroundColor })
   // each mark is a press in its row's group, with no inverse under the pointer, which opens it as at any time

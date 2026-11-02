@@ -155,7 +155,7 @@ test("with Minimal on, a reply's citations read as its plain words, with no sign
   const words = (d: Any, w: string) => textNode(d, w)?.props ?? {}
   for (const w of ['15 of 40', 'p95 check']) {
     expect(words(drawn, w).underline).toBeUndefined()
-    // the paragraph's hover group shows it: underlined on the citations' tint
+    // the paragraph's hover group shows it: underlined, with no fill
     const n = textNode(drawn, w)
     expect(n?.hover ?? n?.props?.hover).toMatchObject({ scope: rowScope('mk-row-t1', 0), underline: true })
   }

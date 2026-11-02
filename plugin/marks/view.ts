@@ -48,8 +48,8 @@
 //
 // A plain reply (`plain`, while Minimal is on: marks/register.ts) draws its marks and spans as its plain words at rest,
 // with no sign after a citation: each row of blocks is one hover group (rowScope), and the pointer anywhere over the
-// row shows its marks, faintly, in their colors: a citation underlined on the citations' tint (a failed one red on its
-// soft red), an explainer on its teal and a heads-up on its orange (their fills at rest elsewhere). A click opens one as
+// row shows its marks in their colors: a citation underlined (a failed one red), an explainer on its teal and a heads-up
+// on its orange (their fills at rest elsewhere). A click opens one as
 // at any time, and the mark the tray shows stands in its look, its sign after it, as in any reply. Only Claude Code's
 // fullscreen layout reports the pointer; elsewhere the marks show only as the tray opens each (] and [).
 import { askCell, passageLabel } from '../core/askcell.js'
@@ -298,10 +298,10 @@ function markEl(els: Any, o: RowOpts, r: Run, key: string) {
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   // in a plain reply (but the one the tray shows, or the span on its words it shows), its words read as the reply's at
-  // rest; while the pointer is over its row, underlined on the citations' tint (or the fill of a span on its words), a
-  // failed one red. Its press is the span's, else the citation's, as at any time
+  // rest; while the pointer is over its row, underlined (on the fill of a span on its words, if any), a failed one red:
+  // citations underline and comments highlight. Its press is the span's, else the citation's, as at any time
   if (o.row && o.focus !== r.mark && !sp?.open) {
-    const q: Any = { children: r.s, hover: { scope: o.row, underline: true, backgroundColor: bg ?? tint.backgroundColor, ...(look.status === 'failed' ? { color: 'error' } : {}) } }
+    const q: Any = { children: r.s, hover: { scope: o.row, underline: true, ...(bg ? { backgroundColor: bg } : {}), ...(look.status === 'failed' ? { color: 'error' } : {}) } }
     if (r.b) q.bold = true
     if (r.it) q.italic = true
     const span = sp?.onPress ? sp : null
