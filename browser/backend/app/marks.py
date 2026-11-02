@@ -7,9 +7,9 @@
    each with a spinner.
 2. The checker: forks of main's session at the turn's end (`claude -p --resume <main> --resume-session-at <cut>
    --fork-session`, as the view proposer forks it), up to MAX_FORKS at once, each with a share of the marks, read the
-   terminal's checker.md as the workbench reads it (CHECKER: its slots of a mode's own words take the workbench's,
-   prompts.py) and give one JSON item per mark: verified, corrected, wrong or unconfirmed, with its evidence. A fork
-   reads with Read, Grep and Glob, and runs code only as Python (Bash `python3 …`).
+   terminal's checker.md as the workbench reads it (CHECKER, prompts.py: with the workbench's words in its slots of a
+   mode's own words) and give one JSON item per mark: verified, corrected, wrong or unconfirmed, with its evidence. A
+   fork reads with Read, Grep and Glob, and runs code only as Python (Bash `python3 …`).
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py), checks that evidence with no model call and no
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
@@ -73,7 +73,7 @@ router = APIRouter()
 
 HERE = Path(__file__).resolve().parent
 MARKS_OF = HERE / "marks_of.mjs"
-PLUGIN = HERE.parents[2] / "plugin"  # the terminal plugin, whose checker prompt and validator this module runs
+PLUGIN = HERE.parents[2] / "plugin"  # the terminal plugin, whose validator this module runs
 CHECKER = "plugin:checker"  # the terminal's checker.md (prompts.py reads a text of the plugin by this name)
 EVIDENCE = PLUGIN / "engine" / "kernel" / "evidence.py"
 # A reply with many marks is split between forks, each with about PER_FORK marks (at most MAX_FORKS forks), which run at

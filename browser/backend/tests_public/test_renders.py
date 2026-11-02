@@ -20,7 +20,7 @@ PLUGIN_PROMPTS = REPO / "plugin" / "prompts"
 LOOK_OF = REPO / "browser" / "backend" / "app" / "look_of.mjs"
 FINGERPRINTS = Path(__file__).resolve().parent / "fixtures" / "renders.json"
 
-# the made-up values of the calls whose prompts are fingerprinted with the values a call gives
+# made-up values for the calls whose prompts are fingerprinted as a call sends them
 MARKS = "1. [12] in: We saw [12] runs."
 FIX = {"id": 3, "title": "Bar says rows", "words": ["make the bar say rows", "and bold"],
        "work": "/made-up/fixes/work/3"}
@@ -33,8 +33,8 @@ LOOK = {"lenses": ["explain", "heads"], "row": "(none)",
 
 
 def _terminal() -> dict[str, str]:
-    """Each text of the plugin's registry as prompts.ts gives it to its reader, as the terminal reads it
-    (plugin/prompts/node.mjs textOf)."""
+    """Each text of the plugin's registry as the terminal reads it, before its reader fills its slots: what prompts.ts
+    gives its reader (plugin/prompts/node.mjs textOf, by the same composition)."""
     script = (f"import {{ TEXTS }} from {json.dumps((PLUGIN_PROMPTS / 'registry.mjs').as_uri())}\n"
               f"import {{ textOf }} from {json.dumps((PLUGIN_PROMPTS / 'node.mjs').as_uri())}\n"
               "const out = {}\nfor (const name of Object.keys(TEXTS)) out[name] = await textOf(name, 'terminal')\n"
