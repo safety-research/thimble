@@ -4,12 +4,15 @@
 // its own with allow. A deny (a deny rule), an ask a rule, a classic hook, a setting or another plugin made, Claude's
 // own call of a subagent however it is worded, another plugin's call, and thimble's other forks stay as Claude Code
 // decides. An ask another plugin made reaches thimble's hook as Claude Code 2.1.307 settles it, naming that plugin: its
-// own ask, and one only the person may answer (`decider: 'person'`) alike. All data is made up. `claude plugin test
-// plugin`.
+// own ask, and one only the person may answer (`decider: 'person'`) alike. x on a failed citation gives that OK too
+// while Claude Code's refusal of the checks stands. A check that could not read a file, which Claude Code refused,
+// leaves the citations it fails with that file: where Claude Code asked nobody, x gives the person's OK for it, and
+// thimble answers Claude Code's own ask on its checks' reads of that file with allow; where the person said no to its
+// ask, x gives none, and Claude Code asks again. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
-import { AGAIN_DESCRIPTION, allowsCheck, checkKey, launchRepair, noteRow, REPAIR_DESCRIPTION, repairOf, startCheck, UNREVIEWED_LINE } from '../marks/checker'
+import { AGAIN_DESCRIPTION, allowsCheck, autoRepair, checkKey, endCheck, launchRepair, noteRow, REPAIR_DESCRIPTION, repairOf, repairOk, startCheck, UNREVIEWED_LINE } from '../marks/checker'
 import { registerMarks } from '../marks/register'
 import { newReply, rowMarks } from '../marks/store'
 import { setOptions } from '../settings/features.mjs'
@@ -95,13 +98,13 @@ const AUTO = "The server-side auto mode classifier gave no verdict for Agent: th
 const REPLY = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down for [3 nights](#).'
 
 /** An engine with versioned state, the checker's text, and forks that Claude Code refuses with `refused`'s words, or
- *  starts. */
-function engine(refused: () => string | null) {
+ *  starts; the validator gives `results` for a check's marks; `env`, more of the process's variables. */
+function engine(refused: () => string | null, results: (marks: Any[]) => Any[] = () => [], env: Record<string, string> = {}) {
   const state = new Map<string, { value: unknown; version: number }>()
   const spawned: Any[] = []
   let now = 1000
   const $: Any = {
-    env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' } as Any)[k] },
+    env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp', ...env } as Any)[k] },
     plugin: { root: '/made-up/plugin', name: 'thimble' },
     session: { cwd: async () => '/made-up/data', id: async () => 's-allow', messages: async () => [] },
     fs: {
@@ -110,7 +113,10 @@ function engine(refused: () => string | null) {
       list: async () => [],
       exists: async () => false,
     },
-    process: { run: async (argv: string[]) => tempRun(argv) ?? { exitCode: 0, stdout: '', stderr: '' } },
+    process: {
+      run: async (argv: string[], o?: { stdin?: string }) => tempRun(argv)
+        ?? (argv.includes('validate') && o?.stdin ? { exitCode: 0, stdout: JSON.stringify({ parsed: true, results: results(JSON.parse(o.stdin).marks) }), stderr: '' } : { exitCode: 0, stdout: '', stderr: '' }),
+    },
     agent: {
       spawn: async (a: Any) => { spawned.push(a); const deny = refused(); return deny ? { deny } : { model: 'claude-made-up', agentId: `agent-${spawned.length}` } },
       list: async () => [],
@@ -205,7 +211,7 @@ test('x on a failed citation refused the same way: the line offers g, and g star
 /** Claude Code 2.1.307's refusal in don't ask mode, of a call no rule allows. */
 const DONT_ASK = "Permission to use Agent has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal. "
 
-test("x on a failed citation in don't ask mode: the line names the mode and offers g, not x again, which would be refused the same way; g starts that repair", async () => {
+test("x on a failed citation in don't ask mode: the line names the mode and offers g, and says nothing of x; g starts that repair", async () => {
   let refuse = true
   const { $, spawned } = engine(() => (refuse ? DONT_ASK : null))
   await newReply($, { key: 'row-1', turnId: 't-1', rows: ['row-1'], startedAt: 1000, settledAt: 1100, items: [
@@ -222,6 +228,153 @@ test("x on a failed citation in don't ask mode: the line names the mode and offe
   expect(spawned.map(a => a.description)).toEqual([REPAIR_DESCRIPTION, REPAIR_DESCRIPTION])
   expect((await rowMarks($, 'row-1'))!.items[0]!.status).toBe('checking')
   expect(await allowsCheck($, { input: { description: REPAIR_DESCRIPTION, subagent_type: 'fork' } }, THIMBLE, ASK)).toBe(true)
+})
+
+/** A failed citation of row-1, whose check found it wrong. */
+const FAILED = { n: 1, row: 'row-1', words: '40', start: 7, end: 14, sentence: REPLY, status: 'failed', failedBy: 'check', shown: '40', reason: 'The log counts 39 runs.' }
+const failedReply = (items: Any[] = [FAILED]) => ({ key: 'row-1', turnId: 't-1', rows: ['row-1'], startedAt: 1000, settledAt: 1100, items }) as never
+const itemOf = async ($: Any, n = 1) => (await rowMarks($, 'row-1'))!.items.find(m => m.n === n)!
+
+test("x on a failed citation while don't ask mode's refusal of thimble's checks stands: x gives the OK g gives, so thimble answers allow on its checks, and a word after x takes it back; with no refusal x gives none", async () => {
+  let refuse = true
+  const { $ } = engine(() => (refuse ? DONT_ASK : null))
+  await newReply($, failedReply())
+  const verdict = () => allowsCheck($, { input: { description: REPAIR_DESCRIPTION, subagent_type: 'fork' } }, THIMBLE, ASK)
+  // no refusal yet: x needs no OK, and gives none
+  await (await repairOk($, await itemOf($)))!.give()
+  expect(await verdict()).toBe(false)
+  // x's repair, refused: the refusal stands, and x's OK is g's
+  expect(await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
+  const ok = (await repairOk($, await itemOf($)))!
+  await ok.give()
+  expect(await verdict()).toBe(true)
+  await ok.undo()
+  expect(await verdict()).toBe(false)
+  // given, the repair Claude Code then starts checks the citation again, and the line goes
+  await ok.give()
+  refuse = false
+  expect(await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
+  expect((await itemOf($)).status).toBe('checking')
+  expect(await failLineNow($)).toBeNull()
+})
+
+test("where no OK answers Claude Code's refusal of thimble's checks, x has nothing to give, so it is not offered: a refusal after the OK, and auto mode's no verdict in a remote Cowork session", async () => {
+  // don't ask mode refuses a repair after the OK too
+  const after = engine(() => DONT_ASK)
+  await newReply(after.$, failedReply())
+  await launchRepair(after.$, (await repairOf(after.$, 'row-1', 1)) as Any, { until: 0, cancelled: false })
+  await (await repairOk(after.$, await itemOf(after.$)))!.give()
+  expect(await launchRepair(after.$, (await repairOf(after.$, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
+  expect((await failLineNow(after.$))?.text).toBe("Claude Code's don't ask mode refused thimble's check of citations. Outside don't ask mode, thimble can check them.")
+  expect(await repairOk(after.$, await itemOf(after.$))).toBeNull()
+  // in a remote Cowork session, Claude Code takes no plugin's allow on a subagent in auto mode
+  const cowork = engine(() => AUTO, () => [], { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' })
+  await newReply(cowork.$, failedReply())
+  await launchRepair(cowork.$, (await repairOf(cowork.$, 'row-1', 1)) as Any, { until: 0, cancelled: false })
+  expect(await repairOk(cowork.$, await itemOf(cowork.$))).toBeNull()
+  // a citation that did not fail has nothing to repair
+  expect(await repairOk(cowork.$, { ...FAILED, status: 'verified' } as never)).toBeNull()
+})
+
+/** A file outside the session's folders, and Claude Code's refusals of a check's read of it: in don't ask mode, the
+ *  person's no to its dialog, a rule of theirs. */
+const ELSEWHERE = '/made-up/elsewhere/runs.csv'
+const READ_DONT_ASK = "Permission to use Read has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal. "
+const READ_REJECTED = 'Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). Try a different approach or report the limitation to complete your task.'
+const READ_RULE = 'Permission to use Read has been denied by your rule Read(//made-up/elsewhere/**).'
+/** A read Claude Code refused, as its tool.call answers it: an error, its words as the model reads them. */
+const refusedRead = (said: string) => ({ result: said, isError: true, text: said })
+/** The validator's results: the first three marks not confirmed, the others verified. */
+const FIRST_THREE = (marks: Any[]) => marks.map(m => (m.n <= 3 ? { n: m.n, status: 'failed', failedBy: 'evidence', shown: m.words, reason: 'No record the check read holds it.' } : { n: m.n, status: 'verified', shown: m.words, reason: 'counted' }))
+
+/** The marks module's hooks on `$`: `call(event, e, below)` runs the event's chain over Claude Code's answer `below`
+ *  (a verdict, a result), as Claude Code raises it for thimble's own fork. */
+function hooksOn($: Any) {
+  const hooks: Record<string, Any[]> = {}
+  const on: Any = (event: string, a: Any, b?: Any) => {
+    ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
+    const reg: Any = { catch: () => reg }
+    return reg
+  }
+  registerMarks(on, {} as never)
+  return (event: string, e: Any, below: Any): Promise<Any> => {
+    const chain = hooks[event] ?? []
+    const run = async (i: number, x: Any): Promise<Any> => (i < chain.length ? chain[i]($, x, Object.assign((y: Any) => run(i + 1, y), { origin: ENGINE, called: false })) : below)
+    return run(0, e)
+  }
+}
+
+/** A reply's check (its two forks: agent-1 for marks 1 to 3, agent-2 for 4 and 5) in which agent-1's read of ELSEWHERE
+ *  ends as Claude Code answers it (`read`), then both end; the validator fails marks 1 to 3. */
+async function checkThatReads($: Any, call: Any, read: Any): Promise<void> {
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await call('tool.call', { tool: 'Read', file_path: ELSEWHERE, agentId: 'agent-1', tool_use_id: 'toolu_r1' }, read)
+  // a file that is not there is no refusal of a permission
+  await call('tool.call', { tool: 'Read', file_path: '/made-up/data/gone.csv', agentId: 'agent-1', tool_use_id: 'toolu_r2' }, refusedRead('File does not exist.'))
+  for (const agentId of ['agent-1', 'agent-2']) await endCheck($, { agentId, reason: 'answer', answer: '```json\n[]\n```' })
+}
+
+test("a check that could not read a file, which Claude Code refused asking nobody: each citation it leaves failed names the file, none is repaired by itself, and x's OK for it makes thimble answer allow on its checks' reads of that file, and of nothing else", async () => {
+  setOptions({ citations: 'auto cite + verify' })
+  try {
+    const { $, spawned } = engine(() => null, FIRST_THREE)
+    const call = hooksOn($)
+    await checkThatReads($, call, refusedRead(READ_DONT_ASK))
+    expect(spawned.length).toBe(2)
+    const items = (await rowMarks($, 'row-1'))!.items
+    expect(items.map(m => m.status)).toEqual(['failed', 'failed', 'failed', 'verified', 'verified'])
+    expect(items.map(m => m.unread)).toEqual([[{ file: ELSEWHERE, fix: 'ok' }], [{ file: ELSEWHERE, fix: 'ok' }], [{ file: ELSEWHERE, fix: 'ok' }], undefined, undefined])
+    // none is repaired by itself: what refused the read would refuse the repair's
+    await autoRepair($, 'agent-1')
+    expect(spawned.length).toBe(2)
+    // a check's read of the file, as Claude Code asks about it
+    const read = (agentId: string | null, file = ELSEWHERE, v: Any = ASK) => call('tool.check', { tool: 'Read', input: { file_path: file }, tool_use_id: 'toolu_r3', ...(agentId ? { agentId } : {}) }, v)
+    expect((await read('agent-1')).decision).toBe('ask')
+    // x: the OK for the file, so thimble answers allow on its checks' reads of it
+    const ok = (await repairOk($, items[0]!))!
+    await ok.give()
+    expect(await read('agent-1')).toMatchObject({ decision: 'allow' })
+    expect((await read('agent-2')).decision).toBe('allow')
+    // of nothing else: another file, main's own read, another agent's; a deny, and an ask a rule made, stand
+    expect((await read('agent-1', '/made-up/elsewhere/other.csv')).decision).toBe('ask')
+    expect((await read(null)).decision).toBe('ask')
+    expect((await read('agent-someone')).decision).toBe('ask')
+    expect((await read('agent-1', ELSEWHERE, { decision: 'deny', reason: READ_RULE, rule: 'Read(//made-up/elsewhere/**)' })).decision).toBe('deny')
+    expect((await read('agent-1', ELSEWHERE, { decision: 'ask', rule: 'Read(//made-up/elsewhere/**)' })).decision).toBe('ask')
+    // a word after x takes the OK back
+    await ok.undo()
+    expect((await read('agent-1')).decision).toBe('ask')
+    // the repair x starts checks the citation again: its earlier result goes, the file with it
+    await ok.give()
+    expect(await launchRepair($, (await repairOf($, 'row-1', 1)) as Any, { until: 0, cancelled: false })).toBe('')
+    expect(spawned.length).toBe(3)
+    expect((await itemOf($)).status).toBe('checking')
+    expect((await itemOf($)).unread).toBeUndefined()
+  } finally {
+    setOptions({})
+  }
+})
+
+test("a check that could not read a file because the person said no to Claude Code's ask: x gives no OK, so Claude Code asks them again as the repair reads it; one a rule of theirs refused: x is not offered", async () => {
+  setOptions({ citations: 'auto cite + verify' })
+  try {
+    const asked = engine(() => null, FIRST_THREE)
+    const call = hooksOn(asked.$)
+    await checkThatReads(asked.$, call, refusedRead(READ_REJECTED))
+    const item = await itemOf(asked.$)
+    expect(item.unread).toEqual([{ file: ELSEWHERE, fix: 'ask' }])
+    await autoRepair(asked.$, 'agent-1')
+    expect(asked.spawned.length).toBe(2)
+    await (await repairOk(asked.$, item))!.give()
+    expect((await call('tool.check', { tool: 'Read', input: { file_path: ELSEWHERE }, tool_use_id: 'toolu_r3', agentId: 'agent-1' }, ASK)).decision).toBe('ask')
+    const ruled = engine(() => null, FIRST_THREE)
+    await checkThatReads(ruled.$, hooksOn(ruled.$), refusedRead(READ_RULE))
+    expect((await itemOf(ruled.$)).unread).toEqual([{ file: ELSEWHERE, fix: null }])
+    expect(await repairOk(ruled.$, await itemOf(ruled.$))).toBeNull()
+  } finally {
+    setOptions({})
+  }
 })
 
 /** A made-up plugin beneath thimble whose hook asks about every new agent: as one only the person may answer

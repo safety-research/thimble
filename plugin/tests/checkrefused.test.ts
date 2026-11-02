@@ -9,7 +9,11 @@
 // key and nothing that could not work, only that thimble checks them outside that mode; a classifier that could not
 // answer for now, or that judged the check, as such;
 // any other refusal by its first sentence whole. g is no other line's key: a fix's line beside it keeps y. The failure
-// line wraps a long text at word edges, no row wider than the line. All data is made up. `claude plugin test plugin`.
+// line wraps a long text at word edges, no row wider than the line. x on a failed citation stays where the person can
+// let its check run: while those two refusals stand, x gives the OK g gives and starts the repair; where a check could
+// not read a file, the citation's card names the file, and x gives the OK to read it where Claude Code asked nobody,
+// or starts the repair, whose read Claude Code asks about again, where it asked the person. Where nothing the person
+// does lets the check run, x is not offered. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
@@ -19,7 +23,7 @@ import { textWidth } from '../core/text.js'
 import { fixKey } from '../fix/line'
 import { setFixLine } from '../fix/fixes'
 import { ownKeys, WORD_MS } from '../hooks/keys'
-import { AGAIN_DESCRIPTION, ALLOW_KEY, cannotStart, checkKey, noteRow, refusalOf, refusingMode, REPAIR_DESCRIPTION, startCheck, UNREVIEWED_LINE } from '../marks/checker'
+import { AGAIN_DESCRIPTION, ALLOW_KEY, cannotStart, checkKey, noteRow, readFix, refusalOf, refusingMode, REPAIR_DESCRIPTION, startCheck, UNREVIEWED_LINE } from '../marks/checker'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
@@ -66,6 +70,11 @@ const JUDGED = "Permission for this action was denied by the Claude Code auto mo
 const DONT_ASK = "Permission to use Agent has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. "
 /** A refusal for another cause: a made-up plugin's hook. */
 const HOOK = 'Subagent spawn denied by a plugin: lab-sync holds every new agent while it copies the workspace to the shared drive of the team. Try again in a minute.'
+/** Claude Code's refusals of a check's read of a file outside the session's folders: in don't ask mode, the person's
+ *  no to its dialog, and a rule of theirs. */
+const READ_DONT_ASK = "Permission to use Read has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. "
+const READ_REJECTED = 'Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). Try a different approach or report the limitation to complete your task.'
+const READ_RULE = 'Permission to use Read has been denied by your rule Read(//made-up/elsewhere/**).'
 
 /** The lines, as the person reads them. */
 const NO_VERDICT = "Auto mode's classifier gave no verdict on thimble's check of citations, so Claude Code refused it."
@@ -301,51 +310,94 @@ async function pressX($: Any, clock: Any): Promise<string> {
   return String(typed?.text ?? '')
 }
 
-for (const [mode, deny, env, line, presses] of [
-  ['auto mode, no verdict', AUTO, {}, UNREVIEWED_LINE, ['press g']],
-  ["don't ask mode", DONT_ASK, {}, DONT_ASK_LINE, ['press g']],
-  ['auto mode in a remote Cowork session', AUTO, { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' }, NO_VERDICT_OUTSIDE, []],
+/** The line of a check Claude Code refused in don't ask mode after the person's OK: what refused it, and the mode
+ *  outside which thimble checks; no key. */
+const DONT_ASK_OUTSIDE = "Claude Code's don't ask mode refused thimble's check of citations. Outside don't ask mode, thimble can check them."
+
+for (const [mode, deny, line, outside] of [
+  ['auto mode, no verdict', AUTO, UNREVIEWED_LINE, NO_VERDICT_OUTSIDE],
+  ["don't ask mode", DONT_ASK, DONT_ASK_LINE, DONT_ASK_OUTSIDE],
 ] as const) {
-  test(`${mode}: a citation whose check did not run (the reply was stopped) offers x until Claude Code refuses the check x starts; then x is not offered, a second x is typed, and the line says why and what to do`, OPTIONS, async ($, on) => {
-    const { spawns, clock } = await session($, on, deny, env)
+  test(`${mode}: a citation whose check did not run (the reply was stopped) keeps x when Claude Code refuses the check x starts, and the line says why; x again gives the OK g gives and starts the repair`, OPTIONS, async ($, on) => {
+    // Claude Code refuses every check but a repair asked for once the person gave the OK, which it starts as thimble
+    // answers allow at tool.check (checkallow.test.ts: this kit's spawns ask no tool.check)
+    let taken = false
+    const { spawns, clock } = await session($, on, e => (taken && e.description === REPAIR_DESCRIPTION ? null : deny))
     await reply($, clock, 't1', 'row-a1', 'aborted')
     await openCitation($, 'row-a1', 1)
     // no check has asked Claude Code yet: x starts one
     expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
     expect(await pressX($, clock)).toBe('')
     expect(spawns.length).toBe(1)
-    // refused: the line says why and what to do, and x, which Claude Code would refuse the same way, is not offered
-    expect(await band($)).toEqual({ status: '× failed', x: false, line, presses })
-    expect(await pressX($, clock)).toBe('x')
-    expect(spawns.length).toBe(1)
-    expect((await band($)).x).toBe(false)
+    // refused: the line says why and offers g, and x stays
+    expect(await band($)).toEqual({ status: '× failed', x: true, line, presses: ['press g'] })
+    // x again: the person's OK, then the repair, asked for (its run, where Claude Code starts it, is
+    // checkallow.test.ts's: this kit's spawns name no agent)
+    taken = true
+    expect(await pressX($, clock)).toBe('')
+    expect(spawns.length).toBe(2)
+    expect(spawns[1]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
+    expect(String(spawns[1].prompt)).toContain('The analyst pressed x to check citation 1, whose first check did not run.')
+    // the OK stands, as g's: a later check Claude Code still refuses says what refused it, with no key
+    await reply($, clock, 't2', 'row-a2')
+    const drawn = await $.ui.render(above)
+    expect(lineOf(drawn)).toBe(outside)
+    expect(pressesIn(drawn)).toEqual([])
   })
 }
 
-test("don't ask mode, its refusal standing: a failed citation opened later offers no x, and the line says why and what to do again; g starts that citation's repair, and once a check starts x is offered again", OPTIONS, async ($, on) => {
-  let refuse = true
-  const { spawns, clock } = await session($, on, () => (refuse ? DONT_ASK : null))
+test("auto mode in a remote Cowork session, where Claude Code takes no plugin's allow on a subagent: a citation whose check did not run offers x until Claude Code refuses the check x starts; then x is not offered, a second x is typed, and the line says what refused it, with no key", OPTIONS, async ($, on) => {
+  const { spawns, clock } = await session($, on, AUTO, { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' })
+  await reply($, clock, 't1', 'row-a1', 'aborted')
+  await openCitation($, 'row-a1', 1)
+  expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
+  expect(await pressX($, clock)).toBe('')
+  expect(spawns.length).toBe(1)
+  expect(await band($)).toEqual({ status: '× failed', x: false, line: NO_VERDICT_OUTSIDE, presses: [] })
+  expect(await pressX($, clock)).toBe('x')
+  expect(spawns.length).toBe(1)
+  // a failed citation opened later says that line again
+  await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
+  await openCitation($, 'row-a1', 2)
+  expect(await band($)).toEqual({ status: '× failed', x: false, line: NO_VERDICT_OUTSIDE, presses: [] })
+})
+
+test("don't ask mode, its refusal standing: a failed citation opened later offers x, with no line; x gives the OK g gives and starts its repair, and a word typed after x takes both back", OPTIONS, async ($, on) => {
+  let taken = false
+  const { spawns, clock } = await session($, on, e => (taken && e.description === REPAIR_DESCRIPTION ? null : DONT_ASK))
   await reply($, clock, 't1', 'row-a1', 'aborted')
   await openCitation($, 'row-a1', 1)
   expect(await pressX($, clock)).toBe('')
   expect(spawns.length).toBe(1)
-  // the prompt sent: the line goes; the next failed citation opened says it again in place of x, and asks nothing
+  // the prompt sent: the line goes; the next failed citation opened offers x, and says nothing
   await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
   expect(lineOf(await $.ui.render(above))).toBe('')
   await openCitation($, 'row-a1', 2)
-  expect(await band($)).toEqual({ status: '× failed', x: false, line: DONT_ASK_LINE, presses: ['press g'] })
+  expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
   expect(spawns.length).toBe(1)
-  // g: the person's OK, and the repair of the citation the line was said for
-  refuse = false
-  expect(await $.prompt.edit(key('g'))).toMatchObject({ text: '' })
-  await clock.advance(WORD_MS + 50)
-  await clock.advance(100)
-  expect(spawns.length).toBe(2)
-  expect(spawns[1]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
-  expect(String(spawns[1].prompt)).toContain('The analyst pressed x to check citation 2, whose first check did not run.')
-  // a check started: x is offered on the other failed citations again
-  await openCitation($, 'row-a1', 3)
-  expect(await band($)).toMatchObject({ status: '× failed', x: true })
+  // x, then a letter in its word window: a word, so the repair is refused before Claude Code starts it, and the OK
+  // is taken back: a citation of a later reply, opened, is refused as before the OK, with g on its line
+  expect(await $.prompt.edit(key('x'))).toMatchObject({ text: '' })
+  await clock.advance(WORD_MS / 3)
+  expect(await $.prompt.edit(key('o'))).toMatchObject({ text: 'xo' })
+  await clock.advance(WORD_MS * 2)
+  expect(spawns.length).toBe(1)
+  await $.prompt.submit({ text: 'xo', origin: { kind: 'composer' } } as never)
+  await reply($, clock, 't2', 'row-a2')
+  await openCitation($, 'row-a2', 1)
+  expect(spawns.length).toBe(3)
+  expect(lineOf(await $.ui.render(above))).toBe(DONT_ASK_LINE)
+  // x on the failed citation: the OK and its repair
+  taken = true
+  await openCitation($, 'row-a1', 2)
+  expect(await pressX($, clock)).toBe('')
+  expect(spawns.length).toBe(4)
+  expect(spawns[3]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
+  expect(String(spawns[3].prompt)).toContain('The analyst pressed x to check citation 2, whose first check did not run.')
+  // the OK stands: a citation opened later, its check refused, says so with no key
+  await openCitation($, 'row-a2', 2)
+  expect(spawns.length).toBe(5)
+  expect(await band($)).toMatchObject({ line: DONT_ASK_OUTSIDE, presses: [] })
 })
 
 test('a check refused for another cause: one failure line with the refusal\'s first sentence whole, and the citations wait, not checked', OPTIONS, async ($, on) => {
@@ -391,6 +443,27 @@ test("Claude Code's refusals, as thimble reads them: the permission mode a refus
   expect(textWidth(cut)).toBeLessThanOrEqual(60)
   expect(cut.endsWith('…')).toBe(true)
   expect(long.startsWith(cut.slice(0, -1))).toBe(true)
+})
+
+test("Claude Code's refusals of a check's read of a file, as x acts on them: the person's OK where it asked nobody, its own ask again where the person said no, nothing where a rule, a setting or auto mode's classifier refused it, and none of these for a refusal of no permission", () => {
+  // asked nobody: don't ask mode; auto mode's classifier gave no verdict, but in a remote Cowork session; no prompt
+  expect(readFix(READ_DONT_ASK)).toBe('ok')
+  expect(readFix(AUTO.replace(/Agent/g, 'Read'))).toBe('ok')
+  expect(readFix(AUTO.replace(/Agent/g, 'Read'), true)).toBeNull()
+  expect(readFix("Permission to use Read has been denied. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. ")).toBe('ok')
+  expect(readFix('Permission for this tool use was denied: it requires interactive approval, and permission prompts are not available in this session. The action was NOT performed.')).toBe('ok')
+  // the person said no to its dialog, a subagent's words and main's
+  expect(readFix(READ_REJECTED)).toBe('ask')
+  expect(readFix("The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.")).toBe('ask')
+  // a rule, a setting, the classifier's judgment
+  expect(readFix(READ_RULE)).toBeNull()
+  expect(readFix('Permission to use Read with //made-up/elsewhere/runs.csv has been denied.')).toBeNull()
+  expect(readFix('Reads outside the working directories are blocked (permissions.blockReadsOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.')).toBeNull()
+  expect(readFix(JUDGED)).toBeNull()
+  // a classifier that could not answer for now, and no permission at all
+  expect(readFix(BUSY)).toBeUndefined()
+  expect(readFix('File does not exist. Current working directory: /made-up/data')).toBeUndefined()
+  expect(readFix(HOOK)).toBeUndefined()
 })
 
 const ELS = { Box: (p: Any) => ({ type: 'Box', props: p }), Text: (p: Any) => ({ type: 'Text', props: p }), Button: (p: Any) => ({ type: 'Button', props: p }) }
