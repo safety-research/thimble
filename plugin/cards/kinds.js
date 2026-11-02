@@ -491,8 +491,8 @@ export function readyKinds(api) {
   }
 
   /** Bars: the value of each category, summed over its rows (a count of rows when y is left out), split by color into
-   *  segments. Named categories go down the side, each with its bar and its value; categories that are times go
-   *  across, as columns over a time axis. */
+   *  segments. Named categories go down the side, each with its bar and its value; categories that are times, or more
+   *  than a page of them in an order not by value, go across as columns. */
   function bars(spec, rows, W) {
     if (!spec.x) throw new Error('a bar chart needs x, the column of its categories')
     let cat = String(spec.x)
@@ -514,7 +514,10 @@ export function readyKinds(api) {
     const groups = lg ? lg.order : ['']
     const cats = [...sums.keys()]
     const totals = cats.map(k => [...sums.get(k).values()].reduce((a, v) => a + v, 0))
-    const across = field(seen.map(v => ({ v })), 'v').type === 'time' && cats.length > 1
+    // categories that are times go across, and so do more of them than a page holds in an order not by value: a
+    // sequence (days written as text, steps), which the analyst reads whole; a ranking goes down the side
+    const byValue = totals.every((t, i) => !i || t <= totals[i - 1]) || totals.every((t, i) => !i || t >= totals[i - 1])
+    const across = cats.length > 1 && (field(seen.map(v => ({ v })), 'v').type === 'time' || (cats.length > 24 && !byValue))
     if (across) return columns(spec, cats, seen, sums, groups, lg, totals, W)
     const labelW = Math.min(Math.max(...cats.map(k => cells(k || '(none)')), 1), Math.max(6, Math.floor(W * 0.4)))
     // each bar's value right after it: its total, and with a few groups the sum of their values, each in its color in
@@ -558,11 +561,14 @@ export function readyKinds(api) {
     return { before: lg && groups.length > 1 ? legend(lg, W, '█') : [], blocks, unit: 'rows' }
   }
 
-  /** Bars over a time axis: a column for each category (summed in groups of neighbors when they outnumber the cells),
-   *  its height in eighths of a row, the largest value at the axis's top. */
+  /** Bars across: a column for each category (summed in groups of neighbors when they outnumber the cells), its height
+   *  in eighths of a row, the largest value at the axis's top; times in their order on a time axis, other categories in
+   *  the rows' order with their names at the ticks. */
   function columns(spec, cats, seen, sums, groups, lg, totals, W) {
-    const times = seen.map(v => timeOf(v))
-    const order = cats.map((k, i) => i).sort((a, b) => times[a].at - times[b].at)
+    const parsed = seen.map(v => timeOf(v))
+    const times = parsed.every(t => t && t.form !== 'number') || parsed.every(t => t) ? parsed : null
+    const order = cats.map((k, i) => i)
+    if (times) order.sort((a, b) => times[a].at - times[b].at)
     // the categories in bins of neighbors when they outnumber the cells, and the axis's labels as wide as its top
     let gutter = cells(num(Math.max(...totals, 0))) + 1
     let bins = []
@@ -605,13 +611,13 @@ export function readyKinds(api) {
       }
       lines.push(line)
     }
-    const at = times.map(t => t.at)
-    const span = Math.max(...at) - Math.min(...at)
+    const span = times ? Math.max(...times.map(t => t.at)) - Math.min(...times.map(t => t.at)) : 0
     const n = bins.length
+    const name = i => (times ? timeText(times[i].at, times[i].form, span) : cut(cats[i] || '(none)', 12))
     const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(f * (n - 1))).filter((v, i, a) => a.indexOf(v) === i)
-      .map(i => ({ x: n > 1 ? (i * wide) / (n * wide - 1 || 1) : 0, text: timeText(times[bins[i][0]].at, times[bins[i][0]].form, span) }))
+      .map(i => ({ x: n > 1 ? (i * wide) / (n * wide - 1 || 1) : 0, text: name(bins[i][0]) }))
     lines.push(axisLine(ticks, n * wide, gutter))
-    const unit = times[0].form === 'date' ? 'days' : times[0].form === 'month' ? 'months' : `${spec.x} values`
+    const unit = times && times[0].form === 'date' ? 'days' : times && times[0].form === 'month' ? 'months' : `${spec.x} values`
     const note = per > 1 ? [[gray(cut(`${per} ${unit} summed in each column`, W))]] : []
     return { before: lg && groups.length > 1 ? legend(lg, W, '█') : [], blocks: [{ lines: [...lines, ...note] }], unit: 'rows' }
   }
@@ -859,10 +865,11 @@ export function readyKinds(api) {
     return { before: lg && lg.order.length > 1 ? legend(lg, W, '█') : [], blocks, after: [axisLine(ticksOf(lo, hi, xs.type === 'time', xs.form), w, labelW + 1)], unit: 'rows' }
   }
 
-  /** A grid of x by y, each cell's value (summed over its rows; a count of rows when color is left out) as a shade:
-   *  ░ ▒ ▓ █ by its quarter of the cells, ranked by value, so one large cell leaves the pattern of the rest in sight,
-   *  with the range of each shade in the legend; in the palette's sequence, darker for more on a light terminal and
-   *  brighter on a dark one, and in the text copy too; an empty cell a gray dot. */
+  /** A grid of x by y, each cell's value (summed over its rows; a count of rows when color is left out) as a shade,
+   *  ░ ▒ ▓ █: by powers of ten when the values span two or more of them (1-9, 10-99, …), so a peak stands out and the
+   *  rest keeps its pattern, else by quarters of their range; the range of each shade in the legend; in the palette's
+   *  sequence, darker for more on a light terminal and brighter on a dark one, and in the text copy too; an empty cell
+   *  a gray dot. */
   function heatmap(spec, rows, W) {
     if (!spec.x || !spec.y) throw new Error('a heatmap needs x and y, the columns of its two sides, and color, the column of each cell\'s value (left out: a count of rows)')
     const val = spec.color ? String(spec.color) : null
@@ -880,10 +887,13 @@ export function readyKinds(api) {
     // times and numbers in their order
     const xt = field(xk.map(v => ({ v })), 'v')
     if (xt.type !== 'text') xk.sort((a, b) => (timeOf(a)?.at ?? 0) - (timeOf(b)?.at ?? 0))
-    // the values that end each quarter of the cells, smallest first
     const ranked = [...sum.values()].filter(v => v > 0).sort((a, b) => a - b)
-    const ends = [0.25, 0.5, 0.75].map(f => ranked[Math.min(ranked.length - 1, Math.floor(f * ranked.length))])
-    const level = v => (v <= ends[0] ? 0 : v <= ends[1] ? 1 : v <= ends[2] ? 2 : 3)
+    const lo = ranked[0] ?? 0
+    const hi = ranked[ranked.length - 1] ?? 0
+    // powers of ten, the top shade taking what is past the fourth; or quarters of the range
+    const decades = lo > 0 && hi / lo >= 100
+    const base = decades ? Math.floor(Math.log10(hi)) - 3 : 0
+    const level = v => (decades ? Math.max(0, Math.min(3, Math.floor(Math.log10(v)) - base)) : hi > lo ? Math.min(3, Math.floor(((v - lo) / (hi - lo)) * 4)) : 3)
     const labelW = Math.min(Math.max(...yk.map(k => cells(k || '(none)'))), Math.floor(W * 0.35))
     const room = W - labelW - 1
     const wide = Math.max(1, Math.min(4, Math.floor(room / Math.max(1, xk.length))))
@@ -906,9 +916,13 @@ export function readyKinds(api) {
     const header = allFit
       ? [gray(' '.repeat(labelW + 1) + xs.map(x => padEnd(x, wide)).join(''))]
       : axisLine([0, 0.33, 0.67, 1].map(f => Math.round(f * (xs.length - 1))).filter((v, i, a) => a.indexOf(v) === i).map(i => ({ x: xs.length > 1 ? (i * wide) / (xs.length * wide - 1 || 1) : 0, text: xs[i] })), xs.length * wide, labelW + 1)
-    // each shade the cells take, with the range of their values
+    // each shade the cells take, with its range: its powers of ten, or the values it holds
     const shown = [0, 1, 2, 3].map(l => ranked.filter(v => level(v) === l)).filter(vs => vs.length)
-    const range = vs => (vs[0] === vs[vs.length - 1] ? short(vs[0]) : `${short(vs[0])}-${short(vs[vs.length - 1])}`)
+    const range = vs => {
+      const l = level(vs[0])
+      if (decades) return l === 3 ? `${num(10 ** (base + 3))}+` : `${l + base > 0 ? num(10 ** (l + base)) : 1}-${num(10 ** (l + base + 1) - 1)}`
+      return vs[0] === vs[vs.length - 1] ? short(vs[0]) : `${short(vs[0])}-${short(vs[vs.length - 1])}`
+    }
     const scale = [gray(`${val || 'rows'}: `), ...shown.flatMap((vs, i) => [...(i ? ['  '] : []), { text: glyphOf(vs[0]), color: shade(vs[0]) }, ` ${range(vs)}`]), gray('  · none')]
     const left = xk.length - xs.length
     return {

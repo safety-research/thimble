@@ -176,6 +176,17 @@ test('a bar chart puts each value right after its bar, the bars in proportion; w
   assert.match(c.lines[2], /^Anthropic █+ 2$/)
 })
 
+test('more categories than a page, in an order not by value, go across as columns with their names at the ticks; a ranking goes down the side', async () => {
+  const days = Array.from({ length: 40 }, (_, i) => `day ${String(i + 1).padStart(2, '0')}`)
+  const seq = await load({ kind: 'chart', mark: 'bar', x: 'day', y: 'saves', answer: 'One day stands out.', rows: days.map((day, i) => ({ day, saves: i === 25 ? 500 : (i * 7) % 30 })) }, 100)
+  assert.equal(seq.keys, '')
+  assert.match(seq.lines[2], /^500 /)
+  assert.match(seq.lines[seq.lines.length - 1], /day 01 .*day 40/)
+  const ranking = await load({ kind: 'chart', mark: 'bar', x: 'day', y: 'saves', answer: 'Ranked.', rows: days.map((day, i) => ({ day, saves: 100 - i })) }, 100)
+  assert.equal(ranking.keys, 'jk')
+  assert.match(ranking.lines[2], /^day 01 █+ 100$/)
+})
+
 test('bars over a time axis go across as columns under the largest value, summed in neighbors when they outnumber the cells, which the card says', async () => {
   const r = await load(SAMPLES.columns, 120)
   assert.match(r.lines[2], /^5,000 /)
@@ -221,17 +232,22 @@ test("a chart whose column no row has, or whose mark is none of the chart's, doe
   assert.match((await load({ ...SAMPLES.bar, mark: 'pie' })).error, /a chart's mark is one of bar, line, scatter, dots, range, heatmap, not pie/)
 })
 
-test('a range chart draws each span on one axis in its group\'s color; a heatmap shades its cells by their quarter of the cells, so the copy shows the pattern', async () => {
+test('a range chart draws each span on one axis in its group\'s color; a heatmap shades its cells by powers of ten or quarters of their range, so the copy shows the pattern', async () => {
   const r = await load(SAMPLES.range, 70)
   assert.match(r.lines[2], /^█ Anthropic {2}█ OpenAI {2}█ Google$/)
   assert.match(r.lines.find(l => l.startsWith('GPT-4.1')), /^GPT-4\.1 +█+─+$/)
   assert.match(r.lines[r.lines.length - 1], /Apr 2025/)
-  // the shades by quarter of the cells, so one large value leaves the pattern of the rest in sight
+  // values that span powers of ten: a shade for each, the top one darkest, so the peak stands out and the rest keeps
+  // its pattern
   const h = await load(SAMPLES.heatmap, 120)
-  assert.match(h.lines[2], /^saves: ░ [\d-]+ {2}▒ [\d-]+ {2}▓ [\d-]+ {2}█ [\d-]+100 {2}· none$/)
+  assert.equal(h.lines[2], 'saves: ▒ 1-9  ▓ 10-99  █ 100+  · none')
   assert.ok(h.lines.find(l => l.startsWith('Mon')).includes('█'), 'the peak in the darkest shade')
   const skewed = await load({ ...SAMPLES.heatmap, rows: SAMPLES.heatmap.rows.map(x => (x.day === 'Mon' && x.hour === '15' ? { ...x, saves: 5000 } : x)) }, 120)
+  assert.equal(skewed.lines[2], 'saves: ░ 1-9  ▒ 10-99  ▓ 100-999  █ 1,000+  · none')
   assert.ok(skewed.lines.find(l => l.startsWith('Tue')).includes('▓'), skewed.lines.join('\n'))
+  // values of one size: quarters of their range
+  const even = await load({ ...SAMPLES.heatmap, rows: SAMPLES.heatmap.rows.map(x => ({ ...x, saves: 50 + (x.saves % 40) })) }, 120)
+  assert.match(even.lines[2], /^saves: ░ 50-[\d-]+ {2}▒ [\d-]+ {2}▓ [\d-]+ {2}█ [\d-]+ {2}· none$/)
 })
 
 test('a timeline puts events in time order, a few lanes as columns side by side, a long wait said as its length, and how long an event with an end lasted', async () => {
