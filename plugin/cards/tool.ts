@@ -12,10 +12,11 @@
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called; a new version draws in the card's place
 //   4. tries the call's actions, keys and clicks in order, then puts the card back as it was
-//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, the copy at the
-//      width a side pane leaves it when a row that fits at the card's width wraps there, and the copy after each
-//      action. Nothing in it asks for a new version: notes come only for what is wrong (a key the card cannot get, a
-//      row a side pane breaks, a card taller than its frame shows, draw.ts CARD_ROWS, or than the screen)
+//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width on the surface the
+//      one that called relates to (draw.ts copyWidth), the copy at the width a side pane leaves it when a row that fits
+//      at the card's width wraps there, and the copy after each action. Nothing in it asks for a new version: notes
+//      come only for what is wrong (a key the card cannot get, a row a side pane breaks, a card taller than its frame
+//      shows, draw.ts CARD_ROWS, or than the screen)
 //   6. a version that does not fit (more rows than its frame shows, or lines cut at the card's edge) is held: its frame
 //      draws `drawing…` until the card check (fit.ts) has read it, and the check's replacement draws in its place. The
 //      answer says nothing of that, and gives no note on its size; the replacement is told to the one that drew the card
@@ -47,9 +48,9 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask, sandboxNotice } from './ask'
-import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidth, cardWidthBesidePane, rowsCut, rowsWord, screenRows } from './draw'
+import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidthBesidePane, copyWidth, rowsCut, rowsWord, screenRows } from './draw'
 import { checkCard, fits, shown } from './fit'
-import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
+import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -280,7 +281,10 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
     return { result: `The card did not draw: ${error}.` }
   }
 
-  const width = (await treeOf($, id))?.width ?? cardWidth()
+  // the version is drawn, and its copies laid out, at the width of the surface the one that called relates to
+  // (draw.ts copyWidth): main and the designer fork read the card as the conversation draws it, a side thread's fork
+  // as its pane draws it
+  const width = copyWidth(meta, threadAnchor(input.agentId))
   // a pane open now: the card is drawn at the width it leaves, and no narrower copy is asked for
   const beside = (await paneNow($)) ? 0 : cardWidthBesidePane()
   const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width, beside })
@@ -432,7 +436,8 @@ export async function personVersion($: Engine, o: { id: string; title: string; v
   await $.fs.write(`${dir}/view.js`, o.view)
   const copied = await $.process.run(['cp', '--', o.rows, `${dir}/rows.json`])
   if (copied.exitCode !== 0) return { error: `thimble could not copy the rows (${String(copied.stderr).trim().slice(0, 200)})` }
-  const width = (await treeOf($, o.id))?.width ?? cardWidth()
+  // its copy is read by the one that drew the card (checkHeld), so it is laid out where the card stands (copyWidth)
+  const width = copyWidth(meta)
   const r = await ask($, 'load', { id: o.id, version, title, view: o.view, rows: `${dir}/rows.json`, state: null, width })
   if (!r?.ok) {
     void $.process.run(['rm', '-rf', '--', dir]).catch(() => undefined)

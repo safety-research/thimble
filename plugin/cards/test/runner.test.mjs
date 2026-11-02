@@ -203,6 +203,37 @@ test('actions give a copy after each, then the card is as it was', async () => {
   assert.deepEqual(JSON.parse(r.state), { n: 1 })
 })
 
+// A card on screen at two widths (the conversation's and a side pane's copy): each request for one frame's drawing moves
+// the card to that width, so the hooks keep each drawing at the width its answer says, never at the width of the last
+// drawing they kept, whose answer may come after the next key's
+test('each drawing says the width it is laid out at: a key is drawn at the width the last drawing moved the card to, a text copy leaves the card there, and actions draw at the width they name', async () => {
+  const view = `const keys = "+"
+function onKey(k, s) { s.setState({ n: ((s.state && s.state.n) || 0) + 1 }) }
+function view(p, s) { return s.elements.Text({ children: 'n ' + ((s.state && s.state.n) || 0) + ' at ' + s.columns }) }`
+  const words = r => JSON.stringify(r.tree).match(/n \d+ at \d+/)?.[0]
+  const { id, r } = await load(view, { width: 60 })
+  assert.equal(r.width, 60)
+  // the other frame's drawing moves the card to its width: the key after it is drawn there, and says so
+  const narrow = await ask('draw', { id, width: 30 })
+  assert.equal(narrow.width, 30)
+  let k = await ask('key', { id, key: '+' })
+  assert.equal(k.width, 30)
+  assert.equal(words(k), 'n 1 at 30')
+  // a text copy at another width leaves the card at its width
+  assert.deepEqual((await ask('copy', { id, width: 50 })).lines, ['n 1 at 50'])
+  k = await ask('key', { id, key: '+' })
+  assert.equal(k.width, 30)
+  assert.equal(words(k), 'n 2 at 30')
+  // actions draw at the width they name, a copy after each at that width, and the card stays there, as it was
+  const a = await ask('act', { id, width: 44, actions: [{ key: '+' }] })
+  assert.deepEqual(a.copies[0].lines, ['n 3 at 44'])
+  assert.equal(a.width, 44)
+  assert.equal(words(a), 'n 2 at 44')
+  k = await ask('key', { id, key: '+' })
+  assert.equal(k.width, 44)
+  assert.equal(words(k), 'n 3 at 44')
+})
+
 test('a view that fails says where; a view that runs too long is stopped and leaves the runner, to load again', async () => {
   let { r } = await load('function view(props) { return props.rows[99].name }')
   assert.equal(r.ok, false)

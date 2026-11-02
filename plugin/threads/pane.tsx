@@ -36,7 +36,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
 import { failNotice } from '../bar/notice'
-import { cardWidth, frame } from '../cards/draw'
+import { cardOffPane, frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { quiet } from '../core/askcell.js'
 import { WORD_MS } from '../hooks/keys'
@@ -213,7 +213,7 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     for (const meta of await cardsOfTurn($, x.cards)) {
       if (t.scope.card === meta.id) out.push(Text({ key: `${k}-c-${meta.id}`, dimColor: true, wrap: 'truncate-end', children: '  ⎿ drew a new version of this card, shown above' }))
       else if (meta.anchorRow !== `thread:${t.key}`) out.push(Text({ key: `${k}-c-${meta.id}`, dimColor: true, wrap: 'truncate-end', children: `  ⎿ drew a new version of “${cut(meta.title, 40)}” in the conversation` }))
-      else out.push(Box({ key: `${k}-c-${meta.id}`, marginTop: 1, children: [await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: w + 2 } }, meta)] }))
+      else out.push(Box({ key: `${k}-c-${meta.id}`, marginTop: 1, children: [await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: w + 2 } }, meta, { pane: `thread:${t.key}` })] }))
     }
   }
   if (t.status === 'failed') {
@@ -460,10 +460,15 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
     if (!meta || meta.version < 1) return { el: subjectBlock(els, 'subject', aboutOf(s), 'a card that is no longer in the session'), rows: 3 }
     const open = cardOpen.has(t.key)
     const keys: PaneKey[] = [{ k: 'e', label: open ? 'hide the card' : 'show the card', onPress: () => { if (open) cardOpen.delete(t.key); else cardOpen.add(t.key); $.ui.invalidate('ui.render') } }]
-    // collapsed: the title and the line asked about (else that it is a card)
-    if (!open) return { el: subjectBlock(els, 'subject', meta.title, s.part ? '' : 'card', s.part ? [els.Text({ children: s.part })] : [], 'truncate-end'), rows: 3, keys }
-    // whole: the conversation's drawing of the card, cut at the pane's edge (no row of it wraps)
-    return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'card'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta, { layout: cardWidth() })]), rows: 14, keys }
+    // collapsed: the title and the line asked about (else that it is a card); the thread then reads the card as the
+    // conversation draws it (cards/draw.ts copyWidth)
+    if (!open) {
+      cardOffPane(`thread:${t.key}`, meta.id)
+      return { el: subjectBlock(els, 'subject', meta.title, s.part ? '' : 'card', s.part ? [els.Text({ children: s.part })] : [], 'truncate-end'), rows: 3, keys }
+    }
+    // whole: the card laid out at the pane's width, as the conversation lays it out at its own; the thread reads the
+    // card as it draws here
+    return { el: column(els, [subjectBlock(els, 'subject', meta.title, 'card'), await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: W + 2 } }, meta, { pane: `thread:${t.key}` })]), rows: 14, keys }
   }
   if (s.mark && (s.mark.kind as string) === 'place') {
     // `id`: the place, `path:from-to`, as the tray shows it

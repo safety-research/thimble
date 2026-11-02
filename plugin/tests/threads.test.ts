@@ -540,12 +540,12 @@ test("a card's thread shows the card collapsed, its title and the line asked abo
   all = nodes(await draw())
   expect(all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e').props.label).toBe('hide the card')
   expect(field().props.key).not.toBe(before)
-  // whole: the conversation's drawing (as wide as main's), cut at the pane's edge, so no row of it wraps
-  const cut = all.find(n => n.props?.key === 'cut')
+  // whole: the card laid out at the pane's width, as the conversation lays out its own, so a view that lays out from
+  // surface.columns fits the pane: its Client asks for that drawing, and nothing cuts the card at the pane's edge
   const client = all.find(n => n.type === 'Client')
-  expect(cut.props.overflow).toBe('hidden')
-  expect(cut.props.width).toBe(54)
-  expect(client.props.width).toBeGreaterThan(54)
+  expect(client.props.width).toBe(54)
+  expect(client.props.props.need).toBe('1:54:0')
+  expect(all.some(n => n.props?.key === 'cut')).toBe(false)
 })
 
 test("a passage's thread shows the passage as the reply reads, under one label: no citation markup, no quoted title", async () => {
