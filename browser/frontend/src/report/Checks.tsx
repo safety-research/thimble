@@ -86,7 +86,7 @@ export function useChecks(ws: string): Checks {
         put(withRun(current.current, e.id, e.doc, { status: e.status, run: e.run, chat: e.chat }))
         later()
       }),
-      // a check made or changed anywhere, such as turned on or off in the other Comments pane or by main
+      // a check made or changed anywhere, such as turned on or off in the top bar's Comments, the canvas's or by main
       bus.on('checks', later),
       bus.on('wsStream', (e) => e.connected && later()),
     ]

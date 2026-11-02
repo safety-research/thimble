@@ -622,7 +622,7 @@
   flex-direction: column;
   padding-bottom: 6px;
 }
-/* a section's head (and the Checks pane's): its chevron, its name at 500, its count in mono at the right */
+/* a section's head: its chevron, its name at 500, its count in mono at the right */
 .wu-sec-head {
   display: flex;
   align-items: center;
