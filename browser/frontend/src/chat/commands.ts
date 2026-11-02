@@ -3,7 +3,7 @@
 // ChatPanel's send asks first). A "/" at the start of the composer lists the commands the text can still become
 // (commandsFor), each with what it does, as Claude Code lists its own (chat/Composer.tsx), so a command added here is
 // in that list too.
-import fixFile from '../../../../plugin/commands/thimble-fix.md?raw'
+import { FIX_DESCRIPTION } from '../../../../plugin/fix/command.mjs'
 
 export interface ChatCommand {
   /** the command as the analyst types it, slash first */
@@ -12,27 +12,11 @@ export interface ChatCommand {
   about: string
 }
 
-/** The `description` of a command file's frontmatter (plugin/commands/<name>.md), which Claude Code's list shows beside
- * the command; null when the file has none. Pure. */
-export function descriptionOf(file: string): string | null {
-  const head = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(file)?.[1] ?? ''
-  const raw = /^description:[ \t]*(.*?)[ \t]*$/m.exec(head)?.[1] ?? ''
-  let text = raw
-  if (/^".*"$/.test(raw)) {
-    try {
-      text = JSON.parse(raw) as string
-    } catch {
-      text = raw.slice(1, -1)
-    }
-  } else if (/^'.*'$/.test(raw)) text = raw.slice(1, -1).replace(/''/g, "'")
-  return text.trim() || null
-}
-
-/** A change to the person's own thimble (fix.ts), with the description of the terminal's command
- * (plugin/commands/thimble-fix.md). */
+/** A change to the person's own thimble (fix.ts), with the description the terminal's command is registered with
+ * (plugin/fix/command.mjs). */
 export const FIX_COMMAND = '/thimble-fix'
 
-export const COMMANDS: readonly ChatCommand[] = [{ name: FIX_COMMAND, about: descriptionOf(fixFile) ?? 'make a change to thimble' }]
+export const COMMANDS: readonly ChatCommand[] = [{ name: FIX_COMMAND, about: FIX_DESCRIPTION }]
 
 /** The command a message is, space before it aside, and the words after it, trimmed; null for a message that starts
  * with none of `commands`. Pure. */

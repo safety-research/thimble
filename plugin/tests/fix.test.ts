@@ -13,6 +13,7 @@
 import { expect } from 'claude-code/testing'
 
 import { busyNow, busySteps } from '../bar/busy'
+import { FIX_ARGUMENT_HINT, FIX_DESCRIPTION } from '../fix/command.mjs'
 import { FIX_ALONE, fixSlug, fixingWord, noticeText, refreshFixes } from '../fix/fixes'
 import { askClaudeText, fixKey, fixLineRows } from '../fix/line'
 import { NOT_ASKED, notStarted, registerFix, wordsOfSkill } from '../fix/register'
@@ -67,6 +68,7 @@ function setup(o: { keys?: boolean } = {}) {
   const ran: { argv: string[]; stdin?: string; env?: Record<string, string> }[] = []
   const spawns: Any[] = []
   const commands: string[] = []
+  const registered: Any[] = []
   const opened: string[] = []
   const toasts: string[] = []
   const notes: { text: string; title?: string }[] = []
@@ -200,7 +202,7 @@ function setup(o: { keys?: boolean } = {}) {
     // the person's rules, as Claude Code reads them: they deny rm -rf
     tool: { check: async (q: Any) => ({ decision: /^rm -rf/.test(String(q.input?.command)) ? 'deny' : 'ask', reason: 'Bash(rm -rf:*) is denied' }) },
     process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, env: o.env, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
-    command: { run: async (c: Any) => { commands.push(c.command); return {} }, register: async () => ({ command: 'thimble-fix' }) },
+    command: { run: async (c: Any) => { commands.push(c.command); return {} }, register: async (c: Any) => { registered.push(c); return { command: c.name } } },
     prompt: {
       read: async () => ({ text: box.text, cursor: box.text.length }),
       fill: async (a: Any) => {
@@ -233,7 +235,7 @@ function setup(o: { keys?: boolean } = {}) {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, prompts, redraws }
+  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, registered, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, prompts, redraws }
 }
 
 /** The person's /thimble-fix <words>: the command's answer gives Claude the request with the words (prompts/
@@ -1229,6 +1231,12 @@ test("a fix-thimble hook that fails tells Claude why, never that thimble's hooks
   expect(await caught.call({}, { tool: 'Skill', skill: 'thimble:fix-thimble', args: 'x' }, next)).toEqual({ deny: notStarted(next.error) })
   expect(await caught.prompt({}, { skill: 'thimble:fix-thimble', text: 'x' }, next)).toEqual({ text: notStarted(next.error) })
   expect(String((await caught.call({}, {}, next)).deny)).toContain('made-up failure')
+})
+
+test("/thimble-fix is registered with the description and argument hint of fix/command.mjs, the file the browser's chat lists it from too", async () => {
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  expect(s.registered).toEqual([{ name: 'thimble-fix', description: FIX_DESCRIPTION, argumentHint: FIX_ARGUMENT_HINT }])
 })
 
 test("/thimble-fix alone and /thimble-fix update answer at once, with no turn of Claude; words go to Claude as the person's prompt, with the request beside them and no other command, and the fix takes them as the person typed them", async () => {

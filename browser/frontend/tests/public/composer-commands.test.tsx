@@ -1,18 +1,18 @@
 // @vitest-environment jsdom
 // The list of commands in the chat's composer (src/chat/Composer.tsx), as Claude Code lists its own: a "/" at the start
 // of the text lists the commands the composer handles (src/chat/commands.ts COMMANDS, the list its send reads them
-// from), one row each, its name and its description (its command file's, plugin/commands/thimble-fix.md), which wraps
-// to two lines at most. The list follows what is typed; ↑ and ↓ move in it; Enter, Tab or a click puts the command in
-// the text with a space after it, ready for its words, but Enter on a command typed in full sends it at once, as
-// without the list; Esc closes it, and so does a text that is no longer a "/" and part of a name, or the focus leaving
-// the text.
+// from), one row each, its name and its description (/thimble-fix's is the one the terminal's command is registered
+// with, plugin/fix/command.mjs), which wraps to two lines at most. The list follows what is typed; ↑ and ↓ move in it;
+// Enter, Tab or a click puts the command in the text with a space after it, ready for its words, but Enter on a command
+// typed in full sends it at once, as without the list; Esc closes it, and so does a text that is no longer a "/" and
+// part of a name, or the focus leaving the text.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import fixFile from '../../../../plugin/commands/thimble-fix.md?raw'
+import { FIX_DESCRIPTION } from '../../../../plugin/fix/command.mjs'
 import { Composer } from '../../src/chat/Composer.tsx'
-import { COMMANDS, commandIn, commandsFor, descriptionOf, FIX_COMMAND, type ChatCommand } from '../../src/chat/commands.ts'
+import { COMMANDS, commandIn, commandsFor, FIX_COMMAND, type ChatCommand } from '../../src/chat/commands.ts'
 import { fixWords } from '../../src/chat/fix.ts'
 import { mount, unmountAll } from './mount.tsx'
 
@@ -52,13 +52,13 @@ async function setup(commands?: readonly ChatCommand[]) {
 }
 
 describe('the list a "/" opens', () => {
-  test('a "/" at the start lists the commands the composer handles, each with the description of its command file', async () => {
+  test('a "/" at the start lists the commands the composer handles, each with its description; /thimble-fix\'s is the terminal command\'s', async () => {
     const c = await setup()
     expect(c.list()).toBeNull()
     await c.type('/')
     expect(c.names()).toEqual(COMMANDS.map((x) => x.name))
     const fix = c.options().find((o) => o.querySelector('.chat-command-name')?.textContent === FIX_COMMAND)!
-    expect(fix.querySelector('.chat-command-about')?.textContent).toBe(descriptionOf(fixFile))
+    expect(fix.querySelector('.chat-command-about')?.textContent).toBe(FIX_DESCRIPTION)
     // the first row is the active one, which the text names for a screen reader
     expect(c.active()).toBe(COMMANDS[0].name)
     expect(c.box.getAttribute('aria-controls')).toBe(c.list()!.id)
@@ -266,15 +266,8 @@ describe('the one list of commands (commands.ts)', () => {
     for (const text of ['', 'f', ' /f', '/fold ', '/fold now', '/fq']) expect(commandsFor(text, MADE_UP), text).toEqual([])
   })
 
-  test("a command's description is its command file's, as Claude Code reads it; the words that stand in without one", () => {
-    const file = (head: string) => `---\n${head}\nargument-hint: "[words]"\n---\n\nThe prompt: $ARGUMENTS\n`
-    expect(descriptionOf(file('description: "Change it: say how."'))).toBe('Change it: say how.')
-    expect(descriptionOf(file("description: 'It''s yours.'"))).toBe("It's yours.")
-    expect(descriptionOf(file('description: Change it'))).toBe('Change it')
-    expect(descriptionOf(file('disable-model-invocation: true'))).toBeNull()
-    expect(descriptionOf('The prompt alone.\ndescription: not frontmatter')).toBeNull()
-    // /thimble-fix's row says what its file says, else the words that stand in
-    expect(COMMANDS.find((c) => c.name === FIX_COMMAND)?.about).toBe(descriptionOf(fixFile) ?? 'make a change to thimble')
-    expect(descriptionOf(fixFile)).toBeTruthy()
+  test("/thimble-fix's description is the one the terminal's command is registered with, from the one file both read (plugin/fix/command.mjs)", () => {
+    expect(COMMANDS.find((c) => c.name === FIX_COMMAND)?.about).toBe(FIX_DESCRIPTION)
+    expect(FIX_DESCRIPTION).toBeTruthy()
   })
 })

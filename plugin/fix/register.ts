@@ -52,6 +52,7 @@ import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
+import { FIX_ARGUMENT_HINT, FIX_DESCRIPTION } from './command.mjs'
 import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
 import { type Fix, carryFixes, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, triesAgain, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen, redrawFor } from './line'
@@ -204,9 +205,10 @@ async function refusal($: Engine, e: Any): Promise<string | null> {
 export const registerFix: Register = on => {
   on('session.start', { cwd: /^\/.*$/ }, async ($, e, next) => {
     const r = await next(e)
-    // not immediate: words typed mid-turn wait for the turn's end, as a prompt does
+    // not immediate: words typed mid-turn wait for the turn's end, as a prompt does. Its words in the list are
+    // command.mjs's, which the browser's chat lists too
     try {
-      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently.', argumentHint: '[what should work differently]' })
+      await $.command.register({ name: 'thimble-fix', description: FIX_DESCRIPTION, argumentHint: FIX_ARGUMENT_HINT })
     } catch {
       // the command is missing in this session; the shell's `thimble fix list` still works
     }
