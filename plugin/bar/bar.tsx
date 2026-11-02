@@ -8,7 +8,8 @@
 //                  card that takes them now (cards/draw.ts cardKeyWords: `j down · k up`), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, or at rest `] show explainer` while
-//                  the answer shows marks, the mark's name in its own look, `s squeeze`, `c cite`); at its
+//                  the answer shows marks, the mark's name in its own look, `s squeeze`, and while words are selected
+//                  the keys that act on them, each in its color: `c cite · e explain · h heads-up · a ask`); at its
 //                  right their items (barRight: `w 11 claims`, `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
 //                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
 //                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
@@ -53,8 +54,9 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
  *  what holds the keys now (a card ] reached), or what the prompt box asks for (`rewrite for…`); while any shows, the
  *  bar's left names only those, after the busy step. (The open tray's keys are in its header and the open chips' in the
- *  chips, so the bar leaves those keys out: core/answerview.ts heldKeys.) `color` and `bold`: words drawn lit (`s ●
- *  short`) or as a failure, not dim. `shorter`: the words in fewer cells, longest first, which a narrow bar draws after
+ *  chips, so the bar leaves those keys out: core/answerview.ts heldKeys.) `color` and `bold`: the key and its words
+ *  drawn lit (`s ● short`), in the color of what the key gives (`h heads-up`, orange), or as a failure, not dim.
+ *  `shorter`: the words in fewer cells, longest first, which a narrow bar draws after
  *  coverage's file counts gave way: the first of them it keeps longer than the busy step's words, and before any count
  *  gives way (the order at the top of this file); '' is the key alone, drawn as the bar's other keys are (in the item's
  *  color when it has one), never dim, as a dim key reads as one that does nothing. `marked`: words of it drawn in a look
@@ -67,9 +69,10 @@ export type BarItem = Item
 const len = textWidth
 /** How an item's words are drawn: dim, or in the item's own color. */
 const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
-/** How an item's key is drawn: in thimble's color, bold; a key alone in the item's color when it has one. */
+/** How an item's key is drawn: bold, in the item's color when it has one (the keys that act on the selected words each
+ *  in theirs), else in thimble's. */
 function keyLook(x: Item) {
-  return { color: !x.words && x.color ? x.color : accent(), bold: true }
+  return { color: x.color ?? accent(), bold: true }
 }
 const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + (x.words ? 1 : 0) : 0) + len(x.words)
 /** The item in its shortest words. */

@@ -3,7 +3,8 @@
 // so it reads the records main read; it is told the words, the person's question, the answer as the person reads it,
 // and the lines of the files the answer points to, and writes a body and a "where it mattered" sentence with links to
 // those lines. With no conversation to fork (after /clear), one side call reads the same without the records. The
-// message's part `explain` keeps it as it keeps the look's explainers.
+// message's part `explain` keeps it as it keeps the look's explainers. A heads-up on words the analyst picked (h on the
+// selection) is written the same way by the `heads-expand` prompt: a title and its points, kept as the look's heads-up.
 //
 // The files: the places the checker's evidence found for the answer's citations (marks/store.ts MarkItem.evidence),
 // then the files the answer links to. placeLines reads the lines an explainer's link points to, for the tray.
@@ -96,16 +97,18 @@ async function evidencePlaces($: Engine, row: string): Promise<Place[]> {
   return out
 }
 
-/** The `explain-expand` prompt over the conversation (a fork), else in a side call: the words, the question, the
- *  answer they stand in and the files it cites. {body, here} once written, else a sentence that says why not. */
-async function writeExplainer($: Engine, row: string, term: string): Promise<{ body: string; here: string } | string> {
+/** The `explain-expand` prompt (an explainer), or `heads-expand` (a heads-up), over the conversation (a fork), else in
+ *  a side call: the words, the question, the answer they stand in and the files it cites. Its reply's JSON once
+ *  written, else a sentence that says why not. */
+async function writeAbout($: Engine, row: string, term: string, kind: 'explain' | 'heads'): Promise<Any> {
   const msg = await messageOf($, row)
   if (!msg) return 'That answer is not in this session any more.'
+  const heads = kind === 'heads'
   const roots = [...new Set([await startDir($), (await rootHere($)) || ''].filter(Boolean))]
   const answer = (await textView($, row, msg.text)).text
   const places = [...(await evidencePlaces($, row)), ...filePlaces(answer)]
   const question = await questionOf($, row).catch(() => '')
-  const system = await promptText($, 'explain-expand')
+  const system = heads ? await promptText($, 'heads-expand') : await promptText($, 'explain-expand')
   const files = await citedFiles($, places, roots)
   const prompt = [
     `The term: ${term}`,
@@ -117,9 +120,10 @@ async function writeExplainer($: Engine, row: string, term: string): Promise<{ b
     ...(files ? ['', 'The files the answer cites, with their line numbers:', files] : []),
   ].join('\n')
   const req = { model: 'opus', maxTokens: 6000, timeoutMs: 120000, system: [{ text: system, cache: true }], prompt }
+  const short = term.length > 40 ? `${term.slice(0, 39)}…` : term
   let r: Any
   try {
-    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: `writing an explainer of “${term.length > 40 ? `${term.slice(0, 39)}…` : term}”`, model: req.model, extra: { row, term } }, async () => {
+    r = await tracked($, { feature: kind, prompt: heads ? 'heads-expand' : 'explain-expand', doing: heads ? `writing a heads-up on “${short}”` : `writing an explainer of “${short}”`, model: req.model, extra: { row, term } }, async () => {
       // the conversation, as the look reads it: the records main read are in it
       const f: Any = await $.model.fork({ prompt: `${system}\n\n${prompt}` })
       return f?.reason === 'nothing-to-fork' ? $.model.complete(req as Any) : f
@@ -127,11 +131,8 @@ async function writeExplainer($: Engine, row: string, term: string): Promise<{ b
   } catch (err) {
     r = { isAnswered: false, reason: 'refused', error: String((err as Error)?.message || err).slice(0, 300) }
   }
-  if (!r?.isAnswered) return `The explanation of “${term}” was not written: ${modelWhy(r) || 'the call gave no answer'}.`
-  const d = jsonIn(r.text) as Any
-  const body = str(d?.body, 2400)
-  if (!body) return `The explanation of “${term}” came back empty.`
-  return { body, here: str(d?.here, 800) }
+  if (!r?.isAnswered) return `The ${heads ? 'heads-up on' : 'explanation of'} “${term}” was not written: ${modelWhy(r) || 'the call gave no answer'}.`
+  return jsonIn(r.text) ?? {}
 }
 
 /**
@@ -140,8 +141,11 @@ async function writeExplainer($: Engine, row: string, term: string): Promise<{ b
  * written, else a sentence that says why not.
  */
 export async function askGloss($: Engine, row: string, term: string): Promise<{ id: string } | string> {
-  const got = await writeExplainer($, row, term)
-  if (typeof got === 'string') return got
+  const d = await writeAbout($, row, term, 'explain')
+  if (typeof d === 'string') return d
+  const body = str(d?.body, 2400)
+  if (!body) return `The explanation of “${term}” came back empty.`
+  const got = { body, here: str(d?.here, 800) }
   let id = ''
   await setPart<ExplainPart>($, row, 'explain', cur => {
     const items = { ...(cur?.items ?? {}) }
@@ -149,6 +153,29 @@ export async function askGloss($: Engine, row: string, term: string): Promise<{ 
     while (items[`a${n}`]) n++
     id = `a${n}`
     items[id] = { id, term, body: got.body, here: got.here, asked: true }
+    return { items, order: [...(cur?.order ?? Object.keys(cur?.items ?? {})), id] }
+  })
+  return { id }
+}
+
+/**
+ * A heads-up on words the analyst picked in the message `row` (the selection), written on demand: its title and points,
+ * kept in the message's part `explain` as the look's heads-up is, so the words show it. {id} once written, else a
+ * sentence that says why not.
+ */
+export async function askHeads($: Engine, row: string, term: string): Promise<{ id: string } | string> {
+  const d = await writeAbout($, row, term, 'heads')
+  if (typeof d === 'string') return d
+  const title = str(d?.title, 200)
+  const bullets = (Array.isArray(d?.bullets) ? d.bullets : []).map((b: unknown) => str(b, 800)).filter(Boolean)
+  if (!title && !bullets.length) return `The heads-up on “${term}” came back empty.`
+  let id = ''
+  await setPart<ExplainPart>($, row, 'explain', cur => {
+    const items = { ...(cur?.items ?? {}) }
+    let n = 1
+    while (items[`ah${n}`]) n++
+    id = `ah${n}`
+    items[id] = { id, kind: 'heads', term, title: title || term, bullets, asked: true }
     return { items, order: [...(cur?.order ?? Object.keys(cur?.items ?? {})), id] }
   })
   return { id }

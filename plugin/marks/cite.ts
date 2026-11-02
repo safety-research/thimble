@@ -25,8 +25,8 @@ import { SPIN } from '../bar/busy'
 import { howTo, hintUsed } from '../bar/hints'
 import { failCleared, hintLine } from '../bar/notice'
 import { answerRows, messageOf, turnIds, turnOf, turnOfRow } from '../core/answers'
-import { answerSelectionOf, selectionKey, selectionNow, selectionUsed, usedBy, type Sel } from '../core/selection'
-import { pickedWords } from '../explain/seam'
+import { answerSelectionOf, pickedWords, selectionKey, selectionNow, selectionUsed, usedBy, type Sel } from '../core/selection'
+import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import { claudeCites, featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
@@ -251,11 +251,12 @@ export async function citeKey($: Engine, key: string, _until: number): Promise<T
   return shown ? { later: () => citeSelection($) } : null
 }
 
-/** `c cite` on the bar while c cites (citeShown); a click does what c does. The settings' preview shows it, as it would
- *  show with words selected. */
+/** `c cite` on the bar, in the citations' purple (thimble's), while c cites (citeShown); a click does what c does. The
+ *  settings' preview shows it, as it would show with words selected. */
 export async function citeBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('cite')) return []
-  if (preview) return [{ id: 'cite', key: 'c', words: 'cite' }]
+  const item = { id: 'cite', key: 'c', words: 'cite', color: accent() }
+  if (preview) return [item]
   if (!(await citeShown($))) return []
-  return [{ id: 'cite', key: 'c', words: 'cite', press: () => citeSelection($) }]
+  return [{ ...item, press: () => citeSelection($) }]
 }

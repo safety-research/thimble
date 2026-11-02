@@ -15,9 +15,11 @@
 //                                         margin asks: a side thread about it)
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the band
 //                                         has over the bar; aboveShape: how it was drawn (the band's blank row)
-//   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
-//                                         `c cite`); heldKeys: the keys what holds them takes now, which the bar and a
-//                                         card's header leave unnamed (cards/draw.ts too)
+//   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`c cite`,
+//                                         `e explain`, `h heads-up`, `a ask` while words are selected); heldKeys: the
+//                                         keys what holds them takes now, which the bar and a card's header leave
+//                                         unnamed (cards/draw.ts too), and selectionAsks: whether a asks about the
+//                                         selected words, which a card's header leaves unnamed then
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
 //                                         no card may take; keysReady, as the plugin loads, what the keys read
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
@@ -36,11 +38,12 @@ import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHeld, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
-import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
+import { THREADS_KEYS, askBar, askKey, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayShape, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { paneHeld } from './pane'
 import { askOnce } from './rowhook'
+import { waitsNow } from './selection'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -203,9 +206,11 @@ export const keyFree = (held: Set<string>) => (x: { key?: string }): boolean => 
 /** A seam's bar items, checked; in the settings pane's preview none is a press. */
 const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ? xs : [])
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
-  .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
+  .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}), ...(x.color ? { color: x.color } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the tray's steps (at rest its ]), s, b, e, then c cite. While an
+/** The features' items at the bar's left, after v: the tray's steps (at rest its ]), s, b, then the keys that act on
+ *  the selected words, each in its color while words are selected: c cite (purple), e explain (teal), h heads-up
+ *  (orange), a ask (blue); with none selected, h heads-ups on the last answer while Heads-ups is on demand. While an
  *  item of what holds the keys shows (`focus`: the keys of a card ] reached, `rewrite for…` while the prompt box holds
  *  /rewrite), the left names only those. An item whose key what holds the keys takes now (`held`, heldKeys: the open
  *  tray's keys are in its header, the open chips' in the chips) is left out: each key shows once, where it acts. */
@@ -218,10 +223,17 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
     // the keys of a card ] reached are the tray's own; at rest, its ] gives way to the chips', which take ]
     ...tray.filter(x => x.focus || free(x)),
     ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => (x.key ? free(x) : !holds)),
+    ...items(await safe(citeBar($, on, preview), []), preview).filter(free),
     ...items(await safe(explainBar($, on, preview), []), preview).filter(free),
     ...items(await safe(headsBar($, on, preview), []), preview).filter(free),
-    ...items(await safe(citeBar($, on, preview), []), preview).filter(free),
+    ...items(await safe(askBar($, on, preview), []), preview).filter(free),
   ]
+}
+
+/** Whether a at an empty prompt asks about the selected words now (threads/seam.ts askKey), which reaches it before a
+ *  card's header does: the header leaves its a unnamed then (cards/draw.ts). */
+export async function selectionAsks($: Engine): Promise<boolean> {
+  return safe(waitsNow($, 'ask'), false)
 }
 
 /** An item of the bar's right while what holds the keys (`held`, heldKeys) takes its key: the item stays, what holds for
@@ -245,7 +257,8 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
  *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
- *  tray's ] [ at rest, s, { } over the answers, e, c (the selected words cited, while they wait; else typed), w (the
+ *  tray's ] [ at rest, s, { } over the answers, then the keys that act on the selected words, while they wait (else
+ *  typed): e, h (heads-ups on the last answer with none selected, while Heads-ups is on demand), c and a; then w (the
  *  claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   const tray = await safe(trayHolds($), false)
@@ -258,6 +271,7 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(explainKey($, key, until), null))
     ?? (await safe(headsKey($, key, until), null))
     ?? (await safe(citeKey($, key, until), null))
+    ?? (await safe(askKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
 }

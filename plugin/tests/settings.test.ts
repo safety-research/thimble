@@ -148,8 +148,8 @@ test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Exp
   expect((await pane.find({ key: 'says-explain' }))?.text).toContain('after each answer')
   expect((await pane.find({ key: 'says-squeezeAnswers' }))?.text).toContain('No rewrites.')
   expect((await pane.find({ key: 'says-claimsMode' }))?.text).toContain('No Claims pane.')
-  // the preview: v, e and c still act; the keys of what Minimal turned off are gone
-  for (const w of [/^ visualize$/, /^ cite$/, /^ explain$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
+  // the preview: v still acts, and c, e, h and a on selected words; the keys of what Minimal turned off are gone
+  for (const w of [/^ visualize$/, /^ cite$/, /^ explain$/, /^ heads-up$/, /^ ask$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
   for (const w of [/^ rewrite$/, /^ catch up$/, /^ claims$/, /^ coverage$/, /^ labels$/]) expect(await pane.find({ type: 'Text', text: w })).toBeUndefined()
   await pane.press({ key: 'mode-minimal-off' })
   await settleAll($)
