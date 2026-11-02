@@ -225,6 +225,14 @@ test('a dots chart draws a dot for each row at its x, a place of several as how 
   }
 })
 
+test('with no color column, dots and bars named as a success or a failure take green and red, and other names the first category', async () => {
+  const d = await load({ kind: 'chart', mark: 'dots', x: 'minute', y: 'outcome', answer: 'Two failed.', rows: [{ minute: 1, outcome: 'failed' }, { minute: 9, outcome: 'passed' }, { minute: 20, outcome: 'not started' }] }, 70)
+  const dots = runs(d.tree).flat().filter(x => x.text === '●').map(x => x.color ?? null)
+  assert.deepEqual(dots, ['#f59183', '#67cda8', null])
+  const b = await load({ kind: 'chart', mark: 'bar', x: 'outcome', y: 'runs', answer: 'Most passed.', rows: [{ outcome: 'passed', runs: 9 }, { outcome: 'failed', runs: 2 }, { outcome: 'skipped', runs: 1 }] }, 70)
+  assert.deepEqual(runs(b.tree).slice(2, 5).map(l => l.find(x => /█|▏|▎|▍|▌|▋|▊|▉/.test(x.text)).color), ['#67cda8', '#f59183', '#80b2ea'])
+})
+
 test("a chart whose column no row has, or whose mark is none of the chart's, does not draw, and says which columns the rows have", async () => {
   const r = await load({ ...SAMPLES.bar, y: 'runz' })
   assert.equal(r.ok, false)

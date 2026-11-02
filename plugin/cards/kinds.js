@@ -491,8 +491,9 @@ export function readyKinds(api) {
   }
 
   /** Bars: the value of each category, summed over its rows (a count of rows when y is left out), split by color into
-   *  segments. Named categories go down the side, each with its bar and its value; categories that are times, or more
-   *  than a page of them in an order not by value, go across as columns. */
+   *  segments; with no `color`, a category named as a success or a failure in green or red. Named categories go down
+   *  the side, each with its bar and its value; categories that are times, or more than a page of them in an order not
+   *  by value, go across as columns. */
   function bars(spec, rows, W) {
     if (!spec.x) throw new Error('a bar chart needs x, the column of its categories')
     let cat = String(spec.x)
@@ -552,7 +553,7 @@ export function readyKinds(api) {
       } else if (top) {
         const eighths = Math.round((Math.abs(totals[i]) / top) * room * 8)
         const bar = '█'.repeat(Math.floor(eighths / 8)) + (eighths % 8 ? '▏▎▍▌▋▊▉'[eighths % 8 - 1] : '')
-        line.push({ text: bar, color: neg && totals[i] < 0 ? colors.bad : group ? lg.color[groups[0]] : colors.cat[0] })
+        line.push({ text: bar, color: neg && totals[i] < 0 ? colors.bad : group ? lg.color[groups[0]] : meaning(k) || colors.cat[0] })
         drawn = cells(bar)
       }
       line.push(drawn ? ' ' : '', ...values[i])
@@ -772,8 +773,9 @@ export function readyKinds(api) {
   }
 
   /** A strip for each row of `y`: each row of data a dot at its x (a number or a time) on a track, a place that holds
-   *  more than one showing how many (2 to 9, + for more), and the strip's count at its right. Where two such counts
-   *  would touch and read as one number, each place takes two cells. */
+   *  more than one showing how many (2 to 9, + for more), and the strip's count at its right; with no `color`, a row
+   *  named as a success or a failure (passed, failed) has its dots in green or red. Where two such counts would touch
+   *  and read as one number, each place takes two cells. */
   function dots(spec, rows, W) {
     if (!spec.x || !spec.y) throw new Error('a dots chart needs x, the number or time of each dot, and y, the row it stands in')
     const xs = field(rows, String(spec.x))
@@ -820,7 +822,7 @@ export function readyKinds(api) {
         if (!h) { track += '─'.repeat(step); continue }
         flush()
         const g = Object.keys(h.groups).sort((a, b) => h.groups[b] - h.groups[a])[0]
-        line.push({ text: h.n === 1 ? '●' : h.n < 10 ? String(h.n) : '+', color: lg ? lg.color[g] : undefined, bold: h.n > 1 })
+        line.push({ text: h.n === 1 ? '●' : h.n < 10 ? String(h.n) : '+', color: lg ? lg.color[g] : meaning(k) || undefined, bold: h.n > 1 })
         if (step > 1) track += '─'
       }
       track += '─'.repeat(w - Math.floor(w / step) * step)
