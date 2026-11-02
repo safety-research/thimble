@@ -6,11 +6,11 @@
 // Not prompt.context: where an organization manages Claude Code, Claude Code's built-in cc-plugin-sec-default sends
 // that event past the plugins a person installs, and prompt.submit's context reaches Claude on every machine.
 //
-// The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a
-// switched-off feature is left out; while Claude does not cite (Citations manual or off), the citations in the other
-// sections' examples read as plain words. A mode that changes what the analyst does adds one sentence at the end (modesNow):
-// Citations manual, and on-demand mode. A switch changed later makes a different text, which the next prompt carries
-// beside the copy the conversation holds.
+// The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a switched-off
+// feature is left out, and Cards on demand's in Cards' other modes; while Claude does not cite (Citations manual or
+// off), the citations in the other sections' examples read as plain words. A mode that changes what the analyst does
+// adds one sentence at the end (modesNow): Citations manual, and on-demand mode. A switch changed later makes a
+// different text, which the next prompt carries beside the copy the conversation holds.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
@@ -21,11 +21,12 @@ import { choiceOf, claudeCites, featureOn, onDemandOn } from '../settings/featur
 type Engine = EngineInterface
 
 /** The `## ` section of guidance.md that teaches each feature a person can switch off; `cites`: Claude cites its
- *  claims (Citations auto cite + verify, or auto cite). */
-const SECTIONS: Record<string, string> = { cites: 'Citing claims', cards: 'Cards' }
+ *  claims (Citations auto cite + verify, or auto cite); `cardsAsked`: Claude draws a card only when asked (Cards on
+ *  demand). */
+const SECTIONS: Record<string, string> = { cites: 'Citing claims', cards: 'Cards', cardsAsked: 'Cards on demand' }
 
 /** Whether a feature of SECTIONS is on now. */
-const sectionOn = (feature: string) => (feature === 'cites' ? claudeCites() : featureOn(feature))
+const sectionOn = (feature: string) => (feature === 'cites' ? claudeCites() : feature === 'cardsAsked' ? choiceOf('cards') === 'on demand' : featureOn(feature))
 
 /** A citation in the guidance's examples: a markdown link to `#`. */
 const MARK = /\[([^\]]*)\]\(#\)/g

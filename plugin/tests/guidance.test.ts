@@ -32,15 +32,19 @@ const GUIDANCE = [
   '',
 ].join('\n')
 
+/** The made-up guidance with the section that says to draw a card only when asked, which shows only while Cards is on
+ *  demand. */
+const WITH_ASKED = GUIDANCE.replace('## Labels', '## Cards on demand\n\nDraw a card only when the analyst asks for one.\n\n## Labels')
+
 /** The conversation as its next request holds it, which the test's core answers `session.messages` with. */
 type World = { messages: Any[]; context: string[][] }
 
-function world(on: Any): World {
+function world(on: Any, guidance = GUIDANCE): World {
   resetPrompts()
   const w: World = { messages: [], context: [] }
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 1, stdout: '', stderr: 'made-up: no such command' }), isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/prompts/guidance.md') ? GUIDANCE : '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/prompts/guidance.md') ? guidance : '' }))
   on('session.messages', () => ({ value: w.messages }))
   // the engine: the prompt enters with its context, which the next request holds as a reminder after the prompt
   on('prompt.submit', (_$: unknown, e: Any) => {
@@ -100,13 +104,30 @@ test('with Citations manual, the guidance ends with one sentence that says what 
   expect(text.endsWith('These come only when the analyst asks: citations (they select words and press c).')).toBe(true)
 })
 
-test('with on-demand mode on, the guidance ends with one sentence that says nothing runs after a reply and names what the analyst asks for', { options: { minimal: true, ...PRESET } }, async ($, on) => {
-  const text = await thimbleText($, world(on))
+test('with on-demand mode on, the guidance keeps the Cards section with the one that says to draw a card only when asked, and ends with one sentence that says nothing runs after a reply and names what the analyst asks for', { options: { minimal: true, ...PRESET } }, async ($, on) => {
+  const text = await thimbleText($, world(on, WITH_ASKED))
+  expect(text).toContain('## Cards\n\nDraw a card with the `card` tool.')
+  expect(text).toContain('## Cards on demand\n\nDraw a card only when the analyst asks for one.')
   expect(text.endsWith('On-demand mode is on: nothing runs after your replies. These come only when the analyst asks: citations (they select words and press c), explainers (e) and heads-ups (h).')).toBe(true)
 })
 
-test('with every mode after each reply, the guidance adds no sentence of modes', { options: { citations: 'auto cite' } }, async ($, on) => {
-  const text = await thimbleText($, world(on))
+test('with every mode after each reply, the guidance adds no sentence of modes, and Cards auto leaves out the section that says to draw a card only when asked', { options: { citations: 'auto cite' } }, async ($, on) => {
+  const text = await thimbleText($, world(on, WITH_ASKED))
+  expect(text).toContain('## Cards\n')
+  expect(text).not.toContain('## Cards on demand')
   expect(text).not.toContain('These come only')
   expect(text).not.toContain('On-demand mode')
+})
+
+test('with Cards on demand alone, the section that says to draw a card only when asked shows beside the Cards section, with no sentence of modes', { options: { cards: 'on demand' } }, async ($, on) => {
+  const text = await thimbleText($, world(on, WITH_ASKED))
+  expect(text).toContain('## Cards\n')
+  expect(text).toContain('## Cards on demand')
+  expect(text).not.toContain('These come only')
+})
+
+test('with Cards off, neither card section shows', { options: { cards: 'off' } }, async ($, on) => {
+  const text = await thimbleText($, world(on, WITH_ASKED))
+  expect(text).not.toContain('## Cards')
+  expect(text).toContain('## Labels')
 })
