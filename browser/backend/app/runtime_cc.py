@@ -35,8 +35,9 @@ sandbox that still cannot start refuses each Bash call, and the person gets a no
 a command Claude Code's own temp folder as its TMPDIR, claude-<uid> in CLAUDE_CODE_TMPDIR, which the session gets as its
 TMPDIR too. Main's and its thread forks' sessions have the workspace's own short folder (workspace_tmp), kept from turn
 to turn, so their commands' TMPDIR (shell_tmp) is the same folder at each turn, which the card kernels share (notebook);
-any other agent's session has one of its own (short_tmp), removed when the turn ends. The agent's own files stay in the
-workspace (Spec.home), as before.
+it goes when the workspace is deleted (drop_workspace_tmp), and a server's start removes those of workspaces deleted
+otherwise (sweep_workspace_tmps). Any other agent's session has one of its own (short_tmp), removed when the turn ends.
+The agent's own files stay in the workspace (Spec.home), as before.
 
 Claude Code's sandbox makes an empty .claude/.cc-writes/ folder in the session's working folder (the corpus) when it
 starts, and no setting moves it, so the last session of a corpus to end removes that folder, and .claude/ when the
@@ -69,6 +70,7 @@ TMP_ROOT = "/tmp"  # short_tmp's and workspace_tmp's parent where it exists, els
 TMP_PREFIX = "thimble-cc-"
 TMP_MAX = 60  # short_tmp's path at most: Claude Code's sandbox starts with a TMPDIR of up to 74 characters
 TMP_TAG = 8  # workspace_tmp's name: TMP_PREFIX and this many hex digits of a hash of the workspace's folder
+TMP_OWNER = ".thimble-workspace"  # in workspace_tmp: the workspace's folder, which it goes with
 CC_WRITES = (".claude", ".cc-writes")  # what Claude Code's sandbox makes in the session's working folder
 SANDBOX_FAILED = "Sandbox is required but failed to initialize"  # Claude Code's Bash result when it refuses the call
 SANDBOX_KEY = "cc-sandbox"  # the notice's key (notices.py)
@@ -108,7 +110,7 @@ def _key(name: str, args: Any) -> str:
 def short_tmp() -> Path | None:
     """A new private (0700) folder with a short path (at most TMP_MAX characters) for one session's TMPDIR (module
     note): /tmp/thimble-<8 random characters>, else under the system's temp folder; None when neither can hold one."""
-    for root in dict.fromkeys((TMP_ROOT, tempfile.gettempdir())):
+    for root in _tmp_roots():
         if len(root) + len(TMP_PREFIX) + 9 > TMP_MAX or not os.path.isdir(root):
             continue
         with contextlib.suppress(OSError):
@@ -116,20 +118,87 @@ def short_tmp() -> Path | None:
     return None
 
 
+def _tmp_roots() -> list[str]:
+    """Where short_tmp and workspace_tmp make their folders: TMP_ROOT, else the system's temp folder."""
+    return list(dict.fromkeys((TMP_ROOT, tempfile.gettempdir())))
+
+
+def _tmp_name(folder: str) -> str:
+    """workspace_tmp's name for the workspace whose folder is `folder` (its real path)."""
+    return f"{TMP_PREFIX}{hashlib.sha256(folder.encode()).hexdigest()[:TMP_TAG]}"
+
+
 def workspace_tmp(c: str) -> Path | None:
     """Workspace `c`'s own short private folder (module note, the sandbox): /tmp/thimble-cc-<a hash of the workspace's
     folder>, else under the system's temp folder, the same at each turn and for each server, so a card kernel that
-    outlives a server still finds it; None when neither can hold one that is this user's own folder."""
+    outlives a server still finds it; None when neither can hold one that is this user's own folder. It names the
+    workspace's folder in TMP_OWNER, by which a server's start finds it once that folder is gone (sweep_workspace_tmps);
+    it goes with the workspace (drop_workspace_tmp)."""
     from . import config  # noqa: PLC0415
 
-    tag = hashlib.sha256(str(config.workspace_dir(c).resolve()).encode()).hexdigest()[:TMP_TAG]
-    for root in dict.fromkeys((TMP_ROOT, tempfile.gettempdir())):
-        p = Path(root) / f"{TMP_PREFIX}{tag}"
+    folder = str(config.workspace_dir(c).resolve())
+    for root in _tmp_roots():
+        p = Path(root) / _tmp_name(folder)
         if len(str(p)) > TMP_MAX or not os.path.isdir(root):
             continue
         with contextlib.suppress(OSError):
-            return _own(p)
+            got = _own(p)
+            if _owner(got) != folder:
+                with contextlib.suppress(OSError):
+                    (got / TMP_OWNER).write_text(folder, encoding="utf-8")
+            return got
     return None
+
+
+def _owner(p: Path) -> str | None:
+    """The workspace folder a short folder `p` names (TMP_OWNER), when `p` is a folder of this user's own and no link;
+    else None, as for one that names none (a session's own, short_tmp, or one an earlier version made)."""
+    try:
+        st = os.lstat(p)
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+            return None
+        return (p / TMP_OWNER).read_text(encoding="utf-8").strip() or None
+    except (OSError, ValueError):
+        return None
+
+
+def _remove(p: Path) -> bool:
+    """`p` removed, when it is a folder of this user's own and no link: whether it was."""
+    try:
+        st = os.lstat(p)
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+            return False
+        shutil.rmtree(p)
+        return True
+    except OSError:
+        return False
+
+
+def drop_workspace_tmp(folder: Path) -> None:
+    """The workspace whose folder is `folder` is deleted: its short folder (workspace_tmp) goes with it, unless it names
+    another workspace (two folders whose hashes meet). The workspace's sessions and kernels have stopped already."""
+    real = str(folder.resolve())
+    for root in _tmp_roots():
+        p = Path(root) / _tmp_name(real)
+        if _owner(p) in (None, real):
+            _remove(p)
+
+
+def sweep_workspace_tmps() -> list[Path]:
+    """At a server's start, the short folders of workspaces that are gone (deleted by hand, or while no server ran),
+    removed: each that names its workspace's folder (TMP_OWNER) when that folder is not there. Another server's, whose
+    workspaces are there, and the sessions' own (short_tmp), which name none, stay. Those removed."""
+    gone: list[Path] = []
+    for root in _tmp_roots():
+        try:
+            found = sorted(Path(root).glob(f"{TMP_PREFIX}*"))
+        except OSError:
+            continue
+        for p in found:
+            owner = _owner(p)
+            if owner and not os.path.isdir(owner) and _remove(p):
+                gone.append(p)
+    return gone
 
 
 def shell_tmp(c: str) -> Path | None:

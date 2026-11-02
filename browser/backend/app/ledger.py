@@ -663,8 +663,9 @@ async def _stop_sessions(c: str, why: str) -> None:
 
 @router.delete("/ws/{c}")
 async def reset_workspace(c: str, idle: bool = False) -> dict[str, bool]:
-    """`thimble purge`: stop the workspace's sessions, end what else runs, then delete workspaces/<c>/ entirely; the
-    corpus is untouched. idle=true: 409 while a session holds the workspace open."""
+    """`thimble purge`: stop the workspace's sessions, end what else runs, then delete workspaces/<c>/ entirely, and its
+    short temp folder on Claude Code sign-in (runtime_cc.drop_workspace_tmp); the corpus is untouched. idle=true: 409
+    while a session holds the workspace open."""
     path = ws_dir(c).resolve()  # validates the corpus name (404 otherwise) and that the corpus exists
     if path.parent != config.WORKSPACES_DIR.resolve() or path == config.WORKSPACES_DIR.resolve():
         raise HTTPException(400, f"refusing to delete {path}")
@@ -678,6 +679,9 @@ async def reset_workspace(c: str, idle: bool = False) -> dict[str, bool]:
     await _stop_sessions(c, "deleted")
     await _end_work(c)
     shutil.rmtree(path, ignore_errors=True)
+    from . import runtime_cc  # noqa: PLC0415 — lazy, as in _end_work
+
+    runtime_cc.drop_workspace_tmp(path)
     return {"ok": True}
 
 

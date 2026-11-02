@@ -384,6 +384,14 @@ async def _lifespan(app: FastAPI):
         views.migrate_workspaces()
     except Exception:
         log.exception("moving the workspaces' views into their local extensions failed")
+    # the short temp folders of workspaces deleted by hand or while no server ran (runtime_cc.sweep_workspace_tmps)
+    try:
+        from . import runtime_cc
+
+        for p in runtime_cc.sweep_workspace_tmps():
+            log.info("removed %s, the temp folder of a workspace that is gone", p)
+    except Exception:
+        log.exception("removing the temp folders of workspaces that are gone failed")
     await _startup()
     from . import loop_watch
 
