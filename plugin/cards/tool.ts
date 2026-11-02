@@ -5,8 +5,9 @@
 //      call, as plan mode's refusal does. An `ask` that a rule of the person's makes refuses it too, since Claude Code
 //      cannot put its dialog in front of a plugin's own tool; one that comes only from the mode (a tool of a plugin, a
 //      file outside the working folder) lets it go on, since the card reads only a file of the session's folders or
-//      temp folder, and runs its view in the runner's sandbox
-//   1. checks the file is in the session's folder or the temp folder, and copies it into the card's folder
+//      temp folders, and runs its view in the runner's sandbox
+//   1. checks the file is in the session's folder or a temp folder of the session (thimble's, or Claude Code's own,
+//      where a command in its Bash sandbox writes for `$TMPDIR`), and copies it into the card's folder
 //   2. loads the view and the copy into the runner (runner.mjs), which draws the card and makes its text copy
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called; a new version draws in the card's place
@@ -33,7 +34,7 @@ import { failCleared, failNotice } from '../bar/notice'
 import { sinceLast } from '../core/answers'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
-import { tempDir } from '../core/home'
+import { claudeTempDir, tempDir } from '../core/home'
 import { paneNow } from '../core/pane'
 import { MAIN, takeFor, tellFor } from '../core/tell'
 import { mainTurn } from '../core/turn'
@@ -102,10 +103,10 @@ async function refused($: Engine, input: Record<string, unknown>, file: string |
   return null
 }
 
-/** The folders a data file may be in, each as its real path: the session's folders and the temp folder. */
-async function roots($: Engine): Promise<string[]> {
+/** The folders a data file may be in, each as its real path: the session's folders and its temp folders (`temps`). */
+async function roots($: Engine, temps: string[]): Promise<string[]> {
   const out: string[] = []
-  for (const c of [await $.session.cwd().catch(() => ''), await startDir($).catch(() => ''), await tempDir($)]) {
+  for (const c of [await $.session.cwd().catch(() => ''), await startDir($).catch(() => ''), ...temps]) {
     if (!c) continue
     const st = await $.fs.stat(c, { resolve: true }).catch(() => null)
     if (st?.kind === 'dir' && st.realPath && !out.includes(st.realPath)) out.push(st.realPath)
@@ -113,16 +114,23 @@ async function roots($: Engine): Promise<string[]> {
   return out
 }
 
-/** The data file's real path, or why it cannot be read. */
+/** The data file's real path, or why it cannot be read. `$TMPDIR` is the session's temp folder as the command that
+ *  wrote the file had it: thimble's (core/home.ts tempDir), or Claude Code's own for a command in its Bash sandbox
+ *  (claudeTempDir); where both hold the file, the one written last. */
 async function dataFile($: Engine, raw: string): Promise<{ path?: string; bad?: string }> {
   const p = String(raw ?? '').trim()
   if (!p) return { bad: '`data` is empty: give the path of the JSON file of rows you wrote' }
-  const expanded = p.replace(/^\$\{?TMPDIR\}?(?=\/)/, await tempDir($))
-  const path = expanded.startsWith('/') ? expanded : `${await $.session.cwd()}/${expanded}`
-  const st = await $.fs.stat(path, { resolve: true }).catch(() => null)
-  if (!st || st.kind !== 'file' || !st.realPath) return { bad: `there is no file at ${p}` }
+  const temps = [await tempDir($), await claudeTempDir($).catch(() => '')].filter(Boolean)
+  const rest = /^\$\{?TMPDIR\}?(?=\/)/.exec(p) ? p.replace(/^\$\{?TMPDIR\}?/, '') : null
+  const paths = rest === null ? [p.startsWith('/') ? p : `${await $.session.cwd()}/${p}`] : temps.map(t => `${t}${rest}`)
+  let st: { kind: string; size: number; mtimeMs: number; realPath?: string } | null = null
+  for (const path of paths) {
+    const at = await $.fs.stat(path, { resolve: true }).catch(() => null)
+    if (at?.kind === 'file' && at.realPath && (!st || at.mtimeMs > st.mtimeMs)) st = at
+  }
+  if (!st || !st.realPath) return { bad: `there is no file at ${p}` }
   const real = st.realPath
-  if (!(await roots($)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder ($TMPDIR); write the data file in one of them` }
+  if (!(await roots($, temps)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder ($TMPDIR); write the data file in one of them` }
   if (st.size > MAX_ROWS_BYTES) return { bad: `${p} is ${Math.round(st.size / 1048576)} MB; a card reads at most 64 MB, so write only the rows it shows` }
   return { path: real }
 }

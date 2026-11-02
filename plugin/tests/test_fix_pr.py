@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, made, press, sh, world  # noqa: E402, F401  (world is the fixture)
+from test_fixes import FX, github_refusing, made, press, sh, world  # noqa: E402, F401  (world is the fixture)
 
 from kernel import cli as CLI  # noqa: E402
 from kernel import share as SH  # noqa: E402
@@ -250,6 +250,21 @@ def test_main_out_of_reach_refuses_with_the_reason(world, gh, monkeypatch, capsy
     err = capsys.readouterr().err
     assert "thimble file pr: thimble could not read main from" in err and "check the network, then try again" in err
     assert branches(gh, "made-up") == []
+
+
+def test_main_github_lets_git_read_nothing_of_says_why_and_the_fix(world, gh, monkeypatch, capsys):
+    """I11: where GitHub lets git read nothing of the repository (it is private, or not there), the line says so and how
+    to sign in, not to check the network, and nothing is sent."""
+    rec = fix_on(world)
+    answer(monkeypatch, "y")
+    for url in github_refusing(world, monkeypatch).values():
+        monkeypatch.setenv("THIMBLE_UPDATE_URL", url)
+        assert CLI.main(["file", "pr", str(rec["id"]), "--yes"]) == 1
+        assert capsys.readouterr().err.strip() == (
+            f"thimble file pr: thimble could not read main from {url}, which a pull request goes onto: GitHub did not let "
+            "git read it, so it is private or not there. Sign in with a GitHub account that can read it (gh auth login, "
+            "then gh auth setup-git), then try again")
+    assert branches(gh, "made-up") == [] and "pr" not in FX.get(rec["id"])
 
 
 def test_with_push_access_the_branch_goes_on_the_repository_with_no_fork(world, gh, monkeypatch, capsys):

@@ -636,6 +636,15 @@ def test_the_install_summary_says_once_that_reload_plugins_loads_the_plugin_in_a
         assert lines[1] == "After a change to Node, start claude in a new terminal.", out
 
 
+def test_the_install_uses_a_clone_claude_made_earlier_and_clones_once():
+    """N77b: step 3 of CLAUDE.md, where Claude clones the repository, says to use a clone it made already (to read these
+    notes), moved out of a temporary folder, and not to clone a second one."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 3. Clone the repository", 1)[1].split(" The checkout stays where it is", 1)[0]
+    assert "cloned it already" in step and "use that clone" in step and "do not clone it again" in step, step
+    assert "temporary" in step, step
+
+
 def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plugin_in_the_open_sessions():
     """The reply Claude ends an install with (CLAUDE.md, step 5) says that /reload-plugins loads the plugin in this
     session and in the other open ones, and that a session keeps the PATH it started with, so after a change to Node a

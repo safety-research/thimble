@@ -665,10 +665,10 @@ def counts(root: Path, rels: list[str], cache_file: Path | None, until: float | 
 
 
 def expand_glob(root: Path, pattern: str) -> list[str]:
-    """Source files under root that a path or glob names, relative, sorted. A file in thimble's temp folder (a file
-    Claude derived for the session, store.in_temp) is named by its absolute real path: it belongs to the root's labels
-    though it lies outside the root. A relative pattern that names nothing under the root is read from the working
-    folder when that is a temp folder (`cd $TMPDIR && thimble label … --in rows.jsonl`)."""
+    """Source files under root that a path or glob names, relative, sorted. A file in a temp folder of the session (a
+    file Claude derived for the session, store.in_temp) is named by its absolute real path: it belongs to the root's
+    labels though it lies outside the root. A relative pattern that names nothing under the root is read from the
+    working folder when that is a temp folder (`cd $TMPDIR && thimble label … --in rows.jsonl`)."""
     import glob
 
     from .store import in_temp

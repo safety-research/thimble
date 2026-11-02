@@ -100,12 +100,17 @@ def _holding(start: Path, conversation: str | None = None) -> Path | None:
 
 
 def temp_folders() -> list[Path]:
-    """thimble's temp folders, as real paths (the plugin's core/home.ts tempDir, hooks/temp_allow.py temp_folders): the
-    session's commands get thimble's folder as their TMPDIR, so TMPDIR itself when it is a folder named thimble, then
-    thimble/ in TMPDIR, then $THIMBLE_HOME/tmp; only those that exist."""
+    """The session's temp folders, as real paths: thimble's (the plugin's core/home.ts tempDir, hooks/temp_allow.py
+    temp_folders), which the session's commands get as their TMPDIR, so TMPDIR itself when it is a folder named thimble,
+    then thimble/ in TMPDIR, then $THIMBLE_HOME/tmp; and Claude Code's own, claude-<uid>/ in CLAUDE_CODE_TMPDIR (that
+    folder itself in a command of Claude Code's Bash sandbox, which gets it as its TMPDIR in place of thimble's: the
+    plugin's core/home.ts claudeTempDir); only those that exist."""
     tmp = (os.environ.get("TMPDIR") or "").rstrip("/")
     cands = [Path(tmp)] if tmp and os.path.basename(os.path.realpath(tmp)) == "thimble" else []
     cands += ([Path(tmp) / "thimble"] if tmp else []) + [thimble_home() / "tmp"]
+    claude, own = (os.environ.get("CLAUDE_CODE_TMPDIR") or "").rstrip("/"), f"claude-{os.getuid()}"
+    if claude:
+        cands.append(Path(claude) if os.path.basename(claude) == own else Path(claude) / own)
     out: list[Path] = []
     for c in cands:
         if c.is_dir() and not c.is_symlink():
@@ -116,8 +121,8 @@ def temp_folders() -> list[Path]:
 
 
 def in_temp(path: str | Path) -> bool:
-    """Whether `path` (its real path) lies in one of thimble's temp folders: a file Claude derived for the session (a
-    table of the records, a filtered copy) belongs to the session's root, not to a root of its own."""
+    """Whether `path` (its real path) lies in one of the session's temp folders: a file Claude derived for the session
+    (a table of the records, a filtered copy) belongs to the session's root, not to a root of its own."""
     try:
         p = Path(path).resolve()
     except (OSError, RuntimeError):
@@ -133,9 +138,9 @@ def find_root(start: str | Path | None = None, conversation: str | None = None) 
     does not move the records: they stay the start folder's (or those of a folder above it), so a session whose first
     command is `cd src` keeps one set of labels, not a second one for the source tree. When no folder at or above
     the start folder holds records, a folder between it and the working folder that holds them is used. A working
-    folder in thimble's temp folder (Claude derived a file there and labels it) is the start folder's too: its labels
-    belong to the session's root, so they show in the session's answers and bar. Any other working folder outside the
-    start folder is found as before, and so is any folder outside a session."""
+    folder in a temp folder of the session (Claude derived a file there and labels it) is the start folder's too: its
+    labels belong to the session's root, so they show in the session's answers and bar. Any other working folder
+    outside the start folder is found as before, and so is any folder outside a session."""
     env = os.environ.get("THIMBLE_ROOT")
     if env:
         return Path(env).resolve()

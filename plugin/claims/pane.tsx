@@ -43,7 +43,7 @@ import { closePane, openPane, paneNow, scrollsOwn } from '../core/pane'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, themeNow } from '../core/theme'
-import { checkOpened, launchRepair, repairOf } from '../marks/checker'
+import { checkOpened, checksRun, launchRepair, repairOf } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
 import { citeHeat, wordsLook, type MarkStatus } from '../marks/view'
 import { plainSentence } from '../marks/message.js'
@@ -250,7 +250,7 @@ export async function repairShown($: Engine): Promise<boolean> {
   const s = cites[at]
   // a citation not checked yet (auto cite, manual): x checks it, as opening it in the reply does
   if (a.open && checkable(s)) { await checkOpened($, s.row, s.n); return true }
-  if (!repairable(s)) return false
+  if (!repairable(s) || !(await checksRun($))) return false
   const r = await repairOf($, s.row, s.n)
   if (r === null) return false
   // no word window in a pane that holds the keyboard: x is a key of the pane's, never a letter of the prompt
@@ -394,9 +394,10 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (view.fixes) key('h', a.history ? 'hide corrections' : 'corrections', () => onClaim({ history: !a.history }))
     if (a.open && (view.cut || a.whole)) key('c', a.whole ? 'shorter' : 'all code and output', () => onClaim({ whole: !a.whole }))
     // the press is the ui.press hook's (seam.ts), which starts the repair inside a hook; while the check runs again, x
-    // says so (a second x is not typed into the prompt)
+    // says so (a second x is not typed into the prompt). No repair while Claude Code's refusal of thimble's checks
+    // stands (marks/checker.ts checksRun): the failure line says why
     if (a.open && checkable(shown)) key('x', 'check', () => undefined, CLAIMS_REPAIR)
-    else if (a.open ? repairable(shown) : cites.some(repairable)) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
+    else if ((a.open ? repairable(shown) : cites.some(repairable)) && (await checksRun($))) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
     else if (a.open && shown?.repair && shown.status === 'checking') key('x', 'checking again', () => undefined)
   } else if (view.chosen && cs.length) {
     // a cluster chosen: k j move the current claim of its list (the ends hold), e opens it; p n the other clusters

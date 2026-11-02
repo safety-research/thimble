@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -740,6 +741,51 @@ def upstream(world, tmp_path, monkeypatch):
     return publish
 
 
+GITHUB_REFUSES = """#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    {private}) echo "fatal: could not read Username for 'https://github.com': terminal prompts disabled" >&2; exit 128;;
+    {gone}) echo "remote: Repository not found." >&2; echo "fatal: repository '{gone}/' not found" >&2; exit 128;;
+  esac
+done
+exec {git} "$@"
+"""
+
+
+def github_refusing(w, monkeypatch) -> dict[str, str]:
+    """git as GitHub answers it where it may read nothing of a repository, first on the PATH: a private one asks git
+    with no sign-in for one, which a command with no terminal cannot give (`private`), and one an account may not read
+    is not found (`gone`), as GitHub's own words go. Any other call is the real git's. The made-up URLs, by case."""
+    urls = {"private": "https://github.com/made-up/private.git", "gone": "https://github.com/made-up/gone.git"}
+    d = w["tmp"] / "github"
+    d.mkdir(exist_ok=True)
+    (d / "git").write_text(GITHUB_REFUSES.format(**urls, git=shutil.which("git")))
+    (d / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{d}:{os.environ['PATH']}")
+    return urls
+
+
+def test_thimble_update_says_why_github_lets_git_read_nothing_and_the_fix(world, upstream, monkeypatch, capsys):
+    """I11: where GitHub lets git read nothing of thimble's repository (it is private, or not there), thimble update says
+    so and how to sign in, not to check the network, which a network that does not answer still says."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    for url in github_refusing(world, monkeypatch).values():
+        monkeypatch.setenv("THIMBLE_UPDATE_URL", url)
+        assert cli.main(["update"]) == 1
+        assert capsys.readouterr().err.strip() == (
+            f"thimble update: thimble could not read its releases from {url}: GitHub did not let git read it, so it is "
+            "private or not there. Sign in with a GitHub account that can read it (gh auth login, then gh auth "
+            "setup-git), then run thimble update again")
+    # a dev install's check of the branch its checkout pulls from, the same way
+    said = "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    assert FX._behind_lines({"upstream": {"name": "origin/main", "error": said}}) == [
+        "thimble could not check whether origin/main has newer commits: GitHub did not let git read it, so it is private "
+        "or not there. Sign in with a GitHub account that can read it (gh auth login, then gh auth setup-git), then run "
+        "thimble update again."]
+
+
 def three_fixes(world) -> tuple[int, int, int]:
     """Three fixes that are on: the bar's word, a new note, and the legend's count."""
     a = made(world, "the bar should say read, not coverage")
@@ -1241,6 +1287,26 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert help_.index("thimble fix on [N]") < help_.index("Claude runs these in a session") < help_.index("thimble label [NAME]")
     monkeypatch.setattr(FX, "can_share", lambda: False)
     assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
+
+
+def test_what_next_names_thimble_file_issue_only_for_a_fix_it_takes(world, capsys, monkeypatch):
+    """R1: while Claude still works on the only fix, thimble fixes names no `thimble file issue`, which refuses a fix
+    that is not done; once another fix is ready, the line names that one, and the command takes it."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.setattr(FX, "can_share", lambda: True)
+    w = made(world, words="make the minimap smaller", edit=False)
+    assert cli.main(["fixes"]) == 0
+    out = capsys.readouterr().out
+    assert f"thimble fix show {w['id']}" in out and "thimble file issue" not in out
+    assert cli.main(["file", "issue", str(w["id"])]) == 1 and "nothing to share yet" in capsys.readouterr().err
+    r = made(world)
+    FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")
+    assert cli.main(["fixes"]) == 0
+    issue = [x.split()[:4] for x in capsys.readouterr().out.split("What next\n")[1].splitlines() if "file issue" in x]
+    assert issue == [["thimble", "file", "issue", str(r["id"])]]
+    assert cli.main(issue[0][1:]) == 0 and "Share fix" in capsys.readouterr().out
 
 
 def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_live(world, tmp_path, monkeypatch):

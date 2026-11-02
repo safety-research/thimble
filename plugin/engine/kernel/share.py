@@ -366,7 +366,9 @@ def _main_tip() -> dict[str, str]:
                timeout=600)
     if p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
-        raise FX.FixError(f"thimble could not read main from {url} ({err[-1] if err else 'no message'}); a pull "
+        why = FX.no_access(p.stderr or p.stdout, "try again")
+        raise FX.FixError(f"thimble could not read main from {url}, which a pull request goes onto: {why}" if why else
+                          f"thimble could not read main from {url} ({err[-1] if err else 'no message'}); a pull "
                           "request goes onto it, so check the network, then try again")
     tip = FX.git("rev-parse", f"{MAIN_REF}^{{commit}}", cwd=live)
     version = ""

@@ -6,7 +6,8 @@
 // says what refused them: for those two, that auto mode's classifier gave no verdict, or the mode by its name, and g,
 // which lets thimble start its checks this session and starts the check again, at each check they stop until the person
 // gives that OK; where Claude Code takes no plugin's allow (auto mode in a remote Cowork session), and after the OK, no
-// key and nothing that could not work; a classifier that could not answer for now, or that judged the check, as such;
+// key and nothing that could not work, only that thimble checks them outside that mode; a classifier that could not
+// answer for now, or that judged the check, as such;
 // any other refusal by its first sentence whole. g is no other line's key: a fix's line beside it keeps y. The failure
 // line wraps a long text at word edges, no row wider than the line. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
@@ -18,7 +19,7 @@ import { textWidth } from '../core/text.js'
 import { fixKey } from '../fix/line'
 import { setFixLine } from '../fix/fixes'
 import { ownKeys, WORD_MS } from '../hooks/keys'
-import { AGAIN_DESCRIPTION, ALLOW_KEY, cannotStart, checkKey, noteRow, refusalOf, refusingMode, startCheck, UNREVIEWED_LINE } from '../marks/checker'
+import { AGAIN_DESCRIPTION, ALLOW_KEY, cannotStart, checkKey, noteRow, refusalOf, refusingMode, REPAIR_DESCRIPTION, startCheck, UNREVIEWED_LINE } from '../marks/checker'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
@@ -68,6 +69,8 @@ const HOOK = 'Subagent spawn denied by a plugin: lab-sync holds every new agent 
 
 /** The lines, as the person reads them. */
 const NO_VERDICT = "Auto mode's classifier gave no verdict on thimble's check of citations, so Claude Code refused it."
+/** Its line where no key could let the check start: what refused it, and the mode outside which thimble checks. */
+const NO_VERDICT_OUTSIDE = `${NO_VERDICT} Outside auto mode, thimble can check them.`
 const DONT_ASK_LINE = "Claude Code's don't ask mode refused thimble's check of citations. Press g to allow thimble's checks this session."
 
 const REPLY = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down for [3 nights](#).'
@@ -120,12 +123,13 @@ async function session($: Any, on: Any, answer: string | ((e: Any) => string | n
   return { spawns, clock }
 }
 
-/** One question of the person's and main's reply to it, REPLY, in row `row`. */
-async function reply($: Any, clock: Any, turnId: string, row: string): Promise<void> {
+/** One question of the person's and main's reply to it, REPLY, in row `row`: a whole reply, or (`aborted`) one the
+ *  person stopped with esc, whose citations' check does not run. */
+async function reply($: Any, clock: Any, turnId: string, row: string, how: 'answer' | 'aborted' = 'answer'): Promise<void> {
   await $.prompt.submit({ text: 'how many failed?', origin: { kind: 'composer' } } as never)
   await $.turn.start({ text: 'how many failed?', turnId } as never)
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: REPLY }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: row } as never)
-  await $.turn.complete({ turnId, reason: 'answer', answer: REPLY, durationMs: 10, isAborted: false } as never)
+  await $.turn.complete({ turnId, reason: how, answer: REPLY, durationMs: 10, isAborted: how === 'aborted' } as never)
   await clock.advance(100)
 }
 
@@ -218,7 +222,7 @@ test("g while that line shows: thimble asks Claude Code again for the check it i
   // allow) says what refused it, a notice with no key, and not `Open one to check it`, which would be refused the same way
   await reply($, clock, 't2', 'row-a2')
   const drawn = await $.ui.render(above)
-  expect(lineOf(drawn)).toBe(NO_VERDICT)
+  expect(lineOf(drawn)).toBe(NO_VERDICT_OUTSIDE)
   expect(pressesIn(drawn)).toEqual([])
   expect(JSON.stringify(drawn)).not.toContain('"color":"error"')
   // and g is typed as any letter
@@ -273,13 +277,75 @@ test("in a remote Cowork session, where Claude Code takes no plugin's allow on a
   const { spawns, clock } = await session($, on, AUTO, { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' })
   await reply($, clock, 't1', 'row-a1')
   const drawn = await $.ui.render(above)
-  expect(lineOf(drawn)).toBe(NO_VERDICT)
+  expect(lineOf(drawn)).toBe(NO_VERDICT_OUTSIDE)
   expect(pressesIn(drawn)).toEqual([])
   expect(textOf(drawn)).not.toContain('Open')
   expect(await $.prompt.edit(key('g'))).toMatchObject({ text: 'g' })
   await clock.advance(WORD_MS * 2)
   expect(spawns.length).toBe(1)
   expect(signAfter(await $.ui.render(answer('row-a1')), 1).sign).toBe('?')
+})
+
+/** What the band shows now: the open tray's status, whether its card offers x, the failure line and its presses. */
+async function band($: Any): Promise<{ status: string; x: boolean; line: string; presses: string[] }> {
+  const drawn = await $.ui.render(above)
+  const t = textOf(drawn)
+  return { status: /(× failed|\? not checked|✓ \w+)/.exec(t)?.[0] ?? '-', x: t.includes('x repair'), line: lineOf(drawn), presses: pressesIn(drawn) }
+}
+
+/** x at the empty prompt, its word window waited out: what the box holds after it ('' when thimble took the key). */
+async function pressX($: Any, clock: Any): Promise<string> {
+  const typed = await $.prompt.edit(key('x'))
+  await clock.advance(WORD_MS + 50)
+  await clock.advance(100)
+  return String(typed?.text ?? '')
+}
+
+for (const [mode, deny, env, line, presses] of [
+  ['auto mode, no verdict', AUTO, {}, UNREVIEWED_LINE, ['press g']],
+  ["don't ask mode", DONT_ASK, {}, DONT_ASK_LINE, ['press g']],
+  ['auto mode in a remote Cowork session', AUTO, { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' }, NO_VERDICT_OUTSIDE, []],
+] as const) {
+  test(`${mode}: a citation whose check did not run (the reply was stopped) offers x until Claude Code refuses the check x starts; then x is not offered, a second x is typed, and the line says why and what to do`, OPTIONS, async ($, on) => {
+    const { spawns, clock } = await session($, on, deny, env)
+    await reply($, clock, 't1', 'row-a1', 'aborted')
+    await openCitation($, 'row-a1', 1)
+    // no check has asked Claude Code yet: x starts one
+    expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
+    expect(await pressX($, clock)).toBe('')
+    expect(spawns.length).toBe(1)
+    // refused: the line says why and what to do, and x, which Claude Code would refuse the same way, is not offered
+    expect(await band($)).toEqual({ status: '× failed', x: false, line, presses })
+    expect(await pressX($, clock)).toBe('x')
+    expect(spawns.length).toBe(1)
+    expect((await band($)).x).toBe(false)
+  })
+}
+
+test("don't ask mode, its refusal standing: a failed citation opened later offers no x, and the line says why and what to do again; g starts that citation's repair, and once a check starts x is offered again", OPTIONS, async ($, on) => {
+  let refuse = true
+  const { spawns, clock } = await session($, on, () => (refuse ? DONT_ASK : null))
+  await reply($, clock, 't1', 'row-a1', 'aborted')
+  await openCitation($, 'row-a1', 1)
+  expect(await pressX($, clock)).toBe('')
+  expect(spawns.length).toBe(1)
+  // the prompt sent: the line goes; the next failed citation opened says it again in place of x, and asks nothing
+  await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
+  expect(lineOf(await $.ui.render(above))).toBe('')
+  await openCitation($, 'row-a1', 2)
+  expect(await band($)).toEqual({ status: '× failed', x: false, line: DONT_ASK_LINE, presses: ['press g'] })
+  expect(spawns.length).toBe(1)
+  // g: the person's OK, and the repair of the citation the line was said for
+  refuse = false
+  expect(await $.prompt.edit(key('g'))).toMatchObject({ text: '' })
+  await clock.advance(WORD_MS + 50)
+  await clock.advance(100)
+  expect(spawns.length).toBe(2)
+  expect(spawns[1]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
+  expect(String(spawns[1].prompt)).toContain('The analyst pressed x to check citation 2, whose first check did not run.')
+  // a check started: x is offered on the other failed citations again
+  await openCitation($, 'row-a1', 3)
+  expect(await band($)).toMatchObject({ status: '× failed', x: true })
 })
 
 test('a check refused for another cause: one failure line with the refusal\'s first sentence whole, and the citations wait, not checked', OPTIONS, async ($, on) => {
@@ -304,14 +370,14 @@ test("Claude Code's refusals, as thimble reads them: the permission mode a refus
     expect(refusalOf(said).kind).toBe('unreviewed')
     expect(cannotStart(said)).toEqual({ kind: 'unreviewed', notice: true, offers: true, text: UNREVIEWED_LINE })
     // once the person gave the OK, or where Claude Code takes no plugin's allow, the same refusal offers no key
-    expect(cannotStart(said, { allowed: true })).toEqual({ kind: 'unreviewed', notice: true, text: NO_VERDICT })
-    expect(cannotStart(said, { cowork: true })).toEqual({ kind: 'unreviewed', notice: true, text: NO_VERDICT })
+    expect(cannotStart(said, { allowed: true })).toEqual({ kind: 'unreviewed', notice: true, text: NO_VERDICT_OUTSIDE })
+    expect(cannotStart(said, { cowork: true })).toEqual({ kind: 'unreviewed', notice: true, text: NO_VERDICT_OUTSIDE })
   }
   expect(refusalOf(DONT_ASK)).toMatchObject({ kind: 'mode', mode: "don't ask mode" })
   expect(cannotStart(DONT_ASK)).toEqual({ kind: 'mode', notice: true, offers: true, text: DONT_ASK_LINE })
   // Claude Code takes a plugin's allow in don't ask mode, in a remote Cowork session too
   expect(cannotStart(DONT_ASK, { cowork: true })).toEqual({ kind: 'mode', notice: true, offers: true, text: DONT_ASK_LINE })
-  expect(cannotStart(DONT_ASK, { allowed: true })).toEqual({ kind: 'mode', notice: true, text: "Claude Code's don't ask mode refused thimble's check of citations." })
+  expect(cannotStart(DONT_ASK, { allowed: true })).toEqual({ kind: 'mode', notice: true, text: "Claude Code's don't ask mode refused thimble's check of citations. Outside don't ask mode, thimble can check them." })
   expect(cannotStart(BUSY)).toEqual({ kind: 'unavailable', notice: true, text: "Auto mode's classifier was unavailable for thimble's check of citations (rate-limited), so Claude Code refused it. Open a citation to check it." })
   expect(cannotStart(WAIT)).toEqual({ kind: 'unavailable', notice: true, text: "Auto mode's classifier was unavailable for thimble's check of citations (overloaded), so Claude Code refused it. Open a citation to check it." })
   expect(cannotStart(JUDGED)).toEqual({ kind: 'judged', notice: true, text: "Auto mode's classifier refused thimble's check of citations (The fork reads the made-up vault's keys), so they are not checked." })

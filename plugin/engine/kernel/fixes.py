@@ -2677,15 +2677,32 @@ def _vtuple(tag: str) -> tuple[int, ...]:
     return tuple(int(x) for x in m.groups()) if m else ()
 
 
+# git's words when GitHub let it read nothing of a repository: it asks for a sign-in where a private repository (or
+# none) is, and an account that may not read one is told there is no such repository
+NO_ACCESS = re.compile(r"Repository not found|repository '[^']*' not found|could not read (?:Username|Password)|"
+                       r"Authentication failed|Invalid username or password|returned error: 40[134]", re.I)
+
+
+def no_access(err: str, then: str) -> str | None:
+    """Why git read nothing of a repository and the fix, then `then` (what the person does after it), when its output
+    `err` says GitHub refused it; None for any other failure, which the network most likely caused."""
+    if not NO_ACCESS.search(err):
+        return None
+    return ("GitHub did not let git read it, so it is private or not there. Sign in with a GitHub account that can read "
+            f"it (gh auth login, then gh auth setup-git), then {then}")
+
+
 def latest_release(then: str = "run thimble update again") -> dict[str, Any]:
     """The newest release, {tag, version, commit, url, tags}: the highest vX.Y.Z tag of thimble's repository, and each
     release tag's commit (tags), which names a release that a clone without tags has. A tag with more after the numbers
-    (v0.11.0-rc1) is not a release. `then`: what the person does after the network works again."""
+    (v0.11.0-rc1) is not a release. `then`: what the person does after the network, or their sign-in, works again."""
     url = update_url()
     p = run(["git", "ls-remote", "--tags", url, "refs/tags/v*"], check=False, timeout=120)
     if p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
-        raise FixError(f"thimble could not read its releases from {url} ({err[-1] if err else 'no message'}); "
+        why = no_access(p.stderr or p.stdout, then)
+        raise FixError(f"thimble could not read its releases from {url}: {why}" if why else
+                       f"thimble could not read its releases from {url} ({err[-1] if err else 'no message'}); "
                        f"check the network, then {then}")
     tags: dict[str, str] = {}
     for line in p.stdout.splitlines():
@@ -3509,7 +3526,8 @@ def _upstream(repo: Path) -> dict[str, str] | None:
 def _behind(repo: Path, commit: str) -> dict[str, Any]:
     """Whether the person's clone is behind what it pulls from (_upstream), which thimble update fetches into its
     remote-tracking branch alone: the clone's HEAD, branches and files stay as they are, for the person to pull.
-    {name, behind, tip, pull}, or {name, error} when the fetch failed (offline); {} with no upstream to check."""
+    {name, behind, tip, pull}, or {name, error} when the fetch failed (offline, or GitHub let git read nothing); {} with
+    no upstream to check."""
     up = _upstream(repo)
     if not up:
         return {}
@@ -3531,6 +3549,9 @@ def _behind_lines(d: dict[str, Any]) -> list[str]:
     """What a dev install's thimble update says of the checkout (`to`) against what it pulls from (d's upstream,
     _behind): how far behind it is and the command that pulls it, or that thimble could not check."""
     u = d.get("upstream") or {}
+    why = no_access(u["error"], "run thimble update again.") if u.get("error") else None
+    if why:
+        return [f"thimble could not check whether {u['name']} has newer commits: {why}"]
     if u.get("error"):
         return [f"thimble could not check whether {u['name']} has newer commits ({u['error']}); check the network, "
                 "then run thimble update again."]
@@ -3978,8 +3999,12 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     elif off_ids:
         nxt.append((f"thimble fix on {off_ids[0]}", "turn a fix on (it asks for your key here)"))
     if can_share():
-        nxt.append((f"thimble file issue {first}",
-                    f"a link to GitHub's new-issue form with fix {first}'s text, to read and submit"))
+        from .share import STATES  # noqa: PLC0415 — share imports this module
+        # the first fix that thimble file issue takes: not one Claude still works on, nor one an update set aside
+        shared = [r["id"] for r in fixes if r.get("state") in STATES]
+        if shared:
+            nxt.append((f"thimble file issue {shared[0]}",
+                        f"a link to GitHub's new-issue form with fix {shared[0]}'s text, to read and submit"))
         code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
         if code:
             nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))

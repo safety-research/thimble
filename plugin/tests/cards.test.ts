@@ -42,7 +42,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string>; stat?: (path: string) => Any } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -74,13 +74,13 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   const code = { mtimeMs: 1 }
   on('fs.stat', (_$: unknown, e: { path: string }) => ({
     // escape.json looks local but its real target is outside every allowed root (a symlink out of the folder); so does
-    // link.json in the temp folder
-    value: e.path.endsWith('/cards/argv.mjs') ? { kind: 'file', size: 64, mtimeMs: code.mtimeMs, isLink: false, realPath: e.path }
+    // link.json in the temp folder; `stat` gives a test's own files first
+    value: o.stat?.(e.path) ?? (e.path.endsWith('/cards/argv.mjs') ? { kind: 'file', size: 64, mtimeMs: code.mtimeMs, isLink: false, realPath: e.path }
       : e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
       : e.path.endsWith('/link.json') ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/made-up/home/.ssh/id' }
         : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
           : e.path === DATA || e.path.startsWith('/made-up/tmp') ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: real(e.path) }
-            : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
+            : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false }),
   }))
   const spawned: string[][] = []
   const runs: string[][] = []
@@ -607,6 +607,27 @@ test('a data file whose real path leaves this folder (a symlink out) is refused,
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_8', title: 'Out', data: 'escape.json', view: VIEW } as never)) as Any
   expect(String(r.result)).toContain('is outside this folder and the temp folder')
   expect(w.asked).not.toContain('load')
+})
+
+test("R2: a data file a command in Claude Code's Bash sandbox wrote at $TMPDIR, Claude Code's own temp folder there, draws as one in thimble's does; where both hold the file, the newer one; where neither does, no file", async ($, on) => {
+  // thimble's temp folder is thimble/ in the person's TMPDIR, made-up/t; Claude Code keeps its own, claude-1000/, in
+  // CLAUDE_CODE_TMPDIR, made-up/cc, and a sandboxed command gets that one as its TMPDIR
+  const C = '/made-up/cc/claude-1000'
+  const T = '/made-up/t/thimble'
+  const at: Record<string, { kind: string; mtimeMs: number }> = { [C]: { kind: 'dir', mtimeMs: 0 }, [T]: { kind: 'dir', mtimeMs: 0 }, [`${C}/probe.json`]: { kind: 'file', mtimeMs: 5 } }
+  const w = world(on, { env: { TMPDIR: '/made-up/t', CLAUDE_CODE_TMPDIR: '/made-up/cc' }, stat: p => (at[p] ? { ...at[p], size: 32, isLink: false, realPath: p } : undefined) })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const copied = () => w.runs.filter(a => a[0] === 'cp').map(a => a[2])
+  const call = async (id: string, data: string) => String(((await $.tool.call({ tool: TOOL, tool_use_id: id, title: 'Probe', data, view: VIEW } as never)) as Any).result)
+  expect(await call('toolu_made_up_r2a', '$TMPDIR/probe.json')).toContain('It read 2 rows from probe.json')
+  expect(copied()).toEqual([`${C}/probe.json`])
+  // the same name written since in thimble's own folder (by a command outside the sandbox): that one
+  at[`${T}/probe.json`] = { kind: 'file', mtimeMs: 9 }
+  expect(await call('toolu_made_up_r2b', '${TMPDIR}/probe.json')).toContain('is drawn')
+  // the path as a sandboxed command printed it
+  expect(await call('toolu_made_up_r2c', `${C}/probe.json`)).toContain('is drawn')
+  expect(copied()).toEqual([`${C}/probe.json`, `${T}/probe.json`, `${C}/probe.json`])
+  expect(await call('toolu_made_up_r2d', '$TMPDIR/none.json')).toBe('The card did not draw: there is no file at $TMPDIR/none.json.')
 })
 
 test('keys at an empty prompt: letters only, never a slash command; a word that starts with a card key and v goes back whole', async ($, on) => {

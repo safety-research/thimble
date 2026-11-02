@@ -25,6 +25,9 @@
 //                             OK, where Claude Code takes thimble's allow
 //   checkKey($, key, until)   g while that line shows: the person's OK for this session, and the check it is about
 //                             starts again (hooks/keys.ts)
+//   checksRun($)              whether a check can start now, as Claude Code's answers this session show: not while a
+//                             refusal for the session stands (`unreviewed`, `mode`), unless the person gave the OK its
+//                             line offers; x is offered only while it holds
 //   allowsCheck($, e, o, v)   whether thimble answers allow to Claude Code's verdict `v` on a spawn (tool.check,
 //                             marks/register.ts): a checker's spawn of thimble's own, once the person gave that OK,
 //                             where Claude Code itself would ask, never where a rule, a hook, a setting or another
@@ -53,7 +56,9 @@
 // marks wait, not checked (`deferred`, a dim ? after each), opening one checks it, and one line says why (cannotStart):
 // once a session for each cause while the replies' own checks run into it, and each time a check the person asked for
 // (opening a citation, x) cannot start. A line that offers the person's OK says it at each check it stops, until they
-// give it: that OK is what lets the checks run.
+// give it: that OK is what lets the checks run. While Claude Code's refusal stands for the session (no verdict, don't
+// ask mode; until a check starts), x would start a check it refuses the same way, so x is not offered, and a failed
+// citation opened says that line again in its place, until the person gave the OK it offers (checksRun).
 //
 // Claude Code decides the fork's spawn as it decides a call of Claude's (Claude Code 2.1.307). In auto mode it lets a
 // plugin's own call run without auto mode's classifier, unless the person's settings give the classifier rules of
@@ -74,8 +79,8 @@
 // that one mark ended (repairTellText): who started it, the person (x) or thimble (auto).
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent),
-// checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about); the marks themselves are
-// in store.ts
+// checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about), checksRefusing (the line
+// of a refusal that stands for the session); the marks themselves are in store.ts
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -335,17 +340,21 @@ export type Line = { text: string; notice: boolean; kind: Refusal['kind']; offer
 /** Whether a line shown offers the person's OK (g). */
 const offersOk = (text: string | undefined) => !!text?.endsWith(OFFER)
 
+/** What the person can do where the OK cannot start thimble's checks: leave the mode that refused them. */
+const outside = (mode: string) => `Outside ${mode}, thimble can check them.`
+
 /** The line a check of citations that could not start gives (Claude Code's refusal, `deny`): what refused it. Where
  *  auto mode's classifier gave no verdict, or don't ask mode refused it, the key that lets thimble start its checks,
  *  until the person gave that OK (`allowed`), and where Claude Code takes thimble's allow: not in auto mode in a remote
- *  Cowork session (`cowork`). There, and after the OK, the line says what refused the check and offers nothing that
- *  could not work. A refusal by a mode is the person's mode at work, not thimble's failure, so its line is a notice. */
+ *  Cowork session (`cowork`). There, and after the OK, the line says what refused the check and that thimble checks
+ *  outside that mode, and offers no key that could not work. A refusal by a mode is the person's mode at work, not
+ *  thimble's failure, so its line is a notice. */
 export function cannotStart(deny: string | undefined, o: { allowed?: boolean; cowork?: boolean } = {}): Line {
   const r = refusalOf(deny)
-  if (r.kind === 'unreviewed') return !o.allowed && !o.cowork ? { kind: r.kind, notice: true, offers: true, text: UNREVIEWED_LINE } : { kind: r.kind, notice: true, text: UNREVIEWED }
+  if (r.kind === 'unreviewed') return !o.allowed && !o.cowork ? { kind: r.kind, notice: true, offers: true, text: UNREVIEWED_LINE } : { kind: r.kind, notice: true, text: `${UNREVIEWED} ${outside('auto mode')}` }
   if (r.kind === 'mode') {
     const said = `Claude Code's ${r.mode} refused thimble's check of citations.`
-    return !o.allowed ? { kind: r.kind, notice: true, offers: true, text: `${said} ${OFFER}` } : { kind: r.kind, notice: true, text: said }
+    return !o.allowed ? { kind: r.kind, notice: true, offers: true, text: `${said} ${OFFER}` } : { kind: r.kind, notice: true, text: `${said} ${outside(r.mode!)}` }
   }
   if (r.kind === 'unavailable') return { kind: r.kind, notice: true, text: `Auto mode's classifier was unavailable for thimble's check of citations${r.reason ? ` (${r.reason})` : ''}, so Claude Code refused it. Open a citation to check it.` }
   if (r.kind === 'judged') return { kind: r.kind, notice: true, text: `Auto mode's classifier refused thimble's check of citations (${reasonOf(r.reason)}), so they are not checked.` }
@@ -357,6 +366,7 @@ const START = 'marks:start'
 const REFUSED = { plugin: 'thimble', key: 'checksRefused' } as const
 const ALLOWED = { plugin: 'thimble', key: 'checksAllowed' } as const
 const HELD = { plugin: 'thimble', key: 'checksHeld' } as const
+const REFUSING = { plugin: 'thimble', key: 'checksRefusing' } as const
 
 /** A check the line that offers g is about, which g starts again: a reply's (its marks that still wait) or a repair's
  *  (x). */
@@ -392,9 +402,35 @@ async function remoteCowork($: Engine): Promise<boolean> {
 }
 
 /** The line Claude Code's refusal `deny` of a check gives now: with the person's OK as it stands, and where Claude Code
- *  takes thimble's allow. */
-async function lineOf($: Engine, deny: string | undefined): Promise<Line> {
-  return cannotStart(deny, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
+ *  takes thimble's allow. A refusal that stands for the session (`unreviewed`, `mode`) is kept, with its line, until a
+ *  check starts (checksRun). */
+async function refusedLine($: Engine, deny: string | undefined): Promise<Line> {
+  const line = cannotStart(deny, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
+  if (line.kind === 'unreviewed' || line.kind === 'mode') await $.state.set(REFUSING, line as never)
+  return line
+}
+
+/** A check started: the line of one that could not start goes, and a refusal kept for the session no longer stands. */
+async function checkStarted($: Engine): Promise<void> {
+  await failCleared($, START)
+  if ((await $.state.get(REFUSING)).value) await $.state.set(REFUSING, null)
+}
+
+/** Whether a check of thimble's can start now, as Claude Code's answers this session show: not while a refusal that
+ *  stands for the session stands (refusedLine), unless the person gave since the OK its line offered (g). The tray and
+ *  the Claims pane offer x only while it holds; where it does not, the line says why and what to do. */
+export async function checksRun($: Engine): Promise<boolean> {
+  const line = ((await $.state.get(REFUSING)).value ?? null) as Line | null
+  return !line || (!!line.offers && (await checksAllowed($)))
+}
+
+/** A failed citation opened while x cannot check it (checksRun): the line of the refusal that stands, again, which says
+ *  why and what to do; where it offers g, g starts that citation's repair. */
+async function sayRefusing($: Engine, row: string, n: number): Promise<void> {
+  const line = ((await $.state.get(REFUSING)).value ?? null) as Line | null
+  if (!line) return
+  const r = line.offers ? await repairOf($, row, n) : null
+  await sayCannotStart($, line, true, r && typeof r !== 'string' ? { kind: 'repair', repair: r } : undefined)
 }
 
 /** The words the forks of thimble's checks show as in /tasks, by which allowsCheck knows a checker's spawn: a reply's
@@ -509,10 +545,10 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
       // what refused this share refuses the next ones too: they wait with it, and no more forks are asked for
       const rest: Check = { ...whole, marks: shares.slice(k).flat().map(m => m.n) }
       await notChecked($, rest, now)
-      await sayCannotStart($, await lineOf($, fork.deny), false, { kind: 'check', whole: rest, reply })
+      await sayCannotStart($, await refusedLine($, fork.deny), false, { kind: 'check', whole: rest, reply })
       break
     }
-    await failCleared($, START)
+    await checkStarted($)
     const agentId = fork.agentId
     const spawnedAt = Number(await $.clock.now())
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...c, agentId, spawnedAt } }))
@@ -599,11 +635,11 @@ async function startAgain($: Engine, a: Again, hold: RepairHold): Promise<void> 
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...a.whole, marks, agentId, spawnedAt: now } }))
     started.push(agentId)
   }
-  if (started.length) await failCleared($, START)
+  if (started.length) await checkStarted($)
   // what Claude Code refused waits as it did, and the line says why
   const refused = forks.flatMap((f, k) => (f.agentId ? [] : a.shares[k]!.marks))
   const deny = forks.find(f => !f.agentId)?.deny
-  if (refused.length) await sayCannotStart($, await lineOf($, deny), true, { kind: 'check', whole: { ...a.whole, marks: refused }, reply: a.reply, ...(a.note ? { note: a.note } : {}) })
+  if (refused.length) await sayCannotStart($, await refusedLine($, deny), true, { kind: 'check', whole: { ...a.whole, marks: refused }, reply: a.reply, ...(a.note ? { note: a.note } : {}) })
   if (started.length) await showRunning($, a.whole.key, a.whole.marks.length - refused.length, started)
 }
 
@@ -690,11 +726,11 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     if (hold.cancelled) return ''
     if (!fork.agentId) {
       // a mode refused it: its line, as any check the person asked for says it, which g answers for this repair
-      const line = await lineOf($, fork.deny)
+      const line = await refusedLine($, fork.deny)
       if (line.kind !== 'other') { await sayCannotStart($, line, true, { kind: 'repair', repair: r }); return '' }
       return `The repair did not start (${reasonOf(fork.deny || 'no reason given')}). Press x on the citation to try again.`
     }
-    await failCleared($, START)
+    await checkStarted($)
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
     // the mark is checked again: its earlier result goes, its place and words stay
@@ -718,11 +754,13 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
 
 /** A citation opened (tray.ts openMark) whose reply waits to be checked until one is opened (Citations `auto cite`, or words the person asked about with c): its check,
  *  one fork for it alone, as a reply's check is made. Call it inside the hook of the press or key that opened it (the
- *  spawn is its first call). Nothing for a citation that is checked, or whose check runs. */
+ *  spawn is its first call). Nothing for a citation that is checked, or whose check runs; for a failed one that x cannot
+ *  check now (checksRun), the line of the refusal that stands (sayRefusing). */
 export async function checkOpened($: Engine, row: string, n: number): Promise<void> {
   const key = await replyKeyOf($, row)
   const r = key ? await replyOf($, key) : null
   const m = r?.items.find(x => x.n === n)
+  if (key && m?.status === 'failed' && !(await checksRun($))) return await sayRefusing($, row, n)
   if (!key || !r || !m || m.status !== 'deferred' || choiceOf('citations') === 'off' || starting.has(`${key}:${n}`)) return
   const id = `${key}:${n}`
   starting.add(id)
@@ -736,13 +774,13 @@ export async function checkOpened($: Engine, row: string, n: number): Promise<vo
     const prompt = `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${note}`
     const fork = await spawnFork($, { kind: 'checker', prompt, description: OPENED_DESCRIPTION })
     if (!fork.agentId) {
-      const line = await lineOf($, fork.deny)
+      const line = await refusedLine($, fork.deny)
       const at = Number(await $.clock.now())
       const whole: Check = { agentId: '', key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: at, spawnedAt: at, ...(r.thread ? { thread: r.thread.agentId } : {}) }
       await sayCannotStart($, line.kind !== 'other' ? line : { notice: false, text: `The check of citation ${n} could not start (${reasonOf(fork.deny || 'no reason given')}). Open it again to try again.` }, true, { kind: 'check', whole, reply, note })
       return
     }
-    await failCleared($, START)
+    await checkStarted($)
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
     await editReply($, key, rep => ({ ...rep, settledAt: null, items: rep.items.map(x => (x.n === n ? { ...x, status: 'checking' as MarkStatus } : x)) }))
