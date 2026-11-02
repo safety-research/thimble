@@ -63,7 +63,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | the guidance: context beside the first prompt of every conversation | `plugin/guidance/` |
 | the texts the model reads, and their registry | `plugin/prompts/` |
 | marks: find `[words](#)` in a reply, draw them, run the checker fork and the validator, the evidence pane | `plugin/marks/` |
-| cards: the `card` tool, the runner that runs the cards' views (`runner.mjs`) and the command that starts it in the sandbox (`argv.mjs`), drawing, a card's keys | `plugin/cards/` |
+| cards: the `card` tool, the ready kinds thimble draws from a call's data (`kinds.js`, read by `ready.ts`), the runner that runs the cards' views (`runner.mjs`) and the command that starts it in the sandbox (`argv.mjs`), drawing, a card's keys | `plugin/cards/` |
 | the sandbox the card runner runs in, shared with the browser workbench: Anthropic's sandbox runtime (srt) pinned (`package.json`, `package-lock.json`), the launcher that runs one command in it (`run.mjs`, `bwrap.sh`), and `setup.mjs`, which installs srt in `~/.thimble/srt` and says whether it works | `plugin/sandbox/` |
 | `v`: the designer fork that draws a card of the last answer | `plugin/designer/` |
 | the observer: one look at each answer, a fork of the conversation, for the explainers, important details and claims (the claims on demand, f in their pane, unless Claims is auto); its lenses | `plugin/observer/` |
