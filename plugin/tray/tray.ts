@@ -28,7 +28,8 @@
 //               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
 //               for one whose check did not run, its check; the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
-//               card too (this module's ui.press hook, so the fork starts inside a hook)
+//               card too (this module's ui.press hook, so the fork starts inside a hook). Not while Claude Code's
+//               refusal of thimble's checks stands (marks/checker.ts checksRun): the failure line says why instead
 //   0 close     back to the mark under it, or close
 //   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
 //               are, in their look
@@ -78,7 +79,7 @@ import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, pendingGloss, pendingSpans, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
-import { checkOpened, launchRepair, repairOf } from '../marks/checker'
+import { checkOpened, checksRun, launchRepair, repairOf } from '../marks/checker'
 import { highlighted, statusEls } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
@@ -168,7 +169,7 @@ export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
   if (cutNow?.ref === frameKey(f)) out.push('+')
   if (f.kind === 'citation' && (!ask || ['h', 'x'].some(k => ask.includes(k)))) {
     if (await innerOf($, f)) out.push('h')
-    if (canRepair(await itemOf($, f.row, f.n))) out.push('x')
+    if (await repairsNow($, await itemOf($, f.row, f.n))) out.push('x')
   } else if (f.kind === 'explain' || f.kind === 'heads') out.push('2', '3', '4', '5', '6', '7', '8', '9')
   return out
 }
@@ -561,10 +562,16 @@ async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Pro
 /** The Button keys of `x repair`: in the citation's card, and in the bar (bar.tsx draws an item as `bar-<id>`). */
 const REPAIR_KEYS = new Set(['repair', 'bar-tray-x'])
 
+/** Whether x repairs this citation now (tray.mjs canRepair): Claude Code's answers to thimble's checks (marks/checker.ts
+ *  checksRun) are read for a failed one only, since a key's hook has a few milliseconds of its own time. */
+async function repairsNow($: Engine, m: MarkItem | null): Promise<boolean> {
+  return canRepair(m, m?.status === 'failed' && (await checksRun($)))
+}
+
 /** x, or a click on `x repair`, on the citation the tray shows: a check of it again in the background
  *  (marks/checker.ts). The repair starts inside the hook that calls this; `hold` waits out a key's word window. */
 async function repair($: Engine, f: Frame, hold: { until: number; cancelled: boolean }): Promise<boolean> {
-  if (f.kind !== 'citation') return false
+  if (f.kind !== 'citation' || !(await repairsNow($, await itemOf($, f.row, f.n)))) return false
   const r = await repairOf($, f.row, f.n)
   if (r === null) return false
   const why = typeof r === 'string' ? r : await launchRepair($, r, hold)
@@ -606,7 +613,7 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   if (key === '+' && cutNow?.ref === frameKey(f)) return { later: () => showAll($, f, true) }
   if (f.kind === 'citation') {
     // only the keys that act on the citation read it: a key's hook has a few milliseconds of its own time
-    if (key === 'x' && canRepair(await itemOf($, f.row, f.n))) {
+    if (key === 'x' && (await repairsNow($, await itemOf($, f.row, f.n)))) {
       const r = await repairOf($, f.row, f.n)
       if (r === null) return null
       if (typeof r === 'string') return { later: async () => failNotice($, r, 'tray:repair') }
@@ -807,15 +814,15 @@ type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit; g
 /** A citation's card under its header (the status is in the header): what it says over its evidence (`top`), then its
  *  evidence in parts (Block), each under its label. A corrected one says what it was (`was 15 of 40`; a rewritten
  *  sentence or a narrowed citation says which, as the header says only corrected or repaired); a failed one why in one
- *  sentence; after a repair (x) that verified it as written, why; all dim, and under it `x repair` (repairRow). For a
- *  value code computed: the code under `code · 7 lines`, in Claude Code's colors for Python (unitEls), around the line
- *  that printed the value (tray.mjs printedAt; from its start when the code does not show which line printed it), a
- *  blank row, then under `output · 62 lines` the printed output around the line that holds it in the ruled block;
- *  printed output that is a table shows as its header over the cited row, under `output · table`. For a file: its
- *  place (`place`, a click opens the side pane), then its lines around the cited one in the ruled block. For a card's
- *  value: the card, then the header over the cited row, or its printed lines around the cited one. The cited words
- *  stand on the citations' purple tint. */
-function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null): { top: Unit[]; blocks: Block[] } {
+ *  sentence; after a repair (x) that verified it as written, why; all dim, and under it `x repair` (repairRow) while a
+ *  check can start (`runs`, marks/checker.ts checksRun). For a value code computed: the code under `code · 7 lines`,
+ *  in Claude Code's colors for Python (unitEls), around the line that printed the value (tray.mjs printedAt; from its
+ *  start when the code does not show which line printed it), a blank row, then under `output · 62 lines` the printed
+ *  output around the line that holds it in the ruled block; printed output that is a table shows as its header over
+ *  the cited row, under `output · table`. For a file: its place (`place`, a click opens the side pane), then its lines
+ *  around the cited one in the ruled block. For a card's value: the card, then the header over the cited row, or its
+ *  printed lines around the cited one. The cited words stand on the citations' purple tint. */
+function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null, runs: boolean): { top: Unit[]; blocks: Block[] } {
   const { Text } = els
   if (!m) return { top: [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }], blocks: [] }
   const ev = printableEvidence(m.evidence)
@@ -832,7 +839,7 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
   // a check that did not run: x starts it
   const unrun = m.status === 'failed' && m.failedBy === 'none'
-  if (canRepair(m)) top.push(repairRow(els, m))
+  if (canRepair(m, runs)) top.push(repairRow(els, m))
   if (!ev) {
     if (m.status !== 'checking' && !unrun) dim('none', 'The check gave no evidence for it.')
     return { top, blocks: [] }
@@ -1053,7 +1060,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
     await themeNow($)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
-    parts = citationParts(els, m, inner, await fileLinkEl($, els, f, m))
+    parts = citationParts(els, m, inner, await fileLinkEl($, els, f, m), m?.status === 'failed' && (await checksRun($)))
   } else if (f.kind === 'place') {
     title = f.id
     units = await placeBody($, els, f, inner)

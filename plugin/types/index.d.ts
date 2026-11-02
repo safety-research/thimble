@@ -26,6 +26,10 @@ declare module 'claude-code' {
       /** the check the line that offers g is about, which g starts again: { kind: 'check', whole, reply, note? } or
        *  { kind: 'repair', repair } (marks/checker.ts Held) */
       checksHeld: unknown
+      /** the line of Claude Code's last refusal of a check that stands for the session (auto mode's classifier gave no
+       *  verdict, don't ask mode), until a check starts: { text, notice, kind, offers? }; x is not offered while it
+       *  stands, unless the person gave the OK it offers (marks/checker.ts checksRun) */
+      checksRefusing: { text: string; notice: boolean; kind: string; offers?: boolean } | null
 
       // ---- cards (cards/)
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,

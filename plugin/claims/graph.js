@@ -495,7 +495,8 @@ function layOf(claims, groups, edges, W, h, cols) {
 const statusOf = s => (s?.status === 'gone' ? { key: 'gone', sign: '', word: 'no longer in the session', tone: 'dim' } : checkStatus(s))
 const statusWords = st => (st.sign && st.sign !== 'spin' ? `${st.sign} ${st.word}` : st.word)
 
-/** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair). */
+/** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair); the pane
+ *  offers x only while a check can start too (marks/checker.ts checksRun). */
 export const repairable = s => !!s && s.status === 'failed' && !!s.row && !!s.n
 
 /** Whether x checks a citation for the first time: it waits to be opened (`deferred`). */

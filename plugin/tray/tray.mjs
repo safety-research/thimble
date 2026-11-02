@@ -207,8 +207,9 @@ export function aboutOf(f, info = {}) {
   return `the explainer of ${q(cut(plain(g.term), 80))}`
 }
 
-/** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run). */
-export const canRepair = m => !!m && m.status === 'failed'
+/** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run), and a check can
+ *  start now (`runs`, marks/checker.ts checksRun; where Claude Code refuses it, the failure line says why in its place). */
+export const canRepair = (m, runs) => !!m && m.status === 'failed' && runs === true
 
 // a citation's check by its status: the sign the reply draws after the citation's words in that status (marks/view.ts
 // withLooks: the turning glyph, `spin`, while it is checked, × failed, ? not checked yet; a checked one has none there,
