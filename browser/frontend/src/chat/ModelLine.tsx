@@ -24,8 +24,8 @@ export const AGENT_EFFORTS: readonly OrientEffort[] = ['low', 'medium', 'high', 
  * (config.LEGACY_EFFORTS); nothing as nothing. Pure. */
 export const agentEffort = (e: string | null | undefined): string | null => (e === 'ultracode' ? 'xhigh' : e ?? null)
 
-/** Main's effort when neither the line nor the analyst's settings chose one: the launcher's `--effort` then
- * (cc_settings.MAIN_DEFAULT_EFFORT). */
+/** Main's effort when its session names none: the launcher's `--effort` for a session it started where the analyst's
+ * settings name none (cc_settings.MAIN_DEFAULT_EFFORT). */
 export const MAIN_DEFAULT_EFFORT: MainEffort = 'high'
 
 /** The orientation's effort while Settings are not read yet (config.ORIENT_DEFAULT_EFFORT). */
@@ -61,7 +61,8 @@ const isChoice = (e: unknown): e is MainEffort => typeof e === 'string' && (EFFO
 
 /**
  * Main's effort as its line shows it: the line's choice for this session; else Ultracode while the settings turn it on
- * and replies run at xhigh; else the level main's replies ran at; else the analyst's choice; else the default. Pure.
+ * and replies run at xhigh; else the level main's replies ran at; else the one main runs at by the analyst's Claude
+ * Code settings (settings_effort); else the default. Pure.
  */
 export function mainEffort(a: Attached | null | undefined): MainEffort {
   if (isChoice(a?.effort_choice)) return a.effort_choice

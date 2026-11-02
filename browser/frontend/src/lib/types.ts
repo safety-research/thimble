@@ -2100,7 +2100,8 @@ export interface Attached {
   effort_choice?: MainEffort
   /** the model the composer's menu chose for main's next turn (events.model_route) */
   model_choice?: string
-  /** the effort the analyst's own Claude Code settings choose (cc_settings.analyst_effort), where main's effort menu opens */
+  /** the effort main runs at while the composer chose none: the analyst's own Claude Code settings' for main's model,
+   * else Claude Code's default for it (cc_settings.session_effort); where main's effort menu opens */
   settings_effort?: MainEffort
   /** whether the session's last reply ran in fast mode, as the mirror read it */
   fast?: boolean
