@@ -8,7 +8,8 @@
 // A TMPDIR. Claude writes the files it makes for thimble (a card's rows) in the session's temp folder, and the texts
 // call it `$TMPDIR`. The session's commands get thimble's own (core/home.ts tempDir: `thimble/` in the person's
 // TMPDIR, else the home's tmp/), so `$TMPDIR` in a command is the folder the texts name, and no such file lands in a
-// folder other users can read.
+// folder other users can read; a command in Claude Code's Bash sandbox gets Claude Code's own (below), where the card
+// tool and thimble's commands find its files too (core/home.ts claudeTempDir, engine/kernel/store.py temp_folders).
 //
 // Claude Code's own temp folder stays where it started. Claude Code keeps it, `claude-<uid>/`, in CLAUDE_CODE_TMPDIR,
 // else in /tmp on macOS and in TMPDIR elsewhere, and looks it up again for each command: a command in its Bash sandbox
