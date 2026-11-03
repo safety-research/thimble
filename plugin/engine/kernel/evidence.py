@@ -57,6 +57,15 @@ shows the words, so a mark is never verified on evidence the checker made up:
             a diagram's 6 edges, cites the things it counts, two or more, and their number stands for it, as the number
             of rows of their table stands for a total beside it (counted). The person sees the card's title and the
             table around the cell, the cell tinted.
+            A card that keeps its versions, as a label's card does (the browser's label versions, the terminal's
+            labels), is given as each of its versions, with when that version was made (`version`, `from`, `made`,
+            `after`; `to` when the host saw the card stop showing it before a next version was made). It is read as it
+            was when the cited words were written (`at`): its places name the version made
+            last by then, and `card:<id>@v<n>#…` an earlier one; a version made after the words is no evidence of them,
+            since they could not have read it. The places of one citation must have shown their values at one time:
+            one version, or versions shown together, and beside a card given as it is now only a version still shown
+            now (_apart). The host keeps the versions where no card's code, agent or kernel writes them, so a change of
+            the label's files after a version was made leaves that version as it was.
 
 Printed output that is a table (a printed DataFrame, aligned columns) is also read as one (text_table): computed
 evidence and a card's printed line carry `table`, the header and the rows around the one that holds the words, so
@@ -88,13 +97,14 @@ evidence in every case, whatever call or place the reply pointed at. A mark the 
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, fails as a check that did not run (`failedBy` `none`), which x in the tray starts again. A checker's note on the rest of the sentence stays beside the mark.
 
-  check_all(marks, answer, calls, cwd, root, tmp, cards, rules)  -> {parsed, results}: every mark of a reply
-  check_mark(mark, item, calls, cwd, root, tmp, cards, rules)    -> {n, status, shown, reason, failedBy?, evidence?,
-                                                                     note?, was?, narrowed?, rewrite?}
-  card_index(cards)                                              -> the cards' places and values, one per line,
+  check_all(marks, answer, calls, cwd, root, tmp, cards, rules, at)  -> {parsed, results}: every mark of a reply
+  check_mark(mark, item, calls, cwd, root, tmp, cards, rules, at)    -> {n, status, shown, reason, failedBy?,
+                                                                         evidence?, note?, was?, narrowed?, rewrite?}
+  card_index(cards, at)                                          -> the cards' places and values, one per line,
                                                                      for the checker
   terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
                                                                      rows.json) as `cards`
+  terminal_label_cards(folder)                                   -> the terminal's labels' kept versions as `cards`
   uncitable(files, cwd, root, tmp, rules)                        -> those of the files no evidence may cite: outside
                                                                      every folder a cited file may lie in
   error_words(text, cwd, root, also)                             -> an error's text, each path of this machine in it
@@ -1378,14 +1388,30 @@ def file_named(path: str, folders: list[str]) -> str | None:
     return None
 
 
+# what a check may write around a path it cites, which is no part of it: white space, quotes, backticks, angle brackets
+WRAPPERS = " \t\r\n`'\"‘’“”«»„<>"
+
+
+def cited_file(file: Any) -> str:
+    """The path a cited file names, as the check meant it: without the white space, quotes, backticks or angle brackets
+    it stood in, JSON's `\\/` read as `/`, and an editor's link to a file (`vscode://file/x`) read as its path."""
+    s = str(file or "").replace("\\/", "/").strip(WRAPPERS)
+    link = EDITOR_LINK.match(s)
+    return s[link.end():] if link else s
+
+
 def missing(file: str, cwd: str, root: str | None, also: list[str], calls: list[dict[str, Any]] = ()) -> str:
-    """Why a cited file that names no file thimble reads gives no evidence. A path only a shell or a URL reads (`~/`,
-    `$HOME/`, `file:`) is read where it leads, to name the file: a file there is not read, as such a path never was,
-    and is named from its folder; one outside every folder a cited file may lie in is named not at all. Any other path
-    names a file that is not there."""
+    """Why a cited file that names no file thimble reads gives no evidence. A path written in a form thimble does not read
+    (in quotes, backticks or angle brackets, with JSON's escapes, as an editor's link, or as only a shell or a URL reads
+    it: `~/`, `$HOME/`, `file:`) is read where it leads (cited_file, written_path), to name the file: a file there is
+    not read, as such a path never was, and is named from its folder; one outside every folder a cited file may lie in
+    is named not at all, and a URL of a server not at all. Any other path names a file that is not there."""
     folders = [f for f in (root, cwd, *also) if f]
-    if SHELL_FORM.match(str(file).strip()):
-        full = written_path(str(file), root or cwd)
+    plain = cited_file(file)
+    if URL_START.match(plain) and plain[:5].lower() != "file:":
+        return UNREAD.format("a file")
+    if plain != str(file) or SHELL_FORM.match(plain):
+        full = written_path(plain, root or cwd)
         if full is None:
             return UNREAD.format("a file")
         if not inside(full, folders):
@@ -1403,14 +1429,22 @@ def missing(file: str, cwd: str, root: str | None, also: list[str], calls: list[
 # file is (written_path), and named as a reason names one (error_words). The terminal's notices name them alike
 # (core/text.js errorWords); plugin/tests/error_paths.json holds the cases both answer.
 
-# a path in an error's text: one quoted whole, which may hold spaces and colons, else one in a run of the characters a
-# path holds, not a URL, starting where the run does or right after a colon in it (`failed:/x`, `notes.md:3:/x`) and
-# ending at the next colon (`/x/run.py:12:5`, `/a/b:/c/d`), a `file:` URL's own aside
-QUOTED_PATH = re.compile(r"""(['"`])((?:file:|~[A-Za-z0-9_.-]*/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/|\.\.?/|/)[^'"`\n]*?)\1""", re.I)
-PATH_RUN = re.compile(r"""[^\s'"`()\[\]<>,;]+""")
+# a path in an error's text: one quoted whole (in straight or typographic quotes, backticks), which may hold spaces and
+# colons, else one in a run of the characters a path holds, not a URL, starting where the run does, right after a flag
+# that names a folder (`-I/x`), or right after a colon, `=`, `|`, `&`, a brace or an escaped line break in it
+# (`failed:/x`, `--settings=/x`, `{/x}`, `error\n/x`), and ending at the next of those (`/x/run.py:12:5`, `/a/b:/c/d`), a
+# `file:` URL's own colon aside. A link an editor opens (`vscode://file/x`) names a path too; `\/`, JSON's escape of
+# `/`, reads as `/`
+PATH_QUOTES = "'\"`‘’“”«»„"
+QUOTED_PATH = re.compile(rf"""([{PATH_QUOTES}])((?:file:|~[A-Za-z0-9_.-]*/|\$\{{?[A-Za-z_][A-Za-z0-9_]*\}}?/|\.\.?/|/)[^{PATH_QUOTES}\n]*?)[{PATH_QUOTES}]""", re.I)
+INVISIBLE = "\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff"  # zero-width and direction marks
+PATH_RUN = re.compile(rf"""[^\s{PATH_QUOTES}()\[\]<>,;{INVISIBLE}]+""")
 PATH_START = re.compile(r"file:|~[A-Za-z0-9_.-]*/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/|\.\.?/|/", re.I)
+PATH_STOP = re.compile(r"[:=|&]|(?<!\$)\{|\\[ntr]")  # where a path in a run ends, and the next may start
+FOLDER_FLAG = re.compile(r"-[IL](?=[/~$.]|file:)")  # a compiler's folder flag right before its path (`-I/x`)
 URL_START = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 URL_SCHEME = re.compile(r"(?:^|:)(?!file:$)[A-Za-z][A-Za-z0-9+.-]*:$", re.I)  # a URL's scheme just before its `//`
+EDITOR_LINK = re.compile(r"(?i)[A-Za-z][A-Za-z0-9+.-]*://file(?=/)")  # vscode://file/x, cursor://file/x
 
 
 def error_words(text: str, cwd: str, root: str | None = None, also: list[str] = ()) -> str:
@@ -1426,24 +1460,29 @@ def error_words(text: str, cwd: str, root: str | None = None, also: list[str] = 
             name = file_named(full, folders) if full else None
         except (OSError, ValueError):
             full, name = None, None
+        if full and not name and full.rstrip("/") == os.path.expanduser("~").rstrip("/"):
+            return "~"  # the home folder itself, whose own name is the person's
         return name or os.path.basename((full or path).rstrip("/")) or path
 
     def run(m: re.Match[str]) -> str:
         t = m.group(0)
+        if (link := EDITOR_LINK.match(t)):
+            return named(t[link.end():])
         if URL_START.match(t) and t[:5].lower() != "file:":
             return t
         out, done = [], 0
-        for at in [0] + [i + 1 for i, ch in enumerate(t) if ch == ":"]:
+        flag = FOLDER_FLAG.match(t)
+        for at in [flag.end() if flag else 0] + [x.end() for x in PATH_STOP.finditer(t)]:
             if at < done or not PATH_START.match(t, at) or (t.startswith("//", at) and URL_SCHEME.search(t, 0, at)):
                 continue
-            end = t.find(":", at + (5 if t[at:at + 5].lower() == "file:" else 0))
-            path = t[at:len(t) if end < 0 else end].rstrip(".!?")
+            stop = PATH_STOP.search(t, at + (5 if t[at:at + 5].lower() == "file:" else 0))
+            path = t[at:stop.start() if stop else len(t)].rstrip(".!?")
             if re.search(r"/[^/]", path):
                 out += [t[done:at], named(path)]
                 done = at + len(path)
         return "".join(out) + t[done:]
 
-    text = QUOTED_PATH.sub(lambda m: m.group(1) + named(m.group(2)) + m.group(1), str(text))
+    text = QUOTED_PATH.sub(lambda m: m.group(0)[0] + named(m.group(2)) + m.group(0)[-1], str(text).replace("\\/", "/"))
     return PATH_RUN.sub(run, text)
 
 
@@ -1494,7 +1533,10 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     lines cited as two)."""
     span = line_span(line)
     if not span:
-        return [f"the check cited lines {line}, which are not one line or a range of at most {MAX_RANGE} lines"], None, []
+        # its words only when they are numbers: a check may write a path where the line goes
+        said = str(line).strip() if re.fullmatch(r"[\sLl\d,–-]+", str(line)) else ""
+        return [f"the check cited lines {said}, which are not one line or a range of at most {MAX_RANGE} lines" if said
+                else "the check named no line number of the file"], None, []
     a, b = span
     near = read_lines(path, max(1, a - SHIFT_MAX), b + SHIFT_MAX, partial=True)
     if near is None or near[0] + len(near[1]) - 1 < b:
@@ -1691,10 +1733,12 @@ def text_table(output: str, spans: list[list[int]]) -> dict[str, Any] | None:
 
 
 LABEL_ESCAPE = frozenset('%/|#[]*_~`\\<>&')
-CARD_TD = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)#([^/]+)/(.+)$")
-CARD_LINE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)@out(\d+)#L(\d+)$")
+# a place of a card: a cell, `card:<id>#<col>/<row>`, or a line of its printed output, `card:<id>@out<i>#L<n>`; a place
+# of one version of a card that keeps its versions (a label's card) has `@v<n>` after the id (group 2)
+CARD_TD = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:@v(\d{1,9}))?#([^/]+)/(.+)$")
+CARD_LINE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:@v(\d{1,9}))?@out(\d+)#L(\d+)$")
 # lines of a card's printed output cited as a range: `card:<id>@out<i>#L<a>-L<b>` (or `-<b>`)
-CARD_LINES = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)@out(\d+)#L(\d+)-L?(\d+)$")
+CARD_LINES = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)(?:@v(\d{1,9}))?@out(\d+)#L(\d+)-L?(\d+)$")
 
 
 def encode_label(label: str) -> str:
@@ -1727,30 +1771,126 @@ def _grid(o: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]], dict[tupl
     return cols, rows, where
 
 
-def card_places(cards: list[dict[str, Any]] | None) -> list[tuple[str, str]]:
-    """Every place of the cards a citation can name, with what it shows: (`card:<id>#<col>/<row>`, the value) for each
-    table cell, (`card:<id>@out<i>#L<n>`, the line) for each line of printed output."""
-    out: list[tuple[str, str]] = []
-    for card in cards or []:
-        cid = str(card.get("id") or "")
-        for o in card.get("outputs") or []:
-            for col, row, value in o.get("cells") or []:
-                if str(col).strip() and str(row).strip():
-                    out.append((f"card:{cid}#{encode_label(str(col))}/{encode_label(str(row))}", str(value)))
-            for n, text in o.get("lines") or []:
-                if str(text).strip():
-                    out.append((f"card:{cid}@out{int(o.get('out') or 0)}#L{int(n)}", str(text)))
+def _when(card: dict[str, Any]) -> float | None:
+    """When the version a card's entry shows was made (seconds since the epoch, `from`): a card that keeps its versions,
+    as a label's card does, gives each of them so (the browser's label versions, the terminal's labels); None for a card
+    given only as it is now."""
+    v = card.get("from")
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not isinstance(card.get("version"), int):
+        return None
+    return float(v)
+
+
+def _version_of(card: dict[str, Any]) -> int | None:
+    v = card.get("version")
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def _timeline(cid: str, cards: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """The versions of card `cid` that keeps its versions, oldest first, one per version number."""
+    seen: set[int] = set()
+    out = []
+    for c in sorted((c for c in cards or [] if isinstance(c, dict) and str(c.get("id")) == cid and _when(c) is not None),
+                    key=lambda c: (_when(c), _version_of(c))):
+        if _version_of(c) not in seen:
+            seen.add(_version_of(c))
+            out.append(c)
     return out
 
 
-def card_index(cards: list[dict[str, Any]] | None) -> str:
+def _card_entry(cid: str, version: int | None, cards: list[dict[str, Any]] | None, at: float | None) -> tuple[str, dict[str, Any] | None]:
+    """The entry of card `cid` a citation names, or why there is none. A card that keeps its versions (each entry with
+    its `version` and when it was made, `from`) is cited as it was when the cited words were written (`at`, seconds
+    since the epoch; None: now): its plain place names the version made last by then, and `@v<n>` names version n,
+    which must have been made by then too. A version made later is no evidence of words written before it: they could
+    not have read it. The entry carries `span`, from when to when it was shown (the next version's making; None while it
+    is the newest). A card given only as it is now is its one entry, and `@v<n>` names it only when that is the version
+    it gives."""
+    same = [c for c in cards or [] if isinstance(c, dict) and str(c.get("id")) == cid]
+    if not same:
+        return f"there is no card {cid} in this session", None
+    timed = _timeline(cid, cards)
+    if not timed:
+        card = same[0]
+        if version is None or _version_of(card) == version:
+            return "", card
+        return f"the card has no version {version}", None
+    if version is None:
+        then = [c for c in timed if at is None or _when(c) <= at]
+        if not then:
+            return "the card has no version from before these words were written", None
+        hit = then[-1]
+    else:
+        hit = next((c for c in timed if _version_of(c) == version), None)
+        if hit is None:
+            return f"the card has no version {version}", None
+        if at is not None and _when(hit) > at:
+            return f"the card's version {version} was made after these words were written", None
+    i = timed.index(hit)
+    # shown until the next version was made, or until the host says the card stopped showing it (`to`), whichever came
+    # first
+    ends = [_when(timed[i + 1]) if i + 1 < len(timed) else None, _when({**hit, "from": hit.get("to")})]
+    ends = [x for x in ends if x is not None]
+    return "", {**hit, "span": (_when(hit), min(ends) if ends else None)}
+
+
+def _listed(cards: list[dict[str, Any]] | None, at: float | None) -> list[tuple[dict[str, Any], str, str]]:
+    """The cards as the checker's index lists them, each (entry, the id its places are cited by, its heading's note): a
+    card given as it is now by its id; one that keeps its versions as it was when the cited words were written (`at`)
+    by its id, then each version before that one, the newest first, by `<id>@v<n>`, each with what made it and what
+    changed after it. A card whose versions were all made later is left out."""
+    out: list[tuple[dict[str, Any], str, str]] = []
+    done: set[str] = set()
+    for card in cards or []:
+        cid = str(card.get("id") or "") if isinstance(card, dict) else ""
+        if not cid or cid in done:
+            continue
+        done.add(cid)
+        timed = _timeline(cid, cards)
+        if not timed:
+            out.append((card, cid, ""))
+            continue
+        then = [c for c in timed if at is None or _when(c) <= at]
+        if not then:
+            continue
+
+        def note(c: dict[str, Any], what: str) -> str:
+            made, after = norm_ws(c.get("made") or ""), norm_ws(c.get("after") or "")
+            return "; ".join(x for x in (what, f"made by: {made}" if made else "", f"it changed after: {after}" if after else "") if x)
+
+        now = then[-1]
+        # the label as it was then: a plain heading while it is the label's one version and nothing changed after it
+        out.append((now, cid, note(now, "as it was when the cited words were written") if len(then) > 1 or now.get("after") else ""))
+        for c in reversed(then[:-1]):
+            out.append((c, f"{cid}@v{_version_of(c)}", note(c, "an earlier version")))
+    return out
+
+
+def card_places(cards: list[dict[str, Any]] | None, at: float | None = None) -> list[tuple[str, str]]:
+    """Every place of the cards a citation can name, with what it shows: (`card:<id>#<col>/<row>`, the value) for each
+    table cell, (`card:<id>@out<i>#L<n>`, the line) for each line of printed output; of a card that keeps its versions,
+    the places of each version made by `at` (_listed)."""
+    out: list[tuple[str, str]] = []
+    for card, ref_id, _ in _listed(cards, at):
+        for o in card.get("outputs") or []:
+            for col, row, value in o.get("cells") or []:
+                if str(col).strip() and str(row).strip():
+                    out.append((f"card:{ref_id}#{encode_label(str(col))}/{encode_label(str(row))}", str(value)))
+            for n, text in o.get("lines") or []:
+                if str(text).strip():
+                    out.append((f"card:{ref_id}@out{int(o.get('out') or 0)}#L{int(n)}", str(text)))
+    return out
+
+
+def card_index(cards: list[dict[str, Any]] | None, at: float | None = None) -> str:
     """What the checker greps for a value a card shows: a heading line for each card (`# card:<id> <title>`), then one
-    line for each place, its citation, a tab, and what it shows."""
+    line for each place, its citation, a tab, and what it shows. A card that keeps its versions is listed as it was
+    when the cited words were written (`at`), and its earlier versions after it (_listed), each heading saying so."""
     lines: list[str] = []
     n = 0
-    for card in cards or []:
-        lines.append(f"# card:{card.get('id')} {norm_ws(card.get('title') or '')}".rstrip())
-        for ref, value in card_places([card]):
+    for card, ref_id, note in _listed(cards, at):
+        lines.append(f"# card:{ref_id} {norm_ws(card.get('title') or '')}".rstrip() + (f" ({note})" if note else ""))
+        for ref, value in card_places([{**card, "id": ref_id, "from": None}]):
             if n >= CARD_PLACES_MAX:
                 break
             lines.append(f"{ref}\t{norm_ws(value)}")
@@ -1805,6 +1945,42 @@ def terminal_cards(folder: str | None) -> list[dict[str, Any]]:
     return out
 
 
+LABEL_CARD = "label-"  # the id of a terminal label's card: this, then the name of its file (labels.py slug)
+
+
+def terminal_label_cards(folder: str | None) -> list[dict[str, Any]]:
+    """The terminal's labels (labels.py: <labels>/<name>.json) as cards that keep their versions, `card:label-<name>`:
+    each version of its counts the label kept (`versions`: the table of what `thimble label NAME` counts, with when it
+    was made and what made it), so a citation of a label's counts is checked against the label as it was when the cited
+    words were written (check_card). A label that kept no versions, as one made before thimble kept them, gives none."""
+    out: list[dict[str, Any]] = []
+    if not folder or not os.path.isdir(folder):
+        return out
+    for name in sorted(os.listdir(folder)):
+        stem = name[:-5] if name.endswith(".json") else ""
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", stem):
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as f:
+                lab = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(lab, dict) or not lab.get("name") or not isinstance(lab.get("versions"), list):
+            continue
+        kept = []
+        for v in lab["versions"]:
+            try:
+                cells = [[str(col), str(row[0]), str(row[1][j])] for row in v["rows"] for j, col in enumerate(v["cols"])]
+                kept.append({"version": int(v["v"]), "from": float(v["at"]), "made": str(v.get("made") or ""), "cells": cells})
+            except (KeyError, TypeError, ValueError, IndexError):
+                continue
+        for i, v in enumerate(kept):
+            out.append({"id": f"{LABEL_CARD}{stem}", "title": f"label {lab['name']}", "version": v["version"],
+                        "from": v["from"], "made": v["made"], "after": kept[-1]["made"] if i + 1 < len(kept) else "",
+                        "outputs": [{"out": 0, "corner": "value", "cells": v["cells"]}]})
+    return out
+
+
 def card_refs(ev: Any) -> list[str]:
     """The places card evidence names: one `ref`, or several when the cited words hold several values (a range such as
     "2.5 to 3.7 hours", a pair such as "243 against 104") or count things a card shows (the 2 edges of "2 of the 6
@@ -1816,54 +1992,86 @@ def card_refs(ev: Any) -> list[str]:
         for x in got if isinstance(got, list) else [got]:
             ref = str(x or "").strip().strip("[]") if isinstance(x, str) else ""
             m = CARD_LINES.match(ref)
-            if m and int(m.group(3)) <= int(m.group(4)) <= int(m.group(3)) + MAX_RANGE:
-                lines = [f"card:{m.group(1)}@out{m.group(2)}#L{n}" for n in range(int(m.group(3)), int(m.group(4)) + 1)]
+            if m and int(m.group(4)) <= int(m.group(5)) <= int(m.group(4)) + MAX_RANGE:
+                head = f"card:{m.group(1)}" + (f"@v{m.group(2)}" if m.group(2) else "")
+                lines = [f"{head}@out{m.group(3)}#L{n}" for n in range(int(m.group(4)), int(m.group(5)) + 1)]
                 out += [line for line in lines if line not in out]
             elif ref and ref not in out:
                 out.append(ref)
     return out
 
 
-def _card_place(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, dict[str, Any] | None]:
+def _card_place(ref: str, cards: list[dict[str, Any]] | None, at: float | None = None) -> tuple[str, dict[str, Any] | None]:
     """One place of a card: why it is no place of the session's cards, or what it is: {cid, title, ref, value, text,
-    where, out}, with the cell's grid (`cols`, `rows`, `r`, `c`, `corner`) or the output's numbered `lines` and `at`."""
+    where, out}, with the cell's grid (`cols`, `rows`, `r`, `c`, `corner`) or the output's numbered `lines` and `i`. A
+    card that keeps its versions is read as it was when the cited words were written, `at` (_card_entry): the place
+    carries the version it names (`version`), when that version was shown (`span`), what made it and what changed
+    after it (`made`, `after`)."""
     td, ln = CARD_TD.match(ref), CARD_LINE.match(ref)
     if not td and not ln:
         return "the check named no value or line of a card", None
-    cid = (td or ln).group(1)
-    card = next((c for c in cards or [] if str(c.get("id")) == cid), None)
+    cid, v = (td or ln).group(1), (td or ln).group(2)
+    why, card = _card_entry(cid, int(v) if v else None, cards, at)
     if card is None:
-        return f"there is no card {cid} in this session", None
+        return why, None
     title = str(card.get("title") or "")
+    head = f"card:{cid}" + (f"@v{int(v)}" if v else "")
+    kept: dict[str, Any] = {}
+    if card.get("span"):
+        kept = {"version": _version_of(card), "span": card["span"], "made": norm_ws(card.get("made") or ""),
+                "after": norm_ws(card.get("after") or "")}
     if td:
-        col, row = decode_label(td.group(2)), decode_label(td.group(3))
+        col, row = decode_label(td.group(3)), decode_label(td.group(4))
         for i, o in enumerate(card.get("outputs") or []):
             cols, rows, where = _grid(o)
             if (col, row) not in where:
                 continue
             r, c = where[(col, row)]
             value = rows[r]["values"][c]
-            return "", {"cid": cid, "title": title, "ref": f"card:{cid}#{encode_label(col)}/{encode_label(row)}", "value": value,
+            return "", {"cid": cid, "title": title, "ref": f"{head}#{encode_label(col)}/{encode_label(row)}", "value": value,
                         "text": f"{row} {value}", "where": f"the card's {col} for {row}", "out": ("cells", i), "col": col, "row": row,
-                        "cols": cols, "rows": rows, "r": r, "c": c, "corner": str(o.get("corner") or "")}
+                        "cols": cols, "rows": rows, "r": r, "c": c, "corner": str(o.get("corner") or ""), **kept}
         return f"the card has no {col} for {row}", None
-    out_i, n = int(ln.group(2)), int(ln.group(3))
+    out_i, n = int(ln.group(3)), int(ln.group(4))
     o = next((x for x in card.get("outputs") or [] if int(x.get("out") or 0) == out_i and x.get("lines")), None)
     lines = [(int(k), str(t)) for k, t in (o or {}).get("lines") or []]
-    at = next((j for j, (k, _) in enumerate(lines) if k == n), None)
-    if at is None:
+    i = next((j for j, (k, _) in enumerate(lines) if k == n), None)
+    if i is None:
         return f"the card's output has no line {n}", None
-    line = lines[at][1]
-    return "", {"cid": cid, "title": title, "ref": f"card:{cid}@out{out_i}#L{n}", "value": line, "text": line,
-                "where": f"line {n} of the card's output", "out": ("lines", out_i), "n": n, "lines": lines, "at": at}
+    line = lines[i][1]
+    return "", {"cid": cid, "title": title, "ref": f"{head}@out{out_i}#L{n}", "value": line, "text": line,
+                "where": f"line {n} of the card's output", "out": ("lines", out_i), "n": n, "lines": lines, "i": i, **kept}
+
+
+def _apart(places: list[dict[str, Any]]) -> str:
+    """Why the places one citation cites never showed their values at one time, or '': each version of a card that
+    keeps its versions showed its values from its making until the next version's (`span`), and a card given only as it
+    is now shows them now. So the places of one version stand together; those of several versions stand together only
+    when the versions were shown at one time, and beside a card as it is now only when they are still shown now. Words
+    that join a trial's count and a later run's total, true of no version, are no claim of the data."""
+    spans = {(p["cid"], p.get("version")): p["span"] for p in places if p.get("span")}
+    if not spans:
+        return ""
+    ends = [b for _, b in spans.values() if b is not None]
+    lo, hi = max(a for a, _ in spans.values()), min(ends) if ends else None
+    if len(spans) > 1 and hi is not None and lo >= hi:
+        if len({cid for cid, _ in spans}) == 1:
+            return f"the check cited places of {len(spans)} versions of the card, and no version shows them together"
+        return "the cited cards never showed these values at one time"
+    if hi is not None and any(not p.get("span") for p in places):
+        return "the check cited a version of a card that changed after it, beside a card as it is now"
+    return ""
 
 
 def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     """The evidence to show of the places of one card output: a cell's table with each cited cell marked, or the
     output's lines with what shows the words highlighted on each cited line, else the whole line, a thing the words
-    count (as a table when the output is one)."""
+    count (as a table when the output is one). A version of a card that keeps its versions says which one it is, when it
+    was made and what changed after it (`version`, `at`, `made`, `after`)."""
     p = ps[0]
     shown: dict[str, Any] = {"kind": "card", "card": p["cid"], "title": p["title"], "ref": p["ref"], "value": p["value"]}
+    if p.get("span"):
+        shown.update(version=p["version"], at=p["span"][0], **{k: p[k] for k in ("made", "after") if p.get(k)})
     if len(ps) > 1:
         shown["refs"] = [x["ref"] for x in ps]
     if p["out"][0] == "cells":
@@ -1873,8 +2081,8 @@ def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     text = "\n".join(t for _, t in lines)
     spans: list[list[int]] = []
     for x in ps:
-        start = sum(len(t) + 1 for _, t in lines[:x["at"]])
-        line = lines[x["at"]][1]
+        start = sum(len(t) + 1 for _, t in lines[:x["i"]])
+        line = lines[x["i"]][1]
         # each cited line highlights what of the words it shows (one value of a range on its own line), else all of it,
         # as a thing the words count (an edge of a diagram)
         spans += [[start + a, start + b] for a, b in spans_of(target, line)] or [[start, start + len(line)]]
@@ -1927,25 +2135,30 @@ def counted(target: str, places: list[dict[str, Any]], approx: bool = False) -> 
     return out
 
 
-def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "",
+               at: float | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of card evidence, and the evidence to show: each cited place must be one of the session's cards,
     and together they show the words (a cell's value, with its row's name; a line of printed output). Words that hold
     several values (a range, a pair) may cite a place for each: each value must stand in one of them. A count of what a
-    card shows cites the things it counts, whose number stands for it (counted)."""
+    card shows cites the things it counts, whose number stands for it (counted). A card that keeps its versions is read
+    as it was when the words were written (`at`, _card_entry), and the cited places must have shown their values at
+    one time (_apart)."""
     refs = card_refs(ev)
     if not refs:
         return ["the check named no value or line of a card"], None
     places: list[dict[str, Any]] = []
     for ref in refs:
-        why, p = _card_place(ref, cards)
+        why, p = _card_place(ref, cards, at)
         if p is None:
             return [why], None
         places.append(p)
-    groups: dict[tuple[str, Any], list[dict[str, Any]]] = {}
+    groups: dict[tuple[str, Any, Any], list[dict[str, Any]]] = {}
     for p in places:
-        groups.setdefault((p["cid"], p["out"]), []).append(p)
+        groups.setdefault((p["cid"], p.get("version"), p["out"]), []).append(p)
     shown_all = [_card_shown(target, g) for g in groups.values()]
     shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
+    if apart := _apart(places):
+        return [apart], shown
     values, texts = [p["value"] for p in places], [p["text"] for p in places]
     said = "\n".join(texts + counted(target, places, approx))
     one = places[0]
@@ -1988,11 +2201,11 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | list[str] | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | list[str] | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show. For a correction, `target` is its
-    new words and `was` the marked words."""
+    new words and `was` the marked words; `at` is when the words were written (check_card)."""
     if kind == "card":
-        return check_card(target, ev, cards, approx, was)
+        return check_card(target, ev, cards, approx, was, at)
     if kind == "computed":
         return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was, root or cwd)
     if kind in ("quote", "code"):
@@ -2220,7 +2433,7 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     return None
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
     rewrite?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real Bash
     calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
@@ -2264,7 +2477,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         res = {**out, "status": "failed", "reason": why, "failedBy": by, **extra}
         if ev:
             _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp, cards=cards,
-                                         rules=rules)
+                                         rules=rules, at=at)
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
                 res["evidence"] = evidence
         return res
@@ -2330,7 +2543,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if not new and quoted_around(str(mark.get("sentence") or ""), words):
         # a quote whose marks stand around the citation (`"[I've been locked out]."`) is a direct quote too
         target = f'"{target}"'
-    problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards, rules)
+    problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards, rules, at)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
@@ -2377,11 +2590,12 @@ def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> lis
     return out
 
 
-def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
+def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None, at: float | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
     folders (one, or a list); `cards` the session's cards' outputs (check_card); `rules` the folder where the host keeps
-    its labels' rules, when it keeps them apart from the temp folders (the browser's labels' definitions). A mark the
-    validator fails on fails as a check that did not run, with why; the other marks are judged."""
+    its labels' rules, when it keeps them apart from the temp folders (the browser's labels' definitions); `at` when the
+    marks' words were written (seconds since the epoch), the time a card that keeps its versions is read at (None: now).
+    A mark the validator fails on fails as a check that did not run, with why; the other marks are judged."""
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}
@@ -2393,7 +2607,7 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
     results = []
     for m in marks:
         try:
-            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules))
+            results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules, at))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             said = error_words(str(e), cwd, root, also_of("code", tmp, rules))
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),

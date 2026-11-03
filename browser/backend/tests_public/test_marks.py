@@ -653,7 +653,7 @@ def test_a_total_of_a_card_s_lines_fails_in_plain_words_and_its_repair_can_verif
 
 def _label_card(takeaway: str) -> str:
     """A made-up prompt label, what the person asked for, over 72 messages, 33 of which ask to investigate the agents, and
-    its card with `takeaway`; the card's id."""
+    its card with `takeaway`; the card's id. Its run's end keeps its version, as a run's end does (label_versions)."""
     from app import concepts, notebook
 
     ws = config.workspace_dir(CORPUS)
@@ -664,6 +664,7 @@ def _label_card(takeaway: str) -> str:
     rows = [{"ref": f"messages.jsonl#L{n}", "label": "investigate the agents" if n <= 33 else "other", "confidence": 0.9,
              "source": "prompt", "ts": "t"} for n in range(1, 73)]
     lf.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    concepts._record_application(ws, k["id"], {"status": "done", "total": 72, "limit": None, "version": k["version"]})
     nb = notebook.create_notebook(ws, "Board", role="exploration")
     cell = notebook.new_cell("label", "main", "What did the people ask for?", nb["id"], payload={"concept": k["id"]})
     cell.update(takeaway=takeaway)
@@ -1259,99 +1260,3 @@ def test_b19_an_error_the_check_quotes_names_no_path_of_this_machine(_fresh, mon
     assert _fresh[-1][1] == ("notice: thimble could not check the citations (PermissionError: [Errno 13] Permission denied: "
                              "'agents/agent-01.jsonl'), so some are not checked."), _fresh
     assert all(str(tmp_path) not in t and str(corpus) not in t for _, t in _fresh), _fresh
-
-
-def _label_tried(name: str, description: str, trial_rows: int, yes: int) -> tuple[str, str]:
-    """A made-up prompt label of board posts, run as a trial on its first `trial_rows` posts, `yes` of them yes, an hour
-    before now, and its card: (the label's id, the card's id)."""
-    from datetime import datetime, timedelta, timezone
-
-    from app import concepts, notebook
-
-    ws = config.workspace_dir(CORPUS)
-    k = concepts.define_concept(CORPUS, name, description, unit="record", labels=["yes", "no"], created_by="main", trial=True)
-    _label_rows(k["id"], trial_rows, yes)
-    concepts._record_application(ws, k["id"], {"status": "done", "total": trial_rows, "limit": trial_rows, "version": k["version"]})
-    k = concepts.read_concept(ws, k["id"])
-    hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(timespec="seconds")
-    k["changes"] = [{**e, "ts": hour_ago} for e in k["changes"]]
-    concepts.write_concept(ws, k)
-    nb = notebook.create_notebook(ws, name, role="exploration")
-    cell = notebook.new_cell("label", "main", name, nb["id"], payload={"concept": k["id"]})
-    nb["cells"].append(cell)
-    notebook.write_notebook(ws, nb)
-    return k["id"], cell["id"]
-
-
-def _label_rows(concept_id: str, n: int, yes: int) -> None:
-    from app import concepts
-
-    lf = concepts.labels_file(config.workspace_dir(CORPUS), concept_id)
-    lf.parent.mkdir(parents=True, exist_ok=True)
-    lf.write_text("".join(json.dumps({"ref": f"board.jsonl#L{i}", "label": "yes" if i <= yes else "no", "confidence": 0.9,
-                                      "source": "prompt", "ts": "t"}) + "\n" for i in range(1, n + 1)), encoding="utf-8")
-
-
-def test_b19_a_trial_citation_that_fails_after_a_redefinition_and_a_full_run_says_the_label_changed_after_the_reply(_fresh, monkeypatch):
-    """B19: main cited counts of a label's trial; after its reply the analyst redefined the label and ran it on every
-    post, which replaced the trial, and the check could not confirm the trial's count on the label card. The failure's
-    reason ends with what changed in the label after the reply, in the words of the card's stale tag (its change log),
-    which main hears with the check's own words, and so does the repair thimble starts at once, which re-cites the count
-    against the label as it is now. A citation of that card the check verified stays verified, and a failure of another
-    label's card, which did not change after the reply, keeps the check's words alone."""
-    from app import concepts
-
-    ws = config.workspace_dir(CORPUS)
-    kid, cid = _label_tried("asks for a review", "a post that asks for a review", 4, 3)
-    _, other = _label_tried("mentions a test", "a post that mentions a test", 4, 2)
-    yes, total, tests = f"card:{cid}#records/yes", f"card:{cid}#records/all", [f"card:{other}#records/yes", f"card:{other}#records/all"]
-    _main_at(monkeypatch, "cut-1")
-    seen: list[str] = []
-    found, wrong = "The label card shows 5 posts for yes now, not 3.", "The card shows 2 posts that mention a test, not 3."
-
-    async def fork(c, main, cut, prompt):
-        seen.append(prompt)
-        if "pressed x to repair citation 1." in prompt:
-            out = [{"mark": 1, "kind": "card", "evidence": {"ref": [yes, total]}, "status": "corrected",
-                    "correction": {"words": "5 of the 8"}, "reason": "the card shows 5 of its 8 posts as yes"}]
-            return {"answer": _answer(out), "calls": [], "error": None}
-        if "pressed x to repair citation 3." in prompt:
-            out = [{"mark": 3, "kind": "card", "evidence": {"ref": tests}, "status": "corrected",
-                    "correction": {"words": "2 of the 4"}, "reason": "the card shows 2 of its 4 posts"}]
-            return {"answer": _answer(out), "calls": [], "error": None}
-        # while the check runs, the analyst redefines the first label and runs it on all 8 posts, in a later second than
-        # the reply's end (the change log keeps whole seconds, and a change in the reply's own second may precede it)
-        await asyncio.sleep(1.1)
-        concepts.define_concept(CORPUS, "asks for a review", "a post that asks someone to review a pull request",
-                                unit="record", labels=["yes", "no"], created_by="user")
-        _label_rows(kid, 8, 5)
-        concepts._record_application(ws, kid, {"status": "done", "total": 8, "limit": None, "version": 2})
-        out = [{"mark": 1, "kind": "card", "evidence": {"ref": yes}, "status": "unconfirmed", "correction": None, "reason": found},
-               {"mark": 2, "kind": "card", "evidence": {"ref": total}, "status": "verified", "correction": None,
-                "reason": "the card shows the trial's 4 posts"},
-               {"mark": 3, "kind": "card", "evidence": {"ref": tests[0]}, "status": "wrong", "correction": None, "reason": wrong}]
-        return {"answer": _answer(out), "calls": [], "error": None}
-
-    turn = marks.new_turn()
-    reply = "In the trial, [3 of the 4](#) posts ask for a review, of the [4](#) it read, and [3 of the 4](#) mention a test."
-
-    async def go():
-        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
-        await marks.start_check(CORPUS, main, turn, [reply], "cut-1", fork=fork)
-        await _wait_all()
-
-    asyncio.run(go())
-    assert [e["text"] for e in concepts.read_concept(ws, kid)["changes"]] == ["run over 4 records", "redefined", "run over 8 records"]
-    changed = f"{found} The label changed after this reply (redefined; run over 8 records)."
-    first = [r["items"] for r in _log() if r["type"] == "marks" and r["turn"] == turn and r["items"][0]["status"] == "failed"][0]
-    assert [(m["status"], m.get("failedBy"), m["reason"]) for m in first] == [
-        ("failed", "evidence", changed), ("verified", None, "The card shows the trial's 4 posts."), ("failed", "check", wrong)], first
-    said = [t for _, t in _fresh if not t.startswith("notice")]
-    assert f'"3 of the 4" is flagged as not confirmed (the check: "{changed}")' in said[0], said
-    assert f'"3 of the 4" is flagged as wrong (the check: "{wrong}")' in said[0], said
-    (repair,) = [p for p in seen if "pressed x to repair citation 1." in p]
-    assert f'The first check could not confirm it: "{changed}"' in repair, repair
-    got = marks.stored(CORPUS, turn)["items"]
-    assert (got[0]["status"], got[0]["shown"], got[0]["was"]) == ("corrected", "5 of the 8", "3 of the 4"), got[0]
-    assert got[1]["status"] == "verified", got[1]
-    assert (got[2]["status"], got[2]["shown"]) == ("corrected", "2 of the 4"), got[2]

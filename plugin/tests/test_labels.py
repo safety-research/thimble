@@ -451,3 +451,48 @@ def test_the_folders_labels_of_thimble_0_10_stay_on_disk_and_only_the_conversati
     (own / "mine.json").write_text(json.dumps({**lab, "name": "mine", "sessions": ["conv-own"]}))
     assert in_conversation(root, "conv-new2", "label", "--json").stdout.strip() == "[]"
     assert [x["name"] for x in json.loads(in_conversation(root, "conv-own", "label", "--json").stdout)] == ["mine"]
+
+
+def test_a_label_keeps_a_version_of_its_counts_after_each_change_and_a_citation_reads_them_as_they_were(root: Path):
+    """B19: what `thimble label NAME` counts is kept as a version after each change once no record waits for the model:
+    a trial, the run on every record, the person's check, a new definition (which keeps the versions before it). The
+    citation check reads a label's counts as they were when the cited words were written (validate.py `at`), so the
+    trial's counts hold against the trial after the full run, and the full run's against the full run."""
+    from kernel.evidence import terminal_label_cards
+
+    st = Store(root)
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog", "--limit", "4", "--seed", "3")
+    trial = LB.load(st, "sorry")["versions"][-1]
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    full = LB.load(st, "sorry")["versions"][-1]
+    run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")
+    vs = LB.load(st, "sorry")["versions"]
+    assert [v["made"] for v in vs] == ["a trial over 4 records", "run over 6 records", "run over 6 records; the analyst checked 1"]
+    assert full["rows"] == [["yes", ["2"]], ["no", ["4"]], ["all", ["6"]]] and vs[-1]["rows"][0] == ["yes", ["3"]]
+    # the same counts again keep no version
+    run(root, "label", "sorry", "--check", "chat/room.jsonl#L1", "yes")
+    assert len(LB.load(st, "sorry")["versions"]) == 3
+    # a new definition keeps the versions before it
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry")
+    vs = LB.load(st, "sorry")["versions"]
+    assert len(vs) == 4 and vs[-1]["made"].startswith("redefined; run over 6 records"), vs[-1]
+    # a prompt label keeps none while its records wait, and one once the model read them all
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    assert LB.load(st, "apology")["versions"] == []
+    refs = [u["ref"] for u in json.loads(run(root, "label", "apology", "--waiting").stdout)["units"]]
+    run(root, "label", "apology", "--answers", "-", "--json", stdin=json.dumps({"values": {refs[0]: {"value": "yes"}}}))
+    assert LB.load(st, "apology")["versions"] == []
+    run(root, "label", "apology", "--answers", "-", "--json", stdin=json.dumps({"values": {r: {"value": "no"} for r in refs[1:]}}))
+    assert [v["rows"] for v in LB.load(st, "apology")["versions"]] == [[["yes", ["1"]], ["no", ["5"]], ["all", ["6"]]]]
+    # the check reads the label as it was when the words were written
+    cards = terminal_label_cards(str(st.dir / "labels"))
+    assert {c["id"] for c in cards} == {"label-sorry", "label-apology"}
+    yes, n = trial["rows"][0][1][0], trial["rows"][-1][1][0]
+    words = {"n": 1, "words": f"{yes} of the {n}", "sentence": f"In the trial, [{yes} of the {n}] messages apologize."}
+    answer = "```json\n" + json.dumps([{"mark": 1, "kind": "card", "status": "verified", "reason": "the label counts it",
+                                        "evidence": {"ref": ["card:label-sorry#records/yes", "card:label-sorry#records/all"]}}]) + "\n```"
+    req = {"marks": [words], "answer": answer, "calls": [], "cwd": str(root), "labels_dir": str(st.dir / "labels")}
+    validate = Path(__file__).resolve().parents[1] / "engine" / "validate.py"
+    for at, status in ((trial["at"] + 0.001, "verified"), (vs[-1]["at"] + 1, "failed")):
+        got = subprocess.run([sys.executable, str(validate)], input=json.dumps({**req, "at": at}), capture_output=True, text=True, check=True)
+        assert json.loads(got.stdout)["results"][0]["status"] == status, (at, got.stdout)

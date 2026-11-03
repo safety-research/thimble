@@ -15,7 +15,9 @@
 //              computed output does, its chip naming the line as the citation's chip does (lib/refs cardPartLabel),
 //              a click on which shows the line in the card's output. The card is read when the label opens: when it
 //              changed after the check (the card check rewrote it, say), the label shows it as it is now, or says the
-//              place is gone and shows what the check read.
+//              place is gone and shows what the check read. A label's card the check read as the label was when the
+//              cited words were written, or an earlier version of it, shows as it was then, under what changed in the
+//              label after it (plugin/tray/tray.mjs versionNote).
 //
 // Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked, under `output ·
 // table`. The lines wrap; a long one shows only the words around its highlighted ones, cut at words (lineWindow). The
@@ -58,7 +60,7 @@ import { CITED, citedLines, type At, type Grid } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { workspaceFromUrl } from '../lib/workspace'
 import { printIndex } from '../../../../plugin/tray/printed.mjs'
-import { cutWords, evidenceLine, partLabel, placeLabel, TABLE_LABEL } from '../../../../plugin/tray/tray.mjs'
+import { cutWords, evidenceLine, partLabel, placeLabel, TABLE_LABEL, versionNote } from '../../../../plugin/tray/tray.mjs'
 import { canRepair, failedWhy, LOOK_WORD, lookOf, wasLine, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
@@ -459,12 +461,15 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
   const card = ev.card ?? (parseRef(ref) as { cellId?: string } | null)?.cellId ?? ''
   const name = useRefLabel(`card:${card}`)
   const copy = !!own || ev.output != null
+  // a label's version the check read (the label as it was when the cited words were written, or an earlier one): its
+  // copy is the evidence, whatever the card shows now, under what changed in the label after it
+  const kept = copy && ev.version != null
   // the check's copy while the card is read, and after when the card still shows the same; else the card now
   // (a card that could not be read leaves the copy as it is, with no note)
-  const checked = copy && (got.state === 'loading' || got.state === 'failed' || got.state === 'gone' || sameAsChecked(own, ev.output, ev.highlight, got))
+  const checked = kept || (copy && (got.state === 'loading' || got.state === 'failed' || got.state === 'gone' || sameAsChecked(own, ev.output, ev.highlight, got)))
   // a line of the output that reads otherwise now is no longer the place the check read: its copy shows
   const reread = copy && !checked && got.state === 'lines'
-  const changed = reread || (copy && got.state === 'gone') ? CHANGED_READ : copy && !checked ? CHANGED_NOW : ''
+  const changed = kept ? versionNote(ev) : reread || (copy && got.state === 'gone') ? CHANGED_READ : copy && !checked ? CHANGED_NOW : ''
   const title = now || ev.title || name || 'card'
   const at = parseRef(ref)
   const head = (at?.kind === 'cell' && at.out != null && at.line != null && cardPartLabel(at, title, home === at.cellId)) || title

@@ -982,11 +982,19 @@ async def _main_loop(sp: Space) -> None:
         main.emit({"type": "user", "message": {"role": "user", "content": text}, "origin": {"kind": "task-notification"}})
         sp.said_line(text)
         try:
+            # each label as main can read it in this turn is a version, which a citation of it is checked against
+            await asyncio.to_thread(_keep_label_versions, sp.c)
             await _run(main, text)
         except asyncio.CancelledError:
             sp.read()
             raise
         main.emit({"type": "system", "subtype": "turn_duration", "durationMs": int((time.monotonic() - t0) * 1000)})
+
+
+def _keep_label_versions(c: str) -> None:
+    from . import label_versions  # noqa: PLC0415
+
+    label_versions.keep_first(c)
 
 
 async def abort_main(c: str) -> bool:

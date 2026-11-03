@@ -33,7 +33,7 @@ import { accent, themeLast, themeNow } from '../core/theme'
 import { rowsAt, treeRows } from '../core/trail.mjs'
 import { explaining, explainTerm, glossFor, sessionGlosses } from '../explain/seam'
 import { markColors } from '../explain/place.mjs'
-import { cardLabel, checkStatus, evidenceLine, partLabel, placeLabel, printableEvidence, TABLE_LABEL, wasLine } from '../tray/tray.mjs'
+import { cardLabel, checkStatus, evidenceLine, partLabel, placeLabel, printableEvidence, TABLE_LABEL, versionNote, wasLine } from '../tray/tray.mjs'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
@@ -160,8 +160,10 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
   const label = (key: string, words: string) => Text({ key, dimColor: true, wrap: 'wrap', children: words })
   if (ev.kind === 'card') {
+    const note = versionNote(ev)
     return [
       label('ct', cardLabel(ev.title || ev.card)),
+      ...(note ? [label('cn', note)] : []),
       Box({ key: 'cv', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output ?? ev.value, ev.highlight ?? []) }),
       // the places of another card or output that the words' other values stand in
       ...(ev.more ?? []).flatMap((p: Evidence, k: number) => [Text({ key: `mg${k}`, children: ' ' }), ...evidenceRows(els, p, width).map((x: Any, j: number) => Box({ key: `m${k}-${j}`, flexDirection: 'column', children: [x] }))]),

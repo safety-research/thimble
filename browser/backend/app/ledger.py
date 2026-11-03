@@ -674,9 +674,12 @@ async def reset_workspace(c: str, idle: bool = False) -> dict[str, bool]:
                                      f"{'them' if n > 1 else 'it'} first")
     await _stop_sessions(c, "deleted")
     await _end_work(c)
+    # the versions thimble kept of the workspace's labels, in its home, go with them (label_versions)
+    labels = [p.stem for p in (path / "concepts").glob("*.json")] if (path / "concepts").is_dir() else []
     shutil.rmtree(path, ignore_errors=True)
-    from . import runtime_cc  # noqa: PLC0415 — lazy, as in _end_work
+    from . import label_versions, runtime_cc  # noqa: PLC0415 — lazy, as in _end_work
 
+    label_versions.drop(c, labels)
     runtime_cc.drop_workspace_tmp(path)
     return {"ok": True}
 

@@ -615,3 +615,27 @@ test("B19: an error a check's notice quotes names each path of this machine in i
   }
   for (const $ of [one.$, two.$, three.$, four.$]) expect(String((await failLineNow($))?.text)).not.toContain('/made-up')
 })
+
+test("B19: the validator reads the conversation's labels as they were when the reply's words were written, and so does a repair of one of its citations later", async () => {
+  let runs = 0
+  const { $, seen } = engine(() => ({ exitCode: 0, stdout: JSON.stringify(runs++ ? { parsed: true, results: [] } : VALIDATED), stderr: '' }))
+  const env = $.env.get
+  // the folder under analysis, for which this conversation keeps labels (core/env.ts labelsDir)
+  $.env.get = async (k: string) => (k === 'THIMBLE_ROOT' ? '/made-up/data' : env(k))
+  $.fs.stat = async (p: string) => ({ realPath: p })
+  $.fs.exists = async (p: string) => p.startsWith('/made-up/.thimble/conversations/') && p.endsWith('/labels')
+  await noteRow($, 'row-1', REPLY)
+  const wrote = (((await $.state.get({ plugin: 'thimble', key: 'marksRows' })).value ?? []) as Any[])[0].at
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  // the cards' index, then the validation of the fork's answer: both read the labels as of the reply's last words
+  const index = JSON.parse(seen.stdin[0]!)
+  expect(index.labels_dir).toMatch(/^\/made-up\/\.thimble\/conversations\/.+\/folders\/.+\/labels$/)
+  expect(index.at).toBe(wrote / 1000)
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(JSON.parse(seen.stdin[1]!)).toMatchObject({ labels_dir: index.labels_dir, at: wrote / 1000 })
+  // x on the failed citation much later: still the labels as they were then
+  const r = await repairOf($, 'row-1', 3)
+  expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
+  await endCheck($, { agentId: `${FORK}1`, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(JSON.parse(seen.stdin[seen.stdin.length - 1]!)).toMatchObject({ labels_dir: index.labels_dir, at: wrote / 1000 })
+})

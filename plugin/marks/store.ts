@@ -34,8 +34,9 @@ export type Evidence =
   | ({ kind: 'quote' | 'code'; more?: Place[] } & Place)
   /** a value a card shows: its cell (`table`), or a line of its printed output (`output`, `highlight`, and `table` when
    *  that output is a table); `ref` names the place as a card's citation does. Words with several values cite a place
-   *  for each (`refs`); places of another card or output are in `more` */
-  | { kind: 'card'; card: string; title: string; ref: string; value: string; table?: EvidenceTable; output?: string; highlight?: [number, number][]; refs?: string[]; more?: Evidence[] }
+   *  for each (`refs`); places of another card or output are in `more`. A label's counts as they were when the cited
+   *  words were written carry their `version`, when it was made (`at`), what made it and what changed after it */
+  | { kind: 'card'; card: string; title: string; ref: string; value: string; table?: EvidenceTable; output?: string; highlight?: [number, number][]; refs?: string[]; more?: Evidence[]; version?: number; at?: number; made?: string; after?: string }
 /** One mark: its number in the reply, its words, the row and place it stands at, its sentence, and its check. The
  *  person sees two outcomes: verified (`verified`, or `corrected`: the right words in place) and `failed`. `failedBy`
  *  says who failed it, for main alone: the checker (`check`: the claim is false and the check found no right words),
@@ -64,7 +65,7 @@ export type OneRead = { tool: 'Read' | 'Grep'; file: string }
  *  classifier gave no verdict on it). */
 export type Unread = OneRead & { fix: 'ok' | 'ask' | null }
 /** `thread`: the reply is a side thread's answer (threads/thread.ts), by its agent and what it is about. */
-export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[]; thread?: { agentId: string; about: string } }
+export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[]; thread?: { agentId: string; about: string }; wroteAt?: number }
 /** What one row draws: its own marks, and the reply's counts. */
 export type RowMarks = { row: string; last: boolean; items: MarkItem[] } & Counts
 /** A reply's marks by what the person sees: `checking` the marks still checked, `verified` those the check confirmed

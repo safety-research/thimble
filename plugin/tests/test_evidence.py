@@ -1408,6 +1408,31 @@ def test_a_cited_file_inside_the_session_s_folders_is_named_by_its_path_from_its
         assert str(tmp_path) not in r["reason"], r
 
 
+def test_a_cited_path_in_quotes_backticks_brackets_an_editor_s_link_or_with_json_escapes_names_no_path_of_this_machine(tmp_path: Path, monkeypatch):
+    """B19, left from 0.10.8: the check wrote a cited file's path inside backticks, quotes or angle brackets, after a
+    space, with JSON's `\\/`, or as an editor's link (`vscode://file/…`), and the reason named the whole path as "the
+    file that is not there". Such a form is read where it leads to name the file: one in the session's folder by its path
+    from there, one outside it not at all, as for `~/` and `file:`; one a URL names on a server not at all. Which files
+    are read is as before: such a form is not read. A path written where the line number goes is not quoted either."""
+    home, data, log = a_home(tmp_path, monkeypatch)
+    p02 = data / "sessions" / "session-P02.jsonl"
+    wraps = (lambda a: f"`{a}`", lambda a: f"'{a}'", lambda a: f"<{a}>", lambda a: f" {a}", lambda a: f"\t{a}",
+             lambda a: f"“{a}”", lambda a: str(a).replace("/", "\\/"), lambda a: f"vscode://file{a}")
+    for wrap in wraps:
+        for line in (1, f"{p02}:1"):
+            r = check_mark(mark('"tags, not folders"'), quote(wrap(p02), line, "tags, not folders"), [], str(data))
+            assert (r["status"], r["failedBy"], r["reason"]) == ("failed", "evidence", "The check named sessions/session-P02.jsonl in a form thimble does not read."), (wrap(p02), r)
+            r = check_mark(mark('"13 of the 40"'), quote(wrap(log), line, "13 of the 40"), [], str(data))
+            assert (r["status"], r["failedBy"], r["reason"]) == ("failed", "evidence", OUTSIDE), (wrap(log), r)
+    for url in (f"http://localhost{log}", f"http://127.0.0.1:8000{p02}"):
+        r = check_mark(mark('"13 of the 40"'), quote(url, 1, "13 of the 40"), [], str(data))
+        assert (r["status"], r["reason"]) == ("failed", "The check named a file in a form thimble does not read."), (url, r)
+    r = check_mark(mark('"tags, not folders"'), quote("sessions/session-P02.jsonl", f"{p02}:1", "tags, not folders"), [], str(data))
+    assert (r["status"], r["reason"]) == ("failed", "The check named no line number of the file."), r
+    r = check_mark(mark('"tags, not folders"'), quote("sessions/session-P02.jsonl", "1-90", "tags, not folders"), [], str(data))
+    assert r["reason"] == "The check cited lines 1-90, which are not one line or a range of at most 50 lines.", r
+
+
 def test_a_record_s_own_paths_and_the_check_s_own_words_are_quoted_word_for_word(tmp_path: Path, monkeypatch):
     """B19 names a cited file by its path from its folder, and changes nothing else of a reason: a record that holds a
     path of this machine is quoted as it reads, and so is the check's own reason, so a record is never misquoted."""

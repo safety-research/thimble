@@ -37,6 +37,7 @@
 //                                          the label over each part of a citation's evidence, in the tray, the side pane
 //                                          and the workbench's evidence label: `code · 7 lines`, `output · 62 lines`,
 //                                          `changes.log · line 3`, `card · Runs by status`
+//   versionNote(ev)                        what a label's version the check read says when the label changed after it
 //   cutWords(n, where), SHOW_ALL           the marker where a drawing leaves lines out: `⋯ 5 lines above`, `⋯ 1 line
 //                                          below`; the key the tray's header names while the tray leaves lines out
 //                                          (`+ show all`)
@@ -314,7 +315,7 @@ export function printableEvidence(ev) {
   if (!ev || typeof ev !== 'object') return ev
   const p = v => (typeof v === 'string' ? printable(v) : v)
   const out = { ...ev }
-  for (const k of ['code', 'file', 'title', 'card', 'value']) if (typeof ev[k] === 'string') out[k] = printable(ev[k])
+  for (const k of ['code', 'file', 'title', 'card', 'value', 'made', 'after']) if (typeof ev[k] === 'string') out[k] = printable(ev[k])
   if (typeof ev.output === 'string') {
     const o = printable(ev.output, Array.isArray(ev.highlight) ? ev.highlight.filter(h => Array.isArray(h)) : [])
     out.output = o.text
@@ -403,6 +404,15 @@ export const placeLabel = (file, line) => `${file} · ${/\D/.test(String(line)) 
 
 /** The label over a value a card shows: the card, by its title. */
 export const cardLabel = title => `card · ${title}`
+
+/** What a citation's card evidence says when it is a version of a label that changed after it (evidence.py: the check
+ *  read the label as it was when the cited words were written, or an earlier version): what made that version and what
+ *  changed after it, so the person reads the table as the label was then. '' for any other evidence. */
+export function versionNote(ev) {
+  if (!ev || typeof ev.version !== 'number' || typeof ev.after !== 'string' || !ev.after.trim()) return ''
+  const made = typeof ev.made === 'string' && ev.made.trim() ? ` (${ev.made.trim()})` : ''
+  return `The label changed after this version${made}: ${ev.after.trim()}.`
+}
 
 /** The marker where a drawing leaves `n` lines out, `above` or `below` the lines it shows beside them: `⋯ 5 lines
  *  above`, `⋯ 1 line below`. */
