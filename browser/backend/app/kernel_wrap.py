@@ -19,7 +19,7 @@ Both draw the same boundary:
            the Messages API, and on Claude Code sign-in the temp folder Claude Code's sandbox gives main's commands,
            outside the workspace, which the kernel may write too (`write`; bwrap binds it by the descriptor of the
            folder the server checked, `write_fds`, since main's Bash may put a link in its place, and under srt the
-           server checks that the kernel got that folder, notebook._sandbox_problem)
+           server checks that the kernel got that folder before the kernel's Python starts, GATE)
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
@@ -95,6 +95,10 @@ LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), wh
 TRUSTED_DIR = "trusted"
 READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR, TRUSTED_DIR)
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
+# what a wrapped kernel's command runs first, inside its sandbox: a shell that waits for a line on its stdin and only
+# then runs the kernel's Python, so the server checks through /proc what the sandbox shows before any Python code runs
+# there (notebook._open_gate); a stdin that ends with no line runs nothing
+GATE = ("/bin/sh", "-c", 'read -r _ && exec "$@"', "thimble-kernel-gate")
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
 SRT_HELPERS = ("vendor", "seccomp")  # srt's apply-seccomp, which runs inside the sandbox on Linux

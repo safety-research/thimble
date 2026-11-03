@@ -1091,3 +1091,81 @@ def test_a_kernel_start_never_depends_on_removing_what_a_card_left(monkeypatch, 
     monkeypatch.setattr(notebook.nofollow, "rmtree", fails)
     notebook._fresh_home(k)
     assert k.home.is_dir() and not k.home.is_symlink()
+
+
+# code a card leaves in its working folder, named like modules a kernel imports at its start: each writes a file into
+# $TMPDIR when it runs, then gives the start what it imports
+STARTED_SRC = """
+import os, sys
+open(os.path.join(os.environ['TMPDIR'], 'ran-at-the-start-' + __name__ + '.txt'), 'w').close()
+here = os.path.realpath(os.getcwd())
+sys.path[:] = [p for p in sys.path if os.path.realpath(p or '.') != here]
+if __name__ == '__main__':
+    import runpy
+    runpy.run_module('ipykernel_launcher', run_name='__main__', alter_sys=True)
+else:
+    import importlib
+    del sys.modules[__name__]
+    sys.modules[__name__] = importlib.import_module(__name__)
+"""
+PLANT_START_CELL = f"""
+for name in ('ipykernel_launcher', 'altair'):
+    with open(name + '.py', 'w') as f:
+        f.write({STARTED_SRC!r})
+with open('made_up_helper.py', 'w') as f:
+    f.write('VALUE = 42\\n')
+print('planted')
+"""
+STARTED_CELL = """
+import os, sys, json, altair, pandas, made_up_helper
+print(json.dumps({'ran': sorted(n for n in os.listdir(os.environ['TMPDIR']) if n.startswith('ran-at-the-start')),
+                  'installed': ['site-packages' in m.__file__ for m in (altair, pandas)],
+                  'helper': made_up_helper.VALUE, 'last': sys.path[-1]}))
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_no_python_runs_in_a_kernel_s_sandbox_before_the_server_checked_it(wrap, monkeypatch, workspaces_tmp,
+                                                                                data_tmp):
+    """A kernel started as `python -m ipykernel_launcher` in scratch/, which a card's code writes and where each entry
+    of the corpus is linked, and IPython put that folder on sys.path ahead of the installed packages: a file there named
+    ipykernel_launcher.py, altair.py or pandas.py, left by a card or in the corpus, ran in the next kernel's sandbox
+    before the server checked through /proc that the sandbox shows the kernel the folders it made, so a check that then
+    stopped the kernel came after that code had read and written whatever the sandbox showed. Now a wrapped kernel's
+    command waits in a gate until the server has checked the sandbox, and the kernel's Python starts with the working
+    folder off sys.path; it goes at the end of sys.path as the last start line, so a card still imports a module it
+    wrote there."""
+    from app import procs
+
+    if not (LINUX and _wrap_works(wrap)):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    (data_tmp / "mini" / "pandas.py").write_text(STARTED_SRC)  # a corpus file, linked in scratch/
+    temp = config.temp_dir("mini")
+    checked: list = []
+    real = notebook._sandbox_problem
+
+    def looking(pid, *a, **kw):  # what the kernel's TMPDIR holds, and what its process runs, as the check starts
+        checked.append((sorted(n for n in os.listdir(temp) if n.startswith("ran-at-the-start")), procs.argv(pid)[:4]))
+        return real(pid, *a, **kw)
+
+    try:
+        planted = await notebook.run_code("mini", PLANT_START_CELL, "main")
+        assert _said(planted) == ["planted"], planted["outputs"]
+        await notebook.shutdown_all()  # the kernel ends (Restart, idle, a crash); the next card starts a new one
+        for p in temp.glob("ran-at-the-start-*"):
+            p.unlink()
+        monkeypatch.setattr(notebook, "_sandbox_problem", looking)
+        cell = await notebook.run_code("mini", STARTED_CELL, "main")
+    finally:
+        await notebook.shutdown_all()
+    assert [ran for ran, _ in checked] == [[]], checked  # nothing a card or the corpus left ran before the check
+    assert [argv for _, argv in checked] == [list(kernel_wrap.GATE)], checked  # nor any Python: the gate still waited
+    assert json.loads(_text(cell)) == {"ran": [], "installed": [True, True], "helper": 42, "last": ""}, cell["outputs"]
+    assert not list(temp.glob("ran-at-the-start-*"))
+
+
+def test_a_kernel_s_python_starts_with_its_working_folder_off_sys_path_until_its_last_start_line(tmp_path):
+    argv = notebook.kernel_argv(tmp_path / "k.conn.json", tmp_path / "k.json", roots=(str(tmp_path),), workspace=tmp_path)
+    assert argv[:4] == [notebook.PYTHON, "-P", "-m", "ipykernel_launcher"] and "--IPKernelApp.ignore_cwd=True" in argv
+    assert argv[-1] == f"--IPKernelApp.exec_lines={notebook.CWD_LAST}"

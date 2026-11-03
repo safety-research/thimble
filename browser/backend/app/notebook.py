@@ -2088,13 +2088,19 @@ def kernel_argv(connection_file: Path, record: Path, ttl: float | None = None, p
                 roots: tuple[str, ...] | None = None, lease: Path | None = None, workspace: Path | None = None) -> list[str]:
     """The kernel's command line: backend/.venv's python -m ipykernel_launcher on our connection file, rendering config,
     the watchdog, with `roots` the cell-reads audit hook, and with `workspace` the `thimble` module (kernel_thimble.py).
-    `lease` makes the watchdog read the server's presence off that file's flock instead of the recorded pid."""
+    `lease` makes the watchdog read the server's presence off that file's flock instead of the recorded pid.
+
+    The working folder, scratch/, which a card's code writes and where the corpus's entries are linked, is not on
+    sys.path while the kernel starts (`-P`, and IPython's ignore_cwd): a file named like a module it imports there
+    (ipykernel_launcher.py, altair.py) would run in the kernel's place. The last start line puts it at the end of
+    sys.path, after the installed packages, for the modules a card's code writes there (startup_lines)."""
     watchdog = {"RECORD": str(record), "TTL": KERNEL_TTL_S if ttl is None else ttl, "POLL": WATCHDOG_POLL_S if poll is None else poll,
                 "LEASE": str(lease) if lease is not None else None}
     lines = startup_lines(roots, workspace)
     first = len(SHELL_LINES) + 2  # the shell's own lines, the figure formatter and the page's faces; the watchdog next
     return [
-        PYTHON, "-m", "ipykernel_launcher", "-f", str(connection_file),
+        PYTHON, "-P", "-m", "ipykernel_launcher", "-f", str(connection_file),
+        "--IPKernelApp.ignore_cwd=True",
         # no ~/.ipython history.sqlite: cell code (which may quote corpus text) stays in workspaces/<c>/
         "--HistoryManager.enabled=False",
         # crisp fonts: matplotlib inline figures as SVG
@@ -2117,8 +2123,8 @@ SHELL_LINES = (
 
 def startup_lines(roots: tuple[str, ...] | None = None, workspace: Path | None = None) -> list[str]:
     """The lines a card's shell runs at its start (SHELL_LINES, then the figure formatter and the page's faces, then
-    with `roots` the cell-reads audit hook and with `workspace` the `thimble` module): kernel_argv passes them as
-    exec_lines."""
+    with `roots` the cell-reads audit hook and with `workspace` the `thimble` module, and last the working folder at the
+    end of sys.path, CWD_LAST): kernel_argv passes them as exec_lines."""
     lines = [
         *SHELL_LINES,
         # a matplotlib figure ending a cell is drawn whatever the backend: with `matplotlib.use("Agg")` IPython has no
@@ -2132,7 +2138,13 @@ def startup_lines(roots: tuple[str, ...] | None = None, workspace: Path | None =
         lines.append(f"exec({_READS_SRC!r}, {{'ROOTS': {tuple(str(r) for r in roots)!r}, 'CAP': {READS_CAP!r}, 'MIME': {READS_MIME!r}}})")
     if workspace is not None:
         lines.append(f"exec({_THIMBLE_INSTALL!r}, {{'PATH': {str(THIMBLE_MODULE)!r}, 'WS': {str(workspace)!r}}})")
+    lines.append(CWD_LAST)
     return lines
+
+
+# the last start line (kernel_argv): the working folder ('') at the end of sys.path, so a card imports a module it wrote
+# there, while every module of the standard library and the installed packages stays the one installed
+CWD_LAST = "import sys as _s; _s.path.append(''); del _s"
 
 
 # The figure formatter kernel_argv registers: by type name, so nothing imports matplotlib at start; the inline backend,
@@ -2723,19 +2735,33 @@ def _kernel_folders(k: _Kernel, workspace: str, wrap: str, temp: Path,
     return out
 
 
-def _sandbox_problem(pid: int, conn: Path, wanted: dict[str, tuple[int, int]]) -> str:
-    """'' when the wrapped kernel started as `pid` sees at each path of `wanted` the folder the server made or checked
-    there (_kernel_folders), else what is wrong. srt binds those folders by their paths after its own checks, so a link
-    put at one in between, as main's Bash on Claude Code sign-in can put one at the kernel's TMPDIR, gave the kernel
-    the folder it points to. The kernel's view is read through /proc/<p>/root, `p` its process inside the sandbox (the
-    one that runs ipykernel on `conn`), before any card's code runs in it."""
-    head = ["-m", "ipykernel_launcher", "-f", str(conn)]
-    inner = next((p for p in procs.descendants(pid) if procs.argv(p)[1:5] == head), None)
-    if inner is None:
-        return "thimble found no process of the kernel in its sandbox to check, so it stopped the kernel"
+def _gated(wrap: str) -> bool:
+    """Whether a kernel in the wrapper `wrap` starts behind the gate (kernel_wrap.GATE): a wrapped one, where /proc
+    shows the server what its sandbox shows it (_kernel_folders)."""
+    return wrap in config.KERNEL_WRAPPED and procs.HAVE_PROC
+
+
+def _gate_of(pid: int, conn: Path) -> int | None:
+    """The gate of the wrapped kernel started as `pid` (kernel_wrap.GATE): the process below it, inside the sandbox,
+    whose command line is the gate's on the kernel's connection file `conn`, while it waits to run the kernel's Python;
+    None while there is none yet."""
+    gate = list(kernel_wrap.GATE)
+    for p in procs.descendants(pid):
+        argv = procs.argv(p)
+        if argv[:len(gate)] == gate and str(conn) in argv:
+            return p
+    return None
+
+
+def _sandbox_problem(pid: int, wanted: dict[str, tuple[int, int]]) -> str:
+    """'' when the process `pid` inside a wrapped kernel's sandbox (its gate, before any of the kernel's Python runs
+    there) sees at each path of `wanted` the folder the server made or checked there (_kernel_folders), else what is
+    wrong. srt binds those folders by their paths after its own checks, so a link put at one in between, as main's Bash
+    on Claude Code sign-in can put one at the kernel's TMPDIR, gave the kernel the folder it points to. The sandbox's
+    view is read through /proc/<pid>/root."""
     for path, want in wanted.items():
         try:
-            st = os.stat(f"/proc/{inner}/root{path}")
+            st = os.stat(f"/proc/{pid}/root{path}")
         except OSError as e:
             return (f"thimble could not check the folder {path} in the kernel's sandbox ({e.strerror}), so it "
                     "stopped the kernel")
@@ -2743,6 +2769,34 @@ def _sandbox_problem(pid: int, conn: Path, wanted: dict[str, tuple[int, int]]) -
             return (f"the kernel's sandbox gave it another folder at {path} than the one thimble made there, so "
                     "thimble stopped the kernel; run the card again")
     return ""
+
+
+GATE_POLL_S = 0.05  # how often _open_gate looks for the gate while the sandbox starts
+
+
+async def _open_gate(k: _Kernel, proc: subprocess.Popen, wanted: dict[str, tuple[int, int]]) -> None:
+    """Let the wrapped kernel `proc` run its Python once its sandbox shows it, at each path of `wanted`, the folder the
+    server made or checked there: find its gate (_gate_of), check what the sandbox shows through the gate's /proc entry
+    (_sandbox_problem), and only then write the line the gate waits for on its stdin. So no Python code, neither a card's
+    nor one a card left in a folder the kernel reads at its start, runs in a sandbox the server has not checked. A
+    RuntimeError when the gate does not come within STARTUP_TIMEOUT or the check fails; the gate then reads the end of
+    its stdin and runs nothing."""
+    try:
+        deadline = time.monotonic() + STARTUP_TIMEOUT
+        while (gate := await asyncio.to_thread(_gate_of, proc.pid, k.conn)) is None:
+            if proc.poll() is not None:
+                why = (_log_lines(k) or [""])[-1][:300]
+                raise RuntimeError("the kernel's sandbox ended before thimble could check it" + (f": {why}" if why else ""))
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"thimble found no process of the kernel in its sandbox to check within "
+                                   f"{STARTUP_TIMEOUT:g} s, so it stopped the kernel")
+            await asyncio.sleep(GATE_POLL_S)
+        if problem := await asyncio.to_thread(_sandbox_problem, gate, wanted):
+            raise RuntimeError(problem)
+        proc.stdin.write(b"\n")  # the kernel's Python starts
+    finally:
+        with contextlib.suppress(OSError):
+            proc.stdin.close()
 
 
 def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings",
@@ -2851,6 +2905,8 @@ async def _launch(k: _Kernel, workspace: str) -> None:
     wrapped = wrap in config.KERNEL_WRAPPED
     argv = kernel_argv(k.conn, k.record, roots=(str(cwd), str(Path(corpus).resolve())), lease=k.lease if wrapped else None,
                        workspace=_ws_dir(workspace).resolve())
+    if _gated(wrap):  # its Python starts once the server has checked its sandbox (_open_gate)
+        argv = [*kernel_wrap.GATE, *argv]
     from . import runtime  # noqa: PLC0415
 
     # its TMPDIR: main's shell commands' (runtime.shell_temp), by the path the wrappers bind: the folders above it by
@@ -2903,8 +2959,9 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
         log.info("starting kernel %s for %s in %s (a mirror of %s)%s", k.key, workspace, cwd, corpus,
                  f"; wrapped in {wrap} ({source})" if wrapped else "")
         out = nofollow.open(k.log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL, stdout=out,
+        try:  # a gated kernel's stdin is the pipe its gate waits on (_open_gate)
+            proc = subprocess.Popen(argv, cwd=str(cwd), env=env,
+                                    stdin=subprocess.PIPE if _gated(wrap) else subprocess.DEVNULL, stdout=out,
                                     stderr=subprocess.STDOUT, start_new_session=True, close_fds=True, pass_fds=keep)
         finally:
             os.close(out)
@@ -2915,13 +2972,16 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
                           "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
                           "home": str(_home()), "attached": _now(), "wrap": wrap,
                           **({"writes": list(kernel_wrap.KERNEL_DIRS)} if wrapped else {})})
+        if proc.stdin is not None:
+            await _open_gate(k, proc, wanted)
         kc = _client(info)
         await _wait_ready(k, kc, STARTUP_TIMEOUT, control=False)
-        if wanted and (problem := await asyncio.to_thread(_sandbox_problem, proc.pid, k.conn, wanted)):
-            raise RuntimeError(problem)
     except BaseException:
         if kc is not None:
             _close_client(kc)
+        if k.proc is not None and k.proc.stdin is not None:
+            with contextlib.suppress(OSError):
+                k.proc.stdin.close()  # a gate not opened yet runs nothing
         await _kill(k)
         raise
     return kc
