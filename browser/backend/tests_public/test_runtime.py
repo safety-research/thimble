@@ -576,6 +576,27 @@ async def test_r2_a_workspace_s_short_folder_goes_with_it_and_a_server_s_start_r
     assert short.is_dir() and unnamed.is_dir() and own is not None and own.is_dir()
 
 
+@pytest.mark.parametrize("how", ["cc", "api"])
+async def test_r2_a_new_session_and_one_brought_back_get_none_of_the_temp_files_of_the_session_they_replace(how, on):
+    """On Claude Code sign-in the TMPDIR of main's commands and of the kernels is the workspace's short folder, named
+    after the workspace's folder (runtime_cc.workspace_tmp). A new session of the folder (/thimble fresh, a
+    thimble-browser start) and a session brought back (/thimble restore) put another workspace at that folder, and it
+    got the replaced session's temp folder with its files. Now the short folder goes with the session that is moved
+    aside, as the workspace's tmp/ on the Messages API moves with it."""
+    from app import ledger
+
+    if how == "cc":
+        claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    a = runtime.shell_temp(CORPUS)
+    (a / "from-session-a.csv").write_text("night,minutes\n1,18.1\n")
+    moved = (await ledger.archive_workspace(CORPUS))["archived"]
+    b = runtime.shell_temp(CORPUS)
+    assert sorted(p.name for p in b.iterdir()) == []
+    (b / "from-session-b.csv").write_text("region,errors\neu,404\n")
+    await ledger.restore_workspace(CORPUS, {"archive": Path(moved).name})
+    assert "from-session-b.csv" not in [p.name for p in runtime.shell_temp(CORPUS).iterdir()]
+
+
 async def test_a_thimble_call_in_a_headless_session_runs_as_its_caller(on, monkeypatch):
     seen: dict[str, Any] = {}
     fake_sdk(monkeypatch, [], seen)
