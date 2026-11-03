@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agents, config, marks, session
+from app import agents, config, marks, prompts, session
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-0000000000aa"
@@ -41,12 +41,14 @@ def _answer(items: list[dict]) -> str:
     return "Checked.\n```json\n" + json.dumps(items) + "\n```"
 
 
-def test_the_checker_prompt_is_the_terminal_s_with_the_browser_s_few_changes():
-    terminal = marks.CHECKER.read_text(encoding="utf-8")
-    for old, _ in marks.CHECKER_CHANGES:
-        assert old in terminal, f"the terminal's checker.md no longer says {old!r}: look at marks.CHECKER_CHANGES"
+def test_the_checker_prompt_is_the_terminal_s_with_the_workbench_s_words_in_its_slots():
+    """The checker reads the terminal's checker.md with the workbench's words in its slots of a mode's own words
+    (plugin/prompts/slots.json), where the terminal reads its own: the browser's fork cannot run `thimble label`, so its
+    text names no such command, and a label's rule is the code or regex its apply_label call gave. Before, the browser
+    made these two changes to the terminal's text after reading it."""
     text = marks.checker_prompt("1. [12] in: We saw [12] runs.", "/data")
     assert "1. [12] in: We saw [12] runs." in text and "{{" not in text and "thimble label" not in text
+    assert "A label's rule is code: the code or regex its apply_label call gave." in text
 
 
 def test_the_checker_cites_the_artifact_itself_not_a_description_of_it():
@@ -895,11 +897,11 @@ def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder
     quote = {"kind": "quote", "status": "verified", "correction": None, "reason": "the first line says it"}
     places = {1: str(corpus / "prompts" / "worker.md"), 2: "prompts/worker.md", 3: str(outside)}
     seen: list[str] = []
-    # a stand-in for the terminal's checker.md with its slots, so the test tells the checker's shell folder from the
-    # folder its paths start from without pinning the terminal's sentences
+    # a stand-in for the terminal's checker.md with its slots, where the plugin's texts are read, so the test tells the
+    # checker's shell folder from the folder its paths start from without pinning the terminal's sentences
     checker = tmp_path / "checker.md"
     checker.write_text("{{MARKS}}\nshell: {{CWD}}\npaths from: {{ROOT}}\n")
-    monkeypatch.setattr(marks, "CHECKER", checker)
+    monkeypatch.setattr(prompts, "PLUGIN_DIR", tmp_path)
 
     async def fork(c, main, cut, prompt):
         seen.append(prompt)

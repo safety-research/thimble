@@ -1,5 +1,6 @@
 // The prompt registry (prompts/registry.mjs, node.mjs): every model-read text is one file, every file in prompts/ is a
-// text the registry names, and each text is read by the module the registry names.
+// text the registry names, each text is read by the module the registry names, and each mode reads a text with what it
+// includes and that mode's words in its slots.
 //   node --test plugin/prompts/test
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -8,7 +9,8 @@ import { dirname, join, relative } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { TEXTS, fileOf, fill } from '../registry.mjs'
+import { textOf } from '../node.mjs'
+import { MODES, TEXTS, compose, fileOf, fill } from '../registry.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -33,7 +35,7 @@ test('every text has its file with text, every file in prompts/ is a text, and e
     assert.ok(calls.length > 0)
     for (const [file, name] of calls) {
       assert.ok(TEXTS[name], `${file} reads ${name}, a text of the registry`)
-      assert.equal(TEXTS[name].reader, file, `the registry names ${file} as what reads ${name}`)
+      assert.equal(TEXTS[name].terminal, file, `the registry names ${file} as what reads ${name}`)
     }
     assert.ok(calls.some(([, n]) => n === 'guidance') && calls.some(([, n]) => n === 'labels'))
   }
@@ -49,6 +51,36 @@ test('placeholders are filled, a value kept as written, and the card tool text f
   {
     const text = fill(readFileSync(join(ROOT, fileOf('card-tool')), 'utf8'), { TMPDIR: `/${'x'.repeat(99)}`, KEPT: 'v, r, l, f, F, p or u' }).trim()
     assert.ok(text.length <= 4096, `${text.length} characters`)
+  }
+})
+
+test("a mode reads a text with what it includes in place and the mode's words in its slots, and leaves its readers' slots for their call", async () => {
+  const files = { checker: 'Check {{REPLY}} as {{WHO}} checks.\n{{include:part}}\nThen {{MARKS}}.\n', part: 'A part, by {{WHO}}.\n\n', loop: '{{include:back}}', back: 'x {{include:loop}}' }
+  const read = name => files[name]
+  const slots = { WHO: { terminal: 'the plugin', browser: 'the workbench' } }
+  // what it includes stands in its place without its closing newlines, and each mode's words stand in its slots
+  {
+    assert.equal(await compose('checker', 'terminal', read, () => slots), 'Check {{REPLY}} as the plugin checks.\nA part, by the plugin.\nThen {{MARKS}}.\n')
+    assert.equal(await compose('checker', 'browser', read, () => slots), 'Check {{REPLY}} as the workbench checks.\nA part, by the workbench.\nThen {{MARKS}}.\n')
+  }
+  // slots.json is read only for a text with a slot its readers do not fill, so a text with none needs no such file
+  {
+    const never = () => { throw new Error('slots.json read') }
+    assert.equal(await compose('checker', 'terminal', () => 'Check {{MARKS}} in {{CWD}}.', never), 'Check {{MARKS}} in {{CWD}}.')
+  }
+  // a slot with no words in the mode, and an include cycle, fail with the file
+  {
+    await assert.rejects(compose('checker', 'browser', read, () => ({ WHO: { terminal: 'the plugin' } })), /prompts\/checker\.md: the slot \{\{WHO\}\} has no browser value/)
+    await assert.rejects(compose('loop', 'terminal', read, () => slots), /include cycle loop -> back -> loop/)
+  }
+})
+
+test("every text reads in each mode with what it includes and slots.json's words, and what is left of its slots is its readers'", async () => {
+  for (const name of Object.keys(TEXTS)) {
+    for (const mode of MODES) {
+      const left = [...(await textOf(name, mode)).matchAll(/\{\{([A-Z_]+)\}\}/g)].map(m => m[1])
+      assert.deepEqual(left.filter(k => !(TEXTS[name].fills ?? []).includes(k)), [], `${name} in the ${mode}`)
+    }
   }
 })
 

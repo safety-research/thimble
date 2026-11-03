@@ -7,9 +7,10 @@
    each with a spinner.
 2. The checker: forks of main's session at the turn's end (`claude -p --resume <main> --resume-session-at <cut>
    --fork-session`, as the view proposer forks it), up to MAX_FORKS at once, each with a share of the marks, read the
-   terminal's checker.md (CHECKER, with the few changes CHECKER_CHANGES lists) and give one JSON item per mark:
-   verified, corrected, wrong or unconfirmed, with its evidence. A fork reads with Read, Grep and Glob, and runs code
-   only as Python (Bash `python3 …`), on Claude Code sign-in in Claude Code's sandbox where it can run (run_fork).
+   terminal's checker.md as the workbench reads it (CHECKER, prompts.py: with the workbench's words in its slots of a
+   mode's own words) and give one JSON item per mark: verified, corrected, wrong or unconfirmed, with its evidence. A
+   fork reads with Read, Grep and Glob, and runs code only as Python (Bash `python3 …`), on Claude Code sign-in in
+   Claude Code's sandbox where it can run (run_fork).
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py), checks that evidence with no model call and no
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
@@ -70,22 +71,16 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agents, config, ledger, nofollow, sdk
+from . import agents, config, ledger, nofollow, prompts, sdk
 
 log = logging.getLogger("thimble.marks")
 router = APIRouter()
 
 HERE = Path(__file__).resolve().parent
 MARKS_OF = HERE / "marks_of.mjs"
-PLUGIN = HERE.parents[2] / "plugin"  # the terminal plugin, whose checker prompt and validator this module runs
-CHECKER = PLUGIN / "prompts" / "checker.md"
+PLUGIN = HERE.parents[2] / "plugin"  # the terminal plugin, whose validator this module runs
+CHECKER = "plugin:checker"  # the terminal's checker.md (prompts.py reads a text of the plugin by this name)
 EVIDENCE = PLUGIN / "engine" / "kernel" / "evidence.py"
-# The terminal's checker.md as the browser's fork reads it: exact strings, each of which must stand in the terminal's
-# text (tests/test_marks.py), so an edit there that touches one stops the test until someone looks at it.
-CHECKER_CHANGES: tuple[tuple[str, str], ...] = (
-    (" Label values come from `thimble label NAME --csv`.", ""),
-    ("its `--code` file or `--regex` command.", "the code or regex its apply_label call gave."),
-)
 # A reply with many marks is split between forks, each with about PER_FORK marks (at most MAX_FORKS forks), which run at
 # once, so the reply settles when its slowest share does (the terminal's checker.ts).
 PER_FORK = 4
@@ -113,12 +108,7 @@ _procs: set[asyncio.subprocess.Process] = set()
 def checker_prompt(marks: str, cwd: str, cards: str = "", root: str | None = None, reply: str = LAST_REPLY) -> str:
     """The checker's text for `marks`, which `reply` holds (LAST_REPLY, or a side thread's THREAD_ANSWER): its shell in
     `cwd`, its paths from `root` (check_folders; `cwd` when None)."""
-    text = CHECKER.read_text(encoding="utf-8")
-    for old, new in CHECKER_CHANGES:
-        text = text.replace(old, new)
-    for slot, value in (("MARKS", marks), ("CWD", cwd), ("ROOT", root or cwd), ("CARDS", cards), ("REPLY", reply)):
-        text = text.replace("{{" + slot + "}}", value)
-    return text
+    return prompts.render(CHECKER, {"MARKS": marks, "CWD": cwd, "ROOT": root or cwd, "CARDS": cards, "REPLY": reply})
 
 
 def check_folders(c: str, main: dict[str, Any]) -> tuple[str, str]:

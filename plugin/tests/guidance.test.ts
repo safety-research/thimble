@@ -35,12 +35,13 @@ const GUIDANCE = [
 /** The conversation as its next request holds it, which the test's core answers `session.messages` with. */
 type World = { messages: Any[]; context: string[][] }
 
-function world(on: Any, guidance = GUIDANCE): World {
+/** The test's world; `files` are the plugin's prompts/ files that fs.read answers, by name. */
+function world(on: Any, files: Record<string, string> = { 'guidance.md': GUIDANCE }): World {
   resetPrompts()
   const w: World = { messages: [], context: [] }
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 1, stdout: '', stderr: 'made-up: no such command' }), isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/prompts/guidance.md') ? guidance : '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: Object.entries(files).find(([name]) => e.path.endsWith(`/prompts/${name}`))?.[1] ?? '' }))
   on('session.messages', () => ({ value: w.messages }))
   // the engine: the prompt enters with its context, which the next request holds as a reminder after the prompt
   on('prompt.submit', (_$: unknown, e: Any) => {
@@ -127,4 +128,10 @@ test('with Cards off, the Cards section is left out, and no sentence says when t
   expect(text).not.toContain('## Cards')
   expect(text).not.toContain('Draw a card only')
   expect(text).toContain('## Labels')
+})
+
+test("the guidance reads as the terminal reads a text: what it includes stands in its place, and a slot of prompts/slots.json takes the terminal's words", { options: { citations: 'auto cite' } }, async ($, on) => {
+  const slots = { SURFACE: { terminal: 'a made-up plugin', browser: 'a made-up workbench' } }
+  const w = world(on, { 'guidance.md': 'thimble is {{SURFACE}}.\n\n{{include:labels-part}}\n', 'labels-part.md': '## Labels\n\nSort records with a label.\n\n', 'slots.json': JSON.stringify(slots) })
+  expect(await thimbleText($, w)).toBe('thimble is a made-up plugin.\n\n## Labels\n\nSort records with a label.')
 })

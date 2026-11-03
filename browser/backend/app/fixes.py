@@ -102,6 +102,7 @@ TAIL_CHARS = 2000  # of the end of its tests' output there
 ASKED_TURNS = 2
 
 PROMPT = "thimble-fix"  # what main reads of the person's /thimble-fix (prompts/thimble-fix.md)
+FIXER_TEXT = "plugin:fixer"  # what opens the fixer's first message (plugin/prompts/fixer.md)
 
 
 @dataclass
@@ -430,10 +431,12 @@ KEPT = ("\n\nThe last try did not pass because {why}. Your copy holds the change
 
 
 def first_message(rec: dict[str, Any], page: str, earlier: bool = False) -> str:
-    """The fixer's first message: the registry's fixer text, the person's words (each round), where it works, what the
-    try before left it, for another try (`earlier`: the kernel's redo says where, and the record why that try did not
-    pass), and the page."""
-    prompt = (plugin_dir() / "prompts" / "fixer.md").read_text("utf-8").strip()
+    """The fixer's first message: the registry's fixer text as the workbench reads it (prompts.py), the person's words
+    (each round), where it works, what the try before left it, for another try (`earlier`: the kernel's redo says
+    where, and the record why that try did not pass), and the page."""
+    from . import prompts  # noqa: PLC0415
+
+    prompt = prompts.load(FIXER_TEXT).strip()
     words = rec.get("words") or []
     asked = "\n".join(f"Round {i + 1}: {w}" for i, w in enumerate(words)) if len(words) > 1 else (
         words[0] if words else rec.get("title", ""))

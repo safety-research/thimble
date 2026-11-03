@@ -1,10 +1,11 @@
 // prompts.ts: the prompt registry (registry.mjs) from the hooks module. Each text a model reads is one file, read once
-// per load of the module. Once per session the plugin's version is a line in the session's events, so a record says
-// which texts were read.
+// per load of the module as the terminal reads it (compose: with what it includes, and the terminal's words of its
+// slots). Once per session the plugin's version is a line in the session's events, so a record says which texts were
+// read.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { record } from '../telemetry/telemetry'
-import { TEXTS, fileOf } from './registry.mjs'
+import { SLOTS_FILE, TEXTS, compose, fileOf } from './registry.mjs'
 
 type Engine = EngineInterface
 
@@ -21,10 +22,14 @@ async function pluginVersion($: Engine): Promise<string | null> {
   try { return String(JSON.parse(String(await $.fs.read(`${rootOf($)}/.claude-plugin/plugin.json`))).version || '') || null } catch { return null }
 }
 
-/** A text: its file's words. A record names the text by its name. */
+/** A text as the terminal reads it: its file's words, with what it includes and the terminal's words of its slots
+ *  (prompts/slots.json). A record names the text by its name. */
 export async function promptText($: Engine, name: PromptName): Promise<string> {
   if (!TEXTS[name]) throw new Error(`no prompt text ${name}`)
-  if (!texts.has(name)) texts.set(name, String(await $.fs.read(`${rootOf($)}/${fileOf(name)}`)))
+  if (!texts.has(name)) {
+    const read = (n: string) => $.fs.read(`${rootOf($)}/${fileOf(n)}`)
+    texts.set(name, await compose(name, 'terminal', read, async () => JSON.parse(String(await $.fs.read(`${rootOf($)}/${SLOTS_FILE}`)))))
+  }
   return texts.get(name)!
 }
 
