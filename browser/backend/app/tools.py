@@ -211,7 +211,7 @@ REGISTRY: dict[str, Spec] = {
         Spec("start_writing", (ANALYST,), "app.write_session:tool_start_writing"),
         # a report check made or run from the chat; main's alone
         Spec("run_check", (ANALYST,), "app.checks:tool_run_check", sessions=MAIN_ONLY),
-        # a report check turned off, as the Checks pane's switch does, its runs stopped; main's, as run_check is
+        # a report check turned off, as its switch in Comments does, its runs stopped; main's, as run_check is
         Spec("stop_check", (ANALYST,), "app.comments:tool_stop_check", sessions=MAIN_ONLY),
         Spec("file_dev_ticket", (ANALYST,), _H + "file_dev_ticket"),
         # the person's /thimble-fix, which main reads with their fixes beside it (fixes.ask): a round of a fix of theirs

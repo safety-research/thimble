@@ -12,11 +12,16 @@
 //
 // A comment category's row: its color, name, open comments, definition, Show in (Chat · Cards · Report, each a toggle
 // of where the check comments, with its comments there) and its switch, which shows or hides its comments everywhere.
-// It opens its detail: the definition, editable, Show in, and its open comments, each a link to where it stands (a
-// card, or the passage in the report) with Apply, which sends it to Claude in the chat, Go to it and Done
-// (CommentsList.tsx). The analyst's and Claude's own notes, which no check made, are the category Notes. The categories
-// end in "+ New check", which opens the new-check card beside the sidebar (report/Checks.tsx NewCheckCard): Run adds the
-// check, commenting on the documents, and the server turns it on and runs it.
+// For a check that comments on the documents, its runs there show as the canvas's Comments button shows its runs on
+// the cards (report/Checks.tsx): a spinner while one runs, which opens the run, ✕ when one failed, and under the row
+// the passages changed since it checked them with Run, and a start that did not happen. The top bar's Comments button
+// carries the new comments' dot for the documents (TopBar.tsx). A row opens its detail: its runs on the documents, each
+// its Last run with Stop while it runs and Re-run, the definition, editable, Show in, and its open comments, each a link
+// to where it stands (a card, or the passage in the report) with Apply, which sends it to Claude in the chat, Go to it
+// and Done (CommentsList.tsx). A check's runs name their document when it has runs on several. The analyst's and
+// Claude's own notes, which no check made, are the category Notes. The categories end in "+ New check", which opens the
+// new-check card beside the sidebar (report/Checks.tsx NewCheckCard): Run adds the check, commenting on the documents,
+// and the server turns it on and runs it.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { LabelAsks } from '../chat/LabelAsk'
@@ -31,9 +36,11 @@ import { classesOf, colourVar, howMade, labelDefinition, isFilesLabel, mainColou
 import { checksApi, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { teleport } from '../lib/teleport'
-import type { Check, CheckCover, Concept, LabelRowText } from '../lib/types'
-import { NewCheckCard, useChecks, type Checks } from '../report/Checks'
-import { checkColour, coversOf, freeColour, nameTaken, NOTE_COLOR } from '../report/checkComments'
+import type { Check, CheckCover, CheckRun, Concept, LabelRowText, TypesState } from '../lib/types'
+import { NewCheckCard, RunLine, RunMark, RunNotes, runCheck, useChecks, type Checks } from '../report/Checks'
+import { checkColour, coversOf, docRuns, freeColour, nameTaken, NOTE_COLOR, runLine } from '../report/checkComments'
+import { useDocTypes, writtenDocs } from '../report/docTypes'
+import { docLabel } from '../report/model'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 /** the found items a detail lists before "N more" */
@@ -84,6 +91,24 @@ export function withCover(check: Pick<Check, 'covers'>, cover: CheckCover, on: b
   return next.length ? next : null
 }
 
+/** A check's run on one document, with the document's name when the check has runs on several. */
+export interface DocRun {
+  doc: string
+  run: CheckRun
+  where?: string
+}
+
+/** A check's runs on the documents (report/checkComments.ts docRuns: on the written ones, once `types` says which),
+ * each named by its document when there are several. Pure. */
+export function namedDocRuns(check: Check | null, types: TypesState | null): DocRun[] {
+  if (!check) return []
+  const runs = docRuns(check, types ? writtenDocs(types) : null)
+  return runs.length > 1 ? runs.map((r) => ({ ...r, where: docLabel(r.doc, types) })) : runs
+}
+
+/** What a run's spinner or ✕ is named by: the check, and its document when the check has runs on several. Pure. */
+const runName = (check: string, r: DocRun): string => (r.where ? `${check} on ${r.where}` : check)
+
 type Detail = { kind: 'label' | 'comments'; id: string }
 
 /** The sidebar's two sections: the labels, and the comment categories. */
@@ -95,6 +120,8 @@ export function LabelsSidebar({ ws, section, onClose }: { ws: string; section: S
   const checks = useChecks(ws)
   const comments = useComments(ws)
   const categories = useMemo(() => commentCategories(checks.list, comments.items), [checks.list, comments.items])
+  // the written documents, whose runs the categories show, and the names of the documents
+  const types = useDocTypes(ws, section === 'comments')
   const [detail, setDetail] = useState<Detail | null>(null)
   // a request from elsewhere to open one label's detail (a label's chip or tag)
   useEffect(() => bus.on('openLabels', (e) => setDetail(e.id ? { kind: 'label', id: e.id } : null)), [])
@@ -135,7 +162,7 @@ export function LabelsSidebar({ ws, section, onClose }: { ws: string; section: S
         {label ? (
           <LabelDetail ws={ws} label={label} onGone={() => setDetail(null)} />
         ) : category ? (
-          <CategoryDetail ws={ws} category={category} checks={checks} onDone={comments.done} />
+          <CategoryDetail ws={ws} category={category} checks={checks} runs={namedDocRuns(category.check, types)} onDone={comments.done} />
         ) : section === 'labels' ? (
           <section className="lside-section" data-section="labels">
             {labels.map((k) => (
@@ -147,7 +174,7 @@ export function LabelsSidebar({ ws, section, onClose }: { ws: string; section: S
         ) : (
           <section className="lside-section" data-section="comments">
             {categories.map((c) => (
-              <CategoryRow key={c.key} ws={ws} category={c} checks={checks} onOpen={() => setDetail({ kind: 'comments', id: c.key })} />
+              <CategoryRow key={c.key} ws={ws} category={c} checks={checks} runs={namedDocRuns(c.check, types)} onOpen={() => setDetail({ kind: 'comments', id: c.key })} />
             ))}
             {!categories.length && <p className="lside-none lside-section-none">No comments yet.</p>}
             <NewCheck checks={checks} />
@@ -477,8 +504,9 @@ function categoryShowIn(ws: string, c: Category) {
   )
 }
 
-function CategoryRow({ ws, category: c, checks, onOpen }: { ws: string; category: Category; checks: Checks; onOpen: () => void }) {
-  const shown = c.check ? c.check.shown : true
+function CategoryRow({ ws, category: c, checks, runs, onOpen }: { ws: string; category: Category; checks: Checks; runs: DocRun[]; onOpen: () => void }) {
+  const check = c.check
+  const shown = check ? check.shown : true
   return (
     <div className={`lside-row${shown ? '' : ' is-off'}`} data-category={c.key}>
       <div className="lside-row-head">
@@ -487,17 +515,65 @@ function CategoryRow({ ws, category: c, checks, onOpen }: { ws: string; category
           {c.name}
           <span className="lside-n">{c.items.length}</span>
         </button>
+        {/* a run that failed before its session started has no chat: the detail runs it again */}
+        {runs.map((r) => (
+          <RunMark key={r.doc} name={runName(c.name, r)} run={r.run} onCard={onOpen} />
+        ))}
         {c.check && <Switch checked={shown} onChange={(on) => checks.toggle(c.key, on)} label={`${c.name}: ${shown ? 'on' : 'off'}`} />}
         <Button variant="icon" size="sm" icon="chevron-right" title="Open" aria-label={`Open ${c.name}`} onClick={onOpen} />
       </div>
       {c.check?.prompt && <p className="lside-question lside-clamp">{c.check.prompt}</p>}
       {c.key === NOTES && <p className="lside-question">Your notes and Claude's, which no check made.</p>}
       {categoryShowIn(ws, c)}
+      {check && runs.map((r) => <RunNotes key={r.doc} ws={ws} check={check} doc={r.doc} run={r.run} where={r.where} />)}
     </div>
   )
 }
 
-function CategoryDetail({ ws, category: c, checks, onDone }: { ws: string; category: Category; checks: Checks; onDone: (c: CommentItem) => void }) {
+/** A check's runs on the documents in its detail: under Last run, each run's line (report/Checks.tsx RunLine: what it
+ * does or how it ended, with Stop while it runs) with Re-run while the check is on and does not run there, as its card
+ * beside the canvas's Comments button has them; then what each run leaves to the analyst (RunNotes). A run that only
+ * counts the passages changed before the check first ran there has no line. */
+function LastRuns({ ws, check, runs }: { ws: string; check: Check; runs: DocRun[] }) {
+  const ran = runs.filter((r) => r.run.run)
+  return (
+    <>
+      {ran.length > 0 && <h4 className="lside-label">Last run</h4>}
+      {ran.map((r) => (
+        <LastRun key={r.doc} ws={ws} check={check} run={r} />
+      ))}
+      {runs.map((r) => (
+        <RunNotes key={r.doc} ws={ws} check={check} doc={r.doc} run={r.run} where={r.where} />
+      ))}
+    </>
+  )
+}
+
+function LastRun({ ws, check, run: { doc, run, where } }: { ws: string; check: Check; run: DocRun }) {
+  const [busy, setBusy] = useState(false)
+  const running = run.status === 'running'
+  return (
+    <div className="lside-run" data-doc={doc}>
+      {where && <span className="lside-run-doc">{where}</span>}
+      <RunLine ws={ws} check={check} doc={doc} line={runLine(run)} running={running} />
+      {check.shown && !running && (
+        <Button
+          size="sm"
+          variant="ghost"
+          busy={busy}
+          onClick={() => {
+            setBusy(true)
+            void runCheck(ws, check, doc, { action: 'run' }).finally(() => setBusy(false))
+          }}
+        >
+          Re-run
+        </Button>
+      )}
+    </div>
+  )
+}
+
+function CategoryDetail({ ws, category: c, checks, runs, onDone }: { ws: string; category: Category; checks: Checks; runs: DocRun[]; onDone: (c: CommentItem) => void }) {
   const prompt = c.check?.prompt ?? ''
   const [text, setText] = useState(prompt)
   const [busy, setBusy] = useState(false)
@@ -514,8 +590,12 @@ function CategoryDetail({ ws, category: c, checks, onDone }: { ws: string; categ
       <div className="lside-row-head">
         <Swatch color={c.color} hollow={!shown} />
         <span className="lside-title">{c.name}</span>
+        {runs.map((r) => (
+          <RunMark key={r.doc} name={runName(c.name, r)} run={r.run} />
+        ))}
         {c.check && <Switch checked={shown} onChange={(on) => checks.toggle(c.key, on)} label={`${c.name}: ${shown ? 'on' : 'off'}`} />}
       </div>
+      {c.check && <LastRuns ws={ws} check={c.check} runs={runs} />}
       {c.check && (
         <>
           <h4 className="lside-label">Definition</h4>

@@ -30,8 +30,8 @@ call is written as task.md, task-2.md… (read_parts), each small enough that Re
 file or those files in order (`## check-task-file`, `## check-task-files`). It comments with add_comment and hands back
 one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
 analyst's Stop ends it (through thimble's plugin module, subagents.stop). A check made or changed (its name, prompt,
-colour, shown or covers) emits `checks` on the stream, so every Comments pane, the Report's and the canvas's in any tab,
-reads the checks again.
+colour, shown or covers) emits `checks` on the stream, so every list of the checks, the top bar's Comments, the
+canvas's and the Comments pane beside the slides, the story and a page, in any tab, reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
@@ -372,7 +372,8 @@ def save(c: str, check: dict[str, Any]) -> dict[str, Any]:
 
 def _announce(c: str, cid: str) -> None:
     """A check was made or changed (its name, prompt, colour, shown or covers): a `checks` record on the stream, so every
-    surface that lists the checks (the Report's and the canvas's Comments panes, in any tab) reads them again."""
+    surface that lists the checks (the top bar's Comments, the canvas's and the Comments pane beside the slides, the
+    story and a page, in any tab) reads them again."""
     try:
         investigation.emit(c, investigation.MAIN, {"type": "checks", "id": cid})
     except Exception:  # noqa: BLE001 — a surface reads the checks again on its next record

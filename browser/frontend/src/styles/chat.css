@@ -116,9 +116,11 @@
 .chat-text > :last-child {
   margin-bottom: 0;
 }
-/* the paragraphs and lists of a reply stand one line apart, a blank line as the terminal prints it */
+/* the paragraphs and lists of a reply stand one line apart, a blank line as the terminal prints it; a line break in a
+   paragraph stays one, as the terminal prints it too (a fixer's last message: its Title line, then What it does) */
 .chat-text p {
   margin: 1lh 0;
+  white-space: pre-line;
 }
 .chat-text ul,
 .chat-text ol {

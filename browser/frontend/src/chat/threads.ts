@@ -98,7 +98,7 @@ export function orientBuild(m: Pick<ChatMeta, 'kind' | 'role'> & { view?: string
 }
 
 /** Whether the analyst did not start the chat themselves: the build of a view nobody asked for (its view's chip is its
- * home) or a report check's run (the Checks pane's). Pure. */
+ * home) or a check's run. Pure. */
 export function startedByThimble(m: Pick<ChatMeta, 'kind' | 'role'> & { view?: string | null; asked?: boolean | null }): boolean {
   return orientBuild(m) || (m.kind === 'agent' && m.role === 'check')
 }

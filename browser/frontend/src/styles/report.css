@@ -665,7 +665,7 @@
 .wu-sec-head .wu-new-dot {
   margin-left: 2px;
 }
-/* a check with no result on the document shown */
+/* a check with no result on the surface */
 .wu-count-none {
   color: var(--text-placeholder);
 }
@@ -706,7 +706,8 @@
   color: var(--status-positive);
 }
 
-/* the Checks pane, pinned to the sidebar's foot on the pane's paper */
+/* the Comments pane (Checks.tsx CommentsPane) on the pane's paper: all of the sidebar of the slides, the story and a
+   page (.wu-side-checks), and the checks' list in the canvas's Comments menu (canvas.css .bcomments-pane) */
 .wu-checks {
   flex: none;
   display: flex;
@@ -806,7 +807,7 @@
   flex: 1;
   min-width: 0;
 }
-/* a check's card, and the new-check card, in a popover beside the pane, styled as a label's edit card in Files */
+/* a check's card, and the new-check card, in a popover beside its row or its +, styled as a label's edit card */
 .check-card.popover {
   padding: 0;
   font: var(--type-ui-sm);
