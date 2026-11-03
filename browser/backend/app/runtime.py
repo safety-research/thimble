@@ -649,9 +649,10 @@ def agent_writes(c: str, conv: Conv) -> list[Path]:
     """The folders one of thimble's agents writes. A view's builder and its reviewer write that view's folder,
     extension/views/<slug>, and their own folder, views-work/<slug> (dev.view_work_dir), alone: the slug is the one of
     the start the server recorded for the agent (Conv.key, `view:<slug>` or `review:<slug>`), never one the agent
-    names. Every other agent writes the agents' work folders (subagents.write_dirs) less the views' folders, which
-    belong to their builders; an agent of a view's role without such a key writes nothing but its temp folder."""
-    from . import dev, subagents, tools, view_tools, views  # noqa: PLC0415
+    names. Every other agent writes the agents' work folders (subagents.write_dirs) less the folders that hold the
+    views' builders' folders, so no agent's command can put a link in place of a folder the sandbox of a builder's
+    command binds by its path; an agent of a view's role without such a key writes nothing but its temp folder."""
+    from . import config, dev, subagents, tools, view_tools, views  # noqa: PLC0415
 
     kinds = {view_tools.BUILDER: tools.VIEW_SESSION, view_tools.REVIEWER: tools.REVIEW_SESSION}
     views_root = views.views_dir(c)
@@ -660,12 +661,13 @@ def agent_writes(c: str, conv: Conv) -> list[Path]:
         if tools.session_kind(conv.key) != kinds[conv.role] or not views.SLUG_RE.fullmatch(slug):
             return []
         return [views_root / slug, dev.view_work_dir(c, slug)]
-    return [w for w in subagents.write_dirs(c) if w != views_root]
+    builders = (views_root, config.workspace_dir(c) / dev.VIEWS_WORK)
+    return [w for w in subagents.write_dirs(c) if w not in builders]
 
 
 def protected(ws: Path) -> list[Path]:
-    """The workspace's files no agent writes, as the kernels' sandbox keeps them (kernel_wrap.srt_rules): its hidden
-    files and lock, and its read-only files and folders. They matter where a write root holds the workspace, as a
+    """The workspace's files no agent writes: its hidden files and lock, and the files and folders kernel_wrap keeps
+    from agents' commands (READ_ONLY_FILES, READ_ONLY_DIRS). They matter where a write root holds the workspace, as a
     corpus folder that holds thimble's home would."""
     from . import kernel_wrap  # noqa: PLC0415
 
