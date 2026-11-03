@@ -97,7 +97,7 @@ def kernel(crew, monkeypatch):
 async def _label(name: str, pattern: str, values: list[str]) -> str:
     s = await concepts.apply_scoped(CORPUS, scope="files", name=name, kind="regex", text=pattern, values=values,
                                     paths=["saves.jsonl"], limit=None, comment=False, filter=False, created_by="test",
-                                    chat=None, group=None, card=False)
+                                    chat=None)
     await concepts.wait_apply(CORPUS, s["concept"], 60)
     return s["concept"]
 

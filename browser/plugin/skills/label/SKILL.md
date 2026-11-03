@@ -1,6 +1,6 @@
 ---
 name: label
-description: Define a label and apply it to the corpus's records. `/thimble:label <name> [definition] [kind=regex|code|prompt] [paths=<glob>,…] [values=a,b] [limit=N]` calls apply_label, and the label card shows the count of each value.
+description: Define a label and apply it to the corpus's records. `/thimble:label <name> [definition] [kind=regex|code|prompt] [paths=<glob>,…] [values=a,b] [limit=N]` calls apply_label, which counts the records of each value.
 disable-model-invocation: true
 argument-hint: "<name> [definition] [kind=regex|code|prompt] [paths=<glob>,…] [values=a,b] [limit=N]"
 ---

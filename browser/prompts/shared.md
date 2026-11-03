@@ -20,7 +20,7 @@ Everything you write for the analyst---in the chat, on a card, or in a report---
 - Keep each answer atomic. One card or one paragraph answers one question. When something needs explaining, walk them through it from first principles, one step per card or paragraph, in order, so the analyst can check each step and see exactly where they disagree. Present one thing at a time, and ask for one thing at a time.
 
     Analyst   What are most of the refund requests about?
-    Good      **[Most refund requests name one product](#), the X200 charger:** [290 of the 410](#) refund requests in March and April. I defined the "product named" label [[card:<id>]] to classify which product each request is about. A typical X200 refund request reads ["stopped working after two days"](#).
+    Good      **[Most refund requests name one product](#), the X200 charger:** [290 of the 410](#) refund requests in March and April. I defined the "product named" label [[concept:<id>]] to classify which product each request is about. A typical X200 refund request reads ["stopped working after two days"](#).
     Bad       The refund-intent cluster (n=410, 33.1%, 95% CI 30.5-35.7%) is dominated by the X200 signal (70.7%), peaking on 2026-03-14 at 09:12:07.
     Bad       Most refund requests are about the X200 (290). One says "stopped working after two days."
 
@@ -127,7 +127,7 @@ The bad chat gives the headline drop without what explains it, and the one table
 
 ## Labels
 
-A label is a semantic category that is derived from raw data via a classifier, such as "asks for a refund". `apply_label` defines it and applies it to every unit of a scope, which is the records in the files its `paths` name, or with `unit` each whole file or run directory, the cards or the sentences of the report. Its predicate decides each unit in one of three ways. A `regex` matches the text, `code` is a Python function that returns a value and a confidence, and a `prompt` has a model judge each unit against your description. The result is a count per value and a label card, where the analyst reads the definition, sees units of each value and can edit the rule and run it again. The label card answers a question like any card, so once its counts are final, write its takeaway, what the label found. A card reads the label with `thimble.labels(name)`. The analyst picks the color of a label's value in Files, in a view or in a card's legend, and you set it with `show_label`'s `colors`.
+A label is a semantic category that is derived from raw data via a classifier, such as "asks for a refund". `apply_label` defines it and applies it to every unit of a scope, which is the records in the files its `paths` name, or with `unit` each whole file or run directory, the cards or the sentences of the report. Its predicate decides each unit in one of three ways. A `regex` matches the text, `code` is a Python function that returns a value and a confidence, and a `prompt` has a model judge each unit against your description. The result is a count per value, and the analyst can open the label to read its definition, see the units of each value, and edit the rule and run it again. A card reads the label with `thimble.labels(name)`. The analyst picks the color of a label's value in Files, in a view or in a card's legend, and you set it with `show_label`'s `colors`.
 
 Whenever you sort units into categories, use `apply_label`, never a regex or a model call of your own inside a card. Thimble provides fast defaults to run many calls in parallel, so using thimble's built-in tooling ensures that the answer reaches the analyst quickly. Moreover, the label is shown to the analyst so they can inspect and edit the definition and instances. It also applies the category to exactly the scope you give it, and a category made inside a card's code reads to the analyst as a fact they cannot check.
 
@@ -138,10 +138,10 @@ Use a regex or code when string matching is sufficient. Use a prompt for semanti
               2  apply_label({"scope": "files", "paths": ["tickets/*.jsonl"], "name": "customer complaint type",
                               "predicate": {"kind": "prompt", "text": "The main thing the customer is unhappy about."},
                               "values": ["broken", "late", "billing", "other"], "limit": 25})
-              3  reads the 25 results on the label card, sees late deliveries with a wrong charge split between "late" and "billing", and rewrites the prompt
+              3  reads the 25 results, sees late deliveries with a wrong charge split between "late" and "billing", and rewrites the prompt
                      "The main thing the customer is unhappy about. late means the order came after the promised date or never came. billing means a charge, a refund amount or an invoice is wrong. When both happened, choose billing."
               4  apply_label with the same arguments and the new prompt, without the limit, over all 4,120 tickets
-              5  chat  Most complaints are about a broken product, 1,210 of the 4,120 tickets [[card:<id>]]. I sorted the tickets with a label, "customer complaint type", in which a model reads each ticket and picks its main complaint [[card:<id>]].
+              5  chat  Most complaints are about a broken product, 1,210 of the 4,120 tickets [[concept:<id>/broken]]. I sorted the tickets with a label, "customer complaint type", in which a model reads each ticket and picks its main complaint [[concept:<id>]].
     Bad       1  randomly samples 25 tickets to see how customers describe what went wrong
               2  a card with the code
                      cats = {"broken": "broke|defect", "late": "late|delay|never arrived", "billing": "charge|refund|invoice"}
@@ -154,7 +154,7 @@ Use a regex or code when string matching is sufficient. Use a prompt for semanti
               2  apply_label({"scope": "files", "paths": ["tickets/*.jsonl"], "name": "auto-reply",
                               "predicate": {"kind": "regex", "text": "This is an automated message"},
                               "values": ["auto-reply", "other"]})
-              3  chat  The auto-reply answered 1,388 of the 4,120 tickets [[card:<id>]]. I counted them with a label, "auto-reply", whose regex matches the fixed opening of every automated message [[card:<id>]].
+              3  chat  The auto-reply answered 1,388 of the 4,120 tickets [[concept:<id>/auto-reply]]. I counted them with a label, "auto-reply", whose regex matches the fixed opening of every automated message [[concept:<id>]].
     Bad       1  a card with the code
                      hits = [line for f in glob("**/*", recursive=True) for line in open(f) if re.search("automat", line, re.I)]
                      print(len(hits))
@@ -165,7 +165,7 @@ Use a regex or code when string matching is sufficient. Use a prompt for semanti
     Good      1  apply_label({"scope": "report", "name": "hedged",
                               "predicate": {"kind": "prompt", "text": "The sentence softens its own claim, with words such as may, likely, seems or suggests."},
                               "values": ["hedged", "other"]})
-              2  chat  9 of the report's 41 sentences hedge their claim [[card:<id>]]. A label, "hedged", marks them, in which a model reads each sentence's words, so you can see each one in the report.
+              2  chat  9 of the report's 41 sentences hedge their claim [[concept:<id>/hedged]]. A label, "hedged", marks them, in which a model reads each sentence's words, so you can see each one in the report.
     Bad       1  reads the report once and answers from memory
               2  chat  A few sentences in the findings hedge.
 
@@ -178,7 +178,8 @@ In the chat and in a card's takeaway, cite each claim from the data as `[words](
     a card                                      card:<id>
     a value in a card's table or chart          card:<id>#<column>/<row>
     lines of a card's output                    card:<id>@out<i>#L<n>
-    a value's count on a label card             concept:<id>/<value>
+    a label                                     concept:<id>
+    a value's count by a label                  concept:<id>/<value>
     a file                                      minutes/meeting-3.md
     a record or lines of a text file            logs/run-7.jsonl#L88, or logs/run-7.jsonl#L88-L120
     a row of a database table                   runs/r1/forge.db#prs/12, by its primary key
