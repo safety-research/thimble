@@ -34,7 +34,9 @@
 //                                     `handled` false, the card as it was, when it stands on no item
 //   undo     {id, n}                  the state as it was before the last n keys
 //   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was, at
-//                                     `width`, which the card is drawn at from now on
+//                                     `width`, which the card is drawn at from now on; a click at a cell does what a
+//                                     live click there does: a Button of words there is pressed too, which Claude Code's
+//                                     own Button presses live (client.tsx)
 //   ping
 // Any request may also name `theme`, 'dark' or 'light' (Claude Code's theme): the palette surface.colors gives every
 // card from then on (the hooks send it with each request, and draw the cards again when it changes).
@@ -614,11 +616,13 @@ function besideOf(card, own, width) {
   return wrapped.length ? { beside: { width, lines: c.lines, cut: c.cut, wrapped } } : {}
 }
 
-/** A click: a Button around lines that holds the cell where it ended, else the view's onPointer listener, else the
- *  item of a card that steps with keys on that line (pick). A click none of these takes names the words it fell on
- *  (`run`), which the hooks ask a side thread about. */
-function click(card, at) {
-  const press = pressAt(card.tree, card.width, at.up.x, at.up.y)
+/** A click: a Button that holds the cell where it ended, else the view's onPointer listener, else the item of a card
+ *  that steps with keys on that line (pick). A click none of these takes names the words it fell on (`run`), which the
+ *  hooks ask a side thread about. `live`: a click the Client sent (client.tsx). There Claude Code's own Button takes a
+ *  click on a Button of words and sends its press, and no pointer event comes for it, so a live click presses only a
+ *  Button around lines; the card tool's test of a click (act) presses either, as the live click does. */
+function click(card, at, live = false) {
+  const press = pressAt(card.tree, card.width, at.up.x, at.up.y, { inline: !live })
   if (press !== null) return inContext(card, 'press', { button: press }, EVENT_MS)
   const cells = !!(card.tree && card.tree.p && card.tree.p.cells)
   if (!cells) {
@@ -769,7 +773,7 @@ const OPS = {
   pointer: a => {
     const card = cards.get(a.id)
     if (!card) return { ok: false, missing: true }
-    const r = click(card, { down: a.down, up: a.up ?? a.down, button: a.button })
+    const r = click(card, { down: a.down, up: a.up ?? a.down, button: a.button }, true)
     if (r.ok) keep(card, r)
     return r
   },

@@ -454,3 +454,33 @@ test('a click on an item of a card that steps with j and k selects it as the key
   assert.equal(r.copies[1].lines[2], '▸ bram █████ 5')
   assert.match(r.copies[2].note, /asks the analyst's side thread/)
 })
+
+// A strip of one Button per run beside its label, as Claude drew it for the sample (B32). The card tool's test of a click
+// at a run's cell presses that run's Button, as a live click on it does (client.tsx draws it as Claude Code's own
+// Button, which takes the click); before, the test found only a Button around lines, said that no Button stood there,
+// and Claude drew the card again without its Buttons.
+const STRIP = `function view(props, surface) {
+  const { Box, Text, Button } = surface.elements
+  const sel = surface.state?.sel ?? -1
+  return Box({ flexDirection: 'column', children: [
+    Box({ children: [Text({ children: 'runs  ' }), ...props.rows.map((r, i) => Button({ plain: true, onPress: () => surface.setState({ sel: i }), children: Text({ inverse: i === sel, children: r.score > 2 ? '×' : '✓' }) }))] }),
+    Text({ children: sel < 0 ? 'Click a run.' : r0(props.rows[sel]) }),
+  ] })
+}
+function r0(r) { return '▸ ' + r.name + ' scored ' + r.score }`
+
+test("the card tool's test of a click at a cell presses a Button laid out inline with its words, as a live click does", async () => {
+  const { id, r: loaded } = await load(STRIP)
+  assert.deepEqual(loaded.lines, ['runs  ××✓', 'Click a run.'])
+  const r = await ask('act', { id, width: 40, actions: [{ click: [7, 0] }, { click: [8, 0] }, { click: [1, 0] }] })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.copies.map(c => c.lines[1]), ['▸ bram scored 5', '▸ cleo scored 1', '▸ cleo scored 1'])
+  assert.deepEqual(r.copies.map(c => c.note), [undefined, undefined, 'a click there asks the analyst\'s side thread about "runs": no Button, onPointer listener or item the card\'s keys select stands there'])
+  // the card is as it was before the actions
+  assert.equal(JSON.parse(r.state), null)
+  // live, Claude Code's own Button takes a click on a run and sends its press, and no pointer event comes for it: a
+  // pointer event that ends on a run (a drag from the label) presses no Button of words
+  const p = await ask('pointer', { id, down: { x: 1, y: 0 }, up: { x: 7, y: 0 } })
+  assert.equal(p.handled, false)
+  assert.equal(JSON.parse(p.state), null)
+})

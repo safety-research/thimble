@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 import { startRunner } from './start.mjs'
 
-import { layoutLines } from '../layout.js'
+import { layoutLines, pressAt } from '../layout.js'
 import { GALLERY, GOLDEN_WIDTHS } from './gallery.mjs'
 
 let dir
@@ -51,4 +51,29 @@ test('a wrapped text in a row of parts side by side, or padded into columns, is 
     { t: 'Box', p: {}, c: [{ t: 'Text', p: {}, c: ['bram'] }, { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: [' 5 of 9 merged'] }] }] },
   ] }
   assert.deepEqual(layoutLines(tree, 12).wrapped.map(w => [w.text, !!w.row]), [['a sentence that wraps', false], ['ada     3 of 9 merged', true], [' 5 of 9 merged', true]])
+})
+
+// A click on a cell presses the Button that stands there, wherever the layout places it: a strip of one Button per run
+// beside its label (B32: the card tool's click test found only a Button around lines, said no Button stood there, and
+// Claude drew the card again without its Buttons)
+test('a click on a cell finds the Button there: a Button of words in a row beside Texts or alone on its line, the innermost, and with inline false only a Button around lines', () => {
+  const B = (n, label, more = { plain: true }) => ({ t: 'Button', p: { onPress: n, ...more }, c: [{ t: 'Text', p: {}, c: [label] }] })
+  const T = s => ({ t: 'Text', p: {}, c: [s] })
+  const tree = { t: 'Box', p: { flexDirection: 'column' }, c: [
+    T('Runs'),
+    { t: 'Box', p: {}, c: [T('result '), B(0, '✓'), B(1, '×'), T('┃'), B(2, '×')] },
+    B(3, 'add ten', {}),
+    { t: 'Box', p: { flexDirection: 'column', onPress: 4 }, c: [{ t: 'Box', p: {}, c: [T('group '), B(5, 'inner')] }] },
+  ] }
+  assert.deepEqual(layoutLines(tree, 30).lines, ['Runs', 'result ✓×┃×', '[ add ten ]', 'group inner'])
+  const at = (x, y, o) => pressAt(tree, 30, x, y, o)
+  // the strip: each run's Button, and nothing on the label or the line between
+  assert.deepEqual([0, 6, 7, 8, 9, 10, 11].map(x => at(x, 1)), [null, null, 0, 1, null, 2, null])
+  assert.equal(at(0, 0), null)
+  // a Button alone on its line takes the cells of its brackets too, and no more
+  assert.deepEqual([0, 10, 11].map(x => at(x, 2)), [3, 3, null])
+  // a Button of words inside a Button around lines: the innermost, and the outer one around it
+  assert.deepEqual([0, 6, 10, 20].map(x => at(x, 3)), [4, 5, 5, 4])
+  // only the Buttons around lines
+  assert.deepEqual([at(8, 1, { inline: false }), at(0, 2, { inline: false }), at(6, 3, { inline: false })], [null, null, 4])
 })
