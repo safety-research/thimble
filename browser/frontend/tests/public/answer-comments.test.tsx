@@ -126,20 +126,29 @@ describe("a check's comment on Claude's answer, in main's chat", () => {
     expect((await chat('main', records.slice(0, 2))).querySelector('mark.answer-tint')).toBeNull()
   })
 
-  test("a click on a citation's words in the passage opens the citation alone, and closes an open comment", async () => {
+  test("a click on a citation's words in the passage opens the comment first, then the citation", async () => {
     const cited = ANSWER.replace('**0 new messages**', '[0 new messages](#)')
     const el = await chat('main', [records[0], { type: 'text', delta: cited }, records[2]])
     const inCitation = [...el.querySelectorAll<HTMLElement>('.mark-words mark.answer-tint')]
     expect(inCitation.map((m) => m.textContent)).toEqual(['0 new messages'])
-    await click(inCitation[0])
+    // a press as the pointer makes it: the comment's own press-outside rule lets the click choose
+    const press = (t: Element) =>
+      act(async () => {
+        for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup'])
+          t.dispatchEvent(new MouseEvent(type, { bubbles: true }))
+        ;(t as HTMLElement).click()
+      })
+    await press(inCitation[0])
+    expect(document.querySelector('.answer-cm-pop')).not.toBeNull()
+    expect(document.querySelector('.mark-pop')).toBeNull()
+    await press(inCitation[0])
     expect(document.querySelector('.mark-pop')).not.toBeNull()
     expect(document.querySelector('.answer-cm-pop')).toBeNull()
-    // the passage's other words open its comment; a press on the citation then makes the comment way
+    // the passage's other words open its comment, and the citation's label makes way for it
     const other = [...el.querySelectorAll<HTMLElement>('mark.answer-tint')].find((m) => !m.closest('.mark-words'))!
-    await click(other)
+    await press(other)
     expect(document.querySelector('.answer-cm-pop')).not.toBeNull()
-    await act(async () => void inCitation[0].dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
-    expect(document.querySelector('.answer-cm-pop')).toBeNull()
+    expect(document.querySelector('.mark-pop')).toBeNull()
   })
 
   test('each comment tints the words it names, so an explainer and a heads-up on one sentence each stand on their own words and open the pop-up of their own kind', async () => {
