@@ -1054,4 +1054,4 @@ def test_the_guide_says_to_start_the_workbench_in_a_terminal_of_its_own():
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
     step = text[text.index("- The workbench, when they want to work in a web page"):text.index("6. When the plugin works")]
     assert "in a terminal of its own" in step
-    assert "Run with `!` here, its link has no sign-in code" in step
+    assert "Started with `!` here, it prints a link with no sign-in code" in step
