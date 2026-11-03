@@ -53,7 +53,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from . import cc_plugin, config, ledger, nofollow, permission_updates, procs, prompts
+from . import cc_plugin, config, labels_off, ledger, nofollow, permission_updates, procs, prompts
 
 log = logging.getLogger("thimble.events")
 
@@ -186,16 +186,21 @@ def render_prompts(names: tuple[str, ...] | list[str], workdir: str, edits: bool
     """Prompt files for a session in `workdir`, rendered and joined by a blank line, with the corpus root and the citation
     forms of the folder's views filled in. Main's append and the shared skill's command both come from here. `edits`:
     whether main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py). Which
-    requests to a host ask the analyst follows the way main reaches Claude (network_words)."""
+    requests to a host ask the analyst follows the way main reaches Claude (network_words). While the workspace's
+    Labels switch is off (ledger.labels_on), each text leaves out what it says of labels, and the card types' text,
+    whose way of answering takes labels, is left out (labels_off.py)."""
     from . import cardtypes, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
     c = config.workspace_for_cwd(workdir)
+    labels = ledger.labels_on(c)
     forms = views.forms_text(c) if c else ""
-    values = {"workdir": str(workdir), "forms": forms, "card_types": cardtypes.prompt_text(c),
+    values = {"workdir": str(workdir), "forms": forms, "card_types": cardtypes.prompt_text(c) if labels else "",
               "corpus_writes": CORPUS_WRITES[edits], "network": network_words(c, edits)}
     parts = []
     for name in names:
         part = prompts.render(name, values).strip()
+        if not labels:
+            part = labels_off.prompt(name, part).strip()
         if name == PROMPT:
             from . import roles  # noqa: PLC0415 — roles reads the extensions
 
@@ -355,6 +360,10 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
     payload = dict(payload or {})
     if check_kind and kind not in kinds():
         raise HTTPException(400, f"unknown event kind {kind!r}; the kinds are {', '.join(kinds())} (prompts/{PROMPT}.md)")
+    if kind in labels_off.EVENTS and not ledger.labels_on(c):
+        # Labels is off in the workspace's Settings: main is told nothing of labels (labels_off.py)
+        log.info("%s: no %s event, since Labels is off in Settings", c, kind)
+        return {"id": event_id or secrets.token_hex(4), "kind": kind, "delivered": 0, "labels_off": True}
     if not reachable(c):
         raise HTTPException(409, NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     event_id = event_id or secrets.token_hex(4)
@@ -432,10 +441,13 @@ def _keep_held(c: str, notes: list[dict[str, Any]]) -> None:
 
 
 def pop_held(c: str) -> list[dict[str, Any]]:
-    """The quiet events waiting, as notes, and no longer waiting."""
+    """The quiet events waiting, as notes, and no longer waiting. While Labels is off in the workspace's Settings, one of
+    labels held from before goes with no word to main (labels_off.EVENTS)."""
     notes = held(c)
     if notes:
         _keep_held(c, [])
+    if notes and not ledger.labels_on(c):
+        notes = [n for n in notes if (n.get("meta") or {}).get("kind") not in labels_off.EVENTS]
     return notes
 
 

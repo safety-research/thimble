@@ -1264,6 +1264,10 @@ export interface Settings {
   /** "Claude can edit files in this folder": whether main and its thread forks may write the corpus folder (the
    * workspace's settings.json `corpus_edits`, on by default) */
   corpus_edits?: boolean
+  /** Labels: whether Claude makes labels in this workspace, as the terminal's Labels setting (the workspace's
+   * settings.json `labels`, on by default); off, main and thimble's agents read nothing of labels and have no label
+   * tool */
+  labels?: boolean
   [k: string]: unknown
 }
 
@@ -1328,6 +1332,8 @@ export interface SettingsPatch {
   ask_key?: 'meta' | 'alt' | null
   /** "Claude can edit files in this folder": false turns it off, null puts back the default (on) */
   corpus_edits?: boolean | null
+  /** Labels: false turns it off, null puts back the default (on) */
+  labels?: boolean | null
   [k: string]: unknown
 }
 

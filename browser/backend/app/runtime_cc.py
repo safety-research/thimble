@@ -352,7 +352,7 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
 
     bash = "Bash" in spec.builtins and cc_settings.sandbox_ok()
     builtins = [b for b in spec.builtins if b != "Bash" or bash]
-    secs = tools.tool_sections(spec.thimble)
+    secs = tools.tool_sections(spec.thimble, getattr(spec, "labels", True))
 
     def handler(name: str) -> Any:
         async def run(args: dict[str, Any]) -> dict[str, Any]:
