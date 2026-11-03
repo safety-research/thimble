@@ -1,13 +1,14 @@
 // register.ts: thimble fix, the person's changes to their own thimble, in the hooks module.
 //
-//   /thimble-fix <words>   a prompt to Claude: the words, as the person typed them, are a prompt of thimble's that Claude
-//                          reads as theirs, so the transcript shows them, and the command's answer gives Claude the
-//                          request beside them (prompts/fix-request.md) and the person's fixes (fixesContext: number,
-//                          name, state). Claude names the fix the words change with the fix-thimble skill, `N` when
-//                          they follow up on fix N, `new` when they are about something else, or first asks one short
-//                          question. Typed mid-turn, it waits for the turn's end. The command is thimble's only one of
-//                          that name: a host that runs Claude Code through its SDK lists every command a plugin gives
-//                          (the desktop app's Code tab)
+//   /thimble-fix <words>   a prompt to Claude: the words, as the person typed them (in quotes when they begin with /,
+//                          which Claude Code takes as a command), are a prompt of thimble's that Claude reads as theirs,
+//                          so the transcript shows them; one that does not enter starts no fix, and a line says so. The
+//                          command's answer gives Claude the request beside them (prompts/fix-request.md) and the
+//                          person's fixes (fixesContext: number, name, state). Claude names the fix the words change
+//                          with the fix-thimble skill, `N` when they follow up on fix N, `new` when they are about
+//                          something else, or first asks one short question. Typed mid-turn, it waits for the turn's
+//                          end. The command is thimble's only one of that name: a host that runs Claude Code through its
+//                          SDK lists every command a plugin gives (the desktop app's Code tab)
 //   the fix-thimble skill  a request in the person's own words, as they typed them after /thimble-fix: the kernel
 //                          makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer (fixer.ts) works in it in
 //                          the background; N is a round of fix N itself (its fixer's, or in place: the version the
@@ -159,6 +160,19 @@ async function numberAlone($: Engine, n: number | null): Promise<string | null> 
   return null
 }
 
+/** /thimble-fix's words did not reach Claude (Claude Code refused thimble's prompt with them, or it did not enter): one
+ *  line says so and what to do, and no fix starts from them in a later turn. */
+async function notGiven($: Engine, words: string, err: unknown): Promise<void> {
+  $.ui.toast(`thimble started no fix: it could not give your words to Claude (${cut(String((err as Error)?.message || err), 160)}). To try again, type /thimble-fix and your words.`)
+  try {
+    if (String((await $.state.get(ASKED_WORDS)).value ?? '') !== words) return
+    await $.state.set(ASKED, 0 as never)
+    await $.state.set(ASKED_WORDS, '' as never)
+  } catch {
+    // the request ends with its two turns
+  }
+}
+
 /** The prompt box now holds `text`: the bar draws again when a failed fix's view shows keys the box no longer lets act,
  *  or hides keys that act again (line.ts redrawFor). Nothing is read while no such view shows, so a key typed costs
  *  nothing more, and nothing here fails the edit. (A word that hooks/keys.ts puts in the box itself, after it took its
@@ -271,8 +285,14 @@ export const registerFix: Register = on => {
     await $.state.set(ASKED, 2 as never)
     await $.state.set(ASKED_WORDS, words as never)
     const list = fixesContext((await refreshFixes($))?.fixes ?? [])
+    // Claude Code takes no prompt of a plugin's that begins with /, which would run a command as the person: such words
+    // go to Claude in quotes, and the fix still takes them as typed
+    const text = words.startsWith('/') ? `“${words}”` : words
     $.clock.after(0, () => {
-      void $.prompt.submit({ text: words, asUser: true }).catch(err => $.ui.toast(notAsked(err)))
+      void (async () => {
+        const r = await $.prompt.submit({ text, asUser: true })
+        if (r.drop !== undefined) throw new Error(r.drop)
+      })().catch(err => notGiven($, words, err))
     })
     return { context: [requestText, ...(list ? [list] : [])] }
   })
