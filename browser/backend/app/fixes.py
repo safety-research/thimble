@@ -69,6 +69,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -760,7 +761,8 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
     the very sources it has (PAGE_SOURCES), made before, takes the build's place rather than a build after the person's
     click: the page the checks of the fix that goes on built (`built`: its folder, and the git ids of the sources it was
     built from, checks_build), or this install's own page, while `root` has the install's page sources (a fix that
-    changes none). '' when ready, else why not."""
+    changes none) and the page is a build of them (page_built), by their git ids in a clone and by its files' in an
+    install from the release archive, which has no git (page_tree). '' when ready, else why not."""
     here = root.resolve() == config.REPO_ROOT.resolve()
     if not here:
         lend(root)
@@ -825,10 +827,50 @@ def page_sources(top: Path, rev: str) -> str:
     return " ".join(ids) if ids[0] else ""
 
 
+# git with none of the person's settings that would change what an index holds or run anything of theirs
+# (files_sources)
+FILE_IDS_GIT = ("git", "-c", "core.hooksPath=/dev/null", "-c", "core.excludesFile=/dev/null",
+                "-c", "core.autocrlf=false", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+                "-c", "gc.auto=0", "-c", "init.defaultBranch=main", "--no-optional-locks")
+
+
+def files_sources(top: Path) -> str:
+    """page_sources for a folder in no git checkout, such as an install from the release archive: the git ids its page
+    sources would have once committed, from its files as they are now, the files its .gitignore leaves out (the page's
+    build, the packages) left out as git leaves them out. git computes them in an index of a temporary folder of the
+    server's own, which needs no repository at `top` and writes nothing there. '' when `top` holds no browser/frontend,
+    or git cannot run."""
+    if not (top / PAGE_SOURCES[0]).is_dir():
+        return ""
+    have = [p for p in PAGE_SOURCES if (top / p).exists()]
+    with tempfile.TemporaryDirectory(prefix="thimble-page-ids-") as d:
+        git = [*FILE_IDS_GIT, f"--git-dir={Path(d) / 'git'}", f"--work-tree={top}"]
+
+        def run(*args: str) -> str | None:
+            try:
+                p = subprocess.run([*git, *args], cwd=top, capture_output=True, text=True, timeout=120, check=False)
+            except (OSError, subprocess.TimeoutExpired):
+                return None
+            return p.stdout if p.returncode == 0 else None
+
+        if run("init", "-q", str(Path(d) / "git")) is None or run("add", "-A", "--", *have) is None:
+            return ""
+        tree = (run("write-tree") or "").strip()
+        listed = run("ls-tree", tree, "--", *have) if tree else None
+    if listed is None:
+        return ""
+    ids = {line.split("\t", 1)[1]: line.split()[2] for line in listed.splitlines() if "\t" in line}
+    return " ".join(ids.get(p, "") for p in PAGE_SOURCES) if ids.get(PAGE_SOURCES[0]) else ""
+
+
 def page_tree(fe: Path) -> str:
     """The git ids of the sources of the page in `fe` (a browser/ folder's frontend/, page_sources), when they are as
-    their checkout's commit has them; '' when they are not (a change not committed), or are in no checkout."""
+    their checkout's commit has them; '' when they are not (a change not committed). In no checkout, such as an install
+    from the release archive, the ids its files would have committed (files_sources), so that a fix that changes no
+    page source takes the install's own page there too (prepare)."""
     top = fe.parent.parent
+    if not (top / ".git").exists():
+        return files_sources(top)
     try:
         st = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(top), "status",
                              "--porcelain", "--", *PAGE_SOURCES], capture_output=True, text=True, timeout=30,

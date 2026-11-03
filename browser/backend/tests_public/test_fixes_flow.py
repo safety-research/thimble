@@ -776,6 +776,119 @@ def test_a_fix_that_changes_only_a_json_file_the_page_bundles_never_keeps_a_page
     assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
 
 
+def _release_page(top: Path, source: str) -> Path:
+    """A made-up release checkout laid out as thimble's: a page whose src/a.tsx (`source` after its import) imports a
+    module of the terminal plugin, and a .gitignore that leaves the page's build and the packages out, as thimble's
+    does; committed. Its top folder."""
+    fe = top / "browser" / "frontend"
+    (fe / "src").mkdir(parents=True)
+    (fe / "index.html").write_text("<!doctype html>\n")
+    (fe / "src" / "a.tsx").write_text(f"import {{ TABLE_LABEL }} from '../../../plugin/tray/tray.mjs'\n{source}")
+    (top / "plugin" / "tray").mkdir(parents=True)
+    (top / "plugin" / "tray" / "tray.mjs").write_text("export const TABLE_LABEL = 'output · table'\n")
+    (top / "browser" / "backend" / "app").mkdir(parents=True)
+    (top / "browser" / "backend" / "app" / "label_order.json").write_text("[1, 2, 3]\n")
+    (top / ".gitignore").write_text("node_modules/\nbrowser/frontend/dist/\n")
+    _git("init", "-q", cwd=top)
+    _git("add", "-A", cwd=top)
+    _git("commit", "-q", "-m", "a made-up release", cwd=top)
+    return top
+
+
+def _archive_install(top: Path, release: Path) -> Path:
+    """An install from the release archive of the checkout `release`, as install.sh leaves one: its committed files as
+    the archive holds them, with no git, the packages installed (node_modules/) and the page built (dist/), both of
+    which .gitignore leaves out of the page's sources. Its browser/."""
+    import io  # noqa: PLC0415
+    import tarfile  # noqa: PLC0415
+
+    tar = subprocess.run(["git", "archive", "--format=tar", "HEAD"], cwd=release, check=True, capture_output=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(tar)) as t:
+        t.extractall(top, filter="data")
+    fe = top / "browser" / "frontend"
+    (fe / "node_modules" / "made-up-package").mkdir(parents=True)
+    (fe / "node_modules" / "made-up-package" / "index.js").write_text("module.exports = 1\n")
+    _built_page(fe / "dist", "the install's page")
+    assert not (top / ".git").exists()
+    return top / "browser"
+
+
+def _live_of(release: Path, top: Path) -> Path:
+    """Live as `thimble fix` makes it: a checkout of the release, at its commit. Its browser/."""
+    _git("clone", "-q", str(release), str(top), cwd=release.parent)
+    return top / "browser"
+
+
+def _commit_fix(live: Path, changes: dict[str, str], when: float | None = None) -> None:
+    """A fix's commit in live: each file of `changes` (by its path in the checkout) with its new text, and its time set
+    to `when`, later than any build, when given."""
+    top = live.parent
+    for rel, text in changes.items():
+        (top / rel).parent.mkdir(parents=True, exist_ok=True)
+        (top / rel).write_text(text)
+        if when is not None:
+            os.utime(top / rel, (when, when))
+    _git("add", "-A", cwd=top)
+    _git("commit", "-q", "-m", "a made-up fix", cwd=top)
+
+
+def _no_npm(monkeypatch, install: Path) -> None:
+    monkeypatch.setattr(config, "REPO_ROOT", install)
+    monkeypatch.setattr(fixes, "lend", lambda root: None)
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
+
+
+def test_an_install_from_the_release_archive_lends_its_page_to_a_fix_that_changes_no_page_file(tmp_path, monkeypatch):
+    """An install from the release archive, the default install, has no git, so its page's sources had no git ids
+    (page_tree) and Use it now built the page again for a fix that changes no file of the page, a wait of 25 to 55 s.
+    Now an install in no checkout has the ids its files would have committed, the files .gitignore leaves out (the
+    build, the packages) left out too, so live, whose page sources are the install's, takes the install's page and
+    builds none."""
+    release = _release_page(tmp_path / "release", "export const rows = 2\n")
+    install = _archive_install(tmp_path / "install", release)
+    _no_npm(monkeypatch, install)
+    live = _live_of(release, tmp_path / "live")
+    _commit_fix(live, {"browser/backend/app/made_up_fix.py": "FIXED = True\n"})
+    assert fixes.prepare(live) == ""
+    assert (live / "frontend" / "dist" / "index.html").read_text() == "the install's page"
+
+
+def test_an_install_from_the_release_archive_lends_no_page_to_a_fix_that_changes_a_page_source(tmp_path, monkeypatch):
+    """The install's page goes to live only while live's page sources are exactly the install's: a fix that changes one
+    of them (a module of the terminal plugin the page bundles, or the page's own source) gets its page built."""
+    release = _release_page(tmp_path / "release", "export const rows = 2\n")
+    install = _archive_install(tmp_path / "install", release)
+    _no_npm(monkeypatch, install)
+    live = _live_of(release, tmp_path / "live")
+    assert fixes.prepare(live) == ""
+    assert (live / "frontend" / "dist" / "index.html").read_text() == "the install's page"
+    later = time.time() + 60
+    _commit_fix(live, {"plugin/tray/tray.mjs": "export const TABLE_LABEL = 'output, fixed'\n"}, later)
+    assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
+    shutil.rmtree(live / "frontend" / "dist")
+    _commit_fix(live, {"plugin/tray/tray.mjs": "export const TABLE_LABEL = 'output · table'\n",
+                       "browser/frontend/src/a.tsx": "export const rows = 3\n"}, later + 60)
+    assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
+
+
+def test_an_install_s_page_whose_source_was_edited_after_its_build_is_lent_to_no_fix(tmp_path, monkeypatch):
+    """The install's page shows the sources it was built from: once a source of the install was edited after the build,
+    the page is no build of the install's sources as they are, so live, whose fix has those very sources, gets its page
+    built rather than the install's."""
+    release = _release_page(tmp_path / "release", "export const rows = 2\n")
+    install = _archive_install(tmp_path / "install", release)
+    _no_npm(monkeypatch, install)
+    live = _live_of(release, tmp_path / "live")
+    assert fixes.prepare(live) == ""
+    later = time.time() + 60
+    edited = "import { TABLE_LABEL } from '../../../plugin/tray/tray.mjs'\nexport const rows = 3\n"
+    (install / "frontend" / "src" / "a.tsx").write_text(edited)
+    os.utime(install / "frontend" / "src" / "a.tsx", (later, later))
+    _commit_fix(live, {"browser/frontend/src/a.tsx": edited}, later)
+    assert fixes.page_tree(install / "frontend") == fixes.page_tree(live / "frontend"), "the very sources"
+    assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
+
+
 def test_the_page_s_sources_name_each_file_outside_browser_frontend_the_page_imports():
     """fixes.PAGE_SOURCES names each file outside browser/frontend the page bundles, whatever its kind: those
     browser/frontend/src imports (the terminal plugin's modules, which vite.config.ts lets it read from ../../plugin,
