@@ -17,10 +17,16 @@ commands thimble and thimble-browser in ~/.local/bin.
                                          earlier install that nothing uses now
     --folder DIR                         plugin, sandbox, browser and commands from the clone DIR in place of live: the
                                          dev install (scripts/install.sh --local), as before 0.10.8
+    thimble install switch --folder DIR  before the dev install's steps: the release installed in thimble's home goes
+                                         aside, with its fixes, and this clone's fixes that were set aside come back
+    thimble install launcher             not the script's: thimble-browser, run from live, points the launcher on PATH
+                                         (--bin-dir) at live, when an install before 0.10.8 wrote it for its own folder
 
-Each verb prints its lines as the script lays them out, and adds what does not work yet to the file --notes names, one
-line each, which the script prints last. --state names a file where a verb leaves what a later one says: where Claude
-Code loaded thimble from before, and the folders of the earlier install.
+The dev install and the release install take turns in thimble's home: the one there goes aside, with its fixes, into a
+dated folder beside them (fixes-release-<date> or fixes-dev-<date>), and the newest one of the other kind that was set
+aside comes back (switch; release with --from). Each verb prints its lines as the script lays them out, and adds what
+does not work yet to the file --notes names, one line each, which the script prints last. --state names a file where a
+verb leaves what a later one says: where Claude Code loaded thimble from before, and the folders of the earlier install.
 """
 from __future__ import annotations
 
@@ -29,6 +35,8 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -159,12 +167,28 @@ def reach_release(full_ref: str) -> None:
 
 def release(a: Any, r: Run) -> int:
     """The release the script downloaded (--from) becomes live, with the release checkout beside it, as thimble's first
-    fix makes them from Claude Code's copy (ensure_live). An install that is there stays (installed)."""
+    fix makes them from Claude Code's copy (ensure_live). An install that is there stays (installed). A dev install's
+    fixes (scripts/install.sh --local) go aside first, and a release install that --local set aside comes back in place
+    of the download, with its fixes (the script then says that it downloaded the release for its install steps)."""
     rel, live = FX.release(), FX.live_dir()
-    if rel and (live / ".git").exists():
+    if rel and (live / ".git").exists() and rel.get("kind") != "clone":
         return installed(a, r, rel)
     if not a.from_:
         raise FX.FixError("thimble is not installed in this home, and no release was given to install (--from)")
+    if rel and (live / ".git").exists():
+        clone = tilde(rel.get("repo") or "")
+        to = aside("dev")
+        # the clone holds those fixes too (live is a worktree of it): it stays in use (unused)
+        r.put(dev=rel.get("repo"))
+        say(f"The fixes of your dev install are set aside in {tilde(to)}. scripts/install.sh --local in {clone} "
+            "brings them back.")
+    back = newest("release")
+    if back:
+        come_back(back, "dev")
+        say(f"The release that scripts/install.sh --local set aside is back in {tilde(thimble_home())}, with its fixes.")
+        got = installed(a, r, FX.release())
+        # the script goes on to the plugin's step, which points Claude Code at it again
+        return 0 if got == IN_PLACE else got
     src = Path(a.from_).resolve()
     commit = FX.git("rev-parse", "HEAD", cwd=src)
     with FX.Lock():
@@ -187,13 +211,6 @@ def installed(a: Any, r: Run, rel: dict[str, Any]) -> int:
     thimble update moves to a release. Then the line that says what it is, with the parts in place when they all are
     (exit IN_PLACE), and the newer release when one is out."""
     home = tilde(thimble_home())
-    if rel.get("kind") == "clone":
-        fixes = tilde(FX.home())
-        clone = tilde(rel.get("repo") or "")
-        say(f"thimble runs from your clone {clone}, installed with scripts/install.sh --local, and {fixes} holds your "
-            f"fixes on it. To install the release in its place, move them aside first: mv {fixes} {fixes}-dev, then "
-            "run the install again. Nothing was installed.")
-        return 1
     if a.ref:
         to = target(a.ref)
         if to["commit"] != rel["base"]:
@@ -243,6 +260,11 @@ def from_folder(src: Any, folder: Path) -> bool:
     return isinstance(src, dict) and src.get("source") == "directory" and same(src.get("path"), folder)
 
 
+def head_of(folder: Path) -> str:
+    """The commit a checkout is on, as Claude Code records the copy it made of it (gitCommitSha)."""
+    return FX.git("rev-parse", "HEAD", cwd=folder, check=False)
+
+
 def browser_ready() -> bool:
     """Whether the workbench in live is built and runs from there (fixes.browser_on_live wrote browser-ready)."""
     b = FX.live_dir() / "browser"
@@ -254,17 +276,37 @@ def browser_ready() -> bool:
 
 
 def launcher_target(p: Path) -> str:
-    """The thimble-browser that a launcher the install wrote starts ('' for another program, or none)."""
+    """The thimble-browser that a launcher the install wrote starts ('' for another program, or none): its comment line
+    has MARKER, and its exec line names the script in the shell's quotes (as the installs of 0.10.2 to 0.10.7 and
+    launcher_text write it)."""
     try:
-        text = p.read_text()
+        lines = p.read_text().splitlines()
     except (OSError, UnicodeDecodeError):
         return ""
-    if MARKER not in text:
+    if not any(x.startswith("#") and MARKER in x for x in lines):
         return ""
-    for line in text.splitlines():
+    for line in lines:
         if line.startswith("exec "):
-            return line[len("exec "):].split(" ", 1)[0].strip("'\"")
+            try:
+                words = shlex.split(line[len("exec "):])
+            except ValueError:
+                return ""
+            return words[0] if words else ""
     return ""
+
+
+def launcher_text(to: Path) -> str:
+    """The launcher thimble-browser as the install writes it: it starts the workbench's script `to`."""
+    return (f"#!/bin/sh\n# thimble-browser, {MARKER}: starts the browser workbench in {tilde(to.parent.parent)}.\n"
+            f"exec {shlex.quote(str(to))} \"$@\"\n")
+
+
+def write_launcher(p: Path, to: Path) -> None:
+    """The launcher `p` (launcher_text), written beside it first, so that a write that fails leaves it as it was."""
+    tmp = p.with_name(f".{p.name}.install-tmp")
+    tmp.write_text(launcher_text(to))
+    tmp.chmod(0o755)
+    tmp.replace(p)
 
 
 def in_place(browser: bool, bin_: Path) -> bool:
@@ -303,10 +345,15 @@ def plugin(a: Any, r: Run) -> int:
     where = tilde(folder) if folder else tilde(thimble_home())
     if folder and rel and (live / ".git").exists() and rel.get("pointed"):
         if rel.get("kind") != "clone" or not same(rel.get("repo"), folder):
-            raise FX.FixError(f"Claude Code loads thimble from {tilde(live)}, the release installed in "
-                              f"{tilde(thimble_home())}, so this clone was not installed. To install it in its place, "
-                              f"move that one aside first: mv {tilde(FX.home())} {tilde(FX.home())}-release, then run "
-                              "scripts/install.sh --local again")
+            # switch sets that install aside before this step
+            raise FX.FixError(f"Claude Code loads thimble from {tilde(live)}, another install, so this clone was not "
+                              "installed. Run scripts/install.sh --local again: it sets that one aside first")
+        # this clone's fixes, back from aside (switch): Claude Code loads them from live again, and copies them
+        if not from_folder(FX._marketplace().get("source"), live):
+            FX.add_marketplace(live, "to load thimble from your fixes")
+            FX.run([FX.claude(), "plugin", "update", "thimble@thimble"])
+        elif FX._installed_sha() != head_of(live):
+            FX.run([FX.claude(), "plugin", "update", "thimble@thimble"])
         say(f"  Claude Code loads it from your fixes, in {tilde(live)}: thimble update moves them to this clone's "
             "commit.")
         return 0
@@ -314,8 +361,9 @@ def plugin(a: Any, r: Run) -> int:
     src = m.get("source") if isinstance(m.get("source"), dict) else {}
     had = installed_in_claude_code()
     if from_folder(src, to) and had:
-        if folder:
-            # the clone moves on as the person pulls and edits it: Claude Code copies what it has now
+        # Claude Code copies the folder again when it holds more than Claude Code's copy has: the clone, as the person
+        # pulls and edits it, or live with another install in it now (a dev install's fixes went aside, release)
+        if folder or FX._installed_sha() != head_of(to):
             FX.run([FX.claude(), "plugin", "update", "thimble@thimble"])
         say(f"  Claude Code loads it from {where}.")
     else:
@@ -455,12 +503,7 @@ def commands(a: Any, r: Run) -> int:
     launcher = to_dir / "thimble-browser"
     if a.browser and ours(launcher):
         r.old(folder_of(launcher_target(launcher), "browser/scripts/thimble-browser"))
-        tmp = to_dir / ".thimble-browser.install-tmp"
-        where = tilde(browser_to.parent.parent)
-        tmp.write_text(f"#!/bin/sh\n# thimble-browser, {MARKER}: starts the browser workbench in {where}.\n"
-                       f"exec {shlex.quote(str(browser_to))} \"$@\"\n")
-        tmp.chmod(0o755)
-        tmp.replace(launcher)
+        write_launcher(launcher, browser_to)
         put.append("thimble-browser")
     elif a.browser:
         r.note(f"{tilde(launcher)} is another program, so the workbench's command was not put there. To put it in "
@@ -488,11 +531,12 @@ def path_line(to_dir: Path) -> str:
 def unused(a: Any, r: Run, folder: Path | None) -> None:
     """Where Claude Code loaded thimble from before this install moved it (plugin), and each folder of the earlier
     install that nothing uses now: not the plugin's marketplace, not a command's target, not the workbench's packages'
-    source, and not in thimble's or Claude Code's own folders."""
+    source, not the clone whose dev install's fixes went aside (release), not in thimble's or Claude Code's own folders,
+    and not a clone that holds work of the person's (holds_work)."""
     st = r.get()
     to_dir = bin_dir(a)
     m = FX._marketplace().get("source") or {}
-    used: list[Any] = [folder, m.get("path") if isinstance(m, dict) else None]
+    used: list[Any] = [folder, m.get("path") if isinstance(m, dict) else None, st.get("dev")]
     link = to_dir / "thimble"
     if link.is_symlink():
         used.append(folder_of(os.path.normpath(os.path.join(str(to_dir), os.readlink(link))), "plugin/bin/thimble"))
@@ -508,7 +552,7 @@ def unused(a: Any, r: Run, folder: Path | None) -> None:
             continue
         if any(real == os.path.realpath(k) or real.startswith(os.path.realpath(k) + os.sep) for k in keep):
             continue
-        if real not in [os.path.realpath(g) for g in gone]:
+        if real not in [os.path.realpath(g) for g in gone] and not holds_work(Path(real)):
             gone.append(p)
     before = st.get("before")
     if not before and not gone:
@@ -520,17 +564,155 @@ def unused(a: Any, r: Run, folder: Path | None) -> None:
         say(f"{'  ' if before else ''}{tilde(p)} is no longer used, so you can delete it.")
 
 
+def holds_work(folder: Path) -> bool:
+    """Whether `folder` is a git checkout of its own with work of the person's in it that no remote has: changes not
+    committed (new files too), or commits on no remote branch, such as a dev install's (scripts/install.sh --local).
+    The install never says that such a folder can go."""
+    if not FX._own_checkout(folder):
+        return False
+    changed = FX.git("status", "--porcelain", cwd=folder, check=False)
+    return bool(changed or FX.git("rev-list", "-n", "1", "--branches", "--not", "--remotes", cwd=folder, check=False))
+
+
+# ------------------------------------------------------------------ the dev install and the release take turns
+
+
+def install_in(fixes: Path) -> dict[str, Any] | None:
+    """The install a fixes folder holds, as its release.json says it: one that has live, else None."""
+    rel = FX.read_json(fixes / "release.json")
+    return rel if isinstance(rel, dict) and (fixes / "live" / ".git").exists() else None
+
+
+def move(src: Path, dest: Path) -> None:
+    """The fixes folder `src` moves to `dest`, and git's links between its checkouts follow it (git worktree repair):
+    live, the release checkout and the copies of fixes are checkouts of one repository, live's own or, for a dev install,
+    the person's clone, and each checkout and that repository name each other by path. The other files in it that name
+    a path in it (release.json, off.sh, the records) are right again once it is back where it was."""
+    old = os.path.realpath(src)
+    new = os.path.join(os.path.realpath(dest.parent), dest.name)
+    listed = FX.git("worktree", "list", "--porcelain", cwd=src / "live", check=False) if (src / "live").is_dir() else ""
+    trees = [x[len("worktree "):] for x in listed.splitlines() if x.startswith("worktree ")]
+    # each checkout where it is after the move; the first is the repository's own (live, or the clone)
+    moved = [new + t[len(old):] if t == old or t.startswith(old + os.sep) else t for t in trees]
+    os.rename(src, dest)
+    linked = [m for t, m in zip(trees[1:], moved[1:]) if m != t and os.path.isdir(m)]
+    if not linked:
+        return
+    p = FX.run(["git", *FX.NO_HOOKS, "worktree", "repair", *linked], cwd=moved[0], check=False)
+    if p.returncode != 0:
+        err = (p.stderr or p.stdout).strip().splitlines()
+        raise FX.FixError(f"{tilde(src)} moved to {tilde(dest)}, and git could not repair the links of its checkouts "
+                          f"({err[-1] if err else 'no message'}): git worktree repair does it, run in {tilde(moved[0])} "
+                          "with the path of each checkout")
+
+
+def aside(kind: str) -> Path:
+    """The install in thimble's fixes folder goes aside, with its fixes, into a dated folder beside it,
+    fixes-<kind>-<date>-<time> (kind release, or dev for a dev install's), while no change of live runs (FX.Lock)."""
+    src = FX.home()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dest, n = src.with_name(f"fixes-{kind}-{stamp}"), 1
+    while dest.exists():
+        n += 1
+        dest = src.with_name(f"fixes-{kind}-{stamp}-{n}")
+    with FX.Lock():
+        move(src, dest)
+    return dest
+
+
+def newest(kind: str, clone: Path | None = None) -> Path | None:
+    """The newest folder that aside made for `kind` and that still holds that install: the release's, or a dev
+    install's (with `clone`, the dev install of that clone)."""
+    found = None
+    for p in sorted(thimble_home().glob(f"fixes-{kind}-*")):
+        rel = install_in(p)
+        if rel and (rel.get("kind") == "clone") == (kind == "dev") and (clone is None or same(rel.get("repo"), clone)):
+            found = p
+    return found
+
+
+def come_back(src: Path, other: str) -> None:
+    """The install `src`, which aside set aside, comes back as thimble's fixes folder. A fixes folder there with no
+    install (what a first fix that failed leaves) goes aside first as `other`, or goes when it holds lock files alone."""
+    home = FX.home()
+    if home.exists():
+        if all(f.suffix == ".lock" for f in home.rglob("*") if not f.is_dir()):
+            shutil.rmtree(home)
+        else:
+            aside(other)
+    move(src, home)
+
+
+def switch(a: Any, r: Run) -> int:
+    """scripts/install.sh --local, before the dev install's steps: the release installed in thimble's home goes aside,
+    with its fixes, and so does a dev install of another clone; then this clone's dev install's fixes, set aside
+    before, come back. A dev install of this clone stays as it is. Each move says where it went, in one line."""
+    folder = Path(a.folder).resolve()
+    rel = install_in(FX.home())
+    first = True
+
+    def tell(line: str) -> None:
+        nonlocal first
+        if first:
+            say()
+            first = False
+        say(line)
+
+    if rel and not (rel.get("kind") == "clone" and same(rel.get("repo"), folder)):
+        if rel.get("kind") == "clone":
+            clone = tilde(rel.get("repo") or "")
+            tell(f"The dev install of {clone} is set aside, with its fixes, in {tilde(aside('dev'))}. "
+                 f"scripts/install.sh --local in {clone} brings it back.")
+        else:
+            tell(f"The release installed in {tilde(thimble_home())} is set aside, with its fixes, in "
+                 f"{tilde(aside('release'))}. The install without --local brings it back.")
+        rel = None
+    back = None if rel else newest("dev", folder)
+    if back:
+        come_back(back, "release")
+        tell(f"The fixes of this clone's dev install, set aside before, are back in {tilde(thimble_home())}.")
+    return 0
+
+
+# ------------------------------------------------------------------ thimble-browser's launcher, after thimble update
+
+
+def launcher(a: Any, r: Run) -> int:
+    """thimble-browser's start from live runs this (the install script does not): the thimble-browser in --bin-dir, when
+    an install wrote it (launcher_target) to start the workbench of another folder, starts live's from now on, as the
+    install writes it, so that the folder can go. An install before 0.10.8 wrote it for the folder it installed from,
+    whose script hands the workbench to live once thimble update has put it there. A dev install's (--local) starts its
+    clone on purpose, and stays. Nothing is said unless the launcher cannot be written."""
+    p = bin_dir(a) / "thimble-browser"
+    to = FX.live_dir() / "browser" / "scripts" / "thimble-browser"
+    was = launcher_target(p)
+    rel = install_in(FX.home())
+    if not was or p.is_symlink() or not rel or rel.get("kind") == "clone" or not browser_ready() or same(was, to):
+        return 0
+    try:
+        write_launcher(p, to)
+    except OSError as e:
+        through = folder_of(was, "browser/scripts/thimble-browser") or was
+        print(f"thimble-browser: {tilde(p)} could not be pointed at {tilde(FX.live_dir())} ({e.strerror or e}), so it "
+              f"still starts the workbench through {tilde(through)}: keep that folder until it can.", file=sys.stderr)
+        return 1
+    return 0
+
+
 VERBS = {"release": release, "name": name, "plugin": plugin, "sandbox": sandbox, "browser": browser,
-         "commands": commands}
+         "commands": commands, "switch": switch, "launcher": launcher}
 
 
 def cmd(a: Any) -> int:
     """thimble install VERB: see this file's text. A step that cannot go on says why, in its section's place (the
-    script's sections indent their lines), and ends with 1."""
+    script's sections indent their lines; thimble-browser's launcher, on stderr), and ends with 1."""
     r = Run(a.notes, a.state)
     try:
         return VERBS[a.verb](a, r)
     except FX.FixError as e:
         why = str(e).rstrip(".")
-        say(f"  {why}." if a.verb in ("plugin", "sandbox", "browser", "commands") else f"{why[:1].upper()}{why[1:]}.")
+        if a.verb == "launcher":
+            print(f"thimble-browser: {why}.", file=sys.stderr)
+        else:
+            say(f"  {why}." if a.verb in ("plugin", "sandbox", "browser", "commands") else f"{why[:1].upper()}{why[1:]}.")
         return 1

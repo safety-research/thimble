@@ -31,7 +31,8 @@ install in ~/.thimble stays as it is, with your fixes, and thimble update moves 
   --ref REF          install this branch or tag of thimble, not the newest release (to try a branch before its
                      release); --version X.Y.Z is the same as --ref vX.Y.Z
   --local            in a clone of thimble: install from the clone (the dev install, for work on thimble's own code).
-                     thimble update then follows the clone, which you pull yourself
+                     thimble update then follows the clone, which you pull yourself. A release installed in ~/.thimble
+                     goes aside with its fixes, and the install without --local brings it back
   --remove-0.9       when thimble 0.9 is here, remove it first: the install shows the steps, and runs them after you
                      answer y, in a terminal
 EOF
@@ -293,11 +294,13 @@ main() {
 
   if [ "$local" = 1 ]; then
     # the dev install: the plugin and the workbench from this clone, which thimble update then follows
-    code="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/.." 2>/dev/null && pwd)" || code=""
+    code="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/.." 2>/dev/null && pwd -P)" || code=""
     [ -f "${BASH_SOURCE[0]:-}" ] && [ "$(git -C "$code" rev-parse --show-toplevel 2>/dev/null)" = "$code" ] ||
       stop "--local installs from a clone of thimble: git clone https://github.com/safety-research/thimble, then" \
         "run scripts/install.sh --local in it"
     no09 "$code"
+    # the release installed in ~/.thimble goes aside with its fixes, and this clone's fixes set aside before come back
+    kernel install switch --folder "$code" || exit 1
     say ""
     say "The plugin"
     kernel install plugin --folder "$code" || { say "After you fix that, run the install again."; exit 1; }
@@ -332,7 +335,7 @@ main() {
   case "$name" in v[0-9]*.[0-9]*.[0-9]*) name="${name#v}" ;; esac
 
   say ""
-  if [ -e "$fixes/live/.git" ] && [ -f "$fixes/release.json" ]; then
+  if [ -e "$fixes/live/.git" ] && [ -f "$fixes/release.json" ] && ! grep -q '"kind": "clone"' "$fixes/release.json"; then
     # 3. an install in ~/.thimble stays, with its fixes; it runs its own code, unless it is older than this install
     code="$fixes/release"
     if [ ! -f "$code/plugin/engine/kernel/install.py" ]; then
@@ -347,15 +350,20 @@ main() {
       exit 1
     }
   else
-    # 3. the release, downloaded with git into a folder of its own, then made ~/.thimble/fixes/live
-    code="$work/thimble"
-    printf 'Downloading thimble %s into %s...' "$name" "$(tilde "$home")"
+    # 3. the release, downloaded with git into a folder of its own, then made ~/.thimble/fixes/live. A dev install's
+    # fixes there (--local) go aside first, and the release that --local set aside comes back in place of the download
+    code="$work/thimble" back=""
+    for d in "$fixes"-release-*; do if [ -e "$d/live/.git" ] && [ -f "$d/release.json" ]; then back=1; fi; done
+    if [ -n "$back" ]; then printf 'Downloading thimble %s for its install steps...' "$name"
+    else printf 'Downloading thimble %s into %s...' "$name" "$(tilde "$home")"; fi
     open=1
     download "$ref" "$code"
     no09 "$code"
-    if out="$(kernel install release --from "$code" ${asked:+--ref "$asked"} 2>&1)"; then say " done."
+    if out="$(kernel install release --from "$code" ${asked:+--ref "$asked"} --bin-dir "$bin_dir" $(browser "$web") \
+      2>&1)"; then say " done."
     else say " failed: $out"; exit 1; fi
     open=0
+    [ -z "$out" ] || say "$out"
   fi
 
   # 4. the plugin: Claude Code loads it from ~/.thimble/fixes/live, with its settings as they were
