@@ -52,13 +52,13 @@ import json
 import logging
 import os
 import secrets
-import shutil
-import stat
 import tempfile
 import uuid
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+from . import nofollow
 
 log = logging.getLogger("thimble.runtime_cc")
 # the callback is for the asks the allowed tools leave (module note, permissions), so the Agent SDK's advisory that an
@@ -144,31 +144,42 @@ def workspace_tmp(c: str) -> Path | None:
         with contextlib.suppress(OSError):
             got = _own(p)
             if _owner(got) != folder:
-                with contextlib.suppress(OSError):
-                    (got / TMP_OWNER).write_text(folder, encoding="utf-8")
+                with contextlib.suppress(OSError), _mine(got) as fd:
+                    nofollow.replace_at(fd, TMP_OWNER, folder.encode("utf-8"))
             return got
     return None
 
 
+@contextlib.contextmanager
+def _mine(p: Path, root: Path | None = None) -> Iterator[int]:
+    """A descriptor of the folder `p`, opened from `root` (its parent's) one part at a time without following a link
+    (nofollow), checked by that descriptor to be a folder of this user's own; OSError for anything else. Main's Bash
+    on Claude Code sign-in writes the short folders, so what the server reads, writes and removes there goes through
+    such a descriptor, never through a link or a FIFO that Bash put there."""
+    with nofollow.folder(p, root=p.parent if root is None else root) as fd:
+        if os.fstat(fd).st_uid != os.getuid():
+            raise OSError(f"{p} is not a folder of this user's own")
+        yield fd
+
+
 def _owner(p: Path) -> str | None:
-    """The workspace folder a short folder `p` names (TMP_OWNER), when `p` is a folder of this user's own and no link;
-    else None, as for one that names none (a session's own, short_tmp, or one an earlier version made)."""
+    """The workspace folder a short folder `p` names (TMP_OWNER), when `p` is a folder of this user's own and no link,
+    and the file a regular file, no link (both as _mine opens them); else None, as for one that names none (a session's
+    own, short_tmp, or one an earlier version made)."""
     try:
-        st = os.lstat(p)
-        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-            return None
-        return (p / TMP_OWNER).read_text(encoding="utf-8").strip() or None
+        with _mine(p) as fd, os.fdopen(nofollow.open_at(fd, TMP_OWNER, os.O_RDONLY), "rb") as f:
+            return f.read().decode("utf-8").strip() or None
     except (OSError, ValueError):
         return None
 
 
 def _remove(p: Path) -> bool:
-    """`p` removed, when it is a folder of this user's own and no link: whether it was."""
+    """`p` removed, when it is a folder of this user's own and no link (_mine), without following a link in it: whether
+    it was."""
     try:
-        st = os.lstat(p)
-        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-            return False
-        shutil.rmtree(p)
+        with _mine(p):
+            pass
+        nofollow.rmtree(p, root=p.parent)
         return True
     except OSError:
         return False
@@ -210,19 +221,18 @@ def shell_tmp(c: str) -> Path | None:
     if base is None:
         return None
     with contextlib.suppress(OSError):
-        return _own(base / f"claude-{os.getuid()}")
+        return _own(base / f"claude-{os.getuid()}", base.parent)
     return None
 
 
-def _own(p: Path) -> Path:
-    """`p`, made when missing: a folder this user owns and no link, then mode 0700, as Claude Code checks its temp
-    folder; OSError for anything else, such as a folder another user made in its place."""
+def _own(p: Path, root: Path | None = None) -> Path:
+    """`p`, made when missing: a folder this user owns and no link, from `root` (its parent's) on (_mine), then mode
+    0700 through its descriptor, as Claude Code checks its temp folder; OSError for anything else, such as a folder
+    another user made in its place."""
     with contextlib.suppress(FileExistsError):
         os.mkdir(p, 0o700)
-    st = os.lstat(p)
-    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-        raise OSError(f"{p} is not a folder of this user's own")
-    os.chmod(p, 0o700)
+    with _mine(p, root) as fd:
+        os.fchmod(fd, 0o700)
     return p
 
 
@@ -406,7 +416,7 @@ async def turn(conv: Any, text: str) -> Any:
         return await _session(conv, spec, text, options(conv, spec, pending, tmp))
     finally:
         if tmp is not None and tmp != kept:
-            shutil.rmtree(tmp, ignore_errors=True)
+            nofollow.rmtree(tmp, root=tmp.parent, ignore_errors=True)  # the session's Bash wrote it: no link followed
         _tidy(spec.cwd)
 
 
