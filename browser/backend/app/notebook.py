@@ -2554,10 +2554,7 @@ def _guarded_files(workspace: str) -> None:
     bwrap fails on a missing one, in place of a link or a file a kernel left there: the wrapper would show it a link's
     target, and a file stops the folder from being made."""
     for name in kernel_wrap.READ_ONLY_DIRS:
-        d = _ws_dir(workspace) / name
-        if d.is_symlink() or (d.exists() and not d.is_dir()):
-            d.unlink()
-        config.private_dir(d)
+        config.private_dir(_ws_dir(workspace) / name, no_link=True)
     files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES),
              *((n, "") for n in (*kernel_wrap.READ_ONLY_FILES, *kernel_wrap.LOCK_FILES))]
     for name, text in files:
@@ -2571,8 +2568,10 @@ def _guarded_files(workspace: str) -> None:
 
 
 def _temp_writes(workspace: str, temp: Path | None) -> list[Path]:
-    """The kernel's TMPDIR (`temp`, runtime.shell_temp) when it lies outside the workspace, which a wrapper then lets it
-    write too: Claude Code's temp folder of main's sessions on Claude Code sign-in."""
+    """The kernel's TMPDIR (`temp`, _launch) when it lies outside the workspace, which a wrapper then lets it write too:
+    Claude Code's temp folder of main's sessions on Claude Code sign-in (runtime_cc.shell_tmp, a folder of this user's
+    own and no link, in a folder the kernel cannot write). The workspace's own temp folder is none: the wrappers let
+    the kernel write it as part of the workspace, by its path there."""
     ws = _ws_dir(workspace).resolve()
     return [] if temp is None or temp == ws or ws in temp.parents else [temp]
 
@@ -2652,7 +2651,8 @@ async def _launch(k: _Kernel, workspace: str) -> None:
     """A fresh kernel process in the workspace's scratch mirror, recorded and connected. Call with k.lock held."""
     corpus = config.corpus_dir(workspace)
     cwd = await asyncio.to_thread(scratch_dir, workspace, corpus)  # the scratch mirror (module docstring)
-    k.record.parent.mkdir(parents=True, exist_ok=True)
+    # kernels/, where the kernel's files go and a folder bwrap binds writable by its path: never a link a card left there
+    config.private_dir(k.record.parent, no_link=True)
     _drop_files(k.record, k.conn)
     wrap, source = await asyncio.to_thread(config.resolve_kernel_wrap, _ws_settings(workspace))
     wrapped = wrap in config.KERNEL_WRAPPED
@@ -2660,8 +2660,10 @@ async def _launch(k: _Kernel, workspace: str) -> None:
                        workspace=_ws_dir(workspace).resolve())
     from . import runtime  # noqa: PLC0415
 
-    # its TMPDIR: main's shell commands' (runtime.shell_temp), by the path the wrappers bind
-    tmp = (await asyncio.to_thread(runtime.shell_temp, workspace)).resolve()
+    # its TMPDIR: main's shell commands' (runtime.shell_temp), by the path the wrappers bind: the folders above it by
+    # their real paths, and the folder by its own name, never as the folder a link a card left in its place points to
+    temp = await asyncio.to_thread(runtime.shell_temp, workspace)
+    tmp = Path(os.path.realpath(temp.parent)) / temp.name
     # paths only so far: a missing wrapper fails here, before any file is written
     if wrap == config.KERNEL_WRAP_BWRAP:
         argv = wrapped_argv(argv, workspace=workspace, corpus=corpus, connection_file=k.conn, source=source, temp=tmp)

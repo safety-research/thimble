@@ -897,13 +897,24 @@ def workspace_path(name: str) -> Path:
     return WORKSPACES_DIR / name
 
 
-def private_dir(p: Path) -> Path:
+def private_dir(p: Path, *, no_link: bool = False) -> Path:
     """`p`, made if missing, readable by its owner alone (0700), since it holds what thimble read and wrote; the folders
-    above it are made as usual."""
+    above it are made as usual. `no_link` for a folder of a workspace, where a card's code can put a link or a file in
+    its place (the kernels write the workspace): that is removed first, and the mode is set on the folder itself, never
+    through a link, so nothing thimble does with `p` reaches the folder a link points to."""
     p.parent.mkdir(parents=True, exist_ok=True)
+    if no_link and (p.is_symlink() or (p.exists() and not p.is_dir())):
+        p.unlink()
     p.mkdir(mode=0o700, exist_ok=True)
     try:
-        if p.stat().st_mode & 0o077:
+        if no_link:  # the mode set on the folder opened as such, which fails on a link put in its place since
+            fd = os.open(p, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                if os.fstat(fd).st_mode & 0o077:
+                    os.fchmod(fd, 0o700)
+            finally:
+                os.close(fd)
+        elif p.stat().st_mode & 0o077:
             os.chmod(p, 0o700)
     except OSError:  # a folder of another owner keeps its mode
         pass
@@ -932,12 +943,12 @@ def registry_dir(name: str) -> Path:
 
 
 def temp_dir(name: str) -> Path:
-    """The workspace's temp folder, created on demand (private_dir): on the Messages API the TMPDIR of every kernel and
-    of main's and its thread forks' shell commands (kernel_wrap.TEMP_DIR, runtime.shell_temp), and a temp folder the
-    citations' validator reads as the session's (marks)."""
+    """The workspace's temp folder, created on demand (private_dir), never a link (`no_link`): on the Messages API the
+    TMPDIR of every kernel and of main's and its thread forks' shell commands (kernel_wrap.TEMP_DIR, runtime.shell_temp),
+    and a temp folder the citations' validator reads as the session's (marks)."""
     from . import kernel_wrap  # noqa: PLC0415
 
-    return private_dir(workspace_dir(name) / kernel_wrap.TEMP_DIR)
+    return private_dir(workspace_dir(name) / kernel_wrap.TEMP_DIR, no_link=True)
 
 
 def safe_corpus_path(corpus: Path, rel: str) -> Path:
