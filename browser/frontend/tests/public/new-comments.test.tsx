@@ -5,12 +5,14 @@
 // document's runs, the head of the Comments pane beside the slides, the story or a page (report/Checks.tsx
 // CommentsPane). The runs that had ended when this browser first read the workspace's checks are not news; a run is
 // looked at once the analyst opens a Comments control it shows on (the canvas's menu, the sidebar on Comments, the
-// pane's head), and that holds across a reload.
+// pane's head), and that holds across a reload. The sidebar the tour opens on Comments, under its example, looks at
+// nothing.
 import { act, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { CommentsButton } from '../../src/canvas/Controls.tsx'
 import { NoticeStrip } from '../../src/chat/Notice.tsx'
 import { dispatch } from '../../src/lib/events.ts'
+import { setTouring } from '../../src/lib/touring.ts'
 import type { Check, CheckRun } from '../../src/lib/types.ts'
 import { storageKey } from '../../src/lib/workspace.ts'
 import { CommentsPane, useChecks } from '../../src/report/Checks.tsx'
@@ -31,6 +33,7 @@ afterEach(() => {
   unmountAll()
   vi.unstubAllGlobals()
   vi.useRealTimers()
+  setTouring(false)
 })
 
 describe('what is new', () => {
@@ -166,4 +169,33 @@ describe("the dot on each surface's Comments control", () => {
     expect(dots(again)).toEqual(['canvas', 'documents'])
   })
 
+  test('the sidebar the tour opens on Comments looks at nothing: the dot stays after the tour and across a reload, until the analyst opens it', async () => {
+    const seen = () => JSON.parse(window.localStorage.getItem(storageKey('nc-tour', 'comments-seen')) ?? 'null')
+    const el = await surfaces('nc-tour')
+    await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
+    expect(dots(el)).toEqual(['documents'])
+    // the tour's Checks step opens the real sidebar with the top bar's Comments (tour/steps.ts holdSide), lays its
+    // example over it, and closes it at the step's end
+    await act(async () => setTouring(true))
+    await click(el.querySelector(TOP))
+    expect(el.querySelector(TOP)?.getAttribute('aria-pressed')).toBe('true')
+    await click(el.querySelector(TOP))
+    await act(async () => setTouring(false))
+    expect(dots(el)).toEqual(['documents'])
+    expect(seen()).toEqual(['old'])
+    unmountAll()
+    resetSeen() // a reload reads what this browser kept
+    const again = await surfaces('nc-tour')
+    expect(dots(again)).toEqual(['documents'])
+    // the analyst's own click looks at them
+    await click(again.querySelector(TOP))
+    expect(dots(again)).toEqual([])
+    expect(seen()).toEqual(['r1'])
+    // the sidebar the analyst left open on Comments: a run that ends during a tour is looked at once the tour ends
+    await act(async () => setTouring(true))
+    await ended('important-details', 'report', run('r2', 1, '2026-10-15T10:05:00Z'))
+    expect(dots(again)).toEqual(['documents'])
+    await act(async () => setTouring(false))
+    expect(dots(again)).toEqual([])
+  })
 })
