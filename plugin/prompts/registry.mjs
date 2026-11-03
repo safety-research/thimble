@@ -72,6 +72,11 @@ export const TEXTS = {
     reader: 'explain/expand.ts',
     use: 'one fork of the conversation when the person asks what words of an answer mean (e on selected words, a press on cited words in a pane)',
   },
+  'heads-expand': {
+    about: 'a heads-up on words the analyst picked, the detail to know before relying on them, over the conversation, the words, the answer and the files it cites',
+    reader: 'explain/expand.ts',
+    use: 'one fork of the conversation when the person asks for a heads-up on words of an answer (h on selected words)',
+  },
   squeeze: {
     about: 'an answer rewritten at the levels the person picked on its chips, or a catch-up of the replies they missed',
     reader: 'squeeze/term.ts',
@@ -81,6 +86,11 @@ export const TEXTS = {
     about: "a side thread's instructions",
     reader: 'threads/thread.ts',
     use: "the prompt of the fork that answers a side thread's question",
+  },
+  'fix-request': {
+    about: "name the fix the person's words change, with the fix-thimble skill, or ask one short question first",
+    reader: 'fix/register.ts',
+    use: "beside the person's words after /thimble-fix <words>, which a prompt of thimble's gives Claude as theirs",
   },
   fixer: {
     about: 'make the change the person asked for to their thimble, in a scratch copy, test it, and say what it does',

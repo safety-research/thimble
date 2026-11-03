@@ -27,7 +27,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Header, HTTPException, Response
 
-from . import config, ledger
+from . import config, ledger, nofollow
 
 log = logging.getLogger("thimble.telemetry")
 router = APIRouter()
@@ -136,9 +136,11 @@ def _iso(d: datetime) -> str:
 
 def _read_jsonl(path: Path) -> list[dict]:
     out: list[dict] = []
-    if not path.is_file():
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        f = nofollow.reader(path, "r", encoding="utf-8")
+    except OSError:
         return out
-    with path.open(encoding="utf-8") as f:
+    with f:
         for line in f:
             line = line.strip()
             if not line:

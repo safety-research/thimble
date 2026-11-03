@@ -77,24 +77,6 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
 })
 
-// A sentence that fits the card and wraps on its own line where a side pane narrows the card reads the same there: the
-// call brings no narrower copy back for it, so the answer gives no reason for a new version. Parts side by side that
-// wrap do (a row of Texts in a Box laid across).
-test('a sentence that wraps at the narrower width alone brings no copy back; parts side by side that wrap there do', async () => {
-  const sentence = `function view(p, s) { const { Box, Text } = s.elements
-  return Box({ flexDirection: 'column', children: [
-    Text({ children: 'Failures jump after the change on the 21st, from five of twenty to all of them.' }),
-    Text({ children: 'ada 3' }),
-  ] }) }`
-  const one = await load(sentence, { width: 90, beside: 40 })
-  assert.equal(one.r.ok, true)
-  assert.equal(one.r.beside, undefined)
-  const parts = sentence.replace("Text({ children: 'ada 3' }),", "Box({ children: [Text({ children: 'ada' }), Text({ children: ' 3 of 9 merged, the longest run of the afternoon by far' })] }),")
-  const two = await load(parts, { width: 90, beside: 40 })
-  assert.equal(two.r.beside.wrapped.length, 1)
-  assert.match(two.r.beside.lines[two.r.beside.wrapped[0] - 1], /3 of 9 merged/)
-})
-
 test('the tree holds only what Claude Code draws: a Button of words, and strings with no control character', async () => {
   const boxed = 'function view(p, s) { const { Box, Text, Button } = s.elements; return Text({ children: Box({ children: Text({ children: "x" }) }) }) }'
   const r1 = (await load(boxed)).r
@@ -203,6 +185,37 @@ test('actions give a copy after each, then the card is as it was', async () => {
   assert.deepEqual(JSON.parse(r.state), { n: 1 })
 })
 
+// A card on screen at two widths (the conversation's and a side pane's copy): each request for one frame's drawing moves
+// the card to that width, so the hooks keep each drawing at the width its answer says, never at the width of the last
+// drawing they kept, whose answer may come after the next key's
+test('each drawing says the width it is laid out at: a key is drawn at the width the last drawing moved the card to, a text copy leaves the card there, and actions draw at the width they name', async () => {
+  const view = `const keys = "+"
+function onKey(k, s) { s.setState({ n: ((s.state && s.state.n) || 0) + 1 }) }
+function view(p, s) { return s.elements.Text({ children: 'n ' + ((s.state && s.state.n) || 0) + ' at ' + s.columns }) }`
+  const words = r => JSON.stringify(r.tree).match(/n \d+ at \d+/)?.[0]
+  const { id, r } = await load(view, { width: 60 })
+  assert.equal(r.width, 60)
+  // the other frame's drawing moves the card to its width: the key after it is drawn there, and says so
+  const narrow = await ask('draw', { id, width: 30 })
+  assert.equal(narrow.width, 30)
+  let k = await ask('key', { id, key: '+' })
+  assert.equal(k.width, 30)
+  assert.equal(words(k), 'n 1 at 30')
+  // a text copy at another width leaves the card at its width
+  assert.deepEqual((await ask('copy', { id, width: 50 })).lines, ['n 1 at 50'])
+  k = await ask('key', { id, key: '+' })
+  assert.equal(k.width, 30)
+  assert.equal(words(k), 'n 2 at 30')
+  // actions draw at the width they name, a copy after each at that width, and the card stays there, as it was
+  const a = await ask('act', { id, width: 44, actions: [{ key: '+' }] })
+  assert.deepEqual(a.copies[0].lines, ['n 3 at 44'])
+  assert.equal(a.width, 44)
+  assert.equal(words(a), 'n 2 at 44')
+  k = await ask('key', { id, key: '+' })
+  assert.equal(k.width, 44)
+  assert.equal(words(k), 'n 3 at 44')
+})
+
 test('a view that fails says where; a view that runs too long is stopped and leaves the runner, to load again', async () => {
   let { r } = await load('function view(props) { return props.rows[99].name }')
   assert.equal(r.ok, false)
@@ -236,7 +249,7 @@ function view(p, s) { return s.elements.Text({ children: 'n ' + ((s.state || {})
   assert.equal((await ask('key', { id, key: '+' })).state, '{"n":2}')
 })
 
-test('at another width: a text copy leaves the card as it was, a row wider than a side pane leaves comes back with that copy, and a drawing that fails narrow leaves the card at its width with its keys and Buttons', async () => {
+test('at another width: a text copy leaves the card as it was, and a drawing that fails narrow leaves the card at its width with its keys and Buttons', async () => {
   // a text copy at another width leaves the card as it was: its width and its Buttons
   {
     const wide = `function view(p, s) { const { Box, Text, Button } = s.elements
@@ -249,24 +262,6 @@ test('at another width: a text copy leaves the card as it was, a row wider than 
     const p = await ask('press', { id, button })
     assert.deepEqual(JSON.parse(p.state), { n: 1 })
     assert.deepEqual((await ask('copy', { id })).lines, ['n 1', '[ one ]'])
-  }
-  // a row laid out wider than the width a side pane leaves the card comes back with that copy; a paragraph that wraps
-  // at both widths does not
-  {
-    const view = `function view(p, s) { const { Box, Text } = s.elements
-    return Box({ flexDirection: 'column', children: [
-      Text({ children: '-'.repeat(s.columns) }),
-      Text({ children: 'a paragraph of words that wraps at either width, so the person reads it as words' }),
-      Text({ children: 'ada'.padEnd(12) + '3 of 9 merged'.padEnd(16) + '1.19 h run' }),
-    ] }) }`
-    const { r } = await load(view, { width: 40, beside: 24 })
-    assert.equal(r.lines.length, 5)
-    assert.deepEqual(r.beside.wrapped, [6])
-    assert.equal(r.beside.width, 24)
-    assert.deepEqual(r.beside.lines.slice(5), ['ada         3 of 9', 'merged   1.19 h run'])
-    // the row fits at the narrower width too: nothing comes back
-    const fits = await load(view.replace("'1.19 h run'", "''"), { width: 40, beside: 30 })
-    assert.equal(fits.r.beside, undefined)
   }
   // a drawing that fails at a narrow width leaves the card at its width, with its keys and Buttons
   {
@@ -422,4 +417,36 @@ test('a click on an item of a card that steps with j and k selects it as the key
   assert.equal(r.copies[0].lines[3], '▸ cleo █ 1')
   assert.equal(r.copies[1].lines[2], '▸ bram █████ 5')
   assert.match(r.copies[2].note, /asks the analyst's side thread/)
+})
+
+// A strip of one Button per run beside its label, as Claude drew it for the sample (B32). The card tool's test of a click
+// at a run's cell presses that run's Button, as a live click on it does (client.tsx draws it as Claude Code's own
+// Button, which takes the click); before, the test found only a Button around lines, said that no Button stood there,
+// and Claude drew the card again without its Buttons.
+const STRIP = `function view(props, surface) {
+  const { Box, Text, Button } = surface.elements
+  const sel = surface.state?.sel ?? -1
+  return Box({ flexDirection: 'column', children: [
+    Box({ children: [Text({ children: 'runs  ' }), ...props.rows.map((r, i) => Button({ plain: true, onPress: () => surface.setState({ sel: i }), children: Text({ inverse: i === sel, children: r.score > 2 ? '×' : '✓' }) }))] }),
+    Text({ children: sel < 0 ? 'Click a run.' : r0(props.rows[sel]) }),
+  ] })
+}
+function r0(r) { return '▸ ' + r.name + ' scored ' + r.score }`
+
+test("the card tool's test of a click at a cell presses a Button laid out inline with its words, as a live click does", async () => {
+  const { id, r: loaded } = await load(STRIP)
+  assert.deepEqual(loaded.lines, ['runs  ××✓', 'Click a run.'])
+  const r = await ask('act', { id, width: 40, actions: [{ click: [7, 0] }, { click: [8, 0] }, { click: [1, 0] }, { click: [20, 0] }] })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.copies.map(c => c.lines[1]), ['▸ bram scored 5', '▸ cleo scored 1', '▸ cleo scored 1', '▸ cleo scored 1'])
+  // a click on words that no Button holds asks a side thread, live; one on a cell where nothing is drawn missed
+  assert.deepEqual(r.copies.map(c => c.note), [undefined, undefined, 'a click there asks the analyst\'s side thread about "runs": no Button, onPointer listener or item the card\'s keys select stands there',
+    'nothing is drawn there, so nothing takes the click; x counts the columns of the text copy and y its lines, both from 0'])
+  // the card is as it was before the actions
+  assert.equal(JSON.parse(r.state), null)
+  // live, Claude Code's own Button takes a click on a run and sends its press, and no pointer event comes for it: a
+  // pointer event that ends on a run (a drag from the label) presses no Button of words
+  const p = await ask('pointer', { id, down: { x: 1, y: 0 }, up: { x: 7, y: 0 } })
+  assert.equal(p.handled, false)
+  assert.equal(JSON.parse(p.state), null)
 })

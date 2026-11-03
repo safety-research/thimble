@@ -50,8 +50,8 @@ def test_a_new_workspace_has_the_trusted_files_and_the_kernel_binds_their_folder
     assert trusted == sf.trusted_dir(ws) and kernel_wrap.TRUSTED_DIR in kernel_wrap.READ_ONLY_DIRS
     for name in sf.FILES:
         assert (trusted / name).is_file(), name
-    argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, connection_dir=tmp_path,
-                                        venv=None, python="/usr/bin/python3")
+    argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None,
+                                        python="/usr/bin/python3")
     i = argv.index(str(trusted))
     assert argv[i - 1] == "--ro-bind" and argv[i + 1] == str(trusted)
     assert not any(str(trusted / name) in argv for name in sf.FILES), "no bind of a file the writers replace"
@@ -65,8 +65,8 @@ def test_the_kernel_can_neither_hold_nor_swap_the_lock_of_subagents_json(tmp_pat
     without it, so the kernel sees an empty file in its place (bwrap) or none (srt)."""
     ws = config.workspace_dir(CORPUS)
     assert kernel_wrap.LOCK_FILES == (sf.LOCK,) and (ws / sf.LOCK).is_file()
-    argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, connection_dir=tmp_path,
-                                        venv=None, python="/usr/bin/python3")
+    argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None,
+                                        python="/usr/bin/python3")
     i = argv.index(str(ws / sf.LOCK))
     assert argv[i - 2:i] == ["--ro-bind", kernel_wrap.EMPTY_FILE]
     rules = kernel_wrap.srt_rules(corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None, python="/usr/bin/python3",

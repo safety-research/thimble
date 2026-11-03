@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // Stop in the composer, as in Claude (src/components/Composer.tsx, src/chat/ChatPanel.tsx composerStopOf): while what
 // the browser can stop runs (main's turn, a side thread's fork, one of thimble's agents), the send square is its stop
-// square while the field is empty and the send square again once there is text; a step's thread carries its running
-// parent's Stop. The Stop goes out through stopRun (main's, a thread's or a session's through stopSession, a ticket's
-// through dev.stop_ticket, a view's build or review through its own route) and says in a toast when it could not stop;
-// in an agent's own thread its card leaves Stop to the composer (AgentCard stopHere). The transcript of a running dev
-// ticket carries no Stop of its own (src/chat/TicketStatus.tsx).
+// square while the field is empty, and once there is text the send square joins it, so what runs can still be stopped
+// while the analyst writes (B14); a step's thread carries its running parent's Stop. The Stop goes out through stopRun
+// (main's, a thread's or a session's through stopSession, a ticket's through dev.stop_ticket, a view's build or review
+// through its own route) and says in a toast when it could not stop; in an agent's own thread its card leaves Stop to
+// the composer (AgentCard stopHere). The transcript of a running dev ticket carries no Stop of its own
+// (src/chat/TicketStatus.tsx).
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { ComposerFrame } from '../../src/components/Composer.tsx'
@@ -48,16 +49,19 @@ describe('the composer while an agent runs', () => {
     expect(onStop).not.toHaveBeenCalled()
   })
 
-  test('text in the field brings the send square back, which sends it', async () => {
+  test('text in the field brings the send square beside the stop square: Send sends it, and Stop still stops', async () => {
     const onStop = vi.fn()
     const onSubmit = vi.fn()
     const el = await mount(<ComposerFrame value="and the runs?" onChange={() => undefined} onSubmit={onSubmit} stop={{ label: 'Stop the orientation', onStop }} />)
-    expect(stopSquare(el)).toBeNull()
-    const btn = el.querySelector<HTMLButtonElement>('button.composer-send')!
-    expect(btn.getAttribute('aria-label')).toBe('Send')
+    const squares = [...el.querySelectorAll<HTMLButtonElement>('button.composer-send')]
+    expect(squares.map((b) => b.getAttribute('aria-label'))).toEqual(['Stop the orientation', 'Send'])
+    const btn = squares[1]
     btn.click()
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onStop).not.toHaveBeenCalled()
+    stopSquare(el)!.click()
+    expect(onStop).toHaveBeenCalledTimes(1)
+    expect(onSubmit).toHaveBeenCalledTimes(1)
   })
 
   test('without a Stop the empty field shows the disabled send square', async () => {

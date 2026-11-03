@@ -116,7 +116,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import agents, cc_settings, cli, config, headless, hook_auth, procs, prompts, session, ticket_box, userconf
-from . import work_files
+from . import nofollow, work_files
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -383,7 +383,7 @@ def _emit_ws(c: str, event: dict[str, Any]) -> None:
     try:
         from . import investigation  # noqa: PLC0415
 
-        (config.WORKSPACES_DIR / c / "investigations" / "main").mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(config.WORKSPACES_DIR / c / "investigations" / "main")
         investigation.emit(c, "main", event)
     except Exception:  # noqa: BLE001
         log.debug("could not emit %s to %s", event.get("type"), c, exc_info=True)
@@ -1057,8 +1057,10 @@ def _frontend_tests(fe: Path, boxed: bool = False) -> tuple[str, list[str]] | No
 
 def _gate_environ(extra: dict[str, str] | None = None) -> dict[str, str]:
     """The environment a gate runs in: this server's without its THIMBLE_* names, so a test or a server a gate starts
-    never reaches the live server's home, workspaces, dev folder or port, with `extra` over it."""
-    return {**{k: v for k, v in os.environ.items() if not k.startswith("THIMBLE_")}, **(extra or {})}
+    never reaches the live server's home, workspaces, dev folder or port, and without its ANTHROPIC_* names, so the
+    ticket's code never reads the key Claude Code signs in with (as the card kernels, notebook.kernel_env_of), with
+    `extra` over it."""
+    return {**{k: v for k, v in os.environ.items() if not k.startswith(("THIMBLE_", "ANTHROPIC_"))}, **(extra or {})}
 
 
 def _free_port() -> int:
@@ -1133,8 +1135,8 @@ async def boot_check(tree: Path) -> dict[str, Any]:
 async def run_gates(tree: Path, touched: list[str], *, scratch: Path | None = None,
                     box: "ticket_box.Box | None" = None) -> dict[str, Any]:
     """The gates for what a ticket touched: tsc and frontend tests for frontend files, pytest, an import and boot_check
-    for backend modules, `prompts.load` for prompt files, each without THIMBLE_* env, and each in `box` when given (a
-    contained ticket: ticket_box). {ok, steps: [{name, ok, tail}]}. Seam for tests."""
+    for backend modules, `prompts.load` for prompt files, each without THIMBLE_* or ANTHROPIC_* env (_gate_environ),
+    and each in `box` when given (a contained ticket: ticket_box). {ok, steps: [{name, ok, tail}]}. Seam for tests."""
     async def run(cmd: list[str], cwd: Path, timeout: float, env: dict[str, str] | None = None) -> tuple[int, str]:
         if box is not None:
             return await ticket_box.run(box, cmd, cwd=cwd, timeout=timeout, env=env)
@@ -3318,8 +3320,8 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
             pass
         _view_runs.pop(key, None)
     views.ensure_local(config.workspace_dir(c))
-    (views.views_dir(c) / slug).mkdir(parents=True, exist_ok=True)
-    view_work_dir(c, slug).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(views.views_dir(c) / slug)  # folders the builder writes: made as nofollow makes them
+    nofollow.makedirs(view_work_dir(c, slug))
     vals = subagents.values_for(c, _builder(), values or prop.get("values") or None)
     fields: dict[str, Any] = {"values": vals, "error": None, "refused": None, "route": route, "stopped_by": None}
     if route == subagents.CLICK:
@@ -3960,8 +3962,8 @@ async def program_build(c: str, slug: str, part: Any) -> None:
         return
     folder = views.views_dir(c) / slug
     views.ensure_local(config.workspace_dir(c))
-    folder.mkdir(parents=True, exist_ok=True)
-    view_work_dir(c, slug).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(folder)  # folders the program writes: made as nofollow makes them
+    nofollow.makedirs(view_work_dir(c, slug))
     chat = _view_chat(c, prop)
     prop = views.update_proposal(c, slug, status="building", error=None, chat=chat, agent_id=None,
                                  program=getattr(part, "extension", None)) or prop

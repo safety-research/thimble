@@ -9,12 +9,14 @@
    --fork-session`, as the view proposer forks it), up to MAX_FORKS at once, each with a share of the marks, read the
    terminal's checker.md (CHECKER, with the few changes CHECKER_CHANGES lists) and give one JSON item per mark:
    verified, corrected, wrong or unconfirmed, with its evidence. A fork reads with Read, Grep and Glob, and runs code
-   only as Python (Bash `python3 …`).
+   only as Python (Bash `python3 …`), on Claude Code sign-in in Claude Code's sandbox where it can run (run_fork).
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py), checks that evidence with no model call and no
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
    lies in the corpus folder or main's, or is a label's definition, which holds the label's rule (_rules_dir); code
-   may also cite the workspace's temp folder. Its result is what the analyst sees.
+   may also cite the workspace's temp folder, and the one Claude Code's sandbox gives main's commands on Claude Code
+   sign-in (_temp_dirs). Its result is what the analyst sees. A mark it failed whose check cited a label card says
+   what changed in the label after the reply was written, when its change log holds a change since (_label_changed).
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
@@ -39,7 +41,9 @@ record names in the thread's chat (answer_ended). The fork of main that checks t
 checker's text says what holds them (THREAD_ANSWER), and the Bash calls of the thread's fork are evidence where main's
 are for a reply. Main hears nothing of that check, nor of a repair of one of its marks.
 
-Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`. A reply's marks are kept in
+Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`, and an error a mark's reason
+or a notice quotes names each path of this machine in it as the validator names a file (_error_words). A reply's marks
+are kept in
 `<workspace>/marks/<turn>.json`, and each change is written to main's log, or to the thread's chat for a side thread's
 answer, as a `marks` record {turn, items}, which the page reads (the newest record of a turn wins).
 
@@ -66,7 +70,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agents, config, ledger, sdk
+from . import agents, config, ledger, nofollow, sdk
 
 log = logging.getLogger("thimble.marks")
 router = APIRouter()
@@ -175,9 +179,9 @@ def cards_index(c: str, cards: list[dict[str, Any]]) -> str:
     workspace's temp folder; its path. Each check has its own: a card rewritten while a check runs starts another
     check, whose index must not take the place of the one this check's validator reads `cards` as."""
     folder = _temp_dir(c) / f"check-{secrets.token_hex(4)}"
-    folder.mkdir()
     p = folder / "cards-index.tsv"
-    p.write_text(evidence().card_index(cards), encoding="utf-8")
+    # in the temp folder a card's code writes: made and written as nofollow does, never through a link put there
+    nofollow.write_text(p, evidence().card_index(cards), make=True)
     return str(p)
 
 
@@ -185,8 +189,8 @@ def _drop_index(index: str) -> None:
     """A check's index, gone with its folder once the check ended."""
     if index:
         with contextlib.suppress(OSError):
-            Path(index).unlink()
-            Path(index).parent.rmdir()
+            nofollow.unlink(index)
+            nofollow.rmdir(Path(index).parent)
 
 
 def evidence() -> ModuleType:
@@ -220,7 +224,7 @@ def stored(c: str, turn: str) -> dict[str, Any] | None:
 
 def _save(c: str, reply: dict[str, Any]) -> None:
     p = _path(c, reply["turn"])
-    p.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(p.parent)
     ledger.write_json(p, reply)
     thread = (reply.get("thread") or {}).get("chat")
     if thread:  # a side thread's answer, which its chat draws
@@ -472,7 +476,8 @@ async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str]
     try:
         found = await marks_of(list(texts) + [t for _, _, t in takeaways])
     except (OSError, RuntimeError, ValueError) as e:
-        _notice(c, f"thimble could not read the citations of the last reply ({str(e)[:120]}), so they are not checked.")
+        said = _error_words(e, check_folders(c, main))
+        _notice(c, f"thimble could not read the citations of the last reply ({said[:120]}), so they are not checked.")
         return
     if not found:
         return
@@ -571,25 +576,27 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         prompt = checker_prompt(lines, cwd, index, root, holds)
         got = await fork(c, main, cut, f"{prompt}\n\n{request}" if request else prompt)
         if got.get("error"):
-            await give_up(f"the check ended: {got['error']}")
-            _notice(c, f"The check of the citations stopped ({str(got['error'])[:100]}), so some are not checked. The "
-                       "next reply is checked again.")
+            error = _error_words(got["error"], folders)
+            await give_up(f"the check ended: {error}")
+            _notice(c, f"The check of the citations stopped ({error[:100]}), so some are not checked. The next reply is "
+                       "checked again.")
             return
         answer = str(got.get("answer") or "")
         ev = evidence()
         cited = cited_outputs(answer)
         # the calls of whoever wrote the marks: main, or the thread's fork for a side thread's answer
-        wrote = thread["calls"] if thread else main.get("transcript_path")
+        wrote = _fork_transcript(c, thread) if thread else main.get("transcript_path")
         mains = [k for k in bash_calls(_transcript_messages(wrote), "main")
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
-                                         answer, calls, cwd, root, str(_temp_dir(c)), cards or [], str(_rules_dir(c)))
+                                         answer, calls, cwd, root, _temp_dirs(c), cards or [], str(_rules_dir(c)))
         if not result["parsed"]:
             await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
             return
         by_n = {int(r["n"]): r for r in result["results"]}
+        await asyncio.to_thread(_label_changed, c, turn, answer, by_n, mine)
 
         def change(r: dict[str, Any]) -> dict[str, Any]:
             def judged(m: dict[str, Any]) -> dict[str, Any]:
@@ -619,8 +626,8 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
             found = [m for m in share if _found_failed(by_n.get(m["n"]))]
     except Exception as e:  # noqa: BLE001 — a check that cannot be validated leaves its marks unchecked, and says so
         log.exception("%s: the check of the marks failed", c)
-        _notice(c, f"thimble could not check the citations ({type(e).__name__}: {str(e)[:80]}), so some are not "
-                   "checked.")
+        _notice(c, f"thimble could not check the citations ({type(e).__name__}: {_error_words(e, folders)[:80]}), so "
+                   "some are not checked.")
     finally:
         await give_up("the check ended before it judged this citation")
     # after give_up, which would leave unchecked a mark whose repair already runs
@@ -632,6 +639,72 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         # a mark that is not failed now has nothing to repair: a takeaway written again meanwhile is under its own check
         if why and why != NOT_FAILED:
             _notice(c, f"The repair of a failed citation did not start ({why[:100]}). Press Repair on it to try again.")
+
+
+def _error_words(error: Any, folders: tuple[str, str]) -> str:
+    """An error's text as a mark's reason or a notice quotes it: each path of this machine in it named as the validator
+    names a cited file, from the check's folders (`folders`, check_folders) when it lies there, else by its name alone
+    (the validator's error_words). The error is thimble's or Claude Code's own, never the records' nor the check's."""
+    cwd, root = folders
+    return evidence().error_words(str(error), cwd, root)
+
+
+# what a failed mark's reason ends with when the label of the card its check cited changed after the reply was written
+LABEL_CHANGED = "The label changed after this reply ({})."
+
+
+def _label_changed(c: str, turn: str, answer: str, results: dict[int, dict[str, Any]], marks: set[int]) -> None:
+    """Each of `marks`, a reply's or a side thread's answer's, that this check failed (wrong, or not confirmed) and whose
+    answer (`answer`, the checker's) cites a label card whose label changed after the reply was written (its record's
+    `reply_end`): its reason in `results` ends with what changed, in the words of the card's stale tag
+    (concepts.changed_after), which the analyst reads in the tray, main hears with the check's words, and a repair reads
+    in its request. The mark's status is the check's, and a citation that holds or one with no change since is as it
+    was. A takeaway's mark has no reply, so it is left out. Never raises: the reasons stay as they were."""
+    try:
+        since = ((stored(c, turn) or {}).get("times") or {}).get("reply_end")
+        if not isinstance(since, (int, float)):
+            return
+        ev = evidence()
+        items: dict[int, dict[str, Any]] = {}
+        for it in ev.parse_answer(answer) or []:
+            with contextlib.suppress(TypeError, ValueError):
+                items.setdefault(int(it.get("mark")), it)
+        changed: dict[str, str] | None = None
+        for n in sorted(marks):
+            r, it = results.get(n), items.get(n)
+            if not r or r.get("status") != "failed" or r.get("failedBy") not in ("check", "evidence"):
+                continue
+            if not it or it.get("kind") != "card":
+                continue
+            cited = [m.group(1) for ref in ev.card_refs(it.get("evidence")) for m in [ev.CARD_TD.match(ref) or ev.CARD_LINE.match(ref)] if m]
+            if not cited:
+                continue
+            if changed is None:
+                changed = label_changes(c, float(since))
+            said = list(dict.fromkeys(changed[cid] for cid in cited if cid in changed))
+            if said:
+                r["reason"] = " ".join(x for x in (str(r.get("reason") or ""), LABEL_CHANGED.format("; ".join(said))) if x)
+    except Exception:  # noqa: BLE001 — what changed in a label is a note on a failure, never a cause of one
+        log.exception("%s: what changed in the labels the check of turn %s cited was not read", c, turn)
+
+
+def label_changes(c: str, since: float) -> dict[str, str]:
+    """Each label card of the workspace whose label changed after `since` (seconds since the epoch), with what changed,
+    in the words of its stale tag (concepts.changed_after)."""
+    from . import concepts, notebook  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    out: dict[str, str] = {}
+    for _, nb in notebook._stored(ws):
+        for cell in nb.get("cells") or []:
+            payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
+            kid = str(payload.get("concept") or "")
+            if cell.get("kind") != "label" or not cell.get("id") or not concepts.ID_RE.match(kid):
+                continue
+            concept = concepts.read_concept(ws, kid)
+            if concept is not None and (said := concepts.changed_after(concept, since)):
+                out[str(cell["id"])] = said
+    return out
 
 
 def _takeaway_now(c: str, m: dict[str, Any]) -> bool:
@@ -651,9 +724,16 @@ def _found_failed(res: dict[str, Any] | None) -> bool:
 
 
 def _temp_dir(c: str) -> Path:
-    p = config.workspace_dir(c) / "tmp"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    return config.temp_dir(c)
+
+
+def _temp_dirs(c: str) -> list[str]:
+    """The temp folders Claude's own code may lie in, the validator's `tmp`: the workspace's, and the TMPDIR of main's
+    shell commands (runtime.shell_temp), which is the temp folder Claude Code's sandbox gives them on Claude Code
+    sign-in."""
+    from . import runtime  # noqa: PLC0415
+
+    return [str(p) for p in dict.fromkeys((_temp_dir(c), runtime.shell_temp(c)))]
 
 
 def _rules_dir(c: str) -> Path:
@@ -701,13 +781,29 @@ def bash_calls(messages: list[dict[str, Any]], by: str) -> list[dict[str, Any]]:
     return out
 
 
+def _fork_transcript(c: str, thread: dict[str, Any]) -> str | None:
+    """The transcript of a side thread's fork that a reply's record keeps (answer_ended): a subagent's file,
+    agent-<id>.jsonl in the folder of a session whose transcript is where the mirror finds one (session.own_transcript),
+    or in its subagents/; None for any other path, since a card's code writes the record."""
+    from . import session  # noqa: PLC0415
+
+    path = thread.get("calls")
+    if not isinstance(path, str) or not os.path.isabs(path):
+        return None
+    p = Path(os.path.normpath(path))
+    folder = p.parent.parent if p.parent.name == "subagents" else p.parent
+    sid = folder.name
+    return path if session.AGENT_FILE_RE.match(p.name) and session.own_transcript(
+        c, sid, str(folder.with_name(f"{sid}.jsonl"))) else None
+
+
 def _transcript_messages(path: Any) -> list[dict[str, Any]]:
     """Main's transcript records, each a dict (a line that does not parse is skipped)."""
     out: list[dict[str, Any]] = []
     if not path:
         return out
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
+    try:  # a transcript in the workspace (the server's own runtime's) lies where a card's code writes (nofollow)
+        with nofollow.reader(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 with contextlib.suppress(ValueError):
                     rec = json.loads(line)
@@ -879,9 +975,16 @@ def _model(c: str, main: dict[str, Any], prompt: str) -> tuple[str, str]:
     return m, str(main.get("effort") or conf["effort"])
 
 
-def fork_argv(main: dict[str, Any], cut: str | None, model_id: str, effort: str) -> list[str]:
+def fork_argv(main: dict[str, Any], cut: str | None, model_id: str, effort: str, sandbox: bool = False) -> list[str]:
+    """The fork's `claude -p`; with `sandbox` its python runs only in Claude Code's sandbox
+    (cc_settings.offline_sandbox, required), with no network and none of the ANTHROPIC_* variables Claude Code signs
+    in with."""
+    from . import cc_settings  # noqa: PLC0415
+
     sent = effort if config.has_effort(model_id) else None
     settings = {**json.loads(sdk.cli_settings(model_id, sent, None)), "advisorModel": "off"}
+    if sandbox:
+        settings["sandbox"] = cc_settings.offline_sandbox(required=True)
     at = ["--resume-session-at", cut] if cut else []
     return [str(config.CLI_PATH or config.CLAUDE_BIN), "-p", "--resume", str(main["sid"]), *at,
             "--fork-session", "--no-session-persistence", "--model", model_id, *(["--effort", sent] if sent else []),
@@ -941,9 +1044,10 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
     way to reach Claude chose (runtime.py): the Messages API in this process for an API key or WIF (no `claude`
     process), their Claude Code session's fork for a Claude Code sign-in; 0.8's `claude -p` fork when the runtime is
     off."""
-    from . import runtime, runtime_api  # noqa: PLC0415
+    from . import cc_settings, runtime, runtime_api, runtime_cc  # noqa: PLC0415
 
     model_id, effort = _model(c, main, prompt)
+    box = False
     if runtime.enabled():
         kind = runtime.engine()
         if kind == "api":
@@ -961,10 +1065,29 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
         if not sid:
             return {"error": "thimble cannot reach Claude yet" if not kind else "main has no Claude Code session yet"}
         main, cut = {**main, "sid": sid, "config_known": False}, None
-    argv = fork_argv(main, cut, model_id, effort)
+        # the fork's python runs in Claude Code's sandbox where it can, as main's Bash does on Claude Code sign-in (in a
+        # short TMPDIR of its own), so it never reads the ANTHROPIC_* variables Claude Code signs in with; the sandbox's
+        # .claude/.cc-writes/ in the corpus goes when the last session there ends (runtime_cc._tidy)
+        box = cc_settings.sandbox_ok()
+    cwd = Path(main.get("cwd") or config.corpus_dir(c))
+    tmp = runtime_cc.short_tmp() if box else None
+    env = {**_env(main), **({"TMPDIR": str(tmp), "CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}
+    if box:
+        runtime_cc._enter(cwd)
+    try:
+        return await _claude_fork(fork_argv(main, cut, model_id, effort, sandbox=box), cwd, env, prompt)
+    finally:
+        if tmp is not None:
+            nofollow.rmtree(tmp, root=tmp.parent, ignore_errors=True)  # the fork's python wrote it: no link followed
+        if box:
+            runtime_cc._tidy(cwd)
+
+
+async def _claude_fork(argv: list[str], cwd: Path, env: dict[str, str], prompt: str) -> dict[str, Any]:
+    """Run the fork `argv` in `cwd` with the prompt on stdin: {answer, calls, error}."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=str(main.get("cwd") or config.corpus_dir(c)), env=_env(main), stdin=asyncio.subprocess.PIPE,
+            *argv, cwd=str(cwd), env=env, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
     except OSError as e:
         return {"error": f"Claude Code could not start: {e}"}

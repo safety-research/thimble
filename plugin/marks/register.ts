@@ -14,14 +14,23 @@
 //   turn.complete    the checker's turn ended: validate, write the statuses
 //   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
 //                    autoRepair), as x does
-//   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script
+//   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script; a read of one file that
+//                    Claude Code refused is noted as it ends (checker.ts readEnded)
 //   turn.step        the checker's requests: the model and the effort the setting Checker names
 //   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
 //                    refused when a word came (a repair thimble starts itself has no word window)
-//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g): Claude Code's
-//                    own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask mode
-//                    would refuse it (checker.ts allowsCheck)
-//   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
+//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g, or x): Claude
+//                    Code's own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask
+//                    mode would refuse it (checker.ts allowsCheck)
+//   tool.check       a checker's Read or Grep of one file the person let thimble's checks read with that tool (x):
+//                    Claude Code's own ask answered allow where nobody is asked (checker.ts allowsRead); never a Glob,
+//                    which lists a folder
+//   tool.check       a checker's Bash call that runs Python, once the person allowed thimble's checks (g, or x):
+//                    Claude Code's own ask answered allow where nobody is asked, as don't ask mode would refuse it
+//                    (checker.ts allowsPython)
+//   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone;
+//                    while Minimal is on, where Claude Code reports the pointer (its fullscreen layout, with its mouse
+//                    reports on), plain: its marks show for the paragraph under the pointer (view.ts `plain`).
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
 //                    citation the tray shows, the lines under its words (the labels it used), a press on a citation,
@@ -29,6 +38,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { SPIN, spinNow } from '../bar/busy'
+import { clicksReach } from '../bar/intro'
 import { checkSpans, markFocus, markPressed, passagesFor, spansFor, textView, underText, type Span } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
@@ -37,9 +47,9 @@ import { shownWords } from '../core/selection'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
-import { checkerEffort, checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
+import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { AGAIN_DESCRIPTION, allowsCheck, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -50,8 +60,11 @@ type Any = any
 
 /** The spawns a key started that wait out its word window: x's repair, and a check g starts again. */
 const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
-/** Why thimble answers allow to Claude Code at tool.check on a check of its own. */
+/** Why thimble answers allow to Claude Code at tool.check on a check of its own, on its read of a file, and on its
+ *  Python. */
 const CHECKS_ALLOWED = "thimble's check of citations, which the person allowed this session"
+const READ_ALLOWED = "a file the person let thimble's check of citations read this session"
+const PYTHON_ALLOWED = "Python of thimble's check of citations, which the person allowed this session"
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
  *  words of one of the row's checked marks looks as that one does, and opens its evidence. A rewrite may word a
@@ -82,9 +95,9 @@ export function looksByWords(marks: { words: string }[], items: MarkItem[], runs
   })
 }
 
-/** The looks of a row's marks while Citations is manual (Minimal holds its auto modes there): the citations Claude
- *  wrote are quiet (view.ts MarkLook), the words the analyst cited with c stand as they are. `own`: the looks follow
- *  the items by place (the text is Claude's own), else by their numbers. In any other mode the looks as they are. */
+/** The looks of a row's marks while Citations is manual: the citations Claude wrote are quiet (view.ts MarkLook), the
+ *  words the analyst cited with c stand as they are. `own`: the looks follow the items by place (the text is Claude's
+ *  own), else by their numbers. In any other mode the looks as they are. */
 export function quietLooks(looks: MarkLook[], items: MarkItem[], own: boolean): MarkLook[] {
   if (choiceOf('citations') !== 'manual') return looks
   const asked = new Set(items.filter(it => it.asked).map(it => it.n))
@@ -158,9 +171,9 @@ export const registerMarks: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // a reply's check ended (the hook under this one): the citations it failed are repaired at once, as x repairs them.
-  // A hook of its own, around endCheck's: a fork skips the hooks its spawn was made in, so the repair's end still
-  // reaches endCheck below
+  // a reply's check ended (the hook under this one): the citations it failed are repaired at once, as x repairs them
+  // (checker.ts autoRepair says which). A hook of its own, around endCheck's: a fork skips the hooks its spawn was made
+  // in, so the repair's end still reaches endCheck below
   on('turn.complete', { agentId: /./ }, async ($, e, next) => {
     const r = await next(e)
     if (forkOf(e.agentId)?.kind === 'checker') {
@@ -177,10 +190,14 @@ export const registerMarks: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // fails closed: a guard that throws before `next` refuses the checker's call in its place
+  // fails closed: a guard that throws before `next` refuses the checker's call in its place. A read Claude Code refused
+  // is noted as it ends: the file the check could not read
   on('tool.call', { agentId: /./ }, async ($, e, next) => {
     const no = denial(e)
-    return no ? { deny: no } : next(e)
+    if (no) return { deny: no }
+    const r = await next(e)
+    if (forkOf(e.agentId)?.kind === 'checker') await readEnded($, e as never, r).catch(() => undefined)
+    return r
   }).catch(($, e, next) => {
     if (next.called) return next(e)
     const no = denial(e)
@@ -218,6 +235,23 @@ export const registerMarks: Register = on => {
     return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
+  // a checker's Read or Grep of one file the person let thimble's checks read with that tool (x, checker.ts
+  // allowsRead): Claude Code's own ask, where it asks nobody and don't ask mode would refuse it, is answered allow; an
+  // ask put to the person or a host, a deny, and an ask a rule, a hook, a setting or another plugin made, stand
+  on('tool.check', { tool: /^(Read|Grep)$/, agentId: /./ }, async ($, e, next) => {
+    const v = await next(e)
+    return forkOf(e.agentId)?.kind === 'checker' && (await allowsRead($, e, v)) ? { ...v, decision: 'allow', reason: READ_ALLOWED } : v
+  }).catch(($, e, next) => next(e))
+
+  // a checker's Bash call that runs Python, once the person let thimble's checks run (g, x; checker.ts allowsPython):
+  // Claude Code's own ask, where it asks nobody and don't ask mode would refuse it, is answered allow; an ask put to the
+  // person or a host, a deny, and an ask a rule, a hook, a setting or another plugin made, stand. Main's calls and other
+  // agents' are not thimble's checks
+  on('tool.check', { tool: 'Bash', agentId: /./ }, async ($, e, next) => {
+    const v = await next(e)
+    return forkOf(e.agentId)?.kind === 'checker' && (await allowsPython($, e, v)) ? { ...v, decision: 'allow', reason: PYTHON_ALLOWED } : v
+  }).catch(($, e, next) => next(e))
+
   // fails safe (core/rowhook.ts): a throw here answers the drawing beneath, which the hooks around this one draw on
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const below = askOnce(e, next)
@@ -227,6 +261,15 @@ export const registerMarks: Register = on => {
       return below()
     }
   }).catch(($, e, next) => next(e))
+}
+
+/** Whether Claude Code reports the pointer over the drawing `e` (its ui.render input), so a row of a plain reply can
+ *  show its marks under it: only in its fullscreen layout, and there only while it asks the terminal for every mouse
+ *  report, the pointer's moves among them, as clicks need too (bar/intro.ts clicksReach). With
+ *  CLAUDE_CODE_DISABLE_MOUSE it asks for none, and with CLAUDE_CODE_DISABLE_MOUSE_CLICKS for presses and the wheel
+ *  alone, which say nothing of where the pointer is. */
+async function pointerReported($: Engine, e: Any): Promise<boolean> {
+  return e.viewport?.isFullscreen === true && (await clicksReach($, e).catch(() => true))
 }
 
 /** A row of Claude's words as marks/register.ts draws it: its marks, spans and lines under it, or the drawing beneath
@@ -301,6 +344,9 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
       spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
+      // Minimal: plain words at rest, each row's marks under the pointer (view.ts), where Claude Code reports the
+      // pointer; elsewhere the marks stand at rest as in any mode
+      plain: minimalOn() && (await pointerReported($, e)),
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
       // a press on a citation's words, or on the sign after them (view.ts markEl)

@@ -10,7 +10,10 @@ as the Claude Code tools 0.8's agents had, so the prompts read the same in both 
     WebSearch WebFetch  the Messages API's own server tools (web_search, web_fetch)
 
 A tool that cannot run here (Bash without the sandbox) is left out of the agent's list (available). Nothing here
-reaches past those folders: every path is resolved, symlinks included, and checked against them.
+reaches past those folders: every path is resolved, symlinks included, and checked against them (Box.path), and the
+file or folder is then opened by that real path one part at a time from the agent's folder that holds it (Box.root)
+without following a link (nofollow), so a link a card's code or a command puts on the way after the check fails the
+call rather than lead outside.
 """
 from __future__ import annotations
 
@@ -24,7 +27,9 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, BinaryIO, Iterator
+
+from . import nofollow
 
 READ_LINES = 2000
 LINE_CHARS = 2000
@@ -112,12 +117,21 @@ class Box:
     read_roots: list[Path]
     write_roots: list[Path]
     private: list[Path] = field(default_factory=list)
-    home: Path | None = None  # HOME and TMPDIR of its commands, inside a write root
+    home: Path | None = None  # HOME of its commands, and their TMPDIR unless `temp` names one, inside a write root
+    temp: Path | None = None  # Spec.temp: the TMPDIR of its commands when not inside `home`, inside a write root
     no_write: list[Path] = field(default_factory=list)  # never written, inside a write root or not (runtime.protected)
     corpus_edits: bool | None = None  # Spec.corpus_edits: what a refused write in the corpus tells the agent
 
     def _inside(self, q: Path, roots: list[Path]) -> bool:
         return any(q == r or r in q.parents for r in roots)
+
+    def _real(self, roots: list[Path]) -> list[Path]:
+        """`roots` by their real paths, less each folder of the workspace whose real path lies outside it: a card's code
+        writes the workspace, so it can put a link in place of such a folder, which then leads the tools nowhere."""
+        ws = self.workspace.resolve()
+        mine = [Path(os.path.normpath(self.workspace)), ws]
+        real = [(Path(os.path.normpath(r)), r.resolve()) for r in roots]
+        return [q for r, q in real if self._inside(q, [ws]) or not self._inside(r, mine)]
 
     def path(self, p: str | None, *, write: bool = False) -> Path:
         raw = Path(p) if p and os.path.isabs(p) else self.cwd / (p or ".")
@@ -127,13 +141,22 @@ class Box:
         if write and self._inside(q, [x.resolve() for x in self.no_write]):
             raise ValueError(f"{p} is thimble's own file, which only thimble writes")
         roots = self.write_roots if write else [*self.read_roots, *self.write_roots]
-        if not self._inside(q, [r.resolve() for r in roots]):
+        if not self._inside(q, self._real(roots)):
             what = "write" if write else "read"
             if write and self.corpus_edits is False and self._inside(q, [self.cwd.resolve()]):
                 raise ValueError(f"{p} is in the corpus folder, which is read-only while the analyst's Settings switch "
                                  f"\"{EDITS_SWITCH}\" is off; they can turn it on there")
             raise ValueError(f"{p} is outside the folders this agent may {what}")
         return q
+
+    def root(self, q: Path) -> Path:
+        """The folder a tool opens the real path `q` (path) from, one folder at a time without following a link: the
+        outermost of the workspace and the box's roots that holds it, which no sandboxed code can replace. The folders
+        above it are opened by path, so on macOS, where each folder so opened needs read permission (no O_PATH), a
+        folder above it that the person may enter but not list is no obstacle, as it is none to Claude Code's tools."""
+        held = [r for r in [self.workspace.resolve(), *self._real([*self.read_roots, *self.write_roots])]
+                if self._inside(q, [r])]
+        return min(held, key=lambda r: len(r.parts)) if held else Path("/")
 
 
 @dataclass
@@ -146,36 +169,57 @@ def _cut(text: str) -> str:
     return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + f"\n[cut at {RESULT_CHARS} characters]"
 
 
-def _binary(p: Path) -> bool:
-    try:
-        with p.open("rb") as f:
-            return b"\0" in f.read(4096)
-    except OSError:
-        return False
+def _opened(q: Path, root: Path) -> BinaryIO:
+    """The regular file at the real path `q` (Box.path), opened from `root` (Box.root) one part at a time without
+    following a link (nofollow): a link put on its way after Box checked it fails the open."""
+    return os.fdopen(nofollow.open(q, os.O_RDONLY, root=root), "rb")
 
 
-def _lines(p: Path) -> Iterator[str]:
+def _binary(f: BinaryIO) -> bool:
+    """Whether the open file `f` holds a NUL byte in its first 4096 bytes; read from its start, and left there."""
+    f.seek(0)
+    head = f.read(4096)
+    f.seek(0)
+    return b"\0" in head
+
+
+def _lines(f: BinaryIO) -> Iterator[str]:
     """A text file's lines, read one at a time, as the citation check reads them (the terminal's evidence.read_lines):
     each ends at a newline alone, without it and a carriage return before it, so a U+2028 in a JSON string ends no
     line, and the number Read or Grep gives a line is the one a citation of it names."""
-    with p.open("rb") as f:
-        for raw in f:
-            yield raw.decode("utf-8", errors="replace").removesuffix("\n").removesuffix("\r")
+    for raw in f:
+        yield raw.decode("utf-8", errors="replace").removesuffix("\n").removesuffix("\r")
 
 
-def _window(p: Path, offset: int, limit: int) -> tuple[list[str], int]:
-    """Lines `offset` to `offset + limit - 1` of a text file (from 1), and how many lines follow them."""
-    lines = _lines(p)
-    shown = list(itertools.islice(lines, offset - 1, offset - 1 + limit))
-    return shown, sum(1 for _ in lines)
+def _window(q: Path, root: Path, offset: int, limit: int) -> tuple[list[str], int] | None:
+    """Lines `offset` to `offset + limit - 1` of the text file at the real path `q` (from 1, opened from `root`), and
+    how many lines follow them; None for a binary file."""
+    with _opened(q, root) as f:
+        if _binary(f):
+            return None
+        lines = _lines(f)
+        shown = list(itertools.islice(lines, offset - 1, offset - 1 + limit))
+        return shown, sum(1 for _ in lines)
 
 
-def _files(base: Path) -> list[Path]:
-    out = []
-    for d, dirs, files in os.walk(base):
-        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS)
-        out.extend(Path(d) / f for f in sorted(files))
-    return out
+def _files(base: Path, root: Path) -> Iterator[tuple[Path, int, str]]:
+    """Each file below the real folder `base`, as (its path, the descriptor of its folder, its name there), from a walk
+    from `root` (Box.root) that opens each folder by its own name in the one above it and enters no link (os.fwalk over
+    nofollow's folder); the descriptors are open only while the caller iterates. Nothing for a `base` that is no folder
+    (any longer); another error, such as a folder the person may not read, fails the call, rather than read as no
+    files."""
+    try:
+        top = nofollow.walk(base, root=root)
+    except (FileNotFoundError, nofollow.Linked):
+        return
+    try:
+        for d, dirs, files, fd in os.fwalk(".", dir_fd=top):
+            dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS)
+            here = base / os.path.normpath(d)
+            for name in sorted(files):
+                yield here / name, fd, name
+    finally:
+        os.close(top)
 
 
 def sandbox_reason() -> str:
@@ -245,11 +289,12 @@ async def _read(box: Box, a: dict[str, Any]) -> Out:
         return Out(f"{a.get('file_path')} is a folder: list it with Glob or Bash ls", True)
     if not q.exists():
         return Out(f"there is no file {a.get('file_path')}", True)
-    if _binary(q):
-        return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
     offset = max(1, int(a.get("offset") or 1))
     limit = max(1, min(int(a.get("limit") or READ_LINES), READ_LINES))
-    lines, more = await asyncio.to_thread(_window, q, offset, limit)
+    got = await asyncio.to_thread(_window, q, box.root(q), offset, limit)
+    if got is None:
+        return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
+    lines, more = got
     out = [f"{n:>6}\t{ln[:LINE_CHARS]}" for n, ln in enumerate(lines, offset)]
     if more > 0:
         out.append(f"[{more} more lines: read on with offset {offset + limit}]")
@@ -262,7 +307,7 @@ async def _glob(box: Box, a: dict[str, Any]) -> Out:
 
     def run() -> list[str]:
         hits = []
-        for f in _files(base):
+        for f, _fd, _name in _files(base, box.root(base)):
             rel = str(f.relative_to(base))
             if fnmatch.fnmatch(rel, pat) or (pat.startswith("**/") and fnmatch.fnmatch(rel, pat[3:])):
                 hits.append(str(f))
@@ -283,35 +328,66 @@ async def _grep(box: Box, a: dict[str, Any]) -> Out:
         return Out(f"the pattern is not a regular expression: {e}", True)
     glob = a.get("glob")
 
-    def run() -> list[str]:
+    def opened(f: Path, fd: int | None, name: str) -> BinaryIO:
+        """A file of the walk by its name in its folder's descriptor, never through a link; a link there is read as
+        Read reads a path, by its real path once Box finds it in a read root (ValueError when Box refuses it)."""
+        if fd is not None:
+            try:
+                return os.fdopen(nofollow.open_at(fd, name, os.O_RDONLY), "rb")
+            except nofollow.Linked:
+                pass
+        q = box.path(str(f))
+        return _opened(q, box.root(q))
+
+    def run() -> tuple[list[str], list[str]]:
         out: list[str] = []
-        for f in [base] if base.is_file() else _files(base):
+        left: list[str] = []  # the links that lead outside the folders the agent may read, which Read refuses too
+        files = [(base, None, base.name)] if base.is_file() else _files(base, box.root(base))
+        for f, fd, name in files:
             if glob and not fnmatch.fnmatch(f.name, glob) and not fnmatch.fnmatch(str(f), glob):
                 continue
-            if _binary(f):
-                continue
             try:
-                for n, line in enumerate(_lines(f), 1):
-                    if rx.search(line):
-                        out.append(f"{f}:{n}: {line[:400]}")
-                        if len(out) >= GREP_MAX:
-                            return out
+                fh = opened(f, fd, name)
+            except ValueError:
+                left.append(str(f))
+                continue
             except OSError:
                 continue
-        return out
+            try:
+                with fh:
+                    if _binary(fh):
+                        continue
+                    for n, line in enumerate(_lines(fh), 1):
+                        if rx.search(line):
+                            out.append(f"{f}:{n}: {line[:400]}")
+                            if len(out) >= GREP_MAX:
+                                return out, left
+            except (OSError, ValueError):
+                continue
+        return out, left
 
-    out = await asyncio.to_thread(run)
+    out, left = await asyncio.to_thread(run)
+    note = _not_searched(left)
     if not out:
-        return Out("No matches found")
+        return Out("No matches found" + note)
     more = "" if len(out) < GREP_MAX else f"\n[stopped at {GREP_MAX} lines: narrow the pattern or the path]"
-    return Out("\n".join(out) + more)
+    return Out("\n".join(out) + more + note)
+
+
+def _not_searched(files: list[str]) -> str:
+    """Grep's line that names the files it did not search, each a link that leads outside the folders the agent may
+    read, so that the agent tells them from files with no match; '' for none."""
+    if not files:
+        return ""
+    what = "1 file not searched, since it is" if len(files) == 1 else f"{len(files)} files not searched, since each is"
+    return f"\n[{what} a link that leads outside the folders you may read: {', '.join(files)}]"
 
 
 async def _write(box: Box, a: dict[str, Any]) -> Out:
     q = box.path(a.get("file_path"), write=True)
-    q.parent.mkdir(parents=True, exist_ok=True)
     text = str(a.get("content") or "")
-    await asyncio.to_thread(q.write_text, text, "utf-8")
+    # by the real path Box checked, its missing folders made, never through a link (nofollow)
+    await asyncio.to_thread(nofollow.write_text, q, text, root=box.root(q), make=True)
     return Out(f"wrote {q} ({len(text)} characters)")
 
 
@@ -319,15 +395,16 @@ async def _edit(box: Box, a: dict[str, Any]) -> Out:
     q = box.path(a.get("file_path"), write=True)
     if not q.is_file():
         return Out(f"there is no file {a.get('file_path')}", True)
-    text = await asyncio.to_thread(q.read_text, "utf-8")
+    text = await asyncio.to_thread(nofollow.read_text, q, root=box.root(q))
     old, new = str(a.get("old_string") or ""), str(a.get("new_string") or "")
     n = text.count(old) if old else 0
     if n == 0:
         return Out("old_string is not in the file", True)
     if n > 1 and not a.get("replace_all"):
         return Out(f"old_string is in the file {n} times: give more context, or set replace_all", True)
-    await asyncio.to_thread(q.write_text, text.replace(old, new) if a.get("replace_all") else text.replace(old, new, 1),
-                            "utf-8")
+    await asyncio.to_thread(nofollow.write_text, q,
+                            text.replace(old, new) if a.get("replace_all") else text.replace(old, new, 1),
+                            root=box.root(q))
     return Out(f"edited {q}")
 
 
@@ -357,8 +434,9 @@ def _reads_around(reads: list[str], writes: list[Path], denied: set[str]) -> lis
     """`reads` with each folder that holds a write root given as its entries off the way to it, level by level. On
     Linux srt binds a hidden folder's write roots back before its allowed reads, so a read root that holds a write root
     (the workspace, under a hidden /home or /mnt) went back read-only over it, and Bash could write none of the agent's
-    folders. The write roots are read roots of their own; an entry denied by name stays out. A folder on the way is
-    srt's empty stand-in, so what a command writes there never reaches the disk."""
+    folders. The write roots are read roots of their own; an entry denied by name stays out, and so does one whose
+    real path leaves its folder (_entries_around). A folder on the way is srt's empty stand-in, so what a command
+    writes there never reaches the disk."""
     out: list[str] = []
     for r in reads:
         inside = [w for w in writes if Path(r) in w.parents]
@@ -367,12 +445,19 @@ def _reads_around(reads: list[str], writes: list[Path], denied: set[str]) -> lis
 
 
 def _entries_around(folder: Path, writes: list[Path], denied: set[str]) -> list[str]:
+    """_reads_around's entries of `folder`. An entry whose real path is not its own place in `folder`, a link such as
+    one a card's code or a command left in the workspace, is none, nor are the entries below it: srt binds a link by
+    its target, so the rule would let Bash read the folder it points to outside, or put a folder of the workspace back
+    read-only over a write root. A link to a folder of the workspace loses nothing: that folder has its own rule."""
     try:
         entries = sorted(folder.iterdir())
     except OSError:
         return []
+    real = os.path.realpath(folder)
     out: list[str] = []
     for e in entries:
+        if os.path.realpath(e) != os.path.join(real, e.name):
+            continue
         below = [w for w in writes if e == w or e in w.parents]
         if not below:
             out += [] if str(e) in denied else [str(e)]
@@ -392,11 +477,12 @@ async def _bash(box: Box, a: dict[str, Any]) -> Out:
         return Out("the command is empty", True)
     timeout = min(max(int(a.get("timeout") or BASH_TIMEOUT_S * 1000), 1000), BASH_TIMEOUT_MAX_S * 1000) / 1000
     home = box.home or box.write_roots[0]
-    (home / "tmp").mkdir(parents=True, exist_ok=True)
+    tmp = box.temp or home / "tmp"
+    nofollow.makedirs(tmp)
     argv = kernel_wrap.srt_argv(["/bin/bash", "-c", command], node=str(srt.node()),
                                 srt_dir=srt.package(config.REPO_ROOT) or config.REPO_ROOT, rules=_rules(box))
     env = {k: v for k in ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME") if (v := os.environ.get(k))}
-    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(home / "tmp"), npm_config_cache=str(home / ".npm-cache"),
+    env.update(PATH=shell_path(), HOME=str(home), TMPDIR=str(tmp), npm_config_cache=str(home / ".npm-cache"),
                **kernel_wrap.NO_SIDE_WRITES)
     proc = await asyncio.create_subprocess_exec(*argv, cwd=str(box.cwd), env=env, stdin=asyncio.subprocess.DEVNULL,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,

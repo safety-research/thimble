@@ -7,11 +7,15 @@
 // `options`), so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again
 // with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
 // choiceOf(key) for a mode, when it acts.
+//
+// Where thimble's drawing does not show (core/host.ts says so as the session starts: setDrawn), the features that only
+// the drawing shows act as off (UNDRAWN), whatever the person set: featureOn, choiceOf and the others answer so, and what
+// the person set stays as it is (currentValues).
 
 import { ALIASES, EFFORTS, modelById, modelNamed, modelOf, shownName } from '../core/models.js'
 
 /** What Minimal does, as the settings pane says it under its row. */
-const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.'
+const MINIMAL_SAYS = 'In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.'
 
 /** Words in a list: `a, b or c`. */
 const listed = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(', ')} or ${ws.at(-1)}` : ws.join(''))
@@ -65,9 +69,13 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'cards', title: 'Cards', group: 'Answers', default: true,
-    does: 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.',
-    says: { on: 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.', off: 'No cards.' },
+    key: 'cards', title: 'Cards', group: 'Answers', default: 'auto', choices: ['auto', 'on demand', 'off'],
+    does: 'auto: Claude draws charts and tables as cards in its answers. on demand: Claude draws a card only when you ask for one. Press v to visualize the last answer. off: no cards.',
+    says: {
+      'auto': 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.',
+      'on demand': 'Claude draws a card only when you ask for one. Press v to visualize the last answer.',
+      'off': 'No cards.',
+    },
   },
   {
     key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
@@ -140,9 +148,10 @@ export const RETIRED = {
  *  the first session saves the new one (term.ts). */
 export const RENAMED = {
   citations: { 'auto cite + check': 'auto cite + verify' },
-  // a switch until 0.10.4, now modes: on is auto, off is off
+  // a switch until 0.10.4 (Cards until 0.10.8), now modes: on is auto, off is off
   explain: { true: 'auto', false: 'off' },
   details: { true: 'auto', false: 'off' },
+  cards: { true: 'auto', false: 'off' },
   // the 0.10.6 test branch saved a model by its alias (haiku); now by its name with the version (Haiku 5.5)
   checkerModel: Object.fromEntries(ALIASES.map(a => [a, shownName(a)])),
 }
@@ -209,9 +218,17 @@ export function settled(values) {
 
 let current = {}
 
+/** Whether thimble's drawing shows in this session: core/host.ts says it as the session starts; until then it shows. */
+let drawn = true
+
 /** The plugin's options, as register(on, options) received them. */
 export function setOptions(options) {
   current = options && typeof options === 'object' ? { ...options } : {}
+}
+
+/** Whether thimble's drawing shows in this session, which core/host.ts reads from the session's start. */
+export function setDrawn(shows) {
+  drawn = shows !== false
 }
 
 /** A feature's value as `values` holds it: a boolean, or for a feature with modes one of its choices; a field missing,
@@ -227,16 +244,31 @@ export function valueIn(values, key) {
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
 
-/** Minimal: the modes it sets, so nothing runs after a reply and each of these waits to be asked. Turning it on saves
- *  them (settings/term.ts), and the rows show them; a row changed away from them turns it off. */
-export const PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
+/** Minimal: the modes it sets. Claude still cites, each citation verified when it is opened (auto cite), and the look
+ *  after each answer still writes explainers and heads-ups; where Claude Code reports the pointer (its fullscreen
+ *  layout, with its mouse reports on) its answers are plain, these showing only for the paragraph under the pointer
+ *  (marks/register.ts, view.ts `plain`), and elsewhere they stand at rest; Claude draws a card only when asked; Rewrite,
+ *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts),
+ *  and the rows show them; a row changed away from them turns it off. */
+export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false }
 
-/** Whether `values` hold Minimal's modes. */
-export const atPreset = values => Object.entries(PRESET).every(([k, v]) => valueIn(values, k) === v)
+/** The modes Minimal set from 0.10.4 to 0.10.7: rows that still hold them stand for it, and the first session sets its
+ *  modes now (settings/term.ts settleMinimal). */
+export const OLD_PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
+
+/** The modes that stand where thimble's drawing does not show (core/host.ts drawsHere: the desktop app's Code tab,
+ *  remote Cowork, claude -p): Citations, Cards, Explainers and Heads-ups off, as if the person had set them off, since
+ *  nothing there draws a citation, its check, a card, an explainer or a heads-up (a citation would read as a raw link,
+ *  and a card would show nowhere), and no key asks for one (every key types there). The person's own modes stay as they
+ *  set them (currentValues), and the terminal acts on them. */
+export const UNDRAWN = { citations: 'off', cards: 'off', explain: 'off', details: 'off' }
+
+/** Whether `values` hold a preset's modes: Minimal's, or `preset`. */
+export const atPreset = (values, preset = PRESET) => Object.entries(preset).every(([k, v]) => valueIn(values, k) === v)
 
 /** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
- *  its mode is `off`), as Minimal leaves it. The settings pane asks it with the values Claude Code holds now; featureOn
- *  is it with the plugin's options. */
+ *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the values
+ *  the plugin acts on (acting). */
 export function switchesFrom(values) {
   return key => {
     // c on selected words, a citation the analyst asks for, works in every mode of Citations but off
@@ -248,9 +280,14 @@ export function switchesFrom(values) {
   }
 }
 
+/** The values the features act on now: the person's (the plugin's options), with UNDRAWN's modes over them where
+ *  thimble's drawing does not show. Each answer on what acts now reads these: choiceOf, featureOn, lensesAfterReply,
+ *  minimalOn. */
+const acting = () => (drawn ? current : { ...current, ...UNDRAWN })
+
 /** A feature's mode, for a feature with `choices` (`on demand`); its value as a boolean for any other. */
 export function choiceOf(key) {
-  return valueIn(current, ALIAS[key] ?? key)
+  return valueIn(acting(), ALIAS[key] ?? key)
 }
 
 /** A change the settings pane just made through Claude Code: this activation acts on it at once, while Claude Code
@@ -277,19 +314,20 @@ export function noteSettled() {
  *  each reply runs: while a feature one of whose lenses it serves is on, and in its mode's `auto` when it has one. */
 export function featureOn(key) {
   if (key === 'observer') return SWITCHES.some(s => (s.lenses ?? []).length > 0 && lensesAfterReply(s.key))
-  return switchesFrom(current)(key)
+  return switchesFrom(acting())(key)
 }
 
 /** Whether a feature's lenses join the look after each reply: it is on, and in its `lensesIn` mode when it has one. */
 export function lensesAfterReply(key) {
   const s = BY_KEY.get(ALIAS[key] ?? key)
-  return switchesFrom(current)(key) && (!s?.lensesIn || valueIn(current, s.key) === s.lensesIn)
+  const values = acting()
+  return switchesFrom(values)(key) && (!s?.lensesIn || valueIn(values, s.key) === s.lensesIn)
 }
 
 /** Whether Minimal is on: the modes it set (PRESET) stand. */
-export const minimalOn = () => valueIn(current, 'minimal') === true
+export const minimalOn = () => valueIn(acting(), 'minimal') === true
 
-/** The values this load runs with now, the retired fields' included. */
+/** The values the person set, as this load runs with them, the retired fields' included: never UNDRAWN's modes. */
 export const currentValues = () => ({ ...current })
 
 /** Whether Claude cites its claims (Citations auto cite + verify, or auto cite): main reads the citing guidance, and

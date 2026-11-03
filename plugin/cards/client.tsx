@@ -4,8 +4,9 @@
 // holds no data and no logic of the card. It sends the hooks module events:
 //
 //   {seen: true}                    once, when the instance is first drawn: the card is on screen, so it takes keys
-//   {draw: need}                    the drawing it needs (`<version>:<width>`), once for each: the card's first
-//                                   drawing in a resumed session, or the drawing at a new width
+//   {draw: need}                    the drawing it needs (`<version>:<width>:<state>`, draw.ts needOf), once for each:
+//                                   the card's first drawing in a resumed session, the drawing at a new width, or the
+//                                   drawing of a state a key gave the card at another frame's width
 //   {rows: n}                       the rows its region takes, when they change: where the card stands in its row,
 //                                   so the hooks know whether the screen shows it
 //   {press: n, width}               a Button, by the number the runner gave its onPress, in the drawing at `width`

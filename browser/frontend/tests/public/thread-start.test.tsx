@@ -3,7 +3,9 @@
 // src/chat/ChatPanel.tsx): a short turn of main starts the thread's fork, but the thread never names main or shows
 // main's state for it. While its question waits for the fork the strip says it is starting; once the fork runs the
 // strip says it works. Until main's turn that took the question to the fork ends, the thread's folded card does not
-// count main's run as work elsewhere (mainRelays).
+// count main's run as work elsewhere (mainRelays). While a command of its fork waits for the analyst (an ask about a
+// host on the thread's meta, or a request main's session relays for the thread), the strip shows the wait dot in place
+// of the spinner; a thread asked from it is a session of its own, whose wait leaves the strip as it is.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel, taskStrip } from '../../src/chat/ChatPanel.tsx'
 import { mainRelays, STAGE_TEXT } from '../../src/chat/threadStatus.ts'
@@ -17,9 +19,11 @@ const LATER = '2026-10-15T10:00:05+00:00'
 const QUESTION: ChatRecord = { type: 'user', ts: T, text: 'Why did agent-05 push three times?', by: 'browser' }
 let main: ChatMeta
 let thread: ChatMeta
+let others: ChatMeta[]
 let mainEvents: ChatRecord[]
 
 beforeEach(() => {
+  others = []
   localStorage.clear()
   localStorage.setItem('thimble:mini:thread-current', JSON.stringify('th1'))
   // main's short turn that starts the fork runs; the thread runs, its question not yet with a fork
@@ -34,7 +38,7 @@ beforeEach(() => {
       : u.endsWith('/chats/th1')
         ? { meta: thread, events: [QUESTION] }
         : /\/chats(\?|$)/.test(u)
-          ? [main, thread]
+          ? [main, thread, ...others]
           : /\/(proposals|notices|views)(\?|$)/.test(u)
             ? []
             : {}
@@ -105,4 +109,35 @@ describe('a thread whose question waits for its fork, while main runs the turn t
     expect(el.querySelector('.chat-strip-title')?.textContent).toBe('Working')
   })
 
+})
+
+describe("a thread whose fork's command waits for the analyst", () => {
+  const ASK = { id: 'h1', host: 'data.example-lab.test', since: LATER, call: { tool: 'Bash', input: { command: 'curl -sS https://data.example-lab.test/api/runs' } } }
+  beforeEach(() => {
+    thread = { ...thread, fork: { agent_id: 'afork1' } } as unknown as ChatMeta
+    main = { ...main, running: false }
+  })
+  /** The thread's chat as it shows: its strip's title, and whether it shows the wait dot or the spinner. */
+  const strip = async () => {
+    const el = await mount(<ChatPanel ws="mini" />)
+    await settle()
+    await settle()
+    const s = el.querySelector('.chat-strip')
+    return { title: s?.querySelector('.chat-strip-title')?.textContent, dot: !!s?.querySelector('.chat-strip-wait-dot'), spinner: !!s?.querySelector('.spinner'), ask: !!el.querySelector('.chat-host-ask') }
+  }
+
+  test('on an ask about a host, its strip shows the wait dot in place of the spinner', async () => {
+    thread = { ...thread, hosts: [ASK] } as unknown as ChatMeta
+    expect(await strip()).toEqual({ title: 'Working', dot: true, spinner: false, ask: true })
+  })
+
+  test("on a request main's session relays for the thread, too", async () => {
+    main = { ...main, permissions: [{ id: 'p1', tool: 'Bash', what: 'Run a command', since: LATER, chat: 'th1', terminal: true }] } as unknown as ChatMeta
+    expect(await strip()).toEqual({ title: 'Working', dot: true, spinner: false, ask: false })
+  })
+
+  test('a thread asked from it that waits leaves its strip at work', async () => {
+    others = [{ id: 'th2', kind: 'thread', role: 'thread', title: 'retry-counts', created_at: LATER, parent: 'th1', anchor: null, anchor_text: null, running: true, fork: { agent_id: 'afork2' }, hosts: [ASK] } as unknown as ChatMeta]
+    expect(await strip()).toEqual({ title: 'Working', dot: false, spinner: true, ask: false })
+  })
 })

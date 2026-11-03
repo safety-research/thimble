@@ -11,9 +11,11 @@ critic's transcript digest, which stays one file that the critic reads in window
 whole."""
 from __future__ import annotations
 
+import contextlib
 import re
 from pathlib import Path
 
+from . import nofollow
 from .ledger import write_under
 
 # of one file or window: what Claude Code's Read returns whole without counting its tokens. Read (2.1.300) estimates a
@@ -83,7 +85,8 @@ def write(base: Path, first: Path, text: str) -> list[Path]:
     later = re.compile(rf"{re.escape(first.stem)}-[1-9][0-9]*{re.escape(first.suffix)}")
     for old in first.parent.glob(f"{first.stem}-*{first.suffix}"):
         if later.fullmatch(old.name) and old not in out:
-            old.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                nofollow.unlink(old)  # the file itself, never through a link an agent left on its way
     return out
 
 

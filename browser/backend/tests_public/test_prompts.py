@@ -460,3 +460,29 @@ def test_a_card_shows_the_evidence_chosen_for_its_answer(mode, monkeypatch):
     html = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["html"]["description"]
     assert "plain HTML" in html and "class=" not in html and "tc-" not in html
     assert "its question above the page and its takeaway under it" in html and "does not say the answer again" in html
+
+
+def test_main_says_which_requests_to_a_host_ask_the_analyst_by_the_way_claude_is_reached_and_names_no_web_switch(
+        tmp_path, monkeypatch):
+    """In the workbench only a Bash command's request to a host the analyst has not allowed asks them first, and only on
+    Claude Code sign-in (host_asks.py); with an API key or WIF nothing asks, and web fetches, web searches and card code
+    never ask. Main's prompt said a request to such a host asks first whatever the way, so main told the analyst it
+    would ask before it reached a host it then reached unasked. Its sentence follows the way Claude is reached, as
+    Settings' row for main does (runtime.network). Settings has no web or network switch for main, so the prompt names
+    none: it said "The web calls the analyst turned off in thimble's Settings are refused", and when Claude Code's
+    sandbox refused a host, main sent the analyst to that switch. The terminal's own Claude Code asks in its dialog, as
+    its branch says."""
+    from app import events, runtime
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    for engine, says, never in (("cc", "A Bash command's request to a host the analyst has not allowed asks them first",
+                                 "reach any host without asking the analyst"),
+                                ("api", "Bash commands, web fetches, web searches and card code reach any host without "
+                                 "asking the analyst.", "asks them first")):
+        monkeypatch.setattr(runtime, "engine", lambda e=engine: e)
+        for edits in (True, False):
+            out = events.render_prompts(["main"], str(tmp_path), terminal=False, edits=edits)
+            part = out.split("## Permission requests", 1)[1].split("\n## ", 1)[0]
+            assert says in part and never not in part, (engine, part)
+            assert "web calls" not in part and "without permission requests" not in part
+    assert "has not allowed" not in prompts.load("main", "terminal")

@@ -1,11 +1,15 @@
 """What the page sees of main's turn before the turn's records land (runtime.Conv.live_text, runtime_api._stream): the
 words of a reply as Claude writes them, pushed to the open pages and never logged; the client built off the event loop,
-so the analyst's own message is not held behind the SDK's import; and main's model, which the composer's menu picks
-(events.model_route) and main's next turn runs on. The Messages API is test_runtime's fake client."""
+so the analyst's own message is not held behind the SDK's import; main's model, which the composer's menu picks
+(events.model_route) and main's next turn runs on; and main's effort, the composer's choice, else the one Claude Code
+runs main's model at by the analyst's settings (cc_settings.session_effort), which the composer's chip shows. The
+Messages API is test_runtime's fake client."""
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
+from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -148,3 +152,108 @@ async def test_the_composer_s_model_is_the_one_main_s_next_turn_runs_on(on, monk
     assert '"claude-sonnet-5"' in stored.read_text()
     await main_turn("second")
     assert client.bodies[1]["model"] == "claude-sonnet-5"
+
+
+def own_settings(monkeypatch, tmp_path: Path, settings: dict[str, Any] | None = None) -> Path:
+    """The analyst's Claude Code settings file, in a config dir of the test's own, holding `settings` (no file for
+    None); no effort or model comes from the environment."""
+    cc = tmp_path / "claude-home"
+    cc.mkdir(exist_ok=True)
+    if settings is not None:
+        (cc / "settings.json").write_text(json.dumps(settings))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cc))
+    for name in ("CLAUDE_CODE_EFFORT_LEVEL", "ANTHROPIC_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    return cc / "settings.json"
+
+
+async def test_main_runs_at_the_analyst_s_effort_for_its_model_else_claude_code_s_default_and_the_composer_s_wins(
+        on, monkeypatch, tmp_path):
+    """With no effort chosen in the composer, main runs at what Claude Code in a terminal runs its model at: the
+    analyst's own setting for the model, else Claude Code's default for it (medium for Opus 5.5, high for Opus 5). The
+    composer's choice wins."""
+    from app.main import app
+
+    settings = own_settings(monkeypatch, tmp_path)
+    client = api_key(monkeypatch, [text("one"), text("two"), text("three"), text("four")])
+    await main_turn("first")
+    assert client.bodies[0]["output_config"] == {"effort": "medium"}
+    settings.write_text(json.dumps({"modelSettings": {"claude-opus-5-5": {"effortLevel": "low"}}}))
+    await main_turn("second")
+    assert client.bodies[1]["output_config"] == {"effort": "low"}
+    with TestClient(app, base_url="http://127.0.0.1") as http:
+        assert http.put(f"/api/ws/{CORPUS}/session/model", json={"model": "claude-opus-5"}).status_code == 200
+    await main_turn("third")
+    assert (client.bodies[2]["model"], client.bodies[2]["output_config"]) == ("claude-opus-5", {"effort": "high"})
+    with TestClient(app, base_url="http://127.0.0.1") as http:
+        assert http.put(f"/api/ws/{CORPUS}/session/effort", json={"effort": "max"}).status_code == 200
+    await main_turn("fourth")
+    assert client.bodies[3]["output_config"] == {"effort": "max"}
+
+
+async def test_sonnet_5_5_picked_in_the_menu_runs_main_at_its_own_default_effort_and_without_fast_mode(
+        on, monkeypatch, tmp_path):
+    from app.main import app
+
+    own_settings(monkeypatch, tmp_path)
+    client = api_key(monkeypatch, [text("one")])
+    with TestClient(app, base_url="http://127.0.0.1") as http:
+        assert http.put(f"/api/ws/{CORPUS}/session/fast", json={"fast": True}).status_code == 200
+        r = http.put(f"/api/ws/{CORPUS}/session/model", json={"model": "claude-sonnet-5-5"})
+    assert r.status_code == 200 and r.json() == {"model": "claude-sonnet-5-5"}, r.text
+    await main_turn("first")
+    body = client.bodies[0]
+    assert (body["model"], body["output_config"], body["fallbacks"]) == ("claude-sonnet-5-5", {"effort": "medium"},
+                                                                         "default")
+    assert "speed" not in body  # Sonnet 5.5 has no fast mode
+
+
+async def test_haiku_5_5_picked_in_the_menu_runs_main_at_its_own_default_effort_where_haiku_4_5_runs_with_none(
+        on, monkeypatch, tmp_path):
+    """Haiku 5.5 runs at an effort (config.has_effort), Haiku 4.5, which a setting may still name, with none; neither
+    has a server-side fallback or fast mode, and the request names no thinking, which Haiku 5.5 runs adaptive."""
+    from app.main import app
+
+    own_settings(monkeypatch, tmp_path)
+    client = api_key(monkeypatch, [text("one"), text("two")])
+    with TestClient(app, base_url="http://127.0.0.1") as http:
+        assert http.put(f"/api/ws/{CORPUS}/session/fast", json={"fast": True}).status_code == 200
+        r = http.put(f"/api/ws/{CORPUS}/session/model", json={"model": "claude-haiku-5-5"})
+    assert r.status_code == 200 and r.json() == {"model": "claude-haiku-5-5"}, r.text
+    await main_turn("first")
+    body = client.bodies[0]
+    assert (body["model"], body["output_config"]) == ("claude-haiku-5-5", {"effort": "medium"})
+    assert not {"fallbacks", "speed", "thinking"} & set(body), body.keys()
+    with TestClient(app, base_url="http://127.0.0.1") as http:
+        assert http.put(f"/api/ws/{CORPUS}/session/model", json={"model": "claude-haiku-4-5-20251001"}).status_code == 200
+    await main_turn("second")
+    body = client.bodies[1]
+    assert body["model"] == "claude-haiku-4-5-20251001"
+    assert not {"output_config", "fallbacks", "speed", "thinking"} & set(body), body.keys()
+
+
+async def test_the_chip_s_effort_is_the_one_main_runs_at_for_the_model_it_runs_on(on, monkeypatch, tmp_path):
+    """Main's `attached.settings_effort`, the effort the composer's chip shows while the composer chose none: the
+    analyst's setting for main's model, else Claude Code's default for it, again for the model the menu picks."""
+    from app.main import app
+
+    own_settings(monkeypatch, tmp_path, {"modelSettings": {"claude-opus-5-5": {"effortLevel": "low"}}})
+    runtime.ensure(CORPUS)
+
+    def shown() -> str | None:
+        return (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}).get("attached", {}).get("settings_effort")
+
+    assert shown() == "low"
+    with TestClient(app, base_url="http://127.0.0.1") as http:
+        assert http.put(f"/api/ws/{CORPUS}/session/model", json={"model": "claude-opus-5"}).status_code == 200
+        assert shown() == "high"
+        assert http.put(f"/api/ws/{CORPUS}/session/model", json={"model": "claude-sonnet-5-5"}).status_code == 200
+        assert shown() == "medium"
+
+
+def test_claude_code_s_default_effort_is_its_model_table_s():
+    from app import cc_settings
+
+    assert [cc_settings.default_effort(m) for m in ("claude-opus-5-5[1m]", "opus", "claude-sonnet-5-5", "claude-opus-5",
+                                                    "claude-opus-4-8", "claude-fable-5-1", "claude-sonnet-5")] == [
+        "medium", "medium", "medium", "high", "high", "high", "high"]

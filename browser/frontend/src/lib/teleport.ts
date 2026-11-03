@@ -34,6 +34,27 @@ export function revealAnchor(ref: string, root: ParentNode = document): boolean 
   return true
 }
 
+const MOVES = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const
+
+/** Keep the element carrying `data-anchor=ref` in `root`, just revealed, in the middle of what scrolls around it while
+ * the page lays out around it (the figures of a document shown for the first time drawn above it): each time what
+ * scrolls, or what it holds, changes size, the element, found again since a document's view may draw it anew, comes back
+ * to the middle. It holds until the analyst scrolls, clicks or types in `root`, or the stop it returns is called. */
+export function keepInView(ref: string, root: HTMLElement): () => void {
+  const find = () => root.querySelector<HTMLElement>(`[data-anchor="${cssEscape(ref)}"]`)
+  let box = find()?.parentElement ?? null
+  while (box && !/auto|scroll/.test(getComputedStyle(box).overflowY)) box = box.parentElement
+  if (!box || typeof ResizeObserver === 'undefined') return () => undefined
+  const ro = new ResizeObserver(() => find()?.scrollIntoView({ block: 'center' }))
+  const stop = () => {
+    ro.disconnect()
+    for (const k of MOVES) root.removeEventListener(k, stop)
+  }
+  for (const el of [box, ...Array.from(box.children)]) ro.observe(el)
+  for (const k of MOVES) root.addEventListener(k, stop, { passive: true })
+  return stop
+}
+
 function cssEscape(s: string): string {
   return typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/["\\]/g, '\\$&')
 }

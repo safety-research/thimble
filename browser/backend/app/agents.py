@@ -26,7 +26,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from . import config, investigation, ledger, tools
+from . import config, investigation, ledger, nofollow, tools
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.agents")
@@ -70,7 +70,7 @@ def _ws(c: str) -> Path:
 
 def chats_dir(c: str) -> Path:
     d = _ws(c) / "chats"
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)  # a card's code writes the workspace: the chats' folders and files are opened as nofollow does
     return d
 
 
@@ -84,9 +84,11 @@ def paths(c: str, chat_id: str) -> tuple[Path, Path]:
 
 def read_meta(c: str, chat_id: str) -> dict:
     meta_path, _ = paths(c, chat_id)
-    if not meta_path.is_file():
-        raise HTTPException(404, f"no such chat: {chat_id}")
-    return _defaults(json.loads(meta_path.read_text("utf-8")))
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        text = nofollow.read_text(meta_path)
+    except (FileNotFoundError, NotADirectoryError, nofollow.Linked):
+        raise HTTPException(404, f"no such chat: {chat_id}") from None
+    return _defaults(json.loads(text))
 
 
 def meta_or_none(c: str, chat_id: str) -> dict | None:
@@ -146,8 +148,7 @@ def append(log_path: Path, record: dict) -> None:
     process appends in terminal mode (the mirror, the tools)."""
     with ledger.locked(log_path):
         ledger.heal_tail(log_path)
-        with log_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        ledger.append_jsonl(log_path, record)
 
 
 # workspaces/<c>/permissions.jsonl: each permission request of the workspace's sessions and its answer, which a problem
@@ -162,24 +163,30 @@ def log_permission(c: str, event: str, **fields: Any) -> None:
     try:
         p = _ws(c) / PERMISSIONS_LOG
         if p.is_file() and p.stat().st_size > PERMISSIONS_LOG_MAX:
-            p.replace(p.with_name("permissions.1.jsonl"))
+            nofollow.rename(p, p.with_name("permissions.1.jsonl"))
         append(p, {"ts": _now(), "event": event, **{k: v for k, v in fields.items() if v is not None}})
     except Exception:  # noqa: BLE001
         log.warning("%s: the permission log could not be written", c, exc_info=True)
 
 
 def count_lines(path: Path) -> int:
-    if not path.is_file():
+    try:  # a chat's log, read as nofollow reads it (read_events)
+        f = nofollow.reader(path)
+    except OSError:
         return 0
-    with path.open("rb") as f:
+    with f:
         return sum(1 for _ in f)
 
 
 def read_events(log_path: Path) -> list[dict]:
-    if not log_path.is_file():
-        return []
+    """A chat's records. Its log lies in the workspace, which a card's code writes, so it is read as nofollow reads
+    it: a link or a FIFO left in its place reads as no log."""
     out: list[dict] = []
-    with log_path.open(encoding="utf-8") as f:
+    try:
+        f = nofollow.reader(log_path, "r", encoding="utf-8")
+    except (FileNotFoundError, NotADirectoryError, nofollow.Linked):
+        return out
+    with f:
         for line in f:
             line = line.strip()
             if not line:
@@ -227,7 +234,7 @@ def _read_on(log_path: Path, keep: bool = False) -> _Tally | None:
                 _kept.move_to_end(key)
             return t
         try:
-            with log_path.open("rb") as f:
+            with nofollow.reader(log_path) as f:  # never through a link or a FIFO a card's code left there
                 st = os.fstat(f.fileno())
                 if t is not None and (t.ino != st.st_ino or st.st_size < t.offset or (keep and t.lines is None)):
                     t = None
@@ -335,7 +342,7 @@ def ensure_main(c: str) -> dict:
         meta = _defaults({"id": MAIN_ID, "kind": KIND_MAIN, "role": "main", "title": "main", "created_at": _now()})
         write_meta(c, meta)
         _, log_path = paths(c, MAIN_ID)
-        log_path.touch()
+        nofollow.touch(log_path)
     return meta
 
 
@@ -368,7 +375,7 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
         meta["anchor_comment"] = None
     write_meta(c, meta)
     _, log_path = paths(c, cid)
-    log_path.touch()
+    nofollow.touch(log_path)
     log.info("%s: thread %s opened on %s from %s (%s)", c, cid, (meta["anchor"] or "-")[:120], meta["parent"],
              meta["anchor_surface"] or "-")
     _notify(c, cid)
@@ -436,8 +443,7 @@ def _meta_text(path: str) -> str:
     hit = _meta_texts.get(path)
     if hit is not None and hit[0] == key:
         return hit[1]
-    with open(path, encoding="utf-8") as f:
-        text = f.read()
+    text = nofollow.read_text(path)  # never through a link or a FIFO a card's code left among the chats
     _meta_texts[path] = (key, text)
     return text
 
@@ -462,6 +468,7 @@ def list_chats(c: str) -> list[dict]:
         meta["n_messages"] = n
         meta["last_ts"] = last or meta.get("created_at")
         meta["running"] = _running(c, meta["id"])
+        _with_asks(c, meta)
         out.append(meta)
     out.sort(key=lambda m: (m["kind"] != KIND_MAIN, m.get("created_at") or ""))
     return out
@@ -494,6 +501,15 @@ def running(c: str, chat_id: str) -> bool:
     """Whether a chat is running: main while its session's turn is open, a thread while its event waits or its fork
     runs (set_running), an agent chat while its task runs."""
     return _running(c, chat_id)
+
+
+def _with_asks(c: str, meta: dict) -> None:
+    """The asks before a request to a host the analyst has not allowed that wait on the chat, which live in this process
+    (host_asks), put on its meta as it is read."""
+    from . import host_asks  # noqa: PLC0415 — host_asks imports this module
+
+    if asks := host_asks.waiting(c, meta["id"]):
+        meta[host_asks.KEY] = asks
 
 
 _CELL_LINE_RE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)$", re.M)
@@ -603,7 +619,8 @@ def chip(c: str, kind: str, text: str, **fields: Any) -> dict:
 
 def mirror(c: str, type_: str, **data: Any) -> dict:
     """A record on main, appended and announced: the mirror's (session.py, `by: terminal`) and a browser message the
-    events module posted (events.py, `by: browser`)."""
+    events module posted (events.py, `by: browser`), or, for one that waited for main's turn, the server's main read
+    (runtime.Space.said_line)."""
     ensure_main(c)
     _, log_path = paths(c, MAIN_ID)
     rec = {"type": type_, "ts": _now(), **data}
@@ -662,7 +679,7 @@ def new_agent(c: str, role: str, title: str, *, parent: str = MAIN_ID, by: str |
                       "status": "running", **fields})
     write_meta(c, meta)
     _, log_path = paths(c, cid)
-    log_path.touch()
+    nofollow.touch(log_path)
     if parent and announce:
         _, main_log = paths(c, parent)
         append(main_log, {"type": "agent", "ts": _now(), "chat": cid, "role": role, "title": title, **({"by": by} if by else {}),
@@ -804,17 +821,18 @@ async def instance_route(c: str) -> dict:
 
 
 def _main_state(c: str) -> dict:
-    """What main's meta adds for the browser (module_bridge.main_meta): `module` and `module_why`, which a refused start
-    reads."""
-    from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
+    """What main's meta adds for the browser: `module` and `module_why` (module_bridge.main_meta), which a refused start
+    reads, and `unread`, the analyst's messages that wait for main's running turn (runtime.unread)."""
+    from . import module_bridge, runtime  # noqa: PLC0415 — module_bridge imports the session modules
 
-    return module_bridge.main_meta(c)
+    return {**module_bridge.main_meta(c), "unread": runtime.unread(c)}
 
 
 @router.get("/ws/{c}/chats/main")
 async def main_route(c: str) -> Response:
     meta = ensure_main(c)
     meta["running"] = _running(c, MAIN_ID)
+    _with_asks(c, meta)
     meta.update(_main_state(c))
     _, log_path = paths(c, MAIN_ID)
     return chat_response(meta, log_path)
@@ -857,6 +875,7 @@ async def get_route(c: str, chat_id: str) -> Response:
     meta = ensure_main(c) if chat_id == MAIN_ID else read_meta(c, chat_id)
     _, log_path = paths(c, chat_id)
     meta["running"] = _running(c, chat_id)
+    _with_asks(c, meta)
     if chat_id == MAIN_ID:
         meta.update(_main_state(c))
     return chat_response(meta, log_path)
@@ -930,10 +949,10 @@ def _trash(c: str, chat_id: str) -> None:
     """Move a chat's two files to chats/trash/, outside list_chats' glob, so what was said in it stays in the workspace
     export (export.py) as a deleted group's cards stay in notebooks/trash/."""
     trash = chats_dir(c) / "trash"
-    trash.mkdir(exist_ok=True)
+    nofollow.makedirs(trash)
     for p in paths(c, chat_id):
         if p.exists():
-            p.replace(trash / p.name)
+            nofollow.rename(p, trash / p.name)
 
 
 STEP_ROLE = "step"  # a subagent's chat under the session that ran it (agent_session.STEP_ROLE)
@@ -1030,18 +1049,20 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
     which is a click, so the analyst's cookie (403 without it); a stop of an agent that had ended counts as done
     ({stopped, done}); without the module {stopped: false, kind: no-module}, and the card says to press Esc in the
     agent's view. Main's running turn ends through the module as Esc ends it (subagents.stop_main, `$.turn.abort`), and
-    the mirror ends the turn (session.turn_stopped); a side thread's fork stops as an agent does (subagents.stop_fork,
-    TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has none. Both are clicks too, and
-    each that stopped something tells main so, in a line no chat shows. A server task stops as before; the analyst's
-    own subagent of main is main's to stop, so main is asked to."""
+    the mirror ends the turn (session.turn_stopped); when the server runs main, a message the analyst sent while the
+    turn ran is main's next turn then (runtime.after_stop). A side thread's fork stops as an agent does
+    (subagents.stop_fork, TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has none. Both
+    are clicks too, and each that stopped something tells main so, in a line no chat shows. A server task stops as
+    before; the analyst's own subagent of main is main's to stop, so main is asked to."""
     if chat_id == MAIN_ID:
-        from . import session, subagents  # noqa: PLC0415 — each imports this module
+        from . import runtime, session, subagents  # noqa: PLC0415 — each imports this module
 
         subagents.analyst_only(request)
         ans = await subagents.stop_main(c)
         if ans.refused:
             return {"stopped": False, "kind": ans.kind, "reason": ans.reason}
         session.turn_stopped(c, stopped=not ans.get("done"))
+        runtime.after_stop(c)
         return {"stopped": True, **({"done": True} if ans.get("done") else {})}
     meta = read_meta(c, chat_id)
     if meta.get("kind") == KIND_THREAD:

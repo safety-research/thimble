@@ -153,16 +153,17 @@ def test_every_role_resolves_to_a_full_model_id_and_an_explicit_effort(tmp_path,
         (config.FALLBACK_MODEL, "high", False)
     _conf({"agents": {"orientation": {"effort": "ultracode", "subagentModel": "sonnet", "subagentEffort": "medium"},
                       "writer": {"fast": True, "effort": "max"}, "dev": {"fast": True},
-                      "labels": {"fast": True, "model": "claude-opus-5-5"}, "suggest": {"effort": "high"},
+                      "labels": {"fast": True, "model": "claude-opus-5-5"}, "suggest": {"effort": "high", "model": "haiku"},
                       "refusal": {"model": "claude-sonnet-5", "effort": "low"}}})
     models = config.models_for(None)
     assert models["orient"]["effort"] == "xhigh", "a stored ultracode runs at xhigh"
-    assert (models["subagents"]["model"], models["subagents"]["effort"]) == ("claude-sonnet-5", "medium")
+    assert (models["subagents"]["model"], models["subagents"]["effort"]) == ("claude-sonnet-5-5", "medium"), \
+        "sonnet is Sonnet 5.5"
     assert "follows" not in models["subagents"]
     assert models["writer"]["effort"] == "max" and not models["writer"]["fast"]
     assert models["dev"]["fast"], "code tickets keep the dev row's fast mode"
     assert models["labels"]["fast"], "a classifier keeps its fast mode"
-    assert models["suggest"]["effort"] == "high"
+    assert (models["suggest"]["model"], models["suggest"]["effort"]) == ("claude-haiku-5-5", "high"), "haiku is Haiku 5.5"
     assert config.call_settings(None, "labels")["refusal"] == {"model": "claude-sonnet-5", "effort": "low"}
     _conf({"agents": {"refusal": {"off": True}}})
     assert config.models_for(None)["refusal"]["off"] and config.call_settings(None, "verify")["refusal"] is None

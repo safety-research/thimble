@@ -15,11 +15,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
-from . import config
+from . import config, nofollow
 
 log = logging.getLogger("thimble.work_files")
 
@@ -54,8 +53,8 @@ def _texts(ws: Path) -> list[str]:
     for sub, keys, pattern in TEXT_SOURCES:
         folder = ws / sub
         for p in sorted(folder.glob(pattern)) if folder.is_dir() else []:
-            try:
-                _strings(json.loads(p.read_text("utf-8")), out, keys)
+            try:  # never through a link or a FIFO a card's code left there (nofollow)
+                _strings(json.loads(nofollow.read_text(p)), out, keys)
             except (OSError, ValueError):
                 continue
     return out
@@ -110,10 +109,11 @@ def _named(rel: str, blob: str) -> bool:
 
 
 def _read_text(path: Path) -> str | None:
-    try:
-        if path.stat().st_size > TEXT_MAX:
-            return None
-        raw = path.read_bytes()
+    try:  # in a work folder, which an agent's commands and a card's code write: never a link or a FIFO (nofollow)
+        with nofollow.reader(path) as f:
+            if os.fstat(f.fileno()).st_size > TEXT_MAX:
+                return None
+            raw = f.read()
     except OSError:
         return None
     return None if b"\0" in raw[:4096] else raw.decode("utf-8", "replace")
@@ -150,11 +150,11 @@ def clear(c: str, work: Path, extracts: bool = True) -> dict[str, int]:
                         with_size = os.path.join(root, f)
                         freed["bytes"] += os.lstat(with_size).st_size
                         freed["files"] += 1
-                shutil.rmtree(p)
+                nofollow.rmtree(p)  # the agent's folder, which its commands write: never through a link put there
             else:
                 freed["bytes"] += p.lstat().st_size
                 freed["files"] += 1
-                p.unlink()
+                nofollow.unlink(p, missing_ok=False)
         except OSError as e:
             log.info("%s: the temporary %s was not deleted (%s)", c, p, e)
     big = {rel: size for rel, size in files.items() if size >= EXTRACT_MIN}
@@ -164,7 +164,7 @@ def clear(c: str, work: Path, extracts: bool = True) -> dict[str, int]:
         if rel in keep:
             continue
         try:
-            (work / rel).unlink()
+            nofollow.unlink(work / rel, missing_ok=False)
         except OSError as e:
             log.info("%s: the extract %s was not deleted (%s)", c, work / rel, e)
             continue
@@ -174,7 +174,7 @@ def clear(c: str, work: Path, extracts: bool = True) -> dict[str, int]:
     for d in sorted(emptied, key=lambda p: len(p.parts), reverse=True):
         while d != work and work in d.parents:
             try:
-                d.rmdir()
+                nofollow.rmdir(d)
             except OSError:
                 break
             d = d.parent

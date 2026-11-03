@@ -42,15 +42,21 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string>; stat?: (path: string) => Any } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
   const asked: string[] = []
-  // with `wide`, the runner's drawings say the width they are laid out at and whether a key sorted them
+  // what each load asked the runner for
+  const loads: Any[] = []
+  // the width the runner holds the card at, which each of its answers says, as the runner does; with `wide`, its
+  // drawings show that width and whether a key sorted them
   let runnerWidth = 0
   let sorted = false
   let seq = 0
+  // a request the test holds (hold, which answers once it came): the runner did it (its width, its seq), and its answer
+  // comes when the test lets it go (release), after the answers of the requests that came later
+  const held: { op: string; go: () => void; came: () => void } = { op: '', go: () => undefined, came: () => undefined }
   // Claude Code's theme setting (/config), and the theme the runner was last asked to draw in (a light one says so)
   const look = { theme: 'dark', runner: 'dark' }
   on('config.list', () => ({ value: [{ key: 'theme', value: look.theme, isLocked: false }] }) as never)
@@ -74,13 +80,13 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   const code = { mtimeMs: 1 }
   on('fs.stat', (_$: unknown, e: { path: string }) => ({
     // escape.json looks local but its real target is outside every allowed root (a symlink out of the folder); so does
-    // link.json in the temp folder
-    value: e.path.endsWith('/cards/argv.mjs') ? { kind: 'file', size: 64, mtimeMs: code.mtimeMs, isLink: false, realPath: e.path }
+    // link.json in the temp folder; `stat` gives a test's own files first
+    value: o.stat?.(e.path) ?? (e.path.endsWith('/cards/argv.mjs') ? { kind: 'file', size: 64, mtimeMs: code.mtimeMs, isLink: false, realPath: e.path }
       : e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
       : e.path.endsWith('/link.json') ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/made-up/home/.ssh/id' }
         : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
           : e.path === DATA || e.path.startsWith('/made-up/tmp') ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: real(e.path) }
-            : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
+            : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false }),
   }))
   const spawned: string[][] = []
   const runs: string[][] = []
@@ -122,13 +128,21 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     // a view that takes all the runner's memory: the socket closes while it answers
     if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
+    if (op === 'load') loads.push(body)
+    const reply = (answer: object) => {
+      const r = { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(answer) } }
+      if (held.op !== op) return r
+      held.op = ''
+      held.came()
+      return new Promise(resolve => { held.go = () => resolve(r) })
+    }
     // a view that does not parse, and one that throws at a narrow width
-    if (op === 'load' && String(body.view).includes('BROKEN')) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'view', error: 'the view does not parse (line 1): Unexpected token' }) } }
-    if (op === 'draw' && body.width < 30) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: false, phase: 'draw', error: 'line 4: Invalid count value: -1' }) } }
-    if (o.wide && (op === 'load' || op === 'draw') && body.width) runnerWidth = body.width
+    if (op === 'load' && String(body.view).includes('BROKEN')) return reply({ ok: false, phase: 'view', error: 'the view does not parse (line 1): Unexpected token' })
+    if (op === 'draw' && body.width < 30) return reply({ ok: false, phase: 'draw', error: 'line 4: Invalid count value: -1' })
+    if ((op === 'load' || op === 'draw') && body.width) runnerWidth = body.width
     if (body.theme === 'dark' || body.theme === 'light') look.runner = body.theme
     if (o.wide && op === 'key' && body.key === 'o') sorted = true
-    if (o.wide && op !== 'load' && op !== 'copy' && op !== 'ping') return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, handled: body.key === 'o', tree: laidOut(), state: 'null', seq: ++seq }) } }
+    if (o.wide && op !== 'load' && op !== 'copy' && op !== 'ping') return reply({ ok: true, handled: body.key === 'o', tree: laidOut(), width: runnerWidth, state: 'null', seq: ++seq })
     // a view whose tree the terminal refuses: a Text whose bold is not a boolean
     const tall = String(body.view ?? '').includes('TALL')
     // a view of `// ROWS n`: n rows, one per run
@@ -139,18 +153,17 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     const answers: Record<string, unknown> = {
       ping: { ok: true },
       load: {
-        ok: true, tree, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: runs ?? (tall ? TALL_LINES : ['ada 3', 'bram 5']), cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
-        // a view with a row laid out for the card's width: it wraps at the narrower width a side pane leaves it
-        ...(String(body.view ?? '').includes('WIDE_ROW') && body.beside > 0 && body.beside < body.width ? { beside: { width: body.beside, lines: ['ada 3 of 9', 'merged', 'bram 5'], cut: [], wrapped: [1] } } : {}),
+        ok: true, tree, width: runnerWidth, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: runs ?? (tall ? TALL_LINES : ['ada 3', 'bram 5']), cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
       },
-      key: { ok: true, handled: body.key === 'o', tree: SORTED, state: '{"sorted":true}' },
-      draw: { ok: true, tree: TREE, state: 'null' },
-      copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
-      undo: { ok: true, tree: TREE, state: 'null' },
+      key: { ok: true, handled: body.key === 'o', tree: SORTED, width: runnerWidth, state: '{"sorted":true}' },
+      draw: { ok: true, tree: TREE, width: runnerWidth, state: 'null' },
+      // with `wide`, a copy says the width it is laid out at
+      copy: { ok: true, lines: o.wide ? [`copy at ${body.width}`] : ['ada 3', 'bram 5'], cut: [] },
+      undo: { ok: true, tree: TREE, width: runnerWidth, state: 'null' },
       // a click on words that stand on no item
       pick: { ok: true, handled: false },
     }
-    return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ...(answers[op] ?? { ok: false, error: 'no such request' }) as object, ...(o.wide ? { seq: ++seq } : {}) }) } }
+    return reply({ ...(answers[op] ?? { ok: false, error: 'no such request' }) as object, ...(o.wide ? { seq: ++seq } : {}) })
   })
   // the person's permission rules: a deny rule for reading `secret.json`; with `ask`, the mode asks about every file
   // outside the folder, and a rule of the person's asks about made-up/tmp/mine
@@ -164,7 +177,9 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     return { type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] } as never
   })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  return { files, asked, dirs, clock, spawned, runs, look, forks, answers, code }
+  const hold = (op: string) => new Promise<void>(resolve => { held.op = op; held.came = resolve })
+  const release = () => held.go()
+  return { files, asked, loads, dirs, clock, spawned, runs, look, forks, answers, code, hold, release }
 }
 
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
@@ -375,7 +390,7 @@ test('a view that did not parse is fixed with edits, its rows kept; the card on 
   expect(Object.entries(w.files).find(([p]) => /\/v3\/view\.js$/.test(p))?.[1]).toBe(VIEW.replace('children: "x"', 'children: "x" '))
 })
 
-test('a card at each width: in a side pane the card and its copy each draw at their own width, a post sent before the frame narrowed is answered at its width now, a drawing that fails at a narrow width holds only there, and a row that wraps beside a pane is named', async ($, on) => {
+test('a card at each width: in a side pane the card and its copy each draw at their own width, a post sent before the frame narrowed is answered at its width now, a drawing that fails at a narrow width holds only there, and the call copies the card at the width it is drawn at only', async ($, on) => {
   const w = world(on, { wide: true })
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   // a side pane opens: the card in the conversation and its copy in the pane each draw at their own width, and never
@@ -389,7 +404,8 @@ test('a card at each width: in a side pane the card and its copy each draw at th
     // the pane opens and the conversation narrows to 70 columns: the drawing at 92 columns is not drawn at 62
     const narrowed = await client(70)
     expect(narrowed.props.tree).toBe(null)
-    expect(narrowed.props.need).toBe('1:62')
+    // version 1 at 62 columns, of the card as its load left it (the load's answer, the runner's second)
+    expect(narrowed.props.need).toBe('1:62:2')
     expect(narrowed.width).toBe(62)
     // the conversation's Client and the pane's copy (40 columns) both on screen: each draws at its own width
     const main = await shown($, at(70))
@@ -461,13 +477,119 @@ test('a card at each width: in a side pane the card and its copy each draw at th
     const wide = textOf(await $.ui.render(at(100)))
     expect(wide).not.toContain('failed')
   }
-  // a row that fits the card but wraps at the width a side pane leaves it: the call answers that copy too
+  // B32: the call gives the text copy at the width the card is drawn at only. A copy at the narrower width a side pane
+  // would leave it gave Claude a reason to change a card that fits where it is shown, so the call asks the runner for
+  // none, and its answer names no side pane
   {
-    const plain = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
-    expect(String(plain.result)).not.toContain('side pane')
-    const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_18', title: 'Scores', data: 'runs.json', view: `${VIEW}\n// WIDE_ROW` } as never)) as Any
-    expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and rows that fit at \d+ columns wrap there, out of their columns \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
+    const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+    expect(w.loads.at(-1).width).toBeGreaterThan(0)
+    expect(w.loads.at(-1).beside).toBeUndefined()
+    expect(String(r.result)).toContain('What it draws,')
+    expect(String(r.result)).not.toContain('side pane')
   }
+})
+
+// The card in the conversation and its copy in a side pane draw at two widths, and the runner holds the card at the
+// width of the last drawing it was asked for. A key that comes while the answer to the other frame's drawing is on its
+// way is drawn at that frame's width, and its answer can come first: the hooks keep it at the width it says
+test("a key while a drawing at another width is on its way: its drawing is kept at the width the runner drew it at, so the card in the conversation never draws the side pane's copy", async ($, on) => {
+  const w = world(on, { wide: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_19', ...input } as never)
+  // the card in the conversation at 62 columns, its copy in a side pane at 32
+  const at = (columns: number) => ({ ...(callRow('toolu_made_up_19', input) as Any), ...(columns < 50 ? { requestId: 'pane-copy' } : {}), viewport: { columns, rows: 40, isFullscreen: true } })
+  const client = async (columns: number) => elements(await $.ui.render(at(columns))).find(n => n.type === 'Client')?.props
+  const laid = (words: string) => ({ t: 'Text', p: {}, c: [words] })
+  const pane = await shown($, at(40))
+  const main = await shown($, at(70))
+  expect((await client(70)).props.tree).toEqual(laid('rows at 62'))
+  expect((await client(40)).props.tree).toEqual(laid('rows at 32'))
+  // the pane's copy asks for its drawing again: the runner moves the card to 32 columns, and its answer is on its way
+  const paneKey = (await client(40)).key
+  const came = w.hold('draw')
+  const asked = pane.post({ client: 'made-up-2', width: 32, events: [{ n: 1, draw: '1:32' }] }, { in: paneKey })
+  await came
+  // a key now: the runner draws it at 32 columns, and its answer comes first
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
+  // the card in the conversation does not draw a drawing laid out at 32 columns; the copy in the pane draws it
+  const waits = await client(70)
+  expect(waits.props.tree).toBe(null)
+  expect(waits.props.need).toMatch(/^1:62(:|$)/)
+  expect((await client(40)).props.tree).toEqual(laid('sorted at 32'))
+  w.release()
+  await asked
+  // it asks for its own, which the runner draws at 62 columns
+  await main.unmount()
+  await (await shown($, at(70))).unmount()
+  expect((await client(70)).props.tree).toEqual(laid('sorted at 62'))
+  await pane.unmount()
+})
+
+// The other order: the conversation's card asked for its drawing, the runner moved the card to its width, and the side
+// pane's copy asked for its own and a key came before that first answer did. The first answer shows the card before the
+// key, so it is dropped, and the card in the conversation asks again; else it would draw `drawing…` from then on
+test('a frame that asked for its drawing before a key changed the card asks again, and does not stay at `drawing…`', async ($, on) => {
+  const w = world(on, { wide: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_20', ...input } as never)
+  const at = (columns: number) => ({ ...(callRow('toolu_made_up_20', input) as Any), ...(columns < 50 ? { requestId: 'pane-copy' } : {}), viewport: { columns, rows: 40, isFullscreen: true } })
+  const client = async (columns: number) => elements(await $.ui.render(at(columns))).find(n => n.type === 'Client')?.props
+  const laid = (words: string) => ({ t: 'Text', p: {}, c: [words] })
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  // the card in the conversation asks for its drawing at 62 columns: the runner moves the card there, and its answer is
+  // on its way
+  const came = w.hold('draw')
+  const main = shown($, at(70))
+  await came
+  // its copy in a side pane asks for its own at 32 columns, and a key comes, which the runner draws at 32
+  const pane = await shown($, at(40))
+  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
+  expect((await client(40)).props.tree).toEqual(laid('sorted at 32'))
+  // the drawing at 62 comes, of the card before the key, and is dropped; Claude Code runs the Client again with the props
+  // its post's answer gave it, and it asks again: the card in the conversation draws the key at 62 columns
+  w.release()
+  const shownMain = await main
+  const draws = w.asked.filter(x => x === 'draw').length
+  expect(textOf(await shownMain.drawn({ in: (await client(70)).key }))).toContain('sorted at 62')
+  expect(w.asked.filter(x => x === 'draw').length).toBe(draws + 1)
+  expect((await client(70)).props.tree).toEqual(laid('sorted at 62'))
+  await shownMain.unmount()
+  await pane.unmount()
+})
+
+// A side thread's pane draws the card at the pane's width, so the runner's newest drawing is the pane's. A text copy
+// Claude reads is laid out at the width of the surface its reader relates to, not at the newest drawing's: main's at the
+// conversation's, the side thread's at its pane's while the pane draws the card
+test("the side pane drew the card last: main's next card call still answers the copy at the conversation's width, and the side thread reads the card as its pane draws it", async ($, on) => {
+  const w = world(on, { wide: true })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_23', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  // the card in the conversation at 92 columns; a side thread about it, whose pane (50 columns) draws it whole at 44
+  const row = await shown($, callRow('toolu_made_up_23', input))
+  await row.press({ key: 'ask-visible' })
+  const pane = await $.ui.mount({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Scores', isFocused: true, bodyColumns: 50, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } } as never)
+  await pane.press({ key: 'thread-key-e' })
+  expect(textOf(await pane.drawn({ in: `card-${id}-1` }))).toContain('rows at 44')
+  // main draws a new version: its copy is the card the conversation shows, not the pane's
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_23b', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
+  expect(String(r2.result)).toContain('What it draws, 92 columns wide:')
+  // a question in the side thread: its fork reads the card as the pane draws it, and once e folded the card to its
+  // title, as the conversation draws it
+  const ask = async (text: string) => {
+    await (pane as Any).input({ key: String((await pane.find({ type: 'Input' }))?.key), text })
+    return String(w.forks.at(-1)?.prompt)
+  }
+  expect(await ask('why is ada first?')).toContain('What the card draws now, as text:\ncopy at 44')
+  await pane.press({ key: 'thread-key-e' })
+  expect(await ask('and bram?')).toContain('What the card draws now, as text:\ncopy at 92')
+  await pane.unmount()
+  await row.unmount()
 })
 
 test('a key at an empty prompt reaches the focused card in view when it lists the key, and other keys type; a card scrolled out of view takes none', async ($, on) => {
@@ -519,7 +641,7 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   // with no drawing yet, its Client asks for one at its width; the runner loads the card from its copy
   const first = await answer('row-made-up')
   expect(textOf(first)).toContain('Scores')
-  expect(elements(first).find(n => n.type === 'Client')?.props.props.need).toBe('1:92')
+  expect(elements(first).find(n => n.type === 'Client')?.props.props.need).toBe('1:92:0')
   await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text: 'An answer.', isFirstOfReply: true } } as never)
   expect(w.asked).toContain('draw')
   expect(elements(await answer('row-made-up')).find(n => n.type === 'Client')?.props.props.tree).toEqual(TREE)
@@ -607,6 +729,27 @@ test('a data file whose real path leaves this folder (a symlink out) is refused,
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_8', title: 'Out', data: 'escape.json', view: VIEW } as never)) as Any
   expect(String(r.result)).toContain('is outside this folder and the temp folder')
   expect(w.asked).not.toContain('load')
+})
+
+test("R2: a data file a command in Claude Code's Bash sandbox wrote at $TMPDIR, Claude Code's own temp folder there, draws as one in thimble's does; where both hold the file, the newer one; where neither does, no file", async ($, on) => {
+  // thimble's temp folder is thimble/ in the person's TMPDIR, made-up/t; Claude Code keeps its own, claude-1000/, in
+  // CLAUDE_CODE_TMPDIR, made-up/cc, and a sandboxed command gets that one as its TMPDIR
+  const C = '/made-up/cc/claude-1000'
+  const T = '/made-up/t/thimble'
+  const at: Record<string, { kind: string; mtimeMs: number }> = { [C]: { kind: 'dir', mtimeMs: 0 }, [T]: { kind: 'dir', mtimeMs: 0 }, [`${C}/probe.json`]: { kind: 'file', mtimeMs: 5 } }
+  const w = world(on, { env: { TMPDIR: '/made-up/t', CLAUDE_CODE_TMPDIR: '/made-up/cc' }, stat: p => (at[p] ? { ...at[p], size: 32, isLink: false, realPath: p } : undefined) })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const copied = () => w.runs.filter(a => a[0] === 'cp').map(a => a[2])
+  const call = async (id: string, data: string) => String(((await $.tool.call({ tool: TOOL, tool_use_id: id, title: 'Probe', data, view: VIEW } as never)) as Any).result)
+  expect(await call('toolu_made_up_r2a', '$TMPDIR/probe.json')).toContain('It read 2 rows from probe.json')
+  expect(copied()).toEqual([`${C}/probe.json`])
+  // the same name written since in thimble's own folder (by a command outside the sandbox): that one
+  at[`${T}/probe.json`] = { kind: 'file', mtimeMs: 9 }
+  expect(await call('toolu_made_up_r2b', '${TMPDIR}/probe.json')).toContain('is drawn')
+  // the path as a sandboxed command printed it
+  expect(await call('toolu_made_up_r2c', `${C}/probe.json`)).toContain('is drawn')
+  expect(copied()).toEqual([`${C}/probe.json`, `${T}/probe.json`, `${C}/probe.json`])
+  expect(await call('toolu_made_up_r2d', '$TMPDIR/none.json')).toBe('The card did not draw: there is no file at $TMPDIR/none.json.')
 })
 
 test('keys at an empty prompt: letters only, never a slash command; a word that starts with a card key and v goes back whole', async ($, on) => {
@@ -1039,7 +1182,7 @@ test('a card a resumed session finds waiting for its check draws as it stands', 
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const client = elements(await $.ui.render(callRow('toolu_made_up_57', { title: 'Every run', data: 'runs.json', view: VIEW }))).find(n => n.type === 'Client')
   // its Client asks for its drawing, which a held card's never does
-  expect(client?.props.props.need).toBe('1:92')
+  expect(client?.props.props.need).toBe('1:92:0')
 })
 
 test("the Client cuts a drawing at the frame's `cap` rows, and draws it whole without one", async () => {

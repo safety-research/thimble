@@ -31,7 +31,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from . import config, notebook
+from . import config, nofollow, notebook
 
 router = APIRouter()
 
@@ -301,7 +301,7 @@ def tail_records(path: Any, size: int = TAIL_BYTES) -> "builtins.list[dict]":
     """The records at the end of a chat's log (agents.py: one JSON object a line), from its last `size` bytes, so a long
     run's log is not read whole every few seconds."""
     try:
-        with open(path, "rb") as f:
+        with nofollow.reader(path) as f:  # in the workspace, which a card's code writes: never a link or a FIFO
             f.seek(0, 2)
             end = f.tell()
             f.seek(max(0, end - size))

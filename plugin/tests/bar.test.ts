@@ -559,6 +559,20 @@ test('the line at the first session goes by itself after a few seconds, and stay
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
 })
 
+test("in a session without Claude Code's terminal interface (a host that runs it through its SDK, such as the desktop app's Code tab), /thimble-settings is thimble's command too, so it never reaches Claude as a prompt; where no surface places the settings, its answer says so at once, and names Claude Code's command that changes a plugin's options outside its terminal interface", async ($, on) => {
+  // beneath the plugin, before the made-up session's own hooks of the same events: every command registered, and no
+  // surface that places the pane
+  const registered: string[] = []
+  on('command.register', { name: /./ }, (_$: unknown, e: { name: string }) => { registered.push(e.name); return { value: { command: e.name } } })
+  on('ui.open', { id: /./ }, () => ({ value: { isPlaced: false, reason: 'no-surface: no surface is attached' } }))
+  on('ui.close', () => ({ value: undefined }))
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: null, isInteractive: false } as never)
+  expect(registered).toContain('thimble-settings')
+  expect(await $.command.run({ command: 'thimble-settings', args: '' } as never)).toEqual({ text: 'Claude Code did not open the settings here; in a terminal, `claude plugin configure thimble@thimble` lists them and says how to change them.' })
+})
+
 test('a hint above the bar goes by itself after a few seconds, or at the next key thimble takes; a failure stays', async () => {
   const state: Record<string, unknown> = {}
   let now = 0
@@ -842,7 +856,7 @@ test("in a terminal 80 to 110 columns wide (the band 5 narrower), after an answe
 
 for (const c of [
   { name: 'at rest, in a terminal 56 columns wide', term: 56, o: {} },
-  { name: 'with words selected, in a terminal 77 columns wide', term: 77, o: { selection: 'the retry budget runs out' } },
+  { name: 'with words selected (c e h a beside them), in a terminal 96 columns wide', term: 96, o: { selection: 'the retry budget runs out' } },
   { name: 'while a count runs, in a terminal 60 columns wide', term: 60, o: { counting: true } },
 ]) {
   test(`${c.name} (the band 5 narrower), where coverage does not fit beside the keys, the labels' count, which is shorter, still shows, and ] gives up its words for it`, async ($, on) => {
@@ -855,16 +869,14 @@ for (const c of [
   })
 }
 
-test("with words of an answer with marks selected, in a terminal 80 or 100 columns wide (the band 5 narrower), the bar names e and c, and gives way in order: coverage's file counts, the verb of ], the busy step's words, the mark's name, then a whole count; in Claude Code's fullscreen layout and its default one, while a count runs and after", async ($, on) => {
+test("with words of an answer with marks selected, in a terminal 100 or 120 columns wide (the band 5 narrower), the bar names the four keys that act on them, c, e, h and a, and gives way in order: coverage's file counts, the verb of ], the busy step's words, the mark's name, then a whole count; in Claude Code's fullscreen layout and its default one, while a count runs and after", async ($, on) => {
   const { end } = await markedAnswer($, on, { selection: 'the retry budget runs out', counting: true })
   const seen: Record<string, ReturnType<typeof barIn>> = {}
   const all = async (when: string) => {
     for (const isFullscreen of [true, false]) {
       noteViewport({ isFullscreen })
-      for (const term of [80, 100]) {
+      for (const term of [100, 120]) {
         const bar = barIn(await $.ui.render(bandIn(term, isFullscreen)))
-        expect(bar.rows.length).toBe(1)
-        expect(bar.widest).toBeLessThanOrEqual(term - 5)
         seen[`${when} ${isFullscreen ? 'fullscreen' : 'default'} ${term}`] = bar
       }
     }
@@ -876,19 +888,23 @@ test("with words of an answer with marks selected, in a terminal 80 or 100 colum
   } finally {
     noteViewport({ isFullscreen: true })
   }
+  for (const k of Object.keys(seen)) {
+    expect(seen[k]!.rows.length).toBe(1)
+    expect(seen[k]!.widest).toBeLessThanOrEqual(Number(k.split(' ').at(-1)) - 5)
+  }
   for (const layout of ['fullscreen', 'default']) {
-    // while the count runs, at 80 neither count has room beside the keys, and ] takes the mark's name in the room they
-    // leave; at 100 both stay, coverage's file counts gone
-    expect(seen[`counting ${layout} 80`]!.left).toMatch(/^thimble {2}\S \d+s · v visualize · \] explainer · s rewrite · e explain · c cite$/)
-    expect(seen[`counting ${layout} 80`]!.right).toBe('')
-    expect(seen[`counting ${layout} 100`]!.left).toMatch(/^thimble {2}\S \d+s · v visualize · \] · s rewrite · e explain · c cite$/)
-    expect(seen[`counting ${layout} 100`]!.right).toBe('r coverage 43% · l 2 labels')
-    // after it: at 80 the labels' count gives way after coverage's file counts and ]'s words; at 100 both counts stay
+    // while the count runs, at 100 neither count has room beside the keys, and ] takes the mark's name in the room they
+    // leave; at 120 both stay, coverage's file counts gone
+    expect(seen[`counting ${layout} 100`]!.left).toMatch(/^thimble {2}\S \d+s · v visualize · \] explainer · s rewrite · c cite · e explain · h heads-up · a ask$/)
+    expect(seen[`counting ${layout} 100`]!.right).toBe('')
+    expect(seen[`counting ${layout} 120`]!.left).toMatch(/^thimble {2}\S \d+s · v visualize · \] · s rewrite · c cite · e explain · h heads-up · a ask$/)
+    expect(seen[`counting ${layout} 120`]!.right).toBe('r coverage 43% · l 2 labels')
+    // after it: at 100 the labels' count gives way after coverage's file counts and ]'s words; at 120 both counts stay
     // beside `]` alone, where the mark's name does not fit: no verb stands without the name
-    expect(seen[`after ${layout} 80`]!.left).toBe('thimble  v visualize · ] · s rewrite · e explain · c cite')
-    expect(seen[`after ${layout} 80`]!.right).toBe('r coverage 43%')
-    expect(seen[`after ${layout} 100`]!.left).toBe('thimble  v visualize · ] · s rewrite · e explain · c cite')
-    expect(seen[`after ${layout} 100`]!.right).toBe('r coverage 43% · l 2 labels')
+    expect(seen[`after ${layout} 100`]!.left).toBe('thimble  v visualize · ] · s rewrite · c cite · e explain · h heads-up · a ask')
+    expect(seen[`after ${layout} 100`]!.right).toBe('r coverage 43%')
+    expect(seen[`after ${layout} 120`]!.left).toBe('thimble  v visualize · ] · s rewrite · c cite · e explain · h heads-up · a ask')
+    expect(seen[`after ${layout} 120`]!.right).toBe('r coverage 43% · l 2 labels')
   }
 })
 
@@ -913,37 +929,37 @@ function namedLook(band: Any, id: string, what: string): Any {
   return rest
 }
 
-test("once each of the answer's marks was opened, the bar's ] looks like its other keys, `]` alone too, never dimmer, but for the mark's name, which keeps the mark's look; while one is not opened its verb is lit, in a terminal 80 or 105 columns wide and a wide one", async ($, on) => {
+test("once each of the answer's marks was opened, the bar's ] looks like its other keys, `]` alone too, never dimmer, but for the mark's name, which keeps the mark's look; while one is not opened its verb is lit, in a terminal 80 or 125 columns wide and a wide one", async ($, on) => {
   const { clock } = await markedAnswer($, on, { selection: 'the retry budget runs out' })
   const looks = async () => {
     const out: Record<number, { rest: string | null; it: Any; v: Any; named: Any }> = {}
-    for (const term of [80, 105, 160]) {
+    for (const term of [80, 125, 160]) {
       const band = await $.ui.render(bandIn(term))
       out[term] = { rest: barIn(band).rest, it: lookOf(band, 'tray-next'), v: lookOf(band, 'v'), named: namedLook(band, 'tray-next', 'explainer') }
     }
     return out
   }
-  // with words selected the band 75 wide keeps `]` alone, 100 wide `] explainer`
+  // with words selected (c e h a beside them) the band 75 wide keeps `]` alone, 120 wide `] explainer`
   const lit = await looks()
-  expect([80, 105, 160].map(t => lit[t]!.rest)).toEqual([']', '] explainer', '] show explainer'])
-  for (const t of [80, 105, 160]) expect(lit[t]!.it.key).toEqual(lit[t]!.v.key)
-  for (const t of [105, 160]) expect(lit[t]!.it.words).toEqual({ color: accent() })
+  expect([80, 125, 160].map(t => lit[t]!.rest)).toEqual([']', '] explainer', '] show explainer'])
+  for (const t of [80, 125, 160]) expect(lit[t]!.it.key).toEqual(lit[t]!.v.key)
+  for (const t of [125, 160]) expect(lit[t]!.it.words).toEqual({ color: accent() })
   // the mark's name on the explainers' teal, in the text's own color, as an explainer's words in the reply
-  for (const t of [105, 160]) expect(lit[t]!.named).toEqual({ backgroundColor: markColors(themeLast()).glossBg })
+  for (const t of [125, 160]) expect(lit[t]!.named).toEqual({ backgroundColor: markColors(themeLast()).glossBg })
   // ] from rest, then on to the citation and the heads-up: each mark of the answer opened
   for (const k of [']', ']', ']', '0']) {
     await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never)
     await clock.advance(1000)
   }
   const seen = await looks()
-  expect([80, 105, 160].map(t => seen[t]!.rest)).toEqual([']', '] explainer', '] show explainer'])
-  for (const t of [80, 105, 160]) {
+  expect([80, 125, 160].map(t => seen[t]!.rest)).toEqual([']', '] explainer', '] show explainer'])
+  for (const t of [80, 125, 160]) {
     expect(seen[t]!.it.key).toEqual(seen[t]!.v.key)
     expect(seen[t]!.it.key).toMatchObject({ color: accent(), bold: true })
     expect(seen[t]!.it.key.dimColor).toBeUndefined()
   }
-  for (const t of [105, 160]) expect(seen[t]!.it.words).toEqual(seen[t]!.v.words)
-  for (const t of [105, 160]) expect(seen[t]!.named).toEqual({ backgroundColor: markColors(themeLast()).glossBg })
+  for (const t of [125, 160]) expect(seen[t]!.it.words).toEqual(seen[t]!.v.words)
+  for (const t of [125, 160]) expect(seen[t]!.named).toEqual({ backgroundColor: markColors(themeLast()).glossBg })
 })
 
 test("while the answer's citation is checked, the bar names it in a citation's look, and its tray says checking beside the turning glyph the reply draws after its words, the same frame in thimble's color", async ($, on) => {

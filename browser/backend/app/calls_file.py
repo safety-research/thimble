@@ -6,6 +6,9 @@ tool call (`--agents`, terminal mode) and the backend's mirror (calls.Numbering)
 lock two processes could give two calls one number. The file is read again under the lock, so a number another process
 gave is found there, and a new number is one past the highest stored.
 
+A card's code writes the workspace, so the store, its folder and its lock are opened from the workspace's folder as
+nofollow opens them (_ws_of), never through a link a card put there.
+
 Standard library only: the plugin's hooks import this module under `python -S` (as app/subagent_files.py).
 """
 from __future__ import annotations
@@ -18,6 +21,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from . import nofollow
 
 CALLS_DIR = "calls"  # calls.CALLS_DIR
 CHAT_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")  # calls.CHAT_RE
@@ -38,6 +43,11 @@ def path(ws: Path, chat: str) -> Path:
     return Path(ws) / CALLS_DIR / f"{chat}.jsonl"
 
 
+def _ws_of(store: Path) -> Path:
+    """The workspace folder a store lies in (path), the root nofollow opens it from."""
+    return Path(store).parent.parent
+
+
 def line(rec: dict[str, Any]) -> str:
     """One record as the store holds it (calls._append writes the same)."""
     return json.dumps(rec, ensure_ascii=False, default=str) + "\n"
@@ -53,9 +63,8 @@ class _Lock:
         self.fd: int | None = None
 
     def __enter__(self) -> "_Lock":
-        self.lf.parent.mkdir(parents=True, exist_ok=True)
         try:
-            self.fd = os.open(self.lf, os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0), 0o600)
+            self.fd = nofollow.open(self.lf, os.O_RDWR | os.O_CREAT, 0o600, root=_ws_of(self.lf), make=True)
         except OSError:
             return self
         deadline = time.monotonic() + LOCK_WAIT_S
@@ -84,7 +93,7 @@ def scan(store: Path) -> tuple[dict[str, int], int]:
     """({tool_use_id: n}, the highest n) of the calls stored in `store`, from their first lines alone: a result line can
     be long, and it is skipped without being parsed. ({}, 0) for a missing store."""
     try:
-        data = store.read_bytes()
+        data = nofollow.read_bytes(store, root=_ws_of(store))
     except OSError:
         return {}, 0
     by_id: dict[str, int] = {}
@@ -108,14 +117,17 @@ def scan(store: Path) -> tuple[dict[str, int], int]:
 def _mend(store: Path) -> None:
     """End a torn last line (ledger.heal_tail), so an append never glues onto it."""
     try:
-        with open(store, "rb") as f:
-            f.seek(-1, 2)
-            torn = f.read(1) != b"\n"
+        fd = nofollow.open(store, os.O_RDWR | os.O_APPEND, root=_ws_of(store))
     except OSError:
         return
-    if torn:
-        with open(store, "ab") as f:
-            f.write(b"\n")
+    try:
+        size = os.fstat(fd).st_size
+        if size and os.pread(fd, 1, size - 1) != b"\n":
+            os.write(fd, b"\n")
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def number(ws: Path, chat: str, tool_use_id: str, name: str, inp: Any = None, agent: str | None = None, *,
@@ -128,7 +140,7 @@ def number(ws: Path, chat: str, tool_use_id: str, name: str, inp: Any = None, ag
     if not tid:
         raise ValueError("a call needs its tool_use_id")
     store = path(ws, chat)
-    store.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(store.parent, root=ws)
     lock = None if held else _Lock(store)
     if lock is not None:
         lock.__enter__()
@@ -141,8 +153,7 @@ def number(ws: Path, chat: str, tool_use_id: str, name: str, inp: Any = None, ag
         if agent:
             rec["agent"] = agent
         _mend(store)
-        with open(store, "a", encoding="utf-8") as f:
-            f.write(line(rec))
+        nofollow.append_bytes(store, line(rec).encode("utf-8"), root=ws)
         return n
     finally:
         if lock is not None:

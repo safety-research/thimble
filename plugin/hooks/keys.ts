@@ -7,14 +7,19 @@
 //                                    changed, n later, u undo (a failed fix: y try again, d ask Claude, n dismiss)
 //   v        designer/v.ts vKey      a card of the last answer
 //   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
-//                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers' (e:
-//                                    the selected words), c (a citation of the selected words), w (the claims), t
+//                                    run's ask, the squeeze chips' and s, { } over the answers, the keys that act on
+//                                    the selected words (e an explainer, h a heads-up, c a citation, a a side thread),
+//                                    w (the claims), t
 //   a p      cards/head.ts headKey   the header of the card the keys reach: a ask, p artifact
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
 //
 // Anything no one takes is typed as usual. A card never gets thimble's own keys (ownKeys); the card tool says so. g, the
 // person's OK, is one of them, so that no line or card shown with its line offers it too.
+//
+// Only where thimble's drawing shows (core/host.ts drawsHere). A host that runs Claude Code through its SDK can send each
+// key of its own prompt box here too (the desktop app's Code tab), where nothing shows what a key would do: there every
+// key types.
 //
 // The word window. Each of these keys is a letter, and a letter also starts a word. So a letter typed within WORD_MS
 // after keys thimble took means the person types a word: the keys are undone and the word goes into the box whole, the
@@ -37,6 +42,7 @@ import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
 import { HEAD_KEYS, headKey } from '../cards/head'
 import { keysReady, restoredKey, restoredKeys } from '../core/answerview'
+import { drawsHere } from '../core/host'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
 import { ALLOW_KEY, checkKey } from '../marks/checker'
@@ -174,6 +180,7 @@ export const registerKeys: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
+    if (!drawsHere()) return next(e)
     // the prompt has the keys: words begun after + in the squeeze chips are let go (esc gave the keys back)
     await promptHasKeys($).catch(() => undefined)
     // the box holds what the person typed: every key types

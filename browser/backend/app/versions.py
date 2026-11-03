@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import investigation
+from . import investigation, nofollow
 from .ledger import read_json, write_json
 
 log = logging.getLogger(__name__)
@@ -185,7 +185,9 @@ def fallback_summary(prev: dict[str, Any] | None, doc: dict[str, Any]) -> list[s
 
 
 def versions_dir(c: str, inv_id: str, slug: str) -> Path:
-    return investigation.inv_dir(c, inv_id) / DIR / slug
+    from . import report_types  # noqa: PLC0415
+
+    return investigation.inv_dir(c, inv_id) / DIR / report_types._named(slug)
 
 
 def _path(c: str, inv_id: str, slug: str, n: int) -> Path:
@@ -228,7 +230,7 @@ def record(c: str, inv_id: str, slug: str, prev: dict[str, Any] | None, doc: Any
         if restored is not None:
             rec.update(summary=[], summary_from=None, restored=restored)
         path_ = _path(c, inv_id, slug, n)
-        path_.parent.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(path_.parent)
         write_json(path_, rec)
         return rec
     except Exception:  # noqa: BLE001
@@ -244,7 +246,7 @@ def record_analyst_draft(c: str, inv_id: str, slug: str, doc: dict[str, Any]) ->
         rec = {"n": 1, "ts": str(doc.get("generated_at") or _now()), "run": None, "source": ANALYST_SOURCE,
                "instructions": None, "summary": [], "summary_from": None, "previous_generation": 0, "previous": None}
         path_ = _path(c, inv_id, slug, 1)
-        path_.parent.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(path_.parent)
         write_json(path_, rec)
     except Exception:  # noqa: BLE001
         log.exception("%s/%s: the record of the analyst's draft could not be written", c, slug)
@@ -274,7 +276,7 @@ def add_revision(c: str, inv_id: str, slug: str, replaced: dict[str, Any], *, ru
         rec["revisions"].append({"i": i, "ts": str(replaced.get("generated_at") or _now()), "words": int(words),
                                  "doc": _lean(replaced)})
         path_ = revisions_path(c, inv_id, slug, n)
-        path_.parent.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(path_.parent)
         write_json(path_, rec)
         return i
     except Exception:  # noqa: BLE001

@@ -35,7 +35,8 @@ shows the words, so a mark is never verified on evidence the checker made up:
             from a file.
   quote     one place or several: the file is inside the folder the session started in or the shell's folder (a
   code      relative path is read from either, since main may have run `cd`; for what code does, also the temp
-            folder, where Claude keeps its own code; and a folder of labels' rules when the host gives one, `rules`,
+            folders, where Claude keeps its own code (`tmp`: thimble's, the one Claude Code's Bash sandbox gives a
+            command, the workbench's); and a folder of labels' rules when the host gives one, `rules`,
             as the browser keeps each label's definition, its rule in it), compared by real paths, a regular file, the
             line (or a range of at most 50 lines) exists, and the place's substring is in it: in the raw line or in
             the line's JSON strings decoded (a JSONL record's, or those of one member of a JSON document written over
@@ -52,7 +53,9 @@ shows the words, so a mark is never verified on evidence the checker made up:
             `card:<id>@out<i>#L<n>` (labels percent-encoded as encode_label writes them). The host gives the cards'
             outputs (`cards`: [{id, title, outputs: [{out, corner?, cells: [[col, row, value]]} | {out, lines: [[n,
             text]]}]}]); the place must exist there and show the words as shows() reads them: the cell's value (with
-            its row's label, which names what the value is of), or the line. The person sees the card's title and the
+            its row's label, which names what the value is of), or the line. A count of what a card shows, such as 2 of
+            a diagram's 6 edges, cites the things it counts, two or more, and their number stands for it, as the number
+            of rows of their table stands for a total beside it (counted). The person sees the card's title and the
             table around the cell, the cell tinted.
 
 Printed output that is a table (a printed DataFrame, aligned columns) is also read as one (text_table): computed
@@ -67,7 +70,9 @@ Cited lines a few lines off from the ones that hold the words, or a few lines sh
 correction is the words that replace the mark: words of the sentence the checker repeated around them go.
 
 A mark the checker verified whose evidence does not hold here fails as not confirmed, with one plain sentence that
-says why: what the records show in place of the words, or what is missing (nearest, unshown). A mark the
+says why: what the records show in place of the words, or what is missing (nearest, unshown). It names a cited file by
+its path from the folder it lies in, and one outside every folder a cited file may lie in not at all (file_named,
+OUTSIDE), never by where it lies on this machine; an error it quotes names its paths alike (error_words). A mark the
 checker found wrong stays failed, with its reason: the checker finds a mark wrong also for the words around it (a wrong
 condition), which evidence that prints the marked words does not answer; one it found wrong and gave the right words for
 is a correction. A correction whose evidence does not show its
@@ -90,6 +95,10 @@ module cannot judge, fails as a check that did not run (`failedBy` `none`), whic
                                                                      for the checker
   terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
                                                                      rows.json) as `cards`
+  uncitable(files, cwd, root, tmp, rules)                        -> those of the files no evidence may cite: outside
+                                                                     every folder a cited file may lie in
+  error_words(text, cwd, root, also)                             -> an error's text, each path of this machine in it
+                                                                     named as a reason names a cited file
   parse_answer(text)                               -> the last ```json array of the checker's answer, or None
 """
 from __future__ import annotations
@@ -203,8 +212,8 @@ def short(s: str, n: int) -> str:
 # missing, never the whole cited words again.
 
 class Named(str):
-    """A clause of a reason that opens with a name, whose case is its own: the cited file as the check named it
-    (`notes is outside …`, `peer/run.log has no line 9`). place() and look() write such clauses, so they mark them."""
+    """A clause of a reason that opens with a name, whose case is its own: the cited file as a reason names it
+    (`peer/run.log has no line 9`, `todo has no line 9`). look() writes such clauses, so it marks them."""
 
 
 def sentence(clause: str) -> str:
@@ -1286,6 +1295,158 @@ def paths_of(file: str, cwd: str, root: str | None, also: list[str], calls: list
     return [p for p in named_paths(file, cwd, root, calls) if inside(p, folders)]
 
 
+def outside(file: str, cwd: str, root: str | None, also: list[str], calls: list[dict[str, Any]] = ()) -> bool:
+    """Whether a cited file lies outside the session's folders and the folders `also` names, so place() takes no
+    evidence from it: no path it may name lies inside them, or it names a file only through a link out of them, which
+    names a file outside them, not none."""
+    paths = paths_of(file, cwd, root, also, calls)
+    return not paths or (not any(os.path.isfile(p) for p in paths) and any(os.path.isfile(p) for p in named_paths(file, cwd, root, calls)))
+
+
+def also_of(kind: str, tmp: str | list[str] | None, rules: str | None) -> list[str]:
+    """The folders a cited file of evidence of `kind` may lie in besides the session's: for what code does, the temp
+    folders `tmp` (one, or a list), where Claude keeps its own code; for both kinds, a folder of labels' rules."""
+    temps = [tmp] if isinstance(tmp, str) else list(tmp or [])
+    return [f for f in (*(temps if kind == "code" else []), rules) if f]
+
+
+def uncitable(files: list[str], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, rules: str | None = None) -> list[str]:
+    """The files no evidence may cite: those outside every folder a cited file may lie in (outside()), the session's
+    folders and those of code, which hold those of a quote. A check that could not read such a file lost no evidence by
+    it, since no read of it would count."""
+    return [f for f in files if outside(str(f), cwd, root, also_of("code", tmp, rules))]
+
+
+# ------------------------------------------------------------------------------------------------ a file, as a reason names it
+#
+# A reason names a cited file by its path from the folder it lies in (file_named), never by where that folder lies on
+# this machine, which tells the person nothing of the claim and, long, is all the line that shows the reason holds. A
+# file outside every folder a cited file may lie in is named not at all (OUTSIDE). Each form a path may take is read
+# where it leads (written_path), so where a file is decides how the reason names it, never how its path is written.
+# These only name a file: which files evidence is read from stays as outside() and paths_of() decide.
+
+OUTSIDE = "the check cited a file outside the folder this session works in"
+UNREAD = "the check named {} in a form thimble does not read"
+# the forms of a path that only a shell or a URL reads: from a home folder (`~/`, `~user/`), from a variable (`$HOME/`,
+# `${HOME}/`), or a `file:` URL in any case
+SHELL_FORM = re.compile(r"(?i)file:|~(?:[\w.-]*/|$)|\$\{?[A-Za-z_]\w*\}?/")
+
+
+def written_path(file: str, base: str) -> str | None:
+    """The absolute path a path leads to, in each form it may be written: an absolute one, `//` read as `/`; a `file:`
+    URL in any case (`file:/x`, `file:///x`, `file://localhost/x`, its %XX escapes read); one from a home folder (`~/`,
+    `~user/`) or from $HOME (`$HOME/`, `${HOME}/`); else one from `base`, which `../` leaves. None for one that leads
+    to no folder this machine names (the home of a user it does not have, another variable), or that no path can be."""
+    s = str(file).strip()
+    if s[:5].lower() == "file:":
+        s = unquote(s[5:])
+        if s.startswith("//"):
+            host, _, rest = s[2:].partition("/")
+            s = "/" + (rest if host.lower() in ("", "localhost") else s[2:])
+    if s.startswith("~"):
+        s = os.path.expanduser(s)
+        if s.startswith("~"):
+            return None
+    elif s.startswith("$"):
+        m = re.match(r"\$(?:HOME|\{HOME\})(?=/|$)", s)
+        if not m:
+            return None
+        s = os.path.expanduser("~") + s[m.end():]
+    if "\0" in s:
+        return None
+    full = os.path.normpath(os.path.join(base or os.sep, s))
+    return "/" + full.lstrip("/") if full.startswith("//") else full
+
+
+def file_named(path: str, folders: list[str]) -> str | None:
+    """A file by its path from the first of the folders that holds it, compared as written, then by real paths (a
+    folder named through a link holds its files too); a folder itself by its own name. None when none holds it. The
+    root of the file system holds every file, so it names none."""
+    if "\0" in str(path):
+        return None
+    full = os.path.abspath(path)
+    for real in (False, True):
+        p = os.path.realpath(full) if real else full
+        for f in folders:
+            d = os.path.realpath(f) if real else os.path.abspath(f)
+            if d == os.sep:
+                continue
+            if p == d:
+                return os.path.basename(d)
+            if p.startswith(d + os.sep):
+                return os.path.relpath(p, d)
+    return None
+
+
+def missing(file: str, cwd: str, root: str | None, also: list[str], calls: list[dict[str, Any]] = ()) -> str:
+    """Why a cited file that names no file thimble reads gives no evidence. A path only a shell or a URL reads (`~/`,
+    `$HOME/`, `file:`) is read where it leads, to name the file: a file there is not read, as such a path never was,
+    and is named from its folder; one outside every folder a cited file may lie in is named not at all. Any other path
+    names a file that is not there."""
+    folders = [f for f in (root, cwd, *also) if f]
+    if SHELL_FORM.match(str(file).strip()):
+        full = written_path(str(file), root or cwd)
+        if full is None:
+            return UNREAD.format("a file")
+        if not inside(full, folders):
+            return OUTSIDE
+        name = file_named(full, folders) or os.path.basename(full)
+        return UNREAD.format(name) if os.path.isfile(full) else f"there is no file {name} in this session's folder"
+    p = (paths_of(file, cwd, root, also, calls) or named_paths(file, cwd, root, calls))[0]
+    return f"there is no file {file_named(p, folders) or os.path.basename(p)} in this session's folder"
+
+
+# ------------------------------------------------------------------------------------------------ an error, as thimble quotes it
+#
+# An error thimble quotes in a reason, a notice or a repair request (an exception's text, a fork's error) is thimble's
+# own words, never the records' nor the check's: each path of this machine in it is read where it leads, as a cited
+# file is (written_path), and named as a reason names one (error_words). The terminal's notices name them alike
+# (core/text.js errorWords); plugin/tests/error_paths.json holds the cases both answer.
+
+# a path in an error's text: one quoted whole, which may hold spaces and colons, else one in a run of the characters a
+# path holds, not a URL, starting where the run does or right after a colon in it (`failed:/x`, `notes.md:3:/x`) and
+# ending at the next colon (`/x/run.py:12:5`, `/a/b:/c/d`), a `file:` URL's own aside
+QUOTED_PATH = re.compile(r"""(['"`])((?:file:|~[A-Za-z0-9_.-]*/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/|\.\.?/|/)[^'"`\n]*?)\1""", re.I)
+PATH_RUN = re.compile(r"""[^\s'"`()\[\]<>,;]+""")
+PATH_START = re.compile(r"file:|~[A-Za-z0-9_.-]*/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/|\.\.?/|/", re.I)
+URL_START = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+URL_SCHEME = re.compile(r"(?:^|:)(?!file:$)[A-Za-z][A-Za-z0-9+.-]*:$", re.I)  # a URL's scheme just before its `//`
+
+
+def error_words(text: str, cwd: str, root: str | None = None, also: list[str] = ()) -> str:
+    """An error's text as thimble quotes it: each path of this machine in it named as a reason names a file, by its path
+    from the folder of the session's that holds it (file_named), else by its name alone. A path is read from the shell's
+    folder, as the process that wrote the error read it. A URL, a path relative to no folder named, and other words stay
+    as they are."""
+    folders = [f for f in (root, cwd, *also) if f]
+
+    def named(path: str) -> str:
+        try:
+            full = written_path(path, cwd or root or os.sep)
+            name = file_named(full, folders) if full else None
+        except (OSError, ValueError):
+            full, name = None, None
+        return name or os.path.basename((full or path).rstrip("/")) or path
+
+    def run(m: re.Match[str]) -> str:
+        t = m.group(0)
+        if URL_START.match(t) and t[:5].lower() != "file:":
+            return t
+        out, done = [], 0
+        for at in [0] + [i + 1 for i, ch in enumerate(t) if ch == ":"]:
+            if at < done or not PATH_START.match(t, at) or (t.startswith("//", at) and URL_SCHEME.search(t, 0, at)):
+                continue
+            end = t.find(":", at + (5 if t[at:at + 5].lower() == "file:" else 0))
+            path = t[at:len(t) if end < 0 else end].rstrip(".!?")
+            if re.search(r"/[^/]", path):
+                out += [t[done:at], named(path)]
+                done = at + len(path)
+        return "".join(out) + t[done:]
+
+    text = QUOTED_PATH.sub(lambda m: m.group(1) + named(m.group(2)) + m.group(1), str(text))
+    return PATH_RUN.sub(run, text)
+
+
 ADJACENT = re.compile(r"([\"'])\s+\1")
 
 
@@ -1306,29 +1467,31 @@ def holds(sub: str, hay: list[str]) -> bool:
     return any(loose in h or plain in h or tight in re.sub(r"\s+", "", h) for h in map(one_quote, hay))
 
 
-def place(ev: dict[str, Any], cwd: str, root: str | None, also: list[str] = (), calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None, list[str]]:
+def place(ev: dict[str, Any], cwd: str, root: str | None, also: list[str] = (), calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None, list[str], str]:
     """One cited place: its problems, the place to show (`file`, `line`, the cited lines with a line around them, the
-    substring highlighted) and the texts the cited lines hold. A relative path names a file of one of the folders
-    paths_of() reads it from: the one whose lines hold the substring. A file in one of the folders `also` names counts
-    too (the temp folder, where Claude keeps its own code, or a folder of labels' rules); its path shows whole."""
+    substring highlighted), the texts the cited lines hold, and the file as a reason names it (file_named). A relative
+    path names a file of one of the folders paths_of() reads it from: the one whose lines hold the substring. A file in
+    one of the folders `also` names counts too (the temp folder, where Claude keeps its own code, or a folder of labels'
+    rules); its path shows whole."""
     file, line, sub = ev.get("file"), ev.get("line", ev.get("lines")), ev.get("substring")
     if not file or line is None or not sub:
-        return ["the check named no line of a file to look at"], None, []
-    paths = paths_of(str(file), cwd, root, also, calls)
-    files = [p for p in paths if os.path.isfile(p)]
-    # a path that names a file only through a link out of the session's folders names a file outside them, not none
-    if not paths or (not files and any(os.path.isfile(p) for p in named_paths(str(file), cwd, root, calls))):
-        return [Named(f"{file} is outside the folder this session works in")], None, []
+        return ["the check named no line of a file to look at"], None, [], ""
+    if outside(str(file), cwd, root, also, calls):
+        return [OUTSIDE], None, [], ""
+    files = [p for p in paths_of(str(file), cwd, root, also, calls) if os.path.isfile(p)]
     if not files:
-        return [f"there is no file {file} in this session's folder"], None, []
-    looks = [look(p, str(file), line, str(sub), cwd, root) for p in files]
+        return [missing(str(file), cwd, root, also, calls)], None, [], ""
+    folders = [f for f in (root, cwd, *also) if f]
+    names = [file_named(p, folders) or os.path.basename(p) for p in files]
+    looks = [(*look(p, name, line, str(sub), cwd, root), name) for p, name in zip(files, names)]
     return next((x for x in looks if not x[0]), looks[0])
 
 
 def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) -> tuple[list[str], dict[str, Any] | None, list[str]]:
-    """The cited lines of one file, as place() gives them. A line number is where to look: when the cited lines do not
-    hold the substring and lines up to SHIFT_MAX away do, the nearest such lines are cited in their place: the same
-    number of lines moved, or more lines around them (a quote that runs over three lines cited as two)."""
+    """The cited lines of one file, as place() gives them, `file` the file as a reason names it. A line number is where
+    to look: when the cited lines do not hold the substring and lines up to SHIFT_MAX away do, the nearest such lines
+    are cited in their place: the same number of lines moved, or more lines around them (a quote that runs over three
+    lines cited as two)."""
     span = line_span(line)
     if not span:
         return [f"the check cited lines {line}, which are not one line or a range of at most {MAX_RANGE} lines"], None, []
@@ -1369,29 +1532,31 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     return problems, {"file": rel, "line": line, "lines": rows}, hay
 
 
-def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, calls: list[dict[str, Any]] = (), was: str = "", rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, calls: list[dict[str, Any]] = (), was: str = "", rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of quote or code evidence, and the cited places to show. The evidence is one place, or several when
     the claim joins places (a value set on one line and used on another): each place holds the words the check gave
     for it, and the places together hold the quoted words of a direct quote and the numbers of the words. A claim about
-    what code does may cite Claude's own code in `tmp`; a quote of a record may not, since a file there holds what
-    Claude derived, not the records. A label's rule in `rules` is evidence of what the label counts and how, as code or
-    as a quote; a quote of it, as any quote, holds the days and numbers of the words in its lines, so a rule shows no
-    count it does not state. For a correction of a quote of a record, `was` is the marked words: the cited lines also
-    show each run of words the correction puts in."""
+    what code does may cite Claude's own code in a temp folder `tmp` names (one, or a list); a quote of a record may
+    not, since a file there holds what Claude derived, not the records. A label's rule in `rules` is evidence of what
+    the label counts and how, as code or as a quote; a quote of it, as any quote, holds the days and numbers of the
+    words in its lines, so a rule shows no count it does not state. For a correction of a quote of a record, `was` is
+    the marked words: the cited lines also show each run of words the correction puts in."""
     problems: list[str] = []
     shown: list[dict[str, Any]] = []
+    names: list[str] = []
     hay: list[str] = []
     # the folders a cited file may lie in besides the session's: Claude's own code for code, labels' rules for both
-    also = [f for f in (tmp if kind == "code" else None, rules) if f]
+    also = also_of(kind, tmp, rules)
     for ev in evs:
-        p, s, h = place(ev, cwd, root, also, calls)
+        p, s, h, name = place(ev, cwd, root, also, calls)
         problems += p
         hay += h
         if s:
             shown.append(s)
+            names.append(name)
     if not shown:
         return problems, None
-    where = " or ".join(f"line {s['line']} of {s['file']}" for s in shown)
+    where = " or ".join(f"line {s['line']} of {name}" for s, name in zip(shown, names))
     for frag in quote_fragments(target):
         if not any(in_text(frag, h) for h in hay) and not (kind == "code" and in_code(frag, hay)):
             problems.append(instead(where, f"“{frag}”", hay))
@@ -1642,8 +1807,9 @@ def terminal_cards(folder: str | None) -> list[dict[str, Any]]:
 
 def card_refs(ev: Any) -> list[str]:
     """The places card evidence names: one `ref`, or several when the cited words hold several values (a range such as
-    "2.5 to 3.7 hours", a pair such as "243 against 104"): a list of refs, as `ref` or as a list of evidence objects,
-    and a range of lines (`#L7-L8`) as each of its lines."""
+    "2.5 to 3.7 hours", a pair such as "243 against 104") or count things a card shows (the 2 edges of "2 of the 6
+    paths"): a list of refs, as `ref` or as a list of evidence objects, and a range of lines (`#L7-L8`) as each of its
+    lines."""
     out: list[str] = []
     for e in ev if isinstance(ev, list) else [ev]:
         got = e.get("ref", e.get("refs")) if isinstance(e, dict) else e
@@ -1694,7 +1860,8 @@ def _card_place(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, dict
 
 def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     """The evidence to show of the places of one card output: a cell's table with each cited cell marked, or the
-    output's lines with what shows the words highlighted on each cited line (as a table when the output is one)."""
+    output's lines with what shows the words highlighted on each cited line, else the whole line, a thing the words
+    count (as a table when the output is one)."""
     p = ps[0]
     shown: dict[str, Any] = {"kind": "card", "card": p["cid"], "title": p["title"], "ref": p["ref"], "value": p["value"]}
     if len(ps) > 1:
@@ -1708,8 +1875,9 @@ def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     for x in ps:
         start = sum(len(t) + 1 for _, t in lines[:x["at"]])
         line = lines[x["at"]][1]
-        # each cited line highlights what of the words it shows (one value of a range on its own line)
-        spans += [[start + a, start + b] for a, b in spans_of(target, line)] or ([[start, start + len(line)]] if x is p else [])
+        # each cited line highlights what of the words it shows (one value of a range on its own line), else all of it,
+        # as a thing the words count (an edge of a diagram)
+        spans += [[start + a, start + b] for a, b in spans_of(target, line)] or [[start, start + len(line)]]
     shown["output"], shown["highlight"] = window(text, spans, OUTPUT_MAX)
     if table := text_table(text, spans):
         shown["table"] = table
@@ -1741,10 +1909,29 @@ def framed(target: str, places: list[dict[str, Any]], approx: bool = False) -> b
     return shows(target, names, approx)
 
 
+def counted(target: str, places: list[dict[str, Any]], approx: bool = False) -> list[str]:
+    """The number of things cited places count, as values they show: "2 of the 6 paths" cites the 2 edges of a diagram
+    that it counts, and the line that states the 6, since no line states the 2. The things are the cited records (a
+    table's rows, lines of printed output) whose values show none of the words' numbers; [] for fewer than two, since
+    one place alone is a value's own place, never a count of one. Rows of one table also show how many rows the card
+    shows of that table, beside their own number and never alone: "2 of the 6 paths" cites 2 rows of a table of 6."""
+    nums = [v for v, _ in marked_numbers(wordnums(target, counts=True))]
+    things = {(p["cid"], p["out"], p.get("row", p.get("n"))): p for p in places
+              if not any(has_number(v, wordnums(p["value"], counts=True), dates=False, approx=approx) for v in nums)}
+    if len(things) < 2:
+        return []
+    out = [str(len(things))]
+    one = next(iter(things.values()))
+    if one["out"][0] == "cells" and len({(p["cid"], p["out"]) for p in things.values()}) == 1 and out[0] in nums:
+        out.append(str(len(one["rows"])))
+    return out
+
+
 def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
     """The problems of card evidence, and the evidence to show: each cited place must be one of the session's cards,
     and together they show the words (a cell's value, with its row's name; a line of printed output). Words that hold
-    several values (a range, a pair) may cite a place for each: each value must stand in one of them."""
+    several values (a range, a pair) may cite a place for each: each value must stand in one of them. A count of what a
+    card shows cites the things it counts, whose number stands for it (counted)."""
     refs = card_refs(ev)
     if not refs:
         return ["the check named no value or line of a card"], None
@@ -1760,7 +1947,7 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     shown_all = [_card_shown(target, g) for g in groups.values()]
     shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
     values, texts = [p["value"] for p in places], [p["text"] for p in places]
-    said = "\n".join(texts)
+    said = "\n".join(texts + counted(target, places, approx))
     one = places[0]
     if not (shows(target, "\n".join(values), approx) or shows(target, said, approx) or framed(target, places, approx)):
         if len(places) > 1:
@@ -1801,7 +1988,7 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | list[str] | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show. For a correction, `target` is its
     new words and `was` the marked words."""
     if kind == "card":
@@ -2033,7 +2220,7 @@ def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: 
     return None
 
 
-def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
+def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
     rewrite?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real Bash
     calls of the session ({command, output, by}); `tmp` and `rules` the folders a cited file may lie in besides the
@@ -2151,8 +2338,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if problems and new:
         # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the
         # old words nor the new ones are confirmed (a match of the old words there, such as the 250 of a test that
-        # printed False, is no sign that they hold)
-        res.update(status="failed", shown=words, failedBy="evidence", reason=f"The check {did}, but {problems[0]}.")
+        # printed False, is no sign that they hold); a problem that opens with the check is said of it once
+        why = re.sub(r"^the check ", "it ", problems[0])
+        res.update(status="failed", shown=words, failedBy="evidence", reason=f"The check {did}, but {why}.")
         return res
     if problems:
         res.update(status="failed", failedBy="evidence", reason=sentence(problems[0]))
@@ -2189,11 +2377,11 @@ def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> lis
     return out
 
 
-def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
+def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | list[str] | None = None, cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
-    folder; `cards` the session's cards' outputs (check_card); `rules` the folder where the host keeps its labels'
-    rules, when it keeps them apart from the temp folder (the browser's labels' definitions). A mark the validator fails
-    on fails as a check that did not run, with why; the other marks are judged."""
+    folders (one, or a list); `cards` the session's cards' outputs (check_card); `rules` the folder where the host keeps
+    its labels' rules, when it keeps them apart from the temp folders (the browser's labels' definitions). A mark the
+    validator fails on fails as a check that did not run, with why; the other marks are judged."""
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}
@@ -2207,8 +2395,9 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
         try:
             results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
+            said = error_words(str(e), cwd, root, also_of("code", tmp, rules))
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
-                            "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})."})
+                            "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {said[:120]})."})
     # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's. The same new
     # sentence for a second citation undoes nothing: a rewrite keeps the other citations' words, so the second
     # citation's words stand in it as written, and the first rewrite places them

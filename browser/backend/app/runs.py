@@ -340,12 +340,16 @@ def _delete_workspace(r: Row, ws: Path, up: bool) -> str | None:
             return f"{r.id}: not deleted: the server answered {status or 'nothing'} ({detail})"
         # the corpus unknown to the server (404): nothing of it runs there, so the disk
         cli._log(f"purge {r.id}: DELETE /api/ws answered 404 {detail}; deleting from the disk")
+    real = p.resolve()
     try:
         shutil.rmtree(p)
     except FileNotFoundError:
         pass
     except OSError as e:
         return f"{r.id}: could not delete {p}: {e}"
+    from . import runtime_cc  # noqa: PLC0415
+
+    runtime_cc.drop_workspace_tmp(real)  # its short temp folder on Claude Code sign-in, as the server's delete does
     return None
 
 

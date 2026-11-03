@@ -62,7 +62,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
-from . import config, corpus_tree, headless, investigation, refs, userconf, view_calls, view_indexes, view_libs
+from . import (config, corpus_tree, headless, investigation, nofollow, refs, userconf, view_calls, view_indexes,
+               view_libs)
 from .records import is_record_ref as is_record
 from .view_host import shown_whole
 from .ledger import atomic_write_text, read_json, unlinked, write_json, write_json_once
@@ -364,19 +365,17 @@ def ensure_local(ws: Path) -> Path:
     they are missing. A link or a file a kernel left where one of them goes is removed first, so nothing written there
     lands outside the workspace."""
     d = ws / LOCAL_SUBDIR
-    for p in (d, d / VIEWS_SUBDIR):
-        if p.is_symlink() or (p.exists() and not p.is_dir()):
-            p.unlink()
-        p.mkdir(mode=0o700, exist_ok=True)
+    for p in (d, d / VIEWS_SUBDIR):  # made in place of a link or a file as nofollow does (own_folder)
+        os.close(nofollow.own_folder(p))
     manifest = d / LOCAL_MANIFEST
     if manifest.is_symlink():
-        manifest.unlink()
+        nofollow.unlink(manifest)
     if not manifest.exists():
         write_json_once(manifest, {"name": local_name(ws.name), "version": LOCAL_VERSION,
                                    "description": "The views thimble built for this workspace."})
     for p in (d / VIEWS_SUBDIR).iterdir():
         if p.is_symlink():
-            p.unlink()
+            nofollow.unlink(p)
     return d
 
 
@@ -782,16 +781,16 @@ def restore_version(c: str, slug: str, version: str) -> bool:
     src = _versions_dir(c, slug) / version if VERSION_RE.match(str(version or "")) else None
     if src is None or not (src / VIEW_JSON).is_file():
         return False
-    d = views_dir(c) / slug
-    d.mkdir(parents=True, exist_ok=True)
+    d = views_dir(c) / slug  # the view's folder, which its builder writes: emptied and written as nofollow does
+    nofollow.makedirs(d)
     for p in d.iterdir():
         if p.name == CACHE_SUBDIR or p.is_symlink():
             continue
-        shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+        nofollow.rmtree(p, ignore_errors=True)
     for p in src.iterdir():
         if p.is_symlink():
             continue
-        shutil.copytree(p, d / p.name, symlinks=True) if p.is_dir() else shutil.copy2(p, d / p.name)
+        nofollow.copy_tree(p, d / p.name) if p.is_dir() else nofollow.copy_file(p, d / p.name)
     _forget(c, slug)
     return True
 
@@ -975,7 +974,7 @@ def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = 
         stored["unit"] = u
     ensure_local(config.workspace_dir(c))
     d = views_dir(c) / slug
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     atomic_write_text(d / READER_PY, reader_src.rstrip("\n") + "\n")
     atomic_write_text(d / VIEW_HTML, html_src.rstrip("\n") + "\n")
     write_json(d / VIEW_JSON, stored)
@@ -1062,9 +1061,9 @@ def install_view(ws: Path, src: Path, slug: str | None = None) -> str:
             (root / slug).rename(old)
         tmp.rename(root / slug)
     except BaseException:
-        shutil.rmtree(tmp, ignore_errors=True)
+        nofollow.rmtree(tmp, ignore_errors=True)
         raise
-    shutil.rmtree(old, ignore_errors=True)
+    nofollow.rmtree(old, ignore_errors=True)
     return version
 
 
@@ -1073,18 +1072,19 @@ def _keep_version(src: Path, root: Path, version: str) -> None:
     dst = root / version
     if not dst.is_dir():
         tmp = root / f".{version}.tmp"
-        shutil.rmtree(tmp, ignore_errors=True)
-        tmp.mkdir(parents=True)
-        for f in src.iterdir():
+        nofollow.rmtree(tmp, ignore_errors=True)
+        nofollow.makedirs(tmp)
+        for f in src.iterdir():  # a view's folder its builder writes: a file read as nofollow reads it, a link left out
             if f.is_file() and not f.is_symlink():
-                shutil.copy2(f, tmp / f.name)
+                with contextlib.suppress(nofollow.Linked):
+                    nofollow.copy_file(f, tmp / f.name)
         view_libs.copy_lib(src, tmp)
         os.replace(tmp, dst)
     os.utime(dst)
     kept = sorted((x for x in root.iterdir() if x.is_dir() and VERSION_RE.match(x.name)),
                   key=lambda x: x.stat().st_mtime_ns, reverse=True)
     for old in kept[VERSIONS_KEPT:]:
-        shutil.rmtree(old, ignore_errors=True)
+        nofollow.rmtree(old, ignore_errors=True)
 
 
 def read_version(c: str, slug: str, version: str) -> dict[str, Any] | None:
@@ -1111,10 +1111,10 @@ def delete_view(c: str, slug: str) -> None:
     _keep_deleted(c, read_proposal(c, slug) or {"slug": slug, "name": _view_json(d).get("name") or slug})
     dev.stop_view(c, slug, "deleted")
     _stop_review(c, slug, forget=True)
-    shutil.rmtree(d, ignore_errors=True)
-    shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
-    shutil.rmtree(index_dir(c, slug), ignore_errors=True)
-    shutil.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
+    nofollow.rmtree(d, ignore_errors=True)
+    nofollow.rmtree(_versions_dir(c, slug), ignore_errors=True)
+    nofollow.rmtree(index_dir(c, slug), ignore_errors=True)
+    nofollow.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
     drop_built_copy(c, slug)
     _forget(c, slug)
     view_calls.forget_view(c, slug)
@@ -2755,8 +2755,8 @@ def withdraw(c: str, slug: str, extension: str | None) -> bool:
     if prop.get("extension") != extension or d is None or view_digest(d) != prop.get("installed"):
         return False
     _stop_review(c, slug, forget=True)
-    shutil.rmtree(d, ignore_errors=True)
-    shutil.rmtree(_versions_dir(c, slug), ignore_errors=True)
+    nofollow.rmtree(d, ignore_errors=True)
+    nofollow.rmtree(_versions_dir(c, slug), ignore_errors=True)
     if old_link(c, slug).is_symlink():
         old_link(c, slug).unlink()
     _forget(c, slug)
@@ -2861,10 +2861,10 @@ def _stop_build(c: str, slug: str, why: str, force: bool = False) -> None:
     d = views_dir(c) / slug
     built = d.is_dir() and bool(_view_json(d).get("built"))
     if d.is_dir() and (force or not built):
-        shutil.rmtree(d, ignore_errors=True)
-        shutil.rmtree(index_dir(c, slug), ignore_errors=True)
+        nofollow.rmtree(d, ignore_errors=True)
+        nofollow.rmtree(index_dir(c, slug), ignore_errors=True)
     if force or not built:
-        shutil.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
+        nofollow.rmtree(dev.view_work_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
 
 
@@ -2897,14 +2897,15 @@ def _keep_built(c: str, slug: str) -> None:
     src, dst = views_dir(c) / slug, _revision_dir(c, slug)
     if dst.is_dir() or not src.is_dir():
         return
-    dst.mkdir(parents=True, exist_ok=True)
-    for p in src.iterdir():
+    nofollow.makedirs(dst)
+    for p in src.iterdir():  # the view's folder, which its builder writes: read as nofollow reads it
         if p.name == CACHE_SUBDIR or p.is_symlink():
             continue
-        if p.is_dir():
-            shutil.copytree(p, dst / p.name, symlinks=True)
-        else:
-            shutil.copy2(p, dst / p.name)
+        with contextlib.suppress(nofollow.Linked):
+            if p.is_dir():
+                nofollow.copy_tree(p, dst / p.name)
+            else:
+                nofollow.copy_file(p, dst / p.name)
 
 
 def restore_built(c: str, slug: str) -> bool:
@@ -2913,22 +2914,22 @@ def restore_built(c: str, slug: str) -> bool:
     src, dst = _revision_dir(c, slug), views_dir(c) / slug
     if not src.is_dir():
         return False
-    dst.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(dst)  # the view's folder, which its builder writes: emptied and written as nofollow does
     for p in dst.iterdir():
         if p.name == CACHE_SUBDIR:
             continue
-        shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
+        nofollow.rmtree(p, ignore_errors=True)
     for p in src.iterdir():
         if p.is_symlink():
             continue
-        shutil.copytree(p, dst / p.name, symlinks=True) if p.is_dir() else shutil.copy2(p, dst / p.name)
-    shutil.rmtree(src, ignore_errors=True)
+        nofollow.copy_tree(p, dst / p.name) if p.is_dir() else nofollow.copy_file(p, dst / p.name)
+    nofollow.rmtree(src, ignore_errors=True)
     _forget(c, slug)
     return True
 
 
 def drop_built_copy(c: str, slug: str) -> None:
-    shutil.rmtree(_revision_dir(c, slug), ignore_errors=True)
+    nofollow.rmtree(_revision_dir(c, slug), ignore_errors=True)
 
 
 def view_digest(d: Path) -> str:
@@ -3135,8 +3136,8 @@ def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
         return None
     d = views_dir(c) / slug
     if d.is_dir() and not _view_json(d).get("built"):
-        shutil.rmtree(d, ignore_errors=True)
-        shutil.rmtree(index_dir(c, slug), ignore_errors=True)
+        nofollow.rmtree(d, ignore_errors=True)
+        nofollow.rmtree(index_dir(c, slug), ignore_errors=True)
     _forget(c, slug)
     _emit(c, slug, "dropped", chat=prop.get("chat"))
     return prop
@@ -3245,7 +3246,7 @@ def _prune_shots(d: Path) -> None:
         for p in files:
             if p.name.startswith(run + "-") or p.name.startswith(run + "."):
                 with contextlib.suppress(OSError):
-                    p.unlink()
+                    nofollow.unlink(p)
 
 
 def gate_lines(report: dict[str, Any]) -> list[str]:
@@ -3599,11 +3600,12 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
     frame_file = work / "frame.html"
     atomic_write_text(frame_file, doc)
     states_file = work / "states.json"
-    for s in states:
-        if s.get("out"):
-            Path(s["out"]).parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(states_file, json.dumps([{**s, "out": str(s["out"]) if s.get("out") else None} for s in states],
-                                              default=str))
+    # the browser writes each picture in `work`, the server's own, and the server copies it to its `out` as nofollow
+    # writes: an `out` lies in a folder an agent's commands write (a view's build folder), where the browser's write by
+    # its path would follow a link put there
+    shots = {i: work / f"shot-{i}.png" for i, s in enumerate(states) if s.get("out")}
+    atomic_write_text(states_file, json.dumps([{**s, "out": str(shots[i]) if i in shots else None}
+                                               for i, s in enumerate(states)], default=str))
     cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
            f"{width}x{height}", *(["--media", media] if media else [])]
     try:
@@ -3696,8 +3698,12 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
         r = dict(results[i]) if i < len(results) and isinstance(results[i], dict) else {"ok": False, "errors": ["the state was not shot"]}
         r.setdefault("errors", [])
         r.setdefault("fetches", 0)
-        if s.get("out") and Path(s["out"]).is_file():
-            r["png"] = str(s["out"])
+        if i in shots and shots[i].is_file():
+            try:
+                nofollow.write_bytes(Path(s["out"]), shots[i].read_bytes(), make=True)
+                r["png"] = str(s["out"])
+            except OSError as e:
+                r["errors"].append(f"the picture was not kept: {e}")
         out.append(r)
     return out
 
@@ -4255,10 +4261,9 @@ def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
         return None
     corpus = config.corpus_dir(c)
     d = index_dir(c, slug) / ROBUST_SUBDIR
-    # the views kernel writes in the index folder, so a reader could leave a symlink there for this copy to follow
-    if d.is_symlink():
-        d.unlink()
-    shutil.rmtree(d, ignore_errors=True)
+    # the views kernel writes in the index folder, so a reader could leave a symlink there for this copy to follow:
+    # the copy is removed, made and written as nofollow does
+    nofollow.rmtree(d, ignore_errors=True)
     root = unlinked(config.workspace_dir(c), d / "corpus")
     out: list[tuple[str, int, int]] = []
     total, shown_n, cut, torn_ref = 0, 0, False, None
@@ -4276,23 +4281,23 @@ def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
             continue
         src = config.safe_corpus_path(corpus, rel).resolve()
         dst = root / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(dst.parent)
         if rel == torn:
-            shutil.copyfile(src, dst)
-            with dst.open("rb+") as fh:
+            nofollow.copy_file(src, dst, meta=False)
+            with os.fdopen(nofollow.open(dst, os.O_RDWR), "rb+") as fh:
                 fh.seek(0, os.SEEK_END)
                 if fh.tell():
                     fh.seek(-1, os.SEEK_END)
                     if fh.read(1) != b"\n":
                         fh.write(b"\n")
                 fh.write(TORN_LINE.encode("utf-8"))
-            with dst.open("rb") as fh:
+            with os.fdopen(nofollow.open(dst, os.O_RDONLY), "rb") as fh:
                 newlines = sum(block.count(b"\n") for block in iter(lambda: fh.read(1 << 20), b""))
             torn_ref = f"{rel}#L{newlines + 1}"
             st = dst.stat()
             size, mtime = st.st_size, st.st_mtime_ns
         else:
-            os.symlink(src, dst)
+            nofollow.symlink(src, dst)
         total += size
         out.append((rel, size, mtime))
     return {"root": root, "files": sorted(out), "removed": removed, "torn": torn_ref, "cut": cut}
@@ -4349,7 +4354,7 @@ async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tupl
                 problems.append(_hint("view-robust-empty", what=what))
         return problems, []
     finally:
-        await asyncio.to_thread(shutil.rmtree, index_dir(c, slug) / ROBUST_SUBDIR, True)
+        await asyncio.to_thread(nofollow.rmtree, index_dir(c, slug) / ROBUST_SUBDIR, ignore_errors=True)
 
 
 DERIVED_SAMPLE = 60  # records of the checks' reader answers compared with the lines they cite

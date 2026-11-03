@@ -52,7 +52,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_settings, cite, config, marks, modes, terminal_tools, threads, userconf
+from . import agents, cc_settings, cite, config, marks, modes, nofollow, terminal_tools, threads, userconf
 from . import subagent_files as sfiles
 from .events import TAG as EVENT_TAG
 from .ledger import atomic_write_text
@@ -101,6 +101,7 @@ SUB_QUIET_S = 1.0  # a foreground subagent whose result is in is finished once i
 TAIL_BUSY_S, TAIL_IDLE_S = 0.5, 1.0
 GRACE_S = 10.0  # a workspace with no subscriber for this long has no session
 SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+RECORD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")  # a transcript record's uuid, as a turn's cut
 # a transcript thimble 0.5.0 wrote holds its events as `<channel source="plugin:thimble:thimble" …>`: as records of
 # origin OLD_ORIGIN on the channel route, inside task notifications on the hook and Monitor routes
 OLD_TAG, OLD_ORIGIN, OLD_SOURCE = "channel", "channel", "plugin:thimble:thimble"
@@ -378,11 +379,72 @@ def _sessions_path(c: str) -> Path:
 
 
 def sessions(c: str) -> dict[str, dict]:
+    """sessions.json: the record of each session that was main, by its id. The file lies in the workspace, which a
+    card's code writes, so it is read as nofollow reads it, and each record keeps only what the mirror itself would
+    have written there (_checked)."""
     try:
-        d = json.loads(_sessions_path(c).read_text("utf-8"))
+        d = json.loads(nofollow.read_text(_sessions_path(c)))
     except (OSError, ValueError):
         return {}
-    return d if isinstance(d, dict) else {}
+    if not isinstance(d, dict):
+        return {}
+    return {str(sid): _checked(c, str(sid), rec) for sid, rec in d.items()
+            if SID_RE.match(str(sid)) and isinstance(rec, dict)}
+
+
+def _checked(c: str, sid: str, rec: dict) -> dict:
+    """A record of sessions.json without what names a file, a folder or a process the mirror would not have recorded: a
+    transcript that is not session `sid`'s where the mirror finds one (own_transcript), as the one it continues names
+    its own, a working folder outside the corpus folder, a pid that is no number, a turn's cut that is no record's id,
+    which claude would read as an option (marks, proposer: --resume-session-at)."""
+    out = dict(rec)
+    if out.get("transcript_path") is not None and not own_transcript(c, sid, out["transcript_path"]):
+        out.pop("transcript_path")
+    if out.get("cwd") and not _in_corpus(c, out["cwd"]):
+        out.pop("cwd")
+    pid = out.get("pid")
+    if pid is not None and not (isinstance(pid, int) and not isinstance(pid, bool) and pid > 0):
+        out.pop("pid")
+    cur = out.get("cursor")
+    if isinstance(cur, dict) and cur.get("last_cut") is not None and not RECORD_ID_RE.match(str(cur["last_cut"])):
+        out["cursor"] = {k: v for k, v in cur.items() if k != "last_cut"}
+    came = out.get(FROM_KEY)
+    if came is not None and not (isinstance(came, dict) and SID_RE.match(str(came.get("session") or ""))
+                                 and own_transcript(c, str(came["session"]), came.get("transcript"))):
+        out.pop(FROM_KEY)
+    return out
+
+
+def own_transcript(c: str, sid: str, path: Any) -> bool:
+    """Whether `path` is session `sid`'s transcript where the mirror finds one: <sid>.jsonl in a project's folder of one
+    of the projects folders of Claude Code's config dirs that find_transcript looks in, or in the workspace's runtime
+    folder, where the server's own runtime keeps it (runtime.py). A path a file of the workspace names, which a card's
+    code writes, is taken only then."""
+    if not isinstance(path, str) or not os.path.isabs(path) or not SID_RE.match(sid):
+        return False
+    p = Path(os.path.normpath(path))
+    if p.name != f"{sid}.jsonl":
+        return False
+    projects = {os.path.realpath(b / "projects") for b in (config.claude_config_dir(),
+                                                          config.config_dir_of(config.own_claude_config()))}
+    if os.path.realpath(p.parent.parent) in projects:
+        return True
+    from . import runtime  # noqa: PLC0415 — runtime imports this module
+
+    try:
+        return os.path.realpath(p.parent) == os.path.realpath(config.workspace_dir(c) / runtime.DIR)
+    except (OSError, ValueError):
+        return False
+
+
+def _in_corpus(c: str, folder: Any) -> bool:
+    """Whether `folder` is the workspace's corpus folder or one inside it, where a session of main works."""
+    from . import procs  # noqa: PLC0415
+
+    try:
+        return isinstance(folder, str) and os.path.isabs(folder) and procs.under(folder, config.corpus_dir(c))
+    except (OSError, ValueError):
+        return False
 
 
 def _persist(lv: Live, *, keep_subs: bool = True) -> None:
@@ -519,7 +581,10 @@ def _take_turn(lv: Live, cur: dict) -> None:
 
 def find_transcript(sid: str, config_dir: Path | None = None) -> str | None:
     """The session's transcript, `<claude config>/projects/<slug>/<sid>.jsonl`, found by its id; None until the CLI has
-    written it. Tries the session's own config dir, then the served one, then this server's CLAUDE_CONFIG_DIR."""
+    written it, or for an id that is no session's (SID_RE), such as a path a file of the workspace named. Tries the
+    session's own config dir, then the served one, then this server's CLAUDE_CONFIG_DIR."""
+    if not SID_RE.match(str(sid or "")):
+        return None
     bases = [config_dir, config.claude_config_dir(), config.config_dir_of(config.own_claude_config())]
     name = f"{sid}.jsonl"
     for base in dict.fromkeys(Path(b) / "projects" for b in bases if b is not None):
@@ -596,10 +661,13 @@ def current(c: str) -> Live | None:
 
 
 def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: int | None = None,
-           config_dir: str | None = None, *, follow: bool = False, after: str | None = None) -> Live | None:
+           config_dir: str | None = None, *, follow: bool = False, after: str | None = None,
+           effort: str | None = None) -> Live | None:
     """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR ("" for
     unset, None for what its shim reported); `follow` says the session runs in the process of the one it replaces
-    (_follow); `attached.after` names the previous main when it still runs in another process."""
+    (_follow); `attached.after` names the previous main when it still runs in another process. `attached.settings_effort`
+    is the effort main runs at while the composer chose none, for the composer's chip: `effort`, which the server's
+    runtime gives (runtime.Space.attach), else the analyst's own (cc_settings.analyst_effort)."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
         return None
@@ -645,7 +713,7 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _live[c] = lv
     if not restored:
         _modes.pop(c, None)  # a session that ended and is resumed may run in another mode than it last reported
-        own = cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None
+        own = effort or (cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None)
         meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since, **({"settings_effort": own} if own else {}),
                             **({"after": after} if after else {})}
         meta["ended"] = None
@@ -660,6 +728,8 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         # the notice stays as main's meta has it, since the kept mode may be one note_plan only guessed
         now = ({**held, "permission_mode": kept} if kept else
                {k: v for k, v in held.items() if k not in ("permission_mode", MANUAL_KEY)})
+        if effort:  # the effort main runs at now, which the analyst's settings may have changed while no server ran
+            now["settings_effort"] = effort
         if now != held:
             meta["attached"] = now
             agents.write_meta(c, meta)
@@ -839,7 +909,8 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             sub.of_main = True
             sub.done = meta.get("status") != "running"
             if meta.get("workflow_dir"):
-                sub.workflow, sub.workflow_dir = True, Path(str(meta["workflow_dir"]))
+                sub.workflow = True
+                sub.workflow_dir = _workflow_dir(lv, meta["workflow_dir"])
             lv.subs.append(sub)
     if not lv.subs:
         return
@@ -1183,9 +1254,10 @@ def _cancel_grace(c: str) -> None:
 
 
 def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
-    """events.post logged event `event_id` as it posted it: the mirror skips its record, and main runs until the turn
-    ends. A thread's event is remembered with its thread (thread_for); when the server runs main (runtime.py), it starts
-    the thread's fork and no turn of main's (runtime.deliver), so main does not run for it."""
+    """events.post logged event `event_id` as it posted it, or the server's main logs it where it reads it
+    (runtime.Space.said_line): the mirror skips its record, and main runs until the turn ends. A thread's event is
+    remembered with its thread (thread_for); when the server runs main (runtime.py), it starts the thread's fork and no
+    turn of main's (runtime.deliver), so main does not run for it."""
     from . import runtime  # noqa: PLC0415
 
     _expected.add(event_id)
@@ -2364,7 +2436,7 @@ def _file_fork_ref(path: Path, tool_use_id: str | None) -> str | None:
     if not tool_use_id:
         return None
     try:
-        with path.open("rb") as f:
+        with nofollow.reader(path) as f:  # a transcript, read as _tail_main reads one
             head = f.read(FORK_CALL_SCAN_BYTES)
     except OSError:
         return None
@@ -2589,8 +2661,8 @@ def _agent_dir(lv: Live) -> Path | None:
 
 
 def _read_meta_json(path: Path) -> dict:
-    try:
-        d = json.loads(path.with_name(path.name[: -len(".jsonl")] + ".meta.json").read_text("utf-8"))
+    try:  # beside a transcript, read as _tail_main reads one
+        d = json.loads(nofollow.read_text(path.with_name(path.name[: -len(".jsonl")] + ".meta.json")))
     except (OSError, ValueError):
         return {}
     return d if isinstance(d, dict) else {}
@@ -2658,6 +2730,17 @@ def _unsettled(lv: Live, agent_id: str) -> bool:
         return False
 
 
+def _workflow_dir(lv: Live, kept: Any) -> Path | None:
+    """The folder of a workflow's agents' transcripts that its chat's meta keeps, when it lies in the folder of main's
+    transcript, where Claude Code writes it; else None. The meta lies in the workspace, which a card's code writes, and
+    the mirror reads every agent-*.jsonl of the folder into the chat."""
+    from . import procs  # noqa: PLC0415
+
+    if not isinstance(kept, str) or not os.path.isabs(kept) or not lv.transcript_path:
+        return None
+    return Path(kept) if procs.under(kept, Path(lv.transcript_path).parent) else None
+
+
 def _scan_workflow(lv: Live, owner: Sub, replay: bool, places: dict[str, dict] | None = None) -> None:
     """Adopt the agent transcripts of a workflow's run directory not yet followed, as members of the workflow's chat.
     `replay`
@@ -2694,8 +2777,9 @@ def _spawn_workflow(lv: Live, tool_use_id: str, inp: dict) -> Sub:
         return sub
     script = str(inp.get("script") or "")
     if not script and inp.get("scriptPath"):
-        with contextlib.suppress(OSError, UnicodeDecodeError):
-            script = Path(str(inp["scriptPath"])).read_text("utf-8")[:SCRIPT_READ_CHARS]
+        with contextlib.suppress(OSError, UnicodeDecodeError):  # a regular file, never a FIFO (nofollow)
+            with nofollow.reader(str(inp["scriptPath"]), "r", encoding="utf-8") as f:
+                script = f.read(SCRIPT_READ_CHARS)
     meta = workflow_meta(script)
     name = meta.get("name") or str(inp.get("name") or "").strip()
     title = " ".join((meta.get("description") or name).split()) or WORKFLOW_TITLE
@@ -2742,9 +2826,10 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         sub.offset, sub.buf = 0, b""
     if size == sub.offset:
         return 0
-    with sub.path.open("rb") as f:
-        f.seek(sub.offset)
-        data = f.read(size - sub.offset)
+    try:
+        data = _read_from(sub.path, sub.offset, size)
+    except OSError:  # gone, or a link or a FIFO a card's code left in its place: nothing to read
+        return 0
     sub.offset = size
     sub.quiet_since = time.monotonic()
     if sub.thread and sub.done:
@@ -2936,9 +3021,7 @@ def _call_holder(lv: Live, tool_use_id: str, needle: bytes, read: dict[str, int]
         if size <= start:
             continue
         try:
-            with path.open("rb") as f:
-                f.seek(start)
-                data = f.read(size - start)
+            data = _read_from(path, start, size)
         except OSError:
             continue
         read[key] = max(start, size - len(needle))
@@ -2993,7 +3076,7 @@ def _began_since(path: str | None, since: str | None) -> bool:
     if start is None or not path:
         return True
     try:
-        with open(path, "rb") as f:
+        with nofollow.reader(path) as f:  # a transcript, read as _tail_main reads one
             for _, line in zip(range(STAMP_LINES), f):
                 stamp = _stamp(line)
                 if stamp:
@@ -3009,7 +3092,7 @@ def _take_copied(lv: Live) -> None:
     src = lv.came_from or {}
     uuids: set[str] = set()
     with contextlib.suppress(OSError, TypeError):
-        with open(src.get("transcript"), "rb") as f:
+        with nofollow.reader(src.get("transcript")) as f:  # a transcript, read as _tail_main reads one
             uuids = {m.group(1).decode() for line in f for m in UUID_RE.finditer(line)}
     lv.copied = (uuids, _stamp({"timestamp": src.get("at")}))
 
@@ -3027,8 +3110,8 @@ def _continued_in(path: str | None) -> tuple[str, str] | None:
     """(session, time) of the continued-in record a transcript ends with, when only records with no uuid (Claude Code's
     queue of the events the parked session never reads) follow it, within its last CONTINUED_TAIL bytes; else None."""
     try:
-        with open(path, "rb") as f:  # type: ignore[arg-type]
-            f.seek(max(0, _size(Path(path)) - CONTINUED_TAIL))  # type: ignore[arg-type]
+        with nofollow.reader(path) as f:  # type: ignore[arg-type]  # a transcript, read as _tail_main reads one
+            f.seek(max(0, os.fstat(f.fileno()).st_size - CONTINUED_TAIL))
             data = f.read()
     except (OSError, TypeError):
         return None
@@ -3133,7 +3216,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 continue
             sub.seen.add(f"result:{tid}")
             if sub.calls is not None:
-                sub.calls.result(tid, b, rec)
+                sub.calls.result(tid, b, rec, sub.path)
             data = _result_data(tid, sub.names.get(tid, ""), b.get("content"), bool(b.get("is_error")))
             shell = BG_SHELL_RE.search(data["summary"]) if sub.names.get(tid) == "Bash" else None
             owner = str(sub.agent_id if sub.thimble else sub.root or "")
@@ -3564,6 +3647,15 @@ def _size(path: Path) -> int:
         return 0
 
 
+def _read_from(path: Path | str, start: int, end: int) -> bytes:
+    """The bytes [start, end) of a transcript, read as nofollow reads it: the server's own runtime keeps main's and its
+    agents' transcripts in the workspace, which a card's code writes, so a link there is not followed and a FIFO holds
+    no read; Claude Code's own, outside any workspace, must be regular files too. OSError otherwise."""
+    with nofollow.reader(path) as f:
+        f.seek(start)
+        return f.read(max(0, end - start))
+
+
 def _tail_main(lv: Live) -> None:
     if lv.degraded or not lv.transcript_path:
         return
@@ -3582,9 +3674,10 @@ def _tail_main(lv: Live) -> None:
         lv.offset, lv.buf = 0, b""
     if size == lv.offset:
         return
-    with p.open("rb") as f:
-        f.seek(lv.offset)
-        data = f.read(size - lv.offset)
+    try:
+        data = _read_from(p, lv.offset, size)
+    except OSError:  # gone, or a link or a FIFO a card's code left in its place: nothing to read
+        return
     lv.offset = size
     lines = (lv.buf + data).split(b"\n")
     lv.buf = lines.pop()  # a partial last line waits for the rest

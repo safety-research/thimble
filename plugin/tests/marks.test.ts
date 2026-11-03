@@ -12,6 +12,7 @@ import { setOptions } from '../settings/features.mjs'
 import { marksIn, withRewrites } from '../marks/message.js'
 import { quietLooks } from '../marks/register'
 import { restoreMarks, rowMarks } from '../marks/store'
+import { resetPrompts } from '../prompts/prompts'
 import { lostSpansEl, messageEl } from '../marks/view'
 import { tempRun } from './stubs'
 import { test } from './kit'
@@ -150,6 +151,17 @@ test("the validator gets the fork's calls and main's (it keeps main's whose outp
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[{"mark": 2, "evidence": {"output": ["merged: 12 of 40", "open"]}}]\n```' })
   expect(JSON.parse(seen.stdin[0]!).calls.map((c: Any) => [c.command, c.by])).toEqual([["python3 - <<'PY'\nprint('12 of 40')\nPY", 'checker'], ['python3 count.py', 'main'], ['ls', 'main']])
+})
+
+test("R2: the validator finds Claude's own code in thimble's temp folder and in Claude Code's, which a command in its Bash sandbox gets as its TMPDIR", async () => {
+  const { $, seen } = engine(VALIDATED)
+  const env = $.env.get
+  // Claude Code keeps its own temp folder, claude-<uid>/ (a made-up user 1000's), in CLAUDE_CODE_TMPDIR
+  $.env.get = async (k: string) => (k === 'CLAUDE_CODE_TMPDIR' ? '/made-up/cc' : env(k))
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(JSON.parse(seen.stdin[0]!).tmp).toEqual(['/made-up/tmp/thimble', '/made-up/cc/claude-1000'])
 })
 
 test('a refused check leaves the marks failed, says so once, and nothing spins', async () => {
@@ -555,4 +567,51 @@ test("the pointer over the words of an explainer or a heads-up the check moved o
   ], 'k')
   const words = all(line).find(n => n.type === 'Text' && n.props?.children === 'retry budget')
   expect(words?.props?.hover).toMatchObject({ backgroundColor: '#2b7068', underline: true })
+})
+
+/** A made-up home, where Claude Code and thimble keep their own files, outside the session's folder (/made-up/data). */
+const HOME = '/made-up/home/analyst'
+function withHome($: Any): void {
+  const env = $.env.get
+  $.env.get = async (k: string) => (k === 'HOME' ? HOME : env(k))
+}
+
+test("B19: an error a check's notice quotes names each path of this machine in it as a reason names a file, from the session's folder, else by its name alone: the validator's, one thrown while it ran, the repair's refused fork, the checker text thimble could not read", async () => {
+  const meta = `${HOME}/.thimble/conversations/s-marks/cards/k1/meta.json`
+  const stderr = `Traceback (most recent call last):\n  File "${HOME}/thimble/plugin/engine/validate.py", line 30, in main\nFileNotFoundError: [Errno 2] No such file or directory: '${meta}'\n`
+  const one = engine(() => ({ exitCode: 1, stdout: '', stderr }))
+  withHome(one.$)
+  await noteRow(one.$, 'row-1', REPLY)
+  await startCheck(one.$, { turnId: 't-1', reason: 'answer' })
+  await endCheck(one.$, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(String((await failLineNow(one.$))?.text)).toBe("thimble could not validate the check of the citations (FileNotFoundError: [Errno 2] No such file or directory: 'meta.json'), so they are not checked. Press x on one in the tray to check it.")
+  // a file in the session's folder by its path from it
+  const two = engine(() => { throw new Error("EACCES: permission denied, open '/made-up/data/runs/r1.log'") })
+  withHome(two.$)
+  await noteRow(two.$, 'row-1', REPLY)
+  await startCheck(two.$, { turnId: 't-1', reason: 'answer' })
+  await endCheck(two.$, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(String((await failLineNow(two.$))?.text)).toBe("thimble could not validate the check of the citations (EACCES: permission denied, open 'runs/r1.log'), so they are not checked. Press x on one in the tray to check it.")
+  // the repair's fork, refused by a hook whose words name its file from the home folder
+  const three = engine(VALIDATED)
+  withHome(three.$)
+  await noteRow(three.$, 'row-1', REPLY)
+  await startCheck(three.$, { turnId: 't-1', reason: 'answer' })
+  await endCheck(three.$, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  three.$.agent.spawn = async () => ({ deny: 'The hook ~/.claude/hooks/guard.sh refused it' })
+  await autoRepair(three.$, FORK)
+  expect(String((await failLineNow(three.$))?.text)).toBe('The repair did not start (The hook guard.sh refused it). Press x on the citation to try again.')
+  // the checker's text, which thimble could not read
+  resetPrompts()
+  const four = engine(VALIDATED)
+  withHome(four.$)
+  four.$.fs.read = async (p: string) => { throw new Error(`ENOENT: no such file or directory, open '${p}'`) }
+  try {
+    await noteRow(four.$, 'row-1', REPLY)
+    await startCheck(four.$, { turnId: 't-1', reason: 'answer' })
+    expect(String((await failLineNow(four.$))?.text)).toBe("thimble could not read its checker text (ENOENT: no such file or directory, open 'checker.md'), so the citations are not checked. Reinstall thimble.")
+  } finally {
+    resetPrompts()
+  }
+  for (const $ of [one.$, two.$, three.$, four.$]) expect(String((await failLineNow($))?.text)).not.toContain('/made-up')
 })

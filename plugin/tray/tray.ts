@@ -28,7 +28,11 @@
 //               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
 //               for one whose check did not run, its check; the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
-//               card too (this module's ui.press hook, so the fork starts inside a hook)
+//               card too (this module's ui.press hook, so the fork starts inside a hook). x gives the person's OK
+//               first (marks/checker.ts repairOk), so one press is enough: for thimble's checks this session, as g
+//               does (their spawn, and their Python where nobody is asked), and for a file its check could not read,
+//               where Claude Code asked nobody; where nothing the person does here lets the check run, x is not
+//               offered, and the failure line or the card says why
 //   0 close     back to the mark under it, or close
 //   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
 //               are, in their look
@@ -61,7 +65,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { spinNow } from '../bar/busy'
-import { failNotice, reasonOf } from '../bar/notice'
+import { failNotice } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
 import { tellOpened } from '../core/engaged'
@@ -78,7 +82,7 @@ import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, pendingGloss, pendingSpans, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
-import { checkOpened, launchRepair, repairOf } from '../marks/checker'
+import { checkOpened, errorWordsOf, launchRepair, repairOf, repairOk } from '../marks/checker'
 import { highlighted, statusEls } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
@@ -91,7 +95,7 @@ import { openThread } from '../threads/seam'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,
   indexOf, lineWindow, open, outputAt, partLabel, placeLabel, printableEvidence, printedAt, push, refOf, restStop, restWords, rowsOf, sameRef, SHOW_ALL,
-  stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top, wasLine,
+  stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, stopsOfTurn, TABLE_LABEL, top, unreadLine, wasLine,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -168,7 +172,7 @@ export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
   if (cutNow?.ref === frameKey(f)) out.push('+')
   if (f.kind === 'citation' && (!ask || ['h', 'x'].some(k => ask.includes(k)))) {
     if (await innerOf($, f)) out.push('h')
-    if (canRepair(await itemOf($, f.row, f.n))) out.push('x')
+    if (await repairsNow($, await itemOf($, f.row, f.n))) out.push('x')
   } else if (f.kind === 'explain' || f.kind === 'heads') out.push('2', '3', '4', '5', '6', '7', '8', '9')
   return out
 }
@@ -372,15 +376,14 @@ async function itemOf($: Engine, row: string, n: number): Promise<MarkItem | nul
   return (await rowMarks($, row))?.items.find(x => x.n === n) ?? null
 }
 
-/** An explainer or a heads-up of the row; an explainer still being written (explain/seam.ts pendingGloss) is its words
- *  alone. */
+/** An explainer or a heads-up of the row; one still being written (explain/seam.ts pendingGloss) is its words alone. */
 async function glossOf($: Engine, row: string, id: string): Promise<Gloss | null> {
   return (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id] ?? pendingGloss(row, id)
 }
 
-/** Whether the frame is an explainer still being written: the tray stands on its words until it is (explain/seam.ts
- *  pendingGloss). */
-const beingWritten = (f: Frame): boolean => f.kind === 'explain' && !!pendingGloss(f.row, f.id)
+/** Whether the frame is an explainer or a heads-up still being written: the tray stands on its words until it is
+ *  (explain/seam.ts pendingGloss). */
+const beingWritten = (f: Frame): boolean => (f.kind === 'explain' || f.kind === 'heads') && !!pendingGloss(f.row, f.id)
 
 /** What the tray and the side thread read of a frame. */
 async function infoOf($: Engine, f: Frame): Promise<Info> {
@@ -401,9 +404,9 @@ function engagedMark(f: Frame, info: Info): Any {
   return f.kind === 'heads' ? { kind: 'heads', row: f.row, term: g?.term ?? '', title: g?.title ?? '' } : { kind: 'explain', row: f.row, term: g?.term ?? '' }
 }
 
-/** The person opened a mark: main hears it with their next prompt (an explainer still being written, once written). */
+/** The person opened a mark: main hears it with their next prompt (one still being written, once written). */
 async function told($: Engine, f: Frame): Promise<void> {
-  if (f.kind === 'explain' && pendingGloss(f.row, f.id)) return
+  if (beingWritten(f)) return
   const info = await infoOf($, f)
   await tellOpened($, engagedMark(f, info), info.begins).catch(() => undefined)
 }
@@ -561,13 +564,21 @@ async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Pro
 /** The Button keys of `x repair`: in the citation's card, and in the bar (bar.tsx draws an item as `bar-<id>`). */
 const REPAIR_KEYS = new Set(['repair', 'bar-tray-x'])
 
-/** x, or a click on `x repair`, on the citation the tray shows: a check of it again in the background
- *  (marks/checker.ts). The repair starts inside the hook that calls this; `hold` waits out a key's word window. */
-async function repair($: Engine, f: Frame, hold: { until: number; cancelled: boolean }): Promise<boolean> {
+/** Whether x repairs this citation now (tray.mjs canRepair, marks/checker.ts repairOk), read for a failed one only,
+ *  since a key's hook has a few milliseconds of its own time. */
+async function repairsNow($: Engine, m: MarkItem | null): Promise<boolean> {
+  return canRepair(m, m?.status === 'failed' && !!(await repairOk($, m)))
+}
+
+/** A click on `x repair` on the citation the tray shows: the OK its check needs (marks/checker.ts repairOk), then a
+ *  check of it again in the background. The repair starts inside the hook that calls this. */
+async function repair($: Engine, f: Frame): Promise<boolean> {
   if (f.kind !== 'citation') return false
-  const r = await repairOf($, f.row, f.n)
-  if (r === null) return false
-  const why = typeof r === 'string' ? r : await launchRepair($, r, hold)
+  const ok = await repairOk($, await itemOf($, f.row, f.n))
+  const r = ok ? await repairOf($, f.row, f.n) : null
+  if (!ok || r === null) return false
+  if (typeof r !== 'string') await ok.give()
+  const why = typeof r === 'string' ? r : await launchRepair($, r, { until: 0, cancelled: false })
   if (why) failNotice($, why, 'tray:repair')
   return true
 }
@@ -606,17 +617,24 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   if (key === '+' && cutNow?.ref === frameKey(f)) return { later: () => showAll($, f, true) }
   if (f.kind === 'citation') {
     // only the keys that act on the citation read it: a key's hook has a few milliseconds of its own time
-    if (key === 'x' && canRepair(await itemOf($, f.row, f.n))) {
+    const ok = key === 'x' ? await repairOk($, await itemOf($, f.row, f.n)) : null
+    if (ok) {
       const r = await repairOf($, f.row, f.n)
       if (r === null) return null
       if (typeof r === 'string') return { later: async () => failNotice($, r, 'tray:repair') }
-      // the spawn is made while this key's hook runs (launchRepair's first call), and waits out the word window
-      // (marks/register.ts); a word refuses it
+      // the OK its check needs, then the spawn, made while this key's hook runs, which waits out the word window
+      // (marks/register.ts); a word takes the OK back and refuses the spawn
       const hold = { until, cancelled: false }
-      const failed = (err: unknown) => failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
+      const failed = async (err: unknown) => failNotice($, `The repair did not start: ${await errorWordsOf($, err)}. Press x to try again.`, 'tray:repair')
       return {
-        now: async () => { void launchRepair($, r, hold).then(why => { if (why) failNotice($, why, 'tray:repair') }, failed) },
-        undo: async () => { hold.cancelled = true },
+        now: async () => {
+          await ok.give()
+          void launchRepair($, r, hold).then(why => { if (why) failNotice($, why, 'tray:repair') }, failed)
+        },
+        undo: async () => {
+          hold.cancelled = true
+          await ok.undo()
+        },
       }
     }
     if (key === 'h') {
@@ -807,15 +825,16 @@ type Block = { n: number; key: number; draw: (i: number) => Unit; lead?: Unit; g
 /** A citation's card under its header (the status is in the header): what it says over its evidence (`top`), then its
  *  evidence in parts (Block), each under its label. A corrected one says what it was (`was 15 of 40`; a rewritten
  *  sentence or a narrowed citation says which, as the header says only corrected or repaired); a failed one why in one
- *  sentence; after a repair (x) that verified it as written, why; all dim, and under it `x repair` (repairRow). For a
- *  value code computed: the code under `code · 7 lines`, in Claude Code's colors for Python (unitEls), around the line
- *  that printed the value (tray.mjs printedAt; from its start when the code does not show which line printed it), a
- *  blank row, then under `output · 62 lines` the printed output around the line that holds it in the ruled block;
- *  printed output that is a table shows as its header over the cited row, under `output · table`. For a file: its
- *  place (`place`, a click opens the side pane), then its lines around the cited one in the ruled block. For a card's
- *  value: the card, then the header over the cited row, or its printed lines around the cited one. The cited words
- *  stand on the citations' purple tint. */
-function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null): { top: Unit[]; blocks: Block[] } {
+ *  sentence, and each file its check could not read (tray.mjs unreadLine); after a repair (x) that verified it as
+ *  written, why; all dim, and under it `x repair` (repairRow) while something the person does here lets its check run
+ *  (`runs`, marks/checker.ts repairOk). For a value code computed: the code under `code · 7 lines`,
+ *  in Claude Code's colors for Python (unitEls), around the line that printed the value (tray.mjs printedAt; from its
+ *  start when the code does not show which line printed it), a blank row, then under `output · 62 lines` the printed
+ *  output around the line that holds it in the ruled block; printed output that is a table shows as its header over
+ *  the cited row, under `output · table`. For a file: its place (`place`, a click opens the side pane), then its lines
+ *  around the cited one in the ruled block. For a card's value: the card, then the header over the cited row, or its
+ *  printed lines around the cited one. The cited words stand on the citations' purple tint. */
+function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | null, runs: boolean): { top: Unit[]; blocks: Block[] } {
   const { Text } = els
   if (!m) return { top: [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }], blocks: [] }
   const ev = printableEvidence(m.evidence)
@@ -830,9 +849,11 @@ function citationParts(els: Any, m: MarkItem | null, w: number, place: Any | nul
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
+  // each file its check could not read, once, whatever tools Claude Code refused on it: what x asks for, or why no x
+  if (m.status === 'failed') for (const [k, file] of [...new Set((m.unread ?? []).map(u => u.file))].entries()) dim(`unread-${k}`, unreadLine(file))
   // a check that did not run: x starts it
   const unrun = m.status === 'failed' && m.failedBy === 'none'
-  if (canRepair(m)) top.push(repairRow(els, m))
+  if (canRepair(m, runs)) top.push(repairRow(els, m))
   if (!ev) {
     if (m.status !== 'checking' && !unrun) dim('none', 'The check gave no evidence for it.')
     return { top, blocks: [] }
@@ -1053,7 +1074,7 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
     await themeNow($)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
-    parts = citationParts(els, m, inner, await fileLinkEl($, els, f, m))
+    parts = citationParts(els, m, inner, await fileLinkEl($, els, f, m), await repairsNow($, m))
   } else if (f.kind === 'place') {
     title = f.id
     units = await placeBody($, els, f, inner)
@@ -1062,8 +1083,9 @@ export async function trayBand($: Engine, els: Any, width: number, room: BandRoo
     const heads = f.kind === 'heads'
     title = String(g?.term || g?.title || (heads ? 'heads-up' : 'explainer'))
     if (!g) units = [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: `This ${heads ? 'heads-up' : 'explainer'} is no longer in the session.` }) }]
-    // an explainer still being written (explain/seam.ts pendingGloss): its box is an explainer's, and where its words
-    // will stand the turning glyph turns with the bar's and a citation's being checked (bar/busy.ts spinNow), no words
+    // an explainer or a heads-up still being written (explain/seam.ts pendingGloss): its box is its kind's, and where
+    // its words will stand the turning glyph turns with the bar's and a citation's being checked (bar/busy.ts spinNow),
+    // no words
     else if (beingWritten(f)) units = [{ h: 1, el: Text({ key: 'writing', color: accent(), children: await spinNow($) }) }]
     else words = { text: explainerText(g) }
   }
@@ -1203,10 +1225,10 @@ export const registerTray: Register = on => {
     try {
       if (e.plugin !== 'thimble' || !REPAIR_KEYS.has(String(e.element))) return next(e)
       const f = top(await trayNow($)) as Frame | null
-      if (!f || !(await repair($, f, { until: 0, cancelled: false }))) return next(e)
+      if (!f || !(await repair($, f))) return next(e)
       return { element: e.element }
     } catch (err) {
-      failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
+      failNotice($, `The repair did not start: ${await errorWordsOf($, err)}. Press x to try again.`, 'tray:repair')
       return { element: e.element }
     }
   }).catch(($, e, next) => next(e))

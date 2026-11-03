@@ -23,7 +23,7 @@ from typing import Any, Iterable
 
 from fastapi import APIRouter, HTTPException
 
-from . import cite, config, frames
+from . import cite, config, frames, nofollow
 
 log = logging.getLogger("thimble.checkstore")
 router = APIRouter()
@@ -335,8 +335,14 @@ def fixable(cell: dict, fields: Iterable[str]) -> list[str]:
 
 
 def _before_path(c: str, cid: str, fix_id: str) -> Path:
+    """card-checks/<card>/<fix>-before.json, its folder made when missing; ValueError for a card's id a route would not
+    take (card_check._shot_path)."""
+    from . import notebook  # noqa: PLC0415
+
+    if not notebook.ID_RE.match(cid or ""):
+        raise ValueError(f"{cid!r} is no card's id")
     d = config.workspace_dir(c) / SHOTS_DIR / cid
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     return d / f"{fix_id}-before.json"
 
 
@@ -389,7 +395,7 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
         fix["state"] = SAME
     else:
         if ran is not None:
-            _before_path(c, cid, fix_id).write_text(json.dumps(ran, default=str), "utf-8")
+            nofollow.write_text(_before_path(c, cid, fix_id), json.dumps(ran, default=str))  # never through a link
         cell.setdefault("fixes", []).append(fix)
     notebook.stamp_edit(ws, cell, content, ACTOR, shown=shown)
     cell["ts"] = _now()
@@ -465,8 +471,8 @@ def undo_fix(c: str, cid: str, fix_id: str) -> dict:
     before = fix.get("before") or {}
     content, shown = notebook.content_of(cell), notebook.shown_of(cell)  # for the card's history (notebook.stamp_edit)
     if "code" in fields:
-        try:
-            run = json.loads(_before_path(c, cid, fix_id).read_text("utf-8"))
+        try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+            run = json.loads(nofollow.read_text(_before_path(c, cid, fix_id)))
         except (OSError, ValueError):
             run = None
         cell["code"] = before.get("code") or ""

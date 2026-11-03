@@ -22,7 +22,7 @@ async function cardsIn($: Engine, text: string, width?: (indent: number) => numb
   for (const id of cardIdsIn(text)) {
     const meta = await metaOf($, id)
     if (!meta || meta.version < 1) continue
-    const drawn = await cardText($, id, width?.(2)).catch(() => '')
+    const drawn = await cardText($, id, { width: width?.(2) }).catch(() => '')
     out[id] = { title: meta.title, text: drawn.startsWith('(the card did not draw') ? '' : drawn }
   }
   return out

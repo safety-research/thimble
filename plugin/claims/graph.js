@@ -36,7 +36,7 @@
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, inverse, part}.
 import { blocks, marksIn } from '../marks/message.js'
 import { tableLines } from '../marks/table.mjs'
-import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printedBy, wasLine } from '../tray/tray.mjs'
+import { checkStatus, evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printedBy, unreadLine, wasLine } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
 const cut = (s, k) => (Array.from(String(s ?? '')).length <= k ? String(s ?? '') : Array.from(String(s ?? '')).slice(0, Math.max(0, k - 1)).join('') + '…')
@@ -495,7 +495,8 @@ function layOf(claims, groups, edges, W, h, cols) {
 const statusOf = s => (s?.status === 'gone' ? { key: 'gone', sign: '', word: 'no longer in the session', tone: 'dim' } : checkStatus(s))
 const statusWords = st => (st.sign && st.sign !== 'spin' ? `${st.sign} ${st.word}` : st.word)
 
-/** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair). */
+/** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair); the pane
+ *  offers x only where something the person does here lets its check run too (marks/checker.ts repairOk). */
 export const repairable = s => !!s && s.status === 'failed' && !!s.row && !!s.n
 
 /** Whether x checks a citation for the first time: it waits to be opened (`deferred`). */
@@ -608,7 +609,7 @@ const cardLine = (ev, W) => fit([{ s: 'card ', tone: 'dim' }, { s: one(ev.title 
  * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citations' look
  * (underlined, tinted on hover; a failed one's red) and
  * its check beside them (`✓ verified · citation`, as the tray's header says it); what it was, when the check corrected
- * it (`✓ corrected · citation` over `was 15 of 40`), or why it failed, dim; then
+ * it (`✓ corrected · citation` over `was 15 of 40`), or why it failed and each file its check could not read, dim; then
  * its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line after a dim │, the
  * cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the output has more.
  * `whole`: the code and output whole (c). {rows, cut}: cut when the code or the line was cut.
@@ -626,6 +627,7 @@ export function cardOf(s, W, { whole = false } = {}) {
   const dim = t => wrap(t, W).forEach(l => rows.push([{ s: l, tone: 'dim' }]))
   if (s.status === 'corrected' && s.was) dim(wasLine({ rewritten: s.rewritten, narrowed: s.narrowed, was: one(s.was) }))
   else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))
+  if (s.status === 'failed') for (const file of new Set((s.unread || []).map(u => u.file))) dim(unreadLine(file))
   if (s.status === 'checking' || s.status === 'gone' || !s.evidence) return { rows, cut: false }
   if (whole) return { rows: [...rows, ...wholeRows(s.evidence, W)], cut: true }
   const sn = snippetOf(s.evidence, W - 2)

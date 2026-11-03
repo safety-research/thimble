@@ -65,7 +65,7 @@ from typing import Any, Callable, Iterator
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import agents, config, subagent_files as files, tools
+from . import agents, config, nofollow, subagent_files as files, tools
 
 log = logging.getLogger("thimble.subagents")
 
@@ -817,7 +817,7 @@ def make_work(c: str, work: Path) -> None:
         if root not in work.resolve().parents:
             log.warning("%s: the work folder %s is outside the workspace; not made", c, work)
             return
-        work.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(work)
     except OSError as e:
         log.warning("%s: the work folder %s was not made: %s", c, work, e)
 
@@ -1957,15 +1957,21 @@ CLICK_ROUTES: tuple[Callable[..., Any], ...] = (start_it_route, again_route)  # 
 
 
 OLD_BG_FILE = "bg-sessions.json"  # in the workspace: the background sessions thimble 0.5.0 started
+BG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")  # a background session's short id, as `claude stop` takes it
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")  # a Claude Code session's id
 ORPHAN_WAIT_S = 3.0  # after SIGTERM to a process an earlier version left, before SIGKILL
 EARLIER_VERSION = "earlier-version"  # a chat's `continue` when an earlier version of thimble ran its agent
 
 
 def _stop_background(short: str) -> None:
     """`claude stop <short>`: the end of an earlier version's background session, with its conversation kept. Blocking;
-    never raises."""
+    never raises. A short id is read from the workspace, which a card's code writes: one that is not a session's
+    (BG_RE), such as one that starts with a dash, which `claude stop` would read as an option, stops nothing."""
     import subprocess  # noqa: PLC0415
 
+    if not BG_RE.match(str(short)):
+        log.warning("background session %r: no session's id, so nothing was stopped", str(short)[:80])
+        return
     try:
         subprocess.run([config.CLAUDE_BIN, "stop", short], capture_output=True, text=True, timeout=30,
                        env=config.launch_environ())
@@ -1980,8 +1986,8 @@ def stop_old_background(c: str) -> list[str]:
     so this runs once. Blocking; returns the short ids stopped."""
     path = config.workspace_dir(c) / OLD_BG_FILE
     shorts: list[str] = []
-    try:
-        rows = json.loads(path.read_text("utf-8"))
+    try:  # never through a link or a FIFO a card's code left there (nofollow)
+        rows = json.loads(nofollow.read_text(path))
     except (OSError, ValueError):
         rows = []
     for row in rows if isinstance(rows, list) else []:
@@ -2014,8 +2020,11 @@ def kill_left(meta: dict[str, Any]) -> None:
 
     if meta.get("background") and meta.get("bg"):
         _stop_background(str(meta["bg"]))
+    # the meta lies in the workspace, which a card's code writes: its process is one whose command line names its
+    # session's id, a Claude Code session's (UUID_RE), never any word of any process's command line
     pid, sid = meta.get("pid"), str(meta.get("session") or "")
-    if not isinstance(pid, int) or pid <= 0 or not sid or not procs.alive(pid) or sid not in procs.argv(pid):
+    if not isinstance(pid, int) or pid <= 0 or not UUID_RE.match(sid) or not procs.alive(pid) \
+            or sid not in procs.argv(pid):
         return
     tree = procs.descendants(pid)
     for sig in (signal.SIGTERM, signal.SIGKILL):

@@ -4,28 +4,14 @@
 // front matter (YAML between `---` lines, TOML between `+++` lines) shows folded above the document, its fields one per
 // row when opened.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import Markdown, { type Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import Markdown from 'react-markdown'
 import type { Root } from 'hast'
 import { Button } from '../../components/Button'
-import { MarkdownCode } from '../../components/Code'
-import { MdImage } from '../../components/MdImage'
 import { rehypeNumericCells } from '../../lib/markdownCells'
 import type { SourceKind, SourceRecord } from '../../lib/types'
-import { BlockEl, LineRow, targetOf, useTarget, type ViewDef, type ViewProps } from './common'
+import { BlockEl, LineRow, MD_COMPONENTS, MD_REMARK, targetOf, useTarget, type ViewDef, type ViewProps } from './common'
 
 export const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path)
-
-const MD_COMPONENTS: Components = {
-  table: ({ node: _node, ...rest }) => (
-    <div className="reader-table-wrap reader-md-table">
-      <table {...rest} />
-    </div>
-  ),
-  code: MarkdownCode,
-  // a corpus's markdown loads no image from another host
-  img: MdImage,
-}
 
 /** rehype plugin: a top-level block gets `data-anchor` from the source line it starts on (`lines` maps the joined text's
  * line index to the record's line number). */
@@ -145,7 +131,7 @@ export function TextView({ path, page, targetRef }: ViewProps) {
       {md && !raw ? (
         <div className="reader-md reader-md-file" data-anchor={path} data-anchor-text={path}>
           {meta > 0 && <FrontMatter path={path} records={records.slice(0, meta)} />}
-          <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} rehypePlugins={rehype} components={MD_COMPONENTS}>
+          <Markdown remarkPlugins={MD_REMARK} rehypePlugins={rehype} components={MD_COMPONENTS}>
             {body.map(lineText).join('\n')}
           </Markdown>
         </div>

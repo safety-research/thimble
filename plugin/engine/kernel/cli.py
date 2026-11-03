@@ -41,6 +41,8 @@ Add --json to label or coverage for the whole record.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import sys
@@ -48,11 +50,16 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import codebox as CB
 from . import coverage as CV
 from . import estimate as EST
 from . import labels as LB
 from . import sources as S
 from .store import Store
+
+
+# how long a command waits on stdin for input it cannot go on without (stdin_text, stdin_wait)
+NEEDS_S = 5.0
 
 
 def stdin_text(wait: float = 1.0) -> str:
@@ -386,7 +393,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         out_json({"name": name, "choice": r["choice"], "reads": r["reads"], "of": r["of"], **LB.status(_load(st, name))})
         return 0
     if a.answers:
-        raw = Path(a.answers).read_text() if a.answers != "-" else stdin_text(5.0)
+        raw = Path(a.answers).read_text() if a.answers != "-" else stdin_text(NEEDS_S)
         try:
             payload = json.loads(raw or "{}")
         except ValueError as e:
@@ -446,7 +453,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             return 2
         rule = a.regex if kind == "regex" else a.prompt if kind == "prompt" else None
         if kind == "code":
-            rule = Path(a.code).read_text() if a.code not in ("-", "") else stdin_text(5.0)
+            rule = Path(a.code).read_text() if a.code not in ("-", "") else stdin_text(NEEDS_S)
             if not rule.strip():
                 print("no code: pass a file with --code FILE, or the code on stdin, defining label(unit)")
                 return 2
@@ -627,6 +634,17 @@ def cmd_doctor(a: argparse.Namespace) -> int:
     return DR.cmd(a)
 
 
+# scripts/install.sh's steps, which only the script runs, and thimble-browser's fix of its launcher (kernel/install.py says
+# what each does)
+INSTALL_VERBS = ("release", "name", "plugin", "sandbox", "browser", "commands", "switch", "launcher")
+
+
+def cmd_install(a: argparse.Namespace) -> int:
+    from . import install as IN  # noqa: PLC0415
+
+    return IN.cmd(a)
+
+
 def _shares(line: str) -> bool:
     """A help line of share.py's commands (thimble file issue, thimble file pr), or the line that goes on from one."""
     return "thimble file " in line or "needs gh, GitHub's" in line
@@ -646,7 +664,8 @@ def _help() -> str:
     return "\n".join(x for x in lines if FX.can_share() or not _shares(x))
 
 
-def main(argv: list[str] | None = None) -> int:
+def _parser() -> tuple[argparse.ArgumentParser, Any]:
+    """The command's parser, and its commands'."""
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,doctor,label,coverage}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
@@ -743,9 +762,57 @@ def main(argv: list[str] | None = None) -> int:
                        "× when it does not, with the step that fixes it on the line below. Run it in a shell.")
     p.add_argument("--offline", action="store_true", help="do not look for a newer release")
     p.set_defaults(fn=cmd_doctor)
-    args = list(sys.argv[1:] if argv is None else argv)
-    if args and args[0] == "fixes":
-        args = ["fix", "list", *args[1:]]
+    # not in thimble --help: scripts/install.sh runs it, and thimble-browser runs its verb launcher
+    p = sub.add_parser("install", description="thimble install VERB: a step of scripts/install.sh, which runs them in "
+                       "order (engine/kernel/install.py says what each does). Run the script, not this.")
+    p.add_argument("verb", choices=INSTALL_VERBS, metavar="VERB")
+    p.add_argument("--from", dest="from_", metavar="DIR", help="release: the release the script downloaded")
+    p.add_argument("--ref", help="release: the branch or tag the script was asked for")
+    p.add_argument("--folder", metavar="DIR", help="the clone of a dev install (scripts/install.sh --local)")
+    p.add_argument("--bin-dir", dest="bin_dir", metavar="DIR", help="where the commands are (~/.local/bin)")
+    p.add_argument("--browser", action="store_true", help="the workbench is asked for, or installed")
+    p.add_argument("--notes", metavar="FILE", help="what does not work yet, a line each, for the script's end")
+    p.add_argument("--state", metavar="FILE", help="what one step leaves for a later one")
+    p.set_defaults(fn=cmd_install)
+    return ap, sub
+
+
+def _named(args: list[str]) -> list[str]:
+    """The arguments with `thimble fixes` as `thimble fix list`."""
+    return ["fix", "list", *args[1:]] if args and args[0] == "fixes" else args
+
+
+def stdin_wait(argv: list[str]) -> float:
+    """How long the command `argv` waits for its input on stdin, as its own code calls stdin_text: NEEDS_S for input it
+    cannot go on without (a label's code with no file, the model's answers, file issue's draft), stdin_text's own 1 s for
+    the rest that reads it (values as JSON for label --set, the words and records of the plugin's fix verbs), and 0 for a
+    command that reads none, or that does not parse. handoff.py reads stdin for as long before it hands the command to
+    the plugin, which gives the command what it read."""
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            a = _parser()[0].parse_args(_named(list(argv)))
+    except (SystemExit, Exception):  # noqa: BLE001 — what does not parse reads nothing
+        return 0.0
+    cmd = getattr(a, "cmd", None)
+    if cmd == "label":
+        if a.answers == "-" or a.code in ("-", ""):
+            return NEEDS_S
+        return 1.0 if a.set_values == [] else 0.0
+    if cmd == "file":
+        return NEEDS_S if a.verb == "issue" and a.draft == "-" else 0.0
+    if cmd == "fix":
+        if a.verb in ("new", "round", "redo", "draft"):
+            return 1.0
+        if a.verb == "done":
+            return 1.0 if "-" in (a.cannot, a.summary) else 0.0
+        if a.verb in ("apply", "merge", "keep", "send"):
+            return 1.0 if a.ask == "-" else 0.0
+    return 0.0
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap, sub = _parser()
+    args = _named(list(sys.argv[1:] if argv is None else argv))
     if args and args[0] == "--version":
         from . import fixes as FX  # noqa: PLC0415
 
@@ -762,6 +829,9 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(a, "fn", None):
         print(_help())
         return 0
+    if CB.needed(a):
+        # the plugin runs it for a command in Claude Code's sandbox, and it runs its caller's code: in thimble's sandbox
+        return CB.run(args)
     try:
         return a.fn(a)
     except BrokenPipeError:

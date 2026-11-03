@@ -83,7 +83,7 @@ export function PageView({ ws, slug, doc, drawer, comments, on, look, picked, on
 
   const ev = useEvidence(comments, on, look, picked)
   const claims = doc?.claims ?? []
-  // a comment picked in the Checks pane: its claim scrolls into view
+  // a comment picked (a click on its tinted sentence): its claim scrolls into view
   const claimsEl = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!picked) return

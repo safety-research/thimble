@@ -9,6 +9,8 @@
 //   fenced(text)   text in a fenced block, so a model reads text from the records as data, not as words to act on
 //   printable(s, spans)  s with each character that does not print as its escape, as Python's repr writes it (`\x1b`,
 //                  `\u200b`); with `spans`, {text, spans}, the spans moved with the text
+//   errorWords(text, where)  an error's text as thimble quotes it, each path of this machine in it named by its path
+//                  from the session's folder when it lies there, else by its name alone
 
 /** A code point's cells: 0 for combining marks and zero-width characters, 2 for wide and fullwidth ones. */
 function charWidth(cp) {
@@ -138,4 +140,107 @@ export function printable(s, spans) {
     return x + d
   }
   return { text: out, spans: ranges.map(([a, b]) => [moved(a, false), moved(b, true)]) }
+}
+
+// ------------------------------------------------------------------------------------------------ an error's words
+//
+// An error thimble quotes in a notice, a reason or a repair request (an exception's text, a fork's error or refusal) is
+// thimble's own words, never the records' nor the check's: each path of this machine in it is read where it leads and
+// named as the validator names a cited file (engine/kernel/evidence.py error_words, file_named), by its path from the
+// session's folder when it lies there, else by its name alone, never by where that folder lies. Both answer the cases
+// of plugin/tests/error_paths.json alike.
+
+// a path in an error's text: one quoted whole, which may hold spaces and colons, else one in a run of the characters a
+// path holds, not a URL, starting where the run does or right after a colon in it (`failed:/x`, `notes.md:3:/x`) and
+// ending at the next colon (`/x/run.py:12:5`, `/a/b:/c/d`), a `file:` URL's own aside
+const QUOTED_PATH = /(['"`])((?:file:|~[A-Za-z0-9_.-]*\/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\/|\.\.?\/|\/)[^'"`\n]*?)\1/gi
+const PATH_RUN = /[^\s'"`()[\]<>,;]+/g
+const PATH_START = /^(?:file:|~[A-Za-z0-9_.-]*\/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\/|\.\.?\/|\/)/i
+const URL_START = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//
+const URL_SCHEME = /(?:^|:)(?!file:$)[A-Za-z][A-Za-z0-9+.-]*:$/i // a URL's scheme just before its `//`
+
+/** A path's . and .. parts read, as the file system reads them: an absolute one stays absolute. */
+function normalPath(p) {
+  const out = []
+  for (const part of p.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') out.pop()
+    else out.push(part)
+  }
+  return `/${out.join('/')}`
+}
+
+/** %XX escapes read, as Python's unquote reads them; an escape that is no UTF-8 stays as it is. */
+function unquote(s) {
+  return s.replace(/(?:%[0-9A-Fa-f]{2})+/g, m => { try { return decodeURIComponent(m) } catch { return m } })
+}
+
+/** The absolute path a path leads to, in each form it may be written (the validator's written_path): an absolute one,
+ *  `//` read as `/`; a `file:` URL in any case, its %XX escapes read; one from the home folder (`~/`, `$HOME/`,
+ *  `${HOME}/`); else one from `base`, which `../` leaves. Null for one that leads to no folder named here: another
+ *  user's home, another variable, a home not known, a relative path with no base. */
+function writtenPath(path, base, home) {
+  let s = String(path).trim()
+  if (s.slice(0, 5).toLowerCase() === 'file:') {
+    s = unquote(s.slice(5))
+    if (s.startsWith('//')) {
+      const rest = s.slice(2)
+      const slash = rest.indexOf('/')
+      const host = slash < 0 ? rest : rest.slice(0, slash)
+      s = ['', 'localhost'].includes(host.toLowerCase()) ? `/${slash < 0 ? '' : rest.slice(slash + 1)}` : `/${rest}`
+    }
+  }
+  const fromHome = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/.exec(s)
+  if (fromHome) {
+    if (!home) return null
+    s = `${home}${s.slice(fromHome[0].length)}`
+  } else if (s.startsWith('~') || s.startsWith('$')) return null
+  if (!s.startsWith('/')) {
+    if (!base) return null
+    s = `${base}/${s}`
+  }
+  return normalPath(s)
+}
+
+/** A path by its path from the first of the folders that holds it; a folder itself by its own name; null when none
+ *  holds it. The root of the file system holds every file, so it names none. */
+function fileNamed(full, folders) {
+  for (const f of folders) {
+    const d = normalPath(f)
+    if (d === '/') continue
+    if (full === d) return d.slice(d.lastIndexOf('/') + 1)
+    if (full.startsWith(`${d}/`)) return full.slice(d.length + 1)
+  }
+  return null
+}
+
+/** An error's text as thimble quotes it: each path of this machine in it named by its path from the session's folder
+ *  (`where.root`, the folder the session started in, then `where.cwd`, the shell's) when it lies there, else by its
+ *  name alone. A path is read from the shell's folder, as the process that wrote the error read it, and `~` from
+ *  `where.home`. A URL, a path relative to no folder named, and other words stay as they are. Pure. */
+export function errorWords(text, where = {}) {
+  const folders = [where.root, where.cwd].filter(f => typeof f === 'string' && f.startsWith('/'))
+  const named = path => {
+    const full = writtenPath(path, where.cwd || where.root || '', where.home || '')
+    const name = full ? fileNamed(full, folders) : null
+    const last = (full ?? path).replace(/\/+$/, '')
+    return name || last.slice(last.lastIndexOf('/') + 1) || path
+  }
+  const run = t => {
+    if (URL_START.test(t) && t.slice(0, 5).toLowerCase() !== 'file:') return t
+    const starts = [0]
+    for (let i = 0; i < t.length; i++) if (t[i] === ':') starts.push(i + 1)
+    let out = ''
+    let done = 0
+    for (const at of starts) {
+      if (at < done || !PATH_START.test(t.slice(at)) || (t.startsWith('//', at) && URL_SCHEME.test(t.slice(0, at)))) continue
+      const end = t.indexOf(':', at + (t.slice(at, at + 5).toLowerCase() === 'file:' ? 5 : 0))
+      const path = t.slice(at, end < 0 ? t.length : end).replace(/[.!?]+$/, '')
+      if (!/\/[^/]/.test(path)) continue
+      out += t.slice(done, at) + named(path)
+      done = at + path.length
+    }
+    return out + t.slice(done)
+  }
+  return String(text ?? '').replace(QUOTED_PATH, (_, q, path) => `${q}${named(path)}${q}`).replace(PATH_RUN, run)
 }

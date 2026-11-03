@@ -3,14 +3,15 @@
 // effort that runs, Claude Code's levels in every agent's effort menu and none for a model that runs with none, fast
 // mode only for the classifiers, main and `thimble fix` (on the dev row), the view proposals' and the refusal's
 // rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
-// when it changed; thimble's rules for main and its agents, code tickets' among them (web and data follow the session's
-// mode, and the shell runs in Claude Code's sandbox where /thimble saw one); one permission row, the dev agent's
+// when it changed; thimble's rules for main and its agents, code tickets' among them, as the workbench runs them (web,
+// edits of this folder by its switch, the shell in a sandbox, and on Claude Code sign-in a new host asks first, where
+// an API key or WIF reaches any host); one permission row, the dev agent's
 // program's, only where an extension runs one, where a session in Bypass counts as Manual; cardWait; no installs row;
 // the Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), sent only when it changed and taken by
 // the page at once.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ASK_KEY_LABEL, BYPASS_LINE, EDITS_LABEL, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyOptions, changedAskKey, changedEdits, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { ASK_KEY_LABEL, BYPASS_LINE, EDITS_LABEL, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyOptions, changedAskKey, changedEdits, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, fenceTip, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { getAskKey, setAskKey } from '../../src/lib/platform.ts'
 import type { Attached, Settings } from '../../src/lib/types.ts'
@@ -80,6 +81,8 @@ describe('the rules', () => {
     expect(lockedWhy('dev', 'fast', conf('claude-opus-5-5'), { attached: true })).toBeNull()
     expect(lockedWhy('dev', 'fast', conf('claude-haiku-4-5-20251001'), { attached: true })).toMatch(/fast/i)
     expect(lockedWhy('checks', 'effort', conf('claude-haiku-4-5-20251001'), { attached: true })).toBe('Haiku 4.5 runs with no effort')
+    expect(lockedWhy('checks', 'effort', conf('claude-haiku-5-5'), { attached: true })).toBeNull()
+    expect(lockedWhy('dev', 'fast', conf('claude-haiku-5-5'), { attached: true })).toBe('Haiku 5.5 has no fast mode')
   })
 
   test('the roles in order, the refusal row last of thimble\'s', () => {
@@ -115,10 +118,12 @@ describe('the rules', () => {
 
   test("thimble's rules for main and its agents in words, and the CLAUDE.md files each agent reads", () => {
     const main = SETTINGS.agents!.main!
-    expect(fenceLine(main)).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
-    expect(fenceLine(main, true)).toBe("web follows your mode · data edits follow your mode · shell in Claude Code's sandbox")
-    expect(fenceLine({ ...main, web: 'off', data: 'off' }, false)).toBe('no web · never edits data · shell follows your mode')
-    expect(fenceLine({ ...main, web: 'allow', data: 'allow' })).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
+    expect(fenceLine(main)).toBe('web on · edits files in this folder · shell in a sandbox · asks before a new host')
+    expect(fenceLine({ ...main, network: 'on' })).toBe('web on · edits files in this folder · shell in a sandbox · network on')
+    expect(fenceLine({ ...main, web: 'off', data: 'off' }, false)).toBe('no web · never edits files in this folder · shell in a sandbox · asks before a new host')
+    expect(fenceLine({ ...main, web: 'allow', data: 'allow', network: 'ask' })).toBe('web on · edits files in this folder · shell in a sandbox · asks before a new host')
+    // the workbench gives main no permission mode, so no part of the line follows one
+    expect([fenceLine(main), fenceTip(main), fenceTip({ ...main, network: 'on' }, false)].join('\n')).not.toMatch(/mode/)
     expect(memoryWords('off')).toBe('CLAUDE.md files: off')
     expect(memoryWords(undefined)).toBe('CLAUDE.md files: on')
   })
@@ -137,7 +142,7 @@ describe('the popover', () => {
     expect(doc.querySelector('.settings-row[data-role="checks"] [aria-label="checks effort"]')?.textContent).toBe('none')
     expect(doc.querySelectorAll('.settings-row[data-role="labels"] .fast-bolt')).toHaveLength(1)
     expect(doc.querySelector('.settings-next-start')?.textContent).toMatch(/applies to its next start/)
-    expect(doc.querySelector('.settings-fence-line')?.textContent).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
+    expect(doc.querySelector('.settings-fence-line')?.textContent).toBe('web on · edits files in this folder · shell in a sandbox · asks before a new host')
     expect(doc.querySelector('.settings-fence .settings-headrow')?.textContent).toMatch(/^thimble's rules/)
     expect(doc.querySelector('.settings-fence-note')).toBeNull()
     expect(doc.textContent).not.toMatch(/fence/i)
@@ -274,14 +279,17 @@ describe('the popover', () => {
     }
   })
 
-  test("main's row says the shell runs in Claude Code's sandbox where /thimble saw one", async () => {
-    attached = { session: 's1', cwd: '/c', since: '', sandbox: true }
+  test("main's row says where the shell's network reaches, and its edits follow the folder's switch", async () => {
+    settings = { ...SETTINGS, agents: { ...SETTINGS.agents, main: { ...SETTINGS.agents!.main!, network: 'on' } } }
     const anchor = document.createElement('button')
     document.body.appendChild(anchor)
     await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
     await settle()
     await settle()
-    expect(document.body.querySelector('.settings-fence-line')?.textContent).toBe("web follows your mode · data edits follow your mode · shell in Claude Code's sandbox")
+    const line = () => document.body.querySelector('.settings-fence-line')?.textContent
+    expect(line()).toBe('web on · edits files in this folder · shell in a sandbox · network on')
+    await act(async () => document.body.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${EDITS_LABEL}"]`)!.click())
+    expect(line()).toBe('web on · never edits files in this folder · shell in a sandbox · network on')
   })
 
   test("a session in Bypass reaches the dev agent's program as Manual; only a row the server answers Bypass is Bypass, with Claude Code's warning", async () => {

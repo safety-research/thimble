@@ -134,7 +134,7 @@ async def test_a_click_starts_a_builder_through_the_module_on_the_values_it_name
     slug = _propose(asked=True)
     agent = await _started(slug, values={"model": "sonnet", "effort": "max"})
     [spawn] = bridge.ops("spawn")
-    assert spawn["role"] == "view-builder" and spawn["values"] == {"model": "claude-sonnet-5", "effort": "max"}
+    assert spawn["role"] == "view-builder" and spawn["values"] == {"model": "claude-sonnet-5-5", "effort": "max"}
     assert spawn["description"] == "view: Posts" and spawn["what"] == slug
     folder, work = views.views_dir(CORPUS) / slug, dev.view_work_dir(CORPUS, slug)
     assert str(folder) in spawn["prompt"] and str(work) in spawn["prompt"]

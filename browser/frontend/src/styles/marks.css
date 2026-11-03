@@ -66,10 +66,9 @@
 .mark-pop .mark-ev-label + .mark-ev-edge { margin-top: 2px; }
 .mark-pop .mark-ev-edge + .refchip-lines { margin-top: 0; }
 .mark-pop .mark-ev-edge { font-size: 12px; line-height: 1.6; color: var(--text-tertiary); white-space: pre; }
+/* a failed mark's reason, whole: it may end with what changed in a label after the reply (backend marks.py) */
 .mark-pop-why {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   color: var(--status-negative);
 }
 .mark-pop-state { color: var(--text-tertiary); }

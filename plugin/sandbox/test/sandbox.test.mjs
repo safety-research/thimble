@@ -99,7 +99,7 @@ test('a Node too old for srt is told the plugin\'s minimum, the one scripts/inst
   const text = path => readFileSync(join(PLUGIN, '..', path), 'utf8')
   const setup = text('plugin/sandbox/setup.mjs')
   const minimum = /const PLUGIN_NODE_MIN = '([\d.]+)'/.exec(setup)?.[1]
-  assert.equal(/\[ "\$plugin" = 1 \] && node_min=([\d.]+)\.0/.exec(text('scripts/install.sh'))?.[1], minimum)
+  assert.equal(/ver_ge "\$v" ([\d.]+); then have\+=\("Node\.js/.exec(text('scripts/install.sh'))?.[1], minimum)
   assert.equal(/Install Node ([\d.]+) or later/.exec(text('plugin/cards/ask.ts'))?.[1], minimum)
   // srt's own floor, which the browser workbench's Node may be at when it installs srt with setup.mjs
   const [, major, minor] = /const NODE_MIN = \[(\d+), (\d+)\]/.exec(setup)

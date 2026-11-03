@@ -33,3 +33,12 @@ describe('the Files tab', () => {
     expect(tabOfEvent('filter', { scope: 'canvas' })).toBe('canvas')
   })
 })
+
+describe('the Report tab', () => {
+  test("a document written, and a check's or Claude's comment, light it; the analyst's own change to a comment does not", () => {
+    expect(tabOfEvent('report', { slug: 'report', status: 'generated' })).toBe('report')
+    expect(tabOfEvent('report', { slug: 'case-file', status: 'commented', span: 'report:case-file#s2' })).toBe('report')
+    // Done in the top bar's Comments while the Canvas is shown: nothing new on the Report
+    expect(tabOfEvent('report', { slug: 'case-file', status: 'commented', span: 'report:case-file#s2', by: 'analyst' })).toBeNull()
+  })
+})

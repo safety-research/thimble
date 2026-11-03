@@ -473,8 +473,8 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     if (!running) return null
     const all = new Map<string, ChatMeta>(metas ?? [])
     if (meta) all.set(meta.id, meta) // the card's own read, which may be newer than the list's
-    return waitingAt(chat, all.values())
-  }, [running, chat, meta, metas])
+    return waitingAt(chat, all.values(), main)
+  }, [running, chat, meta, metas, main])
   const waiting = !!waitingFor
   // the orientation's cards that name no group are in its deck (backend tools.default_group), so they count there; a
   // view an orientation from before 0.8.0 proposed that was dropped when the analyst stopped it is not among what it

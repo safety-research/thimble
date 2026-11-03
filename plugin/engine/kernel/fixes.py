@@ -2,12 +2,16 @@
 
 Under $THIMBLE_HOME/fixes:
 
-    live/            the checkout Claude Code loads thimble from once the first fix is on: branch `mine`, the release
-                     commit plus one commit per fix that is on, in the order they went on. A GitHub install's live is
-                     a clone of Claude Code's own clone of the marketplace, at the installed commit (no download); a
-                     clone install's (scripts/install.sh --local) is a worktree of that clone, so `mine` shows there;
-                     a release's zip, unpacked, has no git, so its live comes from thimble's repository, at the release
-                     whose files the zip's folder has (_zip_release), and the folder stays as it is.
+    live/            the checkout Claude Code loads thimble from: branch `mine`, the release commit plus one commit
+                     per fix that is on, in the order they went on. scripts/install.sh makes it from the release it
+                     downloads, and points Claude Code at it from the start (install.py). An install from before
+                     0.10.8 gets it at its first fix: a GitHub install's live is a clone of Claude Code's own clone of
+                     the marketplace, at the installed commit (no download); a clone install's (scripts/install.sh
+                     --local) is a worktree of that clone, so `mine` shows there; a release's zip, unpacked, has no
+                     git, so its live comes from thimble's repository, at the release whose files the zip's folder has
+                     (_zip_release), and the folder stays as it is.
+    live-<time>/     a live that had no release.json beside it that thimble could read, set aside with any fixes in it
+                     when live was made again, never deleted (live_aside)
     release/         the release commit (base) as it is, never changed by a fix: a detached worktree of live's
                      repository, made with live, moved when base moves, made again when it is missing, and put back as
                      the release commit has it before the way back runs from it (place_release, the launcher), never
@@ -131,6 +135,7 @@ PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
     "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/cards/ask.ts", "plugin/cards/runner.mjs",
+                    "plugin/hooks/handoff.ts", "plugin/engine/kernel/handoff.py", "plugin/engine/kernel/codebox.py",
                     "browser/backend/app/kernel_wrap.py", "browser/backend/app/kernel_srt.mjs",
                     "browser/backend/app/srt.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
@@ -380,7 +385,7 @@ def find_source() -> dict[str, Any]:
     if (PLUGIN / ".claude-plugin" / "plugin.json").is_file():
         return {**zipped, "repo": str(PLUGIN), "prefix": "plugin/"}
     raise FixError("this thimble was not installed from a git repository, so there is no copy of its code to change. "
-                   "Install it again with scripts/install.sh, then ask again")
+                   "Install it again (INSTALL.md), then ask again")
 
 
 def _own_checkout(p: Path) -> bool:
@@ -452,8 +457,8 @@ def _zip_release(root: Path, prefix: str = "", latest: dict[str, Any] | None = N
         git("init", "-q", "--bare", d, cwd=d)
         git("remote", "add", "origin", latest["url"], cwd=d)
         git("config", "remote.origin.promisor", "true", cwd=d)
-        run(["git", "fetch", "-q", "--depth", "1", "--filter=blob:none", "--no-tags", "origin",
-             *[f"+refs/tags/{t}:refs/tags/{t}" for t in latest["tags"]]], cwd=d, timeout=600)
+        remote_git("fetch", "-q", "--depth", "1", "--filter=blob:none", "--no-tags", "origin",
+                   *[f"+refs/tags/{t}:refs/tags/{t}" for t in latest["tags"]], cwd=d, timeout=600)
         for t in latest["tags"]:
             commit = git("rev-parse", f"refs/tags/{t}^{{commit}}", cwd=d)
             seen.append((t, commit, *_differs(Path(d), commit, root, prefix, memo)))
@@ -471,8 +476,8 @@ def _zip_release(root: Path, prefix: str = "", latest: dict[str, Any] | None = N
 
 def _zip_fetch(live: Path, tag: str) -> None:
     """The release `tag` in live, from thimble's repository (live's origin), with no more history."""
-    run(["git", "fetch", "-q", "--depth", "1", "--no-tags", "origin", f"+refs/tags/{tag}:refs/tags/{tag}"], cwd=live,
-        timeout=600)
+    remote_git("fetch", "-q", "--depth", "1", "--no-tags", "origin", f"+refs/tags/{tag}:refs/tags/{tag}", cwd=live,
+               timeout=600)
 
 
 OFF_SH = """#!/bin/sh
@@ -508,11 +513,13 @@ def _write_off_sh(rel: dict[str, Any]) -> None:
     off.chmod(0o755)
 
 
-def ensure_live() -> dict[str, Any]:
+def ensure_live(src: dict[str, Any] | None = None) -> dict[str, Any]:
     """live, made at the first request, with the release checkout beside it: nothing the person runs changes until the
     first fix goes on. Until then, the release follows the code that runs (_follow), so that the release checkout is
     never older than it. A home that has live gets off.sh as this kernel writes it when its text is another: an older
-    thimble's (the update that installs this one runs the older kernel)."""
+    thimble's (the update that installs this one runs the older kernel). `src`: where live comes from, as find_source
+    says it, when it is not the thimble that runs: scripts/install.sh's download of the release (install.py). A live
+    with no release.json beside it that thimble can read goes aside first (live_aside), with any fixes in it."""
     rel = release()
     live = live_dir()
     if rel and (live / ".git").exists():
@@ -521,11 +528,11 @@ def ensure_live() -> dict[str, Any]:
             _write_off_sh(rel)
         place_release(rel["base"])
         return rel
-    src = find_source()
+    src = src or find_source()
     repo, commit = Path(src["repo"]), src["commit"]
     home().mkdir(parents=True, exist_ok=True)
-    if live.exists():
-        shutil.rmtree(live)
+    if os.path.lexists(live):
+        live_aside()
     if src["kind"] == "zip":
         tag, commit = _zip_release(repo, src["prefix"])
         git("init", "-q", str(live), cwd=home())
@@ -550,6 +557,19 @@ def ensure_live() -> dict[str, Any]:
     rel = _follow(rel)
     place_release(rel["base"])
     return rel
+
+
+def live_aside() -> Path:
+    """A live that thimble cannot use, with no release.json it can read beside it, moved aside by the date and time
+    (live-20261103-184500), never deleted: it may hold the person's fixes as commits. Where it went."""
+    live = live_dir()
+    stamp = aside = live.with_name(f"live-{time.strftime('%Y%m%d-%H%M%S')}")
+    n = 1
+    while os.path.lexists(aside):
+        n += 1
+        aside = stamp.with_name(f"{stamp.name}-{n}")
+    os.rename(live, aside)
+    return aside
 
 
 def _leftovers_aside(repo: Path) -> None:
@@ -793,7 +813,19 @@ def _repoint() -> None:
     if not _marketplace():
         # Claude Code has no thimble marketplace (the browser workbench alone): nothing to point, and nothing to copy
         return
-    entry = {"source": "directory", "path": str(live_dir())}
+    add_marketplace(live_dir(), "to load thimble from your fixes")
+    _relink_cli()
+    rel["pointed"] = True
+    write_json(home() / "release.json", rel)
+
+
+def add_marketplace(folder: Path, why: str = "to load thimble from it") -> None:
+    """Claude Code's marketplace thimble, from `folder`: its user settings first (extraKnownMarketplaces, where Claude
+    Code keeps the source and refuses another one for the name until that entry changes), and nothing else in the
+    file, then `claude plugin marketplace add`. When Claude Code does not add it, the settings are put back as they
+    were. Removing the marketplace instead would uninstall thimble and lose its options. `why`: what thimble reads the
+    settings for, in the error when it cannot."""
+    entry = {"source": "directory", "path": str(folder)}
     p = config_dir() / "settings.json"
     try:
         text = p.read_text()
@@ -801,13 +833,21 @@ def _repoint() -> None:
     except FileNotFoundError:
         text, settings = None, None
     except (OSError, ValueError):
-        raise FixError(f"thimble cannot read Claude Code's settings ({p}) to load thimble from your fixes")
+        raise FixError(f"thimble cannot read Claude Code's settings ({p}) {why}")
 
     def write(t: str) -> None:
-        tmp = p.with_suffix(".json.thimble-tmp")
-        tmp.write_text(t)
-        os.chmod(tmp, p.stat().st_mode & 0o777)
-        tmp.replace(p)
+        # through a link (a settings.json kept in a dotfiles folder): the file it names changes, the link stays
+        real = os.path.realpath(p)
+        fd, tmp = tempfile.mkstemp(prefix=".settings.", suffix=".thimble-tmp", dir=os.path.dirname(real))
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(t)
+            os.chmod(tmp, os.stat(real).st_mode & 0o777)
+            os.replace(tmp, real)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     known = (settings or {}).get("extraKnownMarketplaces")
     changed = isinstance(known, dict) and isinstance(known.get("thimble"), dict)
@@ -815,14 +855,11 @@ def _repoint() -> None:
         known["thimble"]["source"] = entry
         write(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
     try:
-        run([claude(), "plugin", "marketplace", "add", str(live_dir())])
+        run([claude(), "plugin", "marketplace", "add", str(folder)])
     except FixError:
         if changed and text is not None:
             write(text)
         raise
-    _relink_cli()
-    rel["pointed"] = True
-    write_json(home() / "release.json", rel)
 
 
 def _sync() -> dict[str, Any]:
@@ -1477,16 +1514,21 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
     copy is still there (working, ready, or refused) gets the round in that copy. A fix that is on, off or ready with
     no copy is changed in place: a new copy holds its change, and its version as it is now (prev) stays on, or off,
     until the person's y puts the new version on (apply), and u goes back to it (undo). A fix that failed, or no longer
-    fits, starts again in a new copy (redo). `asked`: the person's own words, as in new."""
+    fits, starts again in a new copy (redo), and so does a request with no code (a round that ended with `Request:`,
+    such as the fixer's question back to the person, whose copy went): its words, and the person's answer, go on in its
+    next round, also for a request stored by an earlier thimble. `asked`: the person's own words, as in new."""
     words = (words or "").strip()
     with Lock():
         rec = get(fid)
         if _is_checkout(rec.get("work")):
             return _in_copy(rec, [words], session, asked)
-    if rec.get("state") in ("failed", "redo"):
+    if rec.get("state") == "request" and not words:
+        raise FixError("say what should work differently in this fix")
+    if rec.get("state") in ("failed", "redo", "request"):
         return redo(rec["id"], words, session, asked)
     if rec.get("state") not in REFINABLE or not rec.get("commit"):
-        raise FixError(f"fix {rec['id']} is {state_word(rec)}; only a fix that is on, off or ready can change")
+        raise FixError(f"fix {rec['id']} is {state_word(rec)}; only a fix that is on, off, ready or failed, or a request, "
+                       "can change")
     if not words:
         raise FixError("say what should work differently in this fix")
     with Lock():
@@ -1911,8 +1953,8 @@ def check_ask(fid: int, secret: str | None) -> None:
 
 def at_person_terminal() -> bool:
     """A person typing in a terminal: a terminal on stdin and stdout, outside a command Claude Code runs (its Bash
-    tool sets CLAUDECODE and gives a command no terminal)."""
-    return sys.stdin.isatty() and sys.stdout.isatty() and not os.environ.get("CLAUDECODE")
+    tool sets CLAUDECODE and gives a command no terminal; in_claude_code)."""
+    return sys.stdin.isatty() and sys.stdout.isatty() and not in_claude_code()
 
 
 def apply_typed(fid: int | str, answer=input) -> dict[str, Any] | None:
@@ -2573,8 +2615,9 @@ def all_on() -> dict[str, Any]:
 
 def in_claude_code() -> bool:
     """Whether a Claude Code session runs this command (its Bash tool, or the person's ! in it): Claude Code sets
-    CLAUDECODE for the commands it runs."""
-    return bool(os.environ.get("CLAUDECODE"))
+    CLAUDECODE for the commands it runs, and the plugin sets THIMBLE_HANDED_OFF for one it runs outside Claude Code's
+    sandbox for a command there (hooks/handoff.ts), whatever its own process has."""
+    return bool(os.environ.get("CLAUDECODE") or os.environ.get("THIMBLE_HANDED_OFF"))
 
 
 def key_in_terminal(question: str) -> str | None:
@@ -2672,20 +2715,49 @@ def update_url() -> str:
     return os.environ.get("THIMBLE_UPDATE_URL") or f"https://github.com/{upstream()}.git"
 
 
+# git with no ext:: transport, which runs a command in place of reaching a repository
+NO_EXT = ["-c", "protocol.ext.allow=never"]
+
+
+def remote_git(*args: str, cwd: str | Path = "/", **kw: Any) -> subprocess.CompletedProcess:
+    """git ARGS against a repository on the network (thimble's, a fork, a clone's upstream), with no ext:: transport
+    (NO_EXT), from / unless it fetches into a repository of thimble's or the person's (`cwd`): run in the folder of a
+    session, git would take the config of a repository around it, which can rewrite thimble's address
+    (url.<x>.insteadOf) into a command."""
+    return run(["git", *NO_EXT, *args], cwd=cwd, said=["git", *args], **kw)
+
+
 def _vtuple(tag: str) -> tuple[int, ...]:
     m = RELEASE_TAG.match(tag if tag.startswith("v") else "v" + tag)
     return tuple(int(x) for x in m.groups()) if m else ()
 
 
+# git's words when GitHub let it read nothing of a repository: it asks for a sign-in where a private repository (or
+# none) is, and an account that may not read one is told there is no such repository
+NO_ACCESS = re.compile(r"Repository not found|repository '[^']*' not found|could not read (?:Username|Password)|"
+                       r"Authentication failed|Invalid username or password|returned error: 40[134]", re.I)
+
+
+def no_access(err: str, then: str) -> str | None:
+    """Why git read nothing of a repository and the fix, then `then` (what the person does after it), when its output
+    `err` says GitHub refused it; None for any other failure, which the network most likely caused."""
+    if not NO_ACCESS.search(err):
+        return None
+    return ("GitHub did not let git read it, so it is private or not there. Sign in with a GitHub account that can read "
+            f"it (gh auth login, then gh auth setup-git), then {then}")
+
+
 def latest_release(then: str = "run thimble update again") -> dict[str, Any]:
     """The newest release, {tag, version, commit, url, tags}: the highest vX.Y.Z tag of thimble's repository, and each
     release tag's commit (tags), which names a release that a clone without tags has. A tag with more after the numbers
-    (v0.11.0-rc1) is not a release. `then`: what the person does after the network works again."""
+    (v0.11.0-rc1) is not a release. `then`: what the person does after the network, or their sign-in, works again."""
     url = update_url()
-    p = run(["git", "ls-remote", "--tags", url, "refs/tags/v*"], check=False, timeout=120)
+    p = remote_git("ls-remote", "--tags", url, "refs/tags/v*", check=False, timeout=120)
     if p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
-        raise FixError(f"thimble could not read its releases from {url} ({err[-1] if err else 'no message'}); "
+        why = no_access(p.stderr or p.stdout, then)
+        raise FixError(f"thimble could not read its releases from {url}: {why}" if why else
+                       f"thimble could not read its releases from {url} ({err[-1] if err else 'no message'}); "
                        f"check the network, then {then}")
     tags: dict[str, str] = {}
     for line in p.stdout.splitlines():
@@ -2709,12 +2781,15 @@ def release_name(rel: dict[str, Any] | None = None) -> str:
         return _own_name()
     if rel.get("checkout") and not rel.get("tag"):
         return str(rel["checkout"])  # a dev install's commit, as thimble update named it: main at abc1234
+    if rel.get("ref") and not rel.get("tag"):
+        # a branch scripts/install.sh --ref installed, as a release is tried before it is out
+        return f"{rel['ref']} at {str(rel.get('base') or '')[:7]}"
     return str(rel.get("tag") or "").removeprefix("v") or str(rel.get("version") or "") or str(rel.get("base") or "")[:7]
 
 
 def _own_name() -> str:
-    """The thimble that runs, as the person reads it: its plugin's own version, which scripts/install.sh writes in the
-    copy Claude Code installs (a release names its version by its tag alone), else the release tag of its checkout's
+    """The thimble that runs, as the person reads it: its plugin's own version, which an install before 0.10.8 wrote in
+    the copy Claude Code installs (a release names its version by its tag alone), else the release tag of its checkout's
     commit (find_source: Claude Code's clone of the marketplace, or the person's own clone), v0.10.5 as 0.10.5; else
     nothing, since a checkout may have no tags."""
     d = read_json(PLUGIN / ".claude-plugin" / "plugin.json")
@@ -2898,8 +2973,9 @@ def _sha_of(p: Path) -> str:
 
 
 def _browser_seed() -> Path | None:
-    """The checkout scripts/install.sh installed the workbench in (it writes its path to the workbench's home): its
-    packages are linked into live, with no download, while their lock files are the same."""
+    """The folder an install built the workbench in outside live, whose path it wrote in the workbench's home: a clone
+    (scripts/install.sh --local), or a release's folder or clone that an install before 0.10.8 used. Its packages are
+    linked into live, with no download, while their lock files are the same."""
     try:
         p = Path((browser_home() / "checkout").read_text().strip())
     except OSError:
@@ -2955,20 +3031,32 @@ def browser_on_live() -> dict[str, Any]:
             if not dest.exists() and src and src.is_dir() and _sha_of(seed / part / lock) == want:
                 _link_copy(src, dest)
                 did.append(f"{part} packages linked")
-            elif part == "backend":
-                run(["uv", "sync", "--project", str(b / part), "--frozen", "--no-dev", "--no-install-project", "--extra",
-                     "dev"], env=env, timeout=1800)
-                did.append("backend packages installed")
             else:
-                run(["npm", "--prefix", str(b / part), "ci", "--no-audit", "--no-fund"], env=env, timeout=1800)
-                did.append("frontend packages installed")
+                browser_packages(b, part, env)
+                did.append(f"{part} packages installed")
             stamps[lock] = want
             write_json(home() / "browser.json", stamps)
-        run(["npm", "--prefix", str(b / "frontend"), "run", "build"], env=env, timeout=900)
+        browser_build(b, env)
     except FixError as e:
         return {"browser": "failed", "browser_error": str(e)}
     ready.write_text(str(b) + "\n")
     return {"browser": "ready", "browser_dir": str(b), "browser_did": did}
+
+
+def browser_packages(b: Path, part: str, env: dict[str, str]) -> None:
+    """The workbench's packages of `part` in the browser folder `b`: the server's Python packages (uv sync, with the
+    test extras, so that thimble's dev agent can run the server's tests), or the page's and its sandbox runtime's (npm
+    ci)."""
+    if part == "backend":
+        run(["uv", "sync", "--project", str(b / part), "--frozen", "--no-dev", "--no-install-project",
+             "--extra", "dev"], env=env, timeout=1800)
+    else:
+        run(["npm", "--prefix", str(b / part), "ci", "--no-audit", "--no-fund"], env=env, timeout=1800)
+
+
+def browser_build(b: Path, env: dict[str, str]) -> None:
+    """The workbench's page, built in the browser folder `b` (frontend/dist, which the server serves)."""
+    run(["npm", "--prefix", str(b / "frontend"), "run", "build"], env=env, timeout=900)
 
 
 def _set_aside(ids: list[int], recs: dict[int, dict[str, Any]], version: str, key: str, now: str) -> None:
@@ -3353,7 +3441,7 @@ def _checked_with_none() -> None:
             _mark_checked()
 
 
-def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
+def update(check: bool = False, once: bool = False, say=None, to: dict[str, Any] | None = None) -> dict[str, Any]:
     """thimble update: the newest release for both modes.
 
     The fixes that were on are set aside (state pending, their old change in pending/<version>/fix-<id>.patch), mine is
@@ -3369,7 +3457,9 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
     checked out (_update_dev). A release's zip has no git of its own: live, from thimble's repository at the release
     the zip holds (ensure_live), is its git checkout first, and then it updates as a GitHub install does; a check only
     reads which release that is. once: the session's check, which says a new commit once. say: what tells the person
-    that carry's checks run."""
+    that carry's checks run. to: a branch or a tag to move to in place of the newest release (scripts/install.sh --ref
+    on an install that is there, install.py), {tag, version, commit, url, ref, name}, where tag is '' for a branch: the
+    move is the same, also back to an older commit, and only the commit says whether there is one."""
     rel = release()
     has_live = bool(rel) and (live_dir() / ".git").exists()
     src = None if has_live else find_source()
@@ -3378,10 +3468,12 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
             rel, has_live = ensure_live(), True
     if (rel.get("kind") if has_live else src["kind"]) == "clone":
         return _update_dev(check, once, rel if has_live else None, src, say)
-    latest = latest_release()
+    latest = to or latest_release()
     if has_live:
         repo, base, now = live_dir(), str(rel["base"]), release_name(rel)
-        if not rel.get("tag"):
+        # a branch that scripts/install.sh --ref installed keeps its name: its history back to the release before it
+        # (install.py) says whether a release is newer
+        if not rel.get("tag") and not rel.get("ref"):
             now = _described(repo, base) or now
     elif src["kind"] == "zip":
         tag, base = _zip_release(Path(src["repo"]), src["prefix"], latest)
@@ -3391,9 +3483,9 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
         now = _described(repo, base) or _version_at(repo, base) or base[:7]
     if latest["commit"] == base:
         now = latest["version"]
-    out: dict[str, Any] = {"from": now, "to": latest["version"], "newer": _is_newer(repo, latest, base, now),
-                           "said": "", "reload": False}
-    installed = "" if has_live else _installed_sha()
+    newer = latest["commit"] != base if to else _is_newer(repo, latest, base, now)
+    out: dict[str, Any] = {"from": now, "to": latest["version"], "newer": newer, "said": "", "reload": False}
+    installed = "" if has_live or to else _installed_sha()
     if not check and not out["newer"] and base == latest["commit"] and installed and installed != base:
         # Claude Code's clone of the marketplace is at the release already (Claude Code refreshed it), while Claude Code
         # still runs the plugin it had: it copies the release from its clone
@@ -3404,7 +3496,8 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
                     "reload": True, "said": f"thimble {latest['version']}"})
         out["lines"] = _summary(out)
         return out
-    behind = _browser_behind(repo, base) if not check and not out["newer"] and base == latest["commit"] else None
+    behind = (_browser_behind(repo, base) if not to and not check and not out["newer"] and base == latest["commit"]
+              else None)
     if behind:
         # the plugin has the release, and the browser workbench runs an older one from the release's zip its install
         # built it in, with the plugin from GitHub: the workbench alone moves from that release (browser_only)
@@ -3424,22 +3517,32 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
         live, rel = live_dir(), release()
         old = str(rel["base"])
         was_on = is_on()
-        ref = f"refs/thimble/releases/{latest['tag']}"
-        run(["git", "fetch", "-q", "--no-tags", latest["url"], f"+refs/tags/{latest['tag']}:{ref}"], cwd=live, timeout=600)
+        # a release's tag, or the branch `to` names (its folder of patches by a name with no space: r109-a1b2c3d)
+        tag = latest["tag"]
+        ref = f"refs/thimble/releases/{tag}" if tag else f"refs/thimble/branches/{latest['name']}"
+        remote_git("fetch", "-q", "--no-tags", latest["url"], f"+{latest.get('ref') or 'refs/tags/' + tag}:{ref}",
+                   cwd=live, timeout=600)
         new = git("rev-parse", f"{ref}^{{commit}}", cwd=live)
         version = latest["version"]
+        key = version if tag else f"{latest['name'].replace('/', '-')}-{new[:7]}"
         recs = records()
         # the fixes in mine (on, or sent), and any an earlier update set aside that Claude has not brought back yet
         aside = [*_replay_order(recs), *[i for i, r in sorted(recs.items()) if r.get("state") == "pending"]]
         aside = list(dict.fromkeys(aside))
-        _set_aside(aside, recs, version, version, now)
+        _set_aside(aside, recs, version, key, now)
         _unstamp()
         git("checkout", "-q", "-B", "mine", new, cwd=live)
         if was_on:
             write_json(home() / "state.json", {"on": True})
         else:
             git("checkout", "-q", "--detach", new, cwd=live)
-        rel.update(base=new, version=_version_at(live, new), tag=latest["tag"], updated=time.time())
+        rel.update(base=new, version=_version_at(live, new), updated=time.time())
+        if tag:
+            rel["tag"] = tag
+            rel.pop("ref", None)
+        else:
+            rel.pop("tag", None)
+            rel["ref"] = latest["name"]
         if not aside:
             # no fix to check on the new release (_unchecked_on); else carry checks them, and says so
             rel["checked"] = new
@@ -3450,7 +3553,8 @@ def update(check: bool = False, once: bool = False, say=None) -> dict[str, Any]:
         if aside:
             d.mkdir(parents=True, exist_ok=True)
             write_json(d / "current.json", {"version": version, "from": now, "from_commit": old, "to_commit": new,
-                                            "ids": aside, "tip": head(), "made": time.time(), "off": not was_on})
+                                            "ids": aside, "tip": head(), "made": time.time(), "off": not was_on,
+                                            **({} if key == version else {"key": key})})
         else:
             (d / "current.json").unlink(missing_ok=True)
         _repoint()
@@ -3509,13 +3613,14 @@ def _upstream(repo: Path) -> dict[str, str] | None:
 def _behind(repo: Path, commit: str) -> dict[str, Any]:
     """Whether the person's clone is behind what it pulls from (_upstream), which thimble update fetches into its
     remote-tracking branch alone: the clone's HEAD, branches and files stay as they are, for the person to pull.
-    {name, behind, tip, pull}, or {name, error} when the fetch failed (offline); {} with no upstream to check."""
+    {name, behind, tip, pull}, or {name, error} when the fetch failed (offline, or GitHub let git read nothing); {} with
+    no upstream to check."""
     up = _upstream(repo)
     if not up:
         return {}
     try:
-        p = run(["git", "fetch", "-q", "--no-tags", up["remote"], f"+{up['ref']}:{up['tracking']}"], cwd=repo,
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, check=False, timeout=120)
+        p = remote_git("fetch", "-q", "--no-tags", up["remote"], f"+{up['ref']}:{up['tracking']}", cwd=repo,
+                       env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, check=False, timeout=120)
         err = "" if p.returncode == 0 else next(
             (x.strip() for x in (p.stderr or p.stdout).splitlines() if x.strip()), "no message")
     except FixError as e:
@@ -3531,6 +3636,9 @@ def _behind_lines(d: dict[str, Any]) -> list[str]:
     """What a dev install's thimble update says of the checkout (`to`) against what it pulls from (d's upstream,
     _behind): how far behind it is and the command that pulls it, or that thimble could not check."""
     u = d.get("upstream") or {}
+    why = no_access(u["error"], "run thimble update again.") if u.get("error") else None
+    if why:
+        return [f"thimble could not check whether {u['name']} has newer commits: {why}"]
     if u.get("error"):
         return [f"thimble could not check whether {u['name']} has newer commits ({u['error']}); check the network, "
                 "then run thimble update again."]
@@ -3978,8 +4086,12 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     elif off_ids:
         nxt.append((f"thimble fix on {off_ids[0]}", "turn a fix on (it asks for your key here)"))
     if can_share():
-        nxt.append((f"thimble file issue {first}",
-                    f"a link to GitHub's new-issue form with fix {first}'s text, to read and submit"))
+        from .share import STATES  # noqa: PLC0415 — share imports this module
+        # the first fix that thimble file issue takes: one Claude still works on too, not one an update set aside
+        shared = [r["id"] for r in fixes if r.get("state") in STATES]
+        if shared:
+            nxt.append((f"thimble file issue {shared[0]}",
+                        f"a link to GitHub's new-issue form with fix {shared[0]}'s text, to read and submit"))
         code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
         if code:
             nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))
@@ -4046,9 +4158,12 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     s = r.get("state")
     if s == "pending":
         acts.append(("thimble reapply", "Claude checks it against the release and brings it back"))
-    if s in ("on", "off", "ready", "sent") and can_share():
-        acts.append((f"thimble file issue {r['id']}",
-                     "a link to GitHub's new-issue form with its text, to read and submit"))
+    if can_share():
+        from .share import STATES  # noqa: PLC0415 — share imports this module
+        # every state that thimble file issue takes, as the list's What next names it
+        if s in STATES:
+            acts.append((f"thimble file issue {r['id']}",
+                         "a link to GitHub's new-issue form with its text, to read and submit"))
     if s in ("on", "ready") and r.get("commit") and not r.get("pr") and can_share():
         acts.append((f"thimble file pr {r['id']}", "open a pull request with its code on the public repo (asks first)"))
     if s == "on" and is_on():
@@ -4273,15 +4388,23 @@ _PATHISH = re.compile(r"(?<![\w./~-])[\w.-]+(?:/[\w.-]+)+/?")
 _HELD = re.compile("[\U000F0000-\U000FFFFD]")
 
 
-def _protect(parts: dict[str, str], paths: set[str]) -> tuple[dict[str, str], list[str]]:
-    """The parts with thimble's own text held out of the scan: in the diff each line that is not an added line (file
-    names, hunk headers, thimble's code at the release), and in every part a path of thimble's repository. Each held
-    span becomes one private-use character, which no term matches, until _unprotect puts it back."""
-    held: list[str] = []
+def _holder(held: list[str]):
+    """hold(x): x held out of the scan as one private-use character, which no term matches, until _unprotect puts it
+    back; `held` lists the spans it holds."""
 
     def hold(x: str) -> str:
         held.append(x)
         return chr(0xF0000 + len(held) - 1)
+    return hold
+
+
+def _protect(parts: dict[str, str], paths: set[str], held: list[str] | None = None) -> tuple[dict[str, str], list[str]]:
+    """The parts with thimble's own text held out of the scan: in the diff each line that is not an added line (file
+    names, hunk headers, thimble's code at the release), and in every part a path of thimble's repository. Each held
+    span becomes one private-use character, which no term matches, until _unprotect puts it back. `held`: the spans
+    the parts hold already (_holder), such as the headings of share.py's issue text."""
+    held = [] if held is None else held
+    hold = _holder(held)
 
     def paths_in(text: str) -> str:
         def one(m: re.Match) -> str:
@@ -4486,7 +4609,8 @@ def _pull_request(rec: dict[str, Any], d: Path) -> str:
     branch = f"thimble-fix-{rec['id']}-{secrets.token_hex(3)}"
     name = repo.split("/", 1)[1]
     url = (os.environ.get("THIMBLE_FIX_PUSH_URL") or "https://github.com/{login}/{name}.git").format(login=login, name=name)
-    run([push_git(), "-c", "credential.helper=", "-c", f"credential.https://github.com.helper=!{gh()} auth git-credential",
+    run([push_git(), *NO_EXT, "-c", "credential.helper=", "-c",
+         f"credential.https://github.com.helper=!{gh()} auth git-credential",
          "push", url, f"{sha}:refs/heads/{branch}"], cwd=live)
     out = run([gh(), "pr", "create", "--repo", repo, "--draft", "--head", f"{login}:{branch}", "--title", title,
                "--body-file", str(d / "pr.md")]).stdout.strip().splitlines()
@@ -4640,8 +4764,11 @@ def cmd_update(a) -> int:
             lines = r["lines"] or ["No commit to record, and no fix is set aside."]
         elif getattr(a, "check", False):
             r = update(check=True, once=getattr(a, "once", False))
+            # a branch that holds the newest release (scripts/install.sh --ref) is up to date, and no release itself
             lines = [r.get("line") or (f"thimble {r['to']} is out (you have {r['from']}): thimble update in a shell"
-                                       if r["newer"] else f"thimble {r['from']} is the newest release.")]
+                                       if r["newer"] else f"thimble {r['from']} is the newest release."
+                                       if r["from"] == r["to"] else
+                                       f"thimble {r['from']} is up to date; the newest release is {r['to']}.")]
         else:
             if in_claude_code():
                 raise FixError(SHELL_ONLY.format(what="thimble update"))

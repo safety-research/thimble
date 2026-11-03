@@ -176,8 +176,9 @@ ROUTER_MODULES = [
     "start_page",
     # the failures of thimble's agents, told in the foreground with their fix
     "notices",
-    # how thimble reaches Claude (an API key, Claude Code sign-in or WIF), and the agents the server runs on it
-    "claude_access", "runtime",
+    # how thimble reaches Claude (an API key, Claude Code sign-in or WIF), the asks of the agents it runs on Claude Code
+    # sign-in before a request to a new host, and the agents the server runs on it
+    "claude_access", "host_asks", "runtime",
 ]
 
 # The backend binds to 127.0.0.1, but a DNS-rebinding page can still reach it as same-origin unless the Host
@@ -383,6 +384,14 @@ async def _lifespan(app: FastAPI):
         views.migrate_workspaces()
     except Exception:
         log.exception("moving the workspaces' views into their local extensions failed")
+    # the short temp folders of workspaces deleted by hand or while no server ran (runtime_cc.sweep_workspace_tmps)
+    try:
+        from . import runtime_cc
+
+        for p in runtime_cc.sweep_workspace_tmps():
+            log.info("removed %s, the temp folder of a workspace that is gone", p)
+    except Exception:
+        log.exception("removing the temp folders of workspaces that are gone failed")
     await _startup()
     from . import loop_watch
 

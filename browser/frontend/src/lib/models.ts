@@ -24,7 +24,7 @@ export function modelLabel(id: string): string {
 }
 
 /** The current models by their ids, offered in every model menu. */
-export const KNOWN_MODELS: readonly string[] = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001']
+export const KNOWN_MODELS: readonly string[] = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-haiku-5-5']
 
 /** The models GET /settings names across roles plus `current`, then the current models, in first-seen order, each
  * once by its id without a tag (baseModel). */
@@ -47,11 +47,15 @@ export function hasFastMode(model: string | null | undefined): boolean {
   return m.includes('opus-5') || m.includes('opus-4-8') || m.split('[')[0] === 'opus'
 }
 
-/** Whether Claude Code runs a model at an effort (config.has_effort): every model but Haiku, which runs with none, so
- * its row and its run show no effort menu. Pure. */
+/** The models Claude Code runs with no effort, as parts of their ids (config.NO_EFFORT_MODELS): Haiku 4.5 and the
+ * Claude 3 Haikus. Haiku 5.5 is the first Haiku with effort levels. */
+const NO_EFFORT_MODELS: readonly string[] = ['haiku-4', '3-5-haiku', '3-haiku']
+
+/** Whether Claude Code runs a model at an effort (config.has_effort): every model but those of NO_EFFORT_MODELS, which
+ * run with none, so their row and their run show no effort menu. Pure. */
 export function hasEffort(model: string | null | undefined): boolean {
   const m = (model ?? '').toLowerCase()
-  return !!m && !m.includes('haiku')
+  return !!m && !NO_EFFORT_MODELS.some((k) => m.includes(k))
 }
 
 // ---- the settings, read once per workspace and shared by the composer and the settings popover ----

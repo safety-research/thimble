@@ -204,7 +204,8 @@ async function detailOf($: Engine, scope: ThreadScope): Promise<string> {
     }
   }
   if (scope.card) {
-    const text = await cardText($, scope.card).catch(() => '')
+    // as the thread's pane draws the card, while it does; else as the conversation draws it
+    const text = await cardText($, scope.card, { pane: `thread:${threadKey(scope)}` }).catch(() => '')
     if (text.trim()) lines.push(`What the card draws now, as text:\n${cutChars(text, DETAIL_CHARS)}`)
   }
   if (scope.pane && scope.pane.kind !== 'evidence') {

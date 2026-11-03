@@ -547,6 +547,38 @@ test('a citation the check found false: × failed in the header, as any failed o
   // (the test kit names no agent it starts, so the fork's run and end are marks.test.ts's)
 })
 
+// a citation whose check could not read a file it needed, as Claude Code refused that read: where
+// it asked nobody (`ok`, x gives the person's OK for the file), where the person said no to its ask (`ask`, x checks
+// again and Claude Code asks again), where a rule refused it (none: nothing the person does here)
+const ELSEWHERE = '/made-up/elsewhere/runs.csv'
+const UNREAD = { ...QUOTED, status: 'failed', failedBy: 'evidence', reason: 'No record the check read holds it.', evidence: undefined }
+for (const [fix, offered] of [['ok', true], ['ask', true], [null, false]] as const) {
+  test(`a citation whose check could not read a file (${fix ?? 'a rule refused it'}): the card names the file under why, and x ${offered ? 'repair is offered, and x asks for the repair' : 'is not offered, and is typed'}`, CITES, async ($, on) => {
+    // Claude Code types a key thimble does not take into the box
+    on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText ?? ''}${e.text.slice(e.end)}`, cursor: e.start + String(e.inputText ?? '').length }) as never)
+    const { clock, spawns } = await resumed($, on, { ...UNREAD, unread: [{ tool: 'Read', file: ELSEWHERE, fix }] }, `s-tray-unread-${fix}`)
+    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+    const drawn = all(await $.ui.render(above()))
+    const band = textOf(drawn)
+    expect(band).toContain('× failed')
+    expect(band).toContain('No record the check read holds it.')
+    expect(drawn.find(n => n.type === 'Text' && textOf(n) === `The check could not read ${ELSEWHERE}.`)?.props).toMatchObject({ dimColor: true })
+    expect(band.includes('x repair')).toBe(offered)
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key('x'))).toEqual(offered ? { text: '', cursor: 0 } : { text: 'x', cursor: 1 })
+    await clock.advance(1000)
+    expect(spawns.map(s => s.description)).toEqual(offered ? ['checking a citation again (x)'] : [])
+  })
+}
+
+test('a citation whose check Claude Code refused both a Read and a Grep of one file: the card names the file once, and x repair is offered', CITES, async ($, on) => {
+  await resumed($, on, { ...UNREAD, unread: [{ tool: 'Read', file: ELSEWHERE, fix: 'ok' }, { tool: 'Grep', file: ELSEWHERE, fix: 'ok' }] }, 's-tray-unread-twice')
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const drawn = all(await $.ui.render(above()))
+  expect(drawn.filter(n => n.type === 'Text' && textOf(n) === `The check could not read ${ELSEWHERE}.`).length).toBe(1)
+  expect(textOf(drawn)).toContain('x repair')
+})
+
 const WRONG = { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed.' }
 
 // a reply with two citations, each in its own words

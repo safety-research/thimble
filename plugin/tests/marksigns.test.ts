@@ -4,6 +4,9 @@
 // On a resumed session whose replies' citations are kept as their check left them. All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
+
+import { rowScope } from '../marks/view'
+import { PRESET } from '../settings/features.mjs'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,9 +33,12 @@ const view = { columns: 100, rows: 40, isFullscreen: true }
 const above = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} }, viewport: view } as never
 const answer = { plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: 'row-t1', viewport: view, props: { text: TEXT, isFirstOfReply: true } } as never
 
-/** A resumed session with one answer, TEXT, whose citations the check left as `items`. */
-async function resumed($: Any, on: Any, items: Any[]): Promise<void> {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+/** A resumed session with one answer, TEXT, whose citations the check left as `items`; `more`, more of the process's
+ *  variables, which a test may change as it runs. */
+async function resumed($: Any, on: Any, items: Any[], more?: Record<string, string | undefined>): Promise<void> {
+  const env: Record<string, string> = { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' }
+  if (more) on('env.get', (_$: unknown, e: { name: string }) => ({ value: e.name in more ? more[e.name] : env[e.name] }))
+  else mock.env(on, env)
   mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-marksigns' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
@@ -138,4 +144,73 @@ test('a narrowed citation keeps its words and has no sign; its tray says correct
   const band = textOf(await $.ui.render(above))
   expect(band).toContain('✓ corrected')
   expect(band).toContain('narrowed; was 15 of 40')
+})
+
+test("with Minimal on, a reply's citations read as its plain words, with no sign, until the pointer is over their paragraph; a press on one opens the tray, and the one it shows stands with its sign", { options: { minimal: true, ...PRESET } }, async ($, on) => {
+  await resumed($, on, [
+    { n: 1, row: 'row-t1', words: '15 of 40', ...at('15 of 40'), sentence: TEXT, status: 'verified', shown: '15 of 40', reason: 'Counted.' },
+    { n: 2, row: 'row-t1', words: 'p95 check', ...at('p95 check'), sentence: TEXT, status: 'deferred', shown: 'p95 check' },
+  ])
+  const drawn = await $.ui.render(answer)
+  expect(textOf(drawn)).toContain('Of the runs, 15 of 40 failed, most on the p95 check.')
+  expect(signAfter(drawn, 2).sign).toBe('')
+  const textNode = (d: Any, w: string) => all(d).find(x => x.type === 'Text' && textOf(x) === w)
+  const words = (d: Any, w: string) => textNode(d, w)?.props ?? {}
+  for (const w of ['15 of 40', 'p95 check']) {
+    expect(words(drawn, w).underline).toBeUndefined()
+    // the paragraph's hover group shows it: underlined, with no fill
+    const n = textNode(drawn, w)
+    expect(n?.hover ?? n?.props?.hover).toMatchObject({ scope: rowScope('mk-row-t1', 0), underline: true })
+  }
+  // a press on one opens the tray on it, which shows it as in any mode: bold on its tint, its ? after it
+  const cite = all(drawn).find(x => x.type === 'Button' && String(x.props?.label).startsWith('citation 2:'))
+  const ui = await $.ui.mount(answer)
+  await ui.press({ key: cite.props.key })
+  await ui.unmount()
+  expect(textOf(await $.ui.render(above))).toContain('p95 check')
+  const open = await $.ui.render(answer)
+  expect(words(open, 'p95 check')).toMatchObject({ bold: true, underline: true })
+  expect(signAfter(open, 2).sign).toBe('?')
+  expect(words(open, '15 of 40').underline).toBeUndefined()
+})
+
+test("with Minimal on outside Claude Code's fullscreen layout, which reports no pointer, a reply's citations stand at rest as in any mode: underlined, a failed one red with its ×", { options: { minimal: true, ...PRESET } }, async ($, on) => {
+  await resumed($, on, [
+    { n: 1, row: 'row-t1', words: '15 of 40', ...at('15 of 40'), sentence: TEXT, status: 'verified', shown: '15 of 40', reason: 'Counted.' },
+    { n: 2, row: 'row-t1', words: 'p95 check', ...at('p95 check'), sentence: TEXT, status: 'failed', failedBy: 'evidence', shown: 'p95 check', reason: 'No record shows it.' },
+  ])
+  const words = (d: Any, w: string) => all(d).find(x => x.type === 'Text' && textOf(x) === w)?.props ?? {}
+  const classic = await $.ui.render({ ...(answer as Any), viewport: { ...view, isFullscreen: false } } as never)
+  expect(words(classic, '15 of 40').underline).toBe(true)
+  expect(words(classic, 'p95 check')).toMatchObject({ underline: true, color: 'error' })
+  expect(signAfter(classic, 2).sign).toBe('×')
+  // in fullscreen the same reply is plain at rest
+  const full = await $.ui.render(answer)
+  expect(words(full, '15 of 40').underline).toBeUndefined()
+  expect(signAfter(full, 2).sign).toBe('')
+})
+
+test("with Minimal on in Claude Code's fullscreen layout while it reports no pointer (CLAUDE_CODE_DISABLE_MOUSE turns its mouse reports off, CLAUDE_CODE_DISABLE_MOUSE_CLICKS keeps only the wheel's), a reply's citations stand at rest as in any mode; with either set to a false value, or to one Claude Code reads as neither, the reply is plain", { options: { minimal: true, ...PRESET } }, async ($, on) => {
+  const env: Record<string, string | undefined> = {}
+  await resumed($, on, [
+    { n: 1, row: 'row-t1', words: '15 of 40', ...at('15 of 40'), sentence: TEXT, status: 'verified', shown: '15 of 40', reason: 'Counted.' },
+    { n: 2, row: 'row-t1', words: 'p95 check', ...at('p95 check'), sentence: TEXT, status: 'failed', failedBy: 'evidence', shown: 'p95 check', reason: 'No record shows it.' },
+  ], env)
+  const words = (d: Any, w: string) => all(d).find(x => x.type === 'Text' && textOf(x) === w)?.props ?? {}
+  /** The reply in fullscreen with the mouse's variables `vars`: whether its citation stands underlined at rest, and the
+   *  sign after the failed one. */
+  const drawn = async (vars: Record<string, string>) => {
+    for (const k of ['CLAUDE_CODE_DISABLE_MOUSE', 'CLAUDE_CODE_DISABLE_MOUSE_CLICKS']) delete env[k]
+    Object.assign(env, vars)
+    const d = await $.ui.render(answer)
+    return { underline: words(d, '15 of 40').underline === true, sign: signAfter(d, 2).sign }
+  }
+  // no pointer reported, read as Claude Code reads them: the marks at rest, as outside fullscreen
+  for (const vars of [{ CLAUDE_CODE_DISABLE_MOUSE: '1' }, { CLAUDE_CODE_DISABLE_MOUSE: 'TRUE' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'yes' }]) {
+    expect([vars, await drawn(vars)]).toEqual([vars, { underline: true, sign: '×' }])
+  }
+  // the pointer reported: plain; CLAUDE_CODE_DISABLE_MOUSE set either way decides alone
+  for (const vars of [{}, { CLAUDE_CODE_DISABLE_MOUSE: '0' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'off' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'maybe' }, { CLAUDE_CODE_DISABLE_MOUSE: 'false', CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }]) {
+    expect([vars, await drawn(vars)]).toEqual([vars, { underline: false, sign: '' }])
+  }
 })

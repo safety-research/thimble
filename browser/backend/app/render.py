@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import config, headless
+from . import config, headless, nofollow
 from .http_guard import APP_CSP
 
 log = logging.getLogger("thimble.render")
@@ -528,8 +528,8 @@ def call_part(c: str, refs: list[str]) -> dict[str, Any]:
 
 def theme(c: str) -> dict[str, str]:
     """The theme the analyst's browser last reported for workspace `c` (PUT /ws/{c}/render/theme), else Warm and iris."""
-    try:
-        data = json.loads((config.workspace_dir(c) / THEMES_FILE).read_text("utf-8"))
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        data = json.loads(nofollow.read_text(config.workspace_dir(c) / THEMES_FILE))
     except (OSError, ValueError):
         return dict(DEFAULT_THEME)
     paper = data.get("paper") if data.get("paper") in PAPERS else DEFAULT_THEME["paper"]
@@ -649,7 +649,7 @@ async def put_theme(c: str, body: ThemeBody) -> dict[str, str]:
         p = config.workspace_dir(c) / THEMES_FILE
     except ValueError as e:
         raise HTTPException(404, str(e))
-    p.write_text(json.dumps({"paper": body.paper, "accent": body.accent}), "utf-8")
+    nofollow.write_text(p, json.dumps({"paper": body.paper, "accent": body.accent}))  # never through a card's link
     return {"paper": body.paper, "accent": body.accent}
 
 

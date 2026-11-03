@@ -53,7 +53,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from . import cc_plugin, config, ledger, permission_updates, procs, prompts
+from . import cc_plugin, config, ledger, nofollow, permission_updates, procs, prompts
 
 log = logging.getLogger("thimble.events")
 
@@ -162,6 +162,30 @@ CORPUS_WRITES: dict[bool | None, str] = {
             "back on in Settings."),
 }
 
+# main.md's {{network}} in the browser (network_words), by the way main reaches Claude and whether Settings leaves main
+# its web: which requests to a host ask the analyst first, as Settings' row for main says (runtime.network). On Claude
+# Code sign-in ("ask") a Bash command's (host_asks) and nothing else; with an API key or WIF ("on") none. Web fetches and
+# web searches are named only while main has them (userconf.main_web_off)
+NETWORK: dict[tuple[str, bool], str] = {
+    ("ask", True): ("A Bash command's request to a host the analyst has not allowed asks them first, while web fetches, "
+                    "web searches and card code reach any host without asking."),
+    ("ask", False): ("A Bash command's request to a host the analyst has not allowed asks them first, while card code "
+                     "reaches any host without asking."),
+    ("on", True): "Bash commands, web fetches, web searches and card code reach any host without asking the analyst.",
+    ("on", False): "Bash commands and card code reach any host without asking the analyst.",
+}
+
+
+def network_words(c: str | None, edits: bool | None) -> str:
+    """main.md's {{network}}: NETWORK's sentence for the way main reaches Claude, with its web fetches and web searches
+    while Settings leaves them to it (userconf.main_web_off). The main the server runs (`edits` True or False) reaches
+    Claude the way the workbench is set to (runtime.network); one it does not run (`edits` None), the analyst's own
+    Claude Code session such as the launcher's (plugin/bin/thimble), through Claude Code, so on Claude Code sign-in's
+    terms whatever way the workbench is set to."""
+    from . import runtime, userconf  # noqa: PLC0415
+
+    return NETWORK[(runtime.network() if edits is not None else "ask", not userconf.main_web_off(c))]
+
 
 def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: bool | None = None,
                    edits: bool | None = None) -> str:
@@ -169,13 +193,14 @@ def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: b
     forms of the folder's views filled in. Main's append and the shared skill's command both come from here. Main's
     prompt keeps one ending of a turn with nothing for the analyst (terminal_tools.main_prompt): without closing words
     when `terminal`, or when it is None and this process's environment says so (terminal_tools.on). `edits`: whether
-    main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py)."""
+    main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py). Which requests to
+    a host ask the analyst follows the way main reaches Claude (network_words)."""
     from . import cardtypes, terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
     c = config.workspace_for_cwd(workdir)
     forms = views.forms_text(c) if c else ""
     values = {"workdir": str(workdir), "forms": forms, "card_types": cardtypes.prompt_text(c),
-              "corpus_writes": CORPUS_WRITES[edits]}
+              "corpus_writes": CORPUS_WRITES[edits], "network": network_words(c, edits)}
     parts = []
     for name in names:
         part = prompts.render(name, values).strip()
@@ -330,10 +355,11 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
          mirror: bool = True, line: str | None = None, event_id: str | None = None) -> dict[str, Any]:
     """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
     as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
-    main's terminal shows instead of terminal_line's. `event_id` is the event's id when the caller recorded it first
-    (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet for
-    (when `check_kind`), or for a message with no text."""
-    from . import agents, session, threads  # noqa: PLC0415
+    main's terminal shows instead of terminal_line's: at once, or, when the server runs main and main's turn runs, where
+    main reads it, and as waiting until then (runtime.deliver). `event_id` is the event's id when the caller recorded it
+    first (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet
+    for (when `check_kind`), or for a message with no text."""
+    from . import agents, runtime, session, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
     payload = dict(payload or {})
@@ -348,9 +374,14 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         words = str(payload.pop("text", "") or "").strip()
         if not words:
             raise HTTPException(400, "empty message")
-        if mirror:
+        # a message that comes while the server's main works waits for main to read it: its line goes in there, so the
+        # rest of the turn does not read as its answer (runtime.deliver)
+        waits = mirror and runtime.enabled() and runtime.ensure(c).main.running
+        if mirror and not waits:
             agents.mirror(c, "user", by=agents.BROWSER, text=words, event=event_id)
         note = build_note(kind, event_id, words, {**payload, **_ultracode(c), **_filters(c)})
+        if waits:
+            note["said"] = words
     elif kind == THREAD:
         words = str(payload.get("text") or "")
         built = threads.event(c, payload, event_id)
@@ -387,8 +418,8 @@ def held_line(note: dict[str, Any]) -> str:
 def held(c: str) -> list[dict[str, Any]]:
     """The quiet events waiting for the workspace's next event, as notes."""
     if c not in _held:
-        try:
-            notes = json.loads((config.workspace_dir(c) / HELD_FILE).read_text("utf-8"))
+        try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+            notes = json.loads(nofollow.read_text(config.workspace_dir(c) / HELD_FILE))
         except (OSError, ValueError):
             notes = []
         _held[c] = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
@@ -402,7 +433,7 @@ def _keep_held(c: str, notes: list[dict[str, Any]]) -> None:
         if notes:
             ledger.atomic_write_text(path, json.dumps(notes, ensure_ascii=False))
         else:
-            path.unlink(missing_ok=True)
+            nofollow.unlink(path)  # the entry itself, never through a link a card's code left on its way
     except OSError:
         log.warning("%s: the held events were not saved to %s", c, path, exc_info=True)
 
@@ -764,17 +795,21 @@ MODEL_ID = re.compile(r"claude-[a-z0-9][a-z0-9.-]{1,62}")  # a model id as the A
 
 def _choose(c: str, choice: dict[str, Any]) -> None:
     """The composer's choice for main, kept in the workspace's settings as models.main and applied at main's next
-    launch (cli.launch_args); on main's `attached` too, as effort_choice and fast_choice, for the chip to show."""
-    from . import agents, ledger  # noqa: PLC0415
+    launch (cli.launch_args); on main's `attached` too, as effort_choice and fast_choice, for the chip to show. A model
+    chosen sets there the effort main runs at on it while the composer chose none (cc_settings.session_effort)."""
+    from . import agents, cc_settings, ledger  # noqa: PLC0415
 
     try:
-        config.corpus_dir(c)
+        corpus = config.corpus_dir(c)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
     ledger.put_settings(c, {config.MODELS_KEY: {"main": choice}})
     meta = agents.ensure_main(c)
     if meta.get("attached"):
-        meta["attached"] = {**meta["attached"], **{f"{k}_choice": v for k, v in choice.items()}}
+        fresh = {f"{k}_choice": v for k, v in choice.items()}
+        if "model" in choice:
+            fresh["settings_effort"] = cc_settings.session_effort(corpus, choice["model"])
+        meta["attached"] = {**meta["attached"], **fresh}
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
 

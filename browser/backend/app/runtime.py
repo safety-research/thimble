@@ -22,7 +22,9 @@ view's builder and its reviewer write that view's folder in the protected extens
 (agent_writes), by the slug of the start the server recorded for them, so no other agent writes a view's files.
 
 What 0.8 did through Claude Code's interactive session and thimble's plugin, the server now does in its place:
-- a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end;
+- a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end; a message the
+  analyst types in main's chat reaches main's running turn at its next tool call, as Claude Code gives a message typed
+  mid-turn (Conv.take_waiting), and main's chat shows it waiting until then (unread);
 - a `thread` event starts a fork of main's conversation that answers the thread, or a new turn of its fork;
 - the plugin module's ops (module_bridge.request: spawn, send, stop, abort, note) start, message and stop the agents
   and main here (module_op);
@@ -62,6 +64,8 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from . import nofollow  # standard library only
+
 log = logging.getLogger("thimble.runtime")
 
 ENV = "THIMBLE_RUNTIME"
@@ -76,7 +80,6 @@ ACCESS_KIND = "claude-access"  # the chat's error record when Claude cannot be r
 API_ERROR_KIND = "api-error"
 NOTES_HEAD = "(thimble, since your last turn:)"
 MAIN_MODEL = "claude-opus-5-5"
-MAIN_EFFORT = "high"
 PRIVATE_FILES = ("claude-access.json", "anthropic-api-key", "server.json", "session.key", "paired.json")
 NEW = "new"  # the register route's `chat` for a new chat of main (open_chat)
 CHAT_CHIP = "session"  # the kind of main's line where a chat starts or comes back (session.CHIP_KIND)
@@ -84,6 +87,7 @@ NEW_CHAT = "New chat"
 RESUMED_CHAT = "Resumed the chat that began with: {first}"
 SID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 EVENT_BODY_RE = re.compile(r'^\s*<thimble-event\s[^>]*?kind="([^"]*)"[^>]*>\n?(.*?)\n?</thimble-event>\s*$', re.S)
+EVENT_ID_RE = re.compile(r'^\s*<thimble-event\s[^>]*?\bevent="([^"]*)"')
 
 
 def enabled() -> bool:
@@ -100,9 +104,29 @@ def engine() -> str:
     return "api" if h in (claude_access.API_KEY, claude_access.WIF) else ""
 
 
+def network() -> str:
+    """Where the shell commands of main and its agents reach, as Settings' row for main (ledger.agent_rows) and the prompt
+    of the main this server runs (events.network_words) say: "on" with an API key or WIF, any host, unasked; else "ask",
+    where on Claude Code sign-in a request to a host the analyst has not allowed asks them first (host_asks)."""
+    return "on" if engine() == "api" else "ask"
+
+
 def uses_api() -> bool:
     """Whether model calls go to the Messages API from this process (model.structured)."""
     return enabled() and engine() != "cc"
+
+
+def shell_temp(c: str) -> Path:
+    """The TMPDIR of the shell commands of main and its thread forks in workspace `c`, which every card kernel of the
+    workspace shares (notebook), so a card's code reads what such a command wrote in $TMPDIR: on the Messages API, the
+    workspace's temp folder, which runtime_tools.Box gives them (config.temp_dir); on Claude Code sign-in, the temp
+    folder Claude Code's sandbox gives them in the workspace's short folder (runtime_cc.shell_tmp), or the workspace's
+    temp folder when there is none."""
+    from . import config, runtime_cc  # noqa: PLC0415
+
+    if engine() == "cc" and (t := runtime_cc.shell_tmp(c)) is not None:
+        return t
+    return config.temp_dir(c)
 
 
 def _now() -> str:
@@ -135,16 +159,14 @@ class Transcript:
         full = {"parentUuid": self.last, "isSidechain": self.agent_id is not None, "sessionId": self.sid,
                 **({"agentId": self.agent_id} if self.agent_id else {}), "uuid": str(uuid.uuid4()),
                 "timestamp": _now(), **rec}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(full, ensure_ascii=False) + "\n")
+        # in the workspace, which a card's code writes: never through a link put there (nofollow)
+        nofollow.append_bytes(self.path, (json.dumps(full, ensure_ascii=False) + "\n").encode("utf-8"), make=True)
         self.last = full["uuid"]
         return full
 
     def write_meta(self, meta: dict[str, Any]) -> None:
         p = self.path.with_name(self.path.name[: -len(".jsonl")] + ".meta.json")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(meta), encoding="utf-8")
+        nofollow.write_text(p, json.dumps(meta), make=True)
 
 
 # --------------------------------------------------------------------------- what an agent is
@@ -164,6 +186,11 @@ class Spec:
     write_roots: list[Path]
     private: list[Path]
     home: Path
+    # main's and its thread forks' commands' TMPDIR, which they share with the kernels (shell_temp), so a card's code
+    # reads what Bash wrote in $TMPDIR: on the Messages API runtime_tools.Box gives it them (when not inside `home`),
+    # and in a headless Claude Code session its sandbox does, in the workspace's short TMPDIR
+    # (runtime_cc.workspace_tmp). None for thimble's other agents, whose commands have a TMPDIR of their own
+    temp: Path | None = None
     fast: bool = False
     # whether the corpus is among write_roots (Settings' "Claude can edit files in this folder"): True or False for
     # main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
@@ -191,6 +218,9 @@ class Conv:
     key: str = ""  # the key of the start it runs for (subagents' request), such as `view:<slug>` (agent_writes)
     transcript: Transcript | None = None
     queue: list[str] = field(default_factory=list)
+    # set as a message joins the queue (deliver), so a Claude Code session of main's hands it on while its turn runs
+    # (runtime_cc._hand)
+    arrived: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task | None = None
     last_text: str = ""
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
@@ -285,6 +315,32 @@ class Conv:
         if results:
             self.emit({"type": "user", "message": {"role": "user", "content": results}})
 
+    def waiting_messages(self) -> list[str]:
+        """The messages the analyst typed in main's chat while its turn ran (Space.said), in main's queue, oldest first.
+        Every other event, such as a /thimble-fix request, which Claude Code too keeps for the turn's end as it keeps a
+        command, waits for the turn to end, and so does any other conversation's queue."""
+        if self.kind != "main":
+            return []
+        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in self.space.said]
+
+    def take_waiting(self) -> list[str]:
+        """The analyst's messages that wait for main's running turn, read now, with the results of the turn's tool
+        calls, as Claude Code gives a message typed mid-turn to the model at its next tool call (heard)."""
+        got = self.waiting_messages()
+        for text in got:
+            self.heard(text)
+        return got
+
+    def heard(self, text: str) -> None:
+        """Main read `text`, a message that waited in its queue, in its running turn: it leaves the queue, the
+        transcript records it as Claude Code records a message typed mid-turn (a queued_command attachment, which the
+        mirror reads as an event of the turn), and the analyst's line goes into main's chat here (Space.said_line)."""
+        with contextlib.suppress(ValueError):
+            self.queue.remove(text)
+        self.emit({"type": "attachment", "attachment": {"type": "queued_command", "prompt": text,
+                                                       "origin": {"kind": "task-notification"}}})
+        self.space.said_line(text)
+
     def spec(self) -> Spec:
         return self.space.spec_of(self)
 
@@ -331,20 +387,25 @@ class Space:
         self.c = c
         self.ws = config.workspace_dir(c)
         self.corpus = config.corpus_dir(c)
-        self.dir = self.ws / DIR
-        self.dir.mkdir(parents=True, exist_ok=True)
-        rec = _read_json(self.dir / "main.json")
-        self.sid = str(rec.get("session") or "") or str(uuid.uuid4())
-        if not rec.get("session"):
-            (self.dir / "main.json").write_text(json.dumps({"session": self.sid, "at": _now()}), encoding="utf-8")
+        self.dir = self.ws / DIR  # in the workspace: its files are written and moved as nofollow does
+        nofollow.makedirs(self.dir)
+        # main's chat names main's files (main_path, Conv.state_path), and a card's code writes main.json: a chat id no
+        # route would take (SID_OK) is none, and main starts a new chat
+        kept = str(_read_json(self.dir / "main.json").get("session") or "")
+        self.sid = kept if SID_OK.match(kept) else str(uuid.uuid4())
+        if self.sid != kept:
+            nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         for kind in ("api", "cc"):  # main's state from before chats were kept apart is its chat's
             old, new = self.dir / "convs" / f"{MAIN}.{kind}.json", self.dir / "convs" / f"{MAIN}-{self.sid}.{kind}.json"
             if old.is_file() and not new.exists():
                 with contextlib.suppress(OSError):
-                    old.rename(new)
+                    nofollow.rename(old, new)
         self.main = self._main_conv()
         self.convs: dict[str, Conv] = {}
         self.notes: dict[str, list[str]] = {}
+        # by event id, the analyst's words of each message that came while main's turn ran (events.post): main's chat
+        # shows them waiting (unread), and their line goes in where main reads them (said_line)
+        self.said: dict[str, str] = {}
 
     def _main_conv(self) -> Conv:
         tr = Transcript(self.main_path, self.sid)
@@ -352,10 +413,10 @@ class Space:
         return Conv(self, MAIN, "main", transcript=tr)
 
     async def switch(self, sid: str | None) -> bool:
-        """Make chat `sid` main, or a new chat for None: main's running turn stops, runtime/main.json names the chat,
-        the mirror follows its transcript (session.attach, which reads a chat brought back from its end), and main's
-        log gets one line that says so. A new chat while main's chat has no turn yet is that chat. False when
-        nothing changed. ValueError for an id that is no chat of this workspace."""
+        """Make chat `sid` main, or a new chat for None: main's running turn stops and what waited for it goes
+        (drop_waiting), runtime/main.json names the chat, the mirror follows its transcript (session.attach, which reads
+        a chat brought back from its end), and main's log gets one line that says so. A new chat while main's chat has
+        no turn yet is that chat. False when nothing changed. ValueError for an id that is no chat of this workspace."""
         from . import agents  # noqa: PLC0415
 
         if sid is not None and (not SID_OK.match(sid) or not (self.dir / f"{sid}.jsonl").is_file()):
@@ -363,11 +424,11 @@ class Space:
         if sid == self.sid or (sid is None and not _chat_of(self.main_path)["turns"]):
             self.attach()
             return False
+        self.drop_waiting()
         if self.main.running:
-            self.main.queue.clear()
             await _cancel(self.main.task)
         self.sid = sid or str(uuid.uuid4())
-        (self.dir / "main.json").write_text(json.dumps({"session": self.sid, "at": _now()}), encoding="utf-8")
+        nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         self.main = self._main_conv()
         self.attach()
         if sid is None:
@@ -385,11 +446,15 @@ class Space:
         return self.dir / self.sid / "subagents" / f"agent-{agent_id}.jsonl"
 
     def attach(self) -> None:
-        from . import session  # noqa: PLC0415
+        """Main is the mirror's session, with the effort it runs at while the composer chose none (spec_of), for the
+        composer's chip."""
+        from . import cc_settings, session  # noqa: PLC0415
 
         lv = session.current(self.c)
         if lv is None or lv.sid != self.sid:
-            session.attach(self.c, self.sid, str(self.corpus), transcript_path=str(self.main_path))
+            model = str(_main_choice(self.ws).get("model") or MAIN_MODEL)
+            session.attach(self.c, self.sid, str(self.corpus), transcript_path=str(self.main_path),
+                           effort=cc_settings.session_effort(self.corpus, model))
 
     def live(self) -> Any:
         from . import session  # noqa: PLC0415
@@ -426,6 +491,26 @@ class Space:
     def take_notes(self, conv_id: str) -> list[str]:
         return self.notes.pop(conv_id, [])
 
+    # ---- the analyst's messages that wait for main
+
+    def said_line(self, text: str) -> None:
+        """The analyst's line of `text`, a browser event main reads now (Conv.heard, _main_loop) or never will
+        (drop_waiting), into main's chat, when it is a message that waited for main's turn: events.post logs the line of
+        any other as it posts it."""
+        from . import agents  # noqa: PLC0415
+
+        m = EVENT_ID_RE.match(text)
+        words = self.said.pop(m.group(1), None) if m else None
+        if m and words is not None:
+            agents.mirror(self.c, "user", by=agents.BROWSER, text=words, event=m.group(1))
+
+    def drop_waiting(self) -> None:
+        """What waits for main goes unread (main's chat changes, the workspace's folder goes, the server stops): the
+        analyst's messages among it still get their lines in main's chat, as they sent them."""
+        for text in self.main.queue:
+            self.said_line(text)
+        self.main.queue.clear()
+
     # ---- what each agent runs with
 
     def private(self) -> list[Path]:
@@ -435,10 +520,11 @@ class Space:
         return [home / n for n in PRIVATE_FILES]
 
     def spec_of(self, conv: Conv) -> Spec:
-        from . import config, events, ledger, runtime_tools, subagents, tools, userconf  # noqa: PLC0415
+        from . import cc_settings, config, events, ledger, runtime_tools, subagents, tools, userconf  # noqa: PLC0415
 
         tmp = self.dir / "tmp" / conv.id
-        tmp.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(tmp)
+        temp: Path | None = None
         reads = [self.corpus, self.ws, config.REPO_ROOT / "docs", config.REPO_ROOT / "plugin" / "viewers",
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
         if conv.kind in ("main", "fork"):
@@ -451,8 +537,11 @@ class Space:
             builtins = list(MAIN_BUILTINS)
             choice = _main_choice(self.ws)
             model = str(choice.get("model") or MAIN_MODEL)
-            effort = str(choice.get("effort") or MAIN_EFFORT)
-            writes = [*([self.corpus] if edits else []), self.ws / "card-libs", tmp]
+            # the composer's effort, else the one Claude Code in a terminal runs the model at by the analyst's
+            # settings, as the level it runs at (ultracode's is xhigh)
+            effort = config.effort_level(choice.get("effort") or cc_settings.session_effort(self.corpus, model))
+            temp = shell_temp(self.c)  # their commands' TMPDIR, the kernels' too (Spec.temp)
+            writes = [*([self.corpus] if edits else []), self.ws / "card-libs", tmp, temp]
             fast = bool(choice.get("fast"))
         else:
             role = subagents.roles(self.c).get(conv.role) or {}
@@ -475,7 +564,7 @@ class Space:
             fast = False
             with contextlib.suppress(Exception):
                 for d in writes:
-                    d.mkdir(parents=True, exist_ok=True)
+                    nofollow.makedirs(d)
         cwd = self.corpus
         if conv.kind == "fork" and conv.role == FIXER:
             # thimble fix's fixer (fixes.py): main's conversation and tools, and Edit and Write, in the fix's copy of
@@ -484,21 +573,21 @@ class Space:
             from . import fixes  # noqa: PLC0415
 
             work, more, writes = fixes.fixer_roots(int(conv.values.get("fix") or 0))
-            writes = [*writes, tmp]
+            writes, temp = [*writes, tmp], None
             reads = [*reads, *more]
             builtins = [*builtins, *(b for b in ("Edit", "Write") if b not in builtins)]
             edits = None
             if engine() == "api":
                 cwd = work
         with contextlib.suppress(Exception):
-            if (userconf.load_or_defaults(self.c)[0].get("agents") or {}).get("main", {}).get("web") == "off":
+            if userconf.main_web_off(self.c):  # Settings' row for main, which main's prompt follows too
                 builtins = [b for b in builtins if b not in WEB]
         # a protected folder that holds one of the agent's own write folders is left out, since the agent writes only
         # in those: a view's builder writes extension/views/<slug> (agent_writes), and nothing else of extension/
         no_write = [p for p in protected(self.ws) if not any(p in w.parents for w in writes)]
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
                     thimble=names, model=model, effort=effort, cwd=cwd, workspace=self.ws,
-                    read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast,
+                    read_roots=reads, write_roots=writes, private=self.private(), home=tmp, temp=temp, fast=fast,
                     corpus_edits=edits, no_write=no_write)
 
 
@@ -531,17 +620,17 @@ def protected(ws: Path) -> list[Path]:
 
 
 def _read_json(p: Path) -> dict[str, Any]:
-    try:
-        got = json.loads(p.read_text("utf-8"))
+    try:  # in the workspace's runtime folder: never read through a link a card's code left there (nofollow)
+        got = json.loads(nofollow.read_text(p))
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
 
 
 def _last_uuid(path: Path) -> str | None:
-    try:
-        with path.open("rb") as f:
-            f.seek(max(0, path.stat().st_size - 65536))
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        with nofollow.reader(path) as f:
+            f.seek(max(0, os.fstat(f.fileno()).st_size - 65536))
             lines = f.read().splitlines()
     except OSError:
         return None
@@ -557,8 +646,8 @@ def _chat_of(path: Path) -> dict[str, Any]:
     """{turns, first, start}: how many turns a main transcript holds (the user records that open one), the first message
     the analyst typed in it, as one line, and when its first turn began (the record's timestamp, '' when none)."""
     turns, first, other, start = 0, "", "", ""
-    try:
-        f = path.open(encoding="utf-8")
+    try:  # as _last_uuid reads it
+        f = nofollow.reader(path, "r", encoding="utf-8")
     except OSError:
         return {"turns": 0, "first": "", "start": ""}
     with f:
@@ -655,12 +744,14 @@ def ensure(c: str) -> Space:
 
 
 async def forget(c: str) -> None:
-    """The workspace's folder goes (ledger: moved aside for a new session, or deleted): its conversations' running turns
-    stop, awaited, so none writes into the folder that takes its place, and its runtime is dropped, so the next ensure
-    reads that folder (a new session's empty one, or a session brought back)."""
+    """The workspace's folder goes (ledger: moved aside for a new session, or deleted): what waited for main goes
+    (Space.drop_waiting), its conversations' running turns stop, awaited, so none writes into the folder that takes its
+    place, and its runtime is dropped, so the next ensure reads that folder (a new session's empty one, or a session
+    brought back)."""
     sp = _spaces.pop(c, None)
     if sp is None:
         return
+    sp.drop_waiting()
     for conv in [sp.main, *sp.convs.values()]:
         if conv.running:
             conv.queue.clear()
@@ -776,8 +867,10 @@ def _failure_text(e: BaseException) -> str:
 
 def deliver(c: str, note: dict[str, Any]) -> None:
     """A browser event for main (events._publish): a thread's starts or continues its fork; any other starts a turn of
-    main, or waits for main's running turn to end."""
-    from . import events  # noqa: PLC0415
+    main, or waits for main's running turn: a message the analyst typed in main's chat (`said`, events.post) until the
+    turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat shows such a message
+    waiting until main reads it (unread)."""
+    from . import agents, events  # noqa: PLC0415
 
     sp = ensure(c)
     meta = note.get("meta") or {}
@@ -787,6 +880,13 @@ def deliver(c: str, note: dict[str, Any]) -> None:
         return
     main = sp.main
     main.queue.append(text)
+    if note.get("said"):
+        sp.said[str(meta.get("event") or "")] = str(note["said"])
+        agents.notify(c, agents.MAIN_ID)
+    if _in_loop():
+        main.arrived.set()
+    elif _loop is not None:
+        _loop.call_soon_threadsafe(main.arrived.set)
     if not main.running:
         main.task = _spawn_task(_main_loop(sp), f"main:{c}")
 
@@ -818,6 +918,7 @@ async def _main_loop(sp: Space) -> None:
         text = main.queue.pop(0)
         t0 = time.monotonic()
         main.emit({"type": "user", "message": {"role": "user", "content": text}, "origin": {"kind": "task-notification"}})
+        sp.said_line(text)
         try:
             await _run(main, text)
         except asyncio.CancelledError:
@@ -827,14 +928,37 @@ async def _main_loop(sp: Space) -> None:
 
 
 async def abort_main(c: str) -> bool:
-    """Stop main's running turn; whatever waited for it is dropped. False when no turn ran."""
+    """Stop main's running turn. What waited for it stays, and is main's next turn once the Stop is told (after_stop).
+    False when no turn ran."""
     sp = ensure(c)
     main = sp.main
     if not main.running:
         return False
-    main.queue.clear()
     await _cancel(main.task)
     return True
+
+
+def after_stop(c: str) -> None:
+    """The analyst's Stop of main is told (agents.interrupt_route: the stopped turn ended in main's chat, with its
+    note): what waited for the stopped turn, such as a message the analyst sent while it ran, is main's next turn.
+    Nothing when the runtime is off or nothing waits."""
+    sp = _spaces.get(c) if enabled() else None
+    if sp is not None and sp.main.queue and not sp.main.running:
+        sp.main.task = _spawn_task(_main_loop(sp), f"main:{c}")
+
+
+def unread(c: str) -> list[dict[str, str]]:
+    """The analyst's messages that came while main's turn ran and that main has not read yet, oldest first, for main's
+    chat (agents._main_state): {event, text}. Empty when the runtime is off."""
+    sp = _spaces.get(c) if enabled() else None
+    if sp is None:
+        return []
+    out = []
+    for text in sp.main.queue:
+        m = EVENT_ID_RE.match(text)
+        if m and m.group(1) in sp.said:
+            out.append({"event": m.group(1), "text": sp.said[m.group(1)]})
+    return out
 
 
 async def _cancel(task: Any) -> None:
@@ -995,7 +1119,6 @@ async def _lifespan(app: Any):
     global _loop
     _loop = asyncio.get_running_loop()
     if enabled():
-        llm.scrub_env()
         log.info("%s", start_line())
         for p in sorted(config.WORKSPACES_DIR.glob(f"*/{DIR}/main.json")):
             with contextlib.suppress(Exception):
@@ -1014,13 +1137,15 @@ STOP_WAIT_S = 5.0  # how long the server's stop waits for its agents to end (sto
 async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
     """The server stops (Ctrl-C in thimble-browser, a restart): every agent it runs stops, main's turn, the threads'
     forks and thimble's agents, as a Stop click stops one (_cancel): each ends `stopped` in its chat and in the registry
-    (_agent_loop, _ended). It waits up to `wait_s` for them, then the mirror keeps where each stands
-    (session.keep_places), so the next server neither shows them running nor takes them up again. The ids stopped."""
+    (_agent_loop, _ended), and what waited for main goes (Space.drop_waiting). It waits up to `wait_s` for them, then
+    the mirror keeps where each stands (session.keep_places), so the next server neither shows them running nor takes
+    them up again. The ids stopped."""
     from . import session  # noqa: PLC0415
 
     stopping: list[tuple[str, Any]] = []
     mains = [sp.c for sp in _spaces.values() if sp.main.running]
     for sp in list(_spaces.values()):
+        sp.drop_waiting()
         for conv in [sp.main, *sp.convs.values()]:
             if conv.running:
                 conv.queue.clear()
