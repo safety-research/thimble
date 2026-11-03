@@ -287,10 +287,12 @@ def test_a_takeaway_s_marks_are_checked_with_main_s_reply_and_a_card_s_cell_is_t
     assert notebook.takeaways_to_check(CORPUS) == []
 
 
-def test_a_diagram_card_s_count_is_verified_at_the_edges_it_counts(_fresh):
-    """R5: a count that only follows from a diagram card (made up), "2 of the 6 paths", cited at the listing line that
-    states the 6 edges and at the 2 edges it counts, failed, since no line states the 2. It is verified in the card's
-    takeaway, and the reply's wrong count, cited at the same lines, still fails."""
+def test_a_diagram_card_s_count_is_counted_from_its_edges(_fresh):
+    """R5, then B20: a count that only follows from a diagram card (made up), "2 of the 6 paths". R5 verified it at the
+    listing line that states the 6 edges and the 2 edges it counts, a reading of places that also passed a false "2 of
+    the 5 paths" from "5 nodes". The index lists the diagram's edges as a table, the check names it and the edges'
+    condition, and thimble counts the edges the card keeps: the takeaway is verified with its 2 edges cited, and the
+    reply's wrong count fails, with what the edges give."""
     from app import kernel_thimble, notebook
 
     shown: list[dict] = []
@@ -307,24 +309,129 @@ def test_a_diagram_card_s_count_is_verified_at_the_edges_it_counts(_fresh):
     cell.update(status="ok", outputs=shown, takeaway="A change ends in deploy, and [2 of the 6 paths](#) send it back to the draft.")
     nb["cells"].append(cell)
     notebook.write_notebook(ws, nb)
+    listed: list[str] = []
 
     async def fork(c, main, cut, prompt):
         index = next(w for w in prompt.split("`") if w.endswith("cards-index.tsv"))
-        places = [line.split("\t") for line in Path(index).read_text(encoding="utf-8").splitlines() if "\t" in line]
-        refs = [ref for ref, value in places if value.startswith("diagram:") or "-> draft" in value]
-        out = [{"mark": n, "kind": "card", "evidence": {"ref": refs}, "status": "verified", "correction": None,
-                "reason": "the listing counts 6 edges, and 2 of them go back to draft"} for n in (1, 2)]
+        listed.append(Path(index).read_text(encoding="utf-8"))
+        table = next(line.split("\t")[0] for line in listed[-1].splitlines() if "\ta table of" in line)
+        out = [{"mark": n, "kind": "card", "evidence": {"ref": table, "count": {"target": "draft"}}, "status": "verified", "correction": None,
+                "reason": "the diagram has 6 edges, and 2 of them go back to draft"} for n in (1, 2)]
         return {"answer": _answer(out), "calls": [], "error": None}
 
     turn = marks.new_turn()
     main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
-    asyncio.run(marks.start_check(CORPUS, main, turn, ["Only [3 of the 6 paths](#) send a change back."], "cut", fork=fork))
+    asyncio.run(marks.start_check(CORPUS, main, turn, ["Only [3 of the 6 paths](#) send a change back to the draft."], "cut", fork=fork))
+    assert f"card:{cell['id']}@out0#L2-L7\ta table of 6 rows: source, target, label\n" in listed[0]
     (reply,) = marks.stored(CORPUS, turn)["items"]
-    assert (reply["status"], reply["reason"]) == ("failed", "None of the 3 cited lines of the card's output shows 3.")
+    assert (reply["status"], reply["reason"]) == ("failed", "The card's table has 2 rows with target draft, not 3.")
     (take,) = notebook.get_cell(CORPUS, cell["id"])["takeaway_marks"]["items"]
     assert take["status"] == "verified", take
+    t = take["evidence"]["table"]
+    assert sorted(t["rows"][x["r"]]["label"] for x in [t["at"], *t["also"]]) == ["lint -> draft", "review -> draft"]
+
+
+def test_a_count_of_a_table_a_card_printed_is_counted_from_the_rows_it_keeps(_fresh):
+    """B20 (made-up themes, the shape of the report): a card printed a table of 8 themes, 6 of them raised by all 7
+    participants, and its takeaway's "[6 of the 8]" failed with "None of the 9 cited lines of the card's output shows 6
+    or 8", since a printed table's lines show values, never how many of them meet a condition. The card keeps the rows of
+    a table its code printed (frames.attach_printed), the index lists that table, and the check names it and the
+    condition: the takeaway is verified, its 6 rows cited, and the reply's wrong count fails. The lines cited as places
+    still show no count."""
+    import pandas as pd
+
+    from app import frames, notebook
+
+    rows = [("slow onboarding", 7), ("unclear pricing", 7), ("missing export", 7), ("flaky sync", 7), ("dark mode", 3),
+            ("bulk edit", 7), ("offline mode", 2), ("audit log", 7)]
+    t = pd.DataFrame({"theme": [r[0] for r in rows], "participants": [r[1] for r in rows]}).set_index("theme")
+    printed = f"Themes by the participants who raised them\n{t}\n"
+    frame = {"columns": ["theme", "participants"], "types": {}, "index": ["theme"], "rows": [list(r) for r in rows], "total": 8}
+    (out,) = frames.attach_printed([{"_stream": "stdout", "text/plain": printed}], [{"text": str(t), "frame": frames.normalize(frame)}])
+    cid = _seed_card("[6 of the 8](#) themes came up with all 7 participants.", [out])
+    listed: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        index = next(w for w in prompt.split("`") if w.endswith("cards-index.tsv"))
+        listed.append(Path(index).read_text(encoding="utf-8"))
+        block = prompt.split("```text\n", 1)[1].split("\n```", 1)[0]
+        ns = [int(n) for n in re.findall(r"^(\d+)\. \[", block, re.M)]
+        rows_cited = [f"card:{cid}@out0#L{n}" for n in range(4, 12)]
+        ev = {"ref": f"card:{cid}@out0#L2-L11", "count": {"participants": 7}}
+        out = [{"mark": n, "kind": "card", "evidence": {"ref": rows_cited} if n == 2 else ev, "status": "verified", "correction": None,
+                "reason": "6 of the 8 themes have 7 participants"} for n in ns]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    reply = ["[5 of the 8](#) themes came up with all 7 participants. Of the themes, [6 of the 8](#) came up with all 7 participants."]
+    asyncio.run(marks.start_check(CORPUS, main, turn, reply, "cut", fork=fork))
+    assert f"card:{cid}@out0#L2-L11\ta table of 8 rows: theme, participants\n" in listed[0]
+    got = {m["n"]: m for m in marks.stored(CORPUS, turn)["items"]}
+    assert (got[1]["status"], got[1]["reason"]) == ("failed", "The card's table has 6 rows with participants 7, not 5.")
+    assert (got[2]["status"], got[2]["reason"]) == ("failed", "None of the 8 cited lines of the card's output shows 6 or 8.")
+    (take,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+    assert take["status"] == "verified", take
     ev = take["evidence"]
-    assert [ev["output"][a:b] for a, b in ev["highlight"]] == ["6", "lint -> draft (lint errors)", "review -> draft (changes requested)"]
+    assert sorted(ev["table"]["rows"][x["r"]]["label"] for x in [ev["table"]["at"], *ev["table"]["also"]]) == sorted(r[0] for r in rows if r[1] == 7)
+    assert ev["ref"] == f"card:{cid}@out0#L2" and ev["count"] == "6 of 8 rows with participants 7"
+
+
+def test_the_tables_a_card_holds_as_data_are_its_frame_its_chart_s_rows_its_drawing_s_items_and_what_it_printed():
+    """B20: the tables a count of a card's rows counts (marks.card_tables), from the values, never their text: a table
+    card's frame, a chart's rows (none when its layers split them, the same rows twice are one table), a diagram's
+    edges and a timeline's events on the lines of their listing, and each table the card's code printed."""
+    from app import frames, kernel_thimble
+
+    frame = frames.normalize({"columns": ["service", "nights_failed"], "types": {}, "index": ["service"],
+                              "rows": [["auth-gateway", 5], ["cart-api", 2]], "total": 2})
+    (t,) = marks.card_tables(frames.bundle(frame))
+    assert (t["columns"], t["rows"], t["names"], t["label"], t["total"]) == (["service", "nights_failed"], [["auth-gateway", 5], ["cart-api", 2]],
+                                                                             ["auth-gateway", "cart-api"], "service", 2)
+    (cut,) = marks.card_tables(frames.bundle({**frame, "total": 60}))
+    assert cut["total"] == 60 and len(cut["rows"]) == 2
+    rows = [{"service": s, "nights_failed": n} for s, n in (("auth-gateway", 5), ("cart-api", 2), ("geo-lookup", 1))]
+    enc = {"x": {"field": "service", "type": "nominal"}, "y": {"field": "nights_failed", "type": "quantitative"}}
+    one = {kernel_thimble.VEGALITE_MIME: {"data": {"values": rows}, "mark": "bar", "encoding": enc}}
+    (c,) = marks.card_tables(one)
+    assert c["names"] == ["auth-gateway", "cart-api", "geo-lookup"] and c["rows"][0] == ["auth-gateway", 5] and c["total"] == 3
+    split = {kernel_thimble.VEGALITE_MIME: {"layer": [{"data": {"values": rows[:2]}, "mark": "bar", "encoding": enc},
+                                                      {"data": {"values": rows[2:]}, "mark": "bar", "encoding": enc}]}}
+    assert marks.card_tables(split) == []
+    twice = {kernel_thimble.VEGALITE_MIME: {"layer": [{"data": {"values": rows}, "mark": "bar", "encoding": enc},
+                                                      {"data": {"values": rows}, "mark": "text", "encoding": enc}]}}
+    assert len(marks.card_tables(twice)) == 1
+    shown: list[dict] = []
+    real, kernel_thimble._show = kernel_thimble._show, shown.append
+    try:
+        kernel_thimble.diagram([], [("draft", "lint"), ("lint", "draft", "lint errors")])
+        kernel_thimble.timeline([("2026-10-26", "freeze starts"), ("2026-10-28", "freeze ends")])
+    finally:
+        kernel_thimble._show = real
+    (d,), (e,) = marks.card_tables(shown[0]), marks.card_tables(shown[1])
+    assert d["rows"] == [["draft", "lint", None], ["lint", "draft", "lint errors"]] and d["lines"] == [2, 3] and d["label"] is None
+    assert [r[1] for r in e["rows"]] == ["freeze starts", "freeze ends"] and e["lines"] == [2, 3]
+    text = "Nights failed\n" + str(frame["rows"]) + "\n"
+    (out,) = frames.attach_printed([{"_stream": "stdout", "text/plain": text}], [{"text": str(frame["rows"]), "frame": frame}])
+    (p,) = marks.card_tables(out)
+    assert p["lines"] == [2, 2] and p["rows"] == frame["rows"]
+
+
+def test_a_printed_table_is_found_where_it_stands_in_the_printed_output():
+    """frames.attach_printed: each table the kernel noted stands on the lines of the stdout output that hold its text,
+    in the order printed, numbered as a card's lines are; a text found in no stdout output is left out."""
+    from app import frames
+
+    f = frames.normalize({"columns": ["n"], "types": {}, "index": None, "rows": [[1], [2]], "total": 2})
+    tab = "   n\n0  1\n1  2"
+    outs = [{"_stream": "stdout", "text/plain": f"Title\n{tab}\nnote: {tab}\n"}, {"text/html": "<b>x</b>"},
+            {"_stream": "stdout", "text/plain": f"{tab}\n"}, {"_stream": "stderr", "text/plain": "warning\n"}]
+    got = frames.attach_printed(outs, [{"text": tab, "frame": f}] * 3 + [{"text": "not printed", "frame": f}])
+    assert [x["lines"] for x in got[0][frames.PRINTED_KEY]] == [[2, 4], [5, 7]] and [x["lines"] for x in got[2][frames.PRINTED_KEY]] == [[1, 3]]
+    assert frames.PRINTED_KEY not in got[3] and outs[0].get(frames.PRINTED_KEY) is None
+    assert frames.attach_printed(outs, []) is outs
+    assert frames.read_printed({"status": "error"}) == [] and frames.read_printed(
+        {"status": "ok", "data": {"text/plain": json.dumps([{"text": "x", "frame": {"columns": ["a"], "rows": [[1]]}}, {"text": ""}])}})[0]["text"] == "x"
 
 
 def test_a_check_s_index_is_its_own_while_another_check_writes_one(_fresh):

@@ -53,10 +53,17 @@ shows the words, so a mark is never verified on evidence the checker made up:
             `card:<id>@out<i>#L<n>` (labels percent-encoded as encode_label writes them). The host gives the cards'
             outputs (`cards`: [{id, title, outputs: [{out, corner?, cells: [[col, row, value]]} | {out, lines: [[n,
             text]]}]}]); the place must exist there and show the words as shows() reads them: the cell's value (with
-            its row's label, which names what the value is of), or the line. A count of what a card shows, such as 2 of
-            a diagram's 6 edges, cites the things it counts, two or more, and their number stands for it, as the number
-            of rows of their table stands for a total beside it (counted). The person sees the card's title and the
-            table around the cell, the cell tinted.
+            its row's label, which names what the value is of), or the line. Places never count themselves: words
+            that say "N of the M" take N and M from one row (one line, or the cells of one row), or from a value's
+            row and the row that totals the values of a label card (one_count). The person sees the card's title and
+            the table around the cell, the cell tinted.
+  count     a count of a card's rows that no one place shows ("3 of the 9 services failed on all 5 nights"): card
+            evidence that names a table the card holds as data and the condition each counted row meets (`count`,
+            and `of` for the rows the M counts). This module counts the rows itself, from the records the host gives
+            with the card's outputs (`tables`: a table card's DataFrame, a chart's rows, a diagram's edges, a table the
+            card's code printed, the terminal's rows.json), never from printed text: the words state that count, the
+            table's number of rows where they say "of the M", and the sentence states each value of the condition
+            (check_count).
 
 Printed output that is a table (a printed DataFrame, aligned columns) is also read as one (text_table): computed
 evidence and a card's printed line carry `table`, the header and the rows around the one that holds the words, so
@@ -91,8 +98,8 @@ module cannot judge, fails as a check that did not run (`failedBy` `none`), whic
   check_all(marks, answer, calls, cwd, root, tmp, cards, rules)  -> {parsed, results}: every mark of a reply
   check_mark(mark, item, calls, cwd, root, tmp, cards, rules)    -> {n, status, shown, reason, failedBy?, evidence?,
                                                                      note?, was?, narrowed?, rewrite?}
-  card_index(cards)                                              -> the cards' places and values, one per line,
-                                                                     for the checker
+  card_index(cards)                                              -> the cards' tables, places and values, one per
+                                                                     line, for the checker
   terminal_cards(folder)                                         -> the terminal's cards (cards/<id>/meta.json,
                                                                      rows.json) as `cards`
   uncitable(files, cwd, root, tmp, rules)                        -> those of the files no evidence may cite: outside
@@ -109,6 +116,7 @@ import io
 import json
 import keyword
 import math
+import operator
 import os
 import re
 import shlex
@@ -348,14 +356,20 @@ def rounds_to(x: float, places: int) -> float:
     return math.floor(abs(x) * q + 0.5 + 1e-9) / q * (1 if x >= 0 else -1)
 
 
-def same_number(v: str, w: str, approx: bool = False) -> bool:
+def same_number(v: str, w: str, approx: bool = False, exact: bool = False) -> bool:
     """`v`, a number of the marked words, and `w`, one of an output, in one form, are the same value: `w` rounded to the
     places `v` is written with is `v` (24 is 24.2, 48.4% is 48.43%, never 48.5%). A number with a scale is the value
     rounded to it: `8k` is any number from 7,500 to 8,499, `1.2m` any from 1,150,000 to 1,249,999. With `approx` (the
     words say "about"), a whole number that ends in zeros is the value rounded to them: "about 250" is 248, "about 700"
-    is 650 to 749."""
+    is 650 to 749. With `exact` (a count the words state, "all 5", "3 of the 9": count_numbers), only the same value
+    (5 is 5.0, never 4.6)."""
     if v == w:
         return True
+    if exact:
+        try:
+            return Decimal(v) == Decimal(w)
+        except InvalidOperation:
+            return False
     zeros = len(v) - len(v.rstrip("0")) if approx and v.isdigit() else 0
     if 0 < zeros < len(v):
         try:
@@ -472,15 +486,15 @@ def bounded_in(needle: str, hay: str) -> bool:
     return bounded_find(norm_ws(needle), norm_ws(hay)) >= 0
 
 
-def has_number(v: str, text: str, dates: bool = True, approx: bool = False) -> bool:
+def has_number(v: str, text: str, dates: bool = True, approx: bool = False, exact: bool = False) -> bool:
     """`v` (a number in one form) is one of the numbers of `text`, compared as values: 6 matches 6.0, 9 matches 09, 8k
     matches 8,225. With `dates` False, a number inside a date or a time of the text does not count (a count of 12 is
-    not the 12 of 2026-10-12)."""
+    not the 12 of 2026-10-12); with `exact`, no rounding (same_number)."""
     t = norm_ws(text)
     spans = [] if dates else date_spans(t)
     for m in NUM_IN_TEXT.finditer(t):
         w = number_at(m)
-        if w is not None and not any(a <= m.start(1) < b for a, b in spans) and same_number(v, w, approx):
+        if w is not None and not any(a <= m.start(1) < b for a, b in spans) and same_number(v, w, approx, exact):
             return True
     return False
 
@@ -558,8 +572,10 @@ def shows(target: str, out: str, approx: bool = False) -> bool:
     if nums:
         pct = percents(target)
         rough = approx_numbers(wordnums(target, counts=True))
+        whole = count_numbers(target) - pct
         out = wordnums(out, counts=True)
-        return all(has_number(v, out, dates=d, approx=approx or v in rough) or (v in pct and has_number(fraction(v), out, approx=approx or v in rough)) for v, d in nums)
+        return all(has_number(v, out, dates=d, approx=approx or v in rough, exact=v in whole and not (approx or v in rough))
+                   or (v in pct and has_number(fraction(v), out, approx=approx or v in rough)) for v, d in nums)
     return bool(frags or calendar_days(target)) or all(has_name(x, out) for x in NAME.findall(target))
 
 
@@ -618,8 +634,9 @@ def percents(words: str) -> set[str]:
 
 
 def fraction(v: str) -> str:
-    """A percent as the share it is (59.7 is 0.597), the digits kept: an output may print the share."""
-    return num_value(str(Decimal(v) / 100))
+    """A percent as the share it is, as exact as the percent (59.7 is 0.597, 100 is 1.00, 50 is 0.50, never 0.5, which
+    0.46 rounds to): an output may print the share."""
+    return num_value(str(Decimal(v).scaleb(-2)))
 
 
 def spans_of(target: str, out: str) -> list[list[int]]:
@@ -1743,14 +1760,31 @@ def card_places(cards: list[dict[str, Any]] | None) -> list[tuple[str, str]]:
     return out
 
 
+def table_place(cid: str, o: dict[str, Any], t: dict[str, Any]) -> str:
+    """The place a count names a table of a card by (check_count): its output, `card:<id>@out<i>`, and for a table the
+    card's code printed, the output's lines it stands on, `card:<id>@out<i>#L<a>-L<b>`."""
+    at = f"card:{cid}@out{int(o.get('out') or 0)}"
+    span = t.get("lines")
+    return f"{at}#L{int(span[0])}-L{int(span[1])}" if isinstance(span, list) and len(span) == 2 else at
+
+
+def table_note(t: dict[str, Any]) -> str:
+    """What the checker's index says of a table a card holds as data: its rows and its columns."""
+    rows, total = len(t.get("rows") or []), int(t.get("total") or 0)
+    held = f"a table of {total:,} rows" + (f", of which the card keeps {rows:,}" if total > rows else "")
+    return f"{held}: {', '.join(norm_ws(c) for c in t.get('columns') or [])}"
+
+
 def card_index(cards: list[dict[str, Any]] | None) -> str:
-    """What the checker greps for a value a card shows: a heading line for each card (`# card:<id> <title>`), then one
-    line for each place, its citation, a tab, and what it shows."""
+    """What the checker greps for a value a card shows: a heading line for each card (`# card:<id> <title>`), a line
+    for each table the card holds as data, which a count of its rows names (its place, a tab, its rows and columns:
+    table_note), then one line for each place, its citation, a tab, and what it shows."""
     lines: list[str] = []
     n = 0
     for card in cards or []:
         lines.append(f"# card:{card.get('id')} {norm_ws(card.get('title') or '')}".rstrip())
-        for ref, value in card_places([card]):
+        tables = [(table_place(str(card.get("id") or ""), o, t), table_note(t)) for o in card.get("outputs") or [] for t in o.get("tables") or []]
+        for ref, value in tables + card_places([card]):
             if n >= CARD_PLACES_MAX:
                 break
             lines.append(f"{ref}\t{norm_ws(value)}")
@@ -1766,10 +1800,15 @@ def _card_text(v: Any) -> str:
     return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
 
 
+RECORDS_MAX = 5000  # records of a terminal card's rows.json read as its table
+
+
 def _records_table(recs: list[Any]) -> dict[str, Any] | None:
     """Rows of records as a card output's cells: the columns their keys, each row named by the first column of distinct
-    text, else by its position from 0 (as a chart's rows are named)."""
-    recs = [r for r in recs if isinstance(r, dict)][:5000]
+    text, else by its position from 0 (as a chart's rows are named). The records themselves are the output's table
+    (`tables`), which a count of the card's rows counts (check_count); past RECORDS_MAX the card keeps only part of it."""
+    every = [r for r in recs if isinstance(r, dict)]
+    recs = every[:RECORDS_MAX]
     if not recs:
         return None
     cols: list[str] = []
@@ -1777,7 +1816,9 @@ def _records_table(recs: list[Any]) -> dict[str, Any] | None:
         cols.extend(str(k) for k in r if str(k) not in cols)
     key = next((k for k in cols if all(isinstance(r.get(k), str) and r[k].strip() for r in recs) and len({r[k] for r in recs}) == len(recs)), None)
     names = [str(r[key]) for r in recs] if key else [str(i) for i in range(len(recs))]
-    return {"corner": key or "", "cells": [[k, nm, _card_text(r.get(k))] for r, nm in zip(recs, names) for k in cols if k != key]}
+    table = {"columns": cols, "rows": [[r.get(k) for k in cols] for r in recs], "names": names, "label": key, "total": len(every)}
+    return {"corner": key or "", "cells": [[k, nm, _card_text(r.get(k))] for r, nm in zip(recs, names) for k in cols if k != key],
+            "tables": [table]}
 
 
 def terminal_cards(folder: str | None) -> list[dict[str, Any]]:
@@ -1807,9 +1848,8 @@ def terminal_cards(folder: str | None) -> list[dict[str, Any]]:
 
 def card_refs(ev: Any) -> list[str]:
     """The places card evidence names: one `ref`, or several when the cited words hold several values (a range such as
-    "2.5 to 3.7 hours", a pair such as "243 against 104") or count things a card shows (the 2 edges of "2 of the 6
-    paths"): a list of refs, as `ref` or as a list of evidence objects, and a range of lines (`#L7-L8`) as each of its
-    lines."""
+    "2.5 to 3.7 hours", a pair such as "243 against 104"): a list of refs, as `ref` or as a list of evidence objects,
+    and a range of lines (`#L7-L8`) as each of its lines."""
     out: list[str] = []
     for e in ev if isinstance(ev, list) else [ev]:
         got = e.get("ref", e.get("refs")) if isinstance(e, dict) else e
@@ -1845,7 +1885,7 @@ def _card_place(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, dict
             value = rows[r]["values"][c]
             return "", {"cid": cid, "title": title, "ref": f"card:{cid}#{encode_label(col)}/{encode_label(row)}", "value": value,
                         "text": f"{row} {value}", "where": f"the card's {col} for {row}", "out": ("cells", i), "col": col, "row": row,
-                        "cols": cols, "rows": rows, "r": r, "c": c, "corner": str(o.get("corner") or "")}
+                        "cols": cols, "rows": rows, "r": r, "c": c, "corner": str(o.get("corner") or ""), "totals": o.get("totals")}
         return f"the card has no {col} for {row}", None
     out_i, n = int(ln.group(2)), int(ln.group(3))
     o = next((x for x in card.get("outputs") or [] if int(x.get("out") or 0) == out_i and x.get("lines")), None)
@@ -1860,8 +1900,8 @@ def _card_place(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, dict
 
 def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     """The evidence to show of the places of one card output: a cell's table with each cited cell marked, or the
-    output's lines with what shows the words highlighted on each cited line, else the whole line, a thing the words
-    count (as a table when the output is one)."""
+    output's lines with what shows the words highlighted on each cited line, else the whole line (as a table when the
+    output is one)."""
     p = ps[0]
     shown: dict[str, Any] = {"kind": "card", "card": p["cid"], "title": p["title"], "ref": p["ref"], "value": p["value"]}
     if len(ps) > 1:
@@ -1875,8 +1915,7 @@ def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     for x in ps:
         start = sum(len(t) + 1 for _, t in lines[:x["at"]])
         line = lines[x["at"]][1]
-        # each cited line highlights what of the words it shows (one value of a range on its own line), else all of it,
-        # as a thing the words count (an edge of a diagram)
+        # each cited line highlights what of the words it shows (one value of a range on its own line), else all of it
         spans += [[start + a, start + b] for a, b in spans_of(target, line)] or [[start, start + len(line)]]
     shown["output"], shown["highlight"] = window(text, spans, OUTPUT_MAX)
     if table := text_table(text, spans):
@@ -1909,29 +1948,65 @@ def framed(target: str, places: list[dict[str, Any]], approx: bool = False) -> b
     return shows(target, names, approx)
 
 
-def counted(target: str, places: list[dict[str, Any]], approx: bool = False) -> list[str]:
-    """The number of things cited places count, as values they show: "2 of the 6 paths" cites the 2 edges of a diagram
-    that it counts, and the line that states the 6, since no line states the 2. The things are the cited records (a
-    table's rows, lines of printed output) whose values show none of the words' numbers; [] for fewer than two, since
-    one place alone is a value's own place, never a count of one. Rows of one table also show how many rows the card
-    shows of that table, beside their own number and never alone: "2 of the 6 paths" cites 2 rows of a table of 6."""
-    nums = [v for v, _ in marked_numbers(wordnums(target, counts=True))]
-    things = {(p["cid"], p["out"], p.get("row", p.get("n"))): p for p in places
-              if not any(has_number(v, wordnums(p["value"], counts=True), dates=False, approx=approx) for v in nums)}
-    if len(things) < 2:
-        return []
-    out = [str(len(things))]
-    one = next(iter(things.values()))
-    if one["out"][0] == "cells" and len({(p["cid"], p["out"]) for p in things.values()}) == 1 and out[0] in nums:
-        out.append(str(len(one["rows"])))
-    return out
+# "N of the M" and "N out of M" in words whose number words are digits (wordnums)
+COUNT_OF = re.compile(r"(?<![\w.,])(\d+(?:,\d{3})*)(?![.,]?\d)\s+(?:out\s+)?of\s+(?:all\s+)?(?:the\s+|these\s+|those\s+)?(\d+(?:,\d{3})*)(?![.,]?\d)", re.I)
 
 
-def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+def count_pair(words: str) -> tuple[str, str] | None:
+    """The N and M of words that say "N of the M" or "N out of M" ("three of the nine" too), each in one form."""
+    m = COUNT_OF.search(wordnums(unmark(words)))
+    return (num_value(m.group(1)), num_value(m.group(2))) if m else None
+
+
+def count_numbers(words: str) -> set[str]:
+    """The numbers of the words that count things whole: the N and M of "N of the M", and "all 5", "each of the 3",
+    "none of the 9". A count is a whole number of things, so a value with places never shows it by rounding: an average
+    of 4.6 nights is no "all 5 nights" (same_number `exact`)."""
+    w = wordnums(unmark(words))
+    out = {num_value(x) for m in COUNT_OF.finditer(w) for x in m.groups()}
+    return out | {num_value(m.group(1)) for rx in (ALL_OF, NONE_OF) for m in rx.finditer(w)}
+
+
+def one_count(target: str, places: list[dict[str, Any]], approx: bool = False) -> str:
+    """Why places that show the numbers of words saying "N of the M" do not show them as one count, or "". N and M
+    stand in one row of a card (one line of its output, or the cells of one row, whose column names may give the M:
+    `of_40_still_open`), or N in a value's row of a label card's counts and M in the row that totals them. Places never
+    count themselves, and two rows' values are no count: the 4 of one service's nights and the 9 of a title line, or
+    red's 3 negatives and the 12 runs of all teams."""
+    pair = count_pair(target)
+    if not pair or len(places) < 2:
+        return ""
+    big, total = pair
+    rows: dict[tuple[str, Any, Any], list[dict[str, Any]]] = {}
+    for p in places:
+        rows.setdefault((p["cid"], p["out"], p.get("row") if p["out"][0] == "cells" else p.get("n")), []).append(p)
+    if len(rows) < 2:
+        return ""
+    for ps in rows.values():
+        text = wordnums("\n".join(f"{p['text']} {re.sub(r'[_.]+', ' ', str(p.get('col') or ''))}" for p in ps), counts=True)
+        if has_number(big, text, approx=approx) and has_number(total, text, approx=approx):
+            return ""
+    for p in places:
+        totals = p.get("totals")
+        if p["out"][0] != "cells" or not totals or p.get("row") == totals or not has_number(big, p["value"], approx=approx):
+            continue
+        if any(q["cid"] == p["cid"] and q["out"] == p["out"] and q.get("row") == totals and q.get("col") == p.get("col")
+               and has_number(total, q["value"], approx=approx) for q in places):
+            return ""
+    return f"the cited places show {big} and {total} in different rows, not {big} out of {total}"
+
+
+def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "", sentence: str = "") -> tuple[list[str], dict[str, Any] | None]:
     """The problems of card evidence, and the evidence to show: each cited place must be one of the session's cards,
     and together they show the words (a cell's value, with its row's name; a line of printed output). Words that hold
-    several values (a range, a pair) may cite a place for each: each value must stand in one of them. A count of what a
-    card shows cites the things it counts, whose number stands for it (counted)."""
+    several values (a range, a pair) may cite a place for each: each value must stand in one of them. Places never count
+    themselves (one_count): a count of a card's rows names the table and its condition, and is counted from the card's
+    rows (check_count)."""
+    own = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict) and "count" in e]
+    if own:
+        if len(own) > 1 or (isinstance(ev, list) and len(ev) > 1):
+            return ["the check named more than one table for one count"], None
+        return check_count(target, own[0], cards, sentence, approx, was)
     refs = card_refs(ev)
     if not refs:
         return ["the check named no value or line of a card"], None
@@ -1947,7 +2022,7 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     shown_all = [_card_shown(target, g) for g in groups.values()]
     shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
     values, texts = [p["value"] for p in places], [p["text"] for p in places]
-    said = "\n".join(texts + counted(target, places, approx))
+    said = "\n".join(texts)
     one = places[0]
     if not (shows(target, "\n".join(values), approx) or shows(target, said, approx) or framed(target, places, approx)):
         if len(places) > 1:
@@ -1956,10 +2031,399 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
         if one["out"][0] == "cells":
             return [f"{one['where']} shows {short(one['value'], 40) or 'nothing'}, not {unshown(target, one['text'], approx)}"], shown
         return [instead(one["where"], target, texts, approx)], shown
+    apart = one_count(target, places, approx)
+    if apart:
+        return [apart], shown
     missing = unshown_change(was, target, said, approx) if was else []
     if missing:
         gone = f"“{short(' … '.join(missing), 60)}”"
         return [f"none of {several(places)} shows {gone}" if len(places) > 1 else f"{one['where']} does not show {gone}"], shown
+    return [], shown
+
+
+# ------------------------------------------------------------------------------------------------ a count of a card's rows
+#
+# "3 of the 9 services failed on all 5 nights", where no one place of the card shows the 3: the check names the table
+# and the condition each counted row meets, `{"ref": "card:<id>@out<i>", "count": {"nights_failed": 5}}` (and `of`
+# for the rows "of the M" counts, when not all), and this module counts the rows. It reads the card's own rows, the
+# records the host gives with an output (`tables`: [{columns, rows, names, label, total, lines?}]), never printed
+# text: a value compares as the value it is (4.6 is no 5, 0.6 no 100%). The words must state the count, and "of the
+# M" the rows of the table (or of `of`), and every other number of the words is a value of the condition. The sentence
+# states each value of the condition apart from the count's own numbers, a bound by its words ("at least 1" for `>=`),
+# a yes of a column by the column's words, so the check cannot count by a condition the claim does not make. A table
+# the card keeps only part of, whose rows two share a name, or with a row that totals the others, gives no count.
+
+COUNT_OPS = {"=": operator.eq, "<": operator.lt, "<=": operator.le, ">": operator.gt, ">=": operator.ge}
+OP_WORDS = {"=": "", "<": "under ", "<=": "at most ", ">": "over ", ">=": "at least "}
+# the words before a number that state a bound (each `>=` and `<=` before the `>` and `<` it holds), and after it, a
+# unit between them ("4 nights or more")
+BOUND_WORDS = ((re.compile(r"(?:\bat\s+least|≥|>=)\s*$", re.I), ">="), (re.compile(r"(?:\bat\s+most|\bup\s+to|\bwithin|≤|<=)\s*$", re.I), "<="),
+               (re.compile(r"(?:\bmore\s+than|\bover|\babove|>)\s*$", re.I), ">"), (re.compile(r"(?:\bless\s+than|\bfewer\s+than|\bunder|\bbelow|<)\s*$", re.I), "<"))
+BOUND_AFTER_WORDS = ((re.compile(r"\s*(?:%|percent\b)?\s*(?:[A-Za-z]+\s+)?(?:or\s+more\b|\+)", re.I), ">="),
+                     (re.compile(r"\s*(?:%|percent\b)?\s*(?:[A-Za-z]+\s+)?or\s+(?:less|fewer)\b", re.I), "<="))
+ALL_OF = re.compile(r"\b(?:all|each|every\s+one)\s+(?:of\s+)?(?:the\s+|these\s+|those\s+)?(\d+(?:,\d{3})*)(?![.,]?\d)", re.I)
+NONE_OF = re.compile(r"\bnone\s+of\s+(?:the\s+|these\s+|those\s+)?(\d+(?:,\d{3})*)(?![.,]?\d)", re.I)
+CARD_OUT = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)@out(\d+)$")
+FLOAT_NOISE = Decimal("1e-9")  # the share of a value a float sum or mean may be off by (_sums_up)
+SUMMARY_NAMES = frozenset({"all", "total", "totals", "sum", "mean", "average", "avg", "overall"})  # rows that sum up (_sums_up)
+YES, NO = frozenset({"yes", "true"}), frozenset({"no", "false"})
+
+
+def _decimal(v: Any) -> Decimal | None:
+    """A value as the number it is, or None: a number, or text that is only a number (`1,234`, `−3.5`); a boolean is
+    no number."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return Decimal(str(v)) if not (isinstance(v, float) and not math.isfinite(v)) else None
+    s = str(v).strip().replace("−", "-")
+    if not re.fullmatch(r"[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", s):
+        return None
+    return Decimal(s.replace(",", ""))
+
+
+def _truth(v: Any) -> bool | None:
+    """A value as yes or no: a boolean, or the words yes, no, true, false; None for anything else."""
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower() if isinstance(v, str) else ""
+    return True if s in YES else False if s in NO else None
+
+
+def _meets(have: Any, op: str, want: Any) -> bool:
+    """A row's value meets one part of a condition: equal as numbers (5 and 5.0; 4.6 is no 5), as yes or no, else as
+    text, the case aside; a bound compares numbers only."""
+    a, b = _decimal(have), _decimal(want)
+    if op != "=":
+        return a is not None and b is not None and COUNT_OPS[op](a, b)
+    if a is not None and b is not None:
+        return a == b
+    ta, tb = _truth(have), _truth(want)
+    if ta is not None or tb is not None:
+        return ta is not None and ta == tb
+    return have is not None and norm_ws(str(have)).casefold() == norm_ws(str(want)).casefold()
+
+
+def _conditions(spec: Any) -> tuple[str, list[tuple[str, str, Any]] | None]:
+    """A count's condition as (column, operator, value) parts, all of which a counted row meets: `{"nights_failed": 5}`,
+    `{"share": {">=": 0.5}}`; `{}` for every row. (why it cannot be read, None) for any other form."""
+    if not isinstance(spec, dict):
+        return "the check gave the count's condition in a form thimble cannot read", None
+    out: list[tuple[str, str, Any]] = []
+    for col, want in spec.items():
+        op = "="
+        if isinstance(want, dict):
+            if len(want) != 1 or next(iter(want)) not in COUNT_OPS:
+                return "the check gave the count's condition in a form thimble cannot read", None
+            op, want = next(iter(want.items()))
+        if want is None or isinstance(want, (list, dict)) or (op != "=" and _decimal(want) is None):
+            return "the check gave the count's condition in a form thimble cannot read", None
+        out.append((str(col), op, want))
+    return "", out
+
+
+def _condition_words(parts: list[tuple[str, str, Any]]) -> str:
+    """A condition as a reason names it: `nights_failed 5`, `negative at least 1 and team platform`."""
+    return " and ".join(f"{col} {OP_WORDS[op]}{_card_text(v)}" for col, op, v in parts)
+
+
+def _rows(n: int) -> str:
+    return f"{n:,} row" + ("" if n == 1 else "s")
+
+
+def _column_words(col: str) -> list[str]:
+    return [w for w in re.split(r"[^a-z0-9]+", col.lower()) if len(w) > 1]
+
+
+def _says_word(w: str, text: str) -> bool:
+    """A word of a column's name stands in the text, as itself or with or without a plural s."""
+    forms = {w, w + "s", w + "es", w[:-1] if w.endswith("s") else w}
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(f) + r"(?![a-z0-9])", text) for f in forms if f)
+
+
+def _stated(col: str, op: str, want: Any, text: str) -> bool:
+    """The text states one part of a count's condition: its number with the words of its bound before or after it
+    (none for `=`; a percent may state a share, 100% the 1 of a share column), a day as the same day, text as the same
+    words, the case aside, and a yes as every word of the column's name. A no states nothing: a count of the rows a
+    condition leaves out needs its own words."""
+    num = _decimal(want)
+    if num is not None:
+        for m in NUM.finditer(text):
+            v = number_at(m)
+            if v is None or names_record(text, m) or any(a <= m.start(1) < b for a, b in date_spans(text)):
+                continue
+            try:
+                got = Decimal(v)
+            except InvalidOperation:
+                continue
+            after = text[m.end():]
+            pct = re.match(r"\s*(?:%|percent\b)", after) is not None
+            if got != num and not (pct and got / 100 == num):
+                continue
+            bound = next((o for rx, o in BOUND_WORDS if rx.search(text[:m.start()])), None) or next((o for rx, o in BOUND_AFTER_WORDS if rx.match(after)), "=")
+            if bound == op:
+                return True
+        return False
+    truth = _truth(want)
+    if truth is not None:
+        low = text.lower()
+        return truth and bool(_column_words(col)) and all(_says_word(w, low) for w in _column_words(col))
+    s = norm_ws(str(want))
+    if calendar_days(s):
+        return days_shown(s, text)
+    return bool(s) and re.search(r"(?<!\w)" + re.escape(one_quote(s)) + r"(?!\w)", one_quote(text), re.I) is not None
+
+
+def _count_table(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any], int | None] | None]:
+    """The table a count's place names: (why none, None), or (the card, its output, the table, the line the place names
+    or None). An output (`card:<id>@out<i>`) names its one table; a cell names its output's; a line or a range of lines
+    names the printed table it stands in."""
+    ref = str(ref or "").strip().strip("[]")
+    td, ln, lns, whole = CARD_TD.match(ref), CARD_LINE.match(ref), CARD_LINES.match(ref), CARD_OUT.match(ref)
+    m = td or ln or lns or whole
+    if not m:
+        return "the check named no table of a card", None
+    cid = m.group(1)
+    card = next((c for c in cards or [] if str(c.get("id")) == cid), None)
+    if card is None:
+        return f"there is no card {cid} in this session", None
+    outs = [o for o in card.get("outputs") or [] if isinstance(o, dict)]
+    if td:
+        col, row = decode_label(td.group(2)), decode_label(td.group(3))
+        o = next((x for x in outs if (col, row) in _grid(x)[2]), None)
+        if o is None:
+            return f"the card has no {col} for {row}", None
+        line = last = None
+    else:
+        out_i = int(m.group(2))
+        o = next((x for x in outs if int(x.get("out") or 0) == out_i), None)
+        if o is None:
+            return f"the card has no output {out_i}", None
+        line = int(m.group(3)) if not whole else None
+        last = int(m.group(4)) if lns else line
+    tables = [t for t in o.get("tables") or [] if isinstance(t, dict)]
+    if line is not None:
+        tables = [t for t in tables if isinstance(t.get("lines"), list) and len(t["lines"]) == 2
+                  and int(t["lines"][0]) <= line and (last or line) <= int(t["lines"][1])]
+    if not tables:
+        if o.get("cells"):
+            return "the card keeps that table only as the text it shows, so its rows cannot be counted", None
+        where = f"line {line} of the card's output" if line is not None else "the card's output"
+        return f"{where} is printed text, not rows the card keeps as data, so its rows cannot be counted", None
+    if len(tables) > 1:
+        return f"the card's output holds {len(tables)} tables, and the check did not name the lines of one", None
+    return "", (card, o, tables[0], line)
+
+
+def _name_twice(t: dict[str, Any]) -> str | None:
+    """A name two rows of the table share, when a column names its rows: the same thing may stand in both."""
+    if not t.get("label"):
+        return None
+    seen: set[str] = set()
+    for name in t.get("names") or []:
+        if name in seen:
+            return str(name)
+        seen.add(name)
+    return None
+
+
+def _sums_up(t: dict[str, Any], cols: list[str]) -> str | None:
+    """The name of a row that sums up the others, or None, in a table of three rows or more with a column of numbers:
+    in every such column its value is the others' sum or their mean (as pandas' margins, `All`, and a `mean` row are),
+    as the row rounds it (2.8 for 2.78) and a float's error left aside (FLOAT_NOISE). One column's value matches a sum
+    or a mean by chance (3 of 1, 2, 3), so it takes two columns whose other values differ, or a row whose name says it
+    sums up (SUMMARY_NAMES). Such a row is no record of the things the table counts."""
+    rows = t.get("rows") or []
+    if len(rows) < 3:
+        return None
+    nums = [j for j in range(len(cols)) if cols[j] != t.get("label") and all(_decimal(r[j] if j < len(r) else None) is not None for r in rows)]
+    if not nums:
+        return None
+    names = t.get("names") or [str(i) for i in range(len(rows))]
+    near = lambda a, b: abs(a - b) <= FLOAT_NOISE * max(Decimal(1), abs(b))  # noqa: E731
+    for i, r in enumerate(rows):
+        name = str(names[i]) if i < len(names) else str(i)
+        ok, differ = True, 0
+        for j in nums:
+            v = _decimal(r[j])
+            rest = [_decimal(x[j]) for k, x in enumerate(rows) if k != i]
+            total = sum(rest, Decimal(0))
+            mean = total / len(rest)
+            places = -v.as_tuple().exponent if isinstance(v.as_tuple().exponent, int) and v != v.to_integral_value() else 0
+            ok = v == total or v == mean or near(v, total) or near(v, mean) or (places > 0 and mean.quantize(Decimal(1).scaleb(-places)) == v)
+            differ += len(set(rest)) > 1
+            if not ok:
+                break
+        if ok and (differ > 1 or (differ and name.strip().casefold() in SUMMARY_NAMES)):
+            return name
+    return None
+
+
+def _count_shown(card: dict[str, Any], o: dict[str, Any], t: dict[str, Any], counted: list[int], col: str | None, line: int | None) -> dict[str, Any]:
+    """The evidence a count shows: the card's table with each counted row's cell of the condition's column cited (the
+    first column for a count of every row). A table the card's code printed shows from its records, with the cited
+    line of the printed output beside it, which the browser checks the card against; a table of cells shows as the card
+    shows its cells."""
+    cid, title = str(card.get("id") or ""), str(card.get("title") or "")
+    names = [str(x) for x in t.get("names") or []]
+    shown: dict[str, Any] = {"kind": "card", "card": cid, "title": title}
+    if o.get("cells"):
+        cols, rows, _ = _grid(o)
+        at = {row["label"]: i for i, row in enumerate(rows)}
+        rs = [at[names[i]] for i in counted if i < len(names) and names[i] in at]
+        c = cols.index(col) if col in cols else 0
+        if rs and cols:
+            shown.update(ref=f"card:{cid}#{encode_label(cols[c])}/{encode_label(rows[rs[0]]['label'])}", value=rows[rs[0]]["values"][c],
+                         table=table_of(str(o.get("corner") or ""), cols, rows, rs[0], c, [(r, c) for r in rs[1:]]))
+        return shown
+    label = t.get("label")
+    columns = [str(x) for x in t.get("columns") or []]
+    keep = [j for j, x in enumerate(columns) if x != label]
+    cols = [columns[j] for j in keep]
+    rows = [{"label": names[i] if i < len(names) else str(i), "values": [_card_text(r[j] if j < len(r) else None) for j in keep]} for i, r in enumerate(t.get("rows") or [])]
+    c = cols.index(col) if col in cols else 0
+    lines = [(int(k), str(x)) for k, x in o.get("lines") or []]
+    a, b = (int(t["lines"][0]), int(t["lines"][1])) if isinstance(t.get("lines"), list) else (lines[0][0] if lines else 1, lines[-1][0] if lines else 1)
+    pick = next((k for k, (n, _) in enumerate(lines) if n == line and a <= n <= b), None)
+    pick = pick if pick is not None else next((k for k, (n, _) in enumerate(lines) if a <= n <= b), None)
+    if pick is not None:
+        text = "\n".join(x for _, x in lines)
+        start = sum(len(x) + 1 for _, x in lines[:pick])
+        shown["ref"] = f"card:{cid}@out{int(o.get('out') or 0)}#L{lines[pick][0]}"
+        shown["value"] = lines[pick][1]
+        shown["output"], shown["highlight"] = window(text, [[start, start + len(lines[pick][1])]], OUTPUT_MAX)
+    if counted and cols:
+        shown["table"] = table_of(str(label or ""), cols, rows, counted[0], c, [(r, c) for r in counted[1:]])
+    return shown
+
+
+def check_count(target: str, ev: dict[str, Any], cards: list[dict[str, Any]] | None, sentence: str = "", approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+    """The problems of a count of a card's rows (the module note above), and the evidence to show: the table with the
+    counted rows cited. `ev` is {ref, count, of?}; `sentence` the mark's sentence, its citations in brackets."""
+    got = ev.get("ref", ev.get("refs"))
+    refs = [str(x).strip() for x in (got if isinstance(got, list) else [got]) if isinstance(x, str) and x.strip()]
+    if not refs:
+        return ["the check named no table of a card"], None
+    found = []
+    for ref in refs:
+        why, place = _count_table(ref, cards)
+        if place is None:
+            return [why], None
+        found.append(place)
+    if len({id(p[2]) for p in found}) > 1:
+        return ["the check named more than one table for one count"], None
+    card, o, t, line = found[0]
+    why, conds = _conditions(ev.get("count"))
+    if conds is None:
+        return [why], None
+    why, of = _conditions(ev.get("of")) if ev.get("of") is not None else ("", [])
+    if of is None:
+        return [why], None
+    cols = [str(x) for x in t.get("columns") or []]
+    rows = [r if isinstance(r, list) else [] for r in t.get("rows") or []]
+    total = int(t.get("total") or len(rows))
+    for col, _, _ in of + conds:
+        if col not in cols:
+            return [f"the card's table has no column {col}"], None
+    if total > len(rows):
+        return [f"the card keeps {len(rows):,} of the table's {total:,} rows, so they cannot be counted"], None
+    twice = _name_twice(t)
+    if twice is not None:
+        return [f"two rows of the card's table are named {twice}, so its rows cannot be counted"], None
+    summed = _sums_up(t, cols)
+    if summed is not None:
+        return [f"the row {summed} of the card's table sums up the others, so its rows cannot be counted"], None
+    j = {c: k for k, c in enumerate(cols)}
+    value = lambda r, c: r[j[c]] if j[c] < len(r) else None  # noqa: E731
+    pool = [i for i, r in enumerate(rows) if all(_meets(value(r, c), op, v) for c, op, v in of)]
+    counted = [i for i in pool if all(_meets(value(rows[i], c), op, v) for c, op, v in conds)]
+    n, m = len(counted), len(pool)
+    shown = _count_shown(card, o, t, counted, conds[0][0] if conds else None, line)
+    has, among = (f" with {_condition_words(conds)}" if conds else ""), (f" with {_condition_words(of)}" if of else "")
+
+    # the words: the count, "of the M", and every other number a value of the condition
+    w = wordnums(unmark(target))
+    nums = [(mt, v) for mt in NUM.finditer(w) if not names_record(w, mt) for v in [number_at(mt)] if v is not None]
+    own: list[tuple[int, int]] = []
+
+    def bound_of(span: tuple[int, int]) -> str | None:
+        """The bound the words put the count under ("more than 3 of the 9": `>`), "~" for words that make it no count
+        ("almost 3", "all but 3"), None for an exact count."""
+        before, after = w[:span[0]], w[span[1]:]
+        if re.search(r"\b(?:all\s+but|nearly|almost|close\s+to)\s*$", before, re.I):
+            return "~"
+        return next((op for rx, op in BOUND_WORDS if rx.search(before)), None) or next((op for rx, op in BOUND_AFTER_WORDS if rx.match(after)), None)
+
+    def meets(v: str, span: tuple[int, int]) -> bool:
+        op = bound_of(span)
+        if op is None:
+            return same_number(v, str(n), approx)
+        try:
+            return op != "~" and COUNT_OPS[op](Decimal(n), Decimal(v))
+        except InvalidOperation:
+            return False
+
+    pair = COUNT_OF.search(w)
+    none = NONE_OF.search(w)
+    if pair or none:
+        big, whole_m = (pair.group(1), pair.group(2)) if pair else ("0", none.group(1))
+        span = pair.span(1) if pair else none.span(0)
+        if not meets(num_value(big), span):
+            op = bound_of(span)
+            if op == "~":
+                return [f"the card's table has {_rows(n)}{has}{among}, and the words give no exact number of them"], shown
+            return [f"the card's table has {_rows(n)}{has}{among}, not {OP_WORDS.get(op or '=', '')}{num_value(big)}"], shown
+        if not same_number(num_value(whole_m), str(m), approx):
+            return [f"the card's table has {_rows(m)}{among}, not {num_value(whole_m)}"], shown
+        own += [pair.span(1), pair.span(2)] if pair else [none.span(1)]
+    else:
+        first = next((mt for mt, v in nums if meets(v, mt.span(1)) and not any(a <= mt.start(1) < b for a, b in date_spans(w))), None)
+        if first is None:
+            return [f"the card's table has {_rows(n)}{has}{among}, which the words do not state"], shown
+        own.append(first.span(1))
+    for mt in ALL_OF.finditer(w):
+        if mt.span(1) in own and n != m:
+            return [f"the card's table has {_rows(m)}{among}, not {num_value(mt.group(1))}"], shown
+    if of and n == m:
+        # rows picked by `of` that are all the counted rows count the rows against themselves: "3 of the 3 services
+        # failed every night" with `of` the services that failed every night
+        return [f"the check counts {n:,} of the {m:,} rows{among}, which are the same rows"], shown
+    if n == 0:
+        return [f"no row of the card's table has {_condition_words(conds) or 'a value'}{among}, so the count shows no row"], None
+    # the condition's values: stated by the sentence apart from the count's own numbers. The sentence holds the cited
+    # words in brackets (a rewrite's its new words; a correction's sentence the marked ones, which the new words replace)
+    masked = "".join("#" if any(a <= k < b for a, b in own) else ch for k, ch in enumerate(w))
+    said = wordnums(unmark(sentence or ""))
+    text = masked
+    for cited in [f"[{w}]"] + ([f"[{wordnums(unmark(was))}]"] if was else []):
+        i = said.find(cited)
+        if i >= 0:
+            text = f"{said[:i]}[{masked}]{said[i + len(cited):]}"
+            break
+    for col, op, v in of + conds:
+        if not _stated(col, op, v, text):
+            return [f"the check counts the rows with {_condition_words([(col, op, v)])}, which the sentence does not say"], shown
+    values = [_decimal(v) for _, op, v in of + conds if _decimal(v) is not None]
+    texts = [str(v) for _, _, v in of + conds if isinstance(v, str)]
+    for mt, v in nums:
+        if mt.span(1) in own:
+            continue
+        try:
+            d = Decimal(v)
+        except InvalidOperation:
+            d = None
+        pct = re.match(r"\s*(?:%|percent\b)", w[mt.end():]) is not None
+        in_date = any(a <= mt.start(1) < b for a, b in date_spans(w))
+        if (d is not None and any(d == x or (pct and d / 100 == x) for x in values)) or (in_date and any(has_number(v, x) for x in texts)):
+            continue
+        return [f"the words' {number_named(w, v, in_date)} is neither the count nor a value of its condition"], shown
+    if calendar_days(w) and not any(days_shown(w, x) for x in texts):
+        return [f"the check counts the rows with {_condition_words(of + conds) or 'no condition'}, which does not give the day the words name"], shown
+    if was:
+        missing = unshown_change(was, target, f"{n} of {m}\n" + "\n".join(_card_text(v) for _, _, v in of + conds), approx)
+        if missing:
+            return [f"the count does not show “{short(' … '.join(missing), 60)}”"], shown
+    shown["count"] = f"{n:,} of {_rows(m)}{has}{among}"
     return [], shown
 
 
@@ -1988,11 +2452,11 @@ def parse_answer(text: str) -> list[dict[str, Any]] | None:
     return [x for x in found if isinstance(x, dict)] if isinstance(found, list) else None
 
 
-def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | list[str] | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
+def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]], cwd: str, root: str | None, approx: bool = False, tmp: str | list[str] | None = None, was: str = "", cards: list[dict[str, Any]] | None = None, rules: str | None = None, sentence: str = "") -> tuple[list[str], dict[str, Any] | None]:
     """The problems of one mark's evidence for `target`, and the evidence to show. For a correction, `target` is its
-    new words and `was` the marked words."""
+    new words and `was` the marked words; `sentence` is the mark's sentence, which a count's condition stands in."""
     if kind == "card":
-        return check_card(target, ev, cards, approx, was)
+        return check_card(target, ev, cards, approx, was, sentence)
     if kind == "computed":
         return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was, root or cwd)
     if kind in ("quote", "code"):
@@ -2264,7 +2728,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         res = {**out, "status": "failed", "reason": why, "failedBy": by, **extra}
         if ev:
             _, evidence = check_evidence(unmark(words), kind, ev, calls, cwd, root, approx, tmp, cards=cards,
-                                         rules=rules)
+                                         rules=rules, sentence=str(mark.get("sentence") or ""))
             if evidence and (evidence.get("kind") != "computed" or evidence.get("output")):
                 res["evidence"] = evidence
         return res
@@ -2330,7 +2794,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if not new and quoted_around(str(mark.get("sentence") or ""), words):
         # a quote whose marks stand around the citation (`"[I've been locked out]."`) is a direct quote too
         target = f'"{target}"'
-    problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards, rules)
+    sentence_now = str(rewrite["sentence"] if rewrite else mark.get("sentence") or "")
+    problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards, rules,
+                                        sentence_now)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
