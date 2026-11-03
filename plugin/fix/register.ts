@@ -48,6 +48,7 @@
 // thimble's or of Claude Code's.
 import type { EngineInterface, Register } from 'claude-code'
 
+import { expectPrompt } from '../core/answers'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
@@ -289,10 +290,15 @@ export const registerFix: Register = on => {
     // go to Claude in quotes, and the fix still takes them as typed
     const text = words.startsWith('/') ? `“${words}”` : words
     $.clock.after(0, () => {
+      // the turn the prompt starts is the person's (core/answers.ts)
+      const unexpect = expectPrompt(text)
       void (async () => {
         const r = await $.prompt.submit({ text, asUser: true })
         if (r.drop !== undefined) throw new Error(r.drop)
-      })().catch(err => notGiven($, words, err))
+      })().catch(err => {
+        unexpect()
+        return notGiven($, words, err)
+      })
     })
     return { context: [requestText, ...(list ? [list] : [])] }
   })
