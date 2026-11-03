@@ -470,3 +470,67 @@ async def test_a_document_type_a_model_names_is_one_a_route_would_take():
     assert report_types.read_type(CORPUS, planted) is None
     got = await tools.call(CORPUS, "read_ref", {"ref": f"type:{planted}"}, session="writer:report")
     assert "OUTSIDE-SECRET" not in json.dumps(got.content)
+
+
+def test_a_card_s_id_names_its_check_s_pictures_only_when_a_route_would_take_it(tmp_path_factory):
+    """A card check keeps its pictures, and a fix the card from before it, in card-checks/<card>/, by the card's id as
+    the card's group's file holds it, which a card's code writes; an id with ../ parts had the server make folders and
+    write pictures wherever they led."""
+    from app import card_check, checkstore
+
+    outside = _outside(tmp_path_factory)
+    planted = _up_from(config.workspace_dir(CORPUS) / card_check.SHOTS_DIR, outside / "made-up")
+    with pytest.raises(ValueError):
+        card_check._keep(CORPUS, planted, "made-up-card.png", b"\x89PNG made-up")
+    with pytest.raises(ValueError):
+        checkstore._before_path(CORPUS, planted, "fix_made_up")
+    assert sorted(os.listdir(outside)) == ["made-up-settings.json"]
+
+
+def test_the_export_copies_a_chat_s_log_only_by_a_chat_s_id(tmp_path_factory, tmp_path):
+    """The workspace's export copies each chat's log, chats/<id>.jsonl, by the id its meta, chats/<id>.meta.json, holds;
+    a card's code writes the meta, and an id with ../ parts had the export copy any .jsonl file the person can read into
+    the zip they download and share, under a name that unpacks outside its folder."""
+    import zipfile
+
+    from app import agents, export
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.jsonl").write_text(json.dumps({"ts": "2026-11-03T00:00:00Z", "text": "OUTSIDE-SECRET"}) + "\n")
+    agents.ensure_main(CORPUS)
+    chats = config.workspace_dir(CORPUS) / "chats"
+    (chats / "made-up.meta.json").write_text(json.dumps({"id": _up_from(chats, outside / "made-up")}))
+    (chats / "x").mkdir()  # and the folder its ../ parts start from
+    export.build(CORPUS, tmp_path / "made-up.zip")
+    with zipfile.ZipFile(tmp_path / "made-up.zip") as z:
+        assert not [n for n in z.namelist() if ".." in n.split("/")]
+        assert all(b"OUTSIDE-SECRET" not in z.read(n) for n in z.namelist())
+
+
+def test_an_earlier_version_s_session_a_chat_names_ends_only_a_claude_code_session(tmp_path_factory):
+    """At its start the server ends the processes an earlier version's sessions left running, by the pid a chat's meta,
+    chats/<id>.meta.json, keeps, when that process's command line names the meta's session; a card's code writes the
+    meta, so a meta that named any process and a word of its command line had the server stop that process, and one
+    whose background session started with a dash gave `claude stop` an option."""
+    from app import agents, subagents
+
+    victim = _sleeper("made-up-victim")
+    ran: list = []
+    real_run = subprocess.run
+
+    def spy(argv, *a, **k):
+        ran.append(list(argv))
+        return real_run(["true"], *a, **k)
+
+    try:
+        chat = agents.new_agent(CORPUS, "orient", "made-up orientation", announce=False)
+        agents.update_agent(CORPUS, chat["id"], status="running", pid=victim.pid, session="made-up-victim",
+                            bg="--made-up-option")
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(subprocess, "run", spy)
+            subagents.stop_old_background(CORPUS)
+            subagents.close_old(CORPUS)
+        assert victim.poll() is None, "the server stopped a process a chat's meta named"
+        assert not [r for r in ran if "--made-up-option" in r]
+    finally:
+        _stop(victim)

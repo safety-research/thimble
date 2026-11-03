@@ -335,6 +335,12 @@ def fixable(cell: dict, fields: Iterable[str]) -> list[str]:
 
 
 def _before_path(c: str, cid: str, fix_id: str) -> Path:
+    """card-checks/<card>/<fix>-before.json, its folder made when missing; ValueError for a card's id a route would not
+    take (card_check._shot_path)."""
+    from . import notebook  # noqa: PLC0415
+
+    if not notebook.ID_RE.match(cid or ""):
+        raise ValueError(f"{cid!r} is no card's id")
     d = config.workspace_dir(c) / SHOTS_DIR / cid
     nofollow.makedirs(d)
     return d / f"{fix_id}-before.json"

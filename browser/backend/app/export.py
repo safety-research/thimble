@@ -204,6 +204,8 @@ def _telemetry(w: Writer, ws: Path) -> dict[str, int]:
 
 def _chats(w: Writer, ws: Path) -> list[dict[str, Any]]:
     """Every chat's records as the browser showed them, and one index row per chat (its meta and where its log is)."""
+    from . import agents  # noqa: PLC0415
+
     index: list[dict[str, Any]] = []
     d = ws / "chats"
     for folder, trashed in ((d, False), (d / "trash", True)):
@@ -211,7 +213,10 @@ def _chats(w: Writer, ws: Path) -> list[dict[str, Any]]:
             meta = _read_json(meta_path)
             if not isinstance(meta, dict):
                 continue
-            cid = str(meta.get("id") or meta_path.name[: -len(".meta.json")])
+            # by the chat's id, its meta's when a route would take it, since a card's code writes the meta, else the
+            # file's name
+            cid = str(meta.get("id") or "")
+            cid = cid if agents.ID_RE.match(cid) else meta_path.name[: -len(".meta.json")]
             log_path = folder / f"{cid}.jsonl"
             arc = f"chats/{'trash/' if trashed else ''}{cid}.jsonl"
             stats = w.copy_jsonl(arc, log_path, ("ts",)) if log_path.is_file() else {"rows": 0, "first_ts": None, "last_ts": None}
