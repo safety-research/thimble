@@ -5,7 +5,8 @@
 //   telemetry   ../telemetry/telemetry.ts  each model call and turn in the session's events; registered first and last,
 //                                       so its two hooks of each event bracket thimble's others and time them
 //   host        ../core/host.ts         whether thimble's drawing shows in this session (Claude Code's terminal
-//                                       interface): the keys, the look and the card check run only where it does
+//                                       interface): the keys and the look run only where it does, and Citations and
+//                                       Cards act as off where it does not
 //   path        ./path.ts               the session's environment: the plugin's bin/ first on PATH, and a TMPDIR
 //   watch       ./watch.ts              which files Claude's Read, Grep and Bash calls touched, for `thimble coverage`;
 //                                       a /clear or a /resume turns every module over to the new conversation
