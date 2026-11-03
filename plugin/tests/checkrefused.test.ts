@@ -14,9 +14,8 @@
 // not read a file, the citation's card names the file, and x gives the OK to read it where Claude Code asked nobody,
 // or starts the repair, whose read Claude Code asks about again, where it asked the person. Where nothing the person
 // does lets the check run (auto mode in a remote Cowork session, a refusal after the OK, auto mode's classifier that
-// judged the check, a deny rule), x is not offered, and the line says what refused it; a refusal by a mode stands until
-// the person's prompt or the end of main's turn shows the session in another mode, when x is offered again. All data is
-// made up. `claude plugin test plugin`.
+// judged the check, a deny rule), x is not offered, and the line says what refused it. All data is made up. `claude
+// plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
@@ -381,50 +380,6 @@ for (const [what, deny, line] of [
     expect(await band($)).toEqual({ status: '× failed', x: false, line, presses: [] })
   })
 }
-
-/** The person's prompt as Claude Code raises it: thimble's prompt.submit, then the classic hook, which gives the
- *  session's permission mode, `mode`. */
-async function promptIn($: Any, mode: string): Promise<void> {
-  await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
-  await $.classic.UserPromptSubmit({ prompt: 'and the mirror?', permission_mode: mode } as never)
-}
-
-test("a refusal by a mode, which no OK answers, stands while the session is in that mode: once the person's prompt, or the end of main's turn, shows another mode, x is offered on the failed citation again and starts the repair", OPTIONS, async ($, on) => {
-  on('classic.UserPromptSubmit', () => ({}) as never)
-  on('classic.Stop', () => ({}) as never)
-  // auto mode in a remote Cowork session: Claude Code refuses the check x starts, and takes no OK of the person's
-  const { spawns, clock } = await session($, on, AUTO, { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' })
-  await reply($, clock, 't1', 'row-a1', 'aborted')
-  await openCitation($, 'row-a1', 1)
-  expect(await pressX($, clock)).toBe('')
-  expect((await band($)).x).toBe(false)
-  // a prompt in auto mode: the refusal stands
-  await promptIn($, 'auto')
-  await openCitation($, 'row-a1', 2)
-  expect(await band($)).toEqual({ status: '× failed', x: false, line: NO_VERDICT_OUTSIDE, presses: [] })
-  // the person left auto mode: their next prompt shows it, and x is offered again
-  await promptIn($, 'default')
-  await openCitation($, 'row-a1', 2)
-  expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
-  expect(await pressX($, clock)).toBe('')
-  expect(spawns.length).toBe(2)
-  // in auto mode again, Claude Code refuses it again; the end of main's turn in another mode shows that mode too
-  expect((await band($)).x).toBe(false)
-  await $.classic.Stop({ stop_hook_active: false, permission_mode: 'acceptEdits' } as never)
-  expect((await band($)).x).toBe(true)
-})
-
-test("a deny rule's refusal stands in every mode: a prompt in another mode leaves x away", OPTIONS, async ($, on) => {
-  on('classic.UserPromptSubmit', () => ({}) as never)
-  const { spawns, clock } = await session($, on, RULE)
-  await reply($, clock, 't1', 'row-a1', 'aborted')
-  await openCitation($, 'row-a1', 1)
-  expect(await pressX($, clock)).toBe('')
-  await promptIn($, 'default')
-  await openCitation($, 'row-a1', 2)
-  expect((await band($)).x).toBe(false)
-  expect(spawns.length).toBe(1)
-})
 
 test("don't ask mode: x then a letter in its word window is a word, so neither the OK nor the repair stands: the repair is refused before Claude Code starts it, and a later reply's check is refused as before the OK, with g on its line; the next x gives the OK and starts the repair", OPTIONS, async ($, on) => {
   const { spawns, clock } = await session($, on, e => (e.description === REPAIR_DESCRIPTION ? null : DONT_ASK))

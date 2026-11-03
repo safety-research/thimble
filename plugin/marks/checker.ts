@@ -30,8 +30,6 @@
 //                             thimble's checks this session (their spawn and their Python), as g gives it, and each
 //                             file the citation's check could not read where Claude Code asked nobody; null where
 //                             nothing the person does here lets its check run, so x is not offered
-//   modeSeen($, mode)         the session's permission mode as a classic hook gives it (marks/register.ts): a refusal
-//                             of a mode the session is no longer in stands no more, so x comes back
 //   allowsCheck($, e, o, v)   whether thimble answers allow to Claude Code's verdict `v` on a spawn (tool.check,
 //                             marks/register.ts): a checker's spawn of thimble's own, once the person gave that OK,
 //                             where Claude Code itself would ask, never where a rule, a hook, a setting or another
@@ -75,9 +73,7 @@
 // refuse without it (no verdict, don't ask mode), and lets its Python run.
 // Where no OK lets the check start (auto mode in a remote Cowork session, a refusal that came after the OK, auto mode's
 // classifier that judged the check, a deny rule), x is not offered, and a failed citation opened says that line again.
-// A refusal by a mode stands until a check starts or thimble sees the session in another mode (modeSeen); Claude Code
-// raises nothing when the person changes the mode, so thimble sees it in the next hook that gives the mode: the
-// person's next prompt, or the end of main's turn.
+// That refusal stands until a check starts.
 //
 // A check whose read of a file Claude Code refused leaves that file on each citation it fails whose check needed it
 // (readEnded, MarkItem `unread`): a check of one citation needed each file it could not read; a check of several, each
@@ -117,8 +113,8 @@
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent),
 // checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about), checksRefusing (the line
-// of a refusal that stands for the session, and the mode that refused it), checksReads (the files the person let
-// thimble's checks read, each by the tool that reads it); the marks themselves are in store.ts
+// of a refusal that stands for the session), checksReads (the files the person let thimble's checks read, each by the
+// tool that reads it); the marks themselves are in store.ts
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -453,18 +449,13 @@ async function remoteCowork($: Engine): Promise<boolean> {
 /** The refusals that stand for the session, each kept with its line: no verdict, don't ask mode, and those no OK of
  *  the person's answers, auto mode's classifier that judged the check and a deny rule. */
 const STANDING: Refusal['kind'][] = ['unreviewed', 'mode', 'judged', 'rule']
-/** The permission modes a refusal names (refusingMode), as Claude Code's hooks name the session's mode
- *  (`permission_mode`). */
-const MODE_NAMES: Record<string, string> = { 'auto mode': 'auto', "don't ask mode": 'dontAsk' }
 
 /** The line Claude Code's refusal `deny` of a check gives now: with the person's OK as it stands, and where Claude Code
- *  takes thimble's allow. A refusal that stands for the session (STANDING) is kept, with its line and the mode that
- *  refused it (`mode`, none for a rule), until a check starts or the session is seen in another mode (repairOk,
- *  modeSeen). */
+ *  takes thimble's allow. A refusal that stands for the session (STANDING) is kept, with its line, until a check starts
+ *  (repairOk). */
 async function refusedLine($: Engine, deny: string | undefined): Promise<Line> {
   const line = cannotStart(deny, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
-  const mode = MODE_NAMES[refusingMode(String(deny ?? '')) ?? '']
-  if (STANDING.includes(line.kind)) await $.state.set(REFUSING, (mode ? { ...line, mode } : line) as never)
+  if (STANDING.includes(line.kind)) await $.state.set(REFUSING, line as never)
   return line
 }
 
@@ -472,16 +463,6 @@ async function refusedLine($: Engine, deny: string | undefined): Promise<Line> {
 async function checkStarted($: Engine): Promise<void> {
   await failCleared($, START)
   if ((await $.state.get(REFUSING)).value) await $.state.set(REFUSING, null)
-}
-
-/** The session's permission mode as a classic hook gives it (`permission_mode`, marks/register.ts): a refusal kept for
- *  the session by another mode no longer stands, so x comes back on a failed citation. Claude Code raises nothing when
- *  the mode changes, so thimble sees the change at the next hook that gives the mode. A rule's refusal stands in every
- *  mode. */
-export async function modeSeen($: Engine, mode: unknown): Promise<void> {
-  if (typeof mode !== 'string' || !mode) return
-  const line = ((await $.state.get(REFUSING)).value ?? null) as { mode?: string } | null
-  if (line?.mode && line.mode !== mode) await $.state.set(REFUSING, null)
 }
 
 /** What x gives before a failed citation's repair starts: the person's OK (`give`), which a word typed after x takes
