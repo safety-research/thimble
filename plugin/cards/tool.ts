@@ -5,16 +5,20 @@
 //      call, as plan mode's refusal does. An `ask` that a rule of the person's makes refuses it too, since Claude Code
 //      cannot put its dialog in front of a plugin's own tool; one that comes only from the mode (a tool of a plugin, a
 //      file outside the working folder) lets it go on, since the card reads only a file of the session's folders or
-//      temp folder, and runs its view in the runner's sandbox
-//   1. checks the file is in the session's folder or the temp folder, and copies it into the card's folder
+//      temp folders, and runs its view in the runner's sandbox
+//   1. checks the file is in the session's folder or a temp folder of the session (thimble's, or Claude Code's own,
+//      where a command in its Bash sandbox writes for `$TMPDIR`), and copies it into the card's folder
 //   2. loads the view and the copy into the runner (runner.mjs), which draws the card and makes its text copy
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called; a new version draws in the card's place
 //   4. tries the call's actions, keys and clicks in order, then puts the card back as it was
-//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, the copy at the
-//      width a side pane leaves it when a row that fits at the card's width wraps there, and the copy after each
-//      action. Nothing in it asks for a new version: notes come only for what is wrong (a key the card cannot get, a
-//      row a side pane breaks, a card taller than its frame shows, draw.ts CARD_ROWS, or than the screen)
+//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width on the surface the
+//      one that called relates to (draw.ts copyWidth), and the copy after each action. Nothing in it asks for a new
+//      version: notes come only for what is wrong where the card is shown (a key the card cannot get, a card taller
+//      than its frame shows, draw.ts CARD_ROWS, or than the screen). It gives no copy at a width the card is not drawn
+//      at now, such as the narrower width a side pane would leave it: that copy gave Claude a reason to change a card
+//      that fits where it is shown. While a side pane is open, the copy is at the width the pane leaves the card
+//      (copyWidth), and a view that lays out from surface.columns fits each width (the card tool's prompt)
 //   6. a version that does not fit (more rows than its frame shows, or lines cut at the card's edge) is held: its frame
 //      draws `drawing…` until the card check (fit.ts) has read it, and the check's replacement draws in its place. The
 //      answer says nothing of that, and gives no note on its size; the replacement is told to the one that drew the card
@@ -33,8 +37,7 @@ import { failCleared, failNotice } from '../bar/notice'
 import { sinceLast } from '../core/answers'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
-import { tempDir } from '../core/home'
-import { paneNow } from '../core/pane'
+import { claudeTempDir, tempDir } from '../core/home'
 import { MAIN, takeFor, tellFor } from '../core/tell'
 import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
@@ -44,9 +47,9 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask, sandboxNotice } from './ask'
-import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidth, cardWidthBesidePane, rowsCut, rowsWord, screenRows } from './draw'
+import { applyAnswer, askCard, CARD_ROWS, canRedraw, copyWidth, rowsCut, rowsWord, screenRows } from './draw'
 import { checkCard, fits, shown } from './fit'
-import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
+import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,7 +75,7 @@ const SCHEMA = {
     actions: {
       type: 'array',
       description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',
-      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'words the card shows (a click there, as the analyst clicks), or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
+      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'words the card shows (a click there, as the analyst clicks), or [x, y]: the cell at column x of line y of the text copy, both from 0', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
     },
   },
 }
@@ -102,10 +105,10 @@ async function refused($: Engine, input: Record<string, unknown>, file: string |
   return null
 }
 
-/** The folders a data file may be in, each as its real path: the session's folders and the temp folder. */
-async function roots($: Engine): Promise<string[]> {
+/** The folders a data file may be in, each as its real path: the session's folders and its temp folders (`temps`). */
+async function roots($: Engine, temps: string[]): Promise<string[]> {
   const out: string[] = []
-  for (const c of [await $.session.cwd().catch(() => ''), await startDir($).catch(() => ''), await tempDir($)]) {
+  for (const c of [await $.session.cwd().catch(() => ''), await startDir($).catch(() => ''), ...temps]) {
     if (!c) continue
     const st = await $.fs.stat(c, { resolve: true }).catch(() => null)
     if (st?.kind === 'dir' && st.realPath && !out.includes(st.realPath)) out.push(st.realPath)
@@ -113,16 +116,23 @@ async function roots($: Engine): Promise<string[]> {
   return out
 }
 
-/** The data file's real path, or why it cannot be read. */
+/** The data file's real path, or why it cannot be read. `$TMPDIR` is the session's temp folder as the command that
+ *  wrote the file had it: thimble's (core/home.ts tempDir), or Claude Code's own for a command in its Bash sandbox
+ *  (claudeTempDir); where both hold the file, the one written last. */
 async function dataFile($: Engine, raw: string): Promise<{ path?: string; bad?: string }> {
   const p = String(raw ?? '').trim()
   if (!p) return { bad: '`data` is empty: give the path of the JSON file of rows you wrote' }
-  const expanded = p.replace(/^\$\{?TMPDIR\}?(?=\/)/, await tempDir($))
-  const path = expanded.startsWith('/') ? expanded : `${await $.session.cwd()}/${expanded}`
-  const st = await $.fs.stat(path, { resolve: true }).catch(() => null)
-  if (!st || st.kind !== 'file' || !st.realPath) return { bad: `there is no file at ${p}` }
+  const temps = [await tempDir($), await claudeTempDir($).catch(() => '')].filter(Boolean)
+  const rest = /^\$\{?TMPDIR\}?(?=\/)/.exec(p) ? p.replace(/^\$\{?TMPDIR\}?/, '') : null
+  const paths = rest === null ? [p.startsWith('/') ? p : `${await $.session.cwd()}/${p}`] : temps.map(t => `${t}${rest}`)
+  let st: { kind: string; size: number; mtimeMs: number; realPath?: string } | null = null
+  for (const path of paths) {
+    const at = await $.fs.stat(path, { resolve: true }).catch(() => null)
+    if (at?.kind === 'file' && at.realPath && (!st || at.mtimeMs > st.mtimeMs)) st = at
+  }
+  if (!st || !st.realPath) return { bad: `there is no file at ${p}` }
   const real = st.realPath
-  if (!(await roots($)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder ($TMPDIR); write the data file in one of them` }
+  if (!(await roots($, temps)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder ($TMPDIR); write the data file in one of them` }
   if (st.size > MAX_ROWS_BYTES) return { bad: `${p} is ${Math.round(st.size / 1048576)} MB; a card reads at most 64 MB, so write only the rows it shows` }
   return { path: real }
 }
@@ -168,15 +178,6 @@ function copyText(lines: string[], cut: number[], width: number): string[] {
   if (lines.length > COPY_LINES) out.push(`(${lines.length - COPY_LINES} more lines)`)
   if (cut.length) out.push(`(line${cut.length > 1 ? 's' : ''} ${cut.slice(0, 8).join(', ')} ${cut.length > 1 ? 'are' : 'is'} wider than the card's ${width} columns and cut there)`)
   return out
-}
-
-/** The card as a side pane draws it, when a row that fits at the card's width wraps there (the runner's load says:
- *  runner.mjs besideOf). */
-function besidePane(beside: Any, width: number): string[] {
-  if (!beside?.wrapped?.length) return []
-  const lines = beside.wrapped as number[]
-  const which = `line${lines.length > 1 ? 's' : ''} ${lines.slice(0, 8).join(', ')}`
-  return ['', `When a side pane opens beside the conversation, the card is ${beside.width} columns wide, and rows that fit at ${width} columns wrap there, out of their columns (${which}):`, ...copyText(beside.lines, beside.cut, beside.width)]
 }
 
 /** What a call answers when the version did not draw: what to fix, or, when the runner cannot start, that the card is
@@ -270,10 +271,11 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
     return { result: `The card did not draw: ${error}.` }
   }
 
-  const width = (await treeOf($, id))?.width ?? cardWidth()
-  // a pane open now: the card is drawn at the width it leaves, and no narrower copy is asked for
-  const beside = (await paneNow($)) ? 0 : cardWidthBesidePane()
-  const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width, beside })
+  // the version is drawn, and its copies laid out, at the width of the surface the one that called relates to
+  // (draw.ts copyWidth): main and the designer fork read the card as the conversation draws it, a side thread's fork
+  // as its pane draws it
+  const width = copyWidth(meta, threadAnchor(input.agentId))
+  const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width })
   if (!r?.ok) {
     // the folder stays as the last call's, for the next call's `edits`; the version on screen stays
     await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer'), ...(r?.down ? { down: true } : {}) })
@@ -321,7 +323,6 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   const other = asked.filter(k => !/^\p{L}$/u.test(k))
   if (other.length) out.push(`Note on the view: a card takes letters only, so it does not get ${other.join(' ')}. The analyst has not seen ${other.length > 1 ? 'these keys' : 'this key'} on the card.`)
   out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
-  out.push(...besidePane(r.beside, width))
 
   let tallest = r.lines.length
   const actions = Array.isArray(input.actions) ? input.actions : []
@@ -418,7 +419,8 @@ export async function personVersion($: Engine, o: { id: string; title: string; v
   await $.fs.write(`${dir}/view.js`, o.view)
   const copied = await $.process.run(['cp', '--', o.rows, `${dir}/rows.json`])
   if (copied.exitCode !== 0) return { error: `thimble could not copy the rows (${String(copied.stderr).trim().slice(0, 200)})` }
-  const width = (await treeOf($, o.id))?.width ?? cardWidth()
+  // its copy is read by the one that drew the card (checkHeld), so it is laid out where the card stands (copyWidth)
+  const width = copyWidth(meta)
   const r = await ask($, 'load', { id: o.id, version, title, view: o.view, rows: `${dir}/rows.json`, state: null, width })
   if (!r?.ok) {
     void $.process.run(['rm', '-rf', '--', dir]).catch(() => undefined)

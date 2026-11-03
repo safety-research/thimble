@@ -29,7 +29,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import agents, cite, config
+from . import agents, cite, config, nofollow
 
 log = logging.getLogger("thimble.threads")
 
@@ -199,9 +199,8 @@ def save_image(c: str, thread_id: str, data_url: str | None) -> str | None:
     if not data.startswith(b"\x89PNG") or len(data) > IMAGE_MAX_BYTES:
         return None
     d = config.workspace_dir(c) / IMAGE_DIR
-    d.mkdir(parents=True, exist_ok=True)
     path = d / f"{thread_id}.png"
-    path.write_bytes(data)
+    nofollow.write_bytes(path, data, make=True)  # never through a link a card's code left in the workspace
     return str(path)
 
 
@@ -941,12 +940,19 @@ async def tool_screenshot(ctx: Any, args: dict[str, Any]) -> Any:
     if meta is None and not m:
         meta = next((x for x in reversed(agents.list_chats(ctx.c)) if x.get("kind") == agents.KIND_THREAD
                      and ref in _anchors(x) and x.get("anchor_image")), None)
-    path = Path(str((meta or {}).get("anchor_image") or ""))
-    if meta is None or not path.is_file():
+    # the picture save_image kept for the thread, by the thread's id: the meta, which a card's code writes, only says
+    # there is one, and is never taken for where it lies
+    tid = m.group(1) if m else str((meta or {}).get("id") or "")
+    path = config.workspace_dir(ctx.c) / IMAGE_DIR / f"{tid}.png" \
+        if meta is not None and meta.get("anchor_image") and agents.ID_RE.match(tid) else None
+    try:
+        data = base64.b64encode(nofollow.read_bytes(path)).decode("ascii") if path is not None else None
+    except OSError:  # gone, or a link or another entry a card's code left in its place (nofollow)
+        data = None
+    if data is None:
         if not m and _file_ref(ref):
             # a file ref no view opens, and no thread was opened on it: the tool's answer names the way to read it
             return tools.err("screenshot: " + tools.hint("screenshot-none", what=f"No view opens {ref}"))
         return tools.err(f"screenshot: no picture of {ref}; a thread's element is `thread:<id>`, and only a thread opened "
                          "from the browser has one")
-    data = base64.b64encode(path.read_bytes()).decode("ascii")
     return tools._image(data, "image/png", f"screenshot of {ref} ({meta.get('anchor') or 'no ref'}), taken at the click")

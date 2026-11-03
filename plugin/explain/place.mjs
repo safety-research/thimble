@@ -253,11 +253,12 @@ export const holds = (text, term) => !!(findTerm(text, term) || findInLink(text,
 
 /**
  * Where each item of a part `explain` ({items, order}) stands on a text: [{id, start, end}] in text order. Placed first
- * the heads-ups, then the explainers the analyst asked for (`asked`), the newest first, then the look's explainers in
- * their order; words a mark already stands on take no other, so words the analyst picked over or across explainers are
- * one mark, and the explainers it covers do not draw. An explainer never stands on a heads-up's words, nor on what is
- * left of its own words beside one wherever its term is said, so the heads-up keeps its words and opens; the explainer
- * stands where its term is said apart from them, or not at all. `original`: the text is shown in place
+ * the heads-ups, those the analyst asked for (`asked`) the newest first, then the look's; then the explainers, those
+ * the analyst asked for the newest first, then the look's in their order. Words a mark already stands on take no other,
+ * so words the analyst picked over or across marks of their kind are one mark, and the marks it covers do not draw. An
+ * explainer never stands on a heads-up's words, nor on what is left of its own words beside one wherever its term is
+ * said, so the heads-up keeps its words and opens; the explainer stands where its term is said apart from them, or not
+ * at all; nor does a mark beside one of its kind the analyst asked for. `original`: the text is shown in place
  * of Claude's words (a squeezed version), so a term is also found in another form (anchorTerm). An item whose term the
  * text does not hold gets no place: the part keeps it, and it stands on its words again when a text that holds them
  * shows.
@@ -266,16 +267,16 @@ export function placeGlosses(text, part, original = false) {
   const items = part && typeof part === 'object' && part.items ? part.items : {}
   const order = (Array.isArray(part?.order) ? part.order : Object.keys(items)).filter(id => items[id])
   const heads = g => g.kind === 'heads'
-  const rank = g => (heads(g) ? 0 : g.asked ? 1 : 2)
+  const rank = g => (heads(g) ? 0 : 2) + (g.asked ? 0 : 1)
   const sorted = order.map((id, i) => ({ id, i }))
     .sort((x, y) => rank(items[x.id]) - rank(items[y.id]) || (items[x.id].asked ? y.i - x.i : x.i - y.i))
     .map(x => x.id)
   const out = []
   const find = (term, taken) => (original ? anchorTerm(text, term, taken) : findTerm(text, term, taken)) ?? findInLink(text, term, taken) ?? findRead(text, term, taken)
   const meet = (a, b) => a.start < b.end && b.start < a.end
-  // the marks beside which what is left of an item's words is no mark: one of the other kind, and an explainer the
-  // analyst asked for
-  const apart = (g, m) => heads(m) !== heads(g) || (!!m.asked && !heads(g))
+  // the marks beside which what is left of an item's words is no mark: one of the other kind, and one the analyst
+  // asked for
+  const apart = (g, m) => heads(m) !== heads(g) || !!m.asked
   for (const id of sorted) {
     const term = items[id].term
     const near = out.filter(m => apart(items[id], items[m.id]))

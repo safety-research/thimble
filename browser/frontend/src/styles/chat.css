@@ -116,9 +116,11 @@
 .chat-text > :last-child {
   margin-bottom: 0;
 }
-/* the paragraphs and lists of a reply stand one line apart, a blank line as the terminal prints it */
+/* the paragraphs and lists of a reply stand one line apart, a blank line as the terminal prints it; a line break in a
+   paragraph stays one, as the terminal prints it too (a fixer's last message: its Title line, then What it does) */
 .chat-text p {
   margin: 1lh 0;
+  white-space: pre-line;
 }
 .chat-text ul,
 .chat-text ol {
@@ -412,6 +414,87 @@ button.chat-call-chip:hover,
 }
 .chat-call-mark {
   flex: none;
+}
+/* an ask before a request to a host the analyst has not allowed (chat/HostAsk.tsx), under the command that waits for
+   it, in one accent-edged card: what Claude said the command does, the host in mono, the command in mono on one line
+   cut to fit (whole and wrapped once clicked), and the choices, which wrap in a narrow column */
+.chat-host-asks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 2px;
+}
+.chat-host-ask {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--accent) 9%, var(--surface-card));
+}
+.chat-host-ask-what {
+  margin: 0;
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.chat-host-ask-where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+.chat-host-ask-ico {
+  flex: none;
+  color: var(--text-accent);
+}
+.chat-host-ask-host {
+  min-width: 0;
+  color: var(--text-primary);
+  font: var(--type-mono-sm);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.chat-host-ask-call {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-host-ask-call:hover {
+  color: var(--text-primary);
+}
+.chat-host-ask-call:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
+}
+.chat-host-ask-call[aria-expanded='true'] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-host-ask-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
 }
 /* the call chip, shared by a folded run of calls, its failed count and a subagent: a filled tonal chip at the size of
    .chip-sans, its words in mono at 11.5, with a chevron that turns while open */
@@ -726,8 +809,8 @@ button.chat-call-chip:hover,
   gap: 6px;
   margin-left: auto;
 }
-/* a message to the orientation on its way, or queued until the run going on ends: the analyst's tile, a step quieter,
-   with a line under it */
+/* a message to the orientation on its way, or queued until the run going on ends, and one to main until main reads it:
+   the analyst's tile, a step quieter, with a line under it while the server holds it */
 .chat-pending,
 .chat-user[data-event='orient-follow-up'] {
   display: flex;
@@ -1103,7 +1186,7 @@ button.model-line-part[aria-expanded='true'] {
   color: inherit;
 }
 /* -------- the task strip: glass on the pane's paper, riding 4px behind the composer's top edge while the thread works;
-   the spinner, what it does, how many of its steps are done, and a chevron that opens the steps -------- */
+   the spinner, what it does, how many of its steps are done, and a chevron that opens them when it has some -------- */
 .chat-strip {
   position: relative;
   z-index: 0;
@@ -1142,9 +1225,12 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-primary);
   font: var(--type-ui-sm);
   text-align: left;
+}
+/* the head is a button only while there are steps to open */
+button.chat-strip-head {
   cursor: pointer;
 }
-.chat-strip-head:hover {
+button.chat-strip-head:hover {
   background: rgba(var(--ink-rgb), 0.03);
 }
 /* the spinner and the title at the left; the count, when there is one, and the chevron at the right edge */
@@ -1574,6 +1660,57 @@ button.model-line-part[aria-expanded='true'] {
   position: relative;
   z-index: 1;
   margin: 0;
+}
+/* the commands a "/" lists (chat/Composer.tsx): the overlay above the composer, as wide as it (over its 1px edge) and
+   never over its text, one row per command: its name, then what it does, which wraps to two lines at most */
+.chat-commands {
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: calc(100% + 6px);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-height: min(240px, 40vh);
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: var(--radius-card);
+  background: var(--overlay-bg);
+  border: var(--overlay-edge);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  animation: dialog-in var(--dur-base) var(--ease-out);
+}
+.chat-command {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: var(--h-row);
+  padding: 5px 8px;
+  border-radius: var(--radius-seg);
+  cursor: pointer;
+}
+.chat-command.active {
+  background: var(--track-bg);
+}
+.chat-command-name {
+  flex: none;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.chat-command-about {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--text-tertiary);
 }
 
 /* a wide chat keeps a reading measure */

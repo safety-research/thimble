@@ -99,8 +99,9 @@ def has_fast_mode(model: str | None) -> bool:
     return any(k in m for k in FAST_MODE_MODELS) or m.split("[", 1)[0] == "opus"
 
 
-# the models Claude Code runs with no effort (spike m6, Claude Code's documented behaviour): a call on one passes none
-NO_EFFORT_MODELS = ("haiku",)
+# the models Claude Code runs with no effort (spike m6, Claude Code's documented behaviour): a call on one passes none.
+# Haiku 4.5 and the Claude 3 Haikus; Haiku 5.5 is the first Haiku with effort levels (plugin/core/models.js).
+NO_EFFORT_MODELS = ("haiku-4", "3-5-haiku", "3-haiku")
 
 
 def has_effort(model: str | None) -> bool:
@@ -896,9 +897,18 @@ def workspace_path(name: str) -> Path:
     return WORKSPACES_DIR / name
 
 
-def private_dir(p: Path) -> Path:
+def private_dir(p: Path, *, no_link: bool = False) -> Path:
     """`p`, made if missing, readable by its owner alone (0700), since it holds what thimble read and wrote; the folders
-    above it are made as usual."""
+    above it are made as usual. `no_link` for a folder of a workspace, where a card's code can put a link or a file in
+    its place (the kernels write the workspace): that is removed first, and the folder and those above it in the
+    workspace are opened and their mode set as nofollow does (own_folder), never through a link, so nothing thimble does
+    with `p` reaches the folder a link points to. thimble's later opens there go through nofollow too, so a link put
+    there after this fails them rather than lead anywhere."""
+    if no_link:
+        from . import nofollow  # noqa: PLC0415
+
+        os.close(nofollow.own_folder(p))
+        return p
     p.parent.mkdir(parents=True, exist_ok=True)
     p.mkdir(mode=0o700, exist_ok=True)
     try:
@@ -928,6 +938,15 @@ def registry_dir(name: str) -> Path:
     from . import kernel_wrap  # noqa: PLC0415
 
     return private_dir(workspace_dir(name) / kernel_wrap.REGISTRY_DIR)
+
+
+def temp_dir(name: str) -> Path:
+    """The workspace's temp folder, created on demand (private_dir), never a link (`no_link`): on the Messages API the
+    TMPDIR of every kernel and of main's and its thread forks' shell commands (kernel_wrap.TEMP_DIR, runtime.shell_temp),
+    and a temp folder the citations' validator reads as the session's (marks)."""
+    from . import kernel_wrap  # noqa: PLC0415
+
+    return private_dir(workspace_dir(name) / kernel_wrap.TEMP_DIR, no_link=True)
 
 
 def safe_corpus_path(corpus: Path, rel: str) -> Path:
@@ -986,9 +1005,10 @@ ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
 }
 ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the analyst's own settings name none
-# Claude Code's model aliases and the ids they stand for, as Claude Code 2.1.282 resolves them. A role whose model is an
-# alias is kept as the id, so the popover names the version and the session runs the model shown.
-MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5", "haiku": "claude-haiku-4-5-20251001"}
+# Claude Code's model aliases and the ids they stand for: `opus` as Claude Code 2.1.282 resolves it, `sonnet` and
+# `haiku` as the plugin has them (plugin/core/models.js). A role whose model is an alias is kept as the id, so the
+# popover names the version and the session runs the model shown.
+MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 # The agent file a role's defaults come from: prompts/<name>.md (prompts.AGENT_FILES), or a plugin agent's file
 # (plugin/agents/<name>.md) for `plugin:<name>`.
 ROLE_AGENTS: dict[str, str] = {"writer": "writer", "checks": "check"}

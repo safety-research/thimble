@@ -19,6 +19,7 @@ import type {
   Filters,
   FilterScope,
   Group,
+  HostAskChoice,
   LabelRowsResponse,
   LabelsForPath,
   NewCellBody,
@@ -292,14 +293,17 @@ export interface EventPosted {
   thread?: string
 }
 
-/** How thimble reaches Claude (backend claude_access.py): the way chosen ('' before one), in words, and what is missing. */
+/** How thimble reaches Claude (backend claude_access.py): the way chosen ('' before one), in words, and what is
+ * missing; whether ANTHROPIC_API_KEY is set where the workbench runs (never the key), and each way's words. */
 export interface ClaudeAccess {
   how: '' | 'api-key' | 'claude-code' | 'wif'
   describe: string
   problem: { what: string; fix: string } | null
   key_saved: boolean
+  env_key?: boolean
   wif_file: string
   consent_text: string
+  labels?: Partial<Record<'api-key' | 'claude-code' | 'wif', string>>
 }
 
 /** One small call over the way chosen: whether Claude answered, else what is missing. */
@@ -451,6 +455,10 @@ export const api = {
      * the rest of the session, and `shown` is how many of the later calls that joined it the card listed. */
   answerSessionPermission: (c: string, chat: string, id: string, allow: boolean, always = false, shown = 0) =>
     j<{ answered: string }>(`${ws(c)}/chats/${enc(chat)}/permission`, { method: 'POST', body: JSON.stringify({ id, allow, ...(always ? { always } : {}), shown }) }),
+  /** The analyst's answer to an ask before a request to a host they have not allowed (host_asks.answer_route): once,
+     * always (kept for the workspace) or deny; 404 once the command that asked no longer waits. */
+  answerHostAsk: (c: string, id: string, choice: HostAskChoice) =>
+    j<{ ok: boolean }>(`${ws(c)}/host-asks/${enc(id)}`, { method: 'POST', body: JSON.stringify({ choice }) }),
   /** The orientation thread's composer: a click, through thimble's plugin to the orientation's agent (orient_session.
      * message_route): `sent`, or `held` while the coverage line is measured (it goes when that ends). 409 with the
      * earlier-session text (and for a pre-cache, plan mode, or a module that did not pass it on), 410 with the
@@ -912,7 +920,7 @@ export const undoApi = {
   redo: (c: string) => j<UndoLabels & { applied: string }>(`${ws(c)}/redo`, { method: 'POST' }),
 }
 
-// --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
+// --- report checks: the lists of the checks (report/Checks.tsx, shell/LabelsSidebar.tsx; backend checks.py) ---
 import type { CardCheckStatus, CardDrawn, Check, CheckCover, CheckPatch, CheckRun } from './types'
 
 export const marksApi = {

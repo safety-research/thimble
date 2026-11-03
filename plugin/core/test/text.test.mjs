@@ -1,10 +1,11 @@
 // What thimble draws of text from the records (core/text.js printable): each character that does not print shows as
-// its escape, as Python's repr writes it. Made-up text.
+// its escape, as Python's repr writes it; and an error's words as thimble quotes them (errorWords). Made-up text.
 //   node --test plugin/core/test/text.test.mjs
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { printable } from '../text.js'
+import { errorWords, printable } from '../text.js'
 
 test("each character that does not print, as Python's str.isprintable reads it, shows as its escape, as Python's repr writes it; white space that lays text out stays: a line break (also \\r\\n), and a tab, as a space", () => {
   for (const [c, want] of [
@@ -50,4 +51,16 @@ test('spans of a text move with it: the cited value stays marked where escapes s
   assert.deepEqual(two, { text: 'x\ny', spans: [[0, 2], [2, 3]] })
   // nothing to escape: the same text and spans
   assert.deepEqual(printable('12 of 40', [[0, 2]]), { text: '12 of 40', spans: [[0, 2]] })
+})
+
+test("B19: an error's words name each path of this machine in them as the validator names a cited file, by its path from the session's folder when it lies there, else by its name alone, in each form a path takes (plugin/tests/error_paths.json, which the validator's error_words answers alike)", () => {
+  const table = JSON.parse(readFileSync(new URL('../../tests/error_paths.json', import.meta.url), 'utf8'))
+  const root = table.root.replace('{home}', table.home)
+  const cwd = table.cwd.replace('{root}', root)
+  const fill = s => s.replaceAll('{cwd}', cwd).replaceAll('{root}', root).replaceAll('{home}', table.home)
+  for (const [text, want] of table.cases) assert.equal(errorWords(fill(text), { cwd, root, home: table.home }), fill(want), text)
+  // with no folder or home known, a path is named by its name alone; a text with none stays as it is
+  assert.equal(errorWords(`open '${table.home}/.thimble/runs/run.log'`, {}), "open 'run.log'")
+  assert.equal(errorWords('open ~/.thimble/runs/run.log', {}), 'open run.log')
+  assert.equal(errorWords('', {}), '')
 })

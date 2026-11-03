@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, made, press, sh, world  # noqa: E402, F401  (world is the fixture)
+from test_fixes import FX, github_refusing, made, press, sh, world  # noqa: E402, F401  (world is the fixture)
 
 from kernel import cli as CLI  # noqa: E402
 from kernel import share as SH  # noqa: E402
@@ -102,7 +102,8 @@ def ahead(w, path: str = "plugin/notes.md", text: str = "made-up notes\n" * 400)
 
 def test_it_warns_shows_what_would_go_and_no_sends_nothing(world, gh, monkeypatch, capsys):
     rec = fix_on(world)
-    monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["board-7.jsonl"]})
+    # folders named like words of thimble's own text (B16) take nothing out of it
+    monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["board-7.jsonl"], "folder": ["fix", "terminal", "file"]})
     asked = answer(monkeypatch, "")
     assert CLI.main(["file", "pr", str(rec["id"])]) == 0
     out = capsys.readouterr().out
@@ -116,7 +117,7 @@ def test_it_warns_shows_what_would_go_and_no_sends_nothing(world, gh, monkeypatc
     assert "  Files    plugin/bar/bar.tsx  +1 −1" in lines
     # the body: share's text, the person's data file taken out, with the line that says how it was opened
     assert "    ### What was wrong" in lines and "    After Claude read ‹data file›, the bar's item still said coverage." in lines
-    assert "    ### How it was fixed" in lines
+    assert "    ### How it was fixed" in lines and "    thimble 0.10.2 · terminal · fixed by `thimble fix`" in lines
     assert f"    Opened with `thimble file pr`, on thimble 0.10.2 (`{world['base'][:7]}`)." in lines
     assert "board-7.jsonl" not in out
     assert "  ✓ privacy check: took 1 file name out of the text; nothing of yours in the code" in lines
@@ -250,6 +251,21 @@ def test_main_out_of_reach_refuses_with_the_reason(world, gh, monkeypatch, capsy
     err = capsys.readouterr().err
     assert "thimble file pr: thimble could not read main from" in err and "check the network, then try again" in err
     assert branches(gh, "made-up") == []
+
+
+def test_main_github_lets_git_read_nothing_of_says_why_and_the_fix(world, gh, monkeypatch, capsys):
+    """I11: where GitHub lets git read nothing of the repository (it is private, or not there), the line says so and how
+    to sign in, not to check the network, and nothing is sent."""
+    rec = fix_on(world)
+    answer(monkeypatch, "y")
+    for url in github_refusing(world, monkeypatch).values():
+        monkeypatch.setenv("THIMBLE_UPDATE_URL", url)
+        assert CLI.main(["file", "pr", str(rec["id"]), "--yes"]) == 1
+        assert capsys.readouterr().err.strip() == (
+            f"thimble file pr: thimble could not read main from {url}, which a pull request goes onto: GitHub did not let "
+            "git read it, so it is private or not there. Sign in with a GitHub account that can read it (gh auth login, "
+            "then gh auth setup-git), then try again")
+    assert branches(gh, "made-up") == [] and "pr" not in FX.get(rec["id"])
 
 
 def test_with_push_access_the_branch_goes_on_the_repository_with_no_fork(world, gh, monkeypatch, capsys):

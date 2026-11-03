@@ -207,8 +207,14 @@ export function aboutOf(f, info = {}) {
   return `the explainer of ${q(cut(plain(g.term), 80))}`
 }
 
-/** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run). */
-export const canRepair = m => !!m && m.status === 'failed'
+/** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run), and something the
+ *  person does here lets its check run (`runs`, marks/checker.ts repairOk; where nothing does, the failure line or the
+ *  card says why in its place). */
+export const canRepair = (m, runs) => !!m && m.status === 'failed' && runs === true
+
+/** What a failed citation's card says of a file its check could not read (marks/store.ts MarkItem `unread`), in the tray
+ *  and the Claims pane alike: the file that x repair's OK, or Claude Code's ask as the repair reads it, is about. */
+export const unreadLine = file => `The check could not read ${file}.`
 
 // a citation's check by its status: the sign the reply draws after the citation's words in that status (marks/view.ts
 // withLooks: the turning glyph, `spin`, while it is checked, × failed, ? not checked yet; a checked one has none there,

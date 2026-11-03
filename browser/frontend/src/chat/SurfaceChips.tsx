@@ -1,14 +1,12 @@
 // The chips that name a document, a canvas group or a label. In the chat each is drawn as a view's chip (ViewTab) with
 // its glyph; a label's row chip, in a view's list of its fields and labels, is its row in the Labels pane, a size
 // smaller. Each is a button when it goes somewhere.
-import { useEffect, useState } from 'react'
 import type { CSSProperties, MouseEvent, ReactNode } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { Icon } from '../components/Icon'
 import { classesOf, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
-import { docsApi } from '../lib/api'
-import { bus } from '../lib/bus'
-import type { Concept, TypesState } from '../lib/types'
+import type { Concept } from '../lib/types'
+import { useDocTypes } from '../report/docTypes'
 import { BUILTIN_SLUGS, docLabel } from '../report/model'
 
 interface BaseProps {
@@ -34,40 +32,11 @@ function SurfaceChip({ onClick, className, children, ...rest }: BaseProps) {
 const cls = (...names: (string | false | undefined)[]) => ['surface-chip', ...names].filter(Boolean).join(' ')
 const viewCls = (...names: (string | false | undefined)[]) => ['view-tab', ...names].filter(Boolean).join(' ')
 
-/** The workspace's document types, for the names of its own types; read when a chip names one, again on each `report`
- * event. */
-const typesCache = new Map<string, TypesState | null>()
-const typesLoading = new Set<string>()
-const typesListeners = new Set<() => void>()
-
-function loadTypes(ws: string): void {
-  if (typesLoading.has(ws)) return
-  typesLoading.add(ws)
-  docsApi
-    .types(ws)
-    .then((s) => typesCache.set(ws, s))
-    .catch(() => typesCache.set(ws, typesCache.get(ws) ?? null))
-    .finally(() => {
-      typesLoading.delete(ws)
-      typesListeners.forEach((fn) => fn())
-    })
-}
-
+/** A document's name as its tab spells it: a built-in's own, else its type's, read from the workspace's document types
+ * when a chip names one (report/docTypes.ts). */
 function useDocName(ws: string, slug: string): string {
   const builtin = (BUILTIN_SLUGS as readonly string[]).includes(slug)
-  const [, bump] = useState(0)
-  useEffect(() => {
-    if (builtin || !ws) return
-    const fn = () => bump((n) => n + 1)
-    typesListeners.add(fn)
-    if (!typesCache.has(ws)) loadTypes(ws)
-    const off = bus.on('report', () => loadTypes(ws))
-    return () => {
-      typesListeners.delete(fn)
-      off()
-    }
-  }, [ws, builtin])
-  return docLabel(slug, typesCache.get(ws))
+  return docLabel(slug, useDocTypes(ws, !builtin))
 }
 
 /** A note's words about a document with the type's name in them spelled as its tab spells it: "the report, generation

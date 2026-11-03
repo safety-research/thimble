@@ -1,7 +1,7 @@
 // The document views behind one lazy import, so BlockNote loads the first time the tab is shown and switching documents
-// is a prop change. One view per renderer: the report as a page with its sidebar and margin, and a page in its frame.
-// Each has the sidebar with the Checks pane (Checks.tsx). Written documents take comments: a selection offers Comment (SelectComment.tsx)
-// and a click on a tinted sentence holds its evidence card.
+// is a prop change. One view per renderer: the report as a page with its sidebar of cards and margin, and a page in its
+// frame beside the Comments pane (Checks.tsx CommentsSidebar). Written documents take comments: a selection offers
+// Comment (SelectComment.tsx) and a click on a tinted sentence holds its evidence card.
 import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
@@ -42,7 +42,7 @@ export function DocumentView(props: DocumentViewProps) {
 /** A frame, the shape a slides or story type has before a write (GET …/frame), rather than its written document. */
 const isFrame = (doc: AnyDoc | null): doc is Writeup => !!doc && (doc as Writeup).frame === true
 
-/** The slides, the story, a page or a video beside the sidebar's Checks pane. */
+/** The slides, the story, a page or a video beside the sidebar's Comments pane. */
 function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, writing = false }: DocumentViewProps) {
   const side = useSidebar(ws)
   const checks = useChecks(ws)
@@ -51,7 +51,8 @@ function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, wr
   // the comment a click picked, while the document still has it open
   const picked = useMemo(() => comments.find((c) => c.id === pickedId) ?? null, [comments, pickedId])
   const viewRef = useRef<HTMLDivElement | null>(null)
-  // the comment picked is looked at, so the new comments' dot on the Comments pane leaves its run out
+  // the comment picked is looked at, so the new comments' dot on the Comments pane and on the top bar's Comments leaves
+  // its run out
   useLookedAt(ws, picked?.run)
   // a click on a tinted sentence picks its comment, the next one of the sentence's on each click; a click elsewhere in
   // the view lets it go, and a click in the evidence card or the selection's comment keeps it

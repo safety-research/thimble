@@ -2,7 +2,8 @@
 // The shared Labels and Comments sidebar (src/shell/LabelsSidebar.tsx, src/shell/CommentsList.tsx): one sidebar that
 // shows the labels or the comment categories, the section the top bar's Labels or Comments button opened; a category's
 // Show in sets where its check comments (Chat: Claude's answers), its detail edits its definition and lists its open
-// comments as links, those on Claude's answers too, and Apply sends a comment to Claude in main's chat.
+// comments as links, those on Claude's answers too, and Apply sends a comment to Claude in main's chat. The categories
+// end in + New check, whose card adds a check.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { applyText, type CommentItem } from '../../src/shell/CommentsList.tsx'
@@ -27,8 +28,13 @@ const CHECKS = [
   { id: 'judgment', name: 'Judgment calls', prompt: 'Mark the calls Claude made for the reader.', colour: 2, builtin: true, shown: false, covers: ['documents'] },
 ]
 
-function serve(patches: { url: string; body: unknown }[] = []) {
+function serve(patches: { url: string; body: unknown }[] = [], posts: { url: string; body: unknown }[] = []) {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    if (init?.method === 'POST' && url.endsWith('/checks')) {
+      const body = JSON.parse(String(init.body))
+      posts.push({ url, body })
+      return json({ id: 'new', colour: 3, builtin: false, shown: true, runs: {}, ...body })
+    }
     if (init?.method === 'PATCH') {
       patches.push({ url, body: JSON.parse(String(init.body)) })
       return json({ ...CHECKS[1], ...JSON.parse(String(init.body)) })
@@ -127,4 +133,47 @@ test("a category's detail edits its definition and lists its comments as links, 
   await act(async () => apply.click())
   expect(asked).toEqual([{ chatId: 'main', send: 'Apply this comment of the check “Important details” on card:c7: The chart leaves out June.\n\nJune has 40 rows.' }])
   off()
+})
+
+/** Type `text` into a field as React hears it. */
+async function type(el: HTMLTextAreaElement | HTMLInputElement, text: string) {
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, text)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+test('the comment categories end in + New check, whose card adds a check over the documents', async () => {
+  const posts: { url: string; body: unknown }[] = []
+  serve([], posts)
+  // the card's popover follows its own size
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const el = await mount(<LabelsSidebar ws="w1" section="comments" onClose={() => undefined} />)
+  await settle()
+  const section = el.querySelector('.lside-section[data-section="comments"]')!
+  const last = section.lastElementChild as HTMLElement
+  expect(last.classList.contains('lside-new')).toBe(true)
+  expect(last.previousElementSibling?.getAttribute('data-category')).toBe(NOTES)
+  const add = last.querySelector<HTMLButtonElement>('.lside-add')!
+  expect(add.textContent).toBe('New check')
+  expect(add.getAttribute('aria-expanded')).toBe('false')
+  await act(async () => add.click())
+  await settle()
+  const card = document.querySelector<HTMLElement>('[aria-label="New check"]')!
+  expect(card).not.toBeNull()
+  const run = [...card.querySelectorAll('button')].find((b) => b.textContent === 'Run')!
+  // Run waits for a name no other check has, and a prompt
+  await type(card.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, 'Important details')
+  await type(card.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!, 'Ask what the baseline was.')
+  expect(run.disabled).toBe(true)
+  await type(card.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, 'Missing baselines')
+  expect(run.disabled).toBe(false)
+  await act(async () => run.click())
+  await settle()
+  expect(posts).toEqual([{ url: expect.stringContaining('/ws/w1/checks'), body: { name: 'Missing baselines', prompt: 'Ask what the baseline was.', covers: ['documents'] } }])
+  // the card closes, and the new check is listed before + New check
+  expect(document.querySelector('[aria-label="New check"]')).toBeNull()
+  expect([...el.querySelectorAll('[data-category]')].map((r) => r.getAttribute('data-category'))).toEqual(['details', 'judgment', 'new', NOTES])
+  expect(section.lastElementChild?.classList.contains('lside-new')).toBe(true)
 })

@@ -6,7 +6,12 @@
 import type { ChatMeta, PermissionRequest } from '../lib/types'
 import { toolDisplayName } from './model'
 import { threadKind } from './threads'
-import { cardAsks } from './waiting'
+
+/** A chat's permission requests on the card while it runs, those declined unanswered among them; none once it has
+ * ended. Pure. */
+export function cardAsks(m: Pick<ChatMeta, 'status' | 'permissions'> | null | undefined): readonly PermissionRequest[] {
+  return m && m.status === 'running' ? m.permissions ?? [] : []
+}
 
 /** One request waiting for the analyst, and the chat whose session asks: `main` for a prompt of the analyst's own
  * session. */
@@ -32,13 +37,14 @@ export function pendingRequests(main: Pick<ChatMeta, 'permissions'> | null | und
     .map((x) => x.a)
 }
 
-/** The thread a request comes from, which the card's head names: the thread of main whose agent asked (main's
- * request that names it), else the chat of the session that asked, main for main's own. Pure. */
-export function askThread(ask: PendingAsk, metas?: ReadonlyMap<string, ChatMeta>, labels?: ReadonlyMap<string, string>): string {
+/** The thread a request comes from, which the card's head names and where the request waits (chat/waiting.ts): the
+ * thread of main whose agent asked (main's request that names it), else the chat of the session that asked, main for
+ * main's own. Pure. */
+export function askThread(ask: PendingAsk, metas?: ReadonlyMap<string, ChatMeta>): string {
   if (ask.chat !== 'main') return ask.chat
   const id = ask.request.chat
   const m = id ? metas?.get(id) : undefined
-  if (!id || !m || labels?.has(id) || threadKind(m) != null) return id || 'main'
+  if (!id || !m || threadKind(m) != null) return id || 'main'
   // a subagent of main, which the thread tree does not list: main, or (in a chat an earlier build left) the orientation
   // run as main's subagent that started it
   const parent = m.parent ? metas?.get(m.parent) : undefined

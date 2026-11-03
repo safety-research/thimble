@@ -28,16 +28,21 @@
 //                                      in a pane, the selection), written by the explain-expand call and kept on its message
 //                                      as the look's are; explaining(term) says while it is written,
 //                                      pendingSpans draws its words teal from the press on, and the tray opens on
-//                                      them at once (pendingGloss), the explainer shown there once written
-//   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar: an explainer of the words the
+//                                      them at once (pendingGloss), the explainer shown there once written. A
+//                                      heads-up on words the analyst selected (h) is written the same way, by the
+//                                      heads-expand call, its words orange from the press on
+//   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar (teal): an explainer of the words the
 //                                      analyst selected with the mouse in Claude's words (core/selection.ts;
 //                                      fullscreen layout only), on the answer they lie in, else the newest answer
 //                                      that holds them, opened in the tray. Words inside an explainer or a heads-up (or on it) open that one; words
 //                                      over or across marks get one explainer, whose mark covers the explainers it
 //                                      overlaps; a heads-up keeps its words
-//   headsKey($, key), headsBar         h at an empty prompt, `h heads-ups` on the bar, while Minimal is on (nothing is
-//                                      marked by itself then): one look of the heads lens alone at the answer the
-//                                      keys act on (observer/observer.ts headsUpsNow), once per answer
+//   headsKey($, key), headsBar         h at an empty prompt, `h heads-up` on the bar (orange), while words are selected
+//                                      and Heads-ups is not off: a heads-up on them, as e gives an explainer (words
+//                                      inside a heads-up open it). With none selected, while Heads-ups is on demand
+//                                      (nothing is marked by itself then), `h heads-ups`: one look of the heads lens
+//                                      alone at the answer the keys act on (observer/observer.ts headsUpsNow), once
+//                                      per answer
 //   registerExplain                    the watch of the selection, which draws the bar again when one starts or ends
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
@@ -51,8 +56,8 @@ import { fullscreenNow } from '../cards/draw'
 import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
-import { answerSelection, selectionKey, selectionNow, selectionUsed, usedBy } from '../core/selection'
-import { themeNow } from '../core/theme'
+import { answerSelection, pickedWords, selectionKey, selectionNow, selectionUsed, selectionWaits, waitsNow } from '../core/selection'
+import { themeLast, themeNow } from '../core/theme'
 import { tellOpened } from '../core/engaged'
 import { commentsText } from '../core/engaged.mjs'
 import { tellAtNextPrompt } from '../core/tell'
@@ -64,7 +69,7 @@ import { withoutMarks } from '../marks/message.js'
 import { headsUpsNow, type Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { openTray, trayFocus, trayOffRow } from '../tray/seam'
-import { askGloss } from './expand'
+import { askGloss, askHeads } from './expand'
 import { anchorTerm, holds, markColors, markHolding, mergeLook, placeGlosses, termOf } from './place.mjs'
 
 type Engine = EngineInterface
@@ -105,7 +110,9 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
   const order = (part.order ?? Object.keys(part.items)).filter(id => part.items[id] && shown(part.items[id]!))
   if (!order.length) return []
   const own = (await messageOf($, row))?.text ?? ''
-  const original = text !== own && text !== withoutMarks(own)
+  // a version shown in place of Claude's words (a squeezed one), where a term may stand in another form; not Claude's
+  // words with the citations the analyst asked for (c) written in them
+  const original = withoutMarks(text) !== withoutMarks(own)
   const c = markColors(await themeNow($))
   return (placeGlosses(text, { items: part.items, order }, original) as { id: string; start: number; end: number }[]).map(p => {
     const g = part.items[p.id]!
@@ -246,45 +253,55 @@ export function glossFor(list: SessionGloss[], term: string): SessionGloss | nul
   return list.find(g => normTerm(g.term) === t) ?? list.find(g => { const at = anchorTerm(t, g.term); return !!at && at.how !== 'word' && at.start === 0 && at.end >= t.length - 1 }) ?? null
 }
 
-// the words being explained on demand now (and the message each stands on), and why the last try of each failed
+/** What a key writes on words the analyst picked: an explainer (e), or a heads-up (h). */
+type Asked = 'explain' | 'heads'
+
+/** The id of words being written on demand: `asking:<words>` for an explainer, `asking-heads:<words>` for a heads-up. */
+const pendingId = (kind: Asked, t: string) => `${kind === 'heads' ? 'asking-heads' : 'asking'}:${t}`
+
+// the words being written on demand now (and the message each stands on, and what is written), by pendingId, and why
+// the last try of each failed
 const asking = new Set<string>()
-const askedOn = new Map<string, { row: string; words: string }>()
+const askedOn = new Map<string, { row: string; words: string; kind: Asked }>()
 const failed = new Map<string, string>()
 
-/** The words of `row` being explained on demand now, drawn teal at once where the explainer will be (core/answerview.ts
- *  spansFor puts them before the row's other marks, as the explainer covers the explainers it overlaps; like it, they
- *  never stand on a heads-up's words). Nothing opens on a press until it is written; a failed one is gone, and its
- *  failure line says why. */
+/** The words of `row` being written on demand now, drawn at once where the explainer (teal) or the heads-up (orange)
+ *  will be (core/answerview.ts spansFor puts them before the row's other marks, as the explainer covers the
+ *  explainers it overlaps; like it, an explainer's never stand on a heads-up's words). Nothing opens on a press until it
+ *  is written; a failed one is gone, and its failure line says why. */
 export async function pendingSpans($: Engine, row: string, text: string): Promise<Span[]> {
-  const mine = [...askedOn.entries()].filter(([, a]) => a.row === row)
-  if (!mine.length || !featureOn('explain')) return []
+  const mine = [...askedOn.entries()].filter(([, a]) => a.row === row && featureOn(a.kind === 'heads' ? 'details' : 'explain'))
+  if (!mine.length) return []
   const own = (await messageOf($, row))?.text ?? ''
-  const original = text !== own && text !== withoutMarks(own)
+  const original = withoutMarks(text) !== withoutMarks(own)
   const part = await partOf<ExplainPart>($, row, 'explain')
   const heads = Object.fromEntries(Object.entries(part?.items ?? {}).filter(([, g]) => g.kind === 'heads' && shown(g)))
-  const items = { ...heads, ...Object.fromEntries(mine.map(([t, a]) => [`asking:${t}`, { id: `asking:${t}`, term: a.words, asked: true }])) }
+  const items = { ...heads, ...Object.fromEntries(mine.map(([id, a]) => [id, { id, term: a.words, asked: true, ...(a.kind === 'heads' ? { kind: 'heads' as const } : {}) }])) }
   const c = markColors(await themeNow($))
-  return (placeGlosses(text, { items, order: Object.keys(items) }, original) as { id: string; start: number; end: number }[]).filter(p => !heads[p.id]).map(p => ({
-    id: p.id,
-    start: p.start,
-    end: p.end,
-    look: { backgroundColor: c.glossBg, hoverBg: c.glossFocus },
-    label: `explainer of ${withoutMarks(text.slice(p.start, p.end)).replace(/`/g, '')} being written`.slice(0, 120),
-  }))
+  return (placeGlosses(text, { items, order: Object.keys(items) }, original) as { id: string; start: number; end: number }[]).filter(p => !heads[p.id]).map(p => {
+    const kind = askedOn.get(p.id)?.kind
+    const words = withoutMarks(text.slice(p.start, p.end)).replace(/`/g, '')
+    return {
+      id: p.id,
+      start: p.start,
+      end: p.end,
+      look: kind === 'heads' ? { backgroundColor: c.headsBg, hoverBg: c.headsFocus } : { backgroundColor: c.glossBg, hoverBg: c.glossFocus },
+      label: `${kind === 'heads' ? 'heads-up on' : 'explainer of'} ${words} being written`.slice(0, 120),
+    }
+  })
 }
 
-/** The explainer of words asked for on `row` while it is written (`id` as pendingSpans names it): its words alone, which
- *  the tray shows as its title until the explainer is written; null for any other id. */
+/** The explainer or heads-up of words asked for on `row` while it is written (`id` as pendingSpans names it): its words
+ *  alone, which the tray shows as its title until it is written; null for any other id. */
 export function pendingGloss(row: string, id: string): Gloss | null {
-  if (!String(id ?? '').startsWith('asking:')) return null
-  const a = askedOn.get(id.slice('asking:'.length))
-  return a && a.row === row ? { id, term: a.words, asked: true } : null
+  const a = askedOn.get(String(id ?? ''))
+  return a && a.row === row ? { id, term: a.words, asked: true, ...(a.kind === 'heads' ? { kind: 'heads' as const } : {}) } : null
 }
 
 /** Whether an explainer of these words is being written now; why the last one was not, else ''. */
 export function explaining(term: string): { pending: boolean; why: string } {
-  const t = normTerm(term)
-  return { pending: asking.has(t), why: failed.get(t) ?? '' }
+  const id = pendingId('explain', normTerm(term))
+  return { pending: asking.has(id), why: failed.get(id) ?? '' }
 }
 
 /**
@@ -294,36 +311,47 @@ export function explaining(term: string): { pending: boolean; why: string } {
  * the explainer being written (pendingGloss) as soon as the call starts, so it can be shown before it is written.
  */
 export async function explainTerm($: Engine, row: string, term: string, o: { opened?: (mark: MarkRef & { id: string }) => Promise<unknown> } = {}): Promise<SessionGloss | string> {
+  return askOnDemand($, row, term, 'explain', o)
+}
+
+/** What `kind` writes on words the analyst picked in the message `row`: an explainer (explainTerm), or a heads-up
+ *  (explain/expand.ts askHeads, kept on that message as an explainer is). A heads-up is about its own answer, so none
+ *  is taken from another. The look's digest learns the term explained, or the heads-up given, as when the look gives
+ *  one. */
+async function askOnDemand($: Engine, row: string, term: string, kind: Asked, o: { opened?: (mark: MarkRef & { id: string }) => Promise<unknown> }): Promise<SessionGloss | string> {
+  const heads = kind === 'heads'
+  const what = heads ? 'heads-up' : 'explainer'
   const words = termOf(term).replace(/\s+/g, ' ').trim()
-  if (!words) return 'Pick some words to explain.'
-  if (!featureOn('explain')) return 'Explainers are off. Turn on "Explainers" in /thimble-settings to use them.'
-  const have = glossFor(await sessionGlosses($), words)
+  if (!words) return heads ? 'Pick some words for a heads-up.' : 'Pick some words to explain.'
+  if (!featureOn(heads ? 'details' : 'explain')) return heads ? 'Heads-ups are off. Turn on "Heads-ups" in /thimble-settings to use them.' : 'Explainers are off. Turn on "Explainers" in /thimble-settings to use them.'
+  const have = heads ? null : glossFor(await sessionGlosses($), words)
   if (have) return have
-  const t = normTerm(words)
-  if (asking.has(t)) return 'That explainer is being written.'
-  asking.add(t)
-  askedOn.set(t, { row, words })
-  failed.delete(t)
+  const id = pendingId(kind, normTerm(words))
+  if (asking.has(id)) return `That ${what} is being written.`
+  asking.add(id)
+  askedOn.set(id, { row, words, kind })
+  failed.delete(id)
   $.ui.invalidate('ui.render')
   try {
-    if (o.opened) await o.opened({ row, kind: 'explain', id: `asking:${t}` }).catch(() => undefined)
-    const got = await askGloss($, row, words)
-    if (typeof got === 'string') { failed.set(t, got); return got }
-    const m = await memory($)
-    m.glossed = [...m.glossed, words].slice(-GLOSSED_KEEP)
-    await writeKept($, FILE, { glossed: m.glossed, headsGiven: m.headsGiven }).catch(() => undefined)
+    if (o.opened) await o.opened({ row, kind, id }).catch(() => undefined)
+    const got = heads ? await askHeads($, row, words) : await askGloss($, row, words)
+    if (typeof got === 'string') { failed.set(id, got); return got }
     const g = (await partOf<ExplainPart>($, row, 'explain'))?.items?.[got.id]
+    const m = await memory($)
+    if (heads) m.headsGiven = [...m.headsGiven, g?.title || words].slice(-HEADS_KEEP)
+    else m.glossed = [...m.glossed, words].slice(-GLOSSED_KEEP)
+    await writeKept($, FILE, { glossed: m.glossed, headsGiven: m.headsGiven }).catch(() => undefined)
     await tellComments($, [row]).catch(() => undefined)
-    return g ? { ...g, row } : 'The explainer was written, but its answer is not in this session any more.'
+    return g ? { ...g, row } : `The ${what} was written, but its answer is not in this session any more.`
   } finally {
-    asking.delete(t)
-    askedOn.delete(t)
+    asking.delete(id)
+    askedOn.delete(id)
     $.ui.invalidate('ui.render')
   }
 }
 
 /** The newest answer that holds the words, else the newest answer; null with no answer yet. */
-async function rowHolding($: Engine, words: string): Promise<string | null> {
+export async function rowHolding($: Engine, words: string): Promise<string | null> {
   const rows = (await answerRows($).catch(() => [] as string[])).slice().reverse()
   for (const r of rows) {
     const text = (await messageOf($, r))?.text ?? ''
@@ -332,23 +360,24 @@ async function rowHolding($: Engine, words: string): Promise<string | null> {
   return rows[0] ?? null
 }
 
-/** The explainer of `words` on `row`, opened in the tray: one the session has at once; else the tray opens at once on
- *  the words while it is written, and shows it there once written, unless the person moved the tray on meanwhile. A
- *  failure says why, and closes the tray on the words. */
-function explainOpen($: Engine, row: string, words: string): void {
+/** What `kind` writes on `words` of `row`, opened in the tray: an explainer the session has at once; else the tray opens
+ *  at once on the words while it is written, and shows it there once written, unless the person moved the tray on
+ *  meanwhile. A failure says why, and closes the tray on the words. */
+function askOpen($: Engine, row: string, words: string, kind: Asked): void {
+  const what = kind === 'heads' ? 'heads-up' : 'explainer'
   let pending: (MarkRef & { id: string }) | null = null
-  const stillShown = async () => { const f = pending ? await trayFocus($, pending.row) : null; return !!f && f.kind === 'explain' && f.id === pending!.id }
+  const stillShown = async () => { const f = pending ? await trayFocus($, pending.row) : null; return !!f && f.kind === kind && f.id === pending!.id }
   void (async () => {
-    const got = await explainTerm($, row, words, { opened: async mark => { pending = mark; await openTray($, mark) } })
+    const got = await askOnDemand($, row, words, kind, { opened: async mark => { pending = mark; await openTray($, mark) } })
     if (typeof got === 'string') {
       if (await stillShown()) await trayOffRow($, pending!.row)
-      failNotice($, got, 'explain')
+      failNotice($, got, kind)
     } else {
-      await failCleared($, 'explain')
-      await hintUsed($, 'explain')
-      if (!pending || (await stillShown())) await openMark($, { row: got.row, kind: 'explain', id: got.id }, got)
+      await failCleared($, kind)
+      await hintUsed($, kind)
+      if (!pending || (await stillShown())) await openMark($, { row: got.row, kind: got.kind === 'heads' ? 'heads' : 'explain', id: got.id }, got)
     }
-  })().catch(err => failNotice($, `The explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}`, 'explain'))
+  })().catch(err => failNotice($, `The ${what} was not written: ${String((err as Error)?.message || err).slice(0, 160)}`, kind))
 }
 
 /** A mark opened in the tray, and main told so (core/engaged.ts). */
@@ -362,19 +391,6 @@ async function openMark($: Engine, mark: MarkRef & { id: string }, g: Gloss): Pr
 
 /** The bar's key that explains the selected words. */
 export const EXPLAIN_KEYS = ['e']
-/** The most of a selection explained: as long a term as an explainer can stand on (place.mjs anchorTerm). */
-const PICK_MAX = 120
-
-/** The words of a selection to explain: on one line, without the space and quotes around them, at most PICK_MAX
- *  characters, cut after a whole word (`cut`). */
-export function pickedWords(text: string): { words: string; cut: boolean } {
-  const quotes = /^[\s"“”'‘’`]+|[\s"“”'‘’`]+$/g
-  const all = termOf(String(text ?? '')).replace(/\s+/g, ' ').replace(quotes, '')
-  if (all.length <= PICK_MAX) return { words: all, cut: false }
-  const head = all.slice(0, PICK_MAX + 1)
-  const at = head.lastIndexOf(' ')
-  return { words: (at > PICK_MAX / 2 ? head.slice(0, at) : head.slice(0, PICK_MAX)).replace(quotes, '').replace(/[,;:]$/, ''), cut: true }
-}
 
 /** The explainer or heads-up on `row` that the words stand inside, or on, as the row draws its marks now; null when
  *  they stand outside every mark, or over or across one (a new explainer covers the explainers among those, and a
@@ -410,7 +426,7 @@ export async function explainSelection($: Engine): Promise<void> {
   // the bar's busy line says what is written until the tray opens on it (expand.ts); a line here would say it twice.
   // Only a cut selection says so, since the busy line names just the words it explains
   if (cut) hintLine($, `the passage is long: the explainer covers its first ${words.length} characters.`, 'explain')
-  explainOpen($, row, words)
+  askOpen($, row, words, 'explain')
 }
 
 /** e at an empty prompt, while Explainers is on and an answer exists: after the word window (an e that starts a word
@@ -420,32 +436,29 @@ export async function explainKey($: Engine, key: string, _until: number): Promis
   return { later: () => explainSelection($) }
 }
 
-/** Words selected that e has not explained yet: Claude Code answers the last selection until the person selects again
- *  or sends their next prompt, so the bar stops naming e once e has explained it. */
-async function selectionWaits($: Engine): Promise<boolean> {
-  const sel = await answerSelection($)
-  return !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'explain', sel))
-}
-
 /** Whether words are selected now (the bar's `c cite` may stand while they are, marks/cite.ts). */
 export async function wordsSelected($: Engine): Promise<boolean> {
   return !!pickedWords((await answerSelection($))?.text ?? '').words
 }
 
-/** `e explain` on the bar while words are selected (only Claude Code's fullscreen layout reports a selection; elsewhere
- *  e at an empty prompt says so) that e has not explained yet, Explainers is on and an
- *  answer exists; a click does what e does. The settings' preview shows it, as it would show with words selected. */
+/** `e explain` on the bar, in the explainers' teal, while words are selected (only Claude Code's fullscreen layout
+ *  reports a selection; elsewhere e at an empty prompt says so) that e has not explained yet (core/selection.ts
+ *  selectionWaits), Explainers is on and an answer exists; a click does what e does. The settings' preview shows it,
+ *  as it would show with words selected. */
 export async function explainBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('explain')) return []
-  if (preview) return [{ id: 'explain', key: 'e', words: 'explain' }]
-  if (!(await selectionWaits($))) return []
+  // in the explainers' teal (place.mjs markColors): each key that acts on the selected words in the color of what it gives
+  const item = { id: 'explain', key: 'e', words: 'explain', color: markColors(themeLast()).gloss }
+  if (preview) return [item]
+  if (!(await selectionWaits($, 'explain', await selectionNow($)))) return []
   if (!(await answerRows($).catch(() => [])).length) return []
-  return [{ id: 'explain', key: 'e', words: 'explain', press: () => explainSelection($) }]
+  return [{ ...item, press: () => explainSelection($) }]
 }
 
 // ------------------------------------------------------------------------------------------------ heads-ups on demand
 
-/** The bar's key that asks for heads-ups on an answer, while Minimal is on. */
+/** The bar's key that asks for a heads-up on the selected words, or heads-ups on an answer while Heads-ups is on demand
+ *  and none are selected. */
 export const HEADS_KEYS = ['h']
 
 /** The answers h asked heads-ups for in this load: each once. */
@@ -467,17 +480,46 @@ async function askHeadsNow($: Engine, row: string): Promise<void> {
   } else await hintUsed($, 'heads')
 }
 
-/** h at an empty prompt, while Minimal is on and an answer has no heads-ups asked for yet. */
+/** h, or a click on `h heads-up`: a heads-up on the words the analyst last selected with the mouse, on the answer they
+ *  lie in (else the newest answer that holds them), opened in the tray, as e explains them. Words inside a heads-up
+ *  open it. */
+export async function headsSelection($: Engine): Promise<void> {
+  const sel = await answerSelection($)
+  await selectionUsed($, 'heads', sel)
+  const { words, cut } = pickedWords(sel?.text ?? '')
+  if (!words) {
+    if (fullscreenNow() === false) hintLine($, 'selecting a passage needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).', 'heads')
+    else await howTo($, 'heads', 'select a passage in an answer and press h for a heads-up on it.', 'heads')
+    return
+  }
+  await failCleared($, 'heads')
+  const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
+  const row = own ?? (await rowHolding($, words))
+  if (!row) { await howTo($, 'heads', 'ask Claude something, then select a passage in its answer and press h for a heads-up on it.', 'heads'); return }
+  const mark = await markOf($, row, words)
+  if (mark?.kind === 'heads') { await hintUsed($, 'heads'); await openMark($, { row, kind: 'heads', id: mark.id }, mark); return }
+  if (cut) hintLine($, `the passage is long: the heads-up covers its first ${words.length} characters.`, 'heads')
+  askOpen($, row, words, 'heads')
+}
+
+/** h at an empty prompt: while words are selected that h has not taken (core/selection.ts waitsNow) and Heads-ups is
+ *  not off, after the word window (an h that starts a word is typed), a heads-up on them; else, while Heads-ups is on
+ *  demand and an answer has no heads-ups asked for yet, heads-ups on it. */
 export async function headsKey($: Engine, key: string, _until: number): Promise<Take | null> {
   if (!HEADS_KEYS.includes(key)) return null
+  if (featureOn('details') && (await waitsNow($, 'heads'))) return { later: () => headsSelection($) }
   const row = await headsRow($)
   return row ? { later: () => askHeadsNow($, row) } : null
 }
 
-/** `h heads-ups` on the bar while h acts. The settings' preview shows it while Minimal is on. */
+/** `h heads-up` on the bar, in the heads-ups' orange, while words are selected that h has not taken and Heads-ups is
+ *  not off; else `h heads-ups` while h asks for an answer's. The settings' preview shows the first, as it would show
+ *  with words selected. */
 export async function headsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  const item = { id: 'heads', key: 'h', words: 'heads-up', color: markColors(themeLast()).heads }
+  if (preview) return on('details') ? [item] : []
+  if (on('details') && (await selectionWaits($, 'heads', await selectionNow($)))) return [{ ...item, press: () => headsSelection($) }]
   if (!on('heads')) return []
-  if (preview) return [{ id: 'heads', key: 'h', words: 'heads-ups' }]
   const row = await headsRow($)
   return row ? [{ id: 'heads', key: 'h', words: 'heads-ups', press: () => askHeadsNow($, row) }] : []
 }
@@ -494,23 +536,26 @@ export const registerExplain: Register = on => {
 const SELECTION_MS = 300
 let watching = 0
 
-/** The bar names `e explain` and `c cite` only while words are selected, and Claude Code tells no hook when the
- *  person selects: so while its fullscreen layout is drawn (the only one that reports a selection), the selection is
- *  read every SELECTION_MS and the bar drawn again when one starts or ends, or other words are selected. c's key reads
- *  whether words wait as marks/cite.ts last worked it out for the selection, so a new selection is worked out here
- *  too, before the bar draws again (citeShown). One watch per load of the plugin; a watch of an earlier load stops at
- *  its next read. */
+/** The bar names the keys that act on the selected words (c cite, e explain, h heads-up, a ask) only while words are
+ *  selected, and Claude Code tells no hook when the person selects: so while its fullscreen layout is drawn (the only
+ *  one that reports a selection), the selection is read every SELECTION_MS and the bar drawn again when one starts or
+ *  ends, or other words are selected. The keys read whether words wait for them as last worked out for the selection
+ *  (marks/cite.ts for c, core/selection.ts for h and a), so a new selection is worked out here too, before the bar
+ *  draws again. One watch per load of the plugin; a watch of an earlier load stops at its next read. */
 function watchSelection($: Engine): void {
   const mine = ++watching
   let had = ''
   const tick = async () => {
     if (mine !== watching) return
     try {
-      if (fullscreenNow() === true && (featureOn('explain') || featureOn('cite'))) {
-        const has = `${await selectionWaits($)} ${await wordsSelected($)} ${selectionKey(await selectionNow($))}`
+      if (fullscreenNow() === true) {
+        const raw = await selectionNow($)
+        const has = `${await selectionWaits($, 'explain', raw)} ${await wordsSelected($)} ${selectionKey(raw)}`
         if (has !== had) {
           had = has
           await citeShown($).catch(() => false)
+          await selectionWaits($, 'heads', raw).catch(() => false)
+          await selectionWaits($, 'ask', raw).catch(() => false)
           $.ui.invalidate('ui.render')
         }
       }

@@ -22,7 +22,8 @@ export const INTRO_TYPED = 'type /thimble-settings for settings.'
  *  its classic layout (`viewport.isFullscreen` false), which asks the terminal for no mouse reports; nor while
  *  CLAUDE_CODE_DISABLE_MOUSE is set (no mouse reports) or CLAUDE_CODE_DISABLE_MOUSE_CLICKS is (the wheel alone), read
  *  as Claude Code reads them: 1, true, yes or on sets one, 0, false, no or off unsets it, and the first, set either
- *  way, decides alone. A drawing that does not say, or another surface's, takes clicks. */
+ *  way, decides alone. A drawing that does not say, or another surface's, takes clicks. The pointer's moves are
+ *  reported on the same terms (marks/register.ts pointerReported). */
 export async function clicksReach($: Engine, e: { surface?: string; viewport?: { isFullscreen?: boolean } }): Promise<boolean> {
   if (e.surface !== 'terminal') return true
   if (e.viewport?.isFullscreen === false) return false

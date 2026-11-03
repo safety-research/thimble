@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -474,6 +475,45 @@ def test_redo_makes_a_new_copy_with_the_earlier_change(world, monkeypatch):
     assert "earlier" not in FX.get(r["id"])
 
 
+def test_more_words_for_a_fix_whose_round_ended_as_a_request_start_its_next_round_in_a_new_copy(world, monkeypatch):
+    # the tests fail; the person asks a question in the fix's thread, and its fixer answers it with a question back
+    # (`Request:`, no code): the fix is a request, its copy gone. Their answer is the fix's next round, never a refusal
+    # that leaves the fix's thread unable to take a message
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "")["state"] == "failed"
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    r = FX.round_(r["id"], "can you make this a pull request?")
+    q = FX.done(r["id"], "Bar says read", "Which of two ways do you want?", request=True)
+    assert q["state"] == "request" and q["work"] is None and q["commit"] is None
+    with pytest.raises(FX.FixError, match="say what should work differently"):
+        FX.round_(q["id"], "  ")
+    r = FX.round_(q["id"], "the first way", asked="the first way")
+    assert r["state"] == "working" and Path(r["work"]).is_dir() and r["rounds"] == q["rounds"] + 1
+    assert r["words"] == ["say read, not coverage", "can you make this a pull request?", "the first way"]
+    assert sh("git", "rev-parse", "HEAD", cwd=Path(r["work"])) == sh("git", "rev-parse", "HEAD", cwd=FX.live_dir())
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("coverage", "read"))
+    assert FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")["state"] == "ready"
+
+
+def test_a_request_an_earlier_thimble_stored_takes_more_words_in_a_new_process(world):
+    # a fix an earlier thimble left a request (fixes.jsonl, as a server's restart finds it): `thimble fix round`, which
+    # the browser runs as a process of its own for each message in the fix's thread, starts its next round
+    q = FX.done(FX.new("view builds should install their files")["id"], "Views install", "Which way?", request=True)
+    stored = {**FX.get(q["id"]), "words": ["view builds should install their files", "can you make this a pr?"],
+              "rounds": 2}
+    FX.put(stored)
+    p = subprocess.run([sys.executable, "-I", "-B", str(ENGINE / "thimble.py"), "fix", "round", str(q["id"])],
+                       input="let a build under main write its own view's folder", capture_output=True, text=True,
+                       env=os.environ.copy(), cwd=world["tmp"])
+    assert p.returncode == 0, p.stderr
+    r = json.loads(p.stdout)
+    assert r["state"] == "working" and Path(r["work"]).is_dir() and r["rounds"] == 3
+    assert r["words"][-1] == "let a build under main write its own view's folder"
+    assert FX.get(q["id"])["state"] == "working"
+
+
 def _claude_changes(rec: dict) -> Path:
     """What Claude does in the person's session for a fix that did not pass, as d's message asks: a change in its copy."""
     p = Path(rec["work"]) / "plugin" / "bar" / "legend.ts"
@@ -738,6 +778,51 @@ def upstream(world, tmp_path, monkeypatch):
         return sh("git", "rev-parse", "HEAD", cwd=work)
 
     return publish
+
+
+GITHUB_REFUSES = """#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    {private}) echo "fatal: could not read Username for 'https://github.com': terminal prompts disabled" >&2; exit 128;;
+    {gone}) echo "remote: Repository not found." >&2; echo "fatal: repository '{gone}/' not found" >&2; exit 128;;
+  esac
+done
+exec {git} "$@"
+"""
+
+
+def github_refusing(w, monkeypatch) -> dict[str, str]:
+    """git as GitHub answers it where it may read nothing of a repository, first on the PATH: a private one asks git
+    with no sign-in for one, which a command with no terminal cannot give (`private`), and one an account may not read
+    is not found (`gone`), as GitHub's own words go. Any other call is the real git's. The made-up URLs, by case."""
+    urls = {"private": "https://github.com/made-up/private.git", "gone": "https://github.com/made-up/gone.git"}
+    d = w["tmp"] / "github"
+    d.mkdir(exist_ok=True)
+    (d / "git").write_text(GITHUB_REFUSES.format(**urls, git=shutil.which("git")))
+    (d / "git").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{d}:{os.environ['PATH']}")
+    return urls
+
+
+def test_thimble_update_says_why_github_lets_git_read_nothing_and_the_fix(world, upstream, monkeypatch, capsys):
+    """I11: where GitHub lets git read nothing of thimble's repository (it is private, or not there), thimble update says
+    so and how to sign in, not to check the network, which a network that does not answer still says."""
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    for url in github_refusing(world, monkeypatch).values():
+        monkeypatch.setenv("THIMBLE_UPDATE_URL", url)
+        assert cli.main(["update"]) == 1
+        assert capsys.readouterr().err.strip() == (
+            f"thimble update: thimble could not read its releases from {url}: GitHub did not let git read it, so it is "
+            "private or not there. Sign in with a GitHub account that can read it (gh auth login, then gh auth "
+            "setup-git), then run thimble update again")
+    # a dev install's check of the branch its checkout pulls from, the same way
+    said = "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    assert FX._behind_lines({"upstream": {"name": "origin/main", "error": said}}) == [
+        "thimble could not check whether origin/main has newer commits: GitHub did not let git read it, so it is private "
+        "or not there. Sign in with a GitHub account that can read it (gh auth login, then gh auth setup-git), then run "
+        "thimble update again."]
 
 
 def three_fixes(world) -> tuple[int, int, int]:
@@ -1241,6 +1326,67 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert help_.index("thimble fix on [N]") < help_.index("Claude runs these in a session") < help_.index("thimble label [NAME]")
     monkeypatch.setattr(FX, "can_share", lambda: False)
     assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
+
+
+def test_what_next_names_thimble_file_issue_for_a_fix_claude_still_works_on(world, capsys, monkeypatch):
+    """R1: while Claude still works on the only fix, thimble fix and thimble fixes name `thimble file issue` for it, and
+    the command gives the link, whose text says that Claude is still working on it; once another fix is ready, the line
+    names that one, the first in the list, and the command takes it."""
+    from urllib.parse import parse_qs, urlsplit  # noqa: PLC0415
+
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.setattr(FX, "can_share", lambda: True)
+    # the shell stands in thimble's repository here, every file of which the scan would list
+    monkeypatch.setattr(FX, "session_terms", lambda st: {})
+    w = made(world, words="make the minimap smaller", edit=False)
+    n = w["id"]
+    for verb in (["fix"], ["fixes"]):
+        assert cli.main(verb) == 0
+        assert capsys.readouterr().out.split("What next\n")[1].splitlines() == [
+            f"  thimble fix show {n}      what fix {n} does, in a few lines",
+            f"  thimble file issue {n}    a link to GitHub's new-issue form with fix {n}'s text, to read and submit",
+            f"  thimble fix remove {n}    delete a fix",
+            "  thimble update          get the newest thimble and keep your fixes"]
+    assert cli.main(["file", "issue", str(n)]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == f"Share fix {n}: make the minimap smaller"
+    body = parse_qs(urlsplit(out[-1]).query)["body"][0]
+    assert body.startswith("### What was wrong\n\nmake the minimap smaller\n\n### What it does so far\n\n"
+                           "Claude is still working on this fix.\n\n")
+    r = made(world)
+    FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")
+    assert cli.main(["fixes"]) == 0
+    issue = [x.split()[:4] for x in capsys.readouterr().out.split("What next\n")[1].splitlines() if "file issue" in x]
+    assert issue == [["thimble", "file", "issue", str(r["id"])]]
+    assert cli.main(issue[0][1:]) == 0 and "Share fix" in capsys.readouterr().out
+
+
+def test_show_lists_thimble_file_issue_for_each_state_the_command_takes(world, capsys, monkeypatch):
+    """R1: thimble fix show N lists the commands that work for a fix in its state. `thimble file issue N` takes a fix in
+    each state of share.STATES (one Claude still works on, one that failed, a request with no code, ...), so show lists
+    it for each, in the words and the place the other states use; a command that refuses the state stays out."""
+    from kernel import cli  # noqa: PLC0415
+    from kernel import share as SH  # noqa: PLC0415
+
+    monkeypatch.setattr(FX, "session_terms", lambda st: {})  # the shell stands in thimble's repository here
+    w = made(world, words="make the minimap smaller", edit=False)
+    n = w["id"]
+    issue = f"  thimble file issue {n}    a link to GitHub's new-issue form with its text, to read and submit"
+    assert cli.main(["fix", "show", str(n)]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        f"make the minimap smaller · fix {n} · working · {FX._date(FX.get(n)['created'])}, terminal",
+        '  You asked     "make the minimap smaller"',
+        "",
+        issue]
+    for state in SH.STATES:
+        FX.put({**FX.get(n), "state": state})
+        shown = FX.show_lines(n)
+        assert issue in shown and shown[shown.index(issue) - 1] == "", state  # the first of its commands
+        if state not in ("on", "off", "ready"):  # whose other commands are thimble fix off and thimble fix on
+            assert shown[-1] == issue, state
+        assert cli.main(["file", "issue", str(n)]) == 0 and "Share fix" in capsys.readouterr().out, state
 
 
 def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_live(world, tmp_path, monkeypatch):

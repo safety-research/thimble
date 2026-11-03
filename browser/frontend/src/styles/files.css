@@ -2732,8 +2732,18 @@
   max-width: 820px;
   padding: 8px 8px 24px;
 }
+/* a transcript's words drawn as markdown (views/common BlockEl `markdown`): a markdown file's look, in the record's own
+   type and ink */
+.reader-block.reader-md {
+  font: inherit;
+  color: inherit;
+  white-space: normal;
+}
 .reader-md > :first-child {
   margin-top: 0;
+}
+.reader-block.reader-md > :last-child {
+  margin-bottom: 0;
 }
 .reader-md p,
 .reader-md ul,

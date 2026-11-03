@@ -2,7 +2,9 @@
 sandbox. thimble writes none of their files.
 
 Nothing here overrides a setting the analyst has; thimble's defaults apply only where the settings say nothing
-(names_effort), and then the launcher passes `--effort high` to main (main_effort_flag).
+(names_effort), and then the launcher passes `--effort high` to main (main_effort_flag). The server runs the browser's
+main itself (runtime.py), at the effort Claude Code in a terminal runs main's model at: the analyst's own for that
+model, else Claude Code's default for it (session_effort).
 
 Claude Code reads, lowest first, the user's `settings.json` in its config dir, the project's `.claude/settings.json`
 and `.claude/settings.local.json`, and the managed settings file. `ultracode`, CLAUDE_CODE_EFFORT_LEVEL (in an `env`
@@ -31,7 +33,12 @@ log = logging.getLogger("thimble.cc_settings")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (`claude --effort`)
 ULTRACODE = "ultracode"  # the composer's choice beyond the levels: xhigh and a workflow for each message (main.md)
 ULTRACODE_EFFORT = "xhigh"  # the effort Claude Code runs ultracode at
-MAIN_DEFAULT_EFFORT = "high"  # main's effort when the analyst's settings and flags name none
+MAIN_DEFAULT_EFFORT = "high"  # the launcher's `--effort` for main when the analyst's settings and flags name none
+# Claude Code's default effort for a model, where it is not DEFAULT_EFFORT: its table of models' `default_effort`, as
+# Claude Code 2.1.312 has it. A session runs at it when no settings file, variable or flag names an effort.
+DEFAULT_EFFORTS = {"claude-opus-5-5": "medium", "claude-sonnet-5-5": "medium", "claude-haiku-5-5": "medium",
+                   "claude-opus-4-7": "xhigh"}
+DEFAULT_EFFORT = "high"  # Claude Code's default effort for every other model
 # The models for which Claude Code still reads a top-level `effortLevel` in the user's own settings file; every later
 # model reads only its `modelSettings` entry there.
 LEGACY_EFFORT_MODELS = frozenset({
@@ -104,11 +111,12 @@ def main_model(cwd: Path, environ: Mapping[str, str] | None = None) -> str:
     return found
 
 
-def _efforts(cwd: Path, environ: Mapping[str, str] | None = None) -> tuple[bool, str | None, bool | None, str | None, str | None]:
-    """What the analyst's settings files say about the effort of a session in `cwd`: (env names
-    CLAUDE_CODE_EFFORT_LEVEL, its level, `ultracode`, the effort for main's model, the user file's unread top-level
-    `effortLevel`)."""
-    key = model_key(main_model(cwd, environ))
+def _efforts(cwd: Path, environ: Mapping[str, str] | None = None,
+             model: str | None = None) -> tuple[bool, str | None, bool | None, str | None, str | None]:
+    """What the analyst's settings files say about the effort of a session in `cwd` on `model` (main_model's when None):
+    (env names CLAUDE_CODE_EFFORT_LEVEL, its level, `ultracode`, the effort for that model, the user file's unread
+    top-level `effortLevel`)."""
+    key = model_key(main_model(cwd, environ) if model is None else model)
     user = sources(cwd)[0]
     named = False
     by_env = ultracode = level = unread = None
@@ -177,16 +185,28 @@ def level_of(choice: str) -> str:
     return c
 
 
-def analyst_effort(cwd: Path, environ: dict[str, str] | None = None) -> str | None:
-    """The effort the analyst's own settings or environment choose for a session in `cwd`, as the effort menus name it:
-    CLAUDE_CODE_EFFORT_LEVEL, else `ultracode`, else the effort for main's model, else the user file's top-level
-    `effortLevel`; None when they choose none."""
+def analyst_effort(cwd: Path, environ: dict[str, str] | None = None, model: str | None = None) -> str | None:
+    """The effort the analyst's own settings or environment choose for a session in `cwd` on `model` (main_model's when
+    None), as the effort menus name it: CLAUDE_CODE_EFFORT_LEVEL, else `ultracode`, else the effort for that model,
+    else the user file's top-level `effortLevel`; None when they choose none."""
     env = os.environ if environ is None else environ
     value = env.get(EFFORT_ENV, "").strip().lower()
     if value in EFFORTS:
         return value
-    _, by_env, ultracode, level, unread = _efforts(cwd, env)
+    _, by_env, ultracode, level, unread = _efforts(cwd, env, model)
     return by_env or (ULTRACODE if ultracode else level or unread)
+
+
+def default_effort(model: str | None) -> str:
+    """The effort Claude Code runs `model` at when nothing names one (DEFAULT_EFFORTS, by model_key)."""
+    return DEFAULT_EFFORTS.get(model_key(model), DEFAULT_EFFORT)
+
+
+def session_effort(cwd: Path, model: str) -> str:
+    """The effort Claude Code runs a session in `cwd` on `model` at by the analyst's settings, as the effort menus name
+    it: their own for that model (analyst_effort), else Claude Code's default for it (default_effort). The browser's
+    main runs at it when the composer chose none (runtime.Space.spec_of), and the composer's chip shows it."""
+    return analyst_effort(cwd, model=model) or default_effort(model)
 
 
 STATUSLINE_REFRESH_S = 2
@@ -266,13 +286,34 @@ def _box_probe() -> bool:
     return ok
 
 
+# A `claude` thimble starts gets the ANTHROPIC_* variables of this process (config.launch_environ), so that Claude Code
+# signs in with them as in the analyst's terminal, and Claude Code passes its environment on to the commands it runs.
+# So the sandbox unsets those variables for its commands (`credentials.envVars`, mode deny), as the card kernels go
+# without them (notebook.kernel_env_of). CLAUDE_CODE_SUBPROCESS_ENV_SCRUB would unset them outside a sandbox too, but
+# in Claude Code 2.1.307 it is a CI hardening mode: it writes empty files in place of a missing .bash_profile, .profile,
+# .gitconfig, .netrc and others in the home folder, and of package.json, .env and lock files in the folder the session
+# starts in (the corpus), and it forces the default permission mode.
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # a name Claude Code takes in credentials.envVars
+
+
+def env_denies(environ: Mapping[str, str] | None = None) -> list[dict[str, str]]:
+    """The `credentials.envVars` entries that unset each ANTHROPIC_* variable of `environ` (default this process's) for
+    a command in the sandbox."""
+    env = os.environ if environ is None else environ
+    return [{"name": k, "mode": "deny"} for k in sorted(env) if k.startswith("ANTHROPIC_") and ENV_NAME.fullmatch(k)]
+
+
 def offline_sandbox(auto_allow: bool = False, network: bool = False, required: bool = False) -> dict[str, Any]:
     """The `sandbox` settings of a session thimble fences (agent_session.fence, view builds): on, with no network unless
-    `network` (then the analyst's own sandbox settings say where it reaches), and no command run outside it;
-    `auto_allow` lets a command that runs in it skip its permission request; `required` (sandbox.enforce) has Claude
-    Code refuse to start the session when its sandbox can't run, rather than run its commands unsandboxed."""
-    out = {"enabled": True, "failIfUnavailable": required, "autoAllowBashIfSandboxed": auto_allow,
-           "allowUnsandboxedCommands": False}
+    `network` (then the analyst's own sandbox settings say where it reaches), no command run outside it, and none of
+    this process's ANTHROPIC_* variables in its commands' environment (env_denies); `auto_allow` lets a command that
+    runs in it skip its permission request; `required` (sandbox.enforce) has Claude Code refuse to start the session
+    when its sandbox can't run, rather than run its commands unsandboxed."""
+    out: dict[str, Any] = {"enabled": True, "failIfUnavailable": required, "autoAllowBashIfSandboxed": auto_allow,
+                           "allowUnsandboxedCommands": False}
+    denies = env_denies()
+    if denies:
+        out["credentials"] = {"envVars": denies}
     return out if network else {**out, "network": {"deniedDomains": ["*"]}}
 
 

@@ -45,6 +45,9 @@ export type Events = {
   canvasComments: { card?: string }
   /** the checks' comments on Claude's answers changed (the stream's `answer-comments` record, chat/answerComments.ts) */
   answerComments: Record<string, never>
+  /** the label of the citation on the words `el` was pinned open (marks/Mark.tsx): a comment open beside its passage
+   * makes way for it, unless the citation stands in the comment (chat/AnswerComment.tsx) */
+  citeOpen: { el: Element | null }
   /** the stream connected or dropped */
   wsStream: { connected: boolean }
   /** a lazy chunk did not load and the server serves another build: ask for a reload (lib/chunkRecovery) */

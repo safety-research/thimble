@@ -1,10 +1,13 @@
 // The chat column: the thread tree at the top, the transcript of the thread being read, and the composer floating over
 // it. Main is the analyst's Claude Code session and leaves out what shows elsewhere (model.mainSkips). A thread is a
 // fork of main: main's conversation up to where it branched, then its own rows. The orientation and a writer show their
-// card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While a
-// thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
-// it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
-// step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
+// card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While
+// main or a thread works, a strip of its steps rides behind the composer, and every permission request waits on one
+// card above it (PermissionCard); a message sent to main meanwhile waits under main's rows until main reads it (useChat
+// unread); an ask before a request to a host the analyst has not allowed waits at the end of the transcript of the chat
+// whose agent asked, under the command that waits (HostAsks). The composer sends where threads.composerTarget says, and
+// while the agent a thread shows (or a step's parent) runs and the browser can stop it, the composer carries its Stop
+// (composerStopOf). A thread
 // whose run ended without a reply offers Ask again. Main opens empty with its composer, as Claude Code does; a start that
 // did not happen shows its card in main (OrientStart). A view proposal waits above the composer until the analyst
 // answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
@@ -55,7 +58,8 @@ import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
-import { pendingAsks, waitingAt, waitingChats } from './waiting'
+import { hostAsks, pendingAsks, waitingAt, waitingChats, waitsItself } from './waiting'
+import { HostAsks } from './HostAsk'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
 import { LabelAsks } from './LabelAsk'
@@ -273,9 +277,10 @@ export function subagentCount(agents: readonly ToolStep[]): string {
 /** The strip behind the composer while the current thread works: what it is doing, its steps and count, or null. Only
  * subagents are listed and counted; a session with no agents yet, or one that only makes calls, shows just the title
  * and its spinner. A dev thread that builds a view (`view`) says so; a side thread says, in its own words, that it
- * starts and then that it works (`stage`, threadStatus STAGE_TEXT). Pure. */
+ * starts and then that it works (`stage`, threadStatus STAGE_TEXT); main says it works for the whole of its turn, as
+ * Claude Code's working line does. Pure. */
 export function taskStrip(kind: ThreadKind | null, running: boolean, rows: readonly Row[], metas: ReadonlyMap<string, ChatMeta> = new Map(), view = false, stage: ThreadStage | null = null): { title: string; steps: ToolStep[]; count: string } | null {
-  if (!running || kind == null || kind === 'main') return null
+  if (!running || kind == null) return null
   const session = (title: string, own: readonly Row[]) => {
     const steps = sessionSteps(own, metas, true)
     return { title, steps, count: subagentCount(steps) }
@@ -289,7 +294,7 @@ export function taskStrip(kind: ThreadKind | null, running: boolean, rows: reado
   // the thread, never steps, so one that only makes calls has no step list
   if (kind === 'dev') return session(view ? 'Building the view' : 'Working on the ticket', rows)
   if (kind === 'check') return session('Working', rows)
-  // a thread's or an agent's calls are rows in its thread, never steps
+  // main's, a thread's or an agent's calls are rows in its thread, never steps
   return { title: kind === 'thread' && stage ? STAGE_TEXT[stage] : 'Working', steps: [], count: '' }
 }
 
@@ -464,12 +469,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     }
   }, [])
 
-  // the chats a permission prompt waits on: a session's own, and main's that name the thread or subagent that asked
-  const waitingIds = useMemo(() => {
-    const ids = new Set(waitingChats(chats).map((m) => m.id))
-    for (const p of main.meta?.permissions ?? []) if (p.chat) ids.add(p.chat)
-    return ids
-  }, [chats, main.meta?.permissions])
+  // the chats that wait for the analyst, each request at the thread the permission card's head names (chat/waiting.ts)
+  const waitingIds = useMemo(() => new Set(waitingChats(chats, main.meta).map((m) => m.id)), [chats, main.meta])
   const items = useMemo(
     () =>
       pickItems(
@@ -551,7 +552,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const stopWhat = composerStopOf(kind, curMeta, ticket, stepParent, threadView)
   const stopKey = stopWhat ? (stopWhat.kind === 'ticket' ? `ticket:${stopWhat.ticket}` : stopWhat.kind === 'view' ? `view:${stopWhat.slug}:${stopWhat.review}` : `chat:${stopWhat.chat}`) : null
   // the Stop that is under way, by stopKey, so another thread's composer is not left busy: from the request until the
-  // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass; a failed request clears it at once
+  // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass; a failed request clears it at once. Main's turn has
+  // ended when its Stop answers (backend agents.interrupt_route), so that clears it too: a message that waited for the
+  // turn may start main's next one at once
   const [stopping, setStopping] = useState<string | null>(null)
   useEffect(() => {
     if (stopping && stopping !== stopKey) setStopping(null)
@@ -564,8 +567,11 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const stopNow = () => {
     if (!stopWhat || !stopKey || stopping === stopKey) return
     const key = stopKey
+    const ofMain = stopWhat.kind === 'session' && stopWhat.role === 'main'
     setStopping(key)
-    void stopRun(ws, stopWhat, (t) => setTicket(t as TicketWithShots)).then((ok) => ok || setStopping((s) => (s === key ? null : s)))
+    void stopRun(ws, stopWhat, (t) => setTicket(t as TicketWithShots)).then((ok) => {
+      if (!ok || ofMain) setStopping((s) => (s === key ? null : s))
+    })
   }
   // the orientation and the tickets that run: their steps at their rows' edge, and in main the orientation's strip
   const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'orient' || threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
@@ -579,7 +585,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const reloadOther = other.reload
   useEffect(() => bus.on('notice', (e) => void (e.replay ? undefined : e.chat === 'main' ? reloadMain() : e.chat && e.chat === current ? reloadOther() : undefined)), [reloadMain, reloadOther, current])
   const agentRows = useAgentRows(ws, [...new Set([...runningAgents.map((m) => m.id), ...orientIds])])
-  const orienting = current === 'main' ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
+  // the orientation whose strip main shows while it runs, unless main's own turn runs, whose strip main shows then
+  const orienting = current === 'main' && !running ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
   const metaMap = useMemo(() => new Map(chats.map((m) => [m.id, m])), [chats])
   // a ticket that waits in the queue, or for the analyst's Start, is not at work: its foot says so (TicketStatus)
   const waitingTicket = kind === 'dev' && !curMeta?.view && ticket?.status === 'queued'
@@ -595,11 +602,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // the orientation the strip follows in main (its retry below), and the session whose strip it is in its own thread
   const stripMeta = orienting ?? (kind === 'orient' ? curMeta : null)
   const stripSession = orienting ?? (kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'step' || kind === 'dev' ? curMeta : null)
-  // the session the strip follows is waiting for the analyst while one of its permission prompts, or its critique's, is
-  // open (chat/waiting.ts)
+  // the session the strip follows is waiting for the analyst while a request that waits at it, or at its critique, is
+  // open (chat/waiting.ts: at the thread the permission card's head names); main's turn and a thread's fork while one of
+  // their own is (waitsItself)
   const stripped = !!strip
-  const waitingFor = useMemo(() => (stripped && stripSession ? waitingAt(stripSession.id, metaMap.values()) : null), [stripped, stripSession, metaMap])
-  const waiting = !!waitingFor
+  const waitingFor = useMemo(() => (stripped && stripSession ? waitingAt(stripSession.id, metaMap.values(), main.meta) : null), [stripped, stripSession, metaMap, main.meta])
+  const waiting = !!waitingFor || (stripped && !stripSession && (kind === 'main' || kind === 'thread') && waitsItself(curMeta, main.meta, metaMap.values()))
   // every request of every session that waits for the analyst, on the one card above the composer
   const asks = useMemo(() => pendingRequests(main.meta, metaMap.values()), [main.meta, metaMap])
   // the latest orientation, which the orientation's composer and main's message_orientation reach
@@ -887,6 +895,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'main' && (
               <>
                 <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming || main.writing} retry={mainRetry} rewind={rewind} />
+                {/* what the analyst sent while main works, until main reads it, after the turn's rows */}
+                {main.unread.map((m) => (
+                  <PendingMessage key={m.key} text={m.text} ws={ws} held={false} />
+                ))}
               </>
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}
@@ -896,6 +908,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
             {!chat.loading && !chat.error && kind === 'step' && curMeta && <StepView ws={ws} meta={curMeta} chat={chat} running={running} />}
             {!chat.loading && !chat.error && kind === 'fix' && <Rows rows={chat.rows} ws={ws} chat={current} streaming={chat.streaming} />}
+            {/* an ask about a host waits at the end, under the command that waits for it */}
+            {!chat.loading && !chat.error && <HostAsks ws={ws} asks={hostAsks(chat.meta)} />}
           </div>
           </CallFocusContext.Provider>
         </div>
@@ -1119,14 +1133,16 @@ function useCallIndex(ws: string, chat: string | null, rows: readonly Row[]): Re
 /** The note under a message the server holds until the coverage line is measured, which goes with it. */
 export const HELD_NOTE = 'Sent when the coverage check ends (at most 2 minutes)'
 
-/** A message on its way to the orientation: the analyst's tile, with a spinner, or the note that it is held. */
+/** A message on its way to the orientation, or to main while main works, until main reads it (useChat unread): the
+ * analyst's tile, a step quieter, which alone says that it waits (the strip behind the composer says that the agent
+ * works), with the note under it while the server holds it. */
 function PendingMessage({ text, ws, held }: { text: string; ws: string; held: boolean }) {
   return (
     <div className="chat-msg chat-user chat-pending" data-held={held || undefined}>
       <UserMessage className="chat-message">
         <RefText text={text} workspace={ws} />
       </UserMessage>
-      <Note className="chat-pending-note" spin={!held} text={held ? HELD_NOTE : undefined} />
+      {held && <Note className="chat-pending-note" text={HELD_NOTE} />}
     </div>
   )
 }
@@ -1312,9 +1328,12 @@ function TicketView({ ws, id, chat, mainRecords, ticket, onTicket: setTicket }: 
   )
 }
 
-/** The strip behind the composer's top edge while the thread works: the spinner, what it is doing, how many steps; it
- * opens on the steps. A pending permission prompt shows a still dot in place of the spinner; a session waiting to retry
- * after an API capacity error shows a countdown row with Retry now. */
+/** The strip behind the composer's top edge while the thread works: the spinner, what it is doing, how many steps. Its
+ * head opens the steps, so it is a button with a chevron only while there are steps to show (taskStrip: a session's
+ * subagents and workflow agents); main's strip and a side thread's, which list none, and a session's before its first
+ * subagent are the spinner and the title alone, and the first step gives the head its chevron. A pending permission
+ * prompt shows a still dot in place of the spinner; a session waiting to retry after an API capacity error shows a
+ * countdown row with Retry now. */
 function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry = null, onRetry }: { title: string; steps: ToolStep[]; count: string; open: boolean; onToggle: () => void; waiting?: boolean; retry?: SessionAlert | null; onRetry?: () => Promise<unknown> }) {
   const retryLine = useRetryText(retry)
   const [retrying, setRetrying] = useState(false)
@@ -1331,16 +1350,27 @@ function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [open, steps.length])
+  const hasSteps = steps.length > 0
+  const shown = open && hasSteps
+  const head = (
+    <>
+      {waiting || retry ? <span className="chat-strip-wait-dot" aria-hidden="true" /> : <Spinner label="working" />}
+      <span className="chat-strip-title">{title}</span>
+      {/* subagents only (subagentCount); the strip shows while the session runs, so all ended does not mean finished */}
+      {count && <span className="chat-strip-meta">{count}</span>}
+    </>
+  )
   return (
-    <div className={`chat-strip${open ? ' open' : ''}${waiting ? ' is-waiting' : ''}`} data-steps={steps.length} data-waiting={waiting || undefined} data-retry={retry ? '' : undefined}>
+    <div className={`chat-strip${shown ? ' open' : ''}${waiting ? ' is-waiting' : ''}`} data-steps={steps.length} data-waiting={waiting || undefined} data-retry={retry ? '' : undefined}>
       <div className="chat-strip-bar">
-        <button type="button" className="chat-strip-head" aria-expanded={open} onClick={onToggle}>
-          {waiting || retry ? <span className="chat-strip-wait-dot" aria-hidden="true" /> : <Spinner label="working" />}
-          <span className="chat-strip-title">{title}</span>
-          {/* subagents only (subagentCount); the strip shows while the session runs, so all ended does not mean finished */}
-          {count && <span className="chat-strip-meta">{count}</span>}
-          <Icon name="chevron-down" size={12} className="chat-strip-caret" />
-        </button>
+        {hasSteps ? (
+          <button type="button" className="chat-strip-head" aria-expanded={open} onClick={onToggle}>
+            {head}
+            <Icon name="chevron-down" size={12} className="chat-strip-caret" />
+          </button>
+        ) : (
+          <div className="chat-strip-head">{head}</div>
+        )}
       </div>
       {retry && (
         <div className="chat-strip-retry-row">
@@ -1354,7 +1384,7 @@ function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry
           )}
         </div>
       )}
-      {open && steps.length > 0 && (
+      {shown && (
         <ol ref={listRef} className="chat-strip-steps">
           {steps.map((s, i) => (
             <li key={s.key ?? i} className={`toolcard-step toolcard-step-${s.state ?? 'done'}`}>

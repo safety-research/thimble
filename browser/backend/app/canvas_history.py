@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from . import config, ledger, undo
+from . import config, ledger, nofollow, undo
 
 log = logging.getLogger("thimble.canvas_history")
 
@@ -148,9 +148,9 @@ def _load(c: str, path: Path) -> None:
     if c in _loaded:
         return
     _loaded.add(c)
-    try:
-        lines = path.read_text("utf-8").splitlines() if path.is_file() else []
-    except OSError:
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        lines = nofollow.read_text(path).splitlines()
+    except (OSError, ValueError):
         lines = []
     for line in lines:
         try:

@@ -10,6 +10,7 @@ import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus, type ProblemPrefill, type Tab } from '../lib/bus'
 import { toggleLinks, useLinksVisible } from '../lib/links'
+import { useTouring } from '../lib/touring'
 import type { WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { ProblemReportPopover } from './ProblemReport'
@@ -20,6 +21,9 @@ import { WorkspaceList } from './WorkspaceList'
 import { useCommentItems } from './CommentsList'
 import { listedLabels, type SideSection } from './LabelsSidebar'
 import { useConcepts } from '../canvas/concepts'
+import { NewCommentsDot, useChecks } from '../report/Checks'
+import { isDocument } from '../report/checkComments'
+import { useNewComments } from '../report/newComments'
 
 export interface SurfaceTab extends TabOption<Tab> {
   /** `focus`: the focused pane shows it; `shown`: another pane does; `hidden`: no pane does */
@@ -37,21 +41,31 @@ export interface TopBarProps {
 }
 
 /** The top bar's two quiet buttons, Labels and Comments, each with its icon and count: a click opens the right sidebar
- * on its section, or closes it when that section is open. */
+ * on its section, or closes it when that section is open. Comments carries the new comments' dot while a check's run
+ * left comments on the documents that the analyst has not looked at; the sidebar open on Comments looks at them, as
+ * the canvas's Comments button does for the cards (report/newComments.ts), but not while the tour runs: its Checks step
+ * opens the sidebar with this button and lays its example over it (tour/steps.ts holdSide). */
 function SideButtons({ ws, side, onSide }: { ws: string; side: SideSection | null; onSide: (section: SideSection | null) => void }) {
   const n = listedLabels(useConcepts(ws)).length
   const m = useCommentItems(ws).items.length
-  const button = (section: SideSection, icon: 'label' | 'comment', name: string, count: number) => (
+  const fresh = useNewComments(ws, useChecks(ws), isDocument)
+  const { look } = fresh
+  const touring = useTouring()
+  useEffect(() => {
+    if (side === 'comments' && !touring) look()
+  }, [side, look, touring])
+  const button = (section: SideSection, icon: 'label' | 'comment', name: string, count: number, dot = false) => (
     <button type="button" className={`shell-side-btn${side === section ? ' on' : ''}`} aria-pressed={side === section} data-side={section} onClick={() => onSide(side === section ? null : section)}>
       <Icon name={icon} size={14} />
       {name}
       <span className="shell-side-n">{count}</span>
+      {dot && <NewCommentsDot />}
     </button>
   )
   return (
     <span className="shell-side-btns">
       {button('labels', 'label', 'Labels', n)}
-      {button('comments', 'comment', 'Comments', m)}
+      {button('comments', 'comment', 'Comments', m, fresh.runs.length > 0)}
     </span>
   )
 }

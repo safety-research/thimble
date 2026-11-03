@@ -7,6 +7,11 @@
 // margin draw (AnswerComment.tsx AnswerCommentPop). An explainer and a heads-up never share words, so each of their
 // tints opens its own comment (marksOf).
 //
+// Words may carry more than one mark: a citation's words a comment's words meet, or two comments' words that meet (two
+// explainers, or another check's comment). A click on them opens the innermost comment, as the terminal opens an
+// explainer or a heads-up before the citation it stands on; each click on them again opens the next mark out, the
+// citation last, then the innermost again (nextMark). Esc or a press elsewhere closes what is open.
+//
 // A comment names the turn it is on (`turn`, the id the turn's `done` record names, chat/model.ts TextRow.turn) and
 // quotes its passage raw, as Claude wrote it. The chat draws the answer as markdown, so the passage is found in the drawn
 // words (plainQuote: the quote without markdown's marks, a citation as the value it shows), and its words in the passage.
@@ -111,6 +116,16 @@ export function marksOf(comments: readonly AnswerComment[], active: string | nul
   for (const c of [...comments].sort((a, b) => Number(b.id === active) - Number(a.id === active)))
     if (!drawn.some((d) => APART[d.check] === c.check && meet(d, c))) drawn.push(c)
   return comments.filter((c) => drawn.includes(c)).map((c) => ({ id: c.id, quote: c.quote, words: c.words, colour: tintOf(c), ref: c.ref, active: c.id === active }))
+}
+
+/** Which of the marks over clicked words a click opens. `count` marks stand on the words, from the innermost out (the
+ * comments' tints, then the citation whose words hold them), and `open` is the one of them open now, -1 for none. The
+ * innermost when none is open, else the one after the open one, the innermost again after the last; null when that is
+ * the open one itself, a lone mark, which the click closes. Pure. */
+export function nextMark(count: number, open: number): number | null {
+  if (count <= 0) return null
+  const next = open < 0 || open >= count ? 0 : (open + 1) % count
+  return next === open ? null : next
 }
 
 /** What Go to it asked for: an `answer:` ref, and the comment to open there when it names one (shell/CommentsList). */

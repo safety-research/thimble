@@ -57,6 +57,35 @@ def test_a_command_in_thimbles_temp_folder_keeps_the_start_folders_records(tmp_p
     assert STORE.find_root(temp) == temp.resolve()
 
 
+def test_a_file_a_command_of_claude_codes_bash_sandbox_derived_is_the_sessions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # R2: Claude Code's Bash sandbox gives a command Claude Code's own temp folder, claude-<uid>/, as its TMPDIR and its
+    # CLAUDE_CODE_TMPDIR, not thimble's, and lets it write only there: `cd $TMPDIR && thimble label …` keeps the start
+    # folder's records, and a file there is the session's, named by its real path, as one in thimble's folder is
+    from kernel import sources as S  # noqa: PLC0415
+
+    data, temp = tmp_path / "data", tmp_path / "tmp"
+    claude = temp / f"claude-{os.getuid()}"
+    data.mkdir()
+    claude.mkdir(parents=True)
+    (claude / "rows.jsonl").write_text('{"night": 1}\n')
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("THIMBLE_START", str(data))
+    monkeypatch.setenv("TMPDIR", str(claude))
+    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(claude))
+    assert STORE.in_temp(claude / "rows.jsonl") and STORE.find_root(claude) == data.resolve()
+    assert S.expand_glob(data, str(claude / "rows.jsonl")) == [str((claude / "rows.jsonl").resolve())]
+    # a command outside the sandbox (the plugin's own, or Bash with the sandbox off): CLAUDE_CODE_TMPDIR is the folder
+    # Claude Code keeps its own in, and TMPDIR thimble's
+    monkeypatch.setenv("TMPDIR", str(temp / "thimble"))
+    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(temp))
+    assert STORE.in_temp(claude / "rows.jsonl") and STORE.find_root(claude) == data.resolve()
+    # another user's folder there is no temp folder of the session's
+    other = temp / f"claude-{os.getuid() + 1}"
+    other.mkdir()
+    assert not STORE.in_temp(other / "rows.jsonl")
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")
 def test_a_folder_thimble_may_not_write_in_is_found_by_the_records_kept_for_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     data = tmp_path / "data"

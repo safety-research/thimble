@@ -204,7 +204,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
     }
     return out
   }, [shown, answers.comments, opened])
-  const marksCtx = useMemo(() => ({ open: (id: string) => setOpened((cur) => (cur === id ? null : id)) }), [])
+  const marksCtx = useMemo(() => ({ opened, show: setOpened }), [opened])
   // Go to it on `answer:<turn>#s<n>`: the comment it names opens once it is read, and its passage comes into view
   useEffect(() => {
     if (chat !== 'main' || nested) return

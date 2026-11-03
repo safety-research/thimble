@@ -51,7 +51,8 @@ def test_a_pass_lists_the_corpus_folder_alone_however_many_files_lie_under_it(co
     real = os.scandir
 
     def spy(path="."):
-        listed.append(str(path))
+        # the mirror folder is listed by the descriptor of the folder as the server opened it (nofollow)
+        listed.append("the mirror folder" if isinstance(path, int) else str(path))
         return real(path)
 
     monkeypatch.setattr(notebook.os, "scandir", spy)
@@ -59,7 +60,7 @@ def test_a_pass_lists_the_corpus_folder_alone_however_many_files_lie_under_it(co
     notebook.mirror_corpus(corpus, scratch)
     notebook.mirror_corpus(corpus, scratch)
     monkeypatch.undo()
-    assert set(listed) == {str(corpus.resolve()), str(scratch)}
+    assert sorted(listed) == sorted([str(corpus.resolve()), "the mirror folder"] * 2)
     assert _links(scratch) == {"README.md", "runs"}
 
 

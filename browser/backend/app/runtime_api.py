@@ -2,10 +2,12 @@
 Workload Identity Federation, with no `claude` process.
 
 The loop: send the conversation, streaming; write the reply into the agent's transcript (Conv.emit_assistant); run the
-tools it called (thimble's through Conv.call_thimble, the built-in ones through runtime_tools) and write their results;
-go on until the reply calls no tool. The conversation is kept in <workspace>/runtime/convs/<id>.api.json, so it goes on
-after a restart; a fork starts from a copy of main's, up to main's last finished turn. A stopped turn gives every call
-left without a result one that says so, so the conversation stays valid.
+tools it called (thimble's through Conv.call_thimble, the built-in ones through runtime_tools) and write their results,
+with what the analyst sent main while they ran (Conv.take_waiting), as Claude Code gives a message typed mid-turn at
+the next tool call; go on until the reply calls no tool. The conversation is kept in
+<workspace>/runtime/convs/<id>.api.json, so it goes on after a restart; a fork starts from a copy of main's, up to
+main's last finished turn. A stopped turn gives every call left without a result one that says so, so the conversation
+stays valid.
 """
 from __future__ import annotations
 
@@ -14,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from . import llm, runtime_tools
+from . import llm, nofollow, runtime_tools
 
 log = logging.getLogger("thimble.runtime_api")
 
@@ -24,8 +26,8 @@ STOPPED = "The analyst stopped this before it ran."
 
 
 def _load(path: Any) -> list[dict[str, Any]]:
-    try:
-        got = json.loads(path.read_text("utf-8"))
+    try:  # the state sent to the model again: never read through a link a card's code left in the workspace
+        got = json.loads(nofollow.read_text(path))
     except (OSError, ValueError):
         return []
     if not isinstance(got, list):
@@ -61,10 +63,9 @@ def reply_blocks(final: Any) -> list[dict[str, Any]]:
 
 
 def _save(path: Any, messages: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    """The conversation's state, replaced whole in the workspace's runtime folder by a temp file of its own, never
+    through a link a card's code left there (nofollow.replace)."""
+    nofollow.replace(path, json.dumps(messages, ensure_ascii=False).encode("utf-8"), make=True)
 
 
 def complete_prefix(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -173,6 +174,12 @@ async def _call(conv: Any, box: runtime_tools.Box, block: dict[str, Any]) -> tup
     return rec, msg
 
 
+def _said(conv: Any) -> list[dict[str, Any]]:
+    """What the analyst sent main while its tool calls ran, as text blocks after their results (Conv.take_waiting); none
+    for any other conversation."""
+    return [{"type": "text", "text": t} for t in conv.take_waiting()]
+
+
 REFUSED = "This check may not use that tool."
 
 
@@ -195,7 +202,7 @@ async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, al
     # main's tool list as it is (the cache), but no write of the corpus: a checker or proposer fork is no thread's
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
                             write_roots=[w for w in spec.write_roots if w != spec.cwd], private=spec.private,
-                            home=spec.home, no_write=spec.no_write)
+                            home=spec.home, temp=spec.temp, no_write=spec.no_write)
     client = await asyncio.to_thread(llm.client)  # the SDK's first import and the credentials take seconds
     out: list[str] = []
     texts: list[str] = []
@@ -228,25 +235,20 @@ async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, al
     return "\n".join(out) + "\n"
 
 
-def _cc_main_state(c: str) -> dict[str, Any]:
-    from . import runtime  # noqa: PLC0415
-
-    try:
-        got = json.loads(runtime.ensure(c).main.state_path("cc").read_text("utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return got if isinstance(got, dict) else {}
-
-
 def cc_main_session(c: str) -> str | None:
-    """Main's Claude Code session id on the Claude Code sign-in runtime (runtime_cc), which a fork resumes."""
-    return str(_cc_main_state(c).get("session_id") or "") or None
+    """Main's Claude Code session id on the Claude Code sign-in runtime (runtime_cc), which a fork resumes: its state
+    read as nofollow reads it, and the id checked (runtime_cc.session_id), since a card's code writes the workspace."""
+    from . import runtime, runtime_cc  # noqa: PLC0415
+
+    return runtime_cc.session_id(runtime_cc._load(runtime.ensure(c).main.state_path("cc")))
 
 
 def cc_main_cut(c: str) -> str | None:
     """Where a fork of main's Claude Code session resumes it up to (`--resume-session-at`): the entry a rewind left
-    main at until main's next turn (runtime.rewind_main), else None, its whole conversation."""
-    return str(_cc_main_state(c).get("resume_at") or "") or None
+    main at until main's next turn (runtime.rewind_main, runtime_cc.resume_at), else None, its whole conversation."""
+    from . import runtime, runtime_cc  # noqa: PLC0415
+
+    return runtime_cc.resume_at(runtime_cc._load(runtime.ensure(c).main.state_path("cc")))
 
 
 async def turn(conv: Any, text: str) -> Any:
@@ -263,7 +265,7 @@ async def turn(conv: Any, text: str) -> Any:
     messages.append({"role": "user", "content": text})
     _save(path, messages)
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
-                            write_roots=spec.write_roots, private=spec.private, home=spec.home,
+                            write_roots=spec.write_roots, private=spec.private, home=spec.home, temp=spec.temp,
                             no_write=spec.no_write, corpus_edits=spec.corpus_edits)
     reply = ""
     piece, key = 0, ""
@@ -313,13 +315,13 @@ async def turn(conv: Any, text: str) -> Any:
             if final.stop_reason == "max_tokens":
                 cut = [{"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
                         "content": "The reply hit its length limit before this call was complete."} for b in calls]
-                messages.append({"role": "user", "content": cut})
-                _save(path, messages)
                 conv.emit_results(cut)
+                messages.append({"role": "user", "content": [*cut, *_said(conv)]})
+                _save(path, messages)
                 continue
             done = await asyncio.gather(*(_call(conv, box, b) for b in calls))
             conv.emit_results([r for r, _ in done])
-            messages.append({"role": "user", "content": [m for _, m in done]})
+            messages.append({"role": "user", "content": [*(m for _, m in done), *_said(conv)]})
             _save(path, messages)
     except asyncio.CancelledError:
         if key:

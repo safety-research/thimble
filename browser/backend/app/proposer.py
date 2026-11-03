@@ -46,7 +46,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from . import agents, capture, config, ledger, model, notices, prompts, sdk, views
+from . import agents, capture, config, ledger, model, nofollow, notices, prompts, sdk, views
 
 log = logging.getLogger("thimble.proposer")
 
@@ -641,8 +641,8 @@ def session_cost(path: str | None) -> float:
     """main's running cost as the last cost-state record of its transcript has it (0 for none): a fork's
     total_cost_usd includes it (spike E)."""
     cost = 0.0
-    try:
-        with open(str(path), encoding="utf-8", errors="replace") as f:
+    try:  # a transcript in the workspace (the server's own runtime's) lies where a card's code writes (nofollow)
+        with nofollow.reader(str(path), "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 if '"cost-state"' not in line:
                     continue

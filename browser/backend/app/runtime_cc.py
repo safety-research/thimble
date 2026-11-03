@@ -7,19 +7,37 @@ thimble's prompt as the whole system prompt; the role's model and effort. thimbl
 named so that the tools read as 0.8's plugin named them (tools.thimble_tool); Claude Code's built-in tools are the
 same set the Messages API runtime gives (Spec.builtins), Bash in Claude Code's sandbox (no Bash where it cannot run),
 Edit and Write allowed only in the agent's write folders (the corpus among them for main and its thread forks while
-Settings' "Claude can edit files in this folder" is on, runtime.Spec.corpus_edits), and `dontAsk`, so nothing waits on a prompt nobody sees.
+Settings' "Claude can edit files in this folder" is on, runtime.Spec.corpus_edits).
+
+Permissions. The session runs in Claude Code's default mode with a permission callback (options' `ask`), so a command's
+request to a host the analyst's Claude Code settings do not allow asks the analyst in the chat, as Claude Code asks in
+the terminal (host_asks.py), and the hosts the analyst always allowed for the workspace are allowed in the session's
+settings. Every other call that would ask is refused as Claude Code's `dontAsk` refuses it (REFUSED), so nothing else
+waits on a prompt nobody sees. Claude Code's ask about a host names the host alone, under an id of its own, so the ask
+shows the session's Bash call that runs (a session runs one at a time), which the hooks below hear start and end.
 
 A PreToolUse hook callback (in this process, not a plugin hook) hears each call of thimble's tools with Claude Code's
-id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8. The
+id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8, and each
+Bash call with its input, until a PostToolUse or PostToolUseFailure hook callback hears that it ended. The
 session's id is kept in <workspace>/runtime/convs/<id>.cc.json and resumed at the next turn; a fork resumes main's
 session as a fork of it (fork_session).
+
+A message the analyst sends while main's turn runs goes to main's session at once (_hand), as a message typed in Claude
+Code's prompt mid-turn: Claude Code gives it to the model at the turn's next tool call, or runs it as the session's next
+turn when this one ends first. Main's session echoes each message it reads (`replay-user-messages`), which is when
+main's chat logs it (Conv.heard); the turn goes on until each message handed on is read.
 
 The sandbox. Claude Code puts its sandbox's proxy sockets in TMPDIR (claude-http-<16 hex>.sock), and a Unix socket's
 path holds at most 104 (macOS) or 108 (Linux) bytes, so with a long TMPDIR (the workspace's runtime/tmp/<conv>, 76
 characters and more) the sandbox did not start, and Claude Code then ran Bash outside it. So each turn's session gets a
-short TMPDIR of its own (short_tmp: a 0700 folder under /tmp, removed when the turn ends), and its sandbox is required
-(cc_settings.offline_sandbox's `required`): a sandbox that still cannot start refuses each Bash call, and the person
-gets a notice (SANDBOX_NOTICE). The agent's own files stay in the workspace (Spec.home), as before.
+short TMPDIR (a 0700 folder under /tmp), and its sandbox is required (cc_settings.offline_sandbox's `required`): a
+sandbox that still cannot start refuses each Bash call, and the person gets a notice (SANDBOX_NOTICE). The sandbox gives
+a command Claude Code's own temp folder as its TMPDIR, claude-<uid> in CLAUDE_CODE_TMPDIR, which the session gets as its
+TMPDIR too. Main's and its thread forks' sessions have the workspace's own short folder (workspace_tmp), kept from turn
+to turn, so their commands' TMPDIR (shell_tmp) is the same folder at each turn, which the card kernels share (notebook);
+it goes when the workspace is deleted or moved aside for another session (drop_workspace_tmp), and a server's start
+removes those of workspaces deleted otherwise (sweep_workspace_tmps). Any other agent's session has one of its own (short_tmp), removed when the turn ends.
+The agent's own files stay in the workspace (Spec.home), as before.
 
 Claude Code's sandbox makes an empty .claude/.cc-writes/ folder in the session's working folder (the corpus) when it
 starts, and no setting moves it, so the last session of a corpus to end removes that folder, and .claude/ when the
@@ -27,43 +45,80 @@ sandbox made it, when they are still empty (_tidy).
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
+import re
 import secrets
-import shutil
 import tempfile
+import uuid
+import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+from . import nofollow
 
 log = logging.getLogger("thimble.runtime_cc")
+# the callback is for the asks the allowed tools leave (module note, permissions), so the Agent SDK's advisory that an
+# allowed tool never reaches it would only print in the analyst's terminal
+warnings.filterwarnings("ignore", message="can_use_tool will not be invoked")
 
 SERVER = "plugin_thimble_thimble"  # tools.thimble_tool: mcp__plugin_thimble_thimble__<tool>
-TMP_ROOT = "/tmp"  # short_tmp's parent where it exists, else the system's temp folder
+TMP_ROOT = "/tmp"  # short_tmp's and workspace_tmp's parent where it exists, else the system's temp folder
 TMP_PREFIX = "thimble-cc-"
 TMP_MAX = 60  # short_tmp's path at most: Claude Code's sandbox starts with a TMPDIR of up to 74 characters
+TMP_TAG = 8  # workspace_tmp's name: TMP_PREFIX and this many hex digits of a hash of the workspace's folder
+TMP_OWNER = ".thimble-workspace"  # in workspace_tmp: the workspace's folder, which it goes with
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")  # a Claude Code session id as a state file keeps it
 CC_WRITES = (".claude", ".cc-writes")  # what Claude Code's sandbox makes in the session's working folder
 SANDBOX_FAILED = "Sandbox is required but failed to initialize"  # Claude Code's Bash result when it refuses the call
 SANDBOX_KEY = "cc-sandbox"  # the notice's key (notices.py)
 SANDBOX_NOTICE = ("{agent}'s shell commands did not run: Claude Code's Bash sandbox could not start ({why}), and thimble "
                   "runs them only inside it. On Linux the sandbox needs bubblewrap and socat; once they are installed, "
                   "send the message again. Settings, Claude access, can switch to an API key instead.")
+# what a call that would ask for anything but a host gets (module note, permissions): word for word the refusal of
+# Claude Code's `dontAsk`, which the session ran in before, so the model reads what it read then
+REFUSED = ("Permission to use {tool} has been denied because Claude Code is running in don't ask mode. IMPORTANT: You "
+           "*may* attempt to accomplish this action using other tools that might naturally be used to accomplish this "
+           "goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious "
+           "ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work "
+           "around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If "
+           "you believe this capability is essential to complete the user's request, STOP and explain to the user what "
+           "you were trying to do and why you need this permission. Let the user decide how to proceed.")
 _open: dict[str, int] = {}  # the sessions running in each working folder (_enter, _tidy)
 _had_claude: dict[str, bool] = {}  # whether .claude/ was in that folder when its first session started
 
 
 def _load(path: Any) -> dict[str, Any]:
-    try:
-        got = json.loads(path.read_text("utf-8"))
+    try:  # in the workspace's runtime folder: never read through a link a card's code left there (nofollow)
+        got = json.loads(nofollow.read_text(path))
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
 
 
+def session_id(state: dict[str, Any]) -> str | None:
+    """The Claude Code session a conversation's state names (`session_id`), which Claude Code resumes, or None: the
+    state lies in the workspace, which a card's code writes, so an id that is not one Claude Code makes (letters,
+    digits, dashes; never a leading dash, which would read as an option) is none."""
+    sid = str(state.get("session_id") or "")
+    return sid if SESSION_ID_RE.match(sid) else None
+
+
+def resume_at(state: dict[str, Any]) -> str | None:
+    """The entry of its session a conversation's next turn resumes up to (`resume_at`, which a rewind leaves until
+    that turn starts a session of its own), or None: checked as session_id checks the id."""
+    at = str(state.get("resume_at") or "")
+    return at if session_id(state) and SESSION_ID_RE.match(at) else None
+
+
 def _save(path: Any, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
+    """The session's state, in the workspace's runtime folder, replaced whole and never through a link a card's code
+    left there (nofollow.replace)."""
+    nofollow.replace(path, json.dumps(data).encode("utf-8"), make=True)
 
 
 def _key(name: str, args: Any) -> str:
@@ -73,12 +128,131 @@ def _key(name: str, args: Any) -> str:
 def short_tmp() -> Path | None:
     """A new private (0700) folder with a short path (at most TMP_MAX characters) for one session's TMPDIR (module
     note): /tmp/thimble-<8 random characters>, else under the system's temp folder; None when neither can hold one."""
-    for root in dict.fromkeys((TMP_ROOT, tempfile.gettempdir())):
+    for root in _tmp_roots():
         if len(root) + len(TMP_PREFIX) + 9 > TMP_MAX or not os.path.isdir(root):
             continue
         with contextlib.suppress(OSError):
             return Path(tempfile.mkdtemp(prefix=TMP_PREFIX, dir=root))
     return None
+
+
+def _tmp_roots() -> list[str]:
+    """Where short_tmp and workspace_tmp make their folders: TMP_ROOT, else the system's temp folder."""
+    return list(dict.fromkeys((TMP_ROOT, tempfile.gettempdir())))
+
+
+def _tmp_name(folder: str) -> str:
+    """workspace_tmp's name for the workspace whose folder is `folder` (its real path)."""
+    return f"{TMP_PREFIX}{hashlib.sha256(folder.encode()).hexdigest()[:TMP_TAG]}"
+
+
+def workspace_tmp(c: str) -> Path | None:
+    """Workspace `c`'s own short private folder (module note, the sandbox): /tmp/thimble-cc-<a hash of the workspace's
+    folder>, else under the system's temp folder, the same at each turn and for each server, so a card kernel that
+    outlives a server still finds it; None when neither can hold one that is this user's own folder. It names the
+    workspace's folder in TMP_OWNER, by which a server's start finds it once that folder is gone (sweep_workspace_tmps);
+    it goes with the workspace (drop_workspace_tmp)."""
+    from . import config  # noqa: PLC0415
+
+    folder = str(config.workspace_dir(c).resolve())
+    for root in _tmp_roots():
+        p = Path(root) / _tmp_name(folder)
+        if len(str(p)) > TMP_MAX or not os.path.isdir(root):
+            continue
+        with contextlib.suppress(OSError):
+            got = _own(p)
+            if _owner(got) != folder:
+                with contextlib.suppress(OSError), _mine(got) as fd:
+                    nofollow.replace_at(fd, TMP_OWNER, folder.encode("utf-8"))
+            return got
+    return None
+
+
+@contextlib.contextmanager
+def _mine(p: Path, root: Path | None = None) -> Iterator[int]:
+    """A descriptor of the folder `p`, opened from `root` (its parent's) one part at a time without following a link
+    (nofollow), checked by that descriptor to be a folder of this user's own; OSError for anything else. Main's Bash
+    on Claude Code sign-in writes the short folders, so what the server reads, writes and removes there goes through
+    such a descriptor, never through a link or a FIFO that Bash put there."""
+    with nofollow.folder(p, root=p.parent if root is None else root) as fd:
+        if os.fstat(fd).st_uid != os.getuid():
+            raise OSError(f"{p} is not a folder of this user's own")
+        yield fd
+
+
+def _owner(p: Path) -> str | None:
+    """The workspace folder a short folder `p` names (TMP_OWNER), when `p` is a folder of this user's own and no link,
+    and the file a regular file, no link (both as _mine opens them); else None, as for one that names none (a session's
+    own, short_tmp, or one an earlier version made)."""
+    try:
+        with _mine(p) as fd, os.fdopen(nofollow.open_at(fd, TMP_OWNER, os.O_RDONLY), "rb") as f:
+            return f.read().decode("utf-8").strip() or None
+    except (OSError, ValueError):
+        return None
+
+
+def _remove(p: Path) -> bool:
+    """`p` removed, when it is a folder of this user's own and no link (_mine), without following a link in it: whether
+    it was."""
+    try:
+        with _mine(p):
+            pass
+        nofollow.rmtree(p, root=p.parent)
+        return True
+    except OSError:
+        return False
+
+
+def drop_workspace_tmp(folder: Path) -> None:
+    """The workspace whose folder is `folder` is deleted, or moved aside for another session (ledger.archive_workspace):
+    its short folder (workspace_tmp) goes with it, unless it names another workspace (two folders whose hashes meet).
+    The workspace's sessions and kernels have stopped already."""
+    real = str(folder.resolve())
+    for root in _tmp_roots():
+        p = Path(root) / _tmp_name(real)
+        if _owner(p) in (None, real):
+            _remove(p)
+
+
+def sweep_workspace_tmps() -> list[Path]:
+    """At a server's start, the short folders of workspaces that are gone (deleted by hand, or while no server ran),
+    removed: each that names its workspace's folder (TMP_OWNER) when that folder is not there. Another server's, whose
+    workspaces are there, and the sessions' own (short_tmp), which name none, stay. Those removed."""
+    gone: list[Path] = []
+    for root in _tmp_roots():
+        try:
+            found = sorted(Path(root).glob(f"{TMP_PREFIX}*"))
+        except OSError:
+            continue
+        for p in found:
+            owner = _owner(p)
+            if owner and not os.path.isdir(owner) and _remove(p):
+                gone.append(p)
+    return gone
+
+
+def shell_tmp(c: str) -> Path | None:
+    """The TMPDIR Claude Code's sandbox gives the commands of main's and its thread forks' sessions: Claude Code's own
+    temp folder, claude-<uid> in workspace_tmp, made as Claude Code makes it, so a card kernel that starts before main's
+    first turn shares it too (runtime.shell_temp). None when there is no workspace_tmp."""
+    base = workspace_tmp(c)
+    if base is None:
+        return None
+    with contextlib.suppress(OSError):
+        return _own(base / f"claude-{os.getuid()}", base.parent)
+    return None
+
+
+def _own(p: Path, root: Path | None = None) -> Path:
+    """`p`, made when missing in its folder as nofollow opens that from `root` (its parent's), then a folder this user
+    owns and no link (_mine), then mode 0700 through its descriptor, as Claude Code checks its temp folder; OSError for
+    anything else, such as a folder another user made in its place."""
+    with nofollow.folder(p.parent, root=p.parent if root is None else root) as fd, \
+            contextlib.suppress(FileExistsError):
+        os.mkdir(p.name, 0o700, dir_fd=fd)
+    with _mine(p, root) as fd:
+        os.fchmod(fd, 0o700)
+    return p
 
 
 def _enter(cwd: Path) -> None:
@@ -103,12 +277,13 @@ def _tidy(cwd: Path) -> None:
             (cwd / CC_WRITES[0]).rmdir()
 
 
-def settings(spec: Any, bash: bool, tmp: Path | None = None) -> dict[str, Any]:
+def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | None = None) -> dict[str, Any]:
     """The session's inline settings: its effort as 0.8's calls pinned it (sdk.cli_settings), the sandbox for Bash
     (required: a sandbox that cannot start refuses the call, module note), the PATH Bash has on the Messages API
     (runtime_tools.shell_path) and the variables that keep its programs from writing caches beside what they read
     (kernel_wrap.NO_SIDE_WRITES), edits only in the write folders, and no reads of thimble's private files. `tmp` is
-    the session's TMPDIR, which its commands may write too."""
+    the session's TMPDIR, which its commands may write too; `hosts` the web rules of the hosts the analyst always
+    allowed for the workspace (host_asks.kept), which the sandbox's network then reaches unasked."""
     from . import cc_settings, kernel_wrap, runtime_tools, sdk  # noqa: PLC0415
 
     out = json.loads(sdk.cli_settings(spec.model, spec.effort or None))
@@ -127,13 +302,22 @@ def settings(spec: Any, bash: bool, tmp: Path | None = None) -> dict[str, Any]:
         out["sandbox"] = {**cc_settings.offline_sandbox(auto_allow=True, network=True, required=True),
                           "filesystem": {"allowWrite": writes,
                                          "denyWrite": [*map(str, spec.private), *map(str, no_write)]}}
+        out["permissions"]["allow"] += list(hosts or [])
     return out
 
 
-def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | None = None) -> Any:
-    from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, SdkMcpTool, create_sdk_mcp_server  # noqa: PLC0415
+def _chat(conv: Any) -> str | None:
+    """The chat a conversation's asks wait on: main's, or the chat the mirror writes a fork or an agent into."""
+    from . import agents, session  # noqa: PLC0415
 
-    from . import cc_settings, config, runtime, sdk, tools  # noqa: PLC0415
+    return agents.MAIN_ID if conv.kind == "main" else session.chat_of_agent(conv.c, conv.agent_id)
+
+
+def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | None = None) -> Any:
+    from claude_agent_sdk import (ClaudeAgentOptions, HookMatcher, PermissionResultAllow,  # noqa: PLC0415
+                                  PermissionResultDeny, SdkMcpTool, create_sdk_mcp_server)
+
+    from . import cc_settings, config, host_asks, runtime, sdk, tools  # noqa: PLC0415
 
     bash = "Bash" in spec.builtins and cc_settings.sandbox_ok()
     builtins = [b for b in spec.builtins if b != "Bash" or bash]
@@ -150,43 +334,65 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
     server = create_sdk_mcp_server(SERVER, tools=[SdkMcpTool(name=n, description=secs[n][0], input_schema=secs[n][1],
                                                              handler=handler(n)) for n in spec.thimble if n in secs])
 
+    shell: dict[str, dict[str, Any]] = {}  # the session's Bash calls that run, by Claude Code's id: {tool, input}
+
     async def pre(inp: Any, tool_use_id: str | None, _ctx: Any) -> dict[str, Any]:
         name = str((inp or {}).get("tool_name") or "")
         if tool_use_id and name.startswith(f"mcp__{SERVER}__"):
             pending.setdefault(_key(name, (inp or {}).get("tool_input")), []).append(tool_use_id)
+        elif tool_use_id and name == "Bash":
+            shell[tool_use_id] = {"tool": name, "input": (inp or {}).get("tool_input") or {}}
         return {}
+
+    async def ended(_inp: Any, tool_use_id: str | None, _ctx: Any) -> dict[str, Any]:
+        shell.pop(tool_use_id or "", None)
+        return {}
+
+    async def ask(name: str, inp: dict[str, Any], _ctx: Any) -> Any:
+        if name != host_asks.TOOL:
+            return PermissionResultDeny(message=REFUSED.format(tool=name))
+        # the request is the running Bash call's (module note, permissions): the one started last, should two run
+        call = next(reversed(shell.values()), None)
+        if await host_asks.ask(conv.c, _chat(conv), str((inp or {}).get("host") or ""), call):
+            return PermissionResultAllow()
+        return PermissionResultDeny()
 
     allowed = [b for b in builtins if b not in ("Edit", "Write")]
     allowed += [f"Edit(/{w}/**)" for w in spec.write_roots]
     allowed += [tools.thimble_tool(n) for n in spec.thimble]
-    state = _load(conv.state_path("cc"))
     # a rewind (runtime.rewind_main) left `resume_at`: the session resumes up to that entry, as a fork of it
-    resume, at = str(state.get("session_id") or "") or None, str(state.get("resume_at") or "") or None
+    state = _load(conv.state_path("cc"))
+    resume, at = session_id(state), resume_at(state)
     fork = bool(resume and at)
     if resume is None and conv.base:
         base = conv.space.main if conv.base == runtime.MAIN else conv.space.convs.get(conv.base)
         held = _load(base.state_path("cc")) if base is not None else {}
-        if sid := held.get("session_id"):
-            resume, fork, at = str(sid), True, str(held.get("resume_at") or "") or None
+        if sid := session_id(held):
+            resume, fork, at = sid, True, resume_at(held)
     sent = spec.effort if spec.effort and config.has_effort(spec.model) else None
     return ClaudeAgentOptions(
         cwd=str(spec.cwd),
         tools=builtins,
         allowed_tools=allowed,
-        permission_mode="dontAsk",
+        permission_mode="default",
+        can_use_tool=ask,
         mcp_servers={SERVER: server},
         system_prompt=spec.system,
         model=spec.model,
         effort=sent,
-        settings=json.dumps(settings(spec, bash, tmp)),
+        settings=json.dumps(settings(spec, bash, tmp, host_asks.kept(conv.c))),
         cli_path=config.CLI_PATH,
         max_buffer_size=sdk.MAX_BUFFER_SIZE,
         setting_sources=["user"],
         strict_mcp_config=True,
         add_dirs=[str(w) for w in spec.write_roots],
-        env=sdk.call_env({"TMPDIR": str(tmp or spec.home)}),
-        extra_args={"safe-mode": None},
-        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])]},
+        # Claude Code keeps its own temp folder in the short TMPDIR too, whatever CLAUDE_CODE_TMPDIR the server has
+        env=sdk.call_env({"TMPDIR": str(tmp or spec.home), **({"CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}),
+        # main's session echoes each message it reads, so a message handed to it mid-turn is known read (_hand)
+        extra_args={"safe-mode": None, **({"replay-user-messages": None} if conv.kind == "main" else {})},
+        hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])],
+               "PostToolUse": [HookMatcher(matcher="Bash", hooks=[ended])],
+               "PostToolUseFailure": [HookMatcher(matcher="Bash", hooks=[ended])]},
         resume=resume,
         fork_session=fork,
         resume_session_at=at,
@@ -220,18 +426,20 @@ def _result(b: Any) -> dict[str, Any] | None:
 
 
 async def turn(conv: Any, text: str) -> Any:
-    """One turn of `conv` on `text` in a session with a short TMPDIR of its own (module note)."""
+    """One turn of `conv` on `text` in a session with a short TMPDIR (module note): the workspace's own for main and its
+    thread forks (Spec.temp), which stays; any other agent's own, removed when the turn ends."""
     spec = conv.spec()
     pending: dict[str, list[str]] = {}
-    tmp = short_tmp()
+    kept = workspace_tmp(conv.c) if spec.temp is not None else None
+    tmp = kept or short_tmp()
     if tmp is None:
         log.warning("%s: no short TMPDIR for %s's session; its sandbox may not start", conv.c, conv.id)
     _enter(spec.cwd)
     try:
         return await _session(conv, spec, text, options(conv, spec, pending, tmp))
     finally:
-        if tmp is not None:
-            shutil.rmtree(tmp, ignore_errors=True)
+        if tmp is not None and tmp != kept:
+            nofollow.rmtree(tmp, root=tmp.parent, ignore_errors=True)  # the session's Bash wrote it: no link followed
         _tidy(spec.cwd)
 
 
@@ -264,6 +472,31 @@ def _tell_box(conv: Any, why: str) -> None:
         log.exception("%s: the sandbox notice was not told", conv.c)
 
 
+async def _hand(conv: Any, client: Any, handed: dict[str, str], closing: asyncio.Event) -> None:
+    """The analyst's messages that wait for main's running turn (Conv.waiting_messages), each handed to main's session
+    as it comes (Conv.arrived), under a uuid it echoes once it reads the message (`handed`, _session), until the turn
+    ends (`closing`). A message that cannot be handed on stays in main's queue, for main's next turn."""
+    while not closing.is_set():
+        conv.arrived.clear()
+        for text in conv.waiting_messages():
+            if closing.is_set() or text in handed.values():
+                continue
+            uid = str(uuid.uuid4())
+            handed[uid] = text
+            try:
+                await client.query(_message(text, uid))
+            except Exception:  # noqa: BLE001 — it waits for main's next turn
+                handed.pop(uid, None)
+                log.warning("%s: a message for main was not handed to its session", conv.c, exc_info=True)
+                return
+        await conv.arrived.wait()
+
+
+async def _message(text: str, uid: str) -> Any:
+    """`text` as one user message of the session's input, under `uid`, which the session echoes it with."""
+    yield {"type": "user", "message": {"role": "user", "content": text}, "parent_tool_use_id": None, "uuid": uid}
+
+
 async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage, SystemMessage, UserMessage  # noqa: PLC0415
 
@@ -272,6 +505,8 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     path = conv.state_path("cc")
     reply, failed, box, ran = "", "", "", False
     bash_ids: set[str] = set()
+    handed: dict[str, str] = {}  # by uuid, main's messages handed to the session (_hand) that it has not read yet
+    closing = asyncio.Event()
 
     def results(rs: list[dict[str, Any]]) -> None:
         nonlocal box, ran
@@ -282,31 +517,56 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
 
     async with ClaudeSDKClient(opts) as client:
         await client.query(text)
-        async for msg in client.receive_response():
-            if isinstance(msg, SystemMessage) and msg.subtype == "init":
-                sid = (msg.data or {}).get("session_id")
-                if sid:
-                    _save(path, {"session_id": sid})
-            elif isinstance(msg, AssistantMessage):
-                if getattr(msg, "parent_tool_use_id", None):
-                    continue
-                blocks = [b for b in (_block(x) for x in msg.content) if b is not None]
-                bash_ids.update(str(b["id"]) for b in blocks if b.get("type") == "tool_use" and b.get("name") == "Bash")
-                conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {}, asked=spec.model)
-                results([r for r in (_result(x) for x in msg.content) if r is not None])
-                said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
-                reply = said or reply
-                if msg.error:
-                    failed = str(msg.error)
-            elif isinstance(msg, UserMessage):
-                if getattr(msg, "parent_tool_use_id", None) or isinstance(msg.content, str):
-                    continue
-                results([r for r in (_result(x) for x in msg.content) if r is not None])
-            elif isinstance(msg, ResultMessage):
-                if msg.session_id:
-                    _save(path, {"session_id": msg.session_id})
-                if msg.is_error and not failed:
-                    failed = str(msg.result or msg.subtype or "the Claude Code session failed")
+        hand = asyncio.create_task(_hand(conv, client, handed, closing)) if conv.kind == "main" else None
+        try:
+            # the session's reply; then, while a message handed to it is not read yet, its next turn, which reads it
+            while True:
+                ended = False
+                async for msg in client.receive_response():
+                    if isinstance(msg, SystemMessage) and msg.subtype == "init":
+                        sid = (msg.data or {}).get("session_id")
+                        if sid:
+                            _save(path, {"session_id": sid})
+                    elif isinstance(msg, AssistantMessage):
+                        if getattr(msg, "parent_tool_use_id", None):
+                            continue
+                        blocks = [b for b in (_block(x) for x in msg.content) if b is not None]
+                        bash_ids.update(str(b["id"]) for b in blocks
+                                        if b.get("type") == "tool_use" and b.get("name") == "Bash")
+                        conv.emit_assistant(blocks, str(msg.model or spec.model), msg.usage or {}, asked=spec.model)
+                        results([r for r in (_result(x) for x in msg.content) if r is not None])
+                        said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
+                        reply = said or reply
+                        if msg.error:
+                            failed = str(msg.error)
+                    elif isinstance(msg, UserMessage):
+                        if getattr(msg, "uuid", None) in handed:  # the session read a message handed to it
+                            conv.heard(handed.pop(str(msg.uuid)))
+                            continue
+                        if getattr(msg, "parent_tool_use_id", None) or isinstance(msg.content, str):
+                            continue
+                        results([r for r in (_result(x) for x in msg.content) if r is not None])
+                    elif isinstance(msg, ResultMessage):
+                        ended = True
+                        if msg.session_id:
+                            _save(path, {"session_id": msg.session_id})
+                        if msg.is_error and not failed:
+                            failed = str(msg.result or msg.subtype or "the Claude Code session failed")
+                if not ended or failed:
+                    break
+                if not handed and hand is not None:  # nothing more is handed on: what comes waits for main's next turn
+                    closing.set()
+                    conv.arrived.set()
+                    with contextlib.suppress(Exception):
+                        await hand
+                    hand = None
+                if not handed:
+                    break
+        finally:
+            if hand is not None:
+                hand.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await hand
     if box or ran:
         _tell_box(conv, box)
     if failed:

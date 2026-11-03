@@ -66,8 +66,8 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import agents, cc_plugin, cc_settings, config, hook_auth, kernel_wrap, modes, permission_hook, sandbox_allow, \
-    session, tools, userconf
+from . import agents, cc_plugin, cc_settings, config, hook_auth, kernel_wrap, modes, nofollow, permission_hook, \
+    sandbox_allow, session, tools, userconf
 from .ledger import atomic_write_text
 from .permission_updates import EDIT_MODE, WORKSPACE, allowing, offer_text, rule_text
 
@@ -355,7 +355,7 @@ def fence_env(work: Path) -> dict[str, str]:
     CLAUDE.md is read."""
     cache = work / CACHE_DIR
     with contextlib.suppress(OSError):
-        cache.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(cache)
     path = os.environ.get("PATH", "")
     return {"PATH": os.pathsep.join([str(_venv() / "bin"), *[p for p in path.split(os.pathsep) if p]]),
             "XDG_CACHE_HOME": str(cache), "MPLCONFIGDIR": str(cache / "matplotlib"),
@@ -368,10 +368,10 @@ def skill_prompts_env(corpus: Path, work: Path) -> dict[str, str]:
     in that session (module note, the fence)."""
     from . import events  # noqa: PLC0415 — as in shared_prompt
 
-    folder = work / RENDERED_DIR
-    folder.mkdir(parents=True, exist_ok=True)
+    folder = work / RENDERED_DIR  # in the session's work folder, which its commands write: as nofollow writes
+    nofollow.makedirs(folder)
     for name in SKILL_PROMPTS:
-        (folder / f"{name}.md").write_text(events.render_prompts([name], str(corpus)) + "\n", encoding="utf-8")
+        nofollow.write_text(folder / f"{name}.md", events.render_prompts([name], str(corpus)) + "\n")
     return {RENDERED_ENV: str(folder)}
 
 

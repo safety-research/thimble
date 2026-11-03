@@ -4,6 +4,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { resetPrompts } from '../prompts/prompts'
+import { PRESET } from '../settings/features.mjs'
 import { test } from './kit'
 import { tempRun } from './stubs'
 
@@ -34,12 +35,12 @@ const GUIDANCE = [
 /** The conversation as its next request holds it, which the test's core answers `session.messages` with. */
 type World = { messages: Any[]; context: string[][] }
 
-function world(on: Any): World {
+function world(on: Any, guidance = GUIDANCE): World {
   resetPrompts()
   const w: World = { messages: [], context: [] }
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 1, stdout: '', stderr: 'made-up: no such command' }), isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/prompts/guidance.md') ? GUIDANCE : '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/prompts/guidance.md') ? guidance : '' }))
   on('session.messages', () => ({ value: w.messages }))
   // the engine: the prompt enters with its context, which the next request holds as a reminder after the prompt
   on('prompt.submit', (_$: unknown, e: Any) => {
@@ -99,13 +100,31 @@ test('with Citations manual, the guidance ends with one sentence that says what 
   expect(text.endsWith('These come only when the analyst asks: citations (they select words and press c).')).toBe(true)
 })
 
-test('with Minimal on, the guidance ends with one sentence that says nothing runs after a reply and names what the analyst asks for', { options: { minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' } }, async ($, on) => {
+test('with Minimal on, the guidance keeps the Citing claims and Cards sections and ends with the one sentence that says to draw a card only when the analyst asks', { options: { minimal: true, ...PRESET } }, async ($, on) => {
   const text = await thimbleText($, world(on))
-  expect(text.endsWith('Minimal mode is on: nothing runs after your replies. These come only when the analyst asks: citations (they select words and press c), explainers (e) and heads-ups (h).')).toBe(true)
+  expect(text).toContain('## Citing claims')
+  expect(text).toContain('## Cards\n\nDraw a card with the `card` tool.')
+  expect(text.endsWith('Draw a card only when the analyst asks for one.')).toBe(true)
+  expect(text).not.toContain('These come only')
 })
 
 test('with every mode after each reply, the guidance adds no sentence of modes', { options: { citations: 'auto cite' } }, async ($, on) => {
   const text = await thimbleText($, world(on))
+  expect(text).toContain('## Cards\n')
   expect(text).not.toContain('These come only')
-  expect(text).not.toContain('Minimal mode')
+  expect(text).not.toContain('Draw a card only')
+})
+
+test('with Cards on demand alone, the guidance keeps the Cards section and ends with the one sentence that says to draw a card only when the analyst asks', { options: { cards: 'on demand' } }, async ($, on) => {
+  const text = await thimbleText($, world(on))
+  expect(text).toContain('## Cards\n')
+  expect(text.endsWith('Draw a card only when the analyst asks for one.')).toBe(true)
+  expect(text).not.toContain('These come only')
+})
+
+test('with Cards off, the Cards section is left out, and no sentence says when to draw one', { options: { cards: 'off' } }, async ($, on) => {
+  const text = await thimbleText($, world(on))
+  expect(text).not.toContain('## Cards')
+  expect(text).not.toContain('Draw a card only')
+  expect(text).toContain('## Labels')
 })

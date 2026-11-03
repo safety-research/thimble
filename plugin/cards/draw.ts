@@ -6,7 +6,8 @@
 //
 //   frame         the card's frame: its title (a click asks about the card) and, at its right, `a ask · p artifact`
 //                 (the question names the item selected, when one is; a letter only where its key reaches the card:
-//                 none while what holds the keys takes it, core/answerview.ts heldKeys), the Client (a click on an
+//                 none while what holds the keys takes it, core/answerview.ts heldKeys, nor a while it asks about the
+//                 selected words, selectionAsks), the Client (a click on an
 //                 item selects it as its key does; on other words, asks about them: client.tsx, runner.mjs pick; a
 //                 drawing taller than CARD_ROWS + 1 shows CARD_ROWS rows and `+N rows` under them, a click on which
 //                 opens the rest), a failure; left of it, the
@@ -25,22 +26,28 @@
 //                 the person was typing a word
 //   cardPost      what a card's Client sends: Button presses, clicks, and a click on a run of words (the item on its
 //                 line, else its side thread)
-//   cardText      a card's text copy as it draws now (for v)
+//   cardText      a card's text copy as it draws now, on the surface of the one that reads it (copyWidth)
 //   revealCard    the card's row brought into view in the conversation
 //
-// The width a card is drawn at is the screen's columns less its frame. A drawing hook may not write the session's
-// state, so when the frame has no drawing at its width (a resumed session, a resize, a side pane that opens or closes)
-// or for the theme (core/theme.ts: the view's surface.colors give one set for each), its Client asks for one
-// (client.tsx), and that request draws it; the Client also says when the card is first on screen. A card keeps a
-// drawing for each width and theme it shows at (the conversation, its copy in a side pane: store.ts withDrawing), and a
-// frame draws only the one laid out at its own width. So is the answer to a Client's post: the drawing at the width the
-// Client's frame draws at now (siteWidth), never at the width the post named. A post the Client sent before its frame
-// narrowed (a side pane opened) can be answered after the frame's new drawing came, and the wider drawing it named
-// would then stay in the narrower frame, each row's last column wrapped onto a line of its own.
+// The width a card is drawn at is the columns of what holds it (the conversation, a side pane) less its frame. A drawing
+// hook may not write the session's state, so when the frame has no drawing at its width (a resumed session, a resize, a
+// side pane that opens or closes) or for the theme (core/theme.ts: the view's surface.colors give one set for each),
+// its Client asks for one (client.tsx), and that request draws it; the Client also says when the card is first on
+// screen. A card keeps a drawing for each width and theme it shows at (the conversation, its copy in a side pane:
+// store.ts withDrawing), and a frame draws only the one laid out at its own width. So is the answer to a Client's post:
+// the drawing at the width the Client's frame draws at now (siteWidth), never at the width the post named. A post the
+// Client sent before its frame narrowed (a side pane opened) can be answered after the frame's new drawing came, and the
+// wider drawing it named would then stay in the narrower frame, each row's last column wrapped onto a line of its own.
+// For the same reason each drawing is kept at the width the runner laid it out at, as its answer says (applyAnswer):
+// the runner holds the card at the width of the last drawing it was asked for, so a key draws it at the width of
+// whichever frame asked last; a frame at the other width then asks for its own (needOf).
+// A text copy Claude reads (cardText, the card tool's answer) is laid out at the width of the surface its reader
+// relates to, never at the width of the newest drawing (copyWidth): main and the look read the card as the
+// conversation draws it, a side thread as its pane draws it.
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
-import { cardAsk, cardHidden, heldKeys, textView, underCard } from '../core/answerview'
+import { cardAsk, cardHidden, heldKeys, selectionAsks, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords, titleWords } from '../core/selection'
 import { cut } from '../core/text.js'
@@ -104,6 +111,10 @@ const faulted = new Map<string, { gen: number; seq: number; reason: string }>()
 // a Client's ui.message names too) and the card: what the answer to that Client's post is laid out at
 const siteWidth = new Map<string, number>()
 const siteOf = (site: unknown, id: string) => `${String(site ?? '')}\u0000${id}`
+// the width each card is drawn at on each surface that holds it, by the surface and the card: the conversation (''),
+// and a side thread's pane (`thread:<key>`, the anchor of the cards that thread's fork draws) while the pane draws the
+// card. What a text copy for a reader there is laid out at (copyWidth)
+const drawnOn = new Map<string, number>()
 
 /** The screen's size and layout, as the last drawing of a message or a card saw it. */
 export function noteViewport(v: { columns?: number; rows?: number; isFullscreen?: boolean } | undefined): void {
@@ -170,14 +181,6 @@ export function cardWidth(columns?: number): number {
   return Math.max(MIN_WIDTH, (columns || columnsSeen || 100) - FRAME)
 }
 
-/** The share of the window's columns Claude Code leaves the conversation beside a side pane (2.1.307: 88 of 160). */
-const BESIDE_PANE = 0.55
-
-/** The width a card is drawn at while a side pane narrows the conversation (a thread, the tray). */
-export function cardWidthBesidePane(): number {
-  return cardWidth(Math.round((columnsSeen || 100) * BESIDE_PANE))
-}
-
 const about = (id: string) => `card:${id}`
 
 /** The key of a card's Client: one per version, so a new version is a new instance, and a Client that failed on an
@@ -208,11 +211,13 @@ export async function askCard($: Engine, meta: CardMeta, op: string, body: Recor
 /** The runner's answer to an event of the person's, or to a drawing at a new `width`: the new tree drawn, the state
  *  kept, and a failure line about the card gone; a failure on the card and in the failure line, since the person sees
  *  the card stop. The runner keeps the card as it was before a failure (its state, width and keys), so a drawing that
- *  failed at one width holds only there: at another width the card draws again (frame). */
+ *  failed at one width holds only there: at another width the card draws again (frame). The tree is kept at the width
+ *  the answer says the runner laid it out at (runner.mjs), never at the width of the newest drawing kept here: while the
+ *  card shows at two widths, a request for the other frame's drawing moves the runner to its width, and its answer can
+ *  come after the next key's, which the runner drew at that width. */
 export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: number, drawing = false): Promise<void> {
   if (r?.ok) {
-    const before = await treeOf($, meta.id)
-    await setTree($, meta.id, { gen: meta.gen, width: width ?? before?.width ?? cardWidth(), tree: r.tree, seq: Number(r.seq) || 0, theme: await themeNow($) }, !drawing)
+    await setTree($, meta.id, { gen: meta.gen, width: Number(r.width) || width || cardWidth(), tree: r.tree, seq: Number(r.seq) || 0, theme: await themeNow($) }, !drawing)
     if (typeof r.state === 'string') void saveState($, meta.id, meta.version, r.state).catch(() => undefined)
     if (meta.error) await saveMeta($, { ...meta, error: null, errorWidth: null })
     await failCleared($, about(meta.id))
@@ -377,9 +382,10 @@ export async function cardKeyWords($: Engine): Promise<{ key: string; words: str
 }
 
 /** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now; under it, what
- *  the features put under a card. `o.layout`: the width the card is laid out at when that is wider than the frame
- *  (a copy in the side pane is the conversation's drawing, cut at the frame's edge, so no row of it wraps). */
-export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: number; indent?: number } = {}): Promise<Any> {
+ *  the features put under a card. The card is laid out at the frame's own width, in the conversation and in a side
+ *  pane alike, so a view that lays out from surface.columns fits each. `pane`: the side thread's pane that draws the
+ *  frame (`thread:<key>`), else the conversation does. */
+export async function frame($: Engine, e: Any, meta: CardMeta, o: { indent?: number; pane?: string } = {}): Promise<Any> {
   const E = $.ui.resolve(e) as Any
   const row = String(e.requestId ?? '')
   // a card the version of its answer shown now leaves out (a squeeze's): nothing in its place
@@ -388,14 +394,14 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
     return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', children: [] })
   }
   // `indent`: columns the drawing that holds the card takes on its left beyond an answer's (a catch-up's rule)
-  const inside = cardWidth(e.viewport?.columns ? e.viewport.columns - (o.indent ?? 0) : undefined)
-  const width = Math.max(inside, Math.floor(o.layout ?? 0))
+  const width = cardWidth(e.viewport?.columns ? e.viewport.columns - (o.indent ?? 0) : undefined)
   const t = await treeOf($, meta.id)
   const focused = (await focusNow($)) === meta.id
   // only a drawing laid out at this width (for this theme, else the other's until this one's comes): until one comes,
   // the Client says it is drawing
   const theme = await themeNow($)
   siteWidth.set(siteOf(e.requestId, meta.id), width)
+  drawnOn.set(siteOf(o.pane, meta.id), width)
   const current = drawingAt(t, meta.gen, width, theme)
   const f = faulted.get(meta.id)
   const fault = f && current && f.gen === current.gen && f.seq === current.seq ? f.reason : null
@@ -419,10 +425,12 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // at the title's right, in thimble's color, its header's keys: ask (a side thread about the card, whose question
   // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
   // alone, each while its key reaches the card: what holds the keys before the card's header takes a while the tray is
-  // open (a ask in its header) or stands on a card (a ask on the bar), and every key while a click gave the squeeze
-  // chips the keyboard, so each key shows once, where it acts. Every card's words are clicks
+  // open (a ask in its header) or stands on a card (a ask on the bar), and while words are selected (a ask on the bar,
+  // about them), and every key while a click gave the squeeze chips the keyboard, so each key shows once, where it
+  // acts. Every card's words are clicks
   const owner = (await headOwner($))?.id === meta.id
   const held = owner ? await heldKeys($, ['a', 'p']) : new Set<string>()
+  if (owner && (await selectionAsks($))) held.add('a')
   const lettered = (key: string) => owner && !held.has('*') && !held.has(key)
   const word = (key: string, words: string) => [...(lettered(key) ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
   // their words, which a click on one leaves selected: no answer's words while the card is on screen
@@ -435,8 +443,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   ] }) : null
   const rows: Any[] = [
     askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
-    // a drawing wider than the frame: its columns past the frame's edge are cut
-    ...(fault ? [] : [width > inside ? E.Box({ key: 'cut', flexDirection: 'column', width: inside, overflow: 'hidden', children: [client] }) : client]),
+    ...(fault ? [] : [client]),
   ]
   // a drawing taller than CARD_ROWS: its first rows (the Client's `cap`), then the line that opens the rest
   const more = fault || meta.held ? 0 : rowsMore(meta, current?.tree, width)
@@ -449,10 +456,10 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   // the frame in the 2 columns of its indent; `ask` at its title's right is how a side thread about it
   // starts, so no ? in the margin asks the same
-  const framed = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: inside + 4, children: rows })
+  const framed = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: width + 4, children: rows })
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
   const made = await artifactLine($, E, meta.id)
-  const under = [...(made ? [made] : []), ...(await underCard($, E, meta.id, inside))]
+  const under = [...(made ? [made] : []), ...(await underCard($, E, meta.id, width))]
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
 }
 
@@ -512,12 +519,28 @@ export async function clientFault($: Engine, key: string, reason: string): Promi
   failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`, about(id))
 }
 
-/** A card's text copy as it draws now: what its newest version shows, at the width it is drawn at (or `width`). */
-export async function cardText($: Engine, id: string, width?: number): Promise<string> {
+/** The width a text copy of a card is laid out at for a reader on `pane` (a side thread's, `thread:<key>`; none for
+ *  main, the look and the others that read the conversation): as that pane draws the card, while it does; else as the
+ *  card draws where it stands, in the conversation or, for a card a side thread's fork drew, in that thread's pane;
+ *  else at the width the conversation draws a card at. Never the width of the newest drawing: a side pane that drew the
+ *  card last would give main a copy of a card the conversation does not show. */
+export function copyWidth(meta: Pick<CardMeta, 'id' | 'anchorRow'>, pane?: string | null): number {
+  const home = meta.anchorRow?.startsWith('thread:') ? meta.anchorRow : ''
+  return (pane ? drawnOn.get(siteOf(pane, meta.id)) : undefined) ?? drawnOn.get(siteOf(home, meta.id)) ?? cardWidth()
+}
+
+/** The side thread's pane `pane` draws its thread without card `id` (the card folded to its title): a reader there
+ *  reads the card where it stands (copyWidth). */
+export function cardOffPane(pane: string, id: string): void {
+  drawnOn.delete(siteOf(pane, id))
+}
+
+/** A card's text copy as it draws now: what its newest version shows, at `o.width`, else at the width of the surface
+ *  its reader relates to (copyWidth: `o.pane`, a side thread's pane, or none for the conversation). */
+export async function cardText($: Engine, id: string, o: { width?: number; pane?: string | null } = {}): Promise<string> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1) return ''
-  const t = await treeOf($, id)
-  const r = await askCard($, meta, 'copy', { width: width ?? t?.width ?? cardWidth() })
+  const r = await askCard($, meta, 'copy', { width: o.width ?? copyWidth(meta, o.pane) })
   return r?.ok ? (r.lines as string[]).join('\n') : `(the card did not draw: ${r?.error ?? 'no answer'})`
 }
 
@@ -661,11 +684,14 @@ async function atWidth($: Engine, meta: CardMeta, width: number): Promise<void> 
 }
 
 /** The drawing a Client asks for: one at this width (none there, or one that failed at another width), or one in this
- *  theme's colors (the drawing it has was made for the other theme); '' when it has the one it needs. */
-function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: Theme): string {
+ *  theme's colors (the drawing it has was made for the other theme); '' when it has the one it needs. It names the
+ *  state the drawing is of (`state`, the answer that last changed the card: store.ts CardTree `since`), so the Client
+ *  asks again once a key changed the card, also at a width it asked for before: the drawing that ask brought shows the
+ *  card before the key, and is dropped. */
+function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: Theme, state: number): string {
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
-  if (!d || failedElsewhere) return `${meta.gen}:${width}`
-  return (d.theme ?? 'dark') !== theme ? `${meta.gen}:${width}:${theme}` : ''
+  if (!d || failedElsewhere) return `${meta.gen}:${width}:${state}`
+  return (d.theme ?? 'dark') !== theme ? `${meta.gen}:${width}:${state}:${theme}` : ''
 }
 
 /** A Client's props in a frame `room` columns wide: the drawing laid out at that width, or none and the drawing it
@@ -675,7 +701,7 @@ function propsAt(meta: CardMeta, t: CardTree | null | undefined, room: number, t
   if (meta.held) return { tree: null, width: room, need: '', tint: citeTint('verified', theme), accent: accent(), theme, cap: 0 }
   const d = drawingAt(t, meta.gen, room, theme)
   const cap = rowsMore(meta, d?.tree, room) ? CARD_ROWS : 0
-  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme), tint: citeTint('verified', theme), accent: accent(), theme, cap }
+  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme, t?.gen === meta.gen ? t.since ?? 0 : 0), tint: citeTint('verified', theme), accent: accent(), theme, cap }
 }
 
 /** A Client's post: the events it has not had an answer for, each handled once, in order. After a press or a click,

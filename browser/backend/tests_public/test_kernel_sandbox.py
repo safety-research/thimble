@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -123,10 +126,10 @@ def test_on_linux_a_venv_whose_python_goes_through_uv_s_minor_version_folder_run
     (real / "bin" / "python3.12").symlink_to(os.path.realpath(sys.executable))
     minor = real.with_name("cpython-3.12-linux-x86_64-gnu")
     minor.symlink_to(real.name)
-    venv, ws, corpus, conn = (tmp_path / n for n in ("venv", "ws", "corpus", "conn"))
+    venv, ws, corpus = (tmp_path / n for n in ("venv", "ws", "corpus"))
     (venv / "bin").mkdir(parents=True)
     (venv / "bin" / "python").symlink_to(minor / "bin" / "python3.12")
-    for d in (ws, corpus, conn, *(ws / name for name in kernel_wrap.READ_ONLY_DIRS)):
+    for d in (ws, corpus, *(ws / name for name in kernel_wrap.READ_ONLY_DIRS)):
         d.mkdir()
     for name in kernel_wrap.HIDDEN_FILES:
         (ws / name).write_text("{}\n")
@@ -139,8 +142,7 @@ def test_on_linux_a_venv_whose_python_goes_through_uv_s_minor_version_folder_run
                                       platform=sys.platform)
         argv, env = kernel_wrap.srt_argv(cmd, node=NODE, srt_dir=SRT, rules=rules), kernel_wrap.srt_env(dict(os.environ), home=ws)
     else:
-        argv, env = kernel_wrap.kernel_wrap_argv(cmd, corpus_dir=corpus, workspace_dir=ws, connection_dir=conn, venv=venv,
-                                                 python=py), None
+        argv, env = kernel_wrap.kernel_wrap_argv(cmd, corpus_dir=corpus, workspace_dir=ws, venv=venv, python=py), None
     r = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env, cwd=ws, stdin=subprocess.DEVNULL)
     assert (r.returncode, r.stdout.strip()) == (0, "ran"), r.stderr[-2000:]
 
@@ -363,3 +365,364 @@ async def test_card_code_can_t_write_the_files_the_hooks_trust_after_the_server_
         assert not (subagent_files.trusted_dir(ws) / "planted.json").exists()
     finally:
         await notebook.shutdown_all()
+
+
+# a cell that tries to read `secret` and write `write` in a folder outside the workspace, then writes its own TMPDIR
+OUTSIDE_CELL = """
+import os
+said = []
+try:
+    with open({secret!r}) as f:
+        said.append(f.read().strip())
+except OSError as e:
+    said.append(type(e).__name__)
+try:
+    with open({write!r}, 'w') as f:
+        f.write('written by a card')
+    said.append('wrote')
+except OSError as e:
+    said.append(type(e).__name__)
+t = os.environ['TMPDIR']
+with open(os.path.join(t, 'own.csv'), 'w') as f:
+    f.write('night,minutes\\n')
+print(*said, os.path.islink(t), os.path.realpath(t) == t)
+"""
+
+
+def _outside(tmp_path_factory) -> tuple:
+    """A folder outside the workspace, readable by all (0755), that holds a file a card must not read."""
+    outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
+    os.chmod(outside, 0o755)
+    (outside / "secret.txt").write_text("OUTSIDE-SECRET")
+    return outside, outside / "secret.txt"
+
+
+def _said(cell: dict) -> list[str]:
+    return "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_a_link_a_card_left_at_the_workspace_s_tmp_gives_no_later_kernel_the_folder_it_points_to(
+        wrap, monkeypatch, workspaces_tmp, tmp_path_factory):
+    """On the Messages API every kernel's TMPDIR is the workspace's tmp/ (config.temp_dir), which a card's code can put a
+    link to any folder in place of. The next kernel, a dedicated one or the shared one after Restart, had the link's
+    target as its TMPDIR, the wrapper let it read and write that folder as one outside the workspace, and the server
+    made the folder private (0700). Now the TMPDIR is tmp/ in the workspace, a folder made again in place of a link.
+    (A card's own kernel binds tmp/ as a folder of its own, kernel_wrap.PINNED_DIRS, so here the link is put there by
+    other means, as a kernel started before that could.)"""
+    from app import runtime
+
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    monkeypatch.setattr(runtime, "engine", lambda: "api")
+    outside, secret = _outside(tmp_path_factory)
+    try:
+        tmp = config.temp_dir("mini")
+        shutil.rmtree(tmp)
+        tmp.symlink_to(outside, target_is_directory=True)
+        dedicated = await notebook.run_code("mini", OUTSIDE_CELL.format(secret=str(secret), write=str(outside / "k2.txt")),
+                                            "main", kernel="k2")
+        await notebook.restart("mini")
+        shared = await notebook.run_code("mini", OUTSIDE_CELL.format(secret=str(secret), write=str(outside / "k.txt")),
+                                         "main")
+    finally:
+        await notebook.shutdown_all()
+    for said in (_said(dedicated), _said(shared)):
+        assert len(said) == 4 and "OUTSIDE-SECRET" not in said and "wrote" not in said, said
+        assert said[2:] == ["False", "True"], said
+    assert sorted(os.listdir(outside)) == ["secret.txt"]
+    assert stat.S_IMODE(os.stat(outside).st_mode) == 0o755
+    assert (config.temp_dir("mini") / "own.csv").is_file()
+
+
+# a card's code that tries to move each of `folders` away and to remove it, so that a link could take its place
+MOVE_CELL = """
+import os, shutil
+for d in {folders!r}:
+    try:
+        os.rename(d, d + '.moved')
+        print('moved')
+    except OSError:
+        try:
+            shutil.rmtree(d)
+            print('removed' if not os.path.exists(d) else 'kept')
+        except OSError:
+            print('kept')
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_card_code_can_t_move_the_workspace_s_folders_main_s_bash_writes_by_their_paths(
+        wrap, monkeypatch, workspaces_tmp):
+    """Main's Bash on the Messages API writes the workspace's tmp/ and card-libs/, which srt binds by their paths when
+    each command starts, after its own check that neither is a link. A card's code that moved one away and put a link
+    in its place in that moment had srt bind the folder the link points to, and main's Bash wrote and read outside its
+    folders. In the kernel's sandbox each is a folder of its own (a mount point), which no card's code can move or
+    remove."""
+    from app import card_libs, runtime
+
+    if not (LINUX and _wrap_works(wrap)):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    monkeypatch.setattr(runtime, "engine", lambda: "api")
+    card_libs.folder("mini").mkdir()  # as main's first npm install makes it
+    folders = [str(config.temp_dir("mini")), str(card_libs.folder("mini"))]
+    try:
+        said = _said(await notebook.run_code("mini", MOVE_CELL.format(folders=folders), "main"))
+    finally:
+        await notebook.shutdown_all()
+    assert said == ["kept", "kept"], said
+    assert all(os.path.isdir(d) and not os.path.islink(d) for d in folders)
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_a_link_left_at_the_workspace_s_kernels_folder_gives_no_kernel_the_folder_it_points_to(
+        wrap, monkeypatch, workspaces_tmp, tmp_path_factory):
+    """The workspace's kernels/ folder holds each kernel's connection file, record, log and lease, and the folder a
+    kernel under srt writes can hold a link in its place. bwrap bound the folder the link points to writable for the
+    next kernel, and the server wrote the kernel's files there. Now a link there is replaced by a folder before the
+    server writes any of them."""
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    outside, secret = _outside(tmp_path_factory)
+    kernels = config.workspace_dir("mini") / notebook.KERNELS_DIR
+    shutil.rmtree(kernels, ignore_errors=True)
+    kernels.symlink_to(outside, target_is_directory=True)
+    try:
+        cell = await notebook.run_code("mini", OUTSIDE_CELL.format(secret=str(secret), write=str(outside / "k.txt")),
+                                       "main")
+    finally:
+        await notebook.shutdown_all()
+    said = _said(cell)
+    assert len(said) == 4 and "OUTSIDE-SECRET" not in said and "wrote" not in said, said
+    assert sorted(os.listdir(outside)) == ["secret.txt"]
+    assert kernels.is_dir() and not kernels.is_symlink()
+
+
+# a card's code that keeps putting a link to `target` in place of the workspace's kernels/ from a thread of its own
+SWAP_KERNELS_CELL = """
+import os, threading, time
+K, T = {kernels!r}, {target!r}
+said = {{"swaps": 0}}
+def loop():
+    end, n = time.monotonic() + 90, 0
+    while time.monotonic() < end:
+        n += 1
+        try:
+            if not os.path.islink(K):
+                os.rename(K, K + '.moved-' + str(n))
+                os.symlink(T, K)
+                said["swaps"] += 1
+        except OSError:
+            pass
+threading.Thread(target=loop, daemon=True, name="made-up-swapper").start()
+time.sleep(0.5)
+print(said["swaps"] > 0)
+"""
+
+
+@pytest.mark.parametrize("second", ["srt", "bwrap"])
+async def test_a_kernel_that_keeps_putting_a_link_at_kernels_gets_none_of_the_next_kernel_s_files_written_outside(
+        second, monkeypatch, workspaces_tmp, tmp_path_factory):
+    """A kernel under srt can rename the workspace's kernels/ and put a link in its place at any time, from a thread of
+    its own that keeps doing it. The server made kernels/ a folder again, then wrote the next kernel's connection file,
+    log, record and lease by their paths, so through a link put there after that: into the folder the link points to,
+    whose mode the connection file's writer changed (0755 to 01755), and bwrap bound that folder for the next kernel,
+    which read and wrote it. Now the server opens each of those files as nofollow does and bwrap binds no folder of
+    them, so a start may fail while the link is there and nothing of the server's or the kernel's lands outside."""
+    if not (_wrap_works("srt") and _wrap_works(second)):
+        pytest.skip("a wrapper can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, "srt")
+    outside, secret = _outside(tmp_path_factory)
+    kernels = config.workspace_dir("mini") / notebook.KERNELS_DIR
+    said: list = []
+    try:
+        swapping = await notebook.run_code("mini", SWAP_KERNELS_CELL.format(kernels=str(kernels), target=str(outside)),
+                                           "main", kernel="k1")
+        assert _said(swapping) == ["True"], swapping["outputs"]
+        monkeypatch.setenv(config.KERNEL_WRAP_ENV, second)
+        for i in range(4):
+            try:
+                cell = await notebook.run_code(
+                    "mini", OUTSIDE_CELL.format(secret=str(secret), write=str(outside / f"k{i}.txt")), "main",
+                    kernel=f"k2-{i}")
+                said.append([b.get("text/plain") or b.get("evalue") for b in cell["outputs"]])
+            except Exception as e:  # noqa: BLE001 — a start the link made fail
+                said.append(f"{type(e).__name__}: {e}")
+    finally:
+        await notebook.shutdown_all()
+    assert "OUTSIDE-SECRET" not in str(said) and "wrote" not in str(said), said
+    assert sorted(os.listdir(outside)) == ["secret.txt"], said
+    assert stat.S_IMODE(os.stat(outside).st_mode) == 0o755
+
+
+# a card's code that puts a link to `target` in place of a file or a folder of the workspace the server writes
+PLANT_CELL = """
+import os, shutil
+p = {path!r}
+if os.path.isdir(p) and not os.path.islink(p):
+    os.rename(p, p + '.moved')
+elif os.path.lexists(p):
+    os.unlink(p)
+os.symlink({target!r}, p)
+print(os.path.islink(p))
+"""
+
+
+# a card's code that puts a link to `target` in place of each kernel's log in kernels/, its own kernel's among them
+PLANT_LOGS_CELL = """
+import os, pathlib
+logs = sorted(pathlib.Path({kernels!r}).glob('*.log'))
+for log in logs:
+    os.unlink(log)
+    os.symlink({target!r}, log)
+print(bool(logs) and all(os.path.islink(p) for p in logs))
+"""
+
+
+def _dotfile(tmp_path_factory) -> Path:
+    """A made-up dotfile outside the workspace, as one a link a card left could lead the server's write to."""
+    p = tmp_path_factory.mktemp("outside-the-workspace").resolve() / "made-up-dotfile"
+    p.write_text("# a made-up dotfile\n")
+    return p
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_the_server_appends_no_line_through_a_link_a_card_left_in_place_of_the_canvas_history(
+        wrap, monkeypatch, workspaces_tmp, tmp_path_factory):
+    """canvas-history.jsonl gets a line at each card's run (ledger.append_jsonl), and a card's code can put a link to
+    any file in its place: the next run appended its JSON line, the card's code in it, to that file, with no race. Now
+    the append opens the log as nofollow does: the link goes and the log starts again as a file of its own."""
+    from app import canvas_history
+
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    dotfile = _dotfile(tmp_path_factory)
+    log = config.workspace_dir("mini") / canvas_history.LOG_NAME
+    try:
+        planted = await notebook.run_code("mini", PLANT_CELL.format(path=str(log), target=str(dotfile)), "main")
+        assert _said(planted) == ["True"], planted["outputs"]
+        await notebook.run_code("mini", "print('a second card')", "main", title="made-up title")
+    finally:
+        await notebook.shutdown_all()
+    assert dotfile.read_text() == "# a made-up dotfile\n"
+    assert not log.is_symlink() and "a second card" in log.read_text()
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_the_next_start_writes_no_kernel_log_through_a_link_a_card_left_in_place_of_it(
+        wrap, monkeypatch, workspaces_tmp, tmp_path_factory):
+    """A card's code can put a link to any file in place of its kernel's log, kernels/<key>.log, which the next start of
+    the kernel opened to write ('wb') through the link, so it emptied and overwrote that file with the kernel's start-up
+    output. Now the log is opened as nofollow opens it: the link goes and the log is a file of its own."""
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    dotfile = _dotfile(tmp_path_factory)
+    kernels = config.workspace_dir("mini") / notebook.KERNELS_DIR
+    try:
+        planted = await notebook.run_code("mini", PLANT_LOGS_CELL.format(kernels=str(kernels), target=str(dotfile)),
+                                          "main")
+        assert _said(planted) == ["True"], planted["outputs"]
+        await notebook.restart("mini")
+        again = await notebook.run_code("mini", "print(6 * 7)", "main")
+    finally:
+        await notebook.shutdown_all()
+    assert _said(again) == ["42"], again["outputs"]
+    assert dotfile.read_text() == "# a made-up dotfile\n"
+    assert any(not p.is_symlink() for p in kernels.glob("*.log"))
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_the_scratch_mirror_makes_and_removes_no_link_in_a_folder_a_card_s_link_leads_to(
+        wrap, monkeypatch, workspaces_tmp, tmp_path_factory):
+    """scratch/, the kernels' cwd, is where the server makes a link to each entry of the corpus and removes those whose
+    target is gone (mirror_corpus). A card's code can put a link to any folder in its place: the next pass made the
+    corpus's links in that folder and removed each dangling link there. Now the pass works in the folder as nofollow
+    opens it, a folder made again in place of the link."""
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
+    (outside / "a-dangling-link-of-the-person-s").symlink_to(outside / "made-up-gone")
+    scratch = config.workspace_dir("mini") / notebook.SCRATCH_DIR
+    try:
+        planted = await notebook.run_code("mini", PLANT_CELL.format(path=str(scratch), target=str(outside)), "main")
+        assert _said(planted) == ["True"], planted["outputs"]
+    finally:
+        await notebook.shutdown_all()
+    notebook.scratch_dir("mini", fresh=True)
+    assert sorted(os.listdir(outside)) == ["a-dangling-link-of-the-person-s"]
+    assert scratch.is_dir() and not scratch.is_symlink() and (scratch / "manifest.json").is_symlink()
+
+
+async def test_the_records_written_at_attach_and_the_files_dropped_at_shutdown_never_go_through_a_link_at_kernels(
+        workspaces_tmp, tmp_path_factory):
+    """A kernel's record is written again when a server attaches to it, and its files are removed when it is stopped:
+    by their paths, so through a link a card left in place of kernels/, they wrote and removed files of the folder it
+    points to. Now both open kernels/ as nofollow does: a link there fails them and leads nowhere."""
+    outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
+    k = notebook._Kernel("mini", "made-up")
+    for p in (k.record, k.conn, k.log, k.lease):
+        (outside / p.name).write_text("the person's own\n")
+    (outside / k.home.name).mkdir()
+    (outside / k.home.name / "kept.txt").write_text("the person's own\n")
+    kernels = config.workspace_dir("mini") / notebook.KERNELS_DIR
+    shutil.rmtree(kernels, ignore_errors=True)
+    kernels.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(OSError):
+        notebook._write_record(k, {"name": "made-up", "server_pid": os.getpid()})
+    await notebook._kill(k)
+    assert notebook._read_record(k.record) is None
+    assert sorted(os.listdir(outside)) == sorted([k.record.name, k.conn.name, k.log.name, k.lease.name, k.home.name])
+    assert all((outside / n).read_text() == "the person's own\n" for n in (k.record.name, k.conn.name, k.lease.name))
+    assert (outside / k.home.name / "kept.txt").is_file()
+
+
+async def test_bwrap_binds_the_temp_folder_of_main_s_claude_code_bash_the_server_checked_not_a_link_put_there_later(
+        monkeypatch, workspaces_tmp, tmp_path_factory):
+    """On Claude Code sign-in a kernel's TMPDIR is the temp folder Claude Code's sandbox gives main's commands
+    (runtime_cc.shell_tmp), outside the workspace, which main's Bash may write, so it can put a link in that folder's
+    place. The server checked the folder, then bwrap bound it writable by its path, so a link put there between the two
+    gave the kernel the folder it points to. Now bwrap binds the folder by the descriptor the server opened it with
+    (`--bind-fd`), whatever is at its path by then."""
+    from app import runtime, runtime_cc
+
+    if not (_wrap_works("bwrap") and kernel_wrap.bind_fd_works(shutil.which("bwrap") or "bwrap")):
+        pytest.skip("bwrap can't bind a folder by its descriptor here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, "bwrap")
+    monkeypatch.setattr(runtime, "engine", lambda: "cc")
+    outside, secret = _outside(tmp_path_factory)
+    shell = runtime_cc.shell_tmp("mini")
+    (shell / "from-main-s-bash.csv").write_text("night,minutes\n")
+    real = kernel_wrap.kernel_wrap_argv
+
+    def swapped_after_the_check(*a, **kw):
+        out = real(*a, **kw)
+        if shell.is_dir() and not shell.is_symlink():  # main's Bash, between the server's check and bwrap's bind
+            shell.rename(shell.with_name(shell.name + ".moved"))
+            shell.symlink_to(outside, target_is_directory=True)
+        return out
+
+    monkeypatch.setattr(kernel_wrap, "kernel_wrap_argv", swapped_after_the_check)
+    try:
+        cell = await notebook.run_code("mini", TMPDIR_CELL, "main")
+    finally:
+        await notebook.shutdown_all()
+    said = "".join(b.get("text/plain", "") for b in cell["outputs"])
+    assert "from-main-s-bash.csv" in said and "secret.txt" not in said, said
+    assert sorted(os.listdir(outside)) == ["secret.txt"]
+    assert (shell.with_name(shell.name + ".moved") / "own.csv").is_file()
+
+
+# a cell that lists its TMPDIR and writes a file of its own there
+TMPDIR_CELL = """
+import os
+t = os.environ['TMPDIR']
+print(sorted(os.listdir(t)))
+with open(os.path.join(t, 'own.csv'), 'w') as f:
+    f.write('night,minutes\\n')
+"""

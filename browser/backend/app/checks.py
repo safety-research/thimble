@@ -30,8 +30,8 @@ call is written as task.md, task-2.md… (read_parts), each small enough that Re
 file or those files in order (`## check-task-file`, `## check-task-files`). It comments with add_comment and hands back
 one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
 analyst's Stop ends it (through thimble's plugin module, subagents.stop). A check made or changed (its name, prompt,
-colour, shown or covers) emits `checks` on the stream, so every Comments pane, the Report's and the canvas's in any tab,
-reads the checks again.
+colour, shown or covers) emits `checks` on the stream, so every list of the checks, the top bar's Comments, the
+canvas's and the Comments pane beside the slides, the story and a page, in any tab, reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
@@ -86,7 +86,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import answer_comments, canvas_comments, config, investigation, prompts, read_parts, tools, userconf, work_files
+from . import (answer_comments, canvas_comments, config, investigation, nofollow, prompts, read_parts, tools,
+               userconf, work_files)
 from .kernel_thimble import LABEL_ORDER
 from .ledger import read_json, write_json
 
@@ -365,14 +366,15 @@ def by_name(c: str, name: str) -> dict[str, Any] | None:
 
 
 def save(c: str, check: dict[str, Any]) -> dict[str, Any]:
-    _dir(c).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(_dir(c))
     write_json(_path(c, str(check["id"])), check)
     return check
 
 
 def _announce(c: str, cid: str) -> None:
     """A check was made or changed (its name, prompt, colour, shown or covers): a `checks` record on the stream, so every
-    surface that lists the checks (the Report's and the canvas's Comments panes, in any tab) reads them again."""
+    surface that lists the checks (the top bar's Comments, the canvas's and the Comments pane beside the slides, the
+    story and a page, in any tab) reads them again."""
     try:
         investigation.emit(c, investigation.MAIN, {"type": "checks", "id": cid})
     except Exception:  # noqa: BLE001 — a surface reads the checks again on its next record
@@ -434,7 +436,7 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
             check["prompt"] = prompt
             check["version"] = int(check.get("version") or 1) + 1
             for doc, run in (check.get("runs") or {}).items():
-                d = report_types.read_doc(c, inv.MAIN, doc) if doc not in (CANVAS, ANSWERS) else None
+                d = report_types.read_doc(c, inv.MAIN, doc) if _is_doc(doc) else None
                 locked = {p["fp"] for p in passages(doc, d) if p["locked"]} if d else set()
                 run["seen"] = [fp for fp in run.get("seen") or [] if fp in locked]
     if colour is not None:
@@ -702,7 +704,10 @@ def recover(root: Path | None = None) -> list[str]:
         c = p.parent.parent.name
         changed = False
         for doc, rec in check["runs"].items():
-            if not isinstance(rec, dict) or rec.get("status") != "running":
+            # a run's target, which a card's code can write into the check's file: the cards, the answers or a
+            # document whose name a route takes, since it names the run's folder and the files its end reads
+            if not isinstance(rec, dict) or rec.get("status") != "running" \
+                    or not (doc in (CANVAS, ANSWERS) or _is_doc(doc)):
                 continue
             aid = str(rec.get("agent_id") or "")
             try:
@@ -921,9 +926,11 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
     elif doc == ANSWERS:
         cover = answer_cover(c, check, passages_, force, since) if covers(check, "answers") else []  # type: ignore[arg-type]
         notify, route, call = False, route if route != TYPED else "follow-on", None  # a run over answers wakes no one
-    else:
+    elif _is_doc(doc):
         d = report_types.read_doc(c, inv.MAIN, doc)
         cover = to_cover(check, doc, d, passages_, force) if d is not None else []
+    else:  # no run target: a document's name is one a route takes, since it names the run's folder and files
+        return None
     if not cover:
         return None
     old = _current(c, cid, doc)
@@ -1427,6 +1434,14 @@ async def refresh(c: str, cid: str, route: str = "click") -> list[dict[str, Any]
     return out
 
 
+def _is_doc(doc: Any) -> bool:
+    """Whether `doc` names a document as a route takes its name (report_types.SLUG_RE): a check's run target besides
+    the cards (CANVAS) and the answers (ANSWERS)."""
+    from . import report_types  # noqa: PLC0415
+
+    return isinstance(doc, str) and doc not in (CANVAS, ANSWERS) and report_types.SLUG_RE.match(doc) is not None
+
+
 def _spawn(c: str, coro: Any) -> None:
     t = asyncio.ensure_future(coro)
     _tasks[t] = c
@@ -1442,6 +1457,8 @@ def _writer_ended(c: str, meta: dict[str, Any]) -> None:
     if meta.get("role") != WRITER_ROLE or meta.get("status") != "done" or not meta.get("doc"):
         return
     doc = str(meta["doc"])
+    if not _is_doc(doc):  # the meta lies in the workspace, which a card's code writes
+        return
     shown = [x for x in list_checks(c) if x.get("shown") and covers(x, "documents")]
     if not shown:
         return

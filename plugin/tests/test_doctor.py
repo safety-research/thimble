@@ -77,7 +77,7 @@ def test_each_problem_the_doctor_finds_says_how_to_fix_it(world, upstream, monke
     }
     # a terminal-only install is a choice, not a problem: a – line, with the step that adds the workbench
     i = out.index("  – the browser workbench is not installed")
-    assert out[i + 1] == "      To add it, from a thimble checkout: scripts/install.sh"
+    assert out[i + 1] == "      To add it, run the install again without --no-browser (INSTALL.md)"
     assert f"{setup} --json --probe --repair" in world["log"].read_text().splitlines()
     # the fix the sandbox's check gives is the one the doctor says
     fake(bin_ / "node", world["log"], answers("v22.20.0", {
@@ -99,7 +99,7 @@ def test_a_terminal_only_install_is_a_choice_not_a_problem(world, monkeypatch, c
     assert cli.main(["doctor", "--offline"]) == 0
     out = capsys.readouterr().out.splitlines()
     i = out.index("  – the browser workbench is not installed")
-    assert out[i + 1] == "      To add it, from a thimble checkout: scripts/install.sh"
+    assert out[i + 1] == "      To add it, run the install again without --no-browser (INSTALL.md)"
     assert not [line for line in out if line.startswith("  × ")]
 
 

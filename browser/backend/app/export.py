@@ -27,7 +27,7 @@ from typing import Any, Iterable, Iterator
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
 
-from . import canvas_history, config
+from . import canvas_history, config, nofollow
 
 log = logging.getLogger("thimble.export")
 router = APIRouter()
@@ -49,9 +49,11 @@ _hash_cache: dict[tuple[str, int, int], str] = {}  # (abs path, size, mtime_ns) 
 
 
 def _read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
-    """The whole-line JSON objects of a JSONL file; a torn or foreign line is skipped."""
+    """The whole-line JSON objects of a JSONL file; a torn or foreign line is skipped. A file in a workspace, which a
+    card's code writes, is read as nofollow reads it, as each of the export's reads is: a link or a FIFO left there
+    reads as none."""
     try:
-        f = path.open(encoding="utf-8")
+        f = nofollow.reader(path, "r", encoding="utf-8")
     except OSError:
         return
     with f:
@@ -69,7 +71,7 @@ def _read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
 
 def _read_json(path: Path) -> Any:
     try:
-        return json.loads(path.read_text("utf-8"))
+        return json.loads(nofollow.read_text(path))
     except (OSError, ValueError):
         return None
 
@@ -105,10 +107,14 @@ def _corpus_hash(path: Path, size: int, mtime_ns: int) -> str:
 
 
 def _stable_prefix(path: Path) -> bytes:
-    """The file as it stood when the copy began, up to its last complete line."""
-    size = path.stat().st_size
-    with path.open("rb") as f:
-        data = f.read(size)
+    """The file as it stood when the copy began, up to its last complete line; nothing for a link or another entry that
+    is no regular file (nofollow)."""
+    try:
+        f = nofollow.reader(path)
+    except nofollow.Linked:
+        return b""
+    with f:
+        data = f.read(os.fstat(f.fileno()).st_size)
     cut = data.rfind(b"\n")
     return data[: cut + 1] if cut >= 0 else b""
 
@@ -182,7 +188,11 @@ class Writer:
         return {"rows": rows, "first_ts": _iso(first), "last_ts": _iso(last)}
 
     def copy(self, arc: str, src: Path) -> None:
-        self._add(arc, src.read_bytes())
+        try:
+            data = nofollow.read_bytes(src)
+        except nofollow.Linked:  # a link or another entry a card's code left in place of the file: none of the export
+            return
+        self._add(arc, data)
 
     def omit(self, rel: str, src: Path, why: str) -> None:
         try:
@@ -204,6 +214,8 @@ def _telemetry(w: Writer, ws: Path) -> dict[str, int]:
 
 def _chats(w: Writer, ws: Path) -> list[dict[str, Any]]:
     """Every chat's records as the browser showed them, and one index row per chat (its meta and where its log is)."""
+    from . import agents  # noqa: PLC0415
+
     index: list[dict[str, Any]] = []
     d = ws / "chats"
     for folder, trashed in ((d, False), (d / "trash", True)):
@@ -211,7 +223,10 @@ def _chats(w: Writer, ws: Path) -> list[dict[str, Any]]:
             meta = _read_json(meta_path)
             if not isinstance(meta, dict):
                 continue
-            cid = str(meta.get("id") or meta_path.name[: -len(".meta.json")])
+            # by the chat's id, its meta's when a route would take it, since a card's code writes the meta, else the
+            # file's name
+            cid = str(meta.get("id") or "")
+            cid = cid if agents.ID_RE.match(cid) else meta_path.name[: -len(".meta.json")]
             log_path = folder / f"{cid}.jsonl"
             arc = f"chats/{'trash/' if trashed else ''}{cid}.jsonl"
             stats = w.copy_jsonl(arc, log_path, ("ts",)) if log_path.is_file() else {"rows": 0, "first_ts": None, "last_ts": None}

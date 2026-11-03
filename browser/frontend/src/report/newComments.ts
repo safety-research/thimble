@@ -1,11 +1,13 @@
-// New comments: a check that is on ended a run that left comments the analyst has not looked at. The Comments pane of
-// the surface they are on carries the accent dot, named "New comments" (Checks.tsx NewCommentsDot): on the canvas the
-// toolbar's Comments button (canvas/Controls.tsx CommentsButton), beside a document its Comments pane's head
-// (Checks.tsx CommentsPane), so a run that commented on the Report alone marks the Report's pane alone. A run counts
-// once it ends (the stream's `check` record, then the checks' list). The runs looked at are kept per browser and
-// workspace (localStorage), so a reload shows the dot again until the analyst looks: the first time a browser reads a
-// workspace's checks, every run that has ended counts as looked at, so only later runs are news. A run is looked at
-// once the analyst opens its surface's Comments pane, or one of its comments on the page or on the canvas (markSeen).
+// New comments: a check that is on ended a run that left comments the analyst has not looked at. The Comments control
+// of the surface they are on carries the accent dot, named "New comments" (Checks.tsx NewCommentsDot): for the cards
+// the canvas's Comments button (canvas/Controls.tsx CommentsButton), for the documents the top bar's Comments
+// (shell/TopBar.tsx) and, for its own document's runs, the head of the Comments pane beside the slides, the story or a
+// page (Checks.tsx CommentsPane), so a run that commented on the Report alone leaves the canvas's button as it was. A
+// run counts once it ends (the stream's `check` record, then the checks' list). The runs looked at are kept per browser
+// and workspace (localStorage), so a reload shows the dot again until the analyst looks: the first time a browser reads
+// a workspace's checks, every run that has ended counts as looked at, so only later runs are news. A run is looked at
+// once the analyst opens a Comments control it shows on, or one of its comments on the page or on the canvas
+// (useLookedAt).
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Check } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -109,20 +111,25 @@ export function useLookedAt(ws: string, run: string | null | undefined): void {
 export interface NewComments {
   /** the new runs on the surface, in the order they ended; empty when there is nothing new there */
   runs: NewRun[]
-  /** the analyst opened the surface's Comments pane: its new runs are looked at */
+  /** the analyst opened the surface's Comments control: its new runs are looked at */
   look: () => void
 }
 
-/** The new comments of workspace `ws` on `surface` (a document's slug, or CANVAS), for the dot on its Comments pane,
- * from the workspace's checks (Checks.tsx useChecks). */
-export function useNewComments(ws: string, checks: { list: readonly RunsOf[]; ready: boolean }, surface: string): NewComments {
+/** The new comments of workspace `ws` on `surface`, for the dot on its Comments control, from the workspace's checks
+ * (Checks.tsx useChecks): a run target (CANVAS for the cards, a document's slug for its Comments pane), or which run
+ * targets count (checkComments.ts isDocument for the documents). */
+export function useNewComments(ws: string, checks: { list: readonly RunsOf[]; ready: boolean }, surface: string | ((surface: string) => boolean)): NewComments {
   const seen = useSeenRuns(ws)
   const { list, ready } = checks
   // the first read of this workspace's checks in this browser: what has ended is not news
   useEffect(() => {
     if (ready && seen == null) markSeen(ws, endedRuns(list), allRuns(list))
   }, [ws, ready, seen, list])
-  const runs = useMemo(() => (ready && seen ? newRuns(list, seen).filter((r) => r.surface === surface) : []), [ready, seen, list, surface])
+  const runs = useMemo(() => {
+    if (!ready || !seen) return []
+    const on = typeof surface === 'string' ? (s: string) => s === surface : surface
+    return newRuns(list, seen).filter((r) => on(r.surface))
+  }, [ready, seen, list, surface])
   const look = useCallback(() => {
     if (runs.length) markSeen(ws, runs.map((r) => r.run), allRuns(list))
   }, [ws, runs, list])

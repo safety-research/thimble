@@ -1,10 +1,12 @@
 """thimble file issue ID: a fix as a public GitHub issue that the person checks and submits themselves.
 
 The draft is a title, what was wrong and how it was fixed (for a fix that failed, why it could not be done and what
-Claude tried), in plain words, with the thimble version and the mode. It is Claude's text when the plugin or the
-browser gives one (`--draft -`, the JSON fix-draft.md asks for), else the one given before for this fix, else the fix's
-own record: the person's words and what the fixer said the fix does. The privacy scan (privacy.py, as `thimble fix
-draft` runs it) takes the names and values of the person's folder and machine out of the draft first.
+Claude tried; for a fix Claude still works on, that Claude still works on it and what it does so far), in plain words,
+with the thimble version and the mode. It is Claude's text when the plugin or the browser gives one (`--draft -`, the
+JSON fix-draft.md asks for), else the one given before for this fix, else the fix's own record: the person's words and
+what the fixer said the fix does. The privacy scan (privacy.py, as `thimble fix draft` runs it) takes the names and
+values of the person's folder and machine out of the draft first: out of the person's words and Claude's, while
+thimble's own headings and lines stay as they are.
 
 The command prints GitHub's new-issue link with the title and the text in it; `--open` opens the link in the person's
 browser too. On GitHub's page the person reads the text, pastes a screenshot if they want and presses Submit. thimble
@@ -40,7 +42,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, urlencode
 
 from . import fixes as FX
@@ -49,7 +51,7 @@ from .store import Store
 
 # GitHub takes a new-issue link of about 8,000 characters; thimble keeps its links under this
 URL_MAX = 7000
-STATES = ("on", "off", "ready", "redo", "request", "saved", "sent", "released", "failed")
+STATES = ("working", "on", "off", "ready", "redo", "request", "saved", "sent", "released", "failed")
 
 # what the scan took out, in the person's words: (one, many)
 KIND_WORDS = {
@@ -114,32 +116,41 @@ def _given(rec: dict[str, Any], given: dict[str, Any] | None) -> tuple[dict[str,
     return {"title": str(rec.get("title") or ""), "wrong": words, "fixed": " ".join(str(rec.get("summary") or "").split())}, "record"
 
 
-def _body(rec: dict[str, Any], d: dict[str, str]) -> str:
+def _body(rec: dict[str, Any], d: dict[str, str], hold: Callable[[str], str] = str) -> str:
     """The issue's text, in GitHub Markdown: what was wrong, then how it was fixed, or what it needs (a request with no
-    code), or, for a fix that failed, why it could not be done here and what Claude tried (a refused try's change)."""
+    code), or, for a fix that failed, why it could not be done here and what Claude tried (a refused try's change), or,
+    for a fix Claude still works on, that Claude still works on it and what the fix does so far (what its fixer said,
+    when one ended). thimble's own text in it (each heading, fixed sentence and the last line) goes through hold(), so
+    that _scan can leave it out of the privacy scan (FX._holder)."""
     failed = rec.get("state") == "failed"
-    request = failed or rec.get("state") == "request" or not rec.get("commit")
+    working = rec.get("state") == "working"
+    request = failed or working or rec.get("state") == "request" or not rec.get("commit")
     rel = FX.release()
     version = rel.get("version") or str(rel.get("base") or "")[:7] or "?"
     if failed:
-        why = " ".join(str(rec.get("error") or "").split()) or "(say what stopped it)"
-        middle = f"### Why it could not be done here\n\n{why}\n\n" + (
-            f"### What Claude tried\n\n{d['fixed']}\n\n" if d["fixed"] else "")
+        why = " ".join(str(rec.get("error") or "").split()) or hold("(say what stopped it)")
+        middle = f"{hold('### Why it could not be done here')}\n\n{why}\n\n" + (
+            f"{hold('### What Claude tried')}\n\n{d['fixed']}\n\n" if d["fixed"] else "")
+    elif working:
+        middle = f"{hold('### What it does so far')}\n\n{hold('Claude is still working on this fix.')}\n\n" + (
+            f"{d['fixed']}\n\n" if d["fixed"] else "")
     else:
-        fixed = d["fixed"] or ("(no change: Claude could not do it in code)" if request else "(say how it works now)")
-        middle = f"### {'What it needs' if request else 'How it was fixed'}\n\n{fixed}\n\n"
-    return (f"### What was wrong\n\n{d['wrong'] or '(say what you saw)'}\n\n{middle}"
-            f"thimble {version} · {rec.get('made_in') or 'terminal'} · "
-            f"{'asked through' if request else 'fixed by'} `thimble fix`\n")
+        fixed = d["fixed"] or hold("(no change: Claude could not do it in code)" if request else "(say how it works now)")
+        middle = f"{hold('### What it needs' if request else '### How it was fixed')}\n\n{fixed}\n\n"
+    last = (f"thimble {version} · {rec.get('made_in') or 'terminal'} · "
+            f"{'asked through' if request else 'fixed by'} `thimble fix`")
+    return f"{hold('### What was wrong')}\n\n{d['wrong'] or hold('(say what you saw)')}\n\n{middle}{hold(last)}\n"
 
 
-def _scan(text: str, st: Store | None) -> tuple[list[dict[str, Any]], str]:
+def _scan(text: str, st: Store | None, own: list[str] | None = None) -> tuple[list[dict[str, Any]], str]:
     """The privacy scan of the draft, as `thimble fix draft` scans the words: every name from the person's folder goes,
-    even one that thimble's repository has. (hits, the text with them taken out)"""
+    even one that thimble's repository has. It reads only the person's words and Claude's: thimble's own text, held in
+    `own` already (FX._holder), stays as it is, so a folder named like one of thimble's words (fix) takes nothing out
+    of it. (hits, the text with them taken out)"""
     base = FX.release().get("base") or "HEAD"
     have_live = (FX.live_dir() / ".git").exists()
     paths = FX._repo_paths(base, "") if have_live else set()
-    held, keep = FX._protect({"issue": text}, paths)
+    held, keep = FX._protect({"issue": text}, paths, own)
     known = FX._known(base) if have_live else None
     found = FX.session_terms(st)
     terms = FX._widen(found, held["issue"], known, set())
@@ -199,7 +210,8 @@ def share(fid: int | str, given: dict[str, Any] | None = None, st: Store | None 
         st = _store_of(rec)
     d, src = _given(rec, given)
     title = FX.short(d["title"] or rec["title"], 72)
-    hits, text = _scan(f"{title}\n{_body(rec, d)}", st)
+    own: list[str] = []
+    hits, text = _scan(f"{title}\n{_body(rec, d, FX._holder(own))}", st, own)
     title, _, body = text.partition("\n")
     url, shortened = issue_url(title.strip(), body, FX.upstream())
     out_dir = share_dir(rec["id"])
@@ -362,11 +374,13 @@ def _main_tip() -> dict[str, str]:
     fetched into live, {commit, version}. Its version is the release tag at that commit, else the plugin's version
     there, else the commit."""
     live, url = FX.live_dir(), FX.update_url()
-    p = FX.run(["git", "fetch", "-q", "--no-tags", url, f"+refs/heads/main:{MAIN_REF}"], cwd=live, check=False,
-               timeout=600)
+    p = FX.remote_git("fetch", "-q", "--no-tags", url, f"+refs/heads/main:{MAIN_REF}", cwd=live, check=False,
+                      timeout=600)
     if p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
-        raise FX.FixError(f"thimble could not read main from {url} ({err[-1] if err else 'no message'}); a pull "
+        why = FX.no_access(p.stderr or p.stdout, "try again")
+        raise FX.FixError(f"thimble could not read main from {url}, which a pull request goes onto: {why}" if why else
+                          f"thimble could not read main from {url} ({err[-1] if err else 'no message'}); a pull "
                           "request goes onto it, so check the network, then try again")
     tip = FX.git("rev-parse", f"{MAIN_REF}^{{commit}}", cwd=live)
     version = ""
@@ -416,9 +430,10 @@ def pr_preview(fid: int | str, st: Store | None = None) -> dict[str, Any]:
                           f"to make it work on the newest thimble (thimble update moves you to it), then try again")
     d, _src = _given(rec, None)
     title = FX.short(d["title"] or rec["title"], 72)
-    body = (_body(rec, d) + f"\nOpened with `thimble file pr`, on thimble {version} "
-            f"(`{base[:7]}`).\n")
-    hits, text = _scan(f"{title}\n{body}", st)
+    own: list[str] = []
+    hold = FX._holder(own)
+    opened = hold(f"Opened with `thimble file pr`, on thimble {version} (`{base[:7]}`).")
+    hits, text = _scan(f"{title}\n{_body(rec, d, hold)}\n{opened}\n", st, own)
     title, _, body = text.partition("\n")
     title = title.strip()
     files = FX._numstat(FX.live_dir(), f"{rec['commit']}^", rec["commit"])
@@ -466,14 +481,14 @@ def open_pr(r: dict[str, Any], user: dict[str, Any]) -> str:
     try:
         sha = _commit(r, user, tmp)
         # a name no branch there has, nor holds as a folder of branches (a branch thimble-fix-1-x/y would block it)
-        taken = FX.run([FX.push_git(), "-c", "credential.helper=", "-c",
+        taken = FX.run([FX.push_git(), *FX.NO_EXT, "-c", "credential.helper=", "-c",
                         f"credential.https://github.com.helper=!{FX.gh()} auth git-credential", "ls-remote", "--heads", url],
                        cwd=tmp / "repo", check=False).stdout
         heads = {x.split("refs/heads/", 1)[1] for x in taken.splitlines() if "refs/heads/" in x}
         base_name, k = r["branch"], 2
         while any(h == r["branch"] or h.startswith(r["branch"] + "/") for h in heads):
             r["branch"], k = f"{base_name}-{k}", k + 1
-        push = [FX.push_git(), "-c", "credential.helper=", "-c",
+        push = [FX.push_git(), *FX.NO_EXT, "-c", "credential.helper=", "-c",
                 f"credential.https://github.com.helper=!{FX.gh()} auth git-credential",
                 "push", url, f"{sha}:refs/heads/{r['branch']}"]
         for i in range(5):  # a fork GitHub has just made can take a few seconds to take a push

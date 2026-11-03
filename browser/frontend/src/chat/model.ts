@@ -2,7 +2,7 @@
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
 import { parseRef, refLabel } from '../lib/refs'
 import type { ChatRecord } from '../lib/types'
-import { marksIn } from '../../../../plugin/marks/message.js'
+import { marksIn, withoutMarks } from '../../../../plugin/marks/message.js'
 import type { MarkItem } from '../marks/marks'
 import { shortStepNames, stepParts } from './threads'
 
@@ -372,6 +372,9 @@ const oneLine = (s: string, max = 110): string => {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t
 }
 const firstLine = (s: string, max = 110): string => oneLine(s.split('\n').find((l) => l.trim() !== '') ?? '', max)
+/** A takeaway on one line, in the words the chat draws of it: each citation `[[value|ref]]` as its value, each mark
+ * `[words](#)` as its words. */
+const takeawayLine = (t: unknown): string => oneLine(withoutMarks(str(t).replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')))
 
 /** A call's target with the corpus folder's absolute path left off, as Claude Code prints a path under its working
  * directory; the folder itself is `.`. Pure. */
@@ -498,7 +501,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return (
         oneLine(str(inp.question ?? inp.title)) ||
         firstLine(str(inp.code)) ||
-        oneLine(str(inp.takeaway ?? '').replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')) ||
+        takeawayLine(inp.takeaway) ||
         str(inp.card ?? inp.cell ?? '')
       )
     case 'delete_card':
@@ -871,7 +874,7 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
     case 'add_card':
       return with_('Added card', oneLine(str(inp.question ?? inp.title)))
     case 'edit_card':
-      return with_('Edited card', oneLine(str(inp.question ?? inp.title)) || cellQ(inp.card ?? inp.cell) || oneLine(str(inp.takeaway ?? '').replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')))
+      return with_('Edited card', oneLine(str(inp.question ?? inp.title)) || cellQ(inp.card ?? inp.cell) || takeawayLine(inp.takeaway))
     case 'delete_card':
       return with_('Deleted card', cellQ(inp.card ?? inp.cell))
     case 'list_cards': {

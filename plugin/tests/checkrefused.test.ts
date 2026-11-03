@@ -6,9 +6,16 @@
 // says what refused them: for those two, that auto mode's classifier gave no verdict, or the mode by its name, and g,
 // which lets thimble start its checks this session and starts the check again, at each check they stop until the person
 // gives that OK; where Claude Code takes no plugin's allow (auto mode in a remote Cowork session), and after the OK, no
-// key and nothing that could not work; a classifier that could not answer for now, or that judged the check, as such;
+// key and nothing that could not work, only that thimble checks them outside that mode; a classifier that could not
+// answer for now, or that judged the check, as such;
 // any other refusal by its first sentence whole. g is no other line's key: a fix's line beside it keeps y. The failure
-// line wraps a long text at word edges, no row wider than the line. All data is made up. `claude plugin test plugin`.
+// line wraps a long text at word edges, no row wider than the line. x on a failed citation stays where the person can
+// let its check run: it gives the OK g gives before it starts the repair, so one press is enough; where a check could
+// not read a file, the citation's card names the file, and x gives the OK to read it where Claude Code asked nobody,
+// or starts the repair, whose read Claude Code asks about again, where it asked the person. Where nothing the person
+// does lets the check run (auto mode in a remote Cowork session, a refusal after the OK, auto mode's classifier that
+// judged the check, a deny rule), x is not offered, and the line says what refused it. All data is made up. `claude
+// plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
@@ -18,7 +25,7 @@ import { textWidth } from '../core/text.js'
 import { fixKey } from '../fix/line'
 import { setFixLine } from '../fix/fixes'
 import { ownKeys, WORD_MS } from '../hooks/keys'
-import { AGAIN_DESCRIPTION, ALLOW_KEY, cannotStart, checkKey, noteRow, refusalOf, refusingMode, startCheck, UNREVIEWED_LINE } from '../marks/checker'
+import { AGAIN_DESCRIPTION, ALLOW_KEY, cannotStart, checkKey, noteRow, readFix, refusalOf, refusingMode, REPAIR_DESCRIPTION, startCheck, UNREVIEWED_LINE } from '../marks/checker'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
@@ -63,11 +70,23 @@ const WAIT = "The API told auto mode's safety classifier (claude-made-up-classif
 const JUDGED = "Permission for this action was denied by the Claude Code auto mode classifier. Reason: The fork reads the made-up vault's keys. If you have other tasks that don't depend on this action, continue working on those. "
 /** Its refusal in don't ask mode, of a call no rule allows. */
 const DONT_ASK = "Permission to use Agent has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. "
+/** Its refusals by a deny rule of the person's: on the fork's agent type, on the whole tool, and on what it is called
+ *  with. */
+const RULE = "Agent type 'fork' has been denied by permission rule 'Agent(fork)' from userSettings."
+const RULE_TOOL = 'Permission to use Agent has been denied.'
+const RULE_WITH = 'Permission to use Agent with fork has been denied.'
 /** A refusal for another cause: a made-up plugin's hook. */
 const HOOK = 'Subagent spawn denied by a plugin: lab-sync holds every new agent while it copies the workspace to the shared drive of the team. Try again in a minute.'
+/** Claude Code's refusals of a check's read of a file outside the session's folders: in don't ask mode, the person's
+ *  no to its dialog, and a rule of theirs. */
+const READ_DONT_ASK = "Permission to use Read has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. "
+const READ_REJECTED = 'Permission for this tool use was denied. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). Try a different approach or report the limitation to complete your task.'
+const READ_RULE = 'Permission to use Read has been denied by your rule Read(//made-up/elsewhere/**).'
 
 /** The lines, as the person reads them. */
 const NO_VERDICT = "Auto mode's classifier gave no verdict on thimble's check of citations, so Claude Code refused it."
+/** Its line where no key could let the check start: what refused it, and the mode outside which thimble checks. */
+const NO_VERDICT_OUTSIDE = `${NO_VERDICT} Outside auto mode, thimble can check them.`
 const DONT_ASK_LINE = "Claude Code's don't ask mode refused thimble's check of citations. Press g to allow thimble's checks this session."
 
 const REPLY = 'Of the [40](#) nightly runs, [12 of 40](#) failed, most on the [p95 latency check](#); the [slow mirror](#) was down for [3 nights](#).'
@@ -120,12 +139,13 @@ async function session($: Any, on: Any, answer: string | ((e: Any) => string | n
   return { spawns, clock }
 }
 
-/** One question of the person's and main's reply to it, REPLY, in row `row`. */
-async function reply($: Any, clock: Any, turnId: string, row: string): Promise<void> {
+/** One question of the person's and main's reply to it, REPLY, in row `row`: a whole reply, or (`aborted`) one the
+ *  person stopped with esc, whose citations' check does not run. */
+async function reply($: Any, clock: Any, turnId: string, row: string, how: 'answer' | 'aborted' = 'answer'): Promise<void> {
   await $.prompt.submit({ text: 'how many failed?', origin: { kind: 'composer' } } as never)
   await $.turn.start({ text: 'how many failed?', turnId } as never)
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: REPLY }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: row } as never)
-  await $.turn.complete({ turnId, reason: 'answer', answer: REPLY, durationMs: 10, isAborted: false } as never)
+  await $.turn.complete({ turnId, reason: how, answer: REPLY, durationMs: 10, isAborted: how === 'aborted' } as never)
   await clock.advance(100)
 }
 
@@ -218,7 +238,7 @@ test("g while that line shows: thimble asks Claude Code again for the check it i
   // allow) says what refused it, a notice with no key, and not `Open one to check it`, which would be refused the same way
   await reply($, clock, 't2', 'row-a2')
   const drawn = await $.ui.render(above)
-  expect(lineOf(drawn)).toBe(NO_VERDICT)
+  expect(lineOf(drawn)).toBe(NO_VERDICT_OUTSIDE)
   expect(pressesIn(drawn)).toEqual([])
   expect(JSON.stringify(drawn)).not.toContain('"color":"error"')
   // and g is typed as any letter
@@ -273,13 +293,119 @@ test("in a remote Cowork session, where Claude Code takes no plugin's allow on a
   const { spawns, clock } = await session($, on, AUTO, { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' })
   await reply($, clock, 't1', 'row-a1')
   const drawn = await $.ui.render(above)
-  expect(lineOf(drawn)).toBe(NO_VERDICT)
+  expect(lineOf(drawn)).toBe(NO_VERDICT_OUTSIDE)
   expect(pressesIn(drawn)).toEqual([])
   expect(textOf(drawn)).not.toContain('Open')
   expect(await $.prompt.edit(key('g'))).toMatchObject({ text: 'g' })
   await clock.advance(WORD_MS * 2)
   expect(spawns.length).toBe(1)
   expect(signAfter(await $.ui.render(answer('row-a1')), 1).sign).toBe('?')
+})
+
+/** What the band shows now: the open tray's status, whether its card offers x, the failure line and its presses. */
+async function band($: Any): Promise<{ status: string; x: boolean; line: string; presses: string[] }> {
+  const drawn = await $.ui.render(above)
+  const t = textOf(drawn)
+  return { status: /(× failed|\? not checked|✓ \w+)/.exec(t)?.[0] ?? '-', x: t.includes('x repair'), line: lineOf(drawn), presses: pressesIn(drawn) }
+}
+
+/** x at the empty prompt, its word window waited out: what the box holds after it ('' when thimble took the key). */
+async function pressX($: Any, clock: Any): Promise<string> {
+  const typed = await $.prompt.edit(key('x'))
+  await clock.advance(WORD_MS + 50)
+  await clock.advance(100)
+  return String(typed?.text ?? '')
+}
+
+/** The line of a check Claude Code refused in don't ask mode after the person's OK: what refused it, and the mode
+ *  outside which thimble checks; no key. */
+const DONT_ASK_OUTSIDE = "Claude Code's don't ask mode refused thimble's check of citations. Outside don't ask mode, thimble can check them."
+
+for (const [mode, deny, outside] of [
+  ['auto mode, no verdict', AUTO, NO_VERDICT_OUTSIDE],
+  ["don't ask mode", DONT_ASK, DONT_ASK_OUTSIDE],
+] as const) {
+  test(`${mode}: one x on a citation whose check did not run (the reply was stopped) gives the person's OK before it asks for the repair, so Claude Code, which takes thimble's allow on its checks, starts it at the first press (checkallow.test.ts); the OK stands, as g's, so a later check Claude Code still refuses says what refused it, with no key`, OPTIONS, async ($, on) => {
+    // Claude Code starts the repair, as where thimble answers allow at tool.check (this kit's spawns ask no tool.check),
+    // and refuses every other check
+    const { spawns, clock } = await session($, on, e => (e.description === REPAIR_DESCRIPTION ? null : deny))
+    await reply($, clock, 't1', 'row-a1', 'aborted')
+    await openCitation($, 'row-a1', 1)
+    expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
+    expect(await pressX($, clock)).toBe('')
+    // the repair, asked for once (its run is checkallow.test.ts's: this kit names no agent it starts)
+    expect(spawns.length).toBe(1)
+    expect(spawns[0]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
+    expect(String(spawns[0].prompt)).toContain('The analyst pressed x to check citation 1, whose first check did not run.')
+    // the OK the first x gave stands, as g's: a later check Claude Code refuses says what refused it, with no key
+    await reply($, clock, 't2', 'row-a2')
+    const drawn = await $.ui.render(above)
+    expect(lineOf(drawn)).toBe(outside)
+    expect(pressesIn(drawn)).toEqual([])
+  })
+}
+
+test("auto mode in a remote Cowork session, where Claude Code takes no plugin's allow on a subagent: a citation whose check did not run offers x until Claude Code refuses the check x starts; then x is not offered, a second x is typed, and the line says what refused it, with no key", OPTIONS, async ($, on) => {
+  const { spawns, clock } = await session($, on, AUTO, { CLAUDE_CODE_ENTRYPOINT: 'remote_cowork' })
+  await reply($, clock, 't1', 'row-a1', 'aborted')
+  await openCitation($, 'row-a1', 1)
+  expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
+  expect(await pressX($, clock)).toBe('')
+  expect(spawns.length).toBe(1)
+  expect(await band($)).toEqual({ status: '× failed', x: false, line: NO_VERDICT_OUTSIDE, presses: [] })
+  expect(await pressX($, clock)).toBe('x')
+  expect(spawns.length).toBe(1)
+  // a failed citation opened later says that line again
+  await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
+  await openCitation($, 'row-a1', 2)
+  expect(await band($)).toEqual({ status: '× failed', x: false, line: NO_VERDICT_OUTSIDE, presses: [] })
+})
+
+for (const [what, deny, line] of [
+  ["auto mode's classifier judged the check", JUDGED, "Auto mode's classifier refused thimble's check of citations (The fork reads the made-up vault's keys), so they are not checked."],
+  ["a deny rule of the person's", RULE, "A permission rule refused thimble's check of citations (Agent type 'fork' has been denied by permission rule 'Agent(fork)' from userSettings), so they are not checked."],
+] as const) {
+  test(`${what}, which no OK of the person's answers: a citation whose check did not run offers x until Claude Code refuses the check x starts; then x is not offered, a second x is typed, and the line says what refused it, with no key; a failed citation opened later says that line again`, OPTIONS, async ($, on) => {
+    const { spawns, clock } = await session($, on, deny)
+    await reply($, clock, 't1', 'row-a1', 'aborted')
+    await openCitation($, 'row-a1', 1)
+    expect(await band($)).toEqual({ status: '× failed', x: true, line: '', presses: [] })
+    expect(await pressX($, clock)).toBe('')
+    expect(spawns.length).toBe(1)
+    expect(await band($)).toEqual({ status: '× failed', x: false, line, presses: [] })
+    expect(await pressX($, clock)).toBe('x')
+    expect(spawns.length).toBe(1)
+    await $.prompt.submit({ text: 'and the mirror?', origin: { kind: 'composer' } } as never)
+    await openCitation($, 'row-a1', 2)
+    expect(await band($)).toEqual({ status: '× failed', x: false, line, presses: [] })
+  })
+}
+
+test("don't ask mode: x then a letter in its word window is a word, so neither the OK nor the repair stands: the repair is refused before Claude Code starts it, and a later reply's check is refused as before the OK, with g on its line; the next x gives the OK and starts the repair", OPTIONS, async ($, on) => {
+  const { spawns, clock } = await session($, on, e => (e.description === REPAIR_DESCRIPTION ? null : DONT_ASK))
+  await reply($, clock, 't1', 'row-a1', 'aborted')
+  await openCitation($, 'row-a1', 1)
+  // x, then a letter in its word window: a word
+  expect(await $.prompt.edit(key('x'))).toMatchObject({ text: '' })
+  await clock.advance(WORD_MS / 3)
+  expect(await $.prompt.edit(key('o'))).toMatchObject({ text: 'xo' })
+  await clock.advance(WORD_MS * 2)
+  expect(spawns.length).toBe(0)
+  await $.prompt.submit({ text: 'xo', origin: { kind: 'composer' } } as never)
+  await reply($, clock, 't2', 'row-a2')
+  await openCitation($, 'row-a2', 1)
+  expect(spawns.length).toBe(2)
+  expect(lineOf(await $.ui.render(above))).toBe(DONT_ASK_LINE)
+  // x on the failed citation: the OK and its repair
+  await openCitation($, 'row-a1', 2)
+  expect(await pressX($, clock)).toBe('')
+  expect(spawns.length).toBe(3)
+  expect(spawns[2]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
+  expect(String(spawns[2].prompt)).toContain('The analyst pressed x to check citation 2, whose first check did not run.')
+  // the OK stands: a citation opened later, its check refused, says so with no key
+  await openCitation($, 'row-a2', 2)
+  expect(spawns.length).toBe(4)
+  expect(await band($)).toMatchObject({ line: DONT_ASK_OUTSIDE, presses: [] })
 })
 
 test('a check refused for another cause: one failure line with the refusal\'s first sentence whole, and the citations wait, not checked', OPTIONS, async ($, on) => {
@@ -295,7 +421,7 @@ test('a check refused for another cause: one failure line with the refusal\'s fi
   expect(spawns.length).toBe(1)
 })
 
-test("Claude Code's refusals, as thimble reads them: the permission mode a refusal names; no verdict on such a call, a classifier that could not answer for now, one that judged the check, don't ask mode; any other by its first sentence, cut at a word only when that sentence is too long", () => {
+test("Claude Code's refusals, as thimble reads them: the permission mode a refusal names; no verdict on such a call, a classifier that could not answer for now, one that judged the check, don't ask mode, a deny rule; any other by its first sentence, cut at a word only when that sentence is too long", () => {
   expect(refusingMode(AUTO)).toBe('auto mode')
   expect(refusingMode(DONT_ASK)).toBe("don't ask mode")
   expect(refusingMode("Permission to use Agent has been denied because Claude Code is running in don't ask mode. Try something else.")).toBe("don't ask mode")
@@ -304,17 +430,24 @@ test("Claude Code's refusals, as thimble reads them: the permission mode a refus
     expect(refusalOf(said).kind).toBe('unreviewed')
     expect(cannotStart(said)).toEqual({ kind: 'unreviewed', notice: true, offers: true, text: UNREVIEWED_LINE })
     // once the person gave the OK, or where Claude Code takes no plugin's allow, the same refusal offers no key
-    expect(cannotStart(said, { allowed: true })).toEqual({ kind: 'unreviewed', notice: true, text: NO_VERDICT })
-    expect(cannotStart(said, { cowork: true })).toEqual({ kind: 'unreviewed', notice: true, text: NO_VERDICT })
+    expect(cannotStart(said, { allowed: true })).toEqual({ kind: 'unreviewed', notice: true, text: NO_VERDICT_OUTSIDE })
+    expect(cannotStart(said, { cowork: true })).toEqual({ kind: 'unreviewed', notice: true, text: NO_VERDICT_OUTSIDE })
   }
   expect(refusalOf(DONT_ASK)).toMatchObject({ kind: 'mode', mode: "don't ask mode" })
   expect(cannotStart(DONT_ASK)).toEqual({ kind: 'mode', notice: true, offers: true, text: DONT_ASK_LINE })
   // Claude Code takes a plugin's allow in don't ask mode, in a remote Cowork session too
   expect(cannotStart(DONT_ASK, { cowork: true })).toEqual({ kind: 'mode', notice: true, offers: true, text: DONT_ASK_LINE })
-  expect(cannotStart(DONT_ASK, { allowed: true })).toEqual({ kind: 'mode', notice: true, text: "Claude Code's don't ask mode refused thimble's check of citations." })
+  expect(cannotStart(DONT_ASK, { allowed: true })).toEqual({ kind: 'mode', notice: true, text: "Claude Code's don't ask mode refused thimble's check of citations. Outside don't ask mode, thimble can check them." })
   expect(cannotStart(BUSY)).toEqual({ kind: 'unavailable', notice: true, text: "Auto mode's classifier was unavailable for thimble's check of citations (rate-limited), so Claude Code refused it. Open a citation to check it." })
   expect(cannotStart(WAIT)).toEqual({ kind: 'unavailable', notice: true, text: "Auto mode's classifier was unavailable for thimble's check of citations (overloaded), so Claude Code refused it. Open a citation to check it." })
   expect(cannotStart(JUDGED)).toEqual({ kind: 'judged', notice: true, text: "Auto mode's classifier refused thimble's check of citations (The fork reads the made-up vault's keys), so they are not checked." })
+  // a deny rule, in each of Claude Code's words for it: what refused the check, and no key
+  for (const said of [RULE, RULE_TOOL, RULE_WITH]) {
+    expect(refusalOf(said).kind).toBe('rule')
+    expect(cannotStart(said)).toEqual({ kind: 'rule', notice: true, text: `A permission rule refused thimble's check of citations (${reasonOf(said)}), so they are not checked.` })
+  }
+  // Claude Code's same words with its advice after them are no rule's: no prompt it could show
+  expect(refusalOf("Permission to use Agent has been denied. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. ").kind).toBe('other')
   expect(cannotStart(HOOK)).toMatchObject({ kind: 'other', notice: false })
   expect(cannotStart(HOOK).offers).toBeUndefined()
   expect(cannotStart(undefined).text).toContain('(no reason given)')
@@ -325,6 +458,30 @@ test("Claude Code's refusals, as thimble reads them: the permission mode a refus
   expect(textWidth(cut)).toBeLessThanOrEqual(60)
   expect(cut.endsWith('…')).toBe(true)
   expect(long.startsWith(cut.slice(0, -1))).toBe(true)
+})
+
+test("Claude Code's refusals of a check's read of a file, as x acts on them: the person's OK where it asked nobody, its own ask again where the person said no, nothing where a rule, a setting or auto mode's classifier refused it or gave no verdict on it, and none of these for a refusal of no permission", () => {
+  // asked nobody: don't ask mode; no prompt it could show
+  expect(readFix(READ_DONT_ASK)).toBe('ok')
+  expect(readFix("Permission to use Read has been denied. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. ")).toBe('ok')
+  expect(readFix('Permission for this tool use was denied: it requires interactive approval, and permission prompts are not available in this session. The action was NOT performed.')).toBe('ok')
+  // the person said no to its dialog, a subagent's words and main's
+  expect(readFix(READ_REJECTED)).toBe('ask')
+  expect(readFix("The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.")).toBe('ask')
+  // auto mode's classifier gave no verdict: Claude Code put its ask to the person, through the classifier, which no OK
+  // of thimble's answers (checker.ts allowsRead), and it gives none on such a call again
+  expect(readFix(AUTO.replace(/Agent/g, 'Read'))).toBeNull()
+  expect(readFix(HARD.replace(/Agent/g, 'Read'))).toBeNull()
+  // a rule, a setting, the classifier's judgment
+  expect(readFix(READ_RULE)).toBeNull()
+  expect(readFix('Permission to use Read has been denied.')).toBeNull()
+  expect(readFix('Permission to use Read with //made-up/elsewhere/runs.csv has been denied.')).toBeNull()
+  expect(readFix('Reads outside the working directories are blocked (permissions.blockReadsOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.')).toBeNull()
+  expect(readFix(JUDGED)).toBeNull()
+  // a classifier that could not answer for now, and no permission at all
+  expect(readFix(BUSY)).toBeUndefined()
+  expect(readFix('File does not exist. Current working directory: /made-up/data')).toBeUndefined()
+  expect(readFix(HOOK)).toBeUndefined()
 })
 
 const ELS = { Box: (p: Any) => ({ type: 'Box', props: p }), Text: (p: Any) => ({ type: 'Text', props: p }), Button: (p: Any) => ({ type: 'Button', props: p }) }

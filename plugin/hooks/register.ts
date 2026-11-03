@@ -4,6 +4,9 @@
 //   settings    ../settings/term.ts     the plugin's options; featureOn(key) for every module
 //   telemetry   ../telemetry/telemetry.ts  each model call and turn in the session's events; registered first and last,
 //                                       so its two hooks of each event bracket thimble's others and time them
+//   host        ../core/host.ts         whether thimble's drawing shows in this session (Claude Code's terminal
+//                                       interface): the keys and the look run only where it does, and Citations and
+//                                       Cards act as off where it does not
 //   path        ./path.ts               the session's environment: the plugin's bin/ first on PATH, and a TMPDIR
 //   watch       ./watch.ts              which files Claude's Read, Grep and Bash calls touched, for `thimble coverage`;
 //                                       a /clear or a /resume turns every module over to the new conversation
@@ -14,6 +17,8 @@
 //   forks       ../core/forks.ts        the checker and designer forks: spawn, know, end; their reports kept from main
 //   tell        ../core/tell.ts         what Claude reads of thimble's work, with the person's next prompt
 //   feed        ../core/feed.ts         the kernel's change feed, read after each Bash call, for the modules that act on it
+//   handoff     ./handoff.ts            a `thimble` command in Claude Code's Bash sandbox, which may not write
+//                                       thimble's home, run outside the sandbox
 //   answers     ../core/answers.ts      the record of each of main's turns and text rows, for the features below
 //   panes       ../core/pane.ts         the one side pane, drawn by the kind it shows
 //   keys        ./keys.ts               thimble's keys at an empty prompt (v, the fix lines', the features', the cards',
@@ -44,6 +49,7 @@ import { registerAnswers } from '../core/answers'
 import { registerAnswerView } from '../core/answerview'
 import { registerFeed } from '../core/feed'
 import { registerForks } from '../core/forks'
+import { registerHost } from '../core/host'
 import { registerPanes } from '../core/pane'
 import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
@@ -60,6 +66,7 @@ import { registerSqueeze } from '../squeeze/seam'
 import { registerTelemetry } from '../telemetry/telemetry'
 import { registerThreads } from '../threads/seam'
 import { registerTray } from '../tray/seam'
+import { registerHandoff } from './handoff'
 import { registerKeys } from './keys'
 import { registerPath } from './path'
 import { registerWatch } from './watch'
@@ -67,6 +74,7 @@ import { registerWatch } from './watch'
 export const register: Register = (on, options) => {
   registerSettings(on, options)
   registerTelemetry(on, 'first')
+  registerHost(on, options)
   registerPath(on, options)
   registerWatch(on, options)
   registerPrompts(on, options)
@@ -75,6 +83,7 @@ export const register: Register = (on, options) => {
   registerForks(on, options)
   registerTell(on, options)
   registerFeed(on, options)
+  registerHandoff(on, options)
   registerAnswers(on, options)
   registerPanes(on, options)
   registerKeys(on, options)

@@ -1,22 +1,22 @@
 // Assistant markdown: react-markdown with remark-gfm, the `[[value|ref]]` tokens turned into chips, and each mark,
 // `[words](#)`, drawn as its check says (marks/Mark.tsx). In main's chat a rehype pass wraps the words of each passage
 // a check commented on in <mark>, tinted in the check's color, which opens its comment on a click (AnswerMarksContext,
-// chat/answerComments.ts). The tokens are
+// chat/answerComments.ts), before a citation on the same words opens (MdMark). The tokens are
 // hidden from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns
 // the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
 // re-parses only the tail.
 import { Fragment, createContext, memo, useContext, useMemo, useState, type JSX, type ReactNode } from 'react'
 import Markdown, { type Components, type ExtraProps, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Element, Properties, Root, Text } from 'hast'
+import type { Element, Properties, Root, RootContent, Text } from 'hast'
 import { MarkdownCode } from '../components/Code'
 import { findQuote } from '../lib/quoteFind'
-import { plainQuote, type AnswerMark } from './answerComments'
+import { nextMark, plainQuote, type AnswerMark } from './answerComments'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip, ShownTogether } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { parseRef, refPaths, shownValue, splitValueRef } from '../lib/refs'
-import { Mark, MarkItems } from '../marks/Mark'
+import { CiteWordsContext, Mark, MarkItems } from '../marks/Mark'
 import { asChecked, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
 export interface ChipCtx {
@@ -229,29 +229,81 @@ export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {
   }
 }
 
-/** What a tinted passage's click does: open its comment in a popover beside it (chat/Rows, AnswerComment.tsx). */
-export const AnswerMarksContext = createContext<{ open: (id: string) => void } | null>(null)
+/** The text a node starts with, inside the elements it opens with (a tint's <mark>), or null. */
+const leadText = (node: RootContent | undefined): Text | null => (node?.type === 'text' ? node : node?.type === 'element' && node.tagName !== 'br' ? leadText(node.children[0]) : null)
+
+/** rehype plugin: a hard break breaks the line once. The line ending markdown writes after each <br> becomes a space,
+ * also inside a tint that wraps it, since a paragraph that shows its line endings (styles/chat.css, white-space:
+ * pre-line) would break the line there a second time. The space does not show at the start of the line, and it keeps
+ * the two lines' words apart for code that reads the text alone, such as a click on text with the ask key
+ * (pointer/anchors.ts chunkAt), which takes the paragraph's words for the new thread. It runs last, so the passes before
+ * it read the line ending as it was. */
+export function rehypeOneBreak() {
+  const walk = (node: Root | Element): void =>
+    node.children.forEach((child, i) => {
+      if (child.type !== 'element') return
+      if (child.tagName !== 'br') return walk(child)
+      const next = leadText(node.children[i + 1])
+      if (next?.value.startsWith('\n')) next.value = ` ${next.value.slice(1)}`
+    })
+  return (tree: Root) => walk(tree)
+}
+
+/** The comment open beside its passage in main's chat, and what opens one in its place or, with null, closes it
+ * (chat/Rows, AnswerComment.tsx). */
+export interface AnswerMarks {
+  opened: string | null
+  show: (id: string | null) => void
+}
+export const AnswerMarksContext = createContext<AnswerMarks | null>(null)
+
+const TINT = 'mark.answer-tint[data-answer-comment]'
+
+/** The comments whose tints stand over a tint's words, from the innermost out: a tint wraps words alone, so those over
+ * them are the tint itself and the tints around it. */
+function tintsOver(el: HTMLElement): string[] {
+  const out: string[] = []
+  for (let t = el.closest<HTMLElement>(TINT); t; t = t.parentElement?.closest<HTMLElement>(TINT) ?? null) {
+    const id = t.dataset.answerComment
+    if (id && !out.includes(id)) out.push(id)
+  }
+  return out
+}
 
 function MdMark(props: JSX.IntrinsicElements['mark'] & ExtraProps) {
   const ctx = useContext(AnswerMarksContext)
+  const cite = useContext(CiteWordsContext)
   const { node: _node, ...rest } = props
   const id = (props as Record<string, unknown>)['data-answer-comment']
   if (typeof id !== 'string' || !ctx) return <mark {...rest} />
+  // a click, or Enter or Space, on the words opens the next of the marks over them (answerComments.ts nextMark): the
+  // comments from the innermost out, then the citation whose words hold the tint, one of them open at a time
+  const press = (el: HTMLElement) => {
+    const over = tintsOver(el)
+    const shown = ctx.opened == null ? -1 : over.indexOf(ctx.opened)
+    const next = nextMark(over.length + (cite ? 1 : 0), shown >= 0 ? shown : cite?.pinned() ? over.length : -1)
+    if (next != null && next < over.length) {
+      cite?.close()
+      ctx.show(over[next])
+    } else {
+      if (shown >= 0) ctx.show(null)
+      if (next != null) cite?.pin()
+    }
+  }
   return (
     <mark
       {...rest}
       role="button"
       tabIndex={0}
       onClick={(e) => {
-        // a citation's words in the passage open the citation (marks/Mark), so the two popovers never open at once
-        if ((e.target as HTMLElement).closest?.('.mark-words')) return
         e.stopPropagation()
-        ctx.open(id)
+        press(e.currentTarget)
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          ctx.open(id)
+          e.stopPropagation()
+          press(e.currentTarget)
         }
       }}
     />
@@ -271,12 +323,12 @@ function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
 const components: Components = { span: MdSpan, a: MdLink, code: MarkdownCode, img: MdImage, mark: MdMark }
 // a single ~ is no strikethrough: page and file names hold it (`dse~Agent`, live check L21); ~~two~~ still is
 const remarkPlugins: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
-const rehypePlugins = [rehypeRefChips, rehypeNumericCells]
+const rehypePlugins = [rehypeRefChips, rehypeNumericCells, rehypeOneBreak]
 
 const NO_MARKS: readonly AnswerMark[] = []
 
 const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { text: string; marks?: readonly AnswerMark[] }) {
-  const plugins: Options['rehypePlugins'] = marks.length ? [rehypeRefChips, [rehypeAnswerMarks, { marks }], rehypeNumericCells] : rehypePlugins
+  const plugins: Options['rehypePlugins'] = marks.length ? [rehypeRefChips, [rehypeAnswerMarks, { marks }], rehypeNumericCells, rehypeOneBreak] : rehypePlugins
   return (
     <Markdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={components}>
       {protectTokens(text)}

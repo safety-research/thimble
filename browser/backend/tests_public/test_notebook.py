@@ -73,11 +73,11 @@ async def test_create_and_run_print(client, corpus, workspaces_tmp):
 @pytest.mark.parametrize("wrap", ["none", "srt", "bwrap"])
 async def test_a_kernel_whose_port_another_process_took_first_starts_again_on_new_ports(wrap, client, corpus,
                                                                                         monkeypatch):
-    """write_connection_file finds free ports and lets them go; a process that binds one before the kernel does keeps
-    it, and the kernel ends at its start. Here another process's zmq socket holds the first file's shell port, so the
-    server's socket also meets a peer that is not the kernel, after which zmq drops its only pipe and a blocking send
-    would never return. The start never waits on the socket: it sees the kernel end, also inside a sandbox that
-    outlives it a while, and starts it on new ports."""
+    """connection_info finds free ports and lets them go; a process that binds one before the kernel does keeps it, and
+    the kernel ends at its start. Here another process's zmq socket holds the first file's shell port, so the server's
+    socket also meets a peer that is not the kernel, after which zmq drops its only pipe and a blocking send would
+    never return. The start never waits on the socket: it sees the kernel end, also inside a sandbox that outlives it a
+    while, and starts it on new ports."""
     import zmq
     from test_kernel_sandbox import _wrap_works
 
@@ -86,17 +86,17 @@ async def test_a_kernel_whose_port_another_process_took_first_starts_again_on_ne
     monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
 
     ctx, taken = zmq.Context(), []
-    real = notebook.write_connection_file
+    real = notebook.connection_info
 
-    def first_port_taken(fname: str, **kw):
+    def first_port_taken(**kw):
         if taken:
-            return real(fname, **kw)
+            return real(**kw)
         # the foreign socket holds its port before the file names it, so no other process can take it in between
         sock = ctx.socket(zmq.PUB)
         taken.append(sock)
-        return real(fname, **{**kw, "shell_port": sock.bind_to_random_port("tcp://127.0.0.1")})
+        return real(**{**kw, "shell_port": sock.bind_to_random_port("tcp://127.0.0.1")})
 
-    monkeypatch.setattr(notebook, "write_connection_file", first_port_taken)
+    monkeypatch.setattr(notebook, "connection_info", first_port_taken)
     try:
         cell = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells", json={"code": "print(6 * 7)"})).json()
         ran = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells/{cell['id']}/run")).json()

@@ -29,13 +29,14 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failNotice, reasonOf } from '../bar/notice'
+import { failNotice } from '../bar/notice'
 import { closePane, paneShows } from '../core/pane'
 import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import type { TurnRec } from '../core/answers'
+import { errorWordsOf } from '../marks/checker'
 import { CLAIMS_FIND as FIND, CLAIMS_REPAIR, claimsThreadScope as threadScope, drawClaims, repairShown } from './pane'
 import { claimCount, claimsBarWords, claimsBright, claimsDigest, claimsFresh, claimsLit, claimsToFind, claimsUnread as unread, findEnd, findStart, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
@@ -150,7 +151,7 @@ export const registerClaims: Register = (on, options) => {
       if (!(await repairShown($))) return next(e)
       return { element: e.element }
     } catch (err) {
-      failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'claims:repair')
+      failNotice($, `The repair did not start: ${await errorWordsOf($, err)}. Press x to try again.`, 'claims:repair')
       return { element: e.element }
     }
   }).catch(($, e, next) => next(e))

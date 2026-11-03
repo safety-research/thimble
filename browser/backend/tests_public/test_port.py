@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 from conftest import bound_port, free_port
 
-from app import cli, config, hook_auth, llm, permission_hook, procs
+from app import cli, config, hook_auth, permission_hook, procs
 
 PORT_FREE = cli.port_free  # before the home fixture stands it in
 HEALTH_LEADER, FOREIGN_HOME = cli.health_leader, cli.foreign_home  # the same
@@ -272,7 +272,6 @@ def test_the_launcher_links_to_and_stops_its_own_server_alone_beside_a_thimble_s
     THIMBLE_PORT naming the held port, the start fails with the server's error, and no link is printed."""
     monkeypatch.setattr(cli, "backend_cmd", _stand_in_cmd)
     monkeypatch.setattr(cli, "to_terminal", lambda: True)  # the launcher's terminal, which gets a code
-    monkeypatch.setattr(llm, "scrub_env", lambda: [])  # the launcher's own scrub stays out of the test's process
     taken = free_port()
     monkeypatch.setattr(cli, "DEFAULT_PORT", taken)
     cli.ensure_home()

@@ -5,6 +5,7 @@ const STUBS: Record<string, string> = {
   labels: 'LABEL {{NAME}} | {{VALUES}}\n{{RECORDS}}',
   observer: 'OBSERVER\n{{LENSES}}',
   'observer-turn': 'TURN {{MESSAGES}}\nKEYS {{ROW}}{{SHOWN}}\nCARDS {{OBJECTS}}\nREAD {{COVERAGE}}\nGIVEN {{DIGEST}}{{RULES}}\nREPLY {{SKELETON}}',
+  'fix-request': 'REQUEST {{WORDS}}',
 }
 
 /** The stub text of a registry path (`…/prompts/<text>.md`), or undefined for any other path. */
@@ -15,10 +16,15 @@ export function promptStub(path: string): string | undefined {
 }
 
 /** The commands the hooks run for their folders, answered: core/home.ts tempDir has the shell make its folder and
- *  print the folder's real path (the folder as named), and cards/ask.ts runs sandbox/setup.mjs, whose answer is a
- *  sandbox that works (`sandbox` gives another); null for any other command. */
+ *  print the folder's real path (the folder as named), claudeTempDir has it print Claude Code's own temp folder in the
+ *  folder named (a made-up user 1000's), claudeTempFolder a folder in that one, and cards/ask.ts runs
+ *  sandbox/setup.mjs, whose answer is a sandbox that works (`sandbox` gives another); null for any other command. */
 export function tempRun(argv: string[], sandbox: Record<string, unknown> = {}): { exitCode: number; stdout: string; stderr: string } | null {
-  if (argv[0] === 'sh' && String(argv[2] ?? '').includes('pwd -P')) return { exitCode: 0, stdout: `${argv[argv.length - 1]}\n`, stderr: '' }
+  const named = String(argv[argv.length - 1])
+  const claude = (root: string) => (root.endsWith('/claude-1000') ? root : `${root}/claude-1000`)
+  if (argv[0] === 'sh' && String(argv[2] ?? '').includes('mkdir -p -m 700 "$d/$2"')) return { exitCode: 0, stdout: `${claude(String(argv[4]))}/${named}\n`, stderr: '' }
+  if (argv[0] === 'sh' && String(argv[2] ?? '').includes('claude-"$(id -u)"')) return { exitCode: 0, stdout: `${claude(named)}\n`, stderr: '' }
+  if (argv[0] === 'sh' && String(argv[2] ?? '').includes('pwd -P')) return { exitCode: 0, stdout: `${named}\n`, stderr: '' }
   if (String(argv[1] ?? '').endsWith('/sandbox/setup.mjs')) {
     const s = { ok: true, node: '/made-up/bin/node', srt: '/made-up/.thimble/srt/0.0.79', platform: 'linux', why: '', fix: '', ...sandbox }
     return { exitCode: s.ok ? 0 : 1, stdout: `${JSON.stringify(s)}\n`, stderr: '' }

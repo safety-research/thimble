@@ -4,8 +4,9 @@
 // wrong or unconfirmed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model and
 // without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence names one
 // of the session's real Bash calls (the checker's or main's) by a part of its output, and that call's real output must
-// show the words; card evidence names a place of one of the session's cards (cards/store.ts), whose value must show
-// them. Before the forks start, the cards' places and values are written to a file the checker greps (cardsIndex).
+// show the words; card evidence names places of the session's cards (cards/store.ts), whose values must show them, or
+// whose number shows a count of what they are. Before the forks start, the cards' places and values are written to a
+// file the checker greps (cardsIndex).
 // Its result is what the person sees.
 //
 //   noteRow($, row, text)     a text row of main's reply, as session.append stored it
@@ -18,16 +19,31 @@
 //   refusalOf(deny)           what Claude Code's refusal of a check says: auto mode's classifier gave no verdict on it
 //                             and gives none on such a call this session (`unreviewed`), could not answer for now
 //                             (`unavailable`), refused it (`judged`), a mode that refuses what no rule allows refused it
-//                             (`mode`: don't ask mode), or another cause (`other`)
+//                             (`mode`: don't ask mode), a deny rule refused it (`rule`), or another cause (`other`)
 //   cannotStart(deny, o)      the line a check that Claude Code refused gives: what refused it, and for `unreviewed` and
 //                             `mode` the key that lets thimble start its checks (g, ALLOW_KEY), until the person gave that
 //                             OK, where Claude Code takes thimble's allow
 //   checkKey($, key, until)   g while that line shows: the person's OK for this session, and the check it is about
 //                             starts again (hooks/keys.ts)
+//   repairOk($, m)            x on a failed citation: the person's OK that its check needs, which x gives before the
+//                             repair starts, so one press is enough (`give`; `undo`, as a word typed after x undoes g):
+//                             thimble's checks this session (their spawn and their Python), as g gives it, and each
+//                             file the citation's check could not read where Claude Code asked nobody; null where
+//                             nothing the person does here lets its check run, so x is not offered
 //   allowsCheck($, e, o, v)   whether thimble answers allow to Claude Code's verdict `v` on a spawn (tool.check,
 //                             marks/register.ts): a checker's spawn of thimble's own, once the person gave that OK,
 //                             where Claude Code itself would ask, never where a rule, a hook, a setting or another
 //                             plugin decides
+//   allowsPython($, e, v)     the same for a call of a checker fork's (tool.check): a Bash call that runs Python as the
+//                             browser workbench's checker may (runsPython), under the same OK and on the same terms,
+//                             where Claude Code asks nobody (the event names no approver)
+//   readEnded($, e, r)        a checker's read of one file that Claude Code refused (tool.call, marks/register.ts): the
+//                             file its check could not read, by the tool that read it (oneRead), and what lets it
+//                             (readFix); endCheck gives it to the failed citations whose check needed it (MarkItem
+//                             `unread`), unless no evidence may cite it (the validator's `outside`)
+//   allowsRead($, e, v)       whether thimble answers allow to Claude Code's verdict `v` on a checker's read (tool.check):
+//                             the same tool's read of one file the person let thimble's checks read this session
+//                             (repairOk), where Claude Code itself would ask and asks nobody
 //   awaitsCheck($, row)       whether a row of main's is in the turn that runs or the one whose check starts now
 //   repairOf($, row, n)       x on a failed citation (tray): what a check of that one mark again needs; for a mark
 //                             whose check did not run, the check itself
@@ -36,9 +52,12 @@
 //                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
 //                             (`hold`, marks/register.ts holds it) and is refused when the person typed a word
 //   autoRepair($, agentId)    after a reply's check ended (endCheck): each citation it found wrong or could not confirm
-//                             is repaired at once, as x repairs it; a repair's own failure starts none. Call it in a
-//                             hook around endCheck's (marks/register.ts): the repair's fork skips the hook that spawned
-//                             it, so its end still reaches endCheck
+//                             is repaired at once, as x repairs it, but one whose check could not read a file it
+//                             needed; a repair's own failure starts none. Call it in a hook around endCheck's
+//                             (marks/register.ts): the repair's fork skips the hook that spawned it, so its end still
+//                             reaches endCheck
+//   errorWordsOf($, x, n)     the words of an error or a refusal a line quotes (bar/notice.ts reasonOf), each path of
+//                             this machine in them named as the validator names a cited file (core/text.js errorWords)
 //
 // The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + verify`,
 // Claude's marks after each reply; `auto cite` (the default), a reply's marks wait `deferred` (drawn as the reply's own
@@ -52,7 +71,31 @@
 // marks wait, not checked (`deferred`, a dim ? after each), opening one checks it, and one line says why (cannotStart):
 // once a session for each cause while the replies' own checks run into it, and each time a check the person asked for
 // (opening a citation, x) cannot start. A line that offers the person's OK says it at each check it stops, until they
-// give it: that OK is what lets the checks run.
+// give it: that OK is what lets the checks run. x on a failed citation gives that OK, as g does, before it starts the
+// repair (repairOk), whether or not Claude Code refused a check yet, so one press is enough where Claude Code asks
+// nobody: the repair starts where auto mode's classifier would give it no verdict, and its Python runs in don't ask
+// mode. The OK answers no ask Claude Code puts to someone (allowsPython, allowsRead), so in default mode the person's
+// dialog stays on the check's Python.
+// Where no OK lets the check start (auto mode in a remote Cowork session, a refusal that came after the OK, auto mode's
+// classifier that judged the check, a deny rule), x is not offered, and a failed citation opened says that line again.
+// That refusal stands until a check starts.
+//
+// A check whose read of a file Claude Code refused leaves that file on each citation it fails whose check needed it
+// (readEnded, MarkItem `unread`): a check of one citation needed each file it could not read; a check of several, each
+// file its answer for the citation names (namesFile). The citation's card names the file, and no repair starts by itself
+// (autoRepair), since the same refusal would stop it; the check's other citations are repaired as any are. Where Claude
+// Code asked nobody (don't ask mode, no prompt it could show), x gives the person's OK for that one file, read by the
+// same tool, and thimble answers allow on its checks' reads of it (allowsRead); where it asked the person, who did not
+// say yes, x starts the repair, whose read Claude Code asks about again in its own dialog; where a rule, a setting or
+// auto mode's classifier refused it, or the classifier gave no verdict on it (Claude Code put that ask to the person,
+// through the classifier, and the OK answers no such ask), x is not offered. Only a read of one file
+// counts (oneRead): a Read, or a Grep of one regular file. A Grep of a folder reads each file in it, and a Glob lists
+// a folder, so their refusal names no file, and no OK covers them. A file no evidence may cite goes on no citation:
+// one outside every folder the validator takes a cited file from (the session's folders, and the temp folders where
+// Claude's own code counts), as the validator itself answers for the files the check could not read (its `outside`,
+// engine/kernel/evidence.py uncitable). No read of it would count, so its citations keep the validator's reason (`The
+// check cited a file outside the folder this session works in.`) and are repaired as any are, since a repair may find
+// evidence inside those folders.
 //
 // Claude Code decides the fork's spawn as it decides a call of Claude's (Claude Code 2.1.307). In auto mode it lets a
 // plugin's own call run without auto mode's classifier, unless the person's settings give the classifier rules of
@@ -65,7 +108,11 @@
 // only tighten a subagent's call. So the line names what refused the check and, where Claude Code takes that answer,
 // offers g: the person's OK lets thimble answer Claude Code's own ask on its own checks with allow this session
 // (checksAllowed, allowsCheck), never a deny (a deny rule wins) or an ask a rule, a hook or another plugin made, and the
-// check the line is about starts again. A classifier that judged the check, or could not answer for now, is said as
+// check the line is about starts again. The same OK, on the same terms, lets its checker forks run Python (allowsPython),
+// which don't ask mode refuses too: a Bash call that runs one script with python3 or python, as the browser workbench's
+// checker runs with `--allowedTools Bash(python3:*) Bash(python:*)`; never main's call or another agent's, and never
+// where Claude Code asks someone (the tool.check event names an approver: the person's dialog, auto mode's classifier,
+// a host), whose ask stays theirs. A classifier that judged the check, or could not answer for now, is said as
 // such; the mode stays the person's. No other line or card takes g (hooks/keys.ts ownKeys), so a press meant for
 // another never gives this OK.
 //
@@ -73,8 +120,9 @@
 // that one mark ended (repairTellText): who started it, the person (x) or thimble (auto).
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent),
-// checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about); the marks themselves are
-// in store.ts
+// checksAllowed (the person's OK, g), checksHeld (the check the line that offers g is about), checksRefusing (the line
+// of a refusal that stands for the session), checksReads (the files the person let thimble's checks read, each by the
+// tool that reads it); the marks themselves are in store.ts
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -82,15 +130,15 @@ import { cardsDir } from '../cards/store'
 import { failCleared, failLineNow, failNotice, noticeLine, reasonOf } from '../bar/notice'
 import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
-import { tempDir } from '../core/home'
+import { claudeTempDir, tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
-import { fenced } from '../core/text.js'
+import { errorWords, fenced } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { choiceOf, claudeCites } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
 import { marksIn, plainSentence, sentenceOf } from './message.js'
-import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, notRun, type Reply, replyKeyOf, replyOf } from './store'
+import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, notRun, type OneRead, type Reply, replyKeyOf, replyOf, type Unread } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -301,8 +349,15 @@ export function refusingMode(deny: string): string | null {
  *  ask for one`, or a failure it calls hard). `unavailable`: it could not answer for now (busy, rate-limited, told to
  *  wait): a later check may run. `judged`: it judged the check and refused it, `reason` why. `mode`: a permission mode
  *  that refuses each call no rule allows refused it (`mode`, don't ask mode: `Claude Code is running in don't ask
- *  mode`). `other`: another cause (a deny rule, another plugin's hook), `reason` the refusal's first sentence. */
-export type Refusal = { kind: 'unreviewed' | 'unavailable' | 'judged' | 'mode' | 'other'; reason: string; mode?: string }
+ *  mode`). `rule`: a deny rule refused it (DENY_RULE), `reason` the refusal's first sentence. `other`: another cause
+ *  (another plugin's hook), `reason` the refusal's first sentence. */
+export type Refusal = { kind: 'unreviewed' | 'unavailable' | 'judged' | 'mode' | 'rule' | 'other'; reason: string; mode?: string }
+
+/** Claude Code's words where a deny rule refused a call (Claude Code 2.1.312): a rule on the whole tool (`Permission to
+ *  use Agent has been denied.`, and nothing after it), on what it is called with (`Permission to use Agent with fork
+ *  has been denied.`), and the rule named (`… has been denied by your rule …`, `Agent type 'fork' has been denied by
+ *  permission rule 'Agent(fork)' from userSettings.`). */
+const DENY_RULE = /^Permission to use \S+ has been denied\.\s*$|^Permission to use \S+ with .+ has been denied\.|\bhas been denied by (?:your rule|permission rule)\b/
 
 export function refusalOf(deny: string | undefined): Refusal {
   const said = String(deny || '')
@@ -315,7 +370,26 @@ export function refusalOf(deny: string | undefined): Refusal {
     if (/\bgave no verdict\b|\bhard failure\b/.test(said)) return { kind: 'unreviewed', reason: reasonOf(said) }
   }
   if (mode === "don't ask mode") return { kind: 'mode', mode, reason: reasonOf(said) }
+  if (DENY_RULE.test(said)) return { kind: 'rule', reason: reasonOf(said) }
   return { kind: 'other', reason: reasonOf(said || 'no reason given') }
+}
+
+/** The words of an error or a refusal that a line, a reason or a repair request of the citations quotes (bar/notice.ts
+ *  reasonOf), each path of this machine in them named as the validator names a cited file: by its path from the
+ *  session's folder when it lies there, else by its name alone (core/text.js errorWords), never by where that folder
+ *  lies. They are thimble's own words or Claude Code's, never the records' nor the check's, which are quoted as they
+ *  are. `n`: reasonOf's length. */
+export async function errorWordsOf($: Engine, x: unknown, n?: number): Promise<string> {
+  return reasonOf(errorWords(String((x as Error)?.message || x || ''), await whereOf($)), n)
+}
+
+/** The folders errorWords names a path from: the session's (the shell's, the one it started in), and the home folder. */
+async function whereOf($: Engine): Promise<{ cwd?: string; root?: string; home?: string }> {
+  try {
+    return { cwd: String(await $.session.cwd()), root: await startDir($), home: String((await $.env.get('HOME')) ?? '') }
+  } catch {
+    return {} // with no folder known, each path is named by its name alone
+  }
 }
 
 /** The key that gives thimble the person's OK to start its checks where Claude Code would ask about them and nobody
@@ -334,20 +408,26 @@ export type Line = { text: string; notice: boolean; kind: Refusal['kind']; offer
 /** Whether a line shown offers the person's OK (g). */
 const offersOk = (text: string | undefined) => !!text?.endsWith(OFFER)
 
+/** What the person can do where the OK cannot start thimble's checks: leave the mode that refused them. */
+const outside = (mode: string) => `Outside ${mode}, thimble can check them.`
+
 /** The line a check of citations that could not start gives (Claude Code's refusal, `deny`): what refused it. Where
  *  auto mode's classifier gave no verdict, or don't ask mode refused it, the key that lets thimble start its checks,
  *  until the person gave that OK (`allowed`), and where Claude Code takes thimble's allow: not in auto mode in a remote
- *  Cowork session (`cowork`). There, and after the OK, the line says what refused the check and offers nothing that
- *  could not work. A refusal by a mode is the person's mode at work, not thimble's failure, so its line is a notice. */
+ *  Cowork session (`cowork`). There, and after the OK, the line says what refused the check and that thimble checks
+ *  outside that mode, and offers no key that could not work. A refusal by a mode is the person's mode at work, not
+ *  thimble's failure, so its line is a notice; so is one by auto mode's classifier or a deny rule, which the line
+ *  names. */
 export function cannotStart(deny: string | undefined, o: { allowed?: boolean; cowork?: boolean } = {}): Line {
   const r = refusalOf(deny)
-  if (r.kind === 'unreviewed') return !o.allowed && !o.cowork ? { kind: r.kind, notice: true, offers: true, text: UNREVIEWED_LINE } : { kind: r.kind, notice: true, text: UNREVIEWED }
+  if (r.kind === 'unreviewed') return !o.allowed && !o.cowork ? { kind: r.kind, notice: true, offers: true, text: UNREVIEWED_LINE } : { kind: r.kind, notice: true, text: `${UNREVIEWED} ${outside('auto mode')}` }
   if (r.kind === 'mode') {
     const said = `Claude Code's ${r.mode} refused thimble's check of citations.`
-    return !o.allowed ? { kind: r.kind, notice: true, offers: true, text: `${said} ${OFFER}` } : { kind: r.kind, notice: true, text: said }
+    return !o.allowed ? { kind: r.kind, notice: true, offers: true, text: `${said} ${OFFER}` } : { kind: r.kind, notice: true, text: `${said} ${outside(r.mode!)}` }
   }
   if (r.kind === 'unavailable') return { kind: r.kind, notice: true, text: `Auto mode's classifier was unavailable for thimble's check of citations${r.reason ? ` (${r.reason})` : ''}, so Claude Code refused it. Open a citation to check it.` }
   if (r.kind === 'judged') return { kind: r.kind, notice: true, text: `Auto mode's classifier refused thimble's check of citations (${reasonOf(r.reason)}), so they are not checked.` }
+  if (r.kind === 'rule') return { kind: r.kind, notice: true, text: `A permission rule refused thimble's check of citations (${r.reason}), so they are not checked.` }
   return { kind: 'other', notice: false, text: `The check of the citations could not start (${r.reason}), so they are not checked. ${OPEN_ONE}` }
 }
 
@@ -356,6 +436,8 @@ const START = 'marks:start'
 const REFUSED = { plugin: 'thimble', key: 'checksRefused' } as const
 const ALLOWED = { plugin: 'thimble', key: 'checksAllowed' } as const
 const HELD = { plugin: 'thimble', key: 'checksHeld' } as const
+const REFUSING = { plugin: 'thimble', key: 'checksRefusing' } as const
+const FILES = { plugin: 'thimble', key: 'checksReads' } as const
 
 /** A check the line that offers g is about, which g starts again: a reply's (its marks that still wait) or a repair's
  *  (x). */
@@ -390,10 +472,68 @@ async function remoteCowork($: Engine): Promise<boolean> {
   }
 }
 
+/** The refusals that stand for the session, each kept with its line: no verdict, don't ask mode, and those no OK of
+ *  the person's answers, auto mode's classifier that judged the check and a deny rule. */
+const STANDING: Refusal['kind'][] = ['unreviewed', 'mode', 'judged', 'rule']
+
 /** The line Claude Code's refusal `deny` of a check gives now: with the person's OK as it stands, and where Claude Code
- *  takes thimble's allow. */
-async function lineOf($: Engine, deny: string | undefined): Promise<Line> {
-  return cannotStart(deny, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
+ *  takes thimble's allow. A refusal that stands for the session (STANDING) is kept, with its line, until a check starts
+ *  (repairOk). */
+async function refusedLine($: Engine, deny: string | undefined): Promise<Line> {
+  // its words, each path of this machine in them named as errorWordsOf names it, before its line quotes them
+  const said = deny === undefined ? deny : errorWords(String(deny), await whereOf($))
+  const line = cannotStart(said, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
+  if (STANDING.includes(line.kind)) await $.state.set(REFUSING, line as never)
+  return line
+}
+
+/** A check started: the line of one that could not start goes, and a refusal kept for the session no longer stands. */
+async function checkStarted($: Engine): Promise<void> {
+  await failCleared($, START)
+  if ((await $.state.get(REFUSING)).value) await $.state.set(REFUSING, null)
+}
+
+/** What x gives before a failed citation's repair starts: the person's OK (`give`), which a word typed after x takes
+ *  back (`undo`), as it takes back g's (hooks/keys.ts). */
+export type RepairOk = { give: () => Promise<void>; undo: () => Promise<void> }
+
+/** x on failed citation `m`: the person's OK that its check needs, which x gives before the repair starts, so that one
+ *  press is enough. The OK for thimble's checks this session, as g gives it (their spawn and their Python: allowsCheck,
+ *  allowsPython), unless given already, whether or not Claude Code refused a check yet: where Claude Code asks nobody
+ *  about them, the repair starts at the first press (auto mode's classifier that gives no verdict on a check's spawn)
+ *  and runs its Python (don't ask mode); an ask Claude Code puts to someone (the person's dialog, as in default mode,
+ *  or auto mode's classifier on the Python) stays theirs. And for each file its check could not read where Claude Code
+ *  asked nobody (MarkItem `unread`, `ok`), the OK for thimble's checks to read that file with the tool that was refused
+ *  (allowsRead). A file Claude Code asked the person about needs no OK here: Claude Code asks again as the repair reads
+ *  it. Null where nothing the person does here lets the check run: a refusal no OK answers (its line says why), a file
+ *  nobody here can let it read (the citation's card names it), or a citation that did not fail; the tray and the
+ *  Claims pane offer x only where it is not null. */
+export async function repairOk($: Engine, m: MarkItem | null): Promise<RepairOk | null> {
+  if (m?.status !== 'failed') return null
+  const line = ((await $.state.get(REFUSING)).value ?? null) as Line | null
+  if ((line && !line.offers) || m.unread?.some(u => u.fix === null)) return null
+  const allow = !(await checksAllowed($))
+  const have = ((await $.state.get(FILES)).value ?? []) as OneRead[]
+  // each read once, and only one not let before, so a word after x takes back only what x gave
+  const reads = (m.unread ?? []).filter(u => u.fix === 'ok').map(({ tool, file }) => ({ tool, file }))
+    .filter((r, k, all) => !have.some(h => sameRead(h, r)) && all.findIndex(o => sameRead(o, r)) === k)
+  return {
+    give: async () => {
+      if (allow) await $.state.set(ALLOWED, true)
+      if (reads.length) await update($, FILES, cur => [...(cur ?? []), ...reads.filter(r => !(cur ?? []).some(h => sameRead(h, r)))])
+    },
+    undo: async () => {
+      if (allow) await $.state.set(ALLOWED, null)
+      if (reads.length) await update($, FILES, cur => (cur ?? []).filter(h => !reads.some(r => sameRead(r, h))))
+    },
+  }
+}
+
+/** A failed citation opened while Claude Code's refusal of thimble's checks stands and no OK answers it (repairOk): its
+ *  line again, which says why x is not offered. */
+async function sayRefusing($: Engine): Promise<void> {
+  const line = ((await $.state.get(REFUSING)).value ?? null) as Line | null
+  if (line && !line.offers) await sayCannotStart($, line, true)
 }
 
 /** The words the forks of thimble's checks show as in /tasks, by which allowsCheck knows a checker's spawn: a reply's
@@ -419,6 +559,99 @@ export async function allowsCheck($: Engine, e: { input?: unknown }, origin: { p
   if (![CHECK_DESCRIPTION, OPENED_DESCRIPTION, AGAIN_DESCRIPTION, REPAIR_DESCRIPTION].includes(String(input.description))) return false
   if (input.subagent_type !== undefined && input.subagent_type !== 'fork') return false
   return checksAllowed($)
+}
+
+/** Whether a checker's Bash command runs Python as the browser workbench's checker may (`Bash(python3:*)`,
+ *  `Bash(python:*)`): one Python script (oneScript), whose program is python3 or python by that name. */
+function runsPython(command: string): boolean {
+  const program = String(command).trimStart().replace(/^cd\s+\S+[ \t]*(?:&&|;|\n)\s*/, '')
+  return oneScript(command) && /^python3?\s/.test(program)
+}
+
+/** Whether Claude Code puts its ask on call `e` to someone: the person (in their dialog, as in default mode, or through
+ *  auto mode's classifier) or a host's own callback, as the tool.check event names its approver (Claude Code 2.1.312).
+ *  No approver: nobody can be asked (don't ask mode, a session that shows no prompts), and Claude Code refuses its own
+ *  ask. */
+const someoneAsked = (e: { approver?: unknown }) => e.approver !== undefined && e.approver !== null
+
+/** Whether thimble answers allow at tool.check (marks/register.ts, for a checker fork's call) to Claude Code's verdict
+ *  `v` on a call `e`: a Bash call that runs Python (runsPython), once the person gave the OK for thimble's checks (g,
+ *  x), where Claude Code itself would ask and nobody is asked (don't ask mode would refuse it). An ask Claude Code puts
+ *  to someone (someoneAsked: the person's dialog, auto mode's classifier, a host) stays theirs, so thimble answers no
+ *  dialog the person would see. A deny, and an ask a rule, a hook, a setting or another plugin made, stand. */
+export async function allowsPython($: Engine, e: { tool?: unknown; input?: unknown; approver?: unknown }, v: Verdict): Promise<boolean> {
+  if (v.decision !== 'ask' || v.plugin !== undefined || v.rule || v.hook || v.setting || someoneAsked(e)) return false
+  if (String(e.tool) !== 'Bash' || !runsPython(String((e.input as { command?: unknown } | undefined)?.command ?? ''))) return false
+  return checksAllowed($)
+}
+
+/** What lets a check read a file whose read Claude Code refused with the words `said` (Claude Code 2.1.312's), as x acts
+ *  on it (Unread `fix`): `ok`, the person's OK, where Claude Code asked nobody (don't ask mode; no prompt it could
+ *  show), which thimble answers with allow (allowsRead); `ask`, Claude Code's own ask again, where the person did not
+ *  say yes to it; null where a deny rule (DENY_RULE), a setting or the classifier's judgment refused it, or auto mode's
+ *  classifier gave no verdict on it: Claude Code put that ask to the person, through the classifier, which the OK does
+ *  not answer, and the classifier gives none on such a call again. Undefined for a refusal that is no permission's (a
+ *  file that is not there), and for a classifier that could not answer for now, which a later check may get past. */
+export function readFix(said: string): Unread['fix'] | undefined {
+  const r = refusalOf(said)
+  if (r.kind === 'mode') return 'ok'
+  if (r.kind === 'unreviewed' || r.kind === 'judged' || r.kind === 'rule') return null
+  if (r.kind === 'unavailable') return undefined
+  if (/\btool use was rejected\b/.test(said)) return 'ask'
+  if (/^Permission to use \S+ has been denied\.\s|\bpermission prompts are not available\b/.test(said)) return 'ok'
+  if (/\bare blocked \(permissions\.\w+\)/.test(said)) return null
+  return undefined
+}
+
+/** The files each check that runs could not read, by the check's fork, until endCheck gives them to the citations whose
+ *  check needed them. */
+const unreadBy = new Map<string, Unread[]>()
+
+/** The one file a checker's read names, by the tool that reads it, or null where it names no one file: Read's
+ *  `file_path`, and Grep's `path`, which is one file only when it is a regular file (readsAlone). A Grep with no path
+ *  reads the shell's folder. A Glob lists a folder (its `path` must be one), and its absolute `pattern` names a folder of
+ *  its own, as hooks/temp_allow.py says. The path is absolute, as the citation's card shows it: a relative one names a
+ *  file from the shell's folder of the moment. */
+function oneRead(tool: unknown, a: { file_path?: unknown; path?: unknown } | undefined): OneRead | null {
+  const t = String(tool)
+  const file = t === 'Read' ? a?.file_path : t === 'Grep' ? a?.path : undefined
+  return typeof file === 'string' && file.startsWith('/') ? { tool: t as OneRead['tool'], file } : null
+}
+
+/** Whether a read of one file reads it alone: a Read does; a Grep does when its path is a regular file, not a folder,
+ *  whose every file it would read. */
+async function readsAlone($: Engine, r: OneRead): Promise<boolean> {
+  return r.tool === 'Read' || (await $.fs.stat(r.file).catch(() => null))?.kind === 'file'
+}
+
+/** Whether two reads are one tool's reads of one path. */
+function sameRead(a: OneRead, b: OneRead): boolean {
+  return a.tool === b.tool && a.file === b.file
+}
+
+/** A checker's read as its call ended (tool.call, marks/register.ts; `r` its result: Claude Code's error, its words as
+ *  `text`, or another plugin's `deny`): a read of one file (oneRead, readsAlone) that Claude Code refused, by a
+ *  permission (readFix), is noted with what lets the check read the file, for endCheck. */
+export async function readEnded($: Engine, e: { agentId?: string; tool: unknown; file_path?: unknown; path?: unknown }, r: { deny?: unknown; isError?: unknown; text?: unknown } | undefined): Promise<void> {
+  const read = oneRead(e.tool, e)
+  if (!e.agentId || !read) return
+  const said = String(r?.deny ?? (r?.isError ? r.text ?? '' : ''))
+  const fix = said ? readFix(said) : undefined
+  if (fix === undefined || !(await readsAlone($, read))) return
+  const had = unreadBy.get(e.agentId) ?? []
+  if (!had.some(u => sameRead(u, read))) unreadBy.set(e.agentId, [...had, { ...read, fix }])
+}
+
+/** Whether thimble answers allow at tool.check (marks/register.ts) to Claude Code's verdict `v` on a checker's read `e`:
+ *  a read of one file (oneRead, readsAlone) that the person let thimble's checks make this session (x, repairOk), by
+ *  the same tool and named as the refused read named it, where Claude Code itself would ask and nobody is asked. An ask
+ *  Claude Code puts to someone (someoneAsked) stays theirs. A deny, and an ask a rule, a hook, a setting or another
+ *  plugin made, stand. */
+export async function allowsRead($: Engine, e: { tool?: unknown; input?: unknown; approver?: unknown }, v: Verdict): Promise<boolean> {
+  if (v.decision !== 'ask' || v.plugin !== undefined || v.rule || v.hook || v.setting || someoneAsked(e)) return false
+  const read = oneRead(e.tool, e.input as { file_path?: unknown; path?: unknown } | undefined)
+  if (!read || !(((await $.state.get(FILES)).value ?? []) as OneRead[]).some(h => sameRead(h, read))) return false
+  return readsAlone($, read)
 }
 
 /** The marks split into the forks' shares, in order: one share up to PER_FORK marks, else as many as PER_FORK gives
@@ -495,7 +728,7 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
     template = await promptText($, 'checker')
   } catch (err) {
     await notChecked($, whole, now)
-    await sayCannotStart($, { notice: false, text: `thimble could not read its checker text (${reasonOf(err)}), so the citations are not checked. Reinstall thimble.` })
+    await sayCannotStart($, { notice: false, text: `thimble could not read its checker text (${await errorWordsOf($, err)}), so the citations are not checked. Reinstall thimble.` })
     return
   }
   const started: string[] = []
@@ -508,10 +741,10 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
       // what refused this share refuses the next ones too: they wait with it, and no more forks are asked for
       const rest: Check = { ...whole, marks: shares.slice(k).flat().map(m => m.n) }
       await notChecked($, rest, now)
-      await sayCannotStart($, await lineOf($, fork.deny), false, { kind: 'check', whole: rest, reply })
+      await sayCannotStart($, await refusedLine($, fork.deny), false, { kind: 'check', whole: rest, reply })
       break
     }
-    await failCleared($, START)
+    await checkStarted($)
     const agentId = fork.agentId
     const spawnedAt = Number(await $.clock.now())
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...c, agentId, spawnedAt } }))
@@ -598,11 +831,11 @@ async function startAgain($: Engine, a: Again, hold: RepairHold): Promise<void> 
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...a.whole, marks, agentId, spawnedAt: now } }))
     started.push(agentId)
   }
-  if (started.length) await failCleared($, START)
+  if (started.length) await checkStarted($)
   // what Claude Code refused waits as it did, and the line says why
   const refused = forks.flatMap((f, k) => (f.agentId ? [] : a.shares[k]!.marks))
   const deny = forks.find(f => !f.agentId)?.deny
-  if (refused.length) await sayCannotStart($, await lineOf($, deny), true, { kind: 'check', whole: { ...a.whole, marks: refused }, reply: a.reply, ...(a.note ? { note: a.note } : {}) })
+  if (refused.length) await sayCannotStart($, await refusedLine($, deny), true, { kind: 'check', whole: { ...a.whole, marks: refused }, reply: a.reply, ...(a.note ? { note: a.note } : {}) })
   if (started.length) await showRunning($, a.whole.key, a.whole.marks.length - refused.length, started)
 }
 
@@ -668,7 +901,7 @@ export async function repairOf($: Engine, row: string, n: number): Promise<Repai
   try {
     template = await promptText($, 'checker')
   } catch (err) {
-    return `thimble could not read its checker text (${reasonOf(err)}). Reinstall thimble.`
+    return `thimble could not read its checker text (${await errorWordsOf($, err)}). Reinstall thimble.`
   }
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
@@ -688,12 +921,13 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     if (held === hold) held = null
     if (hold.cancelled) return ''
     if (!fork.agentId) {
-      // a mode refused it: its line, as any check the person asked for says it, which g answers for this repair
-      const line = await lineOf($, fork.deny)
+      // a mode, auto mode's classifier or a deny rule refused it: its line, as any check the person asked for says it,
+      // which g answers for this repair where it offers g
+      const line = await refusedLine($, fork.deny)
       if (line.kind !== 'other') { await sayCannotStart($, line, true, { kind: 'repair', repair: r }); return '' }
-      return `The repair did not start (${reasonOf(fork.deny || 'no reason given')}). Press x on the citation to try again.`
+      return `The repair did not start (${await errorWordsOf($, fork.deny || 'no reason given')}). Press x on the citation to try again.`
     }
-    await failCleared($, START)
+    await checkStarted($)
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
     // the mark is checked again: its earlier result goes, its place and words stay
@@ -701,7 +935,7 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
       ...rep, settledAt: null,
       items: rep.items.map(m => {
         if (m.n !== r.n) return m
-        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, ...base } = m
+        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, unread: _u, ...base } = m
         return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const }
       }),
     }))
@@ -717,11 +951,13 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
 
 /** A citation opened (tray.ts openMark) whose reply waits to be checked until one is opened (Citations `auto cite`, or words the person asked about with c): its check,
  *  one fork for it alone, as a reply's check is made. Call it inside the hook of the press or key that opened it (the
- *  spawn is its first call). Nothing for a citation that is checked, or whose check runs. */
+ *  spawn is its first call). Nothing for a citation that is checked, or whose check runs; for a failed one, while a
+ *  refusal no OK answers stands, its line again (sayRefusing). */
 export async function checkOpened($: Engine, row: string, n: number): Promise<void> {
   const key = await replyKeyOf($, row)
   const r = key ? await replyOf($, key) : null
   const m = r?.items.find(x => x.n === n)
+  if (key && m?.status === 'failed') return await sayRefusing($)
   if (!key || !r || !m || m.status !== 'deferred' || choiceOf('citations') === 'off' || starting.has(`${key}:${n}`)) return
   const id = `${key}:${n}`
   starting.add(id)
@@ -735,13 +971,13 @@ export async function checkOpened($: Engine, row: string, n: number): Promise<vo
     const prompt = `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${note}`
     const fork = await spawnFork($, { kind: 'checker', prompt, description: OPENED_DESCRIPTION })
     if (!fork.agentId) {
-      const line = await lineOf($, fork.deny)
+      const line = await refusedLine($, fork.deny)
       const at = Number(await $.clock.now())
       const whole: Check = { agentId: '', key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: at, spawnedAt: at, ...(r.thread ? { thread: r.thread.agentId } : {}) }
-      await sayCannotStart($, line.kind !== 'other' ? line : { notice: false, text: `The check of citation ${n} could not start (${reasonOf(fork.deny || 'no reason given')}). Open it again to try again.` }, true, { kind: 'check', whole, reply, note })
+      await sayCannotStart($, line.kind !== 'other' ? line : { notice: false, text: `The check of citation ${n} could not start (${await errorWordsOf($, fork.deny || 'no reason given')}). Open it again to try again.` }, true, { kind: 'check', whole, reply, note })
       return
     }
-    await failCleared($, START)
+    await checkStarted($)
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
     await editReply($, key, rep => ({ ...rep, settledAt: null, items: rep.items.map(x => (x.n === n ? { ...x, status: 'checking' as MarkStatus } : x)) }))
@@ -760,8 +996,8 @@ const toRepair = new Map<string, { key: string; marks: number[] }>()
 /** After the check of fork `agentId` ended: a repair of each citation it found wrong or could not confirm, at once,
  *  with x's request, each in a fork of its own; the citation spins as for x, and its end replaces it as x's does. A
  *  repair's own end starts none (endCheck notes only a reply's check), so a citation that fails again stays failed and
- *  waits for x. A citation whose check did not run is left to x too: what stopped its check would stop this one. Call
- *  it inside a hook, as launchRepair. */
+ *  waits for x. A citation whose check did not run, or could not read a file it needed, is left to x too: what stopped
+ *  its check would stop this one. Call it inside a hook, as launchRepair. */
 export async function autoRepair($: Engine, agentId: string): Promise<void> {
   const due = toRepair.get(agentId)
   toRepair.delete(agentId)
@@ -803,20 +1039,36 @@ function giveUpLine(reason: string): string {
   return `The check of the citations stopped on an error, so they are not checked. ${CHECK_ONE}`
 }
 
-/** The validator's result for a fork's answer, or why there is none. */
-async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[]): Promise<{ results?: Any[]; problem?: string }> {
+/** The validator's result for a fork's answer, or why there is none; `outside`, those of the files the check could not
+ *  read (`unread`) that no evidence may cite, by the validator's own folders (engine/kernel/evidence.py uncitable). */
+async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[], unread: string[]): Promise<{ results?: Any[]; outside?: string[]; problem?: string }> {
   // main's calls too: the check may cite what main printed (the validator keeps the calls whose output the answer cites)
   // a side thread's answer: the thread's calls are its own code, as main's are a reply's
   const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(c.thread ? { agentId: c.thread } : undefined), 'main')]
+  // the temp folders Claude's own code may lie in: thimble's, and Claude Code's, which a command in its Bash sandbox
+  // gets as its TMPDIR
+  const tmp = [await tempDir($), await claudeTempDir($).catch(() => '')].filter(Boolean)
   const ran = await $.process.run(validateArgv($), {
     cwd: c.cwd, timeoutMs: 120000,
-    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: await tempDir($), cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
+    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls, ...(unread.length ? { unread } : {}) }),
   })
-  let out: { parsed: boolean; results: Any[] } | null = null
+  let out: { parsed: boolean; results: Any[]; outside?: unknown } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
-  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${reasonOf(String(ran.stderr || 'no output').trim().split('\n').pop())}), so they are not checked. ${CHECK_ONE}` }
+  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${await errorWordsOf($, String(ran.stderr || 'no output').trim().split('\n').pop())}), so they are not checked. ${CHECK_ONE}` }
   if (!out.parsed) return { problem: `The check of the citations gave no answer thimble could read, so they are not checked. ${CHECK_ONE}` }
-  return { results: out.results }
+  return { results: out.results, outside: Array.isArray(out.outside) ? out.outside.map(String) : [] }
+}
+
+/** Whether the answer for failed citation `m` names `file`, so its check needed that file: its reason or note, or a
+ *  file its evidence cites, holds the file's name as a whole name (not a part of a longer one), alone or at the end of
+ *  a path. */
+function namesFile(m: MarkItem, file: string): boolean {
+  const name = file.slice(file.lastIndexOf('/') + 1)
+  if (!name) return false
+  const whole = new RegExp(`(?<![\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w/-]|\\.\\w)`)
+  const ev = m.evidence as { file?: unknown; more?: { file?: unknown }[] } | undefined
+  const texts = [m.reason, m.note, ev?.file, ...(Array.isArray(ev?.more) ? ev.more.map(p => p?.file) : [])]
+  return texts.some(t => typeof t === 'string' && whole.test(t))
 }
 
 /** At the end of the checker's turn: its answer validated, each mark's status written, and the timings recorded. */
@@ -835,11 +1087,13 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     }
     const mine = new Set(c.marks)
     const items = ((await replyOf($, c.key))?.items ?? []).filter(m => mine.has(m.n))
-    let v: { results?: Any[]; problem?: string }
+    // the files the check could not read (readEnded)
+    const reads = unreadBy.get(e.agentId) ?? []
+    let v: { results?: Any[]; outside?: string[]; problem?: string }
     try {
-      v = await validate($, c, e, items)
+      v = await validate($, c, e, items, [...new Set(reads.map(u => u.file))])
     } catch (err) {
-      v = { problem: `thimble could not validate the check of the citations (${reasonOf(err)}), so they are not checked. ${CHECK_ONE}` }
+      v = { problem: `thimble could not validate the check of the citations (${await errorWordsOf($, err)}), so they are not checked. ${CHECK_ONE}` }
     }
     if (!v.results) {
       await giveUp($, c, 'thimble could not validate its answer.', forkEnd)
@@ -848,16 +1102,25 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     }
     const byN = new Map(v.results.map(r => [Number(r.n), r]))
     const settled = Number(await $.clock.now())
+    // the files the check could not read, each on a citation it leaves failed (but one it found wrong) whose check
+    // needed it: a check of one citation needed each; a check of several, each file its answer for the citation names.
+    // A file no evidence may cite (the validator's `outside`) it did not need: no read of it would count. Its other
+    // citations are repaired as any are
+    const outside = new Set(v.outside ?? [])
+    const unread = reads.filter(u => !outside.has(u.file))
     const reply = await edit($, c, r => settle(r, settled, r.items.map(m => {
       if (!mine.has(m.n)) return m
       const res = byN.get(m.n)
-      if (!res) return notRun(m, 'Its answer left this citation out.')
-      const { n: _n, ...rest } = res
-      return { ...m, ...rest, shown: String(res.shown ?? m.words) }
+      const { n: _n, ...rest } = res ?? {}
+      const x: MarkItem = res ? { ...m, ...rest, shown: String(res.shown ?? m.words) } : notRun(m, 'Its answer left this citation out.')
+      if (x.status !== 'failed' || x.failedBy === 'check') return x
+      const needed = c.marks.length === 1 ? unread : unread.filter(u => namesFile(x, u.file))
+      return needed.length ? { ...x, unread: needed } : x
     })))
     if (!reply) return
-    // a reply's check: the citations it found wrong or could not confirm are repaired as soon as it ends (autoRepair)
-    const found = c.repair ? [] : reply.items.filter(m => mine.has(m.n) && m.status === 'failed' && m.failedBy !== 'none').map(m => m.n)
+    // a reply's check: the citations it found wrong or could not confirm are repaired as soon as it ends (autoRepair),
+    // but those whose check could not read a file it needed: what refused that read would refuse the repair's
+    const found = c.repair ? [] : reply.items.filter(m => mine.has(m.n) && m.status === 'failed' && m.failedBy !== 'none' && !m.unread).map(m => m.n)
     if (found.length) toRepair.set(e.agentId, { key: c.key, marks: found })
     const count = (s: string, by?: string) => reply.items.filter(m => mine.has(m.n) && m.status === s && (!by || m.failedBy === by)).length
     await record($, {
@@ -868,6 +1131,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     })
   } finally {
     // whatever ended the check, none of its marks stays checked
+    unreadBy.delete(e.agentId)
     await giveUp($, c, 'It ended before it judged this citation.', Number(await $.clock.now())).catch(() => undefined)
     await update($, RUNNING, cur => Object.fromEntries(Object.entries(cur ?? {}).filter(([id]) => id !== e.agentId)))
   }

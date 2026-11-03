@@ -6,17 +6,18 @@
 // Not prompt.context: where an organization manages Claude Code, Claude Code's built-in cc-plugin-sec-default sends
 // that event past the plugins a person installs, and prompt.submit's context reaches Claude on every machine.
 //
-// The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a
-// switched-off feature is left out; while Claude does not cite (Citations manual or off), the citations in the other
-// sections' examples read as plain words. A mode that changes what the analyst does adds one sentence at the end (modesNow):
-// Citations manual, and Minimal. A switch changed later makes a different text, which the next prompt carries beside
-// the copy the conversation holds.
+// The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a switched-off
+// feature is left out; while Claude does not cite (Citations manual or off), the citations in the other sections'
+// examples read as plain words. A mode that changes what Claude or the analyst does adds a sentence at the end
+// (modesNow): Cards on demand, and the modes in which citations, explainers or heads-ups come only when the analyst
+// asks. A switch changed later makes a different text, which the next prompt carries beside the copy the conversation
+// holds.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
-import { choiceOf, claudeCites, featureOn, minimalOn } from '../settings/features.mjs'
+import { choiceOf, claudeCites, featureOn } from '../settings/features.mjs'
 
 type Engine = EngineInterface
 
@@ -39,17 +40,20 @@ export function guidanceFor(text: string, on: (feature: string) => boolean, mode
   return modes.length ? `${out}\n\n${modes.join(' ')}` : out
 }
 
-/** One sentence on what comes only when the analyst asks for it, so Claude can say how thimble works now; with
- *  Minimal on, that nothing runs after Claude's replies. */
+/** The sentences on the modes Claude needs to know: with Cards on demand, that it draws a card only when the analyst
+ *  asks for one; and one on what else comes only when the analyst asks for it, so Claude can say how thimble works
+ *  now. */
 export function modesNow(): string[] {
   const asked = [
     choiceOf('citations') === 'manual' && 'citations (they select words and press c)',
     choiceOf('explain') === 'on demand' && 'explainers (e)',
     choiceOf('details') === 'on demand' && 'heads-ups (h)',
   ].filter(Boolean) as string[]
-  if (!asked.length) return []
   const list = asked.length > 1 ? `${asked.slice(0, -1).join(', ')} and ${asked.at(-1)}` : asked[0]
-  return [`${minimalOn() ? 'Minimal mode is on: nothing runs after your replies. ' : ''}These come only when the analyst asks: ${list}.`]
+  return [
+    ...(choiceOf('cards') === 'on demand' ? ['Draw a card only when the analyst asks for one.'] : []),
+    ...(list ? [`These come only when the analyst asks: ${list}.`] : []),
+  ]
 }
 
 /** The guidance's `## Cards` section, its temp folder filled in: what the card check of a card that does not fit holds

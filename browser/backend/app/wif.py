@@ -14,10 +14,12 @@ and where the identity token comes from, in `token_source`:
     file      the token in `token_file`, read again on each refresh (Kubernetes, GitHub Actions and similar)
     command   what `token_command` prints, run again on each refresh
 
-Without `token_source`, a `token_file` means file, a `token_command` means command, and otherwise it is google. The
-SDK's environment-variable names (ANTHROPIC_FEDERATION_RULE_ID and the others in ALIASES) are accepted as another
-spelling of the keys, read from the file only: the environment is never read. Nothing here prints or logs an ID or a
-token. An error names the file and the key, never a value.
+Without `token_source`, a `token_file` means file, a `token_command` means command, and otherwise it is google.
+`base_url` is the address that the token exchange and the calls go to (by default https://api.anthropic.com; https,
+or http to this machine). The SDK's environment-variable names (ANTHROPIC_FEDERATION_RULE_ID and the others in
+ALIASES) are accepted as another spelling of the keys, read from the file only: the environment is never read, so an
+ANTHROPIC_BASE_URL that the shell sets never gets the identity token. Nothing here prints or logs an ID or a token. An
+error names the file and the key, never a value.
 """
 from __future__ import annotations
 
@@ -29,12 +31,15 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 DEFAULT_AUDIENCE = "https://api.anthropic.com"
+DEFAULT_BASE_URL = "https://api.anthropic.com"
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")  # the hosts a base_url may reach over http, as the SDK allows
 IDS = ("federation_rule_id", "organization_id", "service_account_id", "workspace_id")
 REQUIRED = ("federation_rule_id", "organization_id")
 SOURCES = ("google", "file", "command")
-KEYS = (*IDS, "token_source", "audience", "token_file", "token_command")
+KEYS = (*IDS, "token_source", "audience", "token_file", "token_command", "base_url")
 # the SDK's own names for the same values, as its environment variables spell them
 ALIASES = {
     "ANTHROPIC_FEDERATION_RULE_ID": "federation_rule_id",
@@ -42,6 +47,7 @@ ALIASES = {
     "ANTHROPIC_SERVICE_ACCOUNT_ID": "service_account_id",
     "ANTHROPIC_WORKSPACE_ID": "workspace_id",
     "ANTHROPIC_IDENTITY_TOKEN_FILE": "token_file",
+    "ANTHROPIC_BASE_URL": "base_url",
 }
 COMMAND_TIMEOUT = 60  # seconds a token command may take
 
@@ -58,6 +64,7 @@ class Config:
     audience: str
     token_file: str
     token_command: tuple[str, ...]
+    base_url: str = DEFAULT_BASE_URL
 
     def describe(self) -> str:
         """The token source in words, for Settings and the log: never an ID."""
@@ -194,8 +201,21 @@ def load(path: str) -> Config:
         if not command:
             raise WifError(f"{p}: the command source needs token_command, a command line or a list of its words")
     audience = str(vals.get("audience") or DEFAULT_AUDIENCE).strip()
+    base_url = str(vals.get("base_url") or DEFAULT_BASE_URL).strip().rstrip("/")
+    if not _base_url_ok(base_url):
+        raise WifError(f"{p}: base_url is an https address (or http to this machine)")
     ids = {k: str(vals[k]).strip() for k in IDS if str(vals.get(k) or "").strip()}
-    return Config(p, ids, source, audience, token_file, command)
+    return Config(p, ids, source, audience, token_file, command, base_url)
+
+
+def _base_url_ok(url: str) -> bool:
+    """Whether `url` is an https address, or an http one of this machine (LOCAL_HOSTS)."""
+    try:
+        u = urlparse(url)
+        host = u.hostname
+    except ValueError:
+        return False
+    return bool(host) and (u.scheme == "https" or u.scheme == "http" and host in LOCAL_HOSTS)
 
 
 def stamp(path: str) -> str:

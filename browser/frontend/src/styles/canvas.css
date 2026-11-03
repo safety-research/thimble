@@ -2979,7 +2979,7 @@ button.bdetail-hist:hover {
 .bctl-btn.bctl-comments.is-open {
   background: var(--surface-tonal-hover);
 }
-/* its menu: the rows of the Report's Comments pane, on the menu's own paper */
+/* its menu: the checks' rows (report/Checks.tsx CheckRows), on the menu's own paper */
 .bcomments-pane.wu-checks {
   padding: 4px 6px 6px;
   border-top: 0;

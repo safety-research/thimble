@@ -13,8 +13,9 @@
 //     its words as what the analyst reads (lookAtCatchUp).
 // One worker takes the queue in order. When several messages wait (they came while a look ran), it takes them all in
 // one look whose prompt names each of them. Two looks never run at once, and a look never delays a turn. It looks only
-// where a person is (S.person): never in a `-p` run, and in a session Claude Code's background service runs only once
-// the person's first prompt came; never at a fork's or a subagent's messages.
+// where a person is (S.person): never where thimble's drawing does not show (core/host.ts: a `-p` run, a host that runs
+// Claude Code through its SDK, such as the desktop app's Code tab), and in a session Claude Code's background service
+// runs only once the person's first prompt came; never at a fork's or a subagent's messages.
 // The messages queued or being looked at are kept in $.state too: a reload of the plugin (each settings change is one)
 // stops the looks of the load before it (Claude Code cuts their forks, which answer `aborted`, and drops their timers),
 // and the next load's session.start hook queues those messages again. Any other look takes its messages out when it
@@ -39,8 +40,8 @@
 // A lens whose feature has a mode (Claims: auto, on demand, off) joins the look after each reply only in its `auto` mode;
 // else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims have not read,
 // for a look of that lens alone. While a look reads the claims, either way, the pane says they are being found
-// (claims/seam.ts claimsFindStart) in place of f. While Minimal is on no lens joins the look after each reply; h asks
-// for a look of the heads lens alone at one answer (headsUpsNow).
+// (claims/seam.ts claimsFindStart) in place of f. While Heads-ups is on demand, h asks for a look of the heads lens alone
+// at one answer (headsUpsNow).
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import { update, type EngineInterface, type Register } from 'claude-code'
 
@@ -52,6 +53,7 @@ import { CLAIMS_FIND, claimsFindEnd, claimsFindStart, claimsLookFailed, claimsMe
 import { messageOf, turnOf, turnOfRow, type TurnRec } from '../core/answers'
 import { textView } from '../core/answerview'
 import { readKept, runThimble, writeKept } from '../core/env'
+import { drawsHere } from '../core/host'
 import { modelWhy } from '../core/why.js'
 import { explainMerge, explainState } from '../explain/seam'
 import { sessionKey } from '../hooks/conversation'
@@ -408,13 +410,14 @@ export async function turnObserver($: Engine): Promise<void> {
 }
 
 export const registerObserver: Register = on => {
-  // who is at this session: a `-p` run never; a session of Claude Code's background service from the person's first
-  // prompt. A reload of the plugin: the looks the load before it did not finish, queued again
+  // who is at this session: never where thimble's drawing does not show (core/host.ts); a session of Claude Code's
+  // background service from the person's first prompt. A reload of the plugin: the looks the load before it did not
+  // finish, queued again
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
     const r = await next(e)
     try {
       const kind = String((await $.env.get('CLAUDE_CODE_SESSION_KIND').catch(() => undefined)) ?? '').trim()
-      S.person = e.isInteractive === false ? 'never' : kind ? 'later' : 'now'
+      S.person = !drawsHere() ? 'never' : kind ? 'later' : 'now'
     } catch {
       // a person is taken to be here
     }
