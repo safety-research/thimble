@@ -104,7 +104,6 @@ ASKED_TURNS = 2
 
 PROMPT = "thimble-fix"  # what main reads of the person's /thimble-fix (prompts/thimble-fix.md)
 FIXER_TEXT = "plugin:fixer"  # what opens the fixer's first message (plugin/prompts/fixer.md)
-NOT_GIVEN_TEXT = "plugin:fix-not-given"  # main's answer when the words never reached it (plugin/prompts/fix-not-given.md)
 
 
 @dataclass
@@ -120,8 +119,6 @@ _phase: dict[int, str] = {}  # fix id → fixing | testing | applying | restarti
 _asked: dict[str, _Asking] = {}
 # workspace → each /thimble-fix posted there that no turn of main's read yet, by the id of the event that carries it
 _waiting: dict[str, dict[str, _Asking]] = {}
-# the workspaces whose person's last /thimble-fix never reached main (words_dropped), until their next one
-_not_given: set[str] = set()
 _since: dict[int, float] = {}  # fix id → when this server's work on it began (a new fix, a round, a redo)
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
 _where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
@@ -1069,15 +1066,14 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     request with their fixes beside it (prompts/thimble-fix.md), as the terminal's /thimble-fix gives Claude
     (plugin/prompts/fix-request.md). Main starts the fix with fix_thimble in the turn that reads it or the next one
     (words_read, main_turn_ended), which takes the words and the page as they were now. Posted as main's event, so words
-    typed while main works wait for its turn's end, and their line waits in main's chat with them, as a message sent
-    then waits (events.post `command`). A fix's number alone tries a fix that failed or no longer fits again (redo), as
-    its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a try again."""
-    from . import events, prompts  # noqa: PLC0415
+    typed while main works wait for its turn's end. A fix's number alone tries a fix that failed or no longer fits again
+    (redo), as its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a try
+    again."""
+    from . import agents, events, prompts  # noqa: PLC0415
 
     words = (words or "").strip()
     if not words:
         raise HTTPException(400, EMPTY)
-    _not_given.discard(c)  # this is the person's last /thimble-fix now
     head = head_of(words)
     if head is not None and not head[2]:
         if why := problem():
@@ -1097,10 +1093,9 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     # the words count main's turns from the turn that reads them (words_read): a turn that runs now, and the turns of
     # messages posted before them, are not theirs
     _waiting.setdefault(c, {})[eid] = _Asking(words, page or "")
+    agents.mirror(c, "user", by=agents.BROWSER, text=said, event=eid)
     try:
-        # the line shows in main's chat as the person typed it: at once, or, while main works, waiting until main reads
-        # it at its turn's end, as a message sent while main works waits
-        out = events.post(c, events.MAIN, {"text": text}, mirror=False, line=said, command=said, event_id=eid)
+        out = events.post(c, events.MAIN, {"text": text}, mirror=False, line=said, event_id=eid)
     except HTTPException:
         _waiting.get(c, {}).pop(eid, None)
         raise
@@ -1123,18 +1118,6 @@ def words_read(c: str, event_id: str) -> None:
             return
 
 
-def words_dropped(c: str, event_id: str) -> None:
-    """An event that waited for main's turn goes unread (runtime.Space.drop_waiting: main's chat changed, the workspace's
-    folder went, the server stops): when it carries the person's /thimble-fix, its words never reached main, so no fix
-    starts from them, and main's fix_thimble reads that they did not reach it (NotGiven) until the person's next
-    /thimble-fix, as the terminal's skill reads it after words that never reached Claude."""
-    waiting = _waiting.get(c)
-    if not waiting or waiting.pop(event_id, None) is None:
-        return
-    _asked.pop(c, None)
-    _not_given.add(c)
-
-
 def main_turn_ended(c: str) -> None:
     """Main's turn ended (session.py): the person's /thimble-fix words go after ASKED_TURNS of main's turns from the turn
     that read them, as the terminal's do, so that fix_thimble called later on main's own (on the person's yes to main's
@@ -1150,24 +1133,13 @@ def main_turn_ended(c: str) -> None:
 NOT_ASKED = "a fix starts from the person's own words, which they type after /thimble-fix <what should work differently>."
 
 
-class NotGiven(HTTPException):
-    """fix_thimble after the person's last /thimble-fix whose words never reached main (words_dropped): no fix starts,
-    and `detail` is main's whole answer, the terminal's in the same case (plugin/prompts/fix-not-given.md)."""
-
-    def __init__(self) -> None:
-        from . import prompts  # noqa: PLC0415
-
-        super().__init__(409, prompts.load(NOT_GIVEN_TEXT).strip())
-
-
 async def from_tool(c: str, form: str) -> dict[str, Any]:
     """Main's fix_thimble after the person's /thimble-fix <words> here: their words, as they typed them, go to the fix,
     never main's; main's `form` names the fix they change, `N` a round of fix N (change), `new` or none a new fix
     (request), and the person's own `N …` or `new …` names it first. The page is as their /thimble-fix sent it. Main's
     chat gets the line that opens the fix's thread; main heard of it in the tool's result. With no /thimble-fix of the
     person's that main read to answer (none, one answered already, one older than ASKED_TURNS of main's turns, or one
-    still waiting for main's turn), no fix starts; when the words of their last one never reached main, main reads so
-    (NotGiven). {fix, kind: new | round | live}."""
+    still waiting for main's turn), no fix starts. {fix, kind: new | round | live}."""
     if c not in _asked and _waiting.get(c):
         # the record that brought the words to main's turn may be one the mirror has not read yet: it reads it now
         from . import session  # noqa: PLC0415
@@ -1177,8 +1149,6 @@ async def from_tool(c: str, form: str) -> dict[str, Any]:
             session._read_now(lv)
     a = _asked.pop(c, None)
     if a is None or not a.words:
-        if c in _not_given:
-            raise NotGiven()
         raise HTTPException(409, NOT_ASKED)
     if why := problem():
         raise HTTPException(409, why)

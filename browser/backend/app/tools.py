@@ -2873,8 +2873,6 @@ async def _h_fix_thimble(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
     try:
         got = await fixes.from_tool(ctx.c, str(args.get("words") or "").strip())
-    except fixes.NotGiven as e:
-        return ok(str(e.detail))  # the terminal's answer in the same case, whole
     except HTTPException as e:
         return ok(hint("fix_thimble-failed", why=_detail_text(e.detail)))
     rec = got["fix"]

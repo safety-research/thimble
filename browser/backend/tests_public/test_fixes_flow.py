@@ -106,14 +106,12 @@ def fixing(on, monkeypatch, tmp_path):
     fixes._fixers.clear()
     fixes._asked.clear()
     fixes._waiting.clear()
-    fixes._not_given.clear()
     k.restarts = restarts  # type: ignore[attr-defined]
     yield k
     fixes._phase.clear()
     fixes._fixers.clear()
     fixes._asked.clear()
     fixes._waiting.clear()
-    fixes._not_given.clear()
 
 
 WAIT_S = 60.0  # the most a test waits for the event it waits on, which a busy machine delays but never skips
@@ -1231,35 +1229,6 @@ async def test_main_s_own_call_before_its_turn_reads_the_person_s_words_starts_n
     assert "thimble started no fix" in said
     assert [c[0] for c in _fix_calls(fixing)] == ["new"]
     assert fixing.recs[1]["words"] == ["the legend hides its last row"]
-
-
-async def test_after_a_thimble_fix_whose_words_never_reached_main_fix_thimble_says_so_in_the_terminal_s_words(
-        fixing, monkeypatch, analyst):
-    # the person's /thimble-fix waits for main's running turn, and main's chat changes before main reads it: no fix
-    # starts from its words, and main's fix_thimble reads that they did not reach it, so the person types them again,
-    # as the terminal's skill reads it in the same case (one text, plugin/prompts/fix-not-given.md); the person's next
-    # /thimble-fix is their last one
-    from app import claude_access, llm, runtime
-    from test_main_waits import HangFirst
-
-    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
-    client = HangFirst([])
-    monkeypatch.setattr(llm, "client", lambda: client)
-    events.post(CORPUS, "main", {"text": "Which runs failed?"})
-    await _until(lambda: client.bodies, "main's first request was not sent")
-    await fixes.request_route(CORPUS, fixes.Asked(words="the legend hides its last row", page=PAGE), analyst)
-    assert await runtime._spaces[CORPUS].switch(None)  # a new chat: what waited for main goes unread
-    said = (await tools.call(CORPUS, "fix_thimble", {"words": "new"}, tool_use_id="toolu_f1")).text
-    shared = (fixes.plugin_dir() / "prompts" / "fix-not-given.md").read_text().strip()
-    assert said.endswith(f"\n{shared}") and said.count("thimble started no fix") == 1
-    assert shared.startswith("thimble started no fix: ") and "did not reach you" in shared
-    assert shared.endswith("so they type /thimble-fix and their words again.")
-    assert _fix_calls(fixing) == [] and _fixer_chats(CORPUS) == []
-    # the person's next /thimble-fix is their last one: until main reads its words, main reads how to ask for a fix
-    monkeypatch.setattr(events, "post", lambda *a, **k: {"id": k["event_id"]})
-    await fixes.ask(CORPUS, "the legend's title too")
-    said = (await tools.call(CORPUS, "fix_thimble", {"words": "new"}, tool_use_id="toolu_f2")).text
-    assert "/thimble-fix <what should work differently>" in said and "did not reach you" not in said
 
 
 async def test_a_fix_s_number_alone_tries_a_fix_that_failed_or_does_not_fit_again_as_its_try_again_does(

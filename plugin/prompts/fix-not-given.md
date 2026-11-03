@@ -1,1 +1,0 @@
-thimble started no fix: the words the person typed after their last /thimble-fix did not reach you as their prompt. Tell them in one short line that their words did not reach you, so they type /thimble-fix and their words again.

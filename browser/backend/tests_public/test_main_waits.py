@@ -107,62 +107,6 @@ async def test_stop_keeps_a_message_that_waited_and_main_answers_it_next(on, mon
     assert got[-1] == ("done", "") and await page_unread() == []
 
 
-class GateFirst(FakeClient):
-    """The first reply comes once `gate` is set, as a long turn's; the later ones are the scripted replies at once."""
-
-    def __init__(self, replies: list[Any]) -> None:
-        super().__init__(replies)
-        self.gate = asyncio.Event()
-
-    def stream(self, **body: Any) -> Any:
-        got = super().stream(**body)
-        if len(self.bodies) > 1:
-            return got
-        gate = self.gate
-
-        class Gated(type(got)):  # type: ignore[misc]
-            async def __anext__(self) -> Any:
-                await gate.wait()
-                raise StopAsyncIteration
-
-        return Gated(got.final)
-
-
-async def test_a_thimble_fix_sent_while_main_works_shows_waiting_and_main_reads_it_as_the_turn_ends(on, monkeypatch):
-    """The analyst's /thimble-fix, sent while main's turn runs (fixes.ask): main's chat shows its line waiting, as it
-    shows a message sent then, and logs nothing of it, so the rest of the turn does not read as its answer. Main reads
-    the request once the turn ends, as Claude Code keeps a command typed mid-turn, never at the turn's next tool call,
-    and the chat logs the line there."""
-    from app import fixes
-
-    monkeypatch.setattr(fixes, "problem", lambda: "")
-    monkeypatch.setattr(fixes, "records", lambda: [])
-    monkeypatch.setattr(fixes, "_waiting", {})
-    monkeypatch.setattr(fixes, "_asked", {})
-    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
-    client = GateFirst([call("list_cards", {"group": "all"}), text("Nothing broke."),
-                        text("Is this about one of your fixes, or a new fix?")])
-    monkeypatch.setattr(llm, "client", lambda: client)
-    events.post(CORPUS, "main", {"text": FIRST})
-    await until(lambda: client.bodies, "main's first request was not sent")
-    said = "/thimble-fix make the labels bigger"
-    await fixes.ask(CORPUS, "make the labels bigger")
-    assert await page_unread() == [said]
-    assert [r.get("text") for r in main_records() if r["type"] == "user"] == [FIRST], "no line of the chat yet"
-    assert runtime._spaces[CORPUS].main.waiting_messages() == [], "nothing to hand over at the next tool call"
-    client.gate.set()
-    await runtime._spaces[CORPUS].main.task
-    assert len(client.bodies) == 3
-    assert "make the labels bigger" not in json.dumps(client.bodies[1]["messages"]), "not read mid-turn"
-    assert "make the labels bigger" in json.dumps(client.bodies[2]["messages"][-1])
-    assert shape(main_records()) == [("user", FIRST), ("tool_use", "list_cards"), ("tool_result", ""),
-                                     ("text", "Nothing broke."), ("done", ""), ("user", said),
-                                     ("text", "Is this about one of your fixes, or a new fix?"), ("done", "")]
-    assert await page_unread() == []
-    # the turn that read the words is the first of the turns in which fix_thimble may take them
-    assert fixes._asked[CORPUS].words == "make the labels bigger"
-
-
 # --------------------------------------------------------------------------- the Claude Code sign-in
 
 
