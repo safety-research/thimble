@@ -1,6 +1,7 @@
-"""thimble09.py: finds a thimble 0.9 install, for scripts/install.sh, which stops while one is here. While 0.9's plugin
-is installed, Claude Code loads it and skips 0.10's (both are named thimble), with no error; and a 0.9 clone's
-marketplace, named thimble like 0.10's, makes `claude plugin marketplace add` fail.
+"""thimble09.py: finds a thimble 0.9 install, for scripts/install.sh, which stops while one is here and says to remove
+it with the commands the report ends with, then run the install again. While 0.9's plugin is installed, Claude Code
+loads it and skips 0.10's (both are named thimble), with no error; and a 0.9 clone's marketplace, named thimble like
+0.10's, makes `claude plugin marketplace add` fail.
 
   thimble09.py report       what it found, and how to remove 0.9 (nothing when there is no 0.9)
   thimble09.py commands     the removal commands, one per line: as shown, a tab, then as run
@@ -150,16 +151,14 @@ def report(f):
     cmds = [c for c, _ in commands(f)]
     if plugin:
         lines = ["thimble 0.9 is installed here. Remove it before you install 0.10: while 0.9's plugin is installed,",
-                 "Claude Code loads it and skips 0.10's, with no error. Nothing was installed."]
+                 "Claude Code loads it and skips 0.10's, with no error."]
     elif f["clone"] and f["markets"].get("thimble"):
         lines = ["thimble 0.9's marketplace is still here. Remove it before you install 0.10: it has the name of",
-                 "0.10's marketplace, thimble, so adding 0.10's fails. Nothing was installed."]
+                 "0.10's marketplace, thimble, so adding 0.10's fails."]
     elif link_only(f):
-        lines = [f"{shown(LAUNCHER)} is a link to a thimble folder that is gone. Remove it before you install 0.10.",
-                 "Nothing was installed."]
+        lines = [f"{shown(LAUNCHER)} is a link to a thimble folder that is gone. Remove it before you install 0.10."]
     else:
-        lines = ["thimble 0.9 left files here, which 0.10 does not use. Remove them before you install 0.10.",
-                 "Nothing was installed."]
+        lines = ["thimble 0.9 left files here, which 0.10 does not use. Remove them before you install 0.10."]
     lines += ["", "Found:"]
     if "plugin" in f["release"]:
         lines.append("  - the plugin thimble@thimble-local (thimble 0.9 from a release)")
@@ -201,8 +200,6 @@ def report(f):
     else:
         lines.append("To remove 0.9, run these:")
     lines += ["  " + c for c in cmds]
-    lines += ["Then run scripts/install.sh again, and restart the claude sessions that are open (or run /reload-plugins",
-              "in them)."]
     return "\n".join(lines)
 
 

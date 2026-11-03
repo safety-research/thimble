@@ -1,15 +1,16 @@
 """The Messages API client for the API-key and Workload Identity Federation ways to reach Claude (claude_access.py).
 
-The client is built only from what the person chose: the key saved in thimble's home, or the WIF config file they
-named (wif.py), passed to `WorkloadIdentityCredentials`. The server clears every ANTHROPIC_* name from its own
-environment when it starts (scrub_env), values unread, so nothing in the shell stands in for or overrides that choice.
-failure() says a failed call in one plain sentence, never a raw exception name such as NoCredentials.
+The client is built from what the person chose, passed to the SDK by name, so that no other credential of the
+environment stands in for it: the API key (ANTHROPIC_API_KEY when it is set where the workbench runs, else the key
+pasted in Settings), or the WIF config file they named (wif.py), passed to `WorkloadIdentityCredentials`. The rest of
+the environment is used as it is (ANTHROPIC_BASE_URL, a proxy), as the SDK uses it in the person's terminal. failure()
+says a failed call in one plain sentence, never a raw exception name such as NoCredentials.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-import os
 import re
 import threading
 from datetime import datetime, timezone
@@ -26,14 +27,6 @@ _cache: dict[str, Any] = {}
 
 class NoCredentials(Exception):
     """Claude cannot be reached the way chosen; the message is claude_access.problem()'s words."""
-
-
-def scrub_env() -> list[str]:
-    """Remove ANTHROPIC_* names from this process's environment, values unread; the names removed."""
-    names = [k for k in list(os.environ) if k.startswith("ANTHROPIC_")]
-    for k in names:
-        os.environ.pop(k, None)
-    return names
 
 
 def forget() -> None:
@@ -67,7 +60,8 @@ def client() -> Any:
         raise NoCredentials("this way of reaching Claude runs Claude Code sessions, not the Messages API")
     sig = json.dumps(rec, sort_keys=True)
     if how == claude_access.API_KEY:
-        sig += str(claude_access.key_path().stat().st_mtime_ns)
+        # the key it uses, by its hash: ANTHROPIC_API_KEY, or the one pasted, which Settings may change
+        sig += hashlib.sha256(claude_access.api_key().encode()).hexdigest()
     else:
         sig += wif.stamp(str(rec.get("wif_file") or ""))
     with _lock:
@@ -132,13 +126,14 @@ def failure(e: BaseException) -> str:
         return f"No identity token at {now} for {claude_access.describe()}: {e}."
     if isinstance(e, WorkloadIdentityError):
         code = f" ({e.status_code})" if getattr(e, "status_code", None) else ""
-        return (f"The identity token was not exchanged{code} at {now} with {claude_access.describe()}. Check the IDs "
-                "and the token source in the config file; whoever manages the federation rule can see the reason.")
+        return (f"The identity token was not exchanged{code} at {now}, for {claude_access.describe()}. Check the "
+                "IDs and the token source in the config file; whoever manages the federation rule can see the reason.")
     if isinstance(e, anthropic.AuthenticationError):
-        return (f"Claude refused the credentials (401) at {now}, with {claude_access.describe()}. Check them in "
-                "Settings, Claude access.")
+        where = ("ANTHROPIC_API_KEY where the workbench runs" if claude_access.how() == claude_access.API_KEY
+                 and claude_access.env_key() else "them in Settings, Claude access")
+        return f"Claude refused the credentials (401) at {now}, for {claude_access.describe()}. Check {where}."
     if isinstance(e, anthropic.PermissionDeniedError):
-        return f"These credentials may not use this model or feature (403) at {now}, with {claude_access.describe()}."
+        return f"These credentials may not use this model or feature (403) at {now}, for {claude_access.describe()}."
     if isinstance(e, anthropic.RateLimitError):
         return "Claude's rate limit was reached and the retries ran out. Send the message again in a minute."
     if isinstance(e, anthropic.APIStatusError):

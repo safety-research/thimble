@@ -293,14 +293,17 @@ export interface EventPosted {
   thread?: string
 }
 
-/** How thimble reaches Claude (backend claude_access.py): the way chosen ('' before one), in words, and what is missing. */
+/** How thimble reaches Claude (backend claude_access.py): the way chosen ('' before one), in words, and what is
+ * missing; whether ANTHROPIC_API_KEY is set where the workbench runs (never the key), and each way's words. */
 export interface ClaudeAccess {
   how: '' | 'api-key' | 'claude-code' | 'wif'
   describe: string
   problem: { what: string; fix: string } | null
   key_saved: boolean
+  env_key?: boolean
   wif_file: string
   consent_text: string
+  labels?: Partial<Record<'api-key' | 'claude-code' | 'wif', string>>
 }
 
 /** One small call over the way chosen: whether Claude answered, else what is missing. */

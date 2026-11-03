@@ -634,6 +634,16 @@ def cmd_doctor(a: argparse.Namespace) -> int:
     return DR.cmd(a)
 
 
+# scripts/install.sh's steps, which only the script runs (kernel/install.py says what each does)
+INSTALL_VERBS = ("release", "name", "plugin", "sandbox", "browser", "commands")
+
+
+def cmd_install(a: argparse.Namespace) -> int:
+    from . import install as IN  # noqa: PLC0415
+
+    return IN.cmd(a)
+
+
 def _shares(line: str) -> bool:
     """A help line of share.py's commands (thimble file issue, thimble file pr), or the line that goes on from one."""
     return "thimble file " in line or "needs gh, GitHub's" in line
@@ -751,6 +761,18 @@ def _parser() -> tuple[argparse.ArgumentParser, Any]:
                        "× when it does not, with the step that fixes it on the line below. Run it in a shell.")
     p.add_argument("--offline", action="store_true", help="do not look for a newer release")
     p.set_defaults(fn=cmd_doctor)
+    # not in thimble --help: scripts/install.sh runs it
+    p = sub.add_parser("install", description="thimble install VERB: a step of scripts/install.sh, which runs them in "
+                       "order (engine/kernel/install.py says what each does). Run the script, not this.")
+    p.add_argument("verb", choices=INSTALL_VERBS, metavar="VERB")
+    p.add_argument("--from", dest="from_", metavar="DIR", help="release: the release the script downloaded")
+    p.add_argument("--ref", help="release: the branch or tag the script was asked for")
+    p.add_argument("--folder", metavar="DIR", help="the clone of a dev install (scripts/install.sh --local)")
+    p.add_argument("--bin-dir", dest="bin_dir", metavar="DIR", help="where the commands go (~/.local/bin)")
+    p.add_argument("--browser", action="store_true", help="the workbench is asked for, or installed")
+    p.add_argument("--notes", metavar="FILE", help="what does not work yet, a line each, for the script's end")
+    p.add_argument("--state", metavar="FILE", help="what one step leaves for a later one")
+    p.set_defaults(fn=cmd_install)
     return ap, sub
 
 

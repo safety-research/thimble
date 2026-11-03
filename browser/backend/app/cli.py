@@ -4712,9 +4712,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     chat of main by id. While it holds the terminal, a browser that is not signed in and opens the page gets a new link
     there once the last one was used or expired (watch_links). With `--detach` it returns once the link is printed and
     the server keeps running."""
-    from . import claude_access, llm  # noqa: PLC0415
+    from . import claude_access  # noqa: PLC0415
 
-    llm.scrub_env()
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     if refused(cwd):
         print(BROWSER_LINE.format(what=f"{cwd} is not a folder to open as a workspace; start thimble-browser in the "

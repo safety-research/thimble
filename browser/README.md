@@ -9,8 +9,8 @@ agents (side threads, the writers, the view builders, the report checks) itself,
 
 | Way | What runs |
 |---|---|
-| Your Claude Code sign-in (the default) | The server launches headless Claude Code sessions in the background, through the Agent SDK. It asks you to confirm first, since this uses your Claude subscription. |
-| An Anthropic API key | The server calls the Claude API itself. No Claude Code process starts. |
+| Your Claude Code sign-in (the default) | The server runs Claude Code in the background, through the Agent SDK, on your Claude plan. Claude Code gets the environment as it is, so it signs in as it does in your terminal. |
+| An Anthropic API key | `ANTHROPIC_API_KEY` when it is set where the workbench runs, else a key pasted in Settings. The server calls the Claude API itself. No Claude Code process starts. |
 | Workload Identity Federation | The same, with the IDs and token source of a config file you name (`backend/app/wif.py` lists its keys). |
 
 Each way gets the same prompts, the same tools and the same records, so the page looks the same. The choice is made
@@ -19,11 +19,11 @@ the chat shows one card that says what is missing and opens that step.
 
 ## Install and start
 
-`scripts/install.sh`, at the top of the repository, installs it with the terminal plugin (`--no-plugin` installs the
-browser workbench alone). It needs Claude Code, Node 22.12 or later, [uv](https://docs.astral.sh/uv/), and on Linux
-bubblewrap for the sandbox that card code and the agents' shell commands run in. Claude Code is needed only for the
-Claude Code sign-in. The installer asks how to reach Claude (`--no-setup` skips the question;
-`thimble-browser --setup` asks it again). Then:
+thimble's install ([INSTALL.md](../INSTALL.md)) builds it with the plugin, in `~/.thimble/fixes/live/browser`, and puts
+`thimble-browser` in `~/.local/bin`. It needs Node 22.12 or later, [uv](https://docs.astral.sh/uv/) and npm, and on
+Linux bubblewrap for the sandbox that card code and the agents' shell commands run in. Claude Code is needed only for
+the Claude Code sign-in. The install sets how it reaches Claude (`--sign-in`), or asks in a terminal;
+`thimble-browser --setup` asks again. Then:
 
 ```
 cd path/to/folder

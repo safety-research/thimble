@@ -22,25 +22,16 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 
 ## Installation
 
-### With Claude (recommended)
+Ask Claude Code:
 
-```
-claude "install thimble from https://github.com/safety-research/thimble"
-```
+    claude "install thimble from https://github.com/safety-research/thimble"
 
-Claude asks whether you want both the terminal plugin and the browser workbench (the default) or the plugin alone, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
+Or install it yourself:
 
-### Manual installation
+    curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
 
-Download the newest release, whose tag (such as `v0.10.8`) is on the [releases page](https://github.com/safety-research/thimble/releases/latest), and run its install script:
-
-```
-curl -fsSL https://github.com/safety-research/thimble/archive/refs/tags/<tag>.tar.gz | tar -xz -C ~
-cd ~/thimble-<version>
-scripts/install.sh
-```
-
-The browser workbench builds about 1 GB in that folder and runs from it, so keep it where it is. `scripts/install.sh --no-browser` installs the terminal plugin alone. To work on thimble's own code, clone the repository and add `--local`. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
+It installs the newest release into ~/.thimble: the plugin for Claude Code and the browser workbench (about 1 GB). Add
+`-s -- --no-browser` after `bash` for the plugin alone. To update later: `thimble update`. [INSTALL.md](INSTALL.md) has the details.
 
 ## Usage
 
@@ -60,7 +51,7 @@ Run `thimble-browser` in a folder of files to open the browser workbench.
 
 ## Requirements
 
-Claude Code, macOS or Linux, Python 3.10+ and Node.js 22.18+. The browser workbench also needs [uv](https://docs.astral.sh/uv/) and about 1 GB of disk.
+Claude Code, macOS or Linux, git, Python 3.10+ and Node.js 22.18+. The browser workbench also needs [uv](https://docs.astral.sh/uv/) and about 1 GB of disk.
 
 ## Security & Privacy
 

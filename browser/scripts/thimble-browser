@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# thimble-browser: starts thimble's browser workbench (thimble 0.8's browser mode) on a folder of files. scripts/install.sh,
-# at the top of the repository, installs what it needs and puts a launcher for it on PATH. Here it builds the page again
-# when its sources are newer than the build, then starts the server on 127.0.0.1, opens the folder as a workspace and
-# prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and thimble's agents itself, on
-# the way to reach Claude chosen at install or in the page: your Claude Code sign-in, an Anthropic API key, or Workload
-# Identity Federation. Ctrl-C stops the server. Each start is a new session, as in Claude Code: an empty chat, canvas,
-# report and labels, as at the folder's first start. --continue and --resume bring an earlier session back whole.
+# thimble-browser: starts thimble's browser workbench (thimble 0.8's browser mode) on a folder of files. thimble's
+# install (scripts/install.sh) builds it in ~/.thimble/fixes/live/browser and puts a launcher for it on PATH. Here it
+# builds the page again when its sources are newer than the build, then starts the server on 127.0.0.1, opens the folder
+# as a workspace and prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and
+# thimble's agents itself, on the way to reach Claude chosen at install or in the page: your Claude Code sign-in, an
+# Anthropic API key, or Workload Identity Federation. Ctrl-C stops the server. Each start is a new session, as in Claude
+# Code: an empty chat, canvas, report and labels, as at the folder's first start. --continue and --resume bring an
+# earlier session back whole.
 #
 #   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given; starts a new session
 #   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
 #   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
+#   thimble-browser --setup --how claude-code | --how api-key | --how wif --wif-file F   the same, without asking
 #   thimble-browser --demo [NAME...]      the demo datasets
-#   thimble-browser --setup --how claude-code --yes | --key-file F | --how wif --wif-file F   the same, without asking
-#   thimble-browser --setup --find-wif    list the Workload Identity Federation config files found, by path
 #
 # The workbench keeps its workspaces and its choice in ~/.thimble-browser, or in THIMBLE_BROWSER_HOME, apart from the
 # terminal plugin's ~/.thimble. The server listens on 127.0.0.1, on port 8300 or the next free one (--port N takes N alone).
-# Once `thimble update` has put the workbench on ~/.thimble/fixes/live (the newest release with your fixes), this runs
-# the workbench from there.
+# A workbench installed elsewhere (an install before 0.10.8) runs from ~/.thimble/fixes/live once `thimble update` has
+# put it there (the newest release with your fixes).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
@@ -55,10 +55,12 @@ mkdir -p "$THIMBLE_HOME" && chmod 700 "$THIMBLE_HOME"
 export THIMBLE_WORKSPACES_DIR="${THIMBLE_WORKSPACES_DIR:-$THIMBLE_HOME/workspaces}"
 py="$root/backend/.venv/bin/python"
 [ -x "$py" ] || {
-  echo "thimble-browser: $root/backend/.venv is missing: run scripts/install.sh at the top of the repository" >&2; exit 1; }
+  echo "thimble-browser: $root/backend/.venv is missing, so the workbench is not installed here: run thimble's" \
+    "install again (INSTALL.md)" >&2
+  exit 1; }
 
 if [ "$setup" = 1 ]; then
-  cd "$root/backend" && exec "$py" -m app.claude_access setup "${setup_args[@]}"
+  cd "$root/backend" && exec "$py" -m app.claude_access setup ${setup_args[@]+"${setup_args[@]}"}
 fi
 if [ "$demo" = 1 ]; then
   [ -f "$root/backend/app/demo.py" ] || { echo "thimble-browser: this release of the workbench has no demos" >&2; exit 1; }

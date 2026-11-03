@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-// How thimble reaches Claude (src/shell/ClaudeAccess.tsx): a chat's card that says Claude cannot be reached opens the
-// setup step, the step asks for consent before it saves Claude Code sign-in, and on the first run it can be put off.
+// How the workbench reaches Claude (src/shell/ClaudeAccess.tsx): a chat's card that says Claude cannot be reached opens
+// the setup step, each way says what it does in the install question's few words (choosing the Claude Code sign-in is
+// the consent to it), the API key needs nothing pasted while ANTHROPIC_API_KEY is set, and on the first run the step can
+// be put off.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { ErrorRow } from '../../src/chat/Rows.tsx'
@@ -25,9 +27,9 @@ test("the card that says Claude cannot be reached names what is missing and open
   off()
 })
 
-test('Claude Code sign-in is saved only after the consent text is confirmed', async () => {
+test('choosing the Claude Code sign-in, whose words say what it does, saves it with consent', async () => {
   const sent: unknown[] = []
-  const status = { how: '', describe: 'not chosen yet', problem: null, key_saved: false, wif_file: '', consent_text: 'This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.' }
+  const status = { how: '', describe: 'not chosen yet', problem: null, key_saved: false, wif_file: '', consent_text: '' }
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     if (init?.method === 'PUT') sent.push(JSON.parse(String(init.body)))
     const body = init?.method === 'PUT' ? { ...status, how: 'claude-code', check: { ok: true, how: 'claude-code', describe: 'your Claude Code sign-in' } } : status
@@ -36,14 +38,29 @@ test('Claude Code sign-in is saved only after the consent text is confirmed', as
   const closed = vi.fn()
   const el = await mount(<ClaudeAccessDialog first onClose={closed} />)
   await act(async () => (el.querySelector('[data-how="claude-code"] input') as HTMLInputElement).click())
-  expect(el.textContent).toContain('launch headless Claude Code sessions in the background')
-  const save = [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Confirm'))!
-  expect(save.disabled).toBe(true)
-  await act(async () => (el.querySelector('.access-consent input') as HTMLInputElement).click())
+  expect(el.textContent).toContain('It runs Claude Code in the background, on your Claude plan.')
+  const save = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Save and check')!
   expect(save.disabled).toBe(false)
   await act(async () => save.click())
   expect(sent).toEqual([{ how: 'claude-code', consent: true }])
   expect(closed).toHaveBeenCalled()
+})
+
+test('with ANTHROPIC_API_KEY set where the workbench runs, the API key needs nothing pasted', async () => {
+  const sent: unknown[] = []
+  const status = { how: '', describe: 'not chosen yet', problem: null, key_saved: false, env_key: true, wif_file: '', consent_text: '' }
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    if (init?.method === 'PUT') sent.push(JSON.parse(String(init.body)))
+    const body = init?.method === 'PUT' ? { ...status, how: 'api-key', check: { ok: true, how: 'api-key', describe: 'an API key, from ANTHROPIC_API_KEY' } } : status
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+  const el = await mount(<ClaudeAccessDialog first onClose={() => undefined} />)
+  await act(async () => (el.querySelector('[data-how="api-key"] input') as HTMLInputElement).click())
+  expect(el.textContent).toContain('ANTHROPIC_API_KEY is set where the workbench runs, so it uses that key.')
+  expect(el.querySelector('input[type="password"]')).toBeNull()
+  const save = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Save and check')!
+  await act(async () => save.click())
+  expect(sent).toEqual([{ how: 'api-key', consent: false }])
 })
 
 test('on the first run Not now and Escape close the step, so the person can look around without access', async () => {
@@ -64,10 +81,11 @@ test("the choices are the install question's, in its order and words: the Claude
   const chosen = (el: HTMLElement) => el.querySelector('.access-choice input:checked')?.closest('.access-choice')?.getAttribute('data-how')
   const el = await mount(<ClaudeAccessDialog first onClose={() => undefined} />)
   await settle()
-  expect([...el.querySelectorAll('.access-choice')].map((c) => [c.getAttribute('data-how'), c.textContent])).toEqual([
-    ['claude-code', 'Claude Code sign-in (recommended)'],
-    ['api-key', 'Anthropic API key'],
-    ['wif', 'Workload Identity Federation'],
+  const words = (c: Element) => [c.getAttribute('data-how'), c.querySelector('.access-choice-label')?.textContent, c.querySelector('.access-choice-hint')?.textContent]
+  expect([...el.querySelectorAll('.access-choice')].map(words)).toEqual([
+    ['claude-code', 'Your Claude Code sign-in (recommended)', 'It runs Claude Code in the background, on your Claude plan.'],
+    ['api-key', 'An Anthropic API key', 'ANTHROPIC_API_KEY when it is set, or a key you paste here.'],
+    ['wif', 'Workload Identity Federation', 'The path of your WIF config file.'],
   ])
   expect(chosen(el)).toBe('claude-code')
   unmountAll()

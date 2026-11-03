@@ -16,13 +16,14 @@
 // package or a setting of the machine lacks, or a runner the machine keeps from starting, stays for the person to fix.
 // Setups that run at the same time (two sessions start, a card is called while the session start installs) install
 // once: the others wait for that install. It prints one line, or with --json one JSON object:
-//   {ok, node, nodeVersion, grants, platform, version, srt, why, fix, ms, repaired}
+//   {ok, node, nodeVersion, grants, platform, version, srt, why, fix, missing, ms, repaired}
 // `node` is this Node's binary (the runner's), `nodeVersion` its version, `grants` whether it takes each grant of
 // Node's permission model that the runner needs beyond its files (argv.mjs's GRANTS, such as {'--allow-net': true}),
 // as its list of the flags it allows in NODE_OPTIONS says (process.allowedNodeEnvironmentFlags, which holds each
 // --allow-* flag it takes), `srt` the folder srt is in, `why` what is wrong and `fix` the one command or step that
-// fixes it, `ms` how long the probe's runner took to start and draw the test card, `repaired` why srt was installed
-// again (--repair), when it was. Exits 0 when the sandbox works, else 1.
+// fixes it, `missing` the packages a Linux lacks for it by their names (bubblewrap, socat, ripgrep) when that is why,
+// `ms` how long the probe's runner took to start and draw the test card, `repaired` why srt was installed again
+// (--repair), when it was. Exits 0 when the sandbox works, else 1.
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -165,6 +166,7 @@ async function needs() {
   // srt looks for bwrap, socat and rg with the `which` command, which a small Linux (Arch's base image) may lack: srt
   // then says all three are missing, though they may be there
   const packages = platform === 'linux' ? [['bwrap', 'bubblewrap'], ['socat', 'socat'], ['rg', 'ripgrep'], ['which', 'which']].filter(([c]) => !which(c)).map(([, p]) => p) : []
+  if (packages.length) out.missing = packages
   return { why: `this machine lacks what the sandbox needs: ${errors.join('; ')}`, fix: packages.length ? `Install ${packages.length > 1 ? 'them' : 'it'}: ${installCommand(packages)}` : '' }
 }
 
