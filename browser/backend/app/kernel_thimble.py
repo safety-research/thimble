@@ -57,7 +57,7 @@ its "color".
 
 Server-only helpers: `_frame()` returns a table card's final DataFrame as JSON (frames.CAPTURE); `_trial_begin/_end/
 _undo/_drop` let the card check run a fix's code and put names back if it is refused; `_labels_read()` reports the
-labels (with revisions) the last cell read.
+labels (with revisions) the last cell read; `_printed()` the texts pandas wrote of its tables, each with the rows.
 
 Rows come from labels/<id>.sqlite when it reflects the labels file, else from labels/<id>.jsonl (last row per ref wins).
 A cover over a range of records supplies their negative value. Only the standard library at import; pandas is imported
@@ -3012,3 +3012,101 @@ def _watch_cells():
 
 
 _watch_cells()
+
+
+# The tables a cell prints. pandas writes a DataFrame or a Series as text with its to_string(), which print(df), an
+# f-string and the code's own df.to_string() all call, so each text it returns is noted with the table's rows as data
+# (_frame_json): the citation check counts a printed table's rows from the rows themselves, never from their printed
+# text (marks.session_cards, the validator's check_count). _printed hands them to the server after the cell
+# (notebook.PRINTED_EXPR), which keeps those whose text the cell's printed output holds (frames.attach_printed); a text
+# that was not printed, such as the one IPython shows for a table a cell ends in, is left there. to_string() is wrapped
+# once per kernel (pandas is imported as the kernel starts, else as a card first imports it), and the wrapper and the
+# pre_run_cell handler that empties the list look up this module's names when they run, so a re-run of this source
+# keeps them working, also in a kernel an older server started.
+_PRINTED = []
+_PRINTED_MAX = 20  # the tables of one cell noted at most
+
+
+def _printed():
+    return _Json(json.dumps(list(_PRINTED), default=str))
+
+
+def _note_printed(table, text):
+    """A table's text, as its to_string() returned it, noted with the table's rows."""
+    if isinstance(text, str) and text and len(_PRINTED) < _PRINTED_MAX:
+        try:
+            _PRINTED.append({"text": text, "frame": _frame_json(_as_frame(table))})
+        except Exception:  # noqa: BLE001 — a table whose rows cannot be read is printed all the same, and not noted
+            pass
+
+
+def _clear_printed():
+    del _PRINTED[:]
+
+
+def _wrap_to_string(pd):
+    """DataFrame.to_string and Series.to_string, each wrapped to note the text it returns (once per class)."""
+    import functools
+
+    module = globals()
+    for cls in (pd.DataFrame, pd.Series):
+        real = cls.to_string
+        if getattr(real, "_thimble_noted", False):
+            continue
+
+        def to_string(self, *args, _real=real, **kwargs):
+            text = _real(self, *args, **kwargs)
+            try:
+                module["_note_printed"](self, text)
+            except Exception:  # noqa: BLE001 — the text stands whether or not it was noted
+                pass
+            return text
+
+        functools.update_wrapper(to_string, real)
+        to_string._thimble_noted = True
+        cls.to_string = to_string
+
+
+def _watch_prints():
+    import sys
+
+    try:
+        from IPython import get_ipython
+    except ImportError:
+        return
+    ip = get_ipython()
+    if ip is None or globals().get("_PRINTS_WATCHED"):
+        return
+    module = globals()
+    if "pandas" in sys.modules:
+        _wrap_to_string(sys.modules["pandas"])
+    else:
+        # as page_fonts' hook: pandas' loader runs, then its classes are wrapped
+        class _ThimbleTables:
+            def find_spec(self, name, path=None, target=None):
+                if name != "pandas":
+                    return None
+                sys.meta_path.remove(self)
+                import importlib.util
+
+                spec = importlib.util.find_spec(name)
+                if spec is None or spec.loader is None:
+                    return spec
+                run = spec.loader.exec_module
+
+                def exec_module(m, run=run):
+                    run(m)
+                    try:
+                        module["_wrap_to_string"](m)
+                    except Exception:  # noqa: BLE001 — pandas works the same without it
+                        pass
+
+                spec.loader.exec_module = exec_module
+                return spec
+
+        sys.meta_path.insert(0, _ThimbleTables())
+    ip.events.register("pre_run_cell", lambda *_a, **_k: module["_clear_printed"]())
+    module["_PRINTS_WATCHED"] = True
+
+
+_watch_prints()

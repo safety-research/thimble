@@ -104,9 +104,10 @@ def test_a_trial_s_counts_hold_against_the_trial_after_main_redefined_the_label_
     assert (m2["status"], m2["failedBy"]) == ("failed", "evidence"), m2
     index = listed[0]
     assert (f"# card:{cid} Which posts claim a PR? (as it was when the cited words were written; made by: redefined)\n"
-            f"{_place(cid, 'yes')}\t0\n") in index, index
+            f"card:{cid}@out0\ta table of 3 rows: value, records, share\n{_place(cid, 'yes')}\t0\n") in index, index
     assert (f"# card:{cid}@v{trial['v']} Which posts claim a PR? (an earlier version; made by: run over 4 records; it changed "
-            f"after: redefined)\n{_place(cid, 'yes', trial['v'])}\t{yes}\n") in index, index
+            f"after: redefined)\ncard:{cid}@v{trial['v']}@out0\ta table of 3 rows: value, records, share\n"
+            f"{_place(cid, 'yes', trial['v'])}\t{yes}\n") in index, index
     assert "run over 8" not in index
 
 
@@ -484,7 +485,7 @@ def test_a_second_card_of_a_label_card_s_id_adds_no_other_label_s_versions_under
     """A cell written into the canvas's files with a label card's id, showing another label (a card's code can write
     those files): the card is read once, by the first cell of its id, so the versions under it are one label's, never
     two labels' mixed into a history neither had."""
-    from app import concepts, notebook
+    from app import notebook
 
     async def two():
         a = await _apply("forge pr claim", 4)
@@ -497,6 +498,44 @@ def test_a_second_card_of_a_label_card_s_id_adds_no_other_label_s_versions_under
     notebook.write_notebook(ws, nb)
     mine = [x for x in marks.session_cards(CORPUS) if x["id"] == a["cell"]]
     tables = {json.dumps(x["outputs"]) for x in mine}
-    one = [{json.dumps(marks._outputs([(0, concepts.card_table(v))])) for v in label_versions.read(CORPUS, k)}
+    one = [{json.dumps(marks._version_outputs(v)) for v in label_versions.read(CORPUS, k)}
            for k in (a["concept"], b["concept"])]
     assert len({x["title"] for x in mine}) == 1 and tables in one, mine
+
+
+def test_a_count_of_a_label_s_values_reads_the_version_the_words_could_read(_fresh, monkeypatch):
+    """B19 with B20: each version a label kept is also a table a count of its rows names (concepts.card_rows, its row
+    `all` the total left out of the count), listed as the label was when the reply was written. A count of the trial by
+    its version verifies after main redefined the label; the label as it was then (redefined: no rows) does not, nor the
+    full run made while the check ran, nor the total row counted as a value."""
+    kid, cid, trial = _trial_then_redefined()
+    _main_at(monkeypatch, None)  # no repair: what the first check found stands
+    listed: list[str] = []
+    started: list = []
+
+    async def full_run():  # once, though the reply's marks may go to more than one fork
+        if not started:
+            started.append(asyncio.ensure_future(_apply("(?i)claim", None)))
+        await started[0]
+
+    def count(ref, mark: int) -> dict:
+        return {"mark": mark, "kind": "card", "evidence": {"ref": ref, "count": {"records": 2}}, "status": "verified",
+                "correction": None, "reason": "the label counts it"}
+
+    def answer(prompt):
+        v, full = trial["v"], _newest(kid)["v"]
+        return [count(f"card:{cid}@v{v}@out0", 1), count(f"card:{cid}@out0", 2), count(f"card:{cid}@v{full}@out0", 3),
+                count(f"card:{cid}@v{v}@out0", 4)]
+
+    reply = ["In the trial, [2 of the 2](#) values came up in 2 records each, and then [2 of the 2](#) values did. "
+             "After the full run, [2 of the 2](#) values came up in 2 records each, and in the trial [2 of the 3](#) "
+             "rows did."]
+    got, _ = asyncio.run(_check(reply, answer, during=full_run, listed=listed))
+    by = {m["n"]: m for m in got}
+    assert by[1]["status"] == "verified" and by[1]["evidence"]["version"] == trial["v"], by[1]
+    assert by[1]["evidence"]["count"] == "2 of 2 rows with records 2 besides the row all that sums them up", by[1]
+    assert [(by[n]["status"], by[n]["reason"]) for n in (2, 3, 4)] == [
+        ("failed", "The card's table has 0 rows with records 2, not 2."),
+        ("failed", f"The card has no version {_newest(kid)['v']}."),  # made after the words, while the check ran
+        ("failed", "The card's table has 2 rows besides the row all that sums them up, not 3.")], by
+    assert f"card:{cid}@v{trial['v']}@out0\ta table of 3 rows: value, records, share\n" in listed[0], listed[0]

@@ -4215,18 +4215,29 @@ def card_output(ws: Path, cell: dict) -> dict | None:
     return card_table({"values": values, "counts": counts, "n": int(card.get("n_labeled") or 0), "unit": concept["unit"]})
 
 
-def card_table(shown: dict) -> dict:
+def card_rows(shown: dict) -> dict:
     """A label card's table of what it shows ({values, counts, n, unit}: card_output's, or a version's, card_values),
-    as a card's html table output: under the card's headers (value, the unit's word, share) each value with its count
-    and share (card_shares), then the row CARD_ALL_ROW with the units the label labeled, which the card's label row
-    states."""
+    as rows: under the card's headers (value, the unit's word, share) each value with its count and share
+    (card_shares), as the card writes them, then the row CARD_ALL_ROW with the units the label labeled, which the
+    card's label row states. In the form a count of a card's rows reads (marks.card_tables: {columns, rows, names,
+    label, total}), with `totals`, the name of the row that totals the values (None when a value takes that name, and
+    the card shows no such row)."""
     values, counts, total = list(shown["values"]), dict(shown["counts"]), int(shown["n"])
     shares = card_shares(values, counts, total)
-    rows = [(v, f"{int(counts.get(v, 0)):,}", shares[v]) for v in values]
-    if CARD_ALL_ROW not in values:
-        rows.append((CARD_ALL_ROW, f"{total:,}", ""))
+    rows = [[v, f"{int(counts.get(v, 0)):,}", shares[v]] for v in values]
+    totals = CARD_ALL_ROW if CARD_ALL_ROW not in values else None
+    if totals:
+        rows.append([CARD_ALL_ROW, f"{total:,}", ""])
     unit = CARD_UNIT_WORDS.get(shown["unit"], f"{shown['unit']}s")
-    body = "".join(f"<tr><th>{html.escape(v)}</th><td>{n}</td><td>{s}</td></tr>" for v, n, s in rows)
+    return {"columns": ["value", unit, "share"], "rows": rows, "names": [r[0] for r in rows], "label": "value",
+            "total": len(rows), "totals": totals}
+
+
+def card_table(shown: dict) -> dict:
+    """A label card's table of what it shows (card_rows) as a card's html table output."""
+    t = card_rows(shown)
+    unit = t["columns"][1]
+    body = "".join(f"<tr><th>{html.escape(v)}</th><td>{n}</td><td>{s}</td></tr>" for v, n, s in t["rows"])
     return {"text/html": f"<table><thead><tr><th>value</th><th>{html.escape(unit)}</th><th>share</th></tr></thead>"
                          f"<tbody>{body}</tbody></table>"}
 
