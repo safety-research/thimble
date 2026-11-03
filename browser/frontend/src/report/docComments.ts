@@ -27,6 +27,12 @@ interface Store {
 const stores = new Map<string, Store>()
 const listeners = new Set<() => void>()
 const NONE: Comments = {}
+
+/** A document's comments in a copy, by its slug: only the copy's own keys, so that a slug such as `constructor` never
+ *  reads what every object inherits. */
+export function commentsOf(c: Comments, slug: string): readonly WriteupComment[] {
+  return Object.prototype.hasOwnProperty.call(c, slug) ? c[slug] : []
+}
 // the number of the last request that went out
 let last = 0
 
@@ -45,7 +51,7 @@ function set(ws: string, s: Store, slug: string, comments: readonly WriteupComme
 /** Document `slug` left with no comments (deleted, or no longer written); a read that went out before is dropped. */
 function clear(s: Store, slug: string): void {
   s.n.set(slug, ++last)
-  if (!s.comments[slug]?.length) return
+  if (!commentsOf(s.comments, slug).length) return
   s.comments = { ...s.comments, [slug]: [] }
   changed()
 }

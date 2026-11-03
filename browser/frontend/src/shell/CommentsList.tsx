@@ -14,7 +14,7 @@ import { plainQuote, useAnswerComments } from '../chat/answerComments'
 import { Button } from '../components/Button'
 import { bus } from '../lib/bus'
 import { teleport } from '../lib/teleport'
-import { resolveDocComment, useDocComments } from '../report/docComments'
+import { commentsOf, resolveDocComment, useDocComments } from '../report/docComments'
 import { useDocTypes, writtenDocs } from '../report/docTypes'
 import { docLabel, SLUG } from '../report/model'
 
@@ -53,7 +53,7 @@ function useDocs(ws: string) {
   // the documents read, as one key, so that the types read again with the same documents written read none of them
   const key = [...new Set([SLUG, ...(types ? writtenDocs(types) : [])])].join(' ')
   const held = useDocComments(ws, key)
-  return useMemo(() => key.split(' ').map((slug) => ({ slug, name: docLabel(slug, types), comments: held[slug] ?? [] })), [key, types, held])
+  return useMemo(() => key.split(' ').map((slug) => ({ slug, name: docLabel(slug, types), comments: commentsOf(held, slug) })), [key, types, held])
 }
 
 /** Every open comment, on the cards, in the documents and on Claude's answers, with what Done needs. */
