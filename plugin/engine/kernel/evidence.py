@@ -1388,14 +1388,30 @@ def file_named(path: str, folders: list[str]) -> str | None:
     return None
 
 
+# what a check may write around a path it cites, which is no part of it: white space, quotes, backticks, angle brackets
+WRAPPERS = " \t\r\n`'\"‘’“”«»„<>"
+
+
+def cited_file(file: Any) -> str:
+    """The path a cited file names, as the check meant it: without the white space, quotes, backticks or angle brackets
+    it stood in, JSON's `\\/` read as `/`, and an editor's link to a file (`vscode://file/x`) read as its path."""
+    s = str(file or "").replace("\\/", "/").strip(WRAPPERS)
+    link = EDITOR_LINK.match(s)
+    return s[link.end():] if link else s
+
+
 def missing(file: str, cwd: str, root: str | None, also: list[str], calls: list[dict[str, Any]] = ()) -> str:
-    """Why a cited file that names no file thimble reads gives no evidence. A path only a shell or a URL reads (`~/`,
-    `$HOME/`, `file:`) is read where it leads, to name the file: a file there is not read, as such a path never was,
-    and is named from its folder; one outside every folder a cited file may lie in is named not at all. Any other path
-    names a file that is not there."""
+    """Why a cited file that names no file thimble reads gives no evidence. A path written in a form thimble does not read
+    (in quotes, backticks or angle brackets, with JSON's escapes, as an editor's link, or as only a shell or a URL reads
+    it: `~/`, `$HOME/`, `file:`) is read where it leads (cited_file, written_path), to name the file: a file there is
+    not read, as such a path never was, and is named from its folder; one outside every folder a cited file may lie in
+    is named not at all, and a URL of a server not at all. Any other path names a file that is not there."""
     folders = [f for f in (root, cwd, *also) if f]
-    if SHELL_FORM.match(str(file).strip()):
-        full = written_path(str(file), root or cwd)
+    plain = cited_file(file)
+    if URL_START.match(plain) and plain[:5].lower() != "file:":
+        return UNREAD.format("a file")
+    if plain != str(file) or SHELL_FORM.match(plain):
+        full = written_path(plain, root or cwd)
         if full is None:
             return UNREAD.format("a file")
         if not inside(full, folders):
@@ -1413,14 +1429,22 @@ def missing(file: str, cwd: str, root: str | None, also: list[str], calls: list[
 # file is (written_path), and named as a reason names one (error_words). The terminal's notices name them alike
 # (core/text.js errorWords); plugin/tests/error_paths.json holds the cases both answer.
 
-# a path in an error's text: one quoted whole, which may hold spaces and colons, else one in a run of the characters a
-# path holds, not a URL, starting where the run does or right after a colon in it (`failed:/x`, `notes.md:3:/x`) and
-# ending at the next colon (`/x/run.py:12:5`, `/a/b:/c/d`), a `file:` URL's own aside
-QUOTED_PATH = re.compile(r"""(['"`])((?:file:|~[A-Za-z0-9_.-]*/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/|\.\.?/|/)[^'"`\n]*?)\1""", re.I)
-PATH_RUN = re.compile(r"""[^\s'"`()\[\]<>,;]+""")
+# a path in an error's text: one quoted whole (in straight or typographic quotes, backticks), which may hold spaces and
+# colons, else one in a run of the characters a path holds, not a URL, starting where the run does, right after a flag
+# that names a folder (`-I/x`), or right after a colon, `=`, `|`, `&`, a brace or an escaped line break in it
+# (`failed:/x`, `--settings=/x`, `{/x}`, `error\n/x`), and ending at the next of those (`/x/run.py:12:5`, `/a/b:/c/d`), a
+# `file:` URL's own colon aside. A link an editor opens (`vscode://file/x`) names a path too; `\/`, JSON's escape of
+# `/`, reads as `/`
+PATH_QUOTES = "'\"`‘’“”«»„"
+QUOTED_PATH = re.compile(rf"""([{PATH_QUOTES}])((?:file:|~[A-Za-z0-9_.-]*/|\$\{{?[A-Za-z_][A-Za-z0-9_]*\}}?/|\.\.?/|/)[^{PATH_QUOTES}\n]*?)[{PATH_QUOTES}]""", re.I)
+INVISIBLE = "\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff"  # zero-width and direction marks
+PATH_RUN = re.compile(rf"""[^\s{PATH_QUOTES}()\[\]<>,;{INVISIBLE}]+""")
 PATH_START = re.compile(r"file:|~[A-Za-z0-9_.-]*/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/|\.\.?/|/", re.I)
+PATH_STOP = re.compile(r"[:=|&]|(?<!\$)\{|\\[ntr]")  # where a path in a run ends, and the next may start
+FOLDER_FLAG = re.compile(r"-[IL](?=[/~$.]|file:)")  # a compiler's folder flag right before its path (`-I/x`)
 URL_START = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 URL_SCHEME = re.compile(r"(?:^|:)(?!file:$)[A-Za-z][A-Za-z0-9+.-]*:$", re.I)  # a URL's scheme just before its `//`
+EDITOR_LINK = re.compile(r"(?i)[A-Za-z][A-Za-z0-9+.-]*://file(?=/)")  # vscode://file/x, cursor://file/x
 
 
 def error_words(text: str, cwd: str, root: str | None = None, also: list[str] = ()) -> str:
@@ -1436,24 +1460,29 @@ def error_words(text: str, cwd: str, root: str | None = None, also: list[str] = 
             name = file_named(full, folders) if full else None
         except (OSError, ValueError):
             full, name = None, None
+        if full and not name and full.rstrip("/") == os.path.expanduser("~").rstrip("/"):
+            return "~"  # the home folder itself, whose own name is the person's
         return name or os.path.basename((full or path).rstrip("/")) or path
 
     def run(m: re.Match[str]) -> str:
         t = m.group(0)
+        if (link := EDITOR_LINK.match(t)):
+            return named(t[link.end():])
         if URL_START.match(t) and t[:5].lower() != "file:":
             return t
         out, done = [], 0
-        for at in [0] + [i + 1 for i, ch in enumerate(t) if ch == ":"]:
+        flag = FOLDER_FLAG.match(t)
+        for at in [flag.end() if flag else 0] + [x.end() for x in PATH_STOP.finditer(t)]:
             if at < done or not PATH_START.match(t, at) or (t.startswith("//", at) and URL_SCHEME.search(t, 0, at)):
                 continue
-            end = t.find(":", at + (5 if t[at:at + 5].lower() == "file:" else 0))
-            path = t[at:len(t) if end < 0 else end].rstrip(".!?")
+            stop = PATH_STOP.search(t, at + (5 if t[at:at + 5].lower() == "file:" else 0))
+            path = t[at:stop.start() if stop else len(t)].rstrip(".!?")
             if re.search(r"/[^/]", path):
                 out += [t[done:at], named(path)]
                 done = at + len(path)
         return "".join(out) + t[done:]
 
-    text = QUOTED_PATH.sub(lambda m: m.group(1) + named(m.group(2)) + m.group(1), str(text))
+    text = QUOTED_PATH.sub(lambda m: m.group(0)[0] + named(m.group(2)) + m.group(0)[-1], str(text).replace("\\/", "/"))
     return PATH_RUN.sub(run, text)
 
 
@@ -1504,7 +1533,10 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     lines cited as two)."""
     span = line_span(line)
     if not span:
-        return [f"the check cited lines {line}, which are not one line or a range of at most {MAX_RANGE} lines"], None, []
+        # its words only when they are numbers: a check may write a path where the line goes
+        said = str(line).strip() if re.fullmatch(r"[\sLl\d,–-]+", str(line)) else ""
+        return [f"the check cited lines {said}, which are not one line or a range of at most {MAX_RANGE} lines" if said
+                else "the check named no line number of the file"], None, []
     a, b = span
     near = read_lines(path, max(1, a - SHIFT_MAX), b + SHIFT_MAX, partial=True)
     if near is None or near[0] + len(near[1]) - 1 < b:

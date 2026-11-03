@@ -150,14 +150,21 @@ export function printable(s, spans) {
 // session's folder when it lies there, else by its name alone, never by where that folder lies. Both answer the cases
 // of plugin/tests/error_paths.json alike.
 
-// a path in an error's text: one quoted whole, which may hold spaces and colons, else one in a run of the characters a
-// path holds, not a URL, starting where the run does or right after a colon in it (`failed:/x`, `notes.md:3:/x`) and
-// ending at the next colon (`/x/run.py:12:5`, `/a/b:/c/d`), a `file:` URL's own aside
-const QUOTED_PATH = /(['"`])((?:file:|~[A-Za-z0-9_.-]*\/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\/|\.\.?\/|\/)[^'"`\n]*?)\1/gi
-const PATH_RUN = /[^\s'"`()[\]<>,;]+/g
+// a path in an error's text: one quoted whole (in straight or typographic quotes, backticks), which may hold spaces and
+// colons, else one in a run of the characters a path holds, not a URL, starting where the run does, right after a flag
+// that names a folder (`-I/x`), or right after a colon, `=`, `|`, `&`, a brace or an escaped line break in it
+// (`failed:/x`, `--settings=/x`, `{/x}`, `error\n/x`), and ending at the next of those (`/x/run.py:12:5`, `/a/b:/c/d`), a
+// `file:` URL's own colon aside. A link an editor opens (`vscode://file/x`) names a path too; `\/`, JSON's escape of
+// `/`, reads as `/`
+const QUOTED_PATH = /(['"`‘’“”«»„])((?:file:|~[A-Za-z0-9_.-]*\/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\/|\.\.?\/|\/)[^'"`‘’“”«»„\n]*?)['"`‘’“”«»„]/gi
+// eslint-disable-next-line no-misleading-character-class -- zero-width and direction marks end a run, as white space does
+const PATH_RUN = /[^\s'"`‘’“”«»„()[\]<>,;\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]+/g
 const PATH_START = /^(?:file:|~[A-Za-z0-9_.-]*\/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\/|\.\.?\/|\/)/i
+const PATH_STOP = /[:=|&]|(?<!\$)\{|\\[ntr]/g // where a path in a run ends, and the next may start
+const FOLDER_FLAG = /^-[IL](?=[/~$.]|file:)/ // a compiler's folder flag right before its path (`-I/x`)
 const URL_START = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//
 const URL_SCHEME = /(?:^|:)(?!file:$)[A-Za-z][A-Za-z0-9+.-]*:$/i // a URL's scheme just before its `//`
+const EDITOR_LINK = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/file(?=\/)/i // vscode://file/x, cursor://file/x
 
 /** A path's . and .. parts read, as the file system reads them: an absolute one stays absolute. */
 function normalPath(p) {
@@ -220,27 +227,33 @@ function fileNamed(full, folders) {
  *  `where.home`. A URL, a path relative to no folder named, and other words stay as they are. Pure. */
 export function errorWords(text, where = {}) {
   const folders = [where.root, where.cwd].filter(f => typeof f === 'string' && f.startsWith('/'))
+  const home = String(where.home || '').replace(/\/+$/, '')
   const named = path => {
     const full = writtenPath(path, where.cwd || where.root || '', where.home || '')
     const name = full ? fileNamed(full, folders) : null
+    // the home folder itself, whose own name is the person's
+    if (full && !name && home && full.replace(/\/+$/, '') === home) return '~'
     const last = (full ?? path).replace(/\/+$/, '')
     return name || last.slice(last.lastIndexOf('/') + 1) || path
   }
   const run = t => {
+    const link = EDITOR_LINK.exec(t)
+    if (link) return named(t.slice(link[0].length))
     if (URL_START.test(t) && t.slice(0, 5).toLowerCase() !== 'file:') return t
-    const starts = [0]
-    for (let i = 0; i < t.length; i++) if (t[i] === ':') starts.push(i + 1)
+    const flag = FOLDER_FLAG.exec(t)
+    const starts = [flag ? flag[0].length : 0, ...[...t.matchAll(PATH_STOP)].map(m => m.index + m[0].length)]
     let out = ''
     let done = 0
     for (const at of starts) {
       if (at < done || !PATH_START.test(t.slice(at)) || (t.startsWith('//', at) && URL_SCHEME.test(t.slice(0, at)))) continue
-      const end = t.indexOf(':', at + (t.slice(at, at + 5).toLowerCase() === 'file:' ? 5 : 0))
-      const path = t.slice(at, end < 0 ? t.length : end).replace(/[.!?]+$/, '')
+      PATH_STOP.lastIndex = at + (t.slice(at, at + 5).toLowerCase() === 'file:' ? 5 : 0)
+      const stop = PATH_STOP.exec(t)
+      const path = t.slice(at, stop ? stop.index : t.length).replace(/[.!?]+$/, '')
       if (!/\/[^/]/.test(path)) continue
       out += t.slice(done, at) + named(path)
       done = at + path.length
     }
     return out + t.slice(done)
   }
-  return String(text ?? '').replace(QUOTED_PATH, (_, q, path) => `${q}${named(path)}${q}`).replace(PATH_RUN, run)
+  return String(text ?? '').replaceAll('\\/', '/').replace(QUOTED_PATH, (m, q, path) => `${q}${named(path)}${m.slice(-1)}`).replace(PATH_RUN, run)
 }
