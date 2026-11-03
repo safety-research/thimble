@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 // Rewind main to one of the analyst's messages (src/chat/rewind.ts, backend runtime.rewind_main): the ↶ on a message
 // asks first, under the message; Rewind posts main's rewind, the chat then hides that message and everything after it up
-// to the rewind's line, and the message's words come back in main's composer. `/rewind` asks it for the latest message.
+// to the rewind's line, and the message's words come back in main's composer, with those of a message that waited for
+// main, which shows waiting no more. `/rewind`, one of the composer's commands, asks it for the latest message.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
+import { COMMANDS, commandsFor, REWIND_COMMAND } from '../../src/chat/commands.ts'
 import { foldRecords, mainSkips, REWIND_CHIP, rewoundRecords } from '../../src/chat/model.ts'
 import { isRewindCommand, lastRewindable } from '../../src/chat/rewind.ts'
 import { bus } from '../../src/lib/bus.ts'
@@ -39,6 +41,10 @@ describe('which records a rewind hides', () => {
   test('/rewind is the command alone, and it goes to the latest message the chat still shows', () => {
     expect(isRewindCommand(' /rewind ')).toBe(true)
     expect(isRewindCommand('/rewind the last one')).toBe(false)
+    expect(isRewindCommand('/rewinds')).toBe(false)
+    // one of the composer's commands, which a "/" lists with what it does
+    expect(COMMANDS.find((c) => c.name === REWIND_COMMAND)?.about).toBe('Take main back to before your latest message')
+    expect(commandsFor('/rew').map((c) => c.name)).toEqual([REWIND_COMMAND])
     expect(lastRewindable(TALK, new Set())).toEqual({ event: 'e2', index: 3 })
     expect(lastRewindable([...TALK, REWOUND], rewoundRecords([...TALK, REWOUND]))).toEqual({ event: 'e1', index: 0 })
     expect(lastRewindable([{ type: 'user', text: 'typed in the terminal', by: 'terminal' }], new Set())).toBeNull()
@@ -48,20 +54,26 @@ describe('which records a rewind hides', () => {
 describe("Rewind in main's chat", () => {
   let events: ChatRecord[]
   let posted: { url: string; body: unknown }[]
+  // what the server says waits for main's running turn (meta `unread`), and the words its rewind gives back
+  let unread: { event: string; text: string }[]
+  let back: string
 
   beforeEach(() => {
     events = [...TALK]
     posted = []
-    const main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: false, attached: ATTACHED, module: true } as unknown as ChatMeta
+    unread = []
+    back = 'Was it the config change?'
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
     Element.prototype.scrollIntoView = () => undefined  // jsdom lays nothing out
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
       const u = String(url)
       if (init?.method === 'POST' && !u.includes('/telemetry')) posted.push({ url: u, body: init.body ? JSON.parse(String(init.body)) : null })
       let body: unknown = {}
+      const main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: unread.length > 0, unread, attached: ATTACHED, module: true } as unknown as ChatMeta
       if (u.endsWith('/chats/main/rewind')) {
         events = [...events, { ...REWOUND, event: (posted[posted.length - 1].body as { event: string }).event }]
-        body = { text: 'Was it the config change?', event: 'e2' }
+        unread = []
+        body = { text: back, event: 'e2' }
       } else if (u.endsWith('/chats/main')) body = { meta: main, events }
       else if (/\/chats(\?|$)/.test(u)) body = [main]
       else if (/\/(proposals|notices|views)(\?|$)/.test(u)) body = []
@@ -114,5 +126,22 @@ describe("Rewind in main's chat", () => {
     expect(el.querySelector('.chat-rewind-ask')).toBeNull()
     expect(messages(el)).toEqual(['How many runs failed?', 'Was it the config change?'])
     expect(posted).toEqual([])
+  })
+
+  test('a message that waits for main comes back in the box with the rewound one, and shows waiting no more', async () => {
+    unread = [{ event: 'e3', text: 'And after noon?' }]
+    back = 'Was it the config change?\n\nAnd after noon?'
+    const el = await mount(<ChatPanel ws="mini" />)
+    await settle()
+    expect([...el.querySelectorAll('.chat-pending .chat-message')].map((m) => m.textContent)).toEqual(['And after noon?'])
+    await act(async () => el.querySelectorAll<HTMLButtonElement>('.chat-user button.chat-rewind')[1].click())
+    const go = [...el.querySelectorAll<HTMLButtonElement>('.chat-rewind-ask button')].find((b) => b.textContent === 'Rewind')!
+    await act(async () => go.click())
+    await settle()
+    await act(async () => bus.emit('chat', { chat: 'main' }))
+    await act(async () => new Promise((r) => setTimeout(r, 200)))
+    expect(el.querySelector('.chat-pending')).toBeNull()
+    expect(messages(el)).toEqual(['How many runs failed?'])
+    expect(box(el).value).toBe('Was it the config change?\n\nAnd after noon?')
   })
 })

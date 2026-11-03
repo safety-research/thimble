@@ -430,7 +430,8 @@ export const api = {
    * module); a subagent of main the analyst started is asked of main. */
   interrupt: (c: string, id: string) => j<{ stopped: boolean; done?: boolean; asked?: 'main'; kind?: string; reason?: string }>(`${ws(c)}/chats/${enc(id)}/interrupt`, { method: 'POST' }),
   /** Rewind main to before the analyst's message `event` (agents.rewind_route, a click): Claude no longer sees it or
-   * anything after it, and its words come back for the composer. A 409 says why it could not. */
+   * anything after it, and its words come back for the composer, with those of the later messages main had not read.
+   * A 409 says why it could not. */
   rewindMain: (c: string, event: string) => j<{ text: string; event: string }>(`${ws(c)}/chats/main/rewind`, { method: 'POST', body: JSON.stringify({ event }) }),
   askAgain: (c: string, id: string) => j<{ asked: string; event: string; questions: number }>(`${ws(c)}/chats/${enc(id)}/ask-again`, { method: 'POST' }),
   /**
