@@ -1,7 +1,7 @@
 """Labels: a category given to every record of a scope, kept with each record's ref.
 
     <conversation's labels of the root>/<name>.json    one label: its definition, each record's value, the person's
-                                                       checks, and its runs (store.py kept_dir)
+                                                       checks, its runs, and its versions (store.py kept_dir)
 
 A label belongs to the Claude Code conversation that made it: a new conversation in the same folder has none, and a
 resumed one has its own again. Only the model's reads of a --prompt label are shared, and only as speed: the same label
@@ -32,8 +32,10 @@ the sessions that applied it (`sessions`), which coverage reads.
 A prompt label over more than a sample of records (estimate.py) waits for the person's choice before the model reads
 it (hold_for_ask): run all, run on a random sample, or cancel, which their answer in the terminal gives (answer_ask).
 
-Every change bumps `rev`. Writes take a lock (the model's reads, the person's checks and Claude's commands may write
-at once).
+Every change bumps `rev`, and once no record waits for the model keeps what the label counts as its next version
+(`versions`, keep_version): the citation check reads a label's counts as they were when the cited words were written
+(engine/kernel/evidence.py terminal_label_cards), not as a later run or check made them. Writes take a lock (the
+model's reads, the person's checks and Claude's commands may write at once).
 
 The code a caller gives (a --code rule, a --where expression) runs in this process, except in a run the plugin made
 for a command in Claude Code's sandbox, which runs it in thimble's own sandbox instead (codebox.py; code_here).
@@ -120,8 +122,45 @@ def write(st: Store, lab: dict[str, Any], change: bool = True) -> None:
         lab["rev"] = int(lab.get("rev") or 0) + 1
     lab["updated"] = time.time()
     p = path(st, lab["name"])
+    if change:
+        keep_version(st, lab, p)
     st.write_json(p, lab)
     _keep_summary(st, {p.name: _summary(p, lab)})
+
+
+def version_table(st: Store, lab: dict[str, Any]) -> dict[str, Any]:
+    """What `thimble label NAME` counts, as a table: a column for each unit of its records (records, lines, files: a
+    label over lines and whole files counts each apart), a row for each value, then `all`, the records it holds."""
+    parts = units_of(st, lab)
+    vals = list(lab["values"]) + [v for v in counts(lab) if v not in lab["values"]]
+    return {"cols": [u["unit"] for u in parts] or ["records"],
+            "rows": [[v, [f"{u['counts'].get(v, 0):,}" for u in parts] or ["0"]] for v in vals]
+                    + [["all", [f"{u['n']:,}" for u in parts] or ["0"]]]}
+
+
+def keep_version(st: Store, lab: dict[str, Any], p: Path) -> None:
+    """The label's versions (`versions`), which a citation of its counts is checked against as they were when the cited
+    words were written (evidence.py terminal_label_cards): after a change, when no record waits for the model, what the
+    label counts (version_table) as its next version, with when it was made and what made it, unless the newest shows
+    the same. The versions go on from the label's file, so a new definition keeps those of the one before."""
+    on_disk = st.read_json(p)
+    kept = [v for v in ((on_disk or {}).get("versions") if isinstance(on_disk, dict) else lab.get("versions")) or [] if isinstance(v, dict)]
+    lab["versions"] = kept
+    s = status(lab)
+    if s["waiting"]:
+        return
+    table = version_table(st, lab)
+    if kept and (kept[-1].get("cols"), kept[-1].get("rows")) == (table["cols"], table["rows"]):
+        return
+    one = len(table["cols"]) == 1
+    made = f"{'a trial over' if lab.get('trial') else 'run over'} {unit_count(s['records'], table['cols'][0] if one else 'records')}"
+    if kept and kept[-1].get("def") != lab.get("version"):
+        made = f"redefined; {made}"
+    if s["checked"]:
+        made += f"; the analyst checked {s['checked']:,}"
+    last = kept[-1] if kept else {}
+    kept.append({"v": int(last.get("v") or 0) + 1, "at": max(time.time(), float(last.get("at") or 0)), "def": lab.get("version"),
+                 "made": made, **table})
 
 
 # ------------------------------------------------------------------ what coverage reads of the labels

@@ -186,7 +186,9 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
   if (reply) await editReply($, key, r => ({ ...r, items: [...r.items, item] }))
   else {
     const now = Number(await $.clock.now())
-    await newReply($, { key, turnId: (await turnOfRow($, row))?.turnId ?? '', rows: [row], startedAt: now, settledAt: now, items: [item] })
+    const turn = await turnOfRow($, row)
+    // the words were written by the end of the answer's turn: a label is read as it was then (checker.ts wroteAt)
+    await newReply($, { key, turnId: turn?.turnId ?? '', rows: [row], startedAt: now, settledAt: now, items: [item], ...(turn?.endedAt ? { wroteAt: turn.endedAt } : {}) })
   }
   await showCitation($, row, next)
 }

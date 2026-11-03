@@ -5,8 +5,10 @@
 // without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence names one
 // of the session's real Bash calls (the checker's or main's) by a part of its output, and that call's real output must
 // show the words; card evidence names places of the session's cards (cards/store.ts), whose values must show them, or
-// whose number shows a count of what they are. Before the forks start, the cards' places and values are written to a
-// file the checker greps (cardsIndex).
+// whose number shows a count of what they are. The conversation's labels are cards too, each version of its counts
+// kept (engine/kernel/labels.py keep_version), read as they were when the marks' words were written (`wroteAt`), never
+// as a later run or check made them. Before the forks start, the cards' places and values are written to a file the
+// checker greps (cardsIndex).
 // Its result is what the person sees.
 //
 //   noteRow($, row, text)     a text row of main's reply, as session.append stored it
@@ -128,7 +130,7 @@ import { update, type EngineInterface } from 'claude-code'
 import { busyWhile } from '../bar/busy'
 import { cardsDir } from '../cards/store'
 import { failCleared, failLineNow, failNotice, noticeLine, reasonOf } from '../bar/notice'
-import { startDir } from '../core/env'
+import { labelsDir, rootHere, startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
 import { claudeTempDir, tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
@@ -146,8 +148,20 @@ type Any = any
 
 /** One fork's check: the reply, and the numbers of the marks this fork checks. `cwd` is the shell's folder, where the
  *  fork's code runs; `root` the folder the session started in, which the pane's paths start from. A relative path of
- *  the evidence is read from either. */
-type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }
+ *  the evidence is read from either. `wroteAt`: when the marks' words were written, the time a label is read at (the
+ *  validator's `at`): the label as it was then, never as a later run or check made it. */
+type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string; wroteAt?: number }
+
+/** When the words of reply `r`'s marks were written: its own time, else when its check began (a reply kept before
+ *  thimble kept that time). */
+const wroteAtOf = (r: Reply): number => r.wroteAt ?? r.startedAt
+
+/** The labels this conversation made in the folder under analysis (labels/labels.ts), whose kept versions the
+ *  validator reads as cards (engine/kernel/evidence.py terminal_label_cards); null when there are none. */
+async function labelsHere($: Engine): Promise<string | null> {
+  const root = await rootHere($).catch(() => null)
+  return root ? await labelsDir($, root).catch(() => null) : null
+}
 
 const RUNNING = { plugin: 'thimble', key: 'marksRunning' } as const
 const ROWS = { plugin: 'thimble', key: 'marksRows' } as const
@@ -228,14 +242,15 @@ let lastIndex = ''
 /** The file the checker greps for a value a card shows: each place of the session's cards and its value
  *  (engine/kernel/evidence.py card_index), written in the temp folder before the check starts. An empty file when it
  *  cannot be written: the check then finds no card and uses its other evidence. */
-export async function cardsIndex($: Engine): Promise<string> {
+export async function cardsIndex($: Engine, wroteAt?: number): Promise<string> {
   const path = `${await tempDir($)}/cards-index.tsv`
   lastIndex = path
   try {
     const dir = await cardsDir($)
     const cards = await $.fs.list(dir).catch(() => [])
-    if (!cards.length) await $.fs.write(path, '')
-    else await $.process.run(validateArgv($), { cwd: await startDir($), timeoutMs: 30000, stdin: JSON.stringify({ index: path, cards_dir: dir }) })
+    const labels = await labelsHere($)
+    if (!cards.length && !labels) await $.fs.write(path, '')
+    else await $.process.run(validateArgv($), { cwd: await startDir($), timeoutMs: 30000, stdin: JSON.stringify({ index: path, cards_dir: dir, ...(labels ? { labels_dir: labels } : {}), ...(wroteAt ? { at: wroteAt / 1000 } : {}) }) })
   } catch {
     // the check runs without the cards
   }
@@ -704,7 +719,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   const key = reply[reply.length - 1]!.row
   const rows = [...new Set([...items.map(m => m.row), key])]
   try {
-    await newReply($, { key, turnId: e.turnId, rows, startedAt: now, settledAt: later ? now : null, items })
+    await newReply($, { key, turnId: e.turnId, rows, startedAt: now, settledAt: later ? now : null, items, wroteAt: reply[reply.length - 1]!.at })
   } finally {
     await done()
   }
@@ -712,7 +727,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   if (later) return
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
-  const whole: Check = { agentId: '', key, turnId: e.turnId, marks: items.map(m => m.n), cwd, root, replyEnd: reply[reply.length - 1]!.at, spawnedAt: now }
+  const whole: Check = { agentId: '', key, turnId: e.turnId, marks: items.map(m => m.n), cwd, root, replyEnd: reply[reply.length - 1]!.at, spawnedAt: now, wroteAt: reply[reply.length - 1]!.at }
   if (e.reason !== 'answer') {
     await giveUp($, whole, 'The reply was interrupted.', now)
     return
@@ -732,7 +747,7 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
     return
   }
   const started: string[] = []
-  const cards = await cardsIndex($)
+  const cards = await cardsIndex($, whole.wroteAt)
   const shares = splitMarks(items)
   for (const [k, share] of shares.entries()) {
     const c: Check = { ...whole, marks: share.map(m => m.n) }
@@ -849,9 +864,9 @@ export async function checkAnswer($: Engine, a: { row: string; text: string; tur
   const items = itemsOf([{ row: a.row, text: a.text }], later)
   if (!items.length) return
   const now = Number(await $.clock.now())
-  await newReply($, { key: a.row, turnId: a.turnId, rows: [a.row], startedAt: now, settledAt: later ? now : null, items, thread: { agentId: a.agentId, about: a.about } })
+  await newReply($, { key: a.row, turnId: a.turnId, rows: [a.row], startedAt: now, settledAt: later ? now : null, items, thread: { agentId: a.agentId, about: a.about }, wroteAt: now })
   if (later) return
-  const whole: Check = { agentId: '', key: a.row, turnId: a.turnId, marks: items.map(m => m.n), cwd: String(await $.session.cwd()), root: await startDir($), replyEnd: now, spawnedAt: now, thread: a.agentId }
+  const whole: Check = { agentId: '', key: a.row, turnId: a.turnId, marks: items.map(m => m.n), cwd: String(await $.session.cwd()), root: await startDir($), replyEnd: now, spawnedAt: now, thread: a.agentId, wroteAt: now }
   if (a.reason !== 'answer') {
     await giveUp($, whole, 'The answer was interrupted.', now)
     return
@@ -867,7 +882,7 @@ export const REPAIR_DESCRIPTION = 'checking a citation again (x)'
 /** A repair's spawn held for a key's word window: it waits until `until`, and is refused once `cancelled`. */
 export type RepairHold = { until: number; cancelled: boolean }
 /** What a check of one mark again needs: its reply, its mark, and the checker's text with the request. */
-export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string; auto?: boolean }
+export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string; auto?: boolean; wroteAt?: number }
 
 let held: RepairHold | null = null
 const starting = new Set<string>()
@@ -906,7 +921,7 @@ export async function repairOf($: Engine, row: string, n: number): Promise<Repai
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
   const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
-  return { key, turnId: r.turnId, n, cwd, root, ...(r.thread ? { thread: r.thread.agentId } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(m)}` }
+  return { key, turnId: r.turnId, n, cwd, root, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(m)}` }
 }
 
 /** The repair's fork. Its spawn is the first call, so it is made inside the hook that calls this (the key's or the
@@ -939,7 +954,7 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
         return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const }
       }),
     }))
-    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.auto ? { auto: true } : {}), ...(r.thread ? { thread: r.thread } : {}) }
+    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.auto ? { auto: true } : {}), ...(r.thread ? { thread: r.thread } : {}), ...(r.wroteAt ? { wroteAt: r.wroteAt } : {}) }
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
     await showRunning($, r.key, 1, [agentId])
     return ''
@@ -973,7 +988,7 @@ export async function checkOpened($: Engine, row: string, n: number): Promise<vo
     if (!fork.agentId) {
       const line = await refusedLine($, fork.deny)
       const at = Number(await $.clock.now())
-      const whole: Check = { agentId: '', key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: at, spawnedAt: at, ...(r.thread ? { thread: r.thread.agentId } : {}) }
+      const whole: Check = { agentId: '', key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: at, spawnedAt: at, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}) }
       await sayCannotStart($, line.kind !== 'other' ? line : { notice: false, text: `The check of citation ${n} could not start (${await errorWordsOf($, fork.deny || 'no reason given')}). Open it again to try again.` }, true, { kind: 'check', whole, reply, note })
       return
     }
@@ -981,7 +996,7 @@ export async function checkOpened($: Engine, row: string, n: number): Promise<vo
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
     await editReply($, key, rep => ({ ...rep, settledAt: null, items: rep.items.map(x => (x.n === n ? { ...x, status: 'checking' as MarkStatus } : x)) }))
-    const c: Check = { agentId, key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: now, spawnedAt: now, ...(r.thread ? { thread: r.thread.agentId } : {}) }
+    const c: Check = { agentId, key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: now, spawnedAt: now, wroteAt: wroteAtOf(r), ...(r.thread ? { thread: r.thread.agentId } : {}) }
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
     await showRunning($, key, 1, [agentId])
   } finally {
@@ -1050,13 +1065,21 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   const tmp = [await tempDir($), await claudeTempDir($).catch(() => '')].filter(Boolean)
   const ran = await $.process.run(validateArgv($), {
     cwd: c.cwd, timeoutMs: 120000,
-    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls, ...(unread.length ? { unread } : {}) }),
+    // the labels as they were when the marks' words were written (a check from before thimble kept that time reads them now)
+    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), ...await labelsAt($, c), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls, ...(unread.length ? { unread } : {}) }),
   })
   let out: { parsed: boolean; results: Any[]; outside?: unknown } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
   if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${await errorWordsOf($, String(ran.stderr || 'no output').trim().split('\n').pop())}), so they are not checked. ${CHECK_ONE}` }
   if (!out.parsed) return { problem: `The check of the citations gave no answer thimble could read, so they are not checked. ${CHECK_ONE}` }
   return { results: out.results, outside: Array.isArray(out.outside) ? out.outside.map(String) : [] }
+}
+
+/** The validator's labels for check `c`: the folder of this conversation's labels and when the marks' words were
+ *  written, in seconds (`labels_dir`, `at`). */
+async function labelsAt($: Engine, c: Check): Promise<{ labels_dir?: string; at?: number }> {
+  const labels = await labelsHere($)
+  return { ...(labels ? { labels_dir: labels } : {}), ...(c.wroteAt ? { at: c.wroteAt / 1000 } : {}) }
 }
 
 /** Whether the answer for failed citation `m` names `file`, so its check needed that file: its reason or note, or a
