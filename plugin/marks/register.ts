@@ -22,8 +22,6 @@
 //   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g, or x): Claude
 //                    Code's own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask
 //                    mode would refuse it (checker.ts allowsCheck)
-//   tool.call        x's repair, which Claude Code refused asking nobody: the person's OK, and Claude Code asked again
-//                    within the same call (checker.ts okOnRefusal)
 //   tool.check       a checker's Read or Grep of one file the person let thimble's checks read with that tool (x):
 //                    Claude Code's own ask answered allow where nobody is asked (checker.ts allowsRead); never a Glob,
 //                    which lists a folder
@@ -50,7 +48,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, okOnRefusal, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -234,14 +232,6 @@ export const registerMarks: Register = on => {
   on('tool.check', { tool: 'Agent' }, async ($, e, next) => {
     const v = await next(e)
     return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v
-  }).catch(($, e, next) => next(e))
-
-  // x's repair, which Claude Code refused asking nobody (auto mode's classifier gave no verdict, don't ask mode): the
-  // person's OK (checker.ts okOnRefusal), and Claude Code asked again within this call, whose tool.check above then
-  // answers allow, so one press starts the repair
-  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
-    const r = await next(e)
-    return (await okOnRefusal($, e, next.origin, r)) ? next(e) : r
   }).catch(($, e, next) => next(e))
 
   // a checker's Read or Grep of one file the person let thimble's checks read with that tool (x, checker.ts
