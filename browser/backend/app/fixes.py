@@ -757,10 +757,10 @@ def target_root() -> Path:
 
 def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
     """`root` ready to run: the packages lent, and its page built when its sources are newer than the build. A build of
-    the very sources it has, made before, takes the build's place rather than a build after the person's click: the
-    page the checks of the fix that goes on built (`built`: its folder, and the git tree of the sources it was built
-    from, checks_build), or this install's own page, while `root` has the install's page sources (a fix that changes
-    none). '' when ready, else why not."""
+    the very sources it has (PAGE_SOURCES), made before, takes the build's place rather than a build after the person's
+    click: the page the checks of the fix that goes on built (`built`: its folder, and the git ids of the sources it was
+    built from, checks_build), or this install's own page, while `root` has the install's page sources (a fix that
+    changes none). '' when ready, else why not."""
     here = root.resolve() == config.REPO_ROOT.resolve()
     if not here:
         lend(root)
@@ -788,18 +788,26 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
     return ""
 
 
+# the page's sources, by their paths in a checkout of thimble: browser/frontend, and the modules of the terminal plugin
+# the page bundles (vite.config.ts lets it read ../../plugin), those browser/frontend/src imports and those they import
+PAGE_SOURCES = ("browser/frontend", "plugin/core/text.js", "plugin/fix/command.mjs", "plugin/marks/message.js",
+                "plugin/tray/printed.mjs", "plugin/tray/tray.mjs")
+
+
 def page_built(fe: Path) -> bool:
-    """Whether the page folder `fe` (a browser/ folder's frontend/) holds a build no source of it is newer than."""
+    """Whether the page folder `fe` (a browser/ folder's frontend/) holds a build no source of it is newer than: its
+    src/ and index.html, and the plugin's modules it bundles (PAGE_SOURCES)."""
     built = fe / "dist" / "index.html"
     if not built.is_file():
         return False
     stamp = built.stat().st_mtime
-    newer = any(p.stat().st_mtime > stamp for p in (fe / "src").rglob("*") if p.is_file())
+    sources = [*(fe / "src").rglob("*"), *(fe.parent.parent / p for p in PAGE_SOURCES[1:])]
+    newer = any(p.stat().st_mtime > stamp for p in sources if p.is_file())
     return not newer and (fe / "index.html").stat().st_mtime <= stamp
 
 
 def git_tree(cwd: Path, rev: str) -> str:
-    """The id of the git tree `rev` names (`<commit>:<path>`) in the checkout at `cwd`, '' when it names none."""
+    """The id of the git tree or file `rev` names (`<commit>:<path>`) in the checkout at `cwd`, '' when it names none."""
     try:
         p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(cwd), "rev-parse",
                             rev], capture_output=True, text=True, timeout=30, check=False)
@@ -808,15 +816,24 @@ def git_tree(cwd: Path, rev: str) -> str:
     return p.stdout.strip() if p.returncode == 0 else ""
 
 
+def page_sources(top: Path, rev: str) -> str:
+    """The git ids of the page's sources (PAGE_SOURCES) as commit `rev` of the checkout at `top` has them, as one
+    string, a module it lacks with an empty id; '' when it holds no browser/frontend, or is no checkout."""
+    ids = [git_tree(top, f"{rev}:./{p}") for p in PAGE_SOURCES]
+    return " ".join(ids) if ids[0] else ""
+
+
 def page_tree(fe: Path) -> str:
-    """The git tree of the page sources in `fe` (a browser/ folder's frontend/), when they are as their checkout's
-    commit has them; '' when they are not (a change not committed), or are in no checkout."""
+    """The git ids of the sources of the page in `fe` (a browser/ folder's frontend/, page_sources), when they are as
+    their checkout's commit has them; '' when they are not (a change not committed), or are in no checkout."""
+    top = fe.parent.parent
     try:
-        st = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(fe), "status",
-                             "--porcelain", "--", "."], capture_output=True, text=True, timeout=30, check=False)
+        st = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "--no-optional-locks", "-C", str(top), "status",
+                             "--porcelain", "--", *PAGE_SOURCES], capture_output=True, text=True, timeout=30,
+                            check=False)
     except (OSError, subprocess.TimeoutExpired):
         return ""
-    return git_tree(fe, "HEAD:./") if st.returncode == 0 and not st.stdout.strip() else ""
+    return page_sources(top, "HEAD") if st.returncode == 0 and not st.stdout.strip() else ""
 
 
 def checks_page(fid: int) -> Path:
@@ -826,15 +843,16 @@ def checks_page(fid: int) -> Path:
 
 
 def built_tree(fid: int, commit: str) -> str:
-    """The git tree of the page sources the checks of fix `fid` built its page from: those of its commit, which they
-    checked, when they built the page (settle clears checks_page before they run); '' when they did not."""
+    """The git ids of the page's sources the checks of fix `fid` built its page from (page_sources): those of its
+    commit, which they checked, when they built the page (settle clears checks_page before they run); '' when they did
+    not."""
     if not commit or not (checks_page(fid) / "index.html").is_file():
         return ""
-    return git_tree(fixes_home() / "live", f"{commit}:browser/frontend")
+    return page_sources(fixes_home() / "live", commit)
 
 
 def checks_build(fid: int) -> tuple[Path, str] | None:
-    """The page the checks of ready fix `fid` built, and the git tree of the sources they built it from (settle), for
+    """The page the checks of ready fix `fid` built, and the git ids of the sources they built it from (settle), for
     prepare; None when they built none."""
     tree = str((_notes().get(str(int(fid))) or {}).get("page") or "")
     return (checks_page(fid), tree) if tree else None
