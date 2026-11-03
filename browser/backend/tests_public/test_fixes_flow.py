@@ -735,24 +735,70 @@ def test_a_fix_that_changes_only_a_module_of_the_plugin_the_page_imports_never_k
     assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
 
 
-def test_the_page_s_sources_name_each_module_of_the_plugin_the_page_imports():
-    """fixes.PAGE_SOURCES names each module of the terminal plugin the page bundles (vite.config.ts lets it read
-    ../../plugin): those browser/frontend/src imports, and those they import in turn."""
+def _json_page_checkout(top: Path, order: str) -> Path:
+    """A made-up checkout laid out as thimble's whose page imports the server's label order (src/files/labels.ts reads
+    ../../../backend/app/label_order.json, as the real page does), `order` its text, committed: its browser/."""
+    fe = top / "browser" / "frontend"
+    (fe / "src" / "files").mkdir(parents=True)
+    (fe / "index.html").write_text("<!doctype html>\n")
+    (fe / "src" / "files" / "labels.ts").write_text(
+        "import labelOrder from '../../../backend/app/label_order.json'\nexport const LABEL_ORDER = labelOrder\n")
+    (top / "browser" / "backend" / "app").mkdir(parents=True)
+    (top / "browser" / "backend" / "app" / "label_order.json").write_text(order)
+    (top / ".gitignore").write_text("browser/frontend/dist/\n")
+    _git("init", "-q", cwd=top)
+    _git("add", "-A", cwd=top)
+    _git("commit", "-q", "-m", "made-up page", cwd=top)
+    return top / "browser"
+
+
+def test_a_fix_that_changes_only_a_json_file_the_page_bundles_never_keeps_a_page_built_before_it(tmp_path,
+                                                                                                monkeypatch):
+    """The page also bundles the server's label_order.json and label_wheel.json, which a fix may change alone. They
+    were none of its sources, so live took the install's page, built from the file as it was, and a page live had built
+    before stayed: the page showed the old label order while the server and the views used the new one. Now each is
+    one of the page's sources, so the page is built after the click (here no build can run: npm is missing)."""
+    install = _json_page_checkout(tmp_path / "install", "[1, 2, 3]\n")
+    _built_page(install / "frontend" / "dist", "the install's page, built from [1, 2, 3]")
+    monkeypatch.setattr(config, "REPO_ROOT", install)
+    monkeypatch.setattr(fixes, "lend", lambda root: None)
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
+    live = _json_page_checkout(tmp_path / "live", "[3, 2, 1]\n")
+    assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
+    assert not (live / "frontend" / "dist").exists()
+    # a later fix to the file, once live has a page of its own
+    _built_page(live / "frontend" / "dist", "live's page, built from [3, 2, 1]")
+    assert fixes.prepare(live) == ""
+    order = tmp_path / "live" / "browser" / "backend" / "app" / "label_order.json"
+    order.write_text("[2, 3, 1]\n")
+    later = time.time() + 60
+    os.utime(order, (later, later))
+    assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
+
+
+def test_the_page_s_sources_name_each_file_outside_browser_frontend_the_page_imports():
+    """fixes.PAGE_SOURCES names each file outside browser/frontend the page bundles, whatever its kind: those
+    browser/frontend/src imports (the terminal plugin's modules, which vite.config.ts lets it read from ../../plugin,
+    and the server's label_order.json and label_wheel.json), and those they import in turn."""
     import re  # noqa: PLC0415
 
     repo = config.REPO_ROOT.parent
+    fe = repo / "browser" / "frontend"
     spec = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.[^'"]+)['"]""")
-    todo = [(f.parent / s).resolve() for f in (repo / "browser" / "frontend" / "src").rglob("*")
-            if f.suffix in (".ts", ".tsx", ".js", ".mjs") for s in spec.findall(f.read_text(encoding="utf-8"))]
-    todo = [p for p in todo if repo / "plugin" in p.parents]
+    code = (".ts", ".tsx", ".js", ".mjs")
+
+    def imports(f: Path) -> list[Path]:
+        return [(f.parent / s).resolve() for s in spec.findall(f.read_text(encoding="utf-8"))]
+
+    todo = [p for f in (fe / "src").rglob("*") if f.suffix in code for p in imports(f) if fe not in p.parents]
     found: set[Path] = set()
     while todo:
         p = todo.pop()
         if p not in found:
             found.add(p)
-            todo += [(p.parent / s).resolve() for s in spec.findall(p.read_text(encoding="utf-8"))]
+            todo += [q for q in imports(p) if fe not in q.parents] if p.suffix in code else []
     assert found and sorted(p.relative_to(repo).as_posix() for p in found) == sorted(fixes.PAGE_SOURCES[1:])
-    assert fixes.PAGE_SOURCES[0] == "browser/frontend"
+    assert any(p.suffix == ".json" for p in found) and fixes.PAGE_SOURCES[0] == "browser/frontend"
 
 
 # a release launcher that hands the way back off itself, as the plugin's launcher checks (plugin/bin/thimble)

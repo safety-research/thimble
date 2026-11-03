@@ -788,15 +788,17 @@ def prepare(root: Path, built: tuple[Path, str] | None = None) -> str:
     return ""
 
 
-# the page's sources, by their paths in a checkout of thimble: browser/frontend, and the modules of the terminal plugin
-# the page bundles (vite.config.ts lets it read ../../plugin), those browser/frontend/src imports and those they import
+# the page's sources, by their paths in a checkout of thimble: browser/frontend, and each file outside it the page
+# bundles, those browser/frontend/src imports and those they import: the modules of the terminal plugin (vite.config.ts
+# lets it read ../../plugin) and the server's label colours, which the page reads as the server does
 PAGE_SOURCES = ("browser/frontend", "plugin/core/text.js", "plugin/fix/command.mjs", "plugin/marks/message.js",
-                "plugin/tray/printed.mjs", "plugin/tray/tray.mjs")
+                "plugin/tray/printed.mjs", "plugin/tray/tray.mjs", "browser/backend/app/label_order.json",
+                "browser/backend/app/label_wheel.json")
 
 
 def page_built(fe: Path) -> bool:
     """Whether the page folder `fe` (a browser/ folder's frontend/) holds a build no source of it is newer than: its
-    src/ and index.html, and the plugin's modules it bundles (PAGE_SOURCES)."""
+    src/ and index.html, and the files outside it the page bundles (PAGE_SOURCES)."""
     built = fe / "dist" / "index.html"
     if not built.is_file():
         return False
