@@ -25,7 +25,6 @@ import copy
 import hashlib
 import json
 import logging
-import os
 import secrets
 import threading
 from contextlib import contextmanager
@@ -594,23 +593,24 @@ def _delete_card(c: str, cid: str) -> None:
 
 
 def _write_doc(c: str, step: dict[str, Any], doc: dict[str, Any] | None) -> None:
-    """A document (or its frame) back to `doc`; None removes it, as before its first save."""
+    """A document (or its frame) back to `doc`; None removes it, as before its first save. Each is written or removed as
+    nofollow does, so a link a card's code left on the way leads none of them outside the workspace: the step fails
+    (409) instead."""
     from . import investigation, report_types  # noqa: PLC0415 — report_types calls doc_written
 
     inv, slug = str(step.get("inv") or investigation.MAIN), str(step["target"])
-    if step.get("which") == "frame":
-        if doc is None:
-            with_path = report_types.frame_file(c, inv, slug)
-            if with_path.is_file():
-                os.remove(with_path)
+    try:
+        if step.get("which") == "frame":
+            if doc is None:
+                nofollow.unlink(report_types.frame_file(c, inv, slug))
+            else:
+                report_types.write_frame(c, inv, slug, doc)
+        elif doc is None:
+            nofollow.unlink(report_types.doc_file(c, inv, slug))
         else:
-            report_types.write_frame(c, inv, slug, doc)
-    elif doc is None:
-        path = report_types.doc_file(c, inv, slug)
-        if path.is_file():
-            os.remove(path)
-    else:
-        report_types.write_doc(c, inv, slug, doc)
+            report_types.write_doc(c, inv, slug, doc)
+    except OSError as e:
+        raise HTTPException(409, f"the {slug} was not changed: {e}") from None
     if inv == investigation.MAIN:
         report_types._emit(c, {"type": "report", "slug": slug, "status": "edited", "by": "undo"})
 

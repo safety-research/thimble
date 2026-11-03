@@ -597,3 +597,30 @@ def test_the_export_copies_no_link_and_waits_on_no_fifo_a_card_left_in_the_works
     assert not held, "the export was held by a FIFO in the workspace"
     with zipfile.ZipFile(tmp_path / "made-up.zip") as z:
         assert all(b"OUTSIDE-SECRET" not in z.read(n) for n in z.namelist())
+
+
+def test_undo_of_a_document_s_first_save_removes_no_file_through_a_link_a_card_left(tmp_path_factory):
+    """The undo of a document's first save removes the document, investigations/main/<slug>.json, by its path: a card's
+    code that put a link to another folder in place of investigations/main had the next Undo remove the file of that
+    name in the folder the link led to."""
+    from fastapi import HTTPException
+
+    from app import investigation, report_types, undo
+
+    outside = _outside(tmp_path_factory)
+    (outside / "report.json").write_text('{"made": "up", "keep": true}\n')
+    undo.forget()
+    try:
+        report_types.write_doc(CORPUS, investigation.MAIN, "report", {"title": "Made-up report", "sections": []})
+        inv = investigation.inv_dir(CORPUS, investigation.MAIN)
+        _swap_for_link(inv, outside)
+        for _ in range(3):  # the analyst's Undo, until it reaches the document's first save
+            if undo.labels(CORPUS)["undo"] is None:
+                break
+            try:
+                undo.undo(CORPUS)
+            except HTTPException:
+                pass
+    finally:
+        undo.forget()
+    assert (outside / "report.json").read_text() == '{"made": "up", "keep": true}\n'
