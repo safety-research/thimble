@@ -46,7 +46,7 @@ Run `claude` in a folder with files you'd like to analyze. By default, thimble i
 
 ![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 
-When thimble does something wrong or you'd like a new feature, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble. In the shell, `thimble fixes` shows all existing fixes. `thimble file issue <id>` gives a link to file a GitHub's issue, and `thimble file pr <id>` opens a pull request with the fix.
+When thimble does something wrong or you'd like a new feature, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble. In the shell, `thimble fixes` shows all existing fixes. `thimble file issue <id>` gives a link to file a GitHub issue, and `thimble file pr <id>` opens a pull request with the fix.
 
 ### Browser workbench
 
