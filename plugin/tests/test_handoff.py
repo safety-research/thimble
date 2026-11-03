@@ -252,6 +252,62 @@ def test_r2_update_and_reapply_refuse_a_command_the_plugin_runs_for_claude_code_
         assert r.returncode == 1 and f"{what} runs in a shell, not inside Claude Code" in r.stderr, (argv, r.stdout, r.stderr)
 
 
+@ROOT_SKIP
+def test_r3_thimble_install_in_the_sandbox_is_never_handed_to_the_plugin(tmp_path: Path,
+                                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    # `thimble install` is scripts/install.sh's steps, which run code and write files where their arguments say. Before,
+    # one in Claude Code's sandbox was handed to the plugin like any other command, and ran outside the sandbox; now it
+    # runs here, in the sandbox, at once
+    _, home, box, env = session(tmp_path)
+    for k in ("THIMBLE_HOME", "THIMBLE_HANDOFF"):
+        monkeypatch.setenv(k, env[k])
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    seen: list[dict] = []
+    home.chmod(0o500)
+    stop = threading.Event()
+    plugin(box, home, stop, seen)
+    try:
+        t = time.monotonic()
+        assert H.handed_off(["install", "name"]) is None
+        assert time.monotonic() - t < 1
+    finally:
+        stop.set()
+        home.chmod(0o700)
+    assert seen == [] and list(box.iterdir()) == []
+
+
+def test_r3_the_install_refuses_a_run_the_plugin_makes_for_a_command_in_the_sandbox(tmp_path: Path) -> None:
+    # a request, which any command in the sandbox can write, still has the plugin run `thimble install` outside the
+    # sandbox (THIMBLE_HANDED_OFF), in a folder and with paths the command chose. Before, its setup.mjs ran there,
+    # ~/.local/bin/thimble became a link to its launcher, and --state wrote over any file; now each step refuses such a
+    # run with one line, and does nothing
+    data, home, _, env = session(tmp_path)
+    caller = data / "made-up" / "plugin"
+    ran = tmp_path / "setup-ran"
+    (caller / "sandbox").mkdir(parents=True)
+    (caller / "sandbox" / "setup.mjs").write_text(
+        f"import fs from 'node:fs'\nfs.writeFileSync({json.dumps(str(ran))}, 'ran')\n"
+        "console.log(JSON.stringify({ok: true}))\n")
+    (caller / "bin").mkdir()
+    (caller / "bin" / "thimble").write_text("#!/bin/sh\necho the caller's thimble\n")
+    (caller / "bin" / "thimble").chmod(0o755)
+    notes, bin_ = tmp_path / "notes.txt", tmp_path / "bin"
+    notes.write_text("the person's notes\n")
+    env.update(HOME=str(tmp_path / "home"), CLAUDE_CONFIG_DIR=str(tmp_path / "cc-config"), THIMBLE_HANDOFF="",
+               CLAUDECODE="1", THIMBLE_HANDED_OFF="1", THIMBLE_BROWSER_HOME=str(tmp_path / "browser-home"))
+    for argv in (["install", "sandbox", "--folder", "made-up"],
+                 ["install", "commands", "--folder", "made-up", "--bin-dir", str(bin_), "--browser"],
+                 ["install", "commands", "--bin-dir", str(bin_), "--state", str(notes)],
+                 ["install", "release", "--from", str(caller.parent)], ["install", "name"]):
+        r = subprocess.run([sys.executable, str(ENGINE / "thimble.py"), *argv], cwd=data, env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+        refused = ("thimble install does not run for a command in Claude Code's sandbox; run scripts/install.sh "
+                   "outside the sandbox.\n")
+        assert (r.returncode, r.stdout, r.stderr) == (1, refused, ""), (argv, r.stdout, r.stderr)
+    assert not ran.exists() and not bin_.exists() and notes.read_text() == "the person's notes\n"
+    assert list(home.iterdir()) == []
+
+
 def wait_for(test, limit: float = 10.0) -> bool:
     t = time.monotonic() + limit
     while not test():

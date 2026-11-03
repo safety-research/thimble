@@ -20,7 +20,10 @@ commands thimble and thimble-browser in ~/.local/bin.
 
 Each verb prints its lines as the script lays them out, and adds what does not work yet to the file --notes names, one
 line each, which the script prints last. --state names a file where a verb leaves what a later one says: where Claude
-Code loaded thimble from before, and the folders of the earlier install.
+Code loaded thimble from before, and the folders of the earlier install. Both are files in the folder the script makes
+for one install ($TMPDIR/thimble-install.XXXXXX), and no other. The verbs never run for a command in Claude Code's
+sandbox, which the plugin runs outside it (handoff.py): there they would run code and write files where the command
+chose.
 """
 from __future__ import annotations
 
@@ -39,6 +42,10 @@ from .store import thimble_home
 MARKER = "written by thimble scripts/install.sh"
 PROBE_TIMEOUT_S = 600  # setup.mjs installs the sandbox runtime with npm, then draws a test card
 IN_PLACE = 3  # release's exit code when every part is in place, and the script has nothing more to do
+# the folder scripts/install.sh makes for one install in $TMPDIR (mktemp -d), which holds its --notes and --state
+WORK = "thimble-install."
+HANDED = ("thimble install does not run for a command in Claude Code's sandbox; run scripts/install.sh outside the "
+          "sandbox.")
 
 
 class Run:
@@ -63,12 +70,15 @@ class Run:
         if self.state:
             FX.write_json(Path(self.state), {**self.get(), **kw})
 
-    def old(self, folder: Path | str | None) -> None:
-        """A folder of the earlier install, which the person may delete once nothing uses it (commands says which)."""
+    def old(self, folder: Path | str | None, clone: bool = False) -> None:
+        """A folder of the earlier install, which the person may delete once nothing uses it (commands says which).
+        clone: the clone of a dev install (scripts/install.sh --local), where the person works on thimble's code."""
         if folder:
-            got = self.get().get("old") or []
-            if str(folder) not in got:
-                self.put(old=[*got, str(folder)])
+            old, clones = self.get().get("old") or [], self.get().get("clones") or []
+            if str(folder) not in old:
+                self.put(old=[*old, str(folder)])
+            if clone and str(folder) not in clones:
+                self.put(clones=[*clones, str(folder)])
 
 
 def say(line: str = "", end: str = "\n") -> None:
@@ -118,7 +128,7 @@ def target(ref: str) -> dict[str, Any]:
     """The branch or tag `ref` of thimble's repository, as fixes.update takes it (`to`): {tag, name, ref, commit, url,
     version}, where tag is the release tag, or '' for a branch (or a tag that is no release, v0.11.0-rc1)."""
     url, name = FX.update_url(), ref.removeprefix("refs/heads/").removeprefix("refs/tags/")
-    p = FX.run(["git", "ls-remote", "--tags", "--heads", url], check=False, timeout=120)
+    p = FX.remote_git("ls-remote", "--tags", "--heads", url, check=False, timeout=120)
     if p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
         raise FX.FixError(f"thimble could not read {url} ({err[-1] if err else 'no message'}); check the network, then "
@@ -148,13 +158,13 @@ def reach_release(full_ref: str) -> None:
         tag = FX.latest_release(then="run the install again")["tag"]
     except FX.FixError:
         return
-    FX.run(["git", "fetch", "-q", "--depth", "1", "--no-tags", url, f"+refs/tags/{tag}:refs/tags/{tag}"], cwd=live,
-           check=False, timeout=300)
+    FX.remote_git("fetch", "-q", "--depth", "1", "--no-tags", url, f"+refs/tags/{tag}:refs/tags/{tag}", cwd=live,
+                  check=False, timeout=300)
     when = FX.git("log", "-1", "--format=%ct", f"refs/tags/{tag}", cwd=live, check=False)
     if when.isdigit():
         name = full_ref.removeprefix("refs/heads/").removeprefix("refs/tags/")
-        FX.run(["git", "fetch", "-q", "--no-tags", f"--shallow-since={int(when) - 1}", url,
-                f"+{full_ref}:refs/thimble/branches/{name}"], cwd=live, check=False, timeout=600)
+        FX.remote_git("fetch", "-q", "--no-tags", f"--shallow-since={int(when) - 1}", url,
+                      f"+{full_ref}:refs/thimble/branches/{name}", cwd=live, check=False, timeout=600)
 
 
 def release(a: Any, r: Run) -> int:
@@ -168,6 +178,11 @@ def release(a: Any, r: Run) -> int:
     src = Path(a.from_).resolve()
     commit = FX.git("rev-parse", "HEAD", cwd=src)
     with FX.Lock():
+        if os.path.lexists(live):
+            # a live thimble cannot use (no release.json it can read beside it, or no git copy) may hold the person's
+            # fixes as commits: it goes aside, never away
+            why = "had no release.json beside it that thimble could read" if not rel else "was no git copy"
+            r.note(f"{tilde(live)} {why}, so the install moved it to {tilde(FX.live_aside())}, with any fixes in it.")
         rel = FX.ensure_live({"kind": "github", "repo": str(src), "commit": commit, "url": FX.update_url(),
                               "entry": None})
         # live's origin is thimble's repository; the download it came from goes after the install
@@ -329,7 +344,8 @@ def plugin(a: Any, r: Run) -> int:
         if had and src and not from_folder(src, to):
             r.put(before=source_words(src), now=where)
         if src.get("source") == "directory" and not same(src.get("path"), to):
-            r.old(src.get("path"))
+            # a folder Claude Code loaded thimble from: a dev install's clone (scripts/install.sh --local)
+            r.old(src.get("path"), clone=True)
     if not folder:
         rel = FX.release()
         if not rel.get("pointed"):
@@ -516,17 +532,56 @@ def unused(a: Any, r: Run, folder: Path | None) -> None:
     say()
     if before:
         say(f"Claude Code loaded thimble from {before}. It now loads it from {st.get('now') or tilde(thimble_home())}.")
+    clones = st.get("clones") or []
     for p in gone:
-        say(f"{'  ' if before else ''}{tilde(p)} is no longer used, so you can delete it.")
+        tail = ", so you can delete it" if not any(same(p, c) for c in clones) and nothing_to_lose(p) else ""
+        say(f"{'  ' if before else ''}{tilde(p)} is no longer used{tail}.")
+
+
+def nothing_to_lose(folder: str) -> bool:
+    """Whether deleting `folder`, which nothing uses now, loses nothing that is not on its remote: a folder that is no
+    git checkout (a release's archive), or the top of one with no change (an ignored file, such as the workbench's
+    packages, aside), no stash, no commit that its remote's branches and tags do not hold, and no other worktree. A
+    folder inside another repository, or one git cannot read, is not such a folder."""
+    p = Path(os.path.realpath(folder))
+    if not any((d / ".git").exists() for d in (p, *p.parents)):
+        return True
+    if not FX._own_checkout(p):
+        return False
+    for args in (["status", "--porcelain", "--untracked-files=normal"], ["stash", "list"],
+                 ["rev-list", "-n", "1", "HEAD", "--branches", "--not", "--remotes", "--tags"]):
+        got = FX.run(["git", "--no-optional-locks", *args], cwd=p, check=False)
+        if got.returncode != 0 or got.stdout.strip():
+            return False
+    trees = FX.run(["git", "worktree", "list", "--porcelain"], cwd=p, check=False)
+    return trees.returncode == 0 and trees.stdout.count("\nworktree ") == 0
 
 
 VERBS = {"release": release, "name": name, "plugin": plugin, "sandbox": sandbox, "browser": browser,
          "commands": commands}
 
 
+def in_work(path: str) -> bool:
+    """Whether `path` is a file in a folder scripts/install.sh made for one install (WORK, in $TMPDIR or /tmp), links
+    followed."""
+    folder = Path(os.path.realpath(path)).parent
+    return folder.name.startswith(WORK) and same(folder.parent, os.environ.get("TMPDIR") or "/tmp")
+
+
 def cmd(a: Any) -> int:
     """thimble install VERB: see this file's text. A step that cannot go on says why, in its section's place (the
-    script's sections indent their lines), and ends with 1."""
+    script's sections indent their lines), and ends with 1. It never runs for a command in Claude Code's sandbox
+    (THIMBLE_HANDED_OFF: the plugin's run of one, hooks/handoff.ts), and it writes --notes and --state only in the
+    install's own folder (in_work)."""
+    if os.environ.get("THIMBLE_HANDED_OFF"):
+        say(HANDED)
+        return 1
+    for f in (a.notes, a.state):
+        if f and not in_work(f):
+            say(f"thimble install writes --notes and --state only in the folder scripts/install.sh makes for them "
+                f"({tilde(os.path.join(os.environ.get('TMPDIR') or '/tmp', WORK + 'XXXXXX'))}), and {tilde(f)} is "
+                "not in one.")
+            return 1
     r = Run(a.notes, a.state)
     try:
         return VERBS[a.verb](a, r)

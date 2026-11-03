@@ -48,6 +48,9 @@ terminal() { [ -t 1 ] && (exec </dev/tty) 2>/dev/null; }
 kernel() { "$py" -B "$code/plugin/engine/thimble.py" "$@" --notes "$notes" --state "$state"; }
 # browser 1: the kernel's option for a step that has the workbench to install, or installed
 browser() { if [ "$1" = 1 ]; then echo --browser; fi; }
+# remote ARGS...: git against thimble's repository, from / and with no ext:: transport, so that the config of a
+# repository around the person's folder cannot turn thimble's address into a command
+remote() { (cd / && git -c protocol.ext.allow=never "$@"); }
 
 # ver_ge HAVE WANT: whether the version HAVE is WANT or later, comparing up to three dotted numbers
 ver_ge() {
@@ -152,7 +155,7 @@ why_git() {
 # download REF DIR: thimble's branch or tag REF from its repository, one commit deep, into DIR; on a failure, what git
 # said and what to do, and the install stops
 download() {
-  if ! git -c advice.detachedHead=false clone -q --depth 1 --branch "$1" "$url" "$2" </dev/null 2>"$work/err"; then
+  if ! remote -c advice.detachedHead=false clone -q --depth 1 --branch "$1" "$url" "$2" </dev/null 2>"$work/err"; then
     say " failed: $(why_git)."
     if [ -n "$asked" ]; then say "Check the network and the name $1, then run the install again. Nothing was installed."
     else say "Check the network, then run the install again. Nothing was installed."; fi
@@ -279,7 +282,8 @@ main() {
   url="${THIMBLE_UPDATE_URL:-https://github.com/safety-research/thimble.git}"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
   fixes="$home/fixes"
-  work="$(mktemp -d)"
+  # the install's own folder: the kernel takes --notes and --state only in one so named (install.py in_work)
+  work="$(mktemp -d "${TMPDIR:-/tmp}/thimble-install.XXXXXX")"
   trap 'rm -rf "$work"' EXIT
   notes="$work/notes" state="$work/state.json" built=0 open=0
   : >"$notes"
@@ -317,7 +321,7 @@ main() {
   if [ -n "$asked" ]; then
     ref="$asked"
   else
-    ref="$(git ls-remote --tags --refs "$url" 'refs/tags/v*' 2>"$work/err" |
+    ref="$(remote ls-remote --tags --refs "$url" 'refs/tags/v*' 2>"$work/err" |
       sed -n 's|.*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' |
       sort -t. -k1.2,1n -k2,2n -k3,3n | tail -n 1)" || ref=""
     if [ -z "$ref" ]; then

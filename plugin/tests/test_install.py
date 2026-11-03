@@ -492,7 +492,8 @@ def test_an_install_from_github_with_a_clone_moves_into_thimbles_home_and_keeps_
 
 def test_a_dev_install_from_a_clone_moves_into_thimbles_home(w):
     """An install with --local before 0.10.8: Claude Code loads the plugin from the clone ~/code/thimble, and the
-    command links into it. The release install moves both, and names the clone as no longer used."""
+    command links into it. The release install moves both, and names the clone as no longer used, never as one to
+    delete: the person works on thimble's code there."""
     clone = w.home / "code" / "thimble"
     sh("git", "clone", "-q", str(w.bare), str(clone))
     w.claude_code({"source": "directory", "path": str(clone)}, clone)
@@ -502,7 +503,33 @@ def test_a_dev_install_from_a_clone_moves_into_thimbles_home(w):
     assert p.returncode == 0, text_of(p)
     assert p.stdout.split("The command thimble is in ~/.local/bin.\n\n", 1)[1].splitlines()[:2] == [
         "Claude Code loaded thimble from ~/code/thimble. It now loads it from ~/.thimble.",
-        "  ~/code/thimble is no longer used, so you can delete it."], p.stdout
+        "  ~/code/thimble is no longer used."], p.stdout
+
+
+@pytest.mark.parametrize("work", ["a changed file", "a new file", "a stash", "a commit of its own", "a worktree"])
+def test_a_clone_that_holds_work_of_its_own_is_never_called_one_to_delete(w, work):
+    """The clone ~/thimble of 0.10.7's install (its workbench) is no longer used after the release install. Before, the
+    install said that the person could delete it, whatever it held; now only when it holds nothing that its remote
+    does not (test_an_install_from_github_…), and else only that it is no longer used."""
+    old = github_install(w, {})
+    lock = old / "browser" / "backend" / "uv.lock"
+    if work == "a changed file":
+        lock.write_text("the person's change\n")
+    elif work == "a new file":
+        (old / "notes.txt").write_text("the person's notes\n")
+    elif work == "a stash":
+        lock.write_text("the person's change\n")
+        sh("git", "stash", "-q", cwd=old)
+    elif work == "a commit of its own":
+        sh("git", "checkout", "-q", "-b", "wip", cwd=old)
+        lock.write_text("the person's change\n")
+        commit_all(old, "the person's change")
+    else:
+        sh("git", "worktree", "add", "-q", str(w.home / "thimble-wip"), cwd=old)
+    p = w.install()
+    assert p.returncode == 0, text_of(p)
+    assert "  ~/thimble is no longer used." in p.stdout.splitlines(), p.stdout
+    assert "delete" not in p.stdout
 
 
 def test_an_install_whose_claude_code_loads_live_keeps_it_and_its_fixes(w):
@@ -530,6 +557,81 @@ def test_an_install_whose_claude_code_loads_live_keeps_it_and_its_fixes(w):
         "thimble 0.10.7 is installed in ~/.thimble. The plugin and the commands are in place.",
         "thimble 0.10.8 is out: thimble update moves to it and keeps your fixes."], text_of(p)
     assert sh("git", "rev-parse", "mine", cwd=live) == fix, "the fix stays"
+
+
+def test_a_live_with_no_release_json_goes_aside_with_its_fixes_and_the_install_says_where(w):
+    """~/.thimble/fixes/live holds a fix commit, and release.json beside it is gone. Before, the install deleted live
+    with the fix; now it moves live aside, beside it, by the date and time, says where in a line at the end, and
+    installs the release in its place."""
+    live = w.th / "fixes" / "live"
+    sh("git", "clone", "-q", str(w.bare), str(live))
+    sh("git", "checkout", "-q", "-b", "mine", cwd=live)
+    (live / "plugin" / "my-fix.txt").write_text("a made-up fix\n")
+    fix = commit_all(live, "a made-up fix")
+    p = w.install("--no-browser")
+    assert p.returncode == 0, text_of(p)
+    aside = [d for d in (w.th / "fixes").iterdir() if d.name.startswith("live-")]
+    assert len(aside) == 1 and re.fullmatch(r"live-\d{8}-\d{6}", aside[0].name), aside
+    assert sh("git", "rev-parse", "mine", cwd=aside[0]) == fix
+    assert (aside[0] / "plugin" / "my-fix.txt").is_file()
+    assert (f"Note: ~/.thimble/fixes/live had no release.json beside it that thimble could read, so the install moved "
+            f"it to ~/.thimble/fixes/{aside[0].name}, with any fixes in it.") in p.stdout.splitlines(), p.stdout
+    assert sh("git", "rev-parse", "mine", cwd=live) == sh("git", "rev-parse", "v0.10.8", cwd=w.bare)
+
+
+# ------------------------------------------------------------------ what is the person's
+
+def test_git_against_thimbles_repository_takes_no_config_of_a_repository_around_the_folder(w):
+    """The person's folder is in a git repository whose config rewrites thimble's address into a command (a
+    downloaded repository with its .git/config planted). Before, the install's look for the newest release ran there,
+    and a session's check for a newer one, which the plugin runs at each start once the install points Claude Code at
+    live, ran in the session's folder: the command ran. Now git against thimble's repository runs from /, with no ext::
+    transport, also when the person's own config allows it."""
+    ran = w.tmp / "planted-ran"
+    planted = f"ext::sh -c touch% {ran}"
+    sh("git", "init", "-q", str(w.home))
+    sh("git", "config", "protocol.ext.allow", "always", cwd=w.home)
+    sh("git", "config", f"url.{planted}.insteadOf", str(w.bare), cwd=w.home)
+    p = w.install("--no-browser")
+    assert p.returncode == 0 and not ran.exists(), text_of(p)
+    # a branch: its tip and the newest release, read from thimble's repository, and fetched into live
+    tip = w.publish(branch="try-r109")
+    p = w.install("--no-browser", "--ref", "try-r109")
+    assert p.returncode == 0 and not ran.exists(), text_of(p)
+    assert sh("git", "rev-parse", "mine", cwd=w.th / "fixes" / "live") == tip
+    (w.home / "runs").mkdir()
+    check = [str(w.home / ".local" / "bin" / "thimble"), "fix", "update", "--check", "--once", "--json"]
+    got = subprocess.run(check, cwd=w.home / "runs", env=w.env(THIMBLE_ROOT=str(w.home / "runs")),
+                         capture_output=True, text=True, timeout=120)
+    assert got.returncode == 0 and not ran.exists(), text_of(got)
+    # the person's own config, which allows ext:: and rewrites thimble's address
+    (w.home / ".gitconfig").write_text(
+        f'[protocol "ext"]\n\tallow = always\n[url "{planted}"]\n\tinsteadOf = {w.bare}\n')
+    got = subprocess.run(check, cwd=w.tmp, env=w.env(), capture_output=True, text=True, timeout=120)
+    assert not ran.exists(), text_of(got)
+
+
+def test_the_plugin_step_writes_claude_codes_settings_through_a_link(w):
+    """Claude Code's settings.json is a link into a dotfiles folder. Before, the install wrote a file of its own in the
+    link's place, and the dotfiles copy kept GitHub as the marketplace's source; now the file the link names takes the
+    new source, keeps its mode and the rest of its settings, and the link stays."""
+    dot = w.home / "dotfiles" / "claude-settings.json"
+    dot.parent.mkdir()
+    dot.write_text(json.dumps({"extraKnownMarketplaces": {"thimble": {"source": {"source": "github",
+                                                                                   "repo": "safety-research/thimble"}}},
+                               "permissions": {"deny": ["Read(~/.ssh/**)"]}}, indent=2))
+    dot.chmod(0o600)
+    w.cc.mkdir()
+    (w.cc / "settings.json").symlink_to(dot)
+    p = w.install("--no-browser")
+    assert p.returncode == 0, text_of(p)
+    assert (w.cc / "settings.json").is_symlink() and os.readlink(w.cc / "settings.json") == str(dot)
+    s = json.loads(dot.read_text())
+    assert s["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory",
+                                                                "path": str(w.th / "fixes" / "live")}
+    assert s["permissions"] == {"deny": ["Read(~/.ssh/**)"]}
+    assert dot.stat().st_mode & 0o777 == 0o600
+    assert sorted(x.name for x in dot.parent.iterdir()) == ["claude-settings.json"]
 
 
 # ------------------------------------------------------------------ thimble 0.9
@@ -656,6 +758,27 @@ def test_the_install_command_s_verbs_are_the_kernel_s():
 
     assert tuple(IN.VERBS) == cli.INSTALL_VERBS
     assert "thimble install" not in cli._help(), "only the script runs it"
+
+
+def test_the_steps_write_notes_and_state_only_in_the_folder_the_script_makes_for_them(w):
+    """--notes and --state name files in the folder scripts/install.sh makes for one install ($TMPDIR/thimble-install.
+    XXXXXX). Before, a step wrote any file they named (the state over the person's notes); now it refuses another, a
+    link from such a folder to one elsewhere too, with one line, and writes nothing. The script's own run works as
+    before (every other test here)."""
+    notes = w.home / "notes.txt"
+    notes.write_text("the person's notes\n")
+    work = w.tmp / "tmp" / "thimble-install.made-up"
+    work.mkdir()
+    (work / "state.json").symlink_to(notes)
+    for option, path in (("--notes", notes), ("--state", notes), ("--state", work / "state.json")):
+        p = subprocess.run([sys.executable, str(ROOT / "plugin" / "engine" / "thimble.py"), "install", "commands",
+                            "--bin-dir", str(w.tmp / "bin"), option, str(path)], env=w.env(), cwd=w.home,
+                           capture_output=True, text=True, timeout=60)
+        assert p.returncode == 1 and p.stdout.startswith(
+            "thimble install writes --notes and --state only in the folder scripts/install.sh makes for them ("), \
+            text_of(p)
+    assert notes.read_text() == "the person's notes\n"
+    assert not (w.tmp / "bin").exists() and not w.th.exists()
 
 
 def test_the_script_s_steps_read_top_to_bottom_with_no_python_program_in_it():

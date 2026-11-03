@@ -374,8 +374,8 @@ def _main_tip() -> dict[str, str]:
     fetched into live, {commit, version}. Its version is the release tag at that commit, else the plugin's version
     there, else the commit."""
     live, url = FX.live_dir(), FX.update_url()
-    p = FX.run(["git", "fetch", "-q", "--no-tags", url, f"+refs/heads/main:{MAIN_REF}"], cwd=live, check=False,
-               timeout=600)
+    p = FX.remote_git("fetch", "-q", "--no-tags", url, f"+refs/heads/main:{MAIN_REF}", cwd=live, check=False,
+                      timeout=600)
     if p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
         why = FX.no_access(p.stderr or p.stdout, "try again")
@@ -481,14 +481,14 @@ def open_pr(r: dict[str, Any], user: dict[str, Any]) -> str:
     try:
         sha = _commit(r, user, tmp)
         # a name no branch there has, nor holds as a folder of branches (a branch thimble-fix-1-x/y would block it)
-        taken = FX.run([FX.push_git(), "-c", "credential.helper=", "-c",
+        taken = FX.run([FX.push_git(), *FX.NO_EXT, "-c", "credential.helper=", "-c",
                         f"credential.https://github.com.helper=!{FX.gh()} auth git-credential", "ls-remote", "--heads", url],
                        cwd=tmp / "repo", check=False).stdout
         heads = {x.split("refs/heads/", 1)[1] for x in taken.splitlines() if "refs/heads/" in x}
         base_name, k = r["branch"], 2
         while any(h == r["branch"] or h.startswith(r["branch"] + "/") for h in heads):
             r["branch"], k = f"{base_name}-{k}", k + 1
-        push = [FX.push_git(), "-c", "credential.helper=", "-c",
+        push = [FX.push_git(), *FX.NO_EXT, "-c", "credential.helper=", "-c",
                 f"credential.https://github.com.helper=!{FX.gh()} auth git-credential",
                 "push", url, f"{sha}:refs/heads/{r['branch']}"]
         for i in range(5):  # a fork GitHub has just made can take a few seconds to take a push
