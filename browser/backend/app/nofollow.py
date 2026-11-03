@@ -232,6 +232,75 @@ def temp_at(fd: int, name: str, data: bytes, mode: int = 0o600) -> str:
     return tmp
 
 
+def touch(path: PathLike, *, root: PathLike | None = None, make: bool = False) -> None:
+    """The file at `path` made when missing and its times set to now, as Path.touch does, never through a link
+    (open_at)."""
+    fd = open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, root=root, make=make)
+    try:
+        os.utime(fd)
+    finally:
+        os.close(fd)
+
+
+def copy_file(src: PathLike, dst: PathLike, *, root: PathLike | None = None, make: bool = False,
+              meta: bool = True) -> None:
+    """The file `src` copied to `dst` in place as shutil.copy2 copies it (with `meta`, its mode and times too), each
+    opened as `open` opens it (`dst` from `root`), so neither is read or written through a link in a workspace."""
+    with os.fdopen(open(src, os.O_RDONLY), "rb") as f:
+        data, st = f.read(), os.fstat(f.fileno())
+    fd = open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, root=root, make=make)
+    with os.fdopen(fd, "wb") as out:
+        out.write(data)
+        out.flush()
+        if meta:
+            os.fchmod(out.fileno(), stat.S_IMODE(st.st_mode))
+            os.utime(out.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def symlink(target: PathLike, path: PathLike, *, root: PathLike | None = None, make: bool = False) -> None:
+    """A link to `target` made at `path`, in its folder as walk opens it (`make` makes it)."""
+    parent, name = _parent(path)
+    with folder(parent, root=root, make=make) as fd:
+        os.symlink(target, name, dir_fd=fd)
+
+
+def copy_tree(src: PathLike, dst: PathLike, *, root: PathLike | None = None) -> None:
+    """The folder `src` copied into the folder `dst` (made when missing) as shutil.copytree(symlinks=True) copies it: a
+    link as a link, a file with its mode and times, a folder whole; `src` read and `dst` written as walk and open_at
+    open them, so neither a link in `src` nor one on the way to `dst` is followed. An entry of another kind is left
+    out."""
+    with folder(src) as s, folder(dst, root=root, make=True) as d:
+        _copy_into(s, d)
+
+
+def _copy_into(s: int, d: int) -> None:
+    for name in os.listdir(s):
+        st = os.stat(name, dir_fd=s, follow_symlinks=False)
+        if stat.S_ISLNK(st.st_mode):
+            target = os.readlink(name, dir_fd=s)
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(name, dir_fd=d)
+            os.symlink(target, name, dir_fd=d)
+        elif stat.S_ISDIR(st.st_mode):
+            below_s = os.open(name, DIR_FLAGS, dir_fd=s)
+            try:
+                below_d = _down(d, name, True, 0o777)
+                try:
+                    _copy_into(below_s, below_d)
+                finally:
+                    os.close(below_d)
+            finally:
+                os.close(below_s)
+        elif stat.S_ISREG(st.st_mode):
+            with os.fdopen(open_at(s, name, os.O_RDONLY), "rb") as f:
+                data = f.read()
+            with os.fdopen(open_at(d, name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC), "wb") as out:
+                out.write(data)
+                out.flush()
+                os.fchmod(out.fileno(), stat.S_IMODE(st.st_mode))
+                os.utime(out.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
 def replace_at(fd: int, name: str, data: bytes, mode: int = 0o600) -> None:
     """`data` as the file `name` in the folder `fd`, by a temp file (temp_at) renamed over it: a reader sees the old file
     or the new one, and a link at `name` is replaced, never followed."""
@@ -276,6 +345,13 @@ def unlink(path: PathLike, *, root: PathLike | None = None, missing_ok: bool = T
     except FileNotFoundError:
         if not missing_ok:
             raise
+
+
+def rmdir(path: PathLike, *, root: PathLike | None = None) -> None:
+    """The empty folder at `path` removed (OSError when it holds anything or is no folder)."""
+    parent, name = _parent(path)
+    with folder(parent, root=root) as fd:
+        os.rmdir(name, dir_fd=fd)
 
 
 def rename(src: PathLike, dst: PathLike, *, root: PathLike | None = None) -> None:

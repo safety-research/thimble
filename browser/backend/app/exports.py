@@ -37,7 +37,7 @@ from typing import Any, AsyncIterator
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from . import config, frames, headless, investigation, refs, userconf
+from . import config, frames, headless, investigation, nofollow, refs, userconf
 from .ledger import atomic_write_text, unlinked
 from .report import _collapse, plain_text
 
@@ -680,7 +680,7 @@ def _scratch(c: str) -> Path:
         unlinked(config.workspace_dir(c), d / "x")
     except ValueError as e:
         raise RuntimeError(f"the export folder cannot be written: {e}") from None
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     return d
 
 
@@ -701,13 +701,14 @@ async def run_hook(c: str, path: Path, doc: dict[str, Any], fmt: str, ctx: dict[
             err = next((f"{e.get('ename', 'Error')}: {e.get('evalue', '')}" for b in outputs
                         if isinstance(e := b.get("application/vnd.thimble.error+json"), dict)), "")
             raise RuntimeError(err or "the export hook printed no result")
-        if res.is_symlink():
-            raise RuntimeError("the export hook's result is a symlink")
-        return json.loads(res.read_text("utf-8"))
+        try:  # the kernel writes it in the workspace: read as nofollow reads it, never through a link
+            return json.loads(nofollow.read_text(res))
+        except nofollow.Linked:
+            raise RuntimeError("the export hook's result is a symlink") from None
     finally:
         for p in (req, res):
             with contextlib.suppress(OSError):
-                p.unlink()
+                nofollow.unlink(p)
 
 
 HOOK_SRC = """

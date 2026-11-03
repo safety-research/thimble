@@ -339,9 +339,9 @@ def notebooks_dir(ws: Path) -> Path:
         else:
             bad = False
         cells = data.get("cells") if isinstance(data, dict) else None
-        d.mkdir(exist_ok=True)
+        nofollow.makedirs(d)
         write_json(d / f"{MAIN}.json", _normalize(MAIN, {"title": ANALYST_NOTEBOOK_TITLE, "cells": cells or []}))
-        old.replace(old.with_suffix(".json.bad")) if bad else old.unlink()
+        nofollow.rename(old, old.with_suffix(".json.bad")) if bad else nofollow.unlink(old)
         log.info("migrated %s -> notebooks/%s.json", old, MAIN)
     return d
 
@@ -716,8 +716,8 @@ def _side_file(ws: Path, rel: Any) -> Path | None:
 
 
 def _read_side(side: Path) -> str:
-    with side.open("r", encoding="utf-8", errors="surrogatepass", newline="") as f:  # byte-exact: no newline translation
-        return f.read()
+    # byte-exact (no newline translation), and never through a link a card's code left in the workspace (nofollow)
+    return nofollow.read_bytes(side).decode("utf-8", "surrogatepass")
 
 
 def _bound_stream(ws: Path, cell_id: str, i: int, bundle: dict) -> dict:
@@ -731,9 +731,8 @@ def _bound_stream(ws: Path, cell_id: str, i: int, bundle: dict) -> dict:
     if omitted < 1:
         return bundle
     side = ws / OUTPUTS_DIR / f"{cell_id}-{i}.txt"
-    side.parent.mkdir(parents=True, exist_ok=True)
-    with side.open("w", encoding="utf-8", errors="surrogatepass", newline="") as f:
-        f.write(text)
+    # byte-exact, in the workspace a card's code writes: never through a link it left there (nofollow)
+    nofollow.write_bytes(side, text.encode("utf-8", "surrogatepass"), make=True)
     kept = "".join(lines[:head]) + _marker(omitted) + "\n" + "".join(lines[len(lines) - tail:])
     return {**bundle, "text/plain": kept,
             "truncated": {"total_lines": len(lines), "kept_head": head, "kept_tail": tail,
@@ -745,7 +744,7 @@ def _drop_side_files(ws: Path, cell_id: str) -> None:
     if d.is_dir() and ID_RE.match(cell_id or ""):
         for p in d.glob(f"{cell_id}-*.txt"):
             try:
-                p.unlink()
+                nofollow.unlink(p)
             except OSError:
                 pass
 
@@ -952,7 +951,7 @@ def editing(ws: Path):
     inside it, so `thimble-run`, which may write only that folder in main's sandbox, can take it. Held from the read of
     a change to its write; never across an await."""
     d = ws / "notebooks"
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     return ledger.locked(d)
 
 
@@ -1067,7 +1066,7 @@ def write_notebook(ws: Path, nb: dict) -> None:
     """Replace the group's file whole, under the store's lock (editing), which a caller that read the group holds
     already."""
     p = _nb_file(ws, nb["id"])
-    p.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(p.parent)
     with editing(ws):
         atomic_write_text(p, json.dumps(nb, indent=1))  # a temp of the writer's own: a route and a kernel thread never share one
         if _caching():
@@ -1622,7 +1621,7 @@ def _keep_record(ws: Path, cell_id: str, rec: dict) -> bool:
     if path is None:
         return False
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(path.parent)
         atomic_write_text(path, json.dumps(rec, ensure_ascii=False, default=str))
     except (OSError, TypeError, ValueError):
         log.exception("card %s: the record of edit %s was not kept", cell_id, rec.get("id"))
@@ -4164,8 +4163,8 @@ def trash_notebook(ws: Path, nb_id: str) -> bool:
     if not p.is_file():
         return False
     trash = ws / TRASH_DIR
-    trash.mkdir(parents=True, exist_ok=True)
-    p.replace(trash / p.name)
+    nofollow.makedirs(trash)
+    nofollow.rename(p, trash / p.name)
     _cache.pop(p, None)
     return True
 

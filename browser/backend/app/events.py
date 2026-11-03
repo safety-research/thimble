@@ -53,7 +53,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from . import cc_plugin, config, ledger, permission_updates, procs, prompts
+from . import cc_plugin, config, ledger, nofollow, permission_updates, procs, prompts
 
 log = logging.getLogger("thimble.events")
 
@@ -418,7 +418,7 @@ def _keep_held(c: str, notes: list[dict[str, Any]]) -> None:
         if notes:
             ledger.atomic_write_text(path, json.dumps(notes, ensure_ascii=False))
         else:
-            path.unlink(missing_ok=True)
+            nofollow.unlink(path)  # the entry itself, never through a link a card's code left on its way
     except OSError:
         log.warning("%s: the held events were not saved to %s", c, path, exc_info=True)
 

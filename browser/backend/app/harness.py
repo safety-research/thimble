@@ -64,7 +64,7 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from . import agents, config, hook_auth, kernel_wrap, modes, roles, srt, userconf
+from . import agents, config, hook_auth, kernel_wrap, modes, nofollow, roles, srt, userconf
 
 log = logging.getLogger("thimble.harness")
 router = APIRouter()
@@ -1004,16 +1004,16 @@ async def run_task(c: str, task: str, part: roles.Part, input: dict[str, Any]) -
         finally:
             _unregister(run)
     finally:
-        await asyncio.to_thread(shutil.rmtree, job.work, True)
+        await asyncio.to_thread(nofollow.rmtree, job.work, ignore_errors=True)  # never through a link in the workspace
 
 
 async def _run(run: Run, argv: list[str]) -> Any:
     from . import agent_session, notices  # noqa: PLC0415
 
     job = run.job
-    for sub in (job.work, job.work / TMP_DIR, job.work / CACHE_DIR):
-        sub.mkdir(parents=True, exist_ok=True)
-    (job.work / INPUT_FILE).write_text(json.dumps(job.input, ensure_ascii=False, indent=1), "utf-8")
+    for sub in (job.work, job.work / TMP_DIR, job.work / CACHE_DIR):  # in the workspace: as nofollow opens them
+        nofollow.makedirs(sub)
+    nofollow.write_text(job.work / INPUT_FILE, json.dumps(job.input, ensure_ascii=False, indent=1))
     if not run.boxed:
         if run.rec is not None:
             run.rec.text(NO_BOX + "\n")

@@ -23,7 +23,7 @@ from typing import Any, Iterable
 
 from fastapi import APIRouter, HTTPException
 
-from . import cite, config, frames
+from . import cite, config, frames, nofollow
 
 log = logging.getLogger("thimble.checkstore")
 router = APIRouter()
@@ -336,7 +336,7 @@ def fixable(cell: dict, fields: Iterable[str]) -> list[str]:
 
 def _before_path(c: str, cid: str, fix_id: str) -> Path:
     d = config.workspace_dir(c) / SHOTS_DIR / cid
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     return d / f"{fix_id}-before.json"
 
 
@@ -389,7 +389,7 @@ def apply_fix(c: str, cid: str, check_id: str, patch: dict, cand: dict | None, r
         fix["state"] = SAME
     else:
         if ran is not None:
-            _before_path(c, cid, fix_id).write_text(json.dumps(ran, default=str), "utf-8")
+            nofollow.write_text(_before_path(c, cid, fix_id), json.dumps(ran, default=str))  # never through a link
         cell.setdefault("fixes", []).append(fix)
     notebook.stamp_edit(ws, cell, content, ACTOR, shown=shown)
     cell["ts"] = _now()

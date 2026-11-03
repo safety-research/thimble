@@ -116,7 +116,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import agents, cc_settings, cli, config, headless, hook_auth, procs, prompts, session, ticket_box, userconf
-from . import work_files
+from . import nofollow, work_files
 from .cli import SOURCE_CHANGED, home as thimble_home
 from .ledger import atomic_write_text
 from .session import find_transcript
@@ -3318,8 +3318,8 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
             pass
         _view_runs.pop(key, None)
     views.ensure_local(config.workspace_dir(c))
-    (views.views_dir(c) / slug).mkdir(parents=True, exist_ok=True)
-    view_work_dir(c, slug).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(views.views_dir(c) / slug)  # folders the builder writes: made as nofollow makes them
+    nofollow.makedirs(view_work_dir(c, slug))
     vals = subagents.values_for(c, _builder(), values or prop.get("values") or None)
     fields: dict[str, Any] = {"values": vals, "error": None, "refused": None, "route": route, "stopped_by": None}
     if route == subagents.CLICK:
@@ -3960,8 +3960,8 @@ async def program_build(c: str, slug: str, part: Any) -> None:
         return
     folder = views.views_dir(c) / slug
     views.ensure_local(config.workspace_dir(c))
-    folder.mkdir(parents=True, exist_ok=True)
-    view_work_dir(c, slug).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(folder)  # folders the program writes: made as nofollow makes them
+    nofollow.makedirs(view_work_dir(c, slug))
     chat = _view_chat(c, prop)
     prop = views.update_proposal(c, slug, status="building", error=None, chat=chat, agent_id=None,
                                  program=getattr(part, "extension", None)) or prop

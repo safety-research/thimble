@@ -26,7 +26,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from . import config, investigation, ledger, tools
+from . import config, investigation, ledger, nofollow, tools
 from .ledger import atomic_write_text
 
 log = logging.getLogger("thimble.agents")
@@ -70,7 +70,7 @@ def _ws(c: str) -> Path:
 
 def chats_dir(c: str) -> Path:
     d = _ws(c) / "chats"
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)  # a card's code writes the workspace: the chats' folders and files are opened as nofollow does
     return d
 
 
@@ -146,8 +146,7 @@ def append(log_path: Path, record: dict) -> None:
     process appends in terminal mode (the mirror, the tools)."""
     with ledger.locked(log_path):
         ledger.heal_tail(log_path)
-        with log_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        ledger.append_jsonl(log_path, record)
 
 
 # workspaces/<c>/permissions.jsonl: each permission request of the workspace's sessions and its answer, which a problem
@@ -162,7 +161,7 @@ def log_permission(c: str, event: str, **fields: Any) -> None:
     try:
         p = _ws(c) / PERMISSIONS_LOG
         if p.is_file() and p.stat().st_size > PERMISSIONS_LOG_MAX:
-            p.replace(p.with_name("permissions.1.jsonl"))
+            nofollow.rename(p, p.with_name("permissions.1.jsonl"))
         append(p, {"ts": _now(), "event": event, **{k: v for k, v in fields.items() if v is not None}})
     except Exception:  # noqa: BLE001
         log.warning("%s: the permission log could not be written", c, exc_info=True)
@@ -335,7 +334,7 @@ def ensure_main(c: str) -> dict:
         meta = _defaults({"id": MAIN_ID, "kind": KIND_MAIN, "role": "main", "title": "main", "created_at": _now()})
         write_meta(c, meta)
         _, log_path = paths(c, MAIN_ID)
-        log_path.touch()
+        nofollow.touch(log_path)
     return meta
 
 
@@ -368,7 +367,7 @@ def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str |
         meta["anchor_comment"] = None
     write_meta(c, meta)
     _, log_path = paths(c, cid)
-    log_path.touch()
+    nofollow.touch(log_path)
     log.info("%s: thread %s opened on %s from %s (%s)", c, cid, (meta["anchor"] or "-")[:120], meta["parent"],
              meta["anchor_surface"] or "-")
     _notify(c, cid)
@@ -673,7 +672,7 @@ def new_agent(c: str, role: str, title: str, *, parent: str = MAIN_ID, by: str |
                       "status": "running", **fields})
     write_meta(c, meta)
     _, log_path = paths(c, cid)
-    log_path.touch()
+    nofollow.touch(log_path)
     if parent and announce:
         _, main_log = paths(c, parent)
         append(main_log, {"type": "agent", "ts": _now(), "chat": cid, "role": role, "title": title, **({"by": by} if by else {}),
@@ -943,10 +942,10 @@ def _trash(c: str, chat_id: str) -> None:
     """Move a chat's two files to chats/trash/, outside list_chats' glob, so what was said in it stays in the workspace
     export (export.py) as a deleted group's cards stay in notebooks/trash/."""
     trash = chats_dir(c) / "trash"
-    trash.mkdir(exist_ok=True)
+    nofollow.makedirs(trash)
     for p in paths(c, chat_id):
         if p.exists():
-            p.replace(trash / p.name)
+            nofollow.rename(p, trash / p.name)
 
 
 STEP_ROLE = "step"  # a subagent's chat under the session that ran it (agent_session.STEP_ROLE)

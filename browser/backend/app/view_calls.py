@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import procs
+from . import nofollow, procs
 
 log = logging.getLogger("thimble.view_calls")
 
@@ -582,9 +582,9 @@ def begin(c: str, slug: str, cid: str | None, indexes: Path) -> Call | None:
     if not cid:
         return None
     path = progress_path(indexes, cid)
-    with contextlib.suppress(OSError):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.unlink(missing_ok=True)
+    with contextlib.suppress(OSError):  # in the workspace, which a card's code writes: as nofollow does
+        nofollow.makedirs(path.parent)
+        nofollow.unlink(path)
     call = Call(cid, c, slug, time.monotonic(), path, asyncio.current_task())
     _calls[(c, cid)] = call
     return call
@@ -597,7 +597,7 @@ def end(call: Call | None) -> None:
         del _calls[(call.c, call.id)]
     if call.progress is not None:
         with contextlib.suppress(OSError):
-            call.progress.unlink(missing_ok=True)
+            nofollow.unlink(call.progress)
 
 
 def cancel(c: str, cid: str) -> bool:

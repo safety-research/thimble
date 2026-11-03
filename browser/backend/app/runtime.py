@@ -64,6 +64,8 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from . import nofollow  # standard library only
+
 log = logging.getLogger("thimble.runtime")
 
 ENV = "THIMBLE_RUNTIME"
@@ -157,16 +159,14 @@ class Transcript:
         full = {"parentUuid": self.last, "isSidechain": self.agent_id is not None, "sessionId": self.sid,
                 **({"agentId": self.agent_id} if self.agent_id else {}), "uuid": str(uuid.uuid4()),
                 "timestamp": _now(), **rec}
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(full, ensure_ascii=False) + "\n")
+        # in the workspace, which a card's code writes: never through a link put there (nofollow)
+        nofollow.append_bytes(self.path, (json.dumps(full, ensure_ascii=False) + "\n").encode("utf-8"), make=True)
         self.last = full["uuid"]
         return full
 
     def write_meta(self, meta: dict[str, Any]) -> None:
         p = self.path.with_name(self.path.name[: -len(".jsonl")] + ".meta.json")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(meta), encoding="utf-8")
+        nofollow.write_text(p, json.dumps(meta), make=True)
 
 
 # --------------------------------------------------------------------------- what an agent is
@@ -387,17 +387,17 @@ class Space:
         self.c = c
         self.ws = config.workspace_dir(c)
         self.corpus = config.corpus_dir(c)
-        self.dir = self.ws / DIR
-        self.dir.mkdir(parents=True, exist_ok=True)
+        self.dir = self.ws / DIR  # in the workspace: its files are written and moved as nofollow does
+        nofollow.makedirs(self.dir)
         rec = _read_json(self.dir / "main.json")
         self.sid = str(rec.get("session") or "") or str(uuid.uuid4())
         if not rec.get("session"):
-            (self.dir / "main.json").write_text(json.dumps({"session": self.sid, "at": _now()}), encoding="utf-8")
+            nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         for kind in ("api", "cc"):  # main's state from before chats were kept apart is its chat's
             old, new = self.dir / "convs" / f"{MAIN}.{kind}.json", self.dir / "convs" / f"{MAIN}-{self.sid}.{kind}.json"
             if old.is_file() and not new.exists():
                 with contextlib.suppress(OSError):
-                    old.rename(new)
+                    nofollow.rename(old, new)
         self.main = self._main_conv()
         self.convs: dict[str, Conv] = {}
         self.notes: dict[str, list[str]] = {}
@@ -426,7 +426,7 @@ class Space:
         if self.main.running:
             await _cancel(self.main.task)
         self.sid = sid or str(uuid.uuid4())
-        (self.dir / "main.json").write_text(json.dumps({"session": self.sid, "at": _now()}), encoding="utf-8")
+        nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         self.main = self._main_conv()
         self.attach()
         if sid is None:

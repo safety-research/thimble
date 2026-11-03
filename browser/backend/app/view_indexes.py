@@ -22,13 +22,12 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from . import config
+from . import config, nofollow
 
 log = logging.getLogger("thimble.view_indexes")
 
@@ -63,10 +62,14 @@ def used(pickle: Path, built: bool = False) -> None:
     if now - _touched.get(key, -TOUCH_S) < TOUCH_S:
         return
     _touched[key] = now
-    try:
-        os.utime(pickle)
+    try:  # in the workspace, which a card's code writes: each file as nofollow opens it, never through a link
+        fd = nofollow.open(pickle, os.O_RDONLY)
+        try:
+            os.utime(fd)
+        finally:
+            os.close(fd)
         if built:
-            pickle.with_name(_fp(pickle) + BUILT).touch()
+            nofollow.touch(pickle.with_name(_fp(pickle) + BUILT))
     except OSError:
         pass
 
@@ -81,7 +84,7 @@ def _remove(pickle: Path) -> int:
     for p in (pickle, pickle.with_name(_fp(pickle) + READS), pickle.with_name(_fp(pickle) + BUILT)):
         try:
             freed += p.stat().st_size
-            p.unlink()
+            nofollow.unlink(p, missing_ok=False)
         except OSError:
             pass
     for built in (False, True):
@@ -124,7 +127,7 @@ def prune_dir(d: Path, keep: str | None = None) -> int:
         if now - _mtime(p) > TMP_AGE_S:
             try:
                 freed += p.stat().st_size
-                p.unlink()
+                nofollow.unlink(p, missing_ok=False)
             except OSError:
                 pass
     return freed
@@ -174,7 +177,7 @@ def drop(c: str, slug: str) -> int:
     if not d.is_dir() or d.is_symlink():
         return 0
     freed = sum(p.stat().st_size for p in d.rglob("*") if p.is_file())
-    shutil.rmtree(d, ignore_errors=True)
+    nofollow.rmtree(d, ignore_errors=True)
     return freed
 
 
@@ -229,7 +232,7 @@ def prune_workspace(c: str, alive: Any) -> int:
     for p in stale:
         try:
             freed += p.stat().st_size
-            p.unlink()
+            nofollow.unlink(p, missing_ok=False)
         except OSError:
             pass
     return freed

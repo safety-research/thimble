@@ -26,12 +26,11 @@ import json
 import logging
 import os
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import config
+from . import config, nofollow
 from .ledger import atomic_write_text, write_json
 
 log = logging.getLogger("thimble.view_libs")
@@ -257,8 +256,9 @@ async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
     if stage.is_symlink() or (stage / "node_modules").is_symlink() or not (stage / "node_modules").is_dir():
         raise RuntimeError(f"{stage / 'node_modules'} is not a folder of its own")
     work = stage / f".build-{os.getpid()}-{hashlib.sha1(str(out).encode()).hexdigest()[:8]}"  # resolves from stage
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True)
+    # the server's own work in a folder main's Bash and the kernels write: removed, made and read as nofollow does
+    nofollow.rmtree(work, ignore_errors=True)
+    nofollow.makedirs(work)
     meta = work / "meta.json"
 
     def confined() -> None:
@@ -276,7 +276,7 @@ async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
             if code != 0:
                 raise RuntimeError(_last_line(err) or "esbuild failed")
             confined()
-            atomic_write_text(out, (work / "out.css").read_text("utf-8"))
+            atomic_write_text(out, nofollow.read_text(work / "out.css"))
             return "css"
         entry = work / "entry.cjs"
         target = str(src.resolve()) if e.path else e.name  # a file by its path, since its package's name is external
@@ -292,17 +292,17 @@ async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
         if code != 0:
             raise RuntimeError(_last_line(err) or "esbuild failed")
         confined()
-        js = (work / "out.js").read_text("utf-8")
+        js = nofollow.read_text(work / "out.js")
         text = WRAP_HEAD + js + WRAP_TAIL % {"key": json.dumps(e.key), "glob": json.dumps(global_name(e))}
         css = work / "out.css"  # a package whose script imports its own stylesheet
         if css.is_file():
-            css_text = css.read_text("utf-8")
+            css_text = nofollow.read_text(css)
             text = (f"(function(){{var s=document.createElement('style');s.textContent={json.dumps(css_text)};"
                     f"(document.head||document.documentElement).appendChild(s)}})();\n") + text
         atomic_write_text(out, text)
         return "js"
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        nofollow.rmtree(work, ignore_errors=True)
 
 
 def _file_name(name: str, version: str, path: str, kind: str) -> str:
@@ -341,12 +341,12 @@ async def ensure(c: str, slug: str, folder: Path, libs: Any, *, source: Path | N
             continue
         try:
             fname = _file_name(e.name, version, e.path, e.kind)
-            (folder / LIB_DIR).mkdir(parents=True, exist_ok=True)
+            nofollow.makedirs(folder / LIB_DIR)
             kind = await bundle(stage, e, [r for r in roots if r != e.name], folder / LIB_DIR / fname)
         except RuntimeError as err:
             out["problems"].append(f"the package {raw} could not be bundled: {err}")
             continue
-        data = (folder / LIB_DIR / fname).read_bytes()
+        data = nofollow.read_bytes(folder / LIB_DIR / fname)
         size = len(data)
         kept[raw] = {"name": e.name, "version": version, "path": e.path, "file": fname, "kind": kind,
                      "global": global_name(e) if kind == "js" else None, "bytes": size,
@@ -363,22 +363,22 @@ def copy_lib(src: Path, dst: Path) -> None:
     lib = src / LIB_DIR
     if not lib.is_dir() or lib.is_symlink():
         return
-    out = dst / LIB_DIR
-    shutil.rmtree(out, ignore_errors=True)
-    out.mkdir(parents=True)
+    out = dst / LIB_DIR  # a view's folder, which its builder writes: removed, made and written as nofollow does
+    nofollow.rmtree(out, ignore_errors=True)
+    nofollow.makedirs(out)
     for f in lib.iterdir():
         if f.is_file() and not f.is_symlink():
-            shutil.copy2(f, out / f.name)
+            nofollow.copy_file(f, out / f.name)
 
 
 def _write_lock(folder: Path, items: dict[str, dict[str, Any]]) -> None:
     d = folder / LIB_DIR
     if not items and not d.is_dir():
         return
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     write_json(d / LOCK_FILE, items)
     keep = {LOCK_FILE, *(str(v.get("file")) for v in items.values())}
     for f in d.iterdir():
         if f.name not in keep and f.is_file():
             with contextlib.suppress(OSError):
-                f.unlink()
+                nofollow.unlink(f)

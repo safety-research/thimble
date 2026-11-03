@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from . import llm, runtime_tools
+from . import llm, nofollow, runtime_tools
 
 log = logging.getLogger("thimble.runtime_api")
 
@@ -63,10 +63,9 @@ def reply_blocks(final: Any) -> list[dict[str, Any]]:
 
 
 def _save(path: Any, messages: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    """The conversation's state, replaced whole in the workspace's runtime folder by a temp file of its own, never
+    through a link a card's code left there (nofollow.replace)."""
+    nofollow.replace(path, json.dumps(messages, ensure_ascii=False).encode("utf-8"), make=True)
 
 
 def complete_prefix(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

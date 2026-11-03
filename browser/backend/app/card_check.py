@@ -53,7 +53,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from . import config, render, retry
+from . import config, nofollow, render, retry
 
 log = logging.getLogger("thimble.card_check")
 
@@ -458,9 +458,8 @@ def _log_timing(run: _Run) -> None:
     _timings.append(t)
     try:
         d = config.workspace_dir(run.c) / SHOTS_DIR
-        d.mkdir(parents=True, exist_ok=True)
-        with (d / TIMINGS_FILE).open("a", encoding="utf-8") as f:
-            f.write(json.dumps({k: v for k, v in t.items() if k != "logged"}, ensure_ascii=False, default=str) + "\n")
+        line = json.dumps({k: v for k, v in t.items() if k != "logged"}, ensure_ascii=False, default=str) + "\n"
+        nofollow.append_bytes(d / TIMINGS_FILE, line.encode("utf-8"), make=True)  # never through a card's link
     except (OSError, ValueError):  # a workspace removed meanwhile keeps its line in memory only
         log.debug("card check: timing of card:%s not written", run.cid, exc_info=True)
 
@@ -495,7 +494,7 @@ def stop_all(c: str, reason: str = STOPPED) -> list[str]:
 
 def _shot_path(c: str, cid: str, name: str) -> Path:
     d = config.workspace_dir(c) / SHOTS_DIR / cid
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     return d / name
 
 
@@ -504,7 +503,7 @@ def _keep(c: str, cid: str, name: str, png: bytes | None) -> str | None:
     if not png:
         return None
     p = _shot_path(c, cid, name)
-    p.write_bytes(png)
+    nofollow.write_bytes(p, png)  # never through a link a card's code left in the workspace
     return str(p.relative_to(config.workspace_dir(c)))
 
 

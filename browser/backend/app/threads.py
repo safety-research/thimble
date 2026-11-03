@@ -29,7 +29,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from . import agents, cite, config
+from . import agents, cite, config, nofollow
 
 log = logging.getLogger("thimble.threads")
 
@@ -199,9 +199,8 @@ def save_image(c: str, thread_id: str, data_url: str | None) -> str | None:
     if not data.startswith(b"\x89PNG") or len(data) > IMAGE_MAX_BYTES:
         return None
     d = config.workspace_dir(c) / IMAGE_DIR
-    d.mkdir(parents=True, exist_ok=True)
     path = d / f"{thread_id}.png"
-    path.write_bytes(data)
+    nofollow.write_bytes(path, data, make=True)  # never through a link a card's code left in the workspace
     return str(path)
 
 

@@ -10,6 +10,7 @@ write_document (a whole document in markdown) or edit_document (one passage). Ea
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import logging
@@ -24,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import cite, config, investigation, ledger, material, notebook, prompts, refs, slides, undo
+from . import cite, config, investigation, ledger, material, nofollow, notebook, prompts, refs, slides, undo
 from .ledger import atomic_write_text, read_json, unlinked, write_json
 from .report import (_Refs, _collapse, _cut, _new_id, _put_text, _replace_text, _title_ok, plain_text, reopen_comment,
                      settle_carried_comment)
@@ -343,11 +344,11 @@ def delete_type(c: str, slug: str) -> None:
         if not held:
             continue
         dest = inv / ".deleted" / f"{slug}-{_stamp()}"
-        dest.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(dest)  # in the workspace, which a card's code writes: moved as nofollow moves them
         for p in held:
-            os.replace(p, dest / p.name)
+            nofollow.rename(p, dest / p.name)
     _writes.pop((c, slug), None)
-    shutil.rmtree(d)
+    nofollow.rmtree(d)
 
 
 # --------------------------------------------------------------------------- presets and new documents
@@ -598,9 +599,9 @@ def _archive(c: str, inv_id: str, slug: str) -> Path | None:
     if not p.is_file():
         return None
     hist = investigation.inv_dir(c, inv_id) / slug
-    hist.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(hist)
     dest = hist / f"{_stamp()}.json"
-    os.replace(p, dest)
+    nofollow.rename(p, dest)
     return dest
 
 
@@ -2476,7 +2477,8 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
         versions.add_revision(ctx.c, inv, slug, prev, run=run_key)
     store(ctx.c, inv, slug, doc)
     if frame is not None:
-        frame_file(ctx.c, inv, slug).unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            nofollow.unlink(frame_file(ctx.c, inv, slug))
     event = pending.get("event") or (versions.record_run(ctx.c, inv, slug, doc["generation"]) if same_run else None)
     versions.record(ctx.c, inv, slug, base, doc, source=ctx.cell_author,
                     instructions=pending.get("request") or (doc.get("instructions") if same_run else None), run=event)

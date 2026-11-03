@@ -99,8 +99,9 @@ def _load(path: Any) -> dict[str, Any]:
 
 
 def _save(path: Any, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
+    """The session's state, in the workspace's runtime folder, replaced whole and never through a link a card's code
+    left there (nofollow.replace)."""
+    nofollow.replace(path, json.dumps(data).encode("utf-8"), make=True)
 
 
 def _key(name: str, args: Any) -> str:

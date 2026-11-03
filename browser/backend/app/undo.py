@@ -27,7 +27,6 @@ import json
 import logging
 import os
 import secrets
-import shutil
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -36,7 +35,7 @@ from typing import Any, Iterator
 
 from fastapi import APIRouter, HTTPException
 
-from . import config, ledger
+from . import config, ledger, nofollow
 
 log = logging.getLogger("thimble.undo")
 router = APIRouter()
@@ -222,7 +221,7 @@ def _prune_trash(c: str, steps: list[dict[str, Any]]) -> None:
         kept = {str(s.get("trash")) for s in steps if s.get("trash")}
         for d in root.iterdir():
             if d.is_dir() and d.name not in kept:
-                shutil.rmtree(d, ignore_errors=True)
+                nofollow.rmtree(d, ignore_errors=True)  # never through a link a card's code left in the workspace
     except (OSError, ValueError, HTTPException):
         log.exception("%s: the undo trash was not pruned", c)
 
