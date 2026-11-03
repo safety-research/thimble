@@ -1,31 +1,28 @@
 """How thimble reaches Claude: one choice per install, made once and changed in Settings.
 
-    claude-code   the person's Claude Code sign-in (the default, and recommended). thimble launches headless Claude
-                  Code sessions in the background (runtime_cc.py), and only with the person's consent to CONSENT.
-    api-key       an Anthropic API key the person pasted. The server calls the Messages API itself.
-    wif           Workload Identity Federation, from a config file the person names (wif.py). The server calls the
+    claude-code   the person's Claude Code sign-in (the default, and recommended). thimble runs Claude Code in the
+                  background (runtime_cc.py), with the environment as it is, so that Claude Code signs in as it does in
+                  the person's terminal; only with the person's consent to CONSENT, which choosing it gives.
+    api-key       an Anthropic API key: ANTHROPIC_API_KEY when it is set where the workbench runs, else the key the
+                  person pasted in Settings. The server calls the Messages API itself.
+    wif           Workload Identity Federation, from the config file the person names (wif.py). The server calls the
                   Messages API itself.
 
 With api-key and wif nothing launches a `claude` process: every agent runs in the server (runtime_api.py). The choice
-is kept in <home>/claude-access.json ({how, wif_file, consent}), the key in <home>/anthropic-api-key (0600); neither
-holds a value the environment gave, since the server never reads ANTHROPIC_* variables (scrub_env). install.sh asks
-for the choice (`python -m app.claude_access setup`), the page's first-run step and Settings change it (the routes).
+is kept in <home>/claude-access.json ({how, wif_file, consent}), a pasted key in <home>/anthropic-api-key (0600).
+scripts/install.sh sets the choice (`thimble-browser --setup`, with --sign-in, or asked in a terminal); the page's
+first-run step and Settings change it (the routes).
 
 problem() says, without a network call, what is missing (no choice, no key, a WIF file that cannot be used, no consent,
 no `claude`), in words for the chat's card and the server's start line; check() makes one small call to be sure (with
 Claude Code sign-in, a one-turn headless `claude -p`, and the login that `claude auth status` reports for it, which
-says whether a key stands in for the sign-in). setup's check line also names the ANTHROPIC_* variables of the shell it
-ran in, which nothing here uses. Nothing here prints or logs a key, an ID or a token.
-
-When an agent (Claude Code) installs thimble for a person, it never sees the key: the person writes it to a file
-themselves, and `setup --key-file FILE` reads it from there. `setup --find-wif` lists the WIF config files in the
-usual places (WIF_PLACES) that wif.load accepts, by path only.
+says whether a key stands in for the sign-in). setup's line says the choice, the login, and what the check found.
+Nothing here prints or logs a key, an ID or a token.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
-import getpass
 import json
 import os
 import sys
@@ -44,17 +41,17 @@ API_KEY, CLAUDE_CODE, WIF = "api-key", "claude-code", "wif"
 CHOICES = (CLAUDE_CODE, API_KEY, WIF)  # the order of the install's question and of the page's dialog
 ACCESS_FILE = "claude-access.json"
 KEY_FILE = "anthropic-api-key"
-CONSENT = ("This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in "
-           "the background.")
-LABELS = {API_KEY: "Anthropic API key", CLAUDE_CODE: "Claude Code sign-in", WIF: "Workload Identity Federation"}
+ENV_KEY = "ANTHROPIC_API_KEY"  # the API key of the environment the workbench runs in, which wins over a pasted one
+# each way in a few words, as the install's question and the page's dialog give them; the Claude Code sign-in's words
+# are what the person consents to when they choose it (CONSENT)
+LABELS = {CLAUDE_CODE: "Your Claude Code sign-in", API_KEY: "An Anthropic API key", WIF: "Workload Identity Federation"}
+HINTS = {CLAUDE_CODE: "it runs Claude Code in the background, on your Claude plan",
+         API_KEY: f"{ENV_KEY} when it is set, or a key you paste in the workbench's Settings",
+         WIF: "the path of your WIF config file"}
+CONSENT = f"{LABELS[CLAUDE_CODE]}: {HINTS[CLAUDE_CODE]}."
 CHECK_MODEL = "claude-haiku-5-5"  # the check's one small call
 CC_CHECK_MODEL = "haiku"  # the Claude Code sign-in check's one-turn session
 CC_CHECK_TIMEOUT_S = 120.0
-KEY_FILE_MAX = 4096  # bytes: an API key file is one line
-# where a Workload Identity Federation config file usually is: `setup --find-wif` looks in these folders (not below
-# them), and in thimble browser's home
-WIF_PLACES = ("~/.anthropic", "~/.config/anthropic")
-WIF_FILE_MAX = 65536
 
 
 def _home() -> Path:
@@ -97,11 +94,23 @@ def how() -> str:
     return h if h in CHOICES else ""
 
 
-def api_key() -> str:
+def env_key() -> str:
+    """ANTHROPIC_API_KEY of the environment the workbench runs in ('' when it is not set): the API key it uses."""
+    return (os.environ.get(ENV_KEY) or "").strip()
+
+
+def saved_key() -> str:
+    """The key the person pasted in Settings, which the workbench uses when ANTHROPIC_API_KEY is not set."""
     try:
         return key_path().read_text("utf-8").strip()
     except OSError:
         return ""
+
+
+def api_key() -> str:
+    """The API key the workbench uses with api-key: ANTHROPIC_API_KEY when it is set, else the one pasted in
+    Settings."""
+    return env_key() or saved_key()
 
 
 def has_key() -> bool:
@@ -112,67 +121,11 @@ class AccessError(ValueError):
     """A choice that cannot be saved, in one sentence for the person."""
 
 
-def read_key_file(path: str) -> str:
-    """The API key in the file at `path`, which the person wrote (one line; surrounding space and newlines dropped).
-    AccessError, naming the file but never what it holds, when it cannot be read or holds no key."""
-    if not str(path or "").strip():
-        raise AccessError("name the file that holds the API key")
-    p = Path(str(path).strip()).expanduser().absolute()
-    try:
-        if p.is_dir():
-            raise AccessError(f"{p} is a folder, not the file with the API key")
-        if p.stat().st_size > KEY_FILE_MAX:
-            raise AccessError(f"{p} is too large to be an API key file; it should hold the key alone")
-        text = p.read_text("utf-8")
-    except FileNotFoundError:
-        raise AccessError(f"there is no file {p}") from None
-    except (OSError, UnicodeDecodeError) as e:
-        raise AccessError(f"{p} cannot be read ({getattr(e, 'strerror', None) or type(e).__name__})") from None
-    key = text.strip()
-    if not key:
-        raise AccessError(f"{p} is empty: copy the API key, then write the file again")
-    if not key.startswith("sk-") or any(ch.isspace() for ch in key):
-        raise AccessError(f"{p} does not hold an Anthropic API key alone (one line that starts with sk-ant-)")
-    return key
-
-
-def find_wif(places: tuple[str, ...] | None = None) -> list[dict[str, str]]:
-    """The files in WIF_PLACES and thimble's home that look like Workload Identity Federation configs: {path, ok,
-    detail}, where detail is the token source (Config.describe) when wif.load accepts the file, else why not. A file
-    that wif.load refuses is listed only when it names a federation rule. Never an ID or a token."""
-    folders = [Path(p).expanduser() for p in (places if places is not None else WIF_PLACES)] + [_home()]
-    out: list[dict[str, str]] = []
-    seen: set[Path] = set()
-    for d in folders:
-        try:
-            files = sorted(f for f in d.iterdir() if f.is_file())
-        except OSError:
-            continue
-        for f in files:
-            if f.resolve() in seen or f.name in (KEY_FILE, ACCESS_FILE):
-                continue
-            seen.add(f.resolve())
-            try:
-                if f.stat().st_size > WIF_FILE_MAX:
-                    continue
-                conf = wif.load(str(f))
-            except wif.WifError as e:
-                try:
-                    named = "federation_rule" in f.read_text("utf-8", errors="replace").lower()
-                except OSError:
-                    named = False
-                if named:
-                    out.append({"path": str(f), "ok": "", "detail": str(e)})
-                continue
-            except OSError:
-                continue
-            out.append({"path": str(conf.path), "ok": "1", "detail": conf.describe()})
-    return out
-
-
 def save(choice: str, *, key: str | None = None, wif_file: str | None = None, consent: bool = False) -> dict[str, Any]:
-    """Save `choice`. api-key keeps the key given, or the one saved before; wif needs a file wif.load accepts;
-    claude-code needs `consent`, the person's yes to CONSENT. AccessError says why a choice is refused."""
+    """Save `choice`. api-key keeps the key given (pasted in Settings) or the one saved before, and needs none: the
+    workbench uses ANTHROPIC_API_KEY when it is set, and asks for a key when there is neither; wif needs a file
+    wif.load accepts; claude-code needs `consent`, the person's yes to CONSENT. AccessError says why a choice is
+    refused."""
     if choice not in CHOICES:
         raise AccessError(f"choose one of {', '.join(CHOICES)}")
     rec: dict[str, Any] = {"how": choice, "at": _now()}
@@ -182,8 +135,6 @@ def save(choice: str, *, key: str | None = None, wif_file: str | None = None, co
             if not k.startswith("sk-") or any(ch.isspace() for ch in k):
                 raise AccessError("that does not look like an Anthropic API key (it starts with sk-ant-)")
             _write_private(key_path(), k + "\n")
-        elif not has_key():
-            raise AccessError("paste an Anthropic API key")
     elif choice == WIF:
         try:
             conf = wif.load(str(wif_file or ""))
@@ -192,7 +143,7 @@ def save(choice: str, *, key: str | None = None, wif_file: str | None = None, co
         rec["wif_file"] = str(conf.path)
     elif choice == CLAUDE_CODE:
         if not consent:
-            raise AccessError("Claude Code sign-in needs your confirmation: " + CONSENT)
+            raise AccessError("Claude Code sign-in needs your confirmation. " + CONSENT)
         rec["consent"] = {"at": _now(), "text": CONSENT}
     _write_private(access_path(), json.dumps(rec, indent=1) + "\n")
     from . import llm  # noqa: PLC0415
@@ -201,13 +152,19 @@ def save(choice: str, *, key: str | None = None, wif_file: str | None = None, co
     return rec
 
 
+def _tilde(p: str) -> str:
+    home = str(Path.home())
+    return "~" + p[len(home):] if p.startswith(home + os.sep) else p
+
+
 def describe() -> str:
-    """The way in words, for Settings and the log; never a key or an ID."""
+    """The way in words, for Settings, the log and setup's line; never a key or an ID."""
     rec, h = read(), how()
     if h == API_KEY:
-        return "an Anthropic API key" + ("" if has_key() else " (none saved)")
+        return ("an API key, from ANTHROPIC_API_KEY" if env_key() else "an API key, the one saved in Settings"
+                if saved_key() else "an API key (none yet)")
     if h == WIF:
-        return f"Workload Identity Federation from {rec.get('wif_file') or '(no file)'}"
+        return f"Workload Identity Federation, with {_tilde(str(rec.get('wif_file') or '(no file)'))}"
     if h == CLAUDE_CODE:
         return "your Claude Code sign-in"
     return "not chosen yet"
@@ -221,7 +178,9 @@ def problem() -> dict[str, str] | None:
         return {"what": "thimble does not know yet how to reach Claude.",
                 "fix": "Choose your Claude Code sign-in, an API key or Workload Identity Federation."}
     if h == API_KEY and not has_key():
-        return {"what": "No Anthropic API key is saved.", "fix": "Paste one. " + fix}
+        return {"what": "No API key: ANTHROPIC_API_KEY is not set, and no key is saved.",
+                "fix": "Paste one in Settings, Claude access, or set ANTHROPIC_API_KEY and start thimble-browser "
+                       "again."}
     if h == WIF:
         try:
             wif.load(str(rec.get("wif_file") or ""))
@@ -244,22 +203,36 @@ def problem_line() -> str:
     return f"{p['what']} {p['fix']}" if p else ""
 
 
+# Claude Code's words for its login (`claude auth status --json`: authMethod, apiProvider, apiKeySource), as the
+# person reads them
+LOGINS = {"claude.ai": "a Claude account", "api_key": "an API key",
+          "api_key_helper": "an API key from its apiKeyHelper", "oauth_token": "an OAuth token"}
+PROVIDERS = {"bedrock": "Amazon Bedrock", "vertex": "Google Vertex AI", "foundry": "Microsoft Foundry",
+             "gateway": "a gateway"}
+KEY_SOURCES = {"/login managed key": "its /login", "apiKeyHelper": "its apiKeyHelper"}
+
+
 def _login(status: dict[str, Any] | None) -> str:
-    """The login `claude auth status` reports (config.auth_status), in its own words: its method, and where its key
-    comes from when a key stands in for the sign-in, such as `api_key from apiKeyHelper`; '' when it says none. A
-    `claude` thimble starts gets no ANTHROPIC_* variable of the shell (scrub_env), so an ANTHROPIC_API_KEY it reports
-    comes from its settings."""
-    if not isinstance(status, dict) or not status.get("authMethod"):
+    """The login `claude auth status` reports (config.auth_status), in a few words: a Claude account, an API key and
+    where it comes from (ANTHROPIC_API_KEY, which a `claude` thimble starts gets from the environment as it is, or
+    Claude Code's own settings), an OAuth token (Workload Identity Federation among them), or the cloud provider; ''
+    when it says none."""
+    if not isinstance(status, dict) or status.get("authMethod") in (None, "", "none"):
         return ""
-    source = status.get("apiKeySource")
-    if source == "ANTHROPIC_API_KEY":
-        source += " in its settings"
-    return str(status["authMethod"]) + (f" from {source}" if source else "")
+    method = str(status["authMethod"])
+    if method == "third_party":
+        return PROVIDERS.get(str(status.get("apiProvider") or ""), "a cloud provider")
+    words = LOGINS.get(method, method)
+    source = str(status.get("apiKeySource") or "")
+    if method == "api_key" and source:
+        words += f" from {KEY_SOURCES.get(source, source)}"
+    return words
 
 
 async def check() -> dict[str, Any]:
     """problem(), then one small call over the chosen way: {ok, how, describe, problem?}, and with Claude Code sign-in
-    the login its sessions use (login: _login's words, '' when unknown)."""
+    the login its sessions use (login: _login's words, '' when unknown). A problem's fix says what to do; the command
+    that checks again is setup's (again)."""
     out: dict[str, Any] = {"how": how(), "describe": describe()}
     p = problem()
     if p:
@@ -270,14 +243,13 @@ async def check() -> dict[str, Any]:
         status = await asyncio.to_thread(config.auth_status)
         if isinstance(status, dict) and status.get("loggedIn") is False:
             return {**out, "ok": False, "problem": {"what": "Claude Code is not signed in.",
-                                                     "fix": "Run `claude` in a terminal and sign in, then check again."}}
+                                                     "fix": "Run claude in a terminal and sign in."}}
         out["login"] = login = _login(status)
         failed = await asyncio.to_thread(_claude_code_answers)
         if failed:
             who = f"Claude Code, logged in with {login}," if login else "Claude Code"
-            return {**out, "ok": False, "problem": {"what": f"{who} did not answer: {failed}",
-                                                     "fix": "Run `claude` in a terminal and check that it answers, "
-                                                            "then check again."}}
+            return {**out, "ok": False, "problem": {"what": f"{who} did not answer: {failed.rstrip('.')}.",
+                                                     "fix": "Run claude in a terminal and check that it answers."}}
         return {**out, "ok": True}
     from . import llm  # noqa: PLC0415
 
@@ -285,8 +257,7 @@ async def check() -> dict[str, Any]:
         await llm.client().messages.create(model=CHECK_MODEL, max_tokens=1,
                                            messages=[{"role": "user", "content": "ok"}])
     except Exception as e:  # noqa: BLE001 — any failure is the check's answer
-        return {**out, "ok": False, "problem": {"what": llm.failure(e),
-                                                 "fix": "Or set it again with thimble-browser --setup."}}
+        return {**out, "ok": False, "problem": {"what": llm.failure(e), "fix": ""}}
     return {**out, "ok": True}
 
 
@@ -322,10 +293,12 @@ def _claude_code_answers() -> str:
 
 
 def status() -> dict[str, Any]:
-    """What GET /api/claude-access shows: the choice, its words, what is missing, and the consent text. No secret."""
+    """What GET /api/claude-access shows: the choice, its words, what is missing, whether ANTHROPIC_API_KEY is set where
+    the workbench runs (env_key, never the key) and whether a key is saved, and each way's words. No secret."""
     rec = read()
-    return {"how": how(), "describe": describe(), "problem": problem(), "key_saved": has_key(),
-            "wif_file": rec.get("wif_file") or "", "consent_text": CONSENT, "choices": list(CHOICES), "labels": LABELS}
+    return {"how": how(), "describe": describe(), "problem": problem(), "key_saved": bool(saved_key()),
+            "env_key": bool(env_key()), "wif_file": rec.get("wif_file") or "", "consent_text": CONSENT,
+            "choices": list(CHOICES), "labels": LABELS, "hints": HINTS}
 
 
 # --------------------------------------------------------------------------- routes
@@ -368,103 +341,119 @@ async def check_route() -> dict[str, Any]:
     return await check()
 
 
-# --------------------------------------------------------------------------- the install's question
+# --------------------------------------------------------------------------- thimble-browser --setup
 
 
-def _ask(prompt: str, default: str = "") -> str:
-    try:
-        got = input(prompt).strip()
-    except EOFError:
-        return default
-    return got or default
+def _ask(prompt: str) -> str:
+    """One answer typed in the terminal; the question goes to stderr, so that the install shows it as it comes while
+    it indents setup's lines (stdout)."""
+    sys.stderr.write(prompt)
+    sys.stderr.flush()
+    return (sys.stdin.readline() or "").strip()
 
 
-def setup(argv: list[str] | None = None, unused: list[str] | None = None) -> int:
-    """`python -m app.claude_access setup [--how H] [--key-file F] [--wif-file F] [--yes] [--find-wif]`: ask how to
-    reach Claude (1 Claude Code sign-in, the default and recommended, after the consent text; 2 API key; 3 WIF, its
-    config file), check it, and save it. The key is read from --key-file, else without echo, or from stdin when it is
-    not a terminal; it is never printed. --find-wif lists the WIF config files found (find_wif) and saves nothing. The
-    check's line says the login Claude Code uses (check's login) and names `unused`, the ANTHROPIC_* variables the
-    shell had (scrub_env took them out, so no value of theirs reaches the check or the workbench). Exit 0 when saved and
-    checked, 1 when not saved, 2 when saved and the check failed."""
+def _menu() -> str:
+    """The question how the workbench reaches Claude, in a terminal: the way chosen, '' for Enter (choose later)."""
+    out = sys.stderr
+    out.write("How should the workbench reach Claude?\n")
+    for n, h in enumerate(CHOICES, 1):
+        mark = " (recommended)" if h == CLAUDE_CODE else ""
+        out.write(f"  {n}  {LABELS[h]}{mark}: {HINTS[h]}\n")
+    out.write("  Enter: choose later; the workbench asks when it starts.\n")
+    while True:
+        got = _ask("Choose 1, 2 or 3: ")
+        if not got:
+            return ""
+        if got in ("1", "2", "3"):
+            return CHOICES[int(got) - 1]
+        out.write("Type 1, 2 or 3, or press Enter to choose later.\n")
+
+
+def again(h: str, wif_file: str = "") -> str:
+    """The command that sets the way `h` and checks it again, with ~ for the home when the path needs no quotes."""
+    import re  # noqa: PLC0415
+    import shlex  # noqa: PLC0415
+
+    if h != WIF or not wif_file:
+        return f"thimble-browser --setup --how {h}"
+    t = _tilde(wif_file)
+    shown = t if re.fullmatch(r"~/[\w./+-]*", t) else shlex.quote(wif_file)
+    return f"thimble-browser --setup --how wif --wif-file {shown}"
+
+
+def line(no_check: bool = False) -> tuple[int, list[str]]:
+    """setup's lines for the way chosen, checked unless `no_check`: Sign-in: the way (with Claude Code sign-in, the
+    login it uses), then what the check found; when it failed, the command to run after the fix. Exit 0, or 2 when the
+    check failed."""
+    h = how()
+    if not h:
+        return 0, ["Sign-in: not chosen yet. The workbench asks when it starts."]
+    if h == API_KEY and not has_key():
+        return 0, ["Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so the workbench asks for a key in its "
+                   "Settings when it starts."]
+    if no_check:
+        return 0, [f"Sign-in: {describe()}."]
+    got = asyncio.run(check())
+    way = describe() + (f" (logged in with {got['login']})" if got.get("login") else "")
+    if got.get("ok"):
+        return 0, [f"Sign-in: {way}. Checked: Claude answers."]
+    p = got.get("problem") or {}
+    why = " ".join(x for x in (str(p.get("what") or "").strip(), str(p.get("fix") or "").strip()) if x)
+    return 2, [f"Sign-in: {way}. The check failed: {why.rstrip('.')}.",
+               f"  After you fix that: {again(h, str(read().get('wif_file') or ''))}"]
+
+
+def setup(argv: list[str] | None = None) -> int:
+    """`thimble-browser --setup [--how H] [--wif-file F] [--keep] [--no-check]`: how the workbench reaches Claude.
+
+    --how chooses the way (claude-code, api-key or wif; --wif-file alone is wif). Choosing the Claude Code sign-in is
+    the consent to what it does (CONSENT). The API key needs nothing here: the workbench uses ANTHROPIC_API_KEY when it
+    is set, and else asks for a key in its Settings. Without --how, a terminal gets the question (Enter chooses later),
+    and with --keep a way chosen before stays (the install's run); with no terminal, the way chosen stays as it is. Then
+    the line that says the way and what the check found (line). The question goes to stderr and the lines to stdout.
+    Exit 0, 1 when nothing was saved, 2 when the check failed."""
     ap = argparse.ArgumentParser(prog="thimble-browser --setup")
     ap.add_argument("--how", choices=CHOICES)
-    ap.add_argument("--key-file", help="a file that holds the Anthropic API key alone (implies --how api-key)")
-    ap.add_argument("--wif-file")
-    ap.add_argument("--yes", action="store_true", help="confirm Claude Code sign-in's consent text")
-    ap.add_argument("--find-wif", action="store_true", help="list the WIF config files found, by path; save nothing")
+    ap.add_argument("--wif-file", help="the WIF config file (implies --how wif)")
+    ap.add_argument("--keep", action="store_true", help="keep a way chosen before; ask only when there is none")
+    ap.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # an earlier release's consent: --how is it
     ap.add_argument("--no-check", action="store_true")
     args = ap.parse_args(argv)
-    if args.find_wif:
-        found = find_wif()
-        places = ", ".join([*WIF_PLACES, str(_home())])
-        if not found:
-            print(f"thimble: no Workload Identity Federation config file in {places}.")
-            return 1
-        for f in found:
-            print(f"{f['path']}: " + (f"usable, with {f['detail']}" if f["ok"] else f"not usable: {f['detail']}"))
-        return 0
-    if args.key_file is not None:
-        if args.how not in (None, API_KEY):
-            print("thimble: not saved: --key-file goes with --how api-key")
-            return 1
-        args.how = API_KEY
-    choice = args.how
-    if not choice:
-        print("How should thimble browser reach Claude?")
-        print("  1  Claude Code sign-in (recommended)")
-        print("  2  Anthropic API key")
-        print("  3  Workload Identity Federation")
-        choice = {"1": CLAUDE_CODE, "2": API_KEY, "3": WIF}.get(_ask("Choose 1, 2 or 3 [1]: ", "1"))
+    choice = args.how or (WIF if args.wif_file else "")
+    if not choice and sys.stdin.isatty() and not (args.keep and how()):
+        choice = _menu()
         if not choice:
-            print("thimble: no choice saved; run thimble-browser --setup again.")
+            print("Sign-in: not chosen yet. The workbench asks when it starts.")
+            return 0
+    if choice:
+        path = args.wif_file or ""
+        if choice == WIF and not path and sys.stdin.isatty():
+            path = _ask("The path of your WIF config file: ")
+        try:
+            save(choice, wif_file=path, consent=True)
+        except AccessError as e:
+            way = describe_of(choice, path)
+            print(f"Sign-in: {way}. It was not saved: {str(e).rstrip('.')}.")
+            print(f"  After you fix that: {again(choice, path)}")
             return 1
-    try:
-        if choice == API_KEY:
-            key = ""
-            if args.key_file is not None:
-                key = read_key_file(args.key_file)
-            elif sys.stdin.isatty():
-                key = getpass.getpass("Paste your Anthropic API key (it is not shown): ").strip()
-            else:
-                key = sys.stdin.readline().strip()
-            save(API_KEY, key=key)
-        elif choice == CLAUDE_CODE:
-            print(CONSENT)
-            ok = args.yes or _ask("Continue? [y/N]: ").lower() in ("y", "yes")
-            if not ok:
-                print("thimble: Claude Code sign-in was not chosen.")
-                return 1
-            save(CLAUDE_CODE, consent=True)
-        else:
-            path = args.wif_file or _ask("Path of the Workload Identity Federation config file: ")
-            save(WIF, wif_file=path)
-    except AccessError as e:
-        print(f"thimble: not saved: {e}")
-        return 1
-    print(f"thimble: saved: {describe()}.")
-    if args.no_check:
-        return 0
-    got = asyncio.run(check())
-    names = sorted(unused or [])
-    shell = f" {', '.join(names)}, set in this shell, {'is' if len(names) == 1 else 'are'} not used." if names else ""
-    if got.get("ok"):
-        login = f", through Claude Code logged in with {got['login']}" if got.get("login") else ""
-        print(f"thimble: checked: Claude answers{login}.{shell}")
-        return 0
-    p = got.get("problem") or {}
-    print(f"thimble: the check failed: {p.get('what', '')} {p.get('fix', '')}".rstrip() + shell)
-    return 2
+    rc, lines = line(args.no_check)
+    for x in lines:
+        print(x)
+    return rc
+
+
+def describe_of(choice: str, wif_file: str = "") -> str:
+    """describe()'s words for a way that is not saved."""
+    if choice == WIF:
+        return f"Workload Identity Federation, with {_tilde(wif_file) if wif_file else '(no file)'}"
+    return {API_KEY: "an API key", CLAUDE_CODE: "your Claude Code sign-in"}.get(choice, choice)
 
 
 def main(argv: list[str] | None = None) -> int:
-    from . import llm  # noqa: PLC0415
-
-    unused = llm.scrub_env()
     argv = list(sys.argv[1:] if argv is None else argv)
     cmd = argv[0] if argv else "status"
     if cmd == "setup":
-        return setup(argv[1:], unused)
+        return setup(argv[1:])
     if cmd == "status":
         p = problem_line()
         print(f"thimble: Claude access: {describe()}" + (f". {p}" if p else ""))

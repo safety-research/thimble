@@ -1,11 +1,12 @@
-// How thimble reaches Claude (backend claude_access.py): the person's Claude Code sign-in (the default, and
-// recommended), an Anthropic API key, or Workload Identity Federation. The setup step opens by itself while no way is
-// chosen (the first run, when install.sh's question was skipped), and again from Settings, from a chat's card that says
-// Claude cannot be reached (bus `claudeAccess`), or from the line in Settings. Not now (or Escape) closes it, so the
-// person can still browse without access; it opens by itself again on the next start while nothing is saved. Claude
-// Code sign-in needs the person's yes to the consent text, since it launches headless Claude Code sessions in the
-// background. Saving checks the choice with one small call and says what failed in plain words. The first run's step
-// stands alone: the tour's welcome (TourHost) waits until it is answered (accessAnswered).
+// How the workbench reaches Claude (backend claude_access.py): the person's Claude Code sign-in (the default, and
+// recommended), an Anthropic API key, or Workload Identity Federation, each in the few words of the install's question
+// (the backend's labels and hints). The setup step opens by itself while no way is chosen (the first run, when the
+// install did not ask), and again from Settings, from a chat's card that says Claude cannot be reached (bus
+// `claudeAccess`), or from the line in Settings. Not now (or Escape) closes it, so the person can still browse without
+// access; it opens by itself again on the next start while nothing is saved. Choosing the Claude Code sign-in, whose
+// words say what it does, is the person's consent to it. The API key is ANTHROPIC_API_KEY when it is set where the
+// workbench runs, else one pasted here. Saving checks the choice with one small call and says what failed in plain
+// words. The first run's step stands alone: the tour's welcome (TourHost) waits until it is answered (accessAnswered).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { TextInput } from '../components/Field'
@@ -14,11 +15,12 @@ import { bus } from '../lib/bus'
 
 type How = 'api-key' | 'claude-code' | 'wif'
 
-/** In the order and the words of the install's question (backend claude_access.py setup); the first is the default. */
-const CHOICES: { how: How; label: string; mark?: string }[] = [
-  { how: 'claude-code', label: 'Claude Code sign-in', mark: 'recommended' },
-  { how: 'api-key', label: 'Anthropic API key' },
-  { how: 'wif', label: 'Workload Identity Federation' },
+/** In the order and the words of the install's question (backend claude_access.py LABELS and HINTS, which the status
+ * gives); the first is the default. */
+const CHOICES: { how: How; label: string; hint: string; mark?: string }[] = [
+  { how: 'claude-code', label: 'Your Claude Code sign-in', hint: 'It runs Claude Code in the background, on your Claude plan.', mark: 'recommended' },
+  { how: 'api-key', label: 'An Anthropic API key', hint: 'ANTHROPIC_API_KEY when it is set, or a key you paste here.' },
+  { how: 'wif', label: 'Workload Identity Federation', hint: 'The path of your WIF config file.' },
 ]
 
 let answer: () => void = () => undefined
@@ -70,7 +72,6 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
   const [how, setHow] = useState<How>(CHOICES[0].how)
   const [key, setKey] = useState('')
   const [file, setFile] = useState('')
-  const [consent, setConsent] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [check, setCheck] = useState<ClaudeAccessCheck | null>(null)
@@ -96,7 +97,7 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
     setError(null)
     setCheck(null)
     try {
-      const got = await api.setClaudeAccess({ how, key: how === 'api-key' && key ? key : undefined, wif_file: how === 'wif' ? file : undefined, consent: how === 'claude-code' && consent })
+      const got = await api.setClaudeAccess({ how, key: how === 'api-key' && key ? key : undefined, wif_file: how === 'wif' ? file : undefined, consent: how === 'claude-code' })
       setStatus(got)
       setKey('')
       setCheck(got.check)
@@ -107,23 +108,26 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
       setBusy(false)
     }
   }
-  const ready = how === 'api-key' ? !!key || !!status?.key_saved : how === 'wif' ? !!file.trim() : consent
+  // with ANTHROPIC_API_KEY set where the workbench runs, the API key needs nothing pasted
+  const ready = how === 'api-key' ? !!key || !!status?.key_saved || !!status?.env_key : how === 'wif' ? !!file.trim() : true
   return (
     <div className="access-scrim" role="presentation">
-      <div className="access" role="dialog" aria-modal="true" aria-label="How thimble reaches Claude">
-        <h2 className="access-title">How should thimble reach Claude?</h2>
+      <div className="access" role="dialog" aria-modal="true" aria-label="How the workbench reaches Claude">
+        <h2 className="access-title">How should the workbench reach Claude?</h2>
         <div className="access-choices" role="radiogroup">
           {CHOICES.map((c) => (
             <label key={c.how} className={`access-choice${how === c.how ? ' on' : ''}`} data-how={c.how}>
               <input type="radio" name="access-how" checked={how === c.how} onChange={() => setHow(c.how)} />
               <span className="access-choice-label">
-                {c.label}
+                {status?.labels?.[c.how] ?? c.label}
                 {c.mark && <span className="access-choice-mark"> ({c.mark})</span>}
               </span>
+              <span className="access-choice-hint">{c.hint}</span>
             </label>
           ))}
         </div>
-        {how === 'api-key' && (
+        {how === 'api-key' && status?.env_key && <p className="access-hint">ANTHROPIC_API_KEY is set where the workbench runs, so it uses that key.</p>}
+        {how === 'api-key' && !status?.env_key && (
           <div className="access-field">
             <TextInput block mono type="password" value={key} onChange={setKey} placeholder={status?.key_saved ? 'A key is saved' : 'sk-ant-…'} aria-label="Anthropic API key" autoComplete="off" spellCheck={false} />
           </div>
@@ -132,12 +136,6 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
           <div className="access-field">
             <TextInput block mono value={file} onChange={setFile} placeholder="/path/to/wif-config.toml" aria-label="Workload Identity Federation config file" spellCheck={false} />
           </div>
-        )}
-        {how === 'claude-code' && (
-          <label className="access-consent">
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>{status?.consent_text ?? 'This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.'}</span>
-          </label>
         )}
         {error && <p className="access-error" role="alert">{error}</p>}
         {check && !check.ok && (
@@ -150,7 +148,7 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
             {check && !check.ok ? 'Close' : first ? 'Not now' : 'Cancel'}
           </Button>
           <Button variant="primary" busy={busy} disabled={!ready} onClick={save}>
-            {how === 'claude-code' ? 'Confirm and check' : 'Save and check'}
+            Save and check
           </Button>
         </div>
       </div>

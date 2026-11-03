@@ -1200,17 +1200,16 @@ button.settings-ext-name:hover .settings-ext-caret {
   font-weight: 400;
   color: var(--text-secondary);
 }
+.access-choice-hint {
+  grid-column: 2;
+  color: var(--text-secondary);
+}
 .access-field {
   margin: 8px 0;
 }
-.access-consent {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
+.access-hint {
   margin: 8px 0;
-  padding: 8px 10px;
-  border-radius: var(--radius-ui);
-  background: var(--bg-sunken);
+  color: var(--text-secondary);
 }
 .access-error {
   margin: 8px 0;

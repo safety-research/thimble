@@ -1119,7 +1119,6 @@ async def _lifespan(app: Any):
     global _loop
     _loop = asyncio.get_running_loop()
     if enabled():
-        llm.scrub_env()
         log.info("%s", start_line())
         for p in sorted(config.WORKSPACES_DIR.glob(f"*/{DIR}/main.json")):
             with contextlib.suppress(Exception):
