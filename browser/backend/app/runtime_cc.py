@@ -35,8 +35,8 @@ sandbox that still cannot start refuses each Bash call, and the person gets a no
 a command Claude Code's own temp folder as its TMPDIR, claude-<uid> in CLAUDE_CODE_TMPDIR, which the session gets as its
 TMPDIR too. Main's and its thread forks' sessions have the workspace's own short folder (workspace_tmp), kept from turn
 to turn, so their commands' TMPDIR (shell_tmp) is the same folder at each turn, which the card kernels share (notebook);
-it goes when the workspace is deleted (drop_workspace_tmp), and a server's start removes those of workspaces deleted
-otherwise (sweep_workspace_tmps). Any other agent's session has one of its own (short_tmp), removed when the turn ends.
+it goes when the workspace is deleted or moved aside for another session (drop_workspace_tmp), and a server's start
+removes those of workspaces deleted otherwise (sweep_workspace_tmps). Any other agent's session has one of its own (short_tmp), removed when the turn ends.
 The agent's own files stay in the workspace (Spec.home), as before.
 
 Claude Code's sandbox makes an empty .claude/.cc-writes/ folder in the session's working folder (the corpus) when it
@@ -175,8 +175,9 @@ def _remove(p: Path) -> bool:
 
 
 def drop_workspace_tmp(folder: Path) -> None:
-    """The workspace whose folder is `folder` is deleted: its short folder (workspace_tmp) goes with it, unless it names
-    another workspace (two folders whose hashes meet). The workspace's sessions and kernels have stopped already."""
+    """The workspace whose folder is `folder` is deleted, or moved aside for another session (ledger.archive_workspace):
+    its short folder (workspace_tmp) goes with it, unless it names another workspace (two folders whose hashes meet).
+    The workspace's sessions and kernels have stopped already."""
     real = str(folder.resolve())
     for root in _tmp_roots():
         p = Path(root) / _tmp_name(real)

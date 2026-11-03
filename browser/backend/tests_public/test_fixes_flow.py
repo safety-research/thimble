@@ -551,7 +551,7 @@ async def test_use_it_hands_on_the_page_its_checks_built_so_the_click_waits_for_
     await fixes.apply_route(1, analyst)
     await _went_on()
     await _restarted(fixing, "Use it now")
-    assert got == [(fixes.checks_page(1), "tree of c1:browser/frontend")]
+    assert got == [(fixes.checks_page(1), " ".join(f"tree of c1:./{p}" for p in fixes.PAGE_SOURCES))]
 
 
 async def test_a_page_in_the_fix_s_temp_folder_from_before_its_checks_is_never_handed_on(fixing, monkeypatch, analyst):
@@ -646,12 +646,15 @@ def test_the_tests_read_the_real_packages_also_when_the_server_runs_from_live(tm
     assert os.readlink(copy / "frontend" / "node_modules" / "vite") == str((real / "frontend" / "node_modules" / "vite").resolve())
 
 
-def _page_checkout(top: Path, source: str) -> Path:
-    """A made-up checkout whose browser/frontend holds page sources (`source` in src/a.tsx), committed: its browser/."""
+def _page_checkout(top: Path, source: str, tray: str = "export const TABLE_LABEL = 'output · table'\n") -> Path:
+    """A made-up checkout whose browser/frontend holds page sources (`source` in src/a.tsx), which import a module of
+    the terminal plugin (`tray` in plugin/tray/tray.mjs), committed: its browser/."""
     fe = top / "browser" / "frontend"
     (fe / "src").mkdir(parents=True)
     (fe / "index.html").write_text("<!doctype html>\n")
-    (fe / "src" / "a.tsx").write_text(source)
+    (fe / "src" / "a.tsx").write_text(f"import {{ TABLE_LABEL }} from '../../../plugin/tray/tray.mjs'\n{source}")
+    (top / "plugin" / "tray").mkdir(parents=True)
+    (top / "plugin" / "tray" / "tray.mjs").write_text(tray)
     (top / ".gitignore").write_text("browser/frontend/dist/\n")
     _git("init", "-q", cwd=top)
     _git("add", "-A", cwd=top)
@@ -676,7 +679,7 @@ def test_the_page_the_checks_built_takes_the_build_s_place_when_live_has_the_sou
     monkeypatch.setattr(fixes, "lend", lambda root: None)
     monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
     live = _page_checkout(tmp_path / "live", "export const rows = 2\n")
-    tree = fixes.git_tree(tmp_path / "live", "HEAD:browser/frontend")
+    tree = fixes.page_sources(tmp_path / "live", "HEAD")
     page = _built_page(tmp_path / "page", "the page the checks built")
     assert tree and fixes.prepare(live, (page, tree)) == ""
     dist = live / "frontend" / "dist"
@@ -706,6 +709,50 @@ def test_a_fix_that_changes_no_file_of_the_page_takes_the_install_s_page(tmp_pat
     later = time.time() + 60
     os.utime(install / "frontend" / "src" / "a.tsx", (later, later))
     assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
+
+
+def test_a_fix_that_changes_only_a_module_of_the_plugin_the_page_imports_never_keeps_a_page_built_before_it(tmp_path,
+                                                                                                         monkeypatch):
+    """The page imports modules of the terminal plugin (fixes.PAGE_SOURCES), which a fix may change alone. Live's
+    browser/frontend was then the install's, so the install's page, built from the module as it was, became live's,
+    and a page live had built before stayed: the fix was on and the page did not show it. Now such a module is one of
+    the page's sources, so the page is built after the click."""
+    install = _page_checkout(tmp_path / "install", "export const rows = 2\n")
+    _built_page(install / "frontend" / "dist", "the install's page")
+    monkeypatch.setattr(config, "REPO_ROOT", install)
+    monkeypatch.setattr(fixes, "lend", lambda root: None)
+    monkeypatch.setattr(fixes.shutil, "which", lambda name: None)
+    live = _page_checkout(tmp_path / "live", "export const rows = 2\n", tray="export const TABLE_LABEL = 'output, fixed'\n")
+    assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
+    assert not (live / "frontend" / "dist").exists()
+    # a later fix to the module, once live has a page of its own
+    _built_page(live / "frontend" / "dist", "live's page")
+    assert fixes.prepare(live) == ""
+    tray = tmp_path / "live" / "plugin" / "tray" / "tray.mjs"
+    tray.write_text("export const TABLE_LABEL = 'output, fixed again'\n")
+    later = time.time() + 60
+    os.utime(tray, (later, later))
+    assert fixes.prepare(live) == "the page was not built: npm is not on the PATH"
+
+
+def test_the_page_s_sources_name_each_module_of_the_plugin_the_page_imports():
+    """fixes.PAGE_SOURCES names each module of the terminal plugin the page bundles (vite.config.ts lets it read
+    ../../plugin): those browser/frontend/src imports, and those they import in turn."""
+    import re  # noqa: PLC0415
+
+    repo = config.REPO_ROOT.parent
+    spec = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.[^'"]+)['"]""")
+    todo = [(f.parent / s).resolve() for f in (repo / "browser" / "frontend" / "src").rglob("*")
+            if f.suffix in (".ts", ".tsx", ".js", ".mjs") for s in spec.findall(f.read_text(encoding="utf-8"))]
+    todo = [p for p in todo if repo / "plugin" in p.parents]
+    found: set[Path] = set()
+    while todo:
+        p = todo.pop()
+        if p not in found:
+            found.add(p)
+            todo += [(p.parent / s).resolve() for s in spec.findall(p.read_text(encoding="utf-8"))]
+    assert found and sorted(p.relative_to(repo).as_posix() for p in found) == sorted(fixes.PAGE_SOURCES[1:])
+    assert fixes.PAGE_SOURCES[0] == "browser/frontend"
 
 
 # a release launcher that hands the way back off itself, as the plugin's launcher checks (plugin/bin/thimble)

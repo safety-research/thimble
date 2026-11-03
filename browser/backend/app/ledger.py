@@ -432,7 +432,7 @@ def agent_rows(c: str | None) -> dict[str, Any]:
 
     main = fence("orientation")
     out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"], "web": main["web"], "data": main["data"],
-                                    "network": "on" if runtime.engine() == "api" else "ask", "config": main["config"]}}
+                                    "network": runtime.network(), "config": main["config"]}}
     for agent in userconf.SUBAGENT_ROLES:
         role = by_role.get(agent) or blank
         out[userconf.ROLES[agent]] = {"way": role["way"], "extension": role["extension"],
@@ -699,8 +699,10 @@ def archive_path(c: str, when: datetime | None = None) -> Path:
 @router.post("/ws/{c}/archive")
 async def archive_workspace(c: str) -> dict[str, str | None]:
     """`/thimble fresh`: stop the workspace's sessions, detach the analyst's session, end what else runs, then move
-    workspaces/<c>/ to archive_path; nothing is deleted. {archived: the folder it went to, or null}."""
-    from . import investigation  # lazy: investigation imports this module
+    workspaces/<c>/ to archive_path. Nothing is deleted but its short temp folder on Claude Code sign-in
+    (runtime_cc.drop_workspace_tmp), named after the folder, which the next workspace there would get with its files.
+    {archived: the folder it went to, or null}."""
+    from . import investigation, runtime_cc  # lazy: investigation imports this module
 
     try:
         path = config.workspace_path(c).resolve()  # validated, never created
@@ -715,6 +717,7 @@ async def archive_workspace(c: str) -> dict[str, str | None]:
     dest = archive_path(c)
     dest.parent.mkdir(parents=True, exist_ok=True)
     path.rename(dest)
+    runtime_cc.drop_workspace_tmp(path)
     investigation.reset_streams(c)  # an open tab starts over on the empty workspace
     log.info("%s: workspace archived to %s", c, dest)
     return {"archived": str(dest)}

@@ -120,6 +120,14 @@ class Box:
     def _inside(self, q: Path, roots: list[Path]) -> bool:
         return any(q == r or r in q.parents for r in roots)
 
+    def _real(self, roots: list[Path]) -> list[Path]:
+        """`roots` by their real paths, less each folder of the workspace whose real path lies outside it: a card's code
+        writes the workspace, so it can put a link in place of such a folder, which then leads the tools nowhere."""
+        ws = self.workspace.resolve()
+        mine = [Path(os.path.normpath(self.workspace)), ws]
+        real = [(Path(os.path.normpath(r)), r.resolve()) for r in roots]
+        return [q for r, q in real if self._inside(q, [ws]) or not self._inside(r, mine)]
+
     def path(self, p: str | None, *, write: bool = False) -> Path:
         raw = Path(p) if p and os.path.isabs(p) else self.cwd / (p or ".")
         q = raw.resolve()
@@ -128,7 +136,7 @@ class Box:
         if write and self._inside(q, [x.resolve() for x in self.no_write]):
             raise ValueError(f"{p} is thimble's own file, which only thimble writes")
         roots = self.write_roots if write else [*self.read_roots, *self.write_roots]
-        if not self._inside(q, [r.resolve() for r in roots]):
+        if not self._inside(q, self._real(roots)):
             what = "write" if write else "read"
             if write and self.corpus_edits is False and self._inside(q, [self.cwd.resolve()]):
                 raise ValueError(f"{p} is in the corpus folder, which is read-only while the analyst's Settings switch "

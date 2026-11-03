@@ -102,6 +102,13 @@ def engine() -> str:
     return "api" if h in (claude_access.API_KEY, claude_access.WIF) else ""
 
 
+def network() -> str:
+    """Where the shell commands of main and its agents reach, as Settings' row for main (ledger.agent_rows) and main's
+    prompt (events.NETWORK) say: "on" with an API key or WIF, any host, unasked; else "ask", where on Claude Code sign-in
+    a request to a host the analyst has not allowed asks them first (host_asks)."""
+    return "on" if engine() == "api" else "ask"
+
+
 def uses_api() -> bool:
     """Whether model calls go to the Messages API from this process (model.structured)."""
     return enabled() and engine() != "cc"
