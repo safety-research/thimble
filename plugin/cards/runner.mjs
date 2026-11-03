@@ -17,9 +17,8 @@
 // listeners) between calls.
 //
 // Requests are POST /<op> with a JSON body; each answers JSON: {ok: true, ...} or {ok: false, error}.
-//   load     {id, version, title, view, rows, state, width, beside}  a new version from its view source and rows file;
-//            answers the tree, state, keys, the rows' summary and the text copy, and the copy at `beside` (the width a
-//            side pane leaves it) when texts wrap there. A version that fails keeps the old one.
+//   load     {id, version, title, view, rows, state, width}  a new version from its view source and rows file; answers
+//            the tree, state, keys, the rows' summary and the text copy. A version that fails keeps the old one.
 //   draw     {id, width}              the tree at a width, which the card is drawn at from now on
 //   copy     {id, width}              the text copy at a width; the card stays as it is
 //   key      {id, key}                the view's onKey; `handled` says whether it has one
@@ -596,24 +595,7 @@ function load(a) {
   card.tree = r.tree
   card.keys = typeof r.keys === 'string' ? r.keys : ''
   cards.set(a.id, card)
-  const own = copy(r.tree, a.width)
-  return { ...r, ...own, ...besideOf(card, own, Number(a.beside) || 0) }
-}
-
-/** The copy at `width`, the narrower width a side pane leaves the card, when a row that fits at the card's width wraps
- *  there: `beside: {width, lines, cut, wrapped}`, `wrapped` the numbers of the lines they start on. A row laid out for
- *  the wider card (fixed columns, parts side by side: layout.js `row`) breaks its columns there, and Claude sees it
- *  before the person does. A sentence that wraps on its own line reads the same at either width, so it alone brings
- *  nothing back, and no reason for a new version. Nothing when no row wraps, or the view fails at that width (it is
- *  told when the card draws there). */
-function besideOf(card, own, width) {
-  if (!width || width >= card.width) return {}
-  const r = inContext(card, 'copy', { width }, EVENT_MS)
-  if (!r.ok) return {}
-  const c = copy(r.tree, width)
-  const before = new Set(own.wrapped.map(w => w.text))
-  const wrapped = [...new Set(c.wrapped.filter(w => w.row && !before.has(w.text)).map(w => w.line))]
-  return wrapped.length ? { beside: { width, lines: c.lines, cut: c.cut, wrapped } } : {}
+  return { ...r, ...copy(r.tree, a.width) }
 }
 
 /** A click: a Button that holds the cell where it ended, else the view's onPointer listener, else the item of a card

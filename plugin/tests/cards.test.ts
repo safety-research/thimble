@@ -47,6 +47,8 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
   const asked: string[] = []
+  // what each load asked the runner for
+  const loads: Any[] = []
   // the width the runner holds the card at, which each of its answers says, as the runner does; with `wide`, its
   // drawings show that width and whether a key sorted them
   let runnerWidth = 0
@@ -126,6 +128,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     // a view that takes all the runner's memory: the socket closes while it answers
     if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
+    if (op === 'load') loads.push(body)
     const reply = (answer: object) => {
       const r = { value: { status: 200, ok: true, headers: {}, text: JSON.stringify(answer) } }
       if (held.op !== op) return r
@@ -151,8 +154,6 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
       ping: { ok: true },
       load: {
         ok: true, tree, width: runnerWidth, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: runs ?? (tall ? TALL_LINES : ['ada 3', 'bram 5']), cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
-        // a view with a row laid out for the card's width: it wraps at the narrower width a side pane leaves it
-        ...(String(body.view ?? '').includes('WIDE_ROW') && body.beside > 0 && body.beside < body.width ? { beside: { width: body.beside, lines: ['ada 3 of 9', 'merged', 'bram 5'], cut: [], wrapped: [1] } } : {}),
       },
       key: { ok: true, handled: body.key === 'o', tree: SORTED, width: runnerWidth, state: '{"sorted":true}' },
       draw: { ok: true, tree: TREE, width: runnerWidth, state: 'null' },
@@ -178,7 +179,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   const hold = (op: string) => new Promise<void>(resolve => { held.op = op; held.came = resolve })
   const release = () => held.go()
-  return { files, asked, dirs, clock, spawned, runs, look, forks, answers, code, hold, release }
+  return { files, asked, loads, dirs, clock, spawned, runs, look, forks, answers, code, hold, release }
 }
 
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
@@ -389,7 +390,7 @@ test('a view that did not parse is fixed with edits, its rows kept; the card on 
   expect(Object.entries(w.files).find(([p]) => /\/v3\/view\.js$/.test(p))?.[1]).toBe(VIEW.replace('children: "x"', 'children: "x" '))
 })
 
-test('a card at each width: in a side pane the card and its copy each draw at their own width, a post sent before the frame narrowed is answered at its width now, a drawing that fails at a narrow width holds only there, and a row that wraps beside a pane is named', async ($, on) => {
+test('a card at each width: in a side pane the card and its copy each draw at their own width, a post sent before the frame narrowed is answered at its width now, a drawing that fails at a narrow width holds only there, and the call copies the card at the width it is drawn at only', async ($, on) => {
   const w = world(on, { wide: true })
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   // a side pane opens: the card in the conversation and its copy in the pane each draw at their own width, and never
@@ -476,12 +477,15 @@ test('a card at each width: in a side pane the card and its copy each draw at th
     const wide = textOf(await $.ui.render(at(100)))
     expect(wide).not.toContain('failed')
   }
-  // a row that fits the card but wraps at the width a side pane leaves it: the call answers that copy too
+  // B32: the call gives the text copy at the width the card is drawn at only. A copy at the narrower width a side pane
+  // would leave it gave Claude a reason to change a card that fits where it is shown, so the call asks the runner for
+  // none, and its answer names no side pane
   {
-    const plain = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
-    expect(String(plain.result)).not.toContain('side pane')
-    const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_18', title: 'Scores', data: 'runs.json', view: `${VIEW}\n// WIDE_ROW` } as never)) as Any
-    expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and rows that fit at \d+ columns wrap there, out of their columns \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
+    const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+    expect(w.loads.at(-1).width).toBeGreaterThan(0)
+    expect(w.loads.at(-1).beside).toBeUndefined()
+    expect(String(r.result)).toContain('What it draws,')
+    expect(String(r.result)).not.toContain('side pane')
   }
 })
 

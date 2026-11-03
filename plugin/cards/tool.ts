@@ -13,10 +13,12 @@
 //      the designer fork called; a new version draws in the card's place
 //   4. tries the call's actions, keys and clicks in order, then puts the card back as it was
 //   5. answers what the card read (rows, columns, the first row), the text copy at the card's width on the surface the
-//      one that called relates to (draw.ts copyWidth), the copy at the width a side pane leaves it when a row that fits
-//      at the card's width wraps there, and the copy after each action. Nothing in it asks for a new version: notes
-//      come only for what is wrong (a key the card cannot get, a row a side pane breaks, a card taller than its frame
-//      shows, draw.ts CARD_ROWS, or than the screen)
+//      one that called relates to (draw.ts copyWidth), and the copy after each action. Nothing in it asks for a new
+//      version: notes come only for what is wrong where the card is shown (a key the card cannot get, a card taller
+//      than its frame shows, draw.ts CARD_ROWS, or than the screen). It gives no copy at a width the card is not drawn
+//      at now, such as the narrower width a side pane would leave it: that copy gave Claude a reason to change a card
+//      that fits where it is shown. While a side pane is open, the copy is at the width the pane leaves the card
+//      (copyWidth), and a view that lays out from surface.columns fits each width (the card tool's prompt)
 //   6. a version that does not fit (more rows than its frame shows, or lines cut at the card's edge) is held: its frame
 //      draws `drawing…` until the card check (fit.ts) has read it, and the check's replacement draws in its place. The
 //      answer says nothing of that, and gives no note on its size; the replacement is told to the one that drew the card
@@ -36,7 +38,6 @@ import { sinceLast } from '../core/answers'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
 import { claudeTempDir, tempDir } from '../core/home'
-import { paneNow } from '../core/pane'
 import { MAIN, takeFor, tellFor } from '../core/tell'
 import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
@@ -46,7 +47,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask, sandboxNotice } from './ask'
-import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidthBesidePane, copyWidth, rowsCut, rowsWord, screenRows } from './draw'
+import { applyAnswer, askCard, CARD_ROWS, canRedraw, copyWidth, rowsCut, rowsWord, screenRows } from './draw'
 import { checkCard, fits, shown } from './fit'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, versionDir } from './store'
 
@@ -179,15 +180,6 @@ function copyText(lines: string[], cut: number[], width: number): string[] {
   return out
 }
 
-/** The card as a side pane draws it, when a row that fits at the card's width wraps there (the runner's load says:
- *  runner.mjs besideOf). */
-function besidePane(beside: Any, width: number): string[] {
-  if (!beside?.wrapped?.length) return []
-  const lines = beside.wrapped as number[]
-  const which = `line${lines.length > 1 ? 's' : ''} ${lines.slice(0, 8).join(', ')}`
-  return ['', `When a side pane opens beside the conversation, the card is ${beside.width} columns wide, and rows that fit at ${width} columns wrap there, out of their columns (${which}):`, ...copyText(beside.lines, beside.cut, beside.width)]
-}
-
 /** What a call answers when the version did not draw: what to fix, or, when the runner cannot start, that the card is
  *  not the cause (the person sees why in the failure line). */
 function failed(id: string, r: Any, update: boolean): string {
@@ -283,9 +275,7 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   // (draw.ts copyWidth): main and the designer fork read the card as the conversation draws it, a side thread's fork
   // as its pane draws it
   const width = copyWidth(meta, threadAnchor(input.agentId))
-  // a pane open now: the card is drawn at the width it leaves, and no narrower copy is asked for
-  const beside = (await paneNow($)) ? 0 : cardWidthBesidePane()
-  const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width, beside })
+  const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width })
   if (!r?.ok) {
     // the folder stays as the last call's, for the next call's `edits`; the version on screen stays
     await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer'), ...(r?.down ? { down: true } : {}) })
@@ -333,7 +323,6 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   const other = asked.filter(k => !/^\p{L}$/u.test(k))
   if (other.length) out.push(`Note on the view: a card takes letters only, so it does not get ${other.join(' ')}. The analyst has not seen ${other.length > 1 ? 'these keys' : 'this key'} on the card.`)
   out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
-  out.push(...besidePane(r.beside, width))
 
   let tallest = r.lines.length
   const actions = Array.isArray(input.actions) ? input.actions : []
