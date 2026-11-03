@@ -366,6 +366,8 @@ test("a check that could not read a file, which Claude Code refused asking nobod
     expect((await read('agent-someone')).decision).toBe('ask')
     expect((await read('agent-1', ELSEWHERE, { decision: 'deny', reason: READ_RULE, rule: 'Read(//made-up/elsewhere/**)' })).decision).toBe('deny')
     expect((await read('agent-1', ELSEWHERE, { decision: 'ask', rule: 'Read(//made-up/elsewhere/**)' })).decision).toBe('ask')
+    // nor an ask Claude Code puts to someone (its event names the approver: the person, a host), which stays theirs
+    for (const approver of ['person', 'host']) expect((await call('tool.check', { tool: 'Read', input: { file_path: ELSEWHERE }, tool_use_id: 'toolu_r4', agentId: 'agent-1', approver }, ASK)).decision).toBe('ask')
     // a word after x takes the OK back
     await ok.undo()
     expect((await read('agent-1')).decision).toBe('ask')
