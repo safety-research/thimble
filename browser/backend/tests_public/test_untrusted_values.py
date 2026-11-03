@@ -421,3 +421,52 @@ async def test_a_side_thread_s_calls_are_read_only_from_its_fork_s_transcript(mo
         await marks._check_share(CORPUS, {"sid": SID}, turn, "", [{"n": 1, "words": "made-up", "sentence": "made-up"}],
                                  (str(config.corpus_dir(CORPUS)), str(config.corpus_dir(CORPUS))), fork)
     assert str(outside / "made-up.jsonl") not in map(str, read)
+
+
+def _other_report() -> Path:
+    """Another workspace's report, as its writer kept it: what a name with ../ parts in this one could reach."""
+    p = config.WORKSPACES_DIR / "made-up-other" / "investigations" / investigation.MAIN / "report.json"
+    p.parent.mkdir(parents=True)
+    (p.parent / "investigation.json").write_text("{}")
+    p.write_text(json.dumps({"title": "OUTSIDE-SECRET", "sections": [{"heading": "Made-up", "paragraphs": [
+        {"sentences": [{"id": "s1", "text": "A made-up sentence of the other workspace."}]}]}]}))
+    return p
+
+
+async def test_a_document_a_writer_s_chat_names_is_one_a_route_would_take(monkeypatch):
+    """When a writer's chat ends done, each shown check runs on the document its meta, chats/<id>.meta.json, names; a
+    card's code writes that file, and the server took the name as it was for the document's file, the run's own folder
+    and its comments, so a name with ../ parts had it read another workspace's report and write there."""
+    from app import checks, report_types
+
+    other = _other_report()
+    before = other.read_text()
+    planted = "x/../../../../made-up-other/investigations/main/report"
+    assert report_types.read_doc(CORPUS, investigation.MAIN, planted) is None
+    with pytest.raises(HTTPException):
+        report_types.write_doc(CORPUS, investigation.MAIN, planted, {"title": "chosen by the card", "sections": []})
+    try:
+        assert await checks.start_run(CORPUS, "heads-up", planted, route="follow-on") is None
+    finally:
+        for act in list(checks._active.values()):
+            if act.task is not None:
+                act.task.cancel()
+        checks._active.clear()
+    assert other.read_text() == before
+    assert sorted(p.name for p in other.parent.iterdir()) == ["investigation.json", "report.json"]
+
+
+async def test_a_document_type_a_model_names_is_one_a_route_would_take():
+    """read_ref("type:<name>") and a writer's save name a document type by the model's own words, which the server
+    took as they were for the type's folder, so a name with ../ parts read any folder's type.json, prompt.md and
+    rubric.md into the model's context."""
+    from app import report_types, tools
+
+    folder = config.WORKSPACES_DIR / "made-up-other" / "made-up-type"
+    folder.mkdir(parents=True)
+    (folder / "type.json").write_text(json.dumps({"slug": "made-up", "name": "Made-up", "renderer": "document"}))
+    (folder / "prompt.md").write_text("OUTSIDE-SECRET\n")
+    planted = "x/../../../made-up-other/made-up-type"
+    assert report_types.read_type(CORPUS, planted) is None
+    got = await tools.call(CORPUS, "read_ref", {"ref": f"type:{planted}"}, session="writer:report")
+    assert "OUTSIDE-SECRET" not in json.dumps(got.content)

@@ -185,7 +185,9 @@ def fallback_summary(prev: dict[str, Any] | None, doc: dict[str, Any]) -> list[s
 
 
 def versions_dir(c: str, inv_id: str, slug: str) -> Path:
-    return investigation.inv_dir(c, inv_id) / DIR / slug
+    from . import report_types  # noqa: PLC0415
+
+    return investigation.inv_dir(c, inv_id) / DIR / report_types._named(slug)
 
 
 def _path(c: str, inv_id: str, slug: str, n: int) -> Path:

@@ -169,7 +169,15 @@ def types_dir(c: str) -> Path:
 
 
 def _type_dir(c: str, slug: str) -> Path:
-    return types_dir(c) / slug
+    return types_dir(c) / _named(slug)
+
+
+def _named(slug: str) -> str:
+    """`slug` when it is one a route takes (SLUG_RE), else 404: a type's or a document's name becomes a file's or a
+    folder's, and a name the server read from a file a card's code writes, or a model gave, may hold ../ parts."""
+    if not isinstance(slug, str) or not SLUG_RE.match(slug):
+        raise HTTPException(404, f"no document {slug!r}")
+    return slug
 
 
 def _check_slug(slug: str, *, custom: bool = True) -> str:
@@ -198,6 +206,8 @@ def read_type(c: str, slug: str) -> dict[str, Any] | None:
     """A type record with its prompt and rubric text; None when neither a built-in nor a custom type has the slug."""
     if slug in BUILTIN_SLUGS:
         return _builtin(slug)
+    if not isinstance(slug, str) or not SLUG_RE.match(slug):
+        return None
     d = _type_dir(c, slug)
     meta = read_json(d / "type.json", None)
     if not isinstance(meta, dict):
@@ -504,11 +514,11 @@ def type_form(t: dict[str, Any]) -> str:
 
 
 def doc_file(c: str, inv_id: str, slug: str) -> Path:
-    return investigation.inv_dir(c, inv_id) / f"{slug}.json"
+    return investigation.inv_dir(c, inv_id) / f"{_named(slug)}.json"
 
 
 def frame_file(c: str, inv_id: str, slug: str) -> Path:
-    return investigation.inv_dir(c, inv_id) / f"{slug}.frame.json"
+    return investigation.inv_dir(c, inv_id) / f"{_named(slug)}.frame.json"
 
 
 def _with_defaults(doc: dict[str, Any]) -> dict[str, Any]:
@@ -532,7 +542,9 @@ def _with_defaults(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def read_doc(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
-    """The stored document of a type for an investigation; None until written."""
+    """The stored document of a type for an investigation; None until written, or for a name no route takes."""
+    if not isinstance(slug, str) or not SLUG_RE.match(slug):
+        return None
     doc = read_json(doc_file(c, inv_id, slug), None)
     if not isinstance(doc, dict):
         return None
@@ -595,7 +607,7 @@ def write_doc(c: str, inv_id: str, slug: str, doc: dict[str, Any], *, before: An
     """Store a document under the documents' lock (docs_lock); a write that changes its text is an undo step
     (undo.doc_written) with the document as it was, read here unless the caller hands it over (`before`, None for
     none)."""
-    path = _inv(c, inv_id) / f"{slug}.json"
+    path = _inv(c, inv_id) / f"{_named(slug)}.json"
     with docs_lock(c, inv_id):
         prior = read_json(path, None) if before is _UNREAD else before
         write_json(path, doc)
@@ -606,7 +618,7 @@ def _archive(c: str, inv_id: str, slug: str) -> Path | None:
     p = doc_file(c, inv_id, slug)
     if not p.is_file():
         return None
-    hist = investigation.inv_dir(c, inv_id) / slug
+    hist = investigation.inv_dir(c, inv_id) / _named(slug)
     nofollow.makedirs(hist)
     dest = hist / f"{_stamp()}.json"
     nofollow.rename(p, dest)
@@ -790,7 +802,9 @@ def empty_frame(slug: str, t: dict[str, Any]) -> dict[str, Any]:
 
 
 def read_frame(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
-    """The stored frame; a deck frame stored as sections reads as slides."""
+    """The stored frame; a deck frame stored as sections reads as slides. None for a name no route takes."""
+    if not isinstance(slug, str) or not SLUG_RE.match(slug):
+        return None
     f = read_json(frame_file(c, inv_id, slug), None)
     if not isinstance(f, dict) or not (isinstance(f.get("sections"), list) or isinstance(f.get("slides"), list)):
         return None
@@ -805,7 +819,7 @@ def read_frame(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
 
 def write_frame(c: str, inv_id: str, slug: str, frame: dict[str, Any]) -> None:
     """Store the frame of a document not written yet; a write that changes its text is an undo step, as write_doc's."""
-    path = _inv(c, inv_id) / f"{slug}.frame.json"
+    path = _inv(c, inv_id) / f"{_named(slug)}.frame.json"
     prior = read_json(path, None)
     write_json(path, frame)
     undo.doc_written(c, inv_id, slug, "frame", prior if isinstance(prior, dict) else None, frame)
@@ -837,7 +851,7 @@ def keep_analyst_draft(c: str, inv_id: str, slug: str, draft: dict[str, Any]) ->
     from . import versions  # noqa: PLC0415
 
     with docs_lock(c, inv_id):
-        write_json(_inv(c, inv_id) / f"{slug}.json", draft)
+        write_json(_inv(c, inv_id) / f"{_named(slug)}.json", draft)
     versions.record_analyst_draft(c, inv_id, slug, draft)
 
 
