@@ -106,6 +106,15 @@ def write_json(path: Path, obj: Any) -> None:
     atomic_write_text(path, json.dumps(obj, indent=2, ensure_ascii=False))
 
 
+def rewrite_text(path: Path, text: str) -> None:
+    """`text` as the whole file at `path`, written into the file that is there under the file's lock (locked,
+    nofollow.rewrite), not renamed over it: for a file a kernel wrapper hides by a mount on the file itself
+    (kernel_wrap.HIDDEN_FILES: the workspace's settings.json and config.json), which a rename over it would take off
+    inside a running kernel, which could then read the file."""
+    with locked(path):
+        nofollow.rewrite(path, text.encode("utf-8"))
+
+
 def write_json_once(path: Path, obj: Any) -> bool:
     """write_json for a file created once and never rewritten: if anything is at `path` by the time this writer would
     replace it, the other writer's file is kept and this temp removed. True when this call wrote the file. Its folder is
@@ -597,7 +606,7 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
             role: {**held[role], **conf} if isinstance(conf, dict) and isinstance(held.get(role), dict) else conf
             for role, conf in settings[config.MODELS_KEY].items()}}
     if merged != stored or not path.exists() and settings:
-        write_json(path, merged)
+        rewrite_text(path, json.dumps(merged, indent=2, ensure_ascii=False))  # in place: kernels' hide of it holds
     return with_features(merged, c)
 
 

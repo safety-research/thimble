@@ -1274,3 +1274,45 @@ async def test_a_card_s_code_holds_no_lock_of_the_workspace_s_stores(wrap, monke
         await notebook.shutdown_all()
     assert _text(held).strip() == "[]", held["outputs"]
     assert _said(later) == ["2"] and took < ledger.LOCK_WAIT_S and max(gaps) < 1.0, (took, max(gaps))
+
+
+# a card's code that reads the workspace's settings.json and config.json
+READ_HIDDEN_CELL = r"""
+import json, os
+ws = os.path.realpath('..')
+out = {}
+for n in ('settings.json', 'config.json'):
+    try:
+        with open(os.path.join(ws, n)) as f:
+            out[n] = f.read()
+    except OSError as e:
+        out[n] = 'refused: ' + str(e.strerror)
+print(json.dumps(out))
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_the_workspace_s_config_stays_hidden_from_a_kernel_after_the_server_writes_it(wrap, monkeypatch,
+                                                                                           workspaces_tmp):
+    """Both wrappers hide settings.json and config.json each by a mount on the file, and the server wrote each as a new
+    file renamed over the old one, which takes that mount off inside a kernel that runs: after a Settings save and a
+    save of the workspace's config, the same kernel read both files whole. Now the server writes them in place, so the
+    mount holds and the kernel reads neither."""
+    from app import ledger, userconf
+
+    if not (LINUX and _wrap_works(wrap)):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    ws = config.workspace_dir("mini")
+    try:
+        before = json.loads(_text(await notebook.run_code("mini", READ_HIDDEN_CELL, "main")))
+        inodes = {n: (ws / n).stat().st_ino for n in kernel_wrap.HIDDEN_FILES}
+        ledger.put_settings("mini", {"corpus_edits": False})  # a Settings save
+        userconf._write(ws / userconf.FILE, {"agents": {"orientation": {"env": ["MADE_UP_KEY_NAME"]}}})
+        after = json.loads(_text(await notebook.run_code("mini", READ_HIDDEN_CELL, "main")))
+    finally:
+        await notebook.shutdown_all()
+    assert all(v.startswith("refused") or v == "" for v in [*before.values(), *after.values()]), (before, after)
+    assert json.loads((ws / "settings.json").read_text())["corpus_edits"] is False
+    assert "MADE_UP_KEY_NAME" in (ws / userconf.FILE).read_text()
+    assert {n: (ws / n).stat().st_ino for n in kernel_wrap.HIDDEN_FILES} == inodes  # the same files, written in place

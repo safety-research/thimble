@@ -231,6 +231,26 @@ def write_text(path: PathLike, text: str, encoding: str = "utf-8", *, root: Path
     write_bytes(path, text.encode(encoding), root=root, make=make)
 
 
+def rewrite(path: PathLike, data: bytes, *, root: PathLike | None = None, mode: int = 0o600) -> None:
+    """`data` as the whole file at `path`, written into the file that is there (made with `mode` when missing, never
+    through a link: open_at), never as a new file renamed over it, so a mount on the file stays on it: a kernel wrapper
+    hides settings.json and config.json each by a mount on it, which a rename over the file takes off inside the running
+    kernel. One write of `data` padded with spaces to the file's old length, then the file cut to `data`, so a reader
+    finds the old text, or the new one with white space after it, which JSON reads alike. The caller keeps other writers
+    out (ledger.rewrite_text)."""
+    fd = open(path, os.O_RDWR | os.O_CREAT, mode, root=root)
+    try:
+        st = os.fstat(fd)
+        if st.st_mode & 0o777 & ~mode:
+            os.fchmod(fd, mode)
+        buf, at = data + b" " * max(0, st.st_size - len(data)), 0
+        while at < len(buf):
+            at += os.pwrite(fd, buf[at:], at)
+        os.ftruncate(fd, len(data))
+    finally:
+        os.close(fd)
+
+
 def append_bytes(path: PathLike, data: bytes, *, root: PathLike | None = None, make: bool = False,
                  sync: bool = False, mode: int = 0o666) -> None:
     """`data` at the end of the file at `path`, made when missing, never through a link (open_at); fsync'd with

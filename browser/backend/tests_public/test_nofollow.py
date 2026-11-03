@@ -654,3 +654,21 @@ def test_undo_of_a_document_s_first_save_removes_no_file_through_a_link_a_card_l
     finally:
         undo.forget()
     assert (outside / "report.json").read_text() == '{"made": "up", "keep": true}\n'
+
+
+def test_a_rewrite_writes_into_the_file_that_is_there_and_through_no_link(tmp_path_factory):
+    """nofollow.rewrite (the workspace's settings.json and config.json, which a kernel wrapper hides by a mount on each
+    file) writes the file in place, never a new file renamed over it: the file keeps its inode, a shorter text leaves
+    nothing of the longer one, and a link at its name is replaced by a file of the server's own, never followed."""
+    outside = _outside(tmp_path_factory)
+    ws = config.workspace_dir(CORPUS)
+    p = ws / "settings.json"
+    p.write_text('{"a": "a long value the next text is shorter than"}\n')
+    inode = p.stat().st_ino
+    nofollow.rewrite(p, b'{"a": 1}\n')
+    assert p.read_text() == '{"a": 1}\n' and p.stat().st_ino == inode and p.stat().st_mode & 0o777 == 0o600
+    p.unlink()
+    p.symlink_to(outside / "made-up-dotfile")
+    nofollow.rewrite(p, b'{"b": 2}\n')
+    assert not p.is_symlink() and p.read_text() == '{"b": 2}\n'
+    assert (outside / "made-up-dotfile").read_text() == "# the person's own\n"
