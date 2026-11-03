@@ -1,8 +1,8 @@
 """Where cards stand on the canvas. A new workspace's canvas has no group: a card stands in a group only when someone put
 it there, the analyst (Group, a drag) or a call that names one for a sequence of cards that answer one question
 together, which is made at the root. Every other card stands loose, outside every frame (the loose group): a card main
-adds without a group, a label's card, a card the analyst adds on the canvas, a card made where the analyst wrote
-(`request:<id>`), a thread's card and a writer's card. Main edits and moves loose cards, its own and the analyst's.
+adds without a group, a card the analyst adds on the canvas, a card made where the analyst wrote (`request:<id>`), a
+thread's card and a writer's card. A label makes no card. Main edits and moves loose cards, its own and the analyst's.
 Workspaces from before keep the groups they have.
 
 Main's calls go through tools.call as main's shim makes them (runtime.call_thimble): the analyst's caller, no notebook
@@ -118,12 +118,10 @@ async def test_main_names_one_group_for_a_sequence_made_at_the_root():
 
 async def test_a_new_workspace_s_canvas_gets_a_group_only_for_a_sequence(monkeypatch):
     """Every way a card is made, but a call that names a group, leaves the canvas without a frame: main's single card,
-    a label's card, a card asked for where the analyst wrote, a thread's card, a writer's card and code run with no
-    group. Then a sequence of cards gets one group, named by its question."""
+    a card asked for where the analyst wrote, a thread's card, a writer's card and code run with no group. Then a
+    sequence of cards gets one group, named by its question."""
     monkeypatch.setattr(investigation, "emit", lambda *a, **k: None)
     single = await card("How many runs failed?")
-    await main("apply_label", scope="files", paths=["board.jsonl"], name="claims a PR",
-               predicate={"kind": "regex", "text": "forge pr claim"})
     await card("Runs per day?", group="request:r1")
     tid = agents.new_thread(CORPUS, f"card:{single}", "How many runs failed?")["id"]
     await card("Which stage stopped each run?", group=f"thread:{tid}")
@@ -171,27 +169,26 @@ async def test_main_edits_and_moves_loose_cards_its_own_and_the_analyst_s():
     assert YOUR_WORK not in titles()
 
 
-async def test_a_label_s_card_stands_loose_unless_its_call_names_a_group():
-    await main("apply_label", scope="files", paths=["board.jsonl"], name="claims a PR",
-               predicate={"kind": "regex", "text": "forge pr claim"})
-    k = concepts.find_concept(ws(), "claims a PR")
-    (_, cell), = concepts._label_cards(ws(), k["id"])
-    assert group_of(cell["id"])["kind"] == notebook.LOOSE_KIND
-    await main("apply_label", scope="files", paths=["board.jsonl"], name="asks for review", group="Who asks whom?",
-               predicate={"kind": "regex", "text": "REVIEW WANTED"})
-    k = concepts.find_concept(ws(), "asks for review")
-    (_, cell), = concepts._label_cards(ws(), k["id"])
-    assert group_of(cell["id"])["title"] == "Who asks whom?" and group_of(cell["id"])["parent"] is None
-    # the analyst's own label, applied in the browser, gets its card loose too
-    mine = concepts.label_card(CORPUS, {"id": "k-analyst", "name": "mine"}, None, "user")
-    assert group_of(mine["id"])["kind"] == notebook.LOOSE_KIND
-    # and so does a label one of thimble's agents applies, which got a group named after it
-    await writer("apply_label", scope="files", paths=["board.jsonl"], name="mentions a merge",
-                 predicate={"kind": "regex", "text": "merge"})
-    k = concepts.find_concept(ws(), "mentions a merge")
-    (_, cell), = concepts._label_cards(ws(), k["id"])
-    assert group_of(cell["id"])["kind"] == notebook.LOOSE_KIND
-    assert YOUR_WORK not in titles() and "mentions a merge" not in titles()
+def all_cards() -> list[dict]:
+    return [cell for info in notebook.list_notebooks(ws()) for cell in notebook.read_notebook(ws(), info["id"])["cells"]]
+
+
+async def test_a_label_makes_no_card_and_its_result_names_none():
+    """A label is no card: main's apply_label, also once applied again, and a writer's leave the canvas as it was, and
+    the result names the label and its counts but no card. (The analyst's own run in the browser makes none either:
+    test_label_delete.)"""
+    said = [await main("apply_label", scope="files", paths=["board.jsonl"], name="claims a PR",
+                       predicate={"kind": "regex", "text": "forge pr claim"})]
+    said.append(await main("apply_label", scope="files", paths=["board.jsonl"], name="claims a PR",
+                           predicate={"kind": "regex", "text": "(?i)forge pr claim"}))
+    said.append(await writer("apply_label", scope="files", paths=["board.jsonl"], name="mentions a merge",
+                             predicate={"kind": "regex", "text": "merge"}))
+    for r in said:
+        assert "applied label" in r.text and "card:" not in r.text, r.text
+    for name in ("claims a PR", "mentions a merge"):
+        k = concepts.find_concept(ws(), name)
+        assert k is not None and concepts._label_cards(ws(), k["id"]) == []
+    assert all_cards() == [] and frames() == []
 
 
 async def test_a_writer_s_card_stands_loose_as_its_own_on_a_kernel_of_its_own():
@@ -304,14 +301,15 @@ async def test_a_thread_s_card_is_the_thread_s_from_the_moment_it_is_made(fork, 
 
 
 async def test_a_thread_s_label_is_the_thread_s_and_an_unknown_fork_s_card_waits_for_the_mirror(fork, monkeypatch):
-    """A label a thread's fork applies, and its card, are the thread's from the start. A fork whose thread the mirror
+    """A label a thread's fork applies is the thread's from the start, and makes no card. A fork whose thread the mirror
     does not know yet adds a card stamped as main's shim stamps it, which the mirror credits to the thread later."""
     tid, call = fork
     monkeypatch.setattr(investigation, "emit", lambda *a, **k: None)
+    cards = len(all_cards())
     await by_fork(call, "apply_label", scope="files", paths=["board.jsonl"], name="claims a PR",
                   predicate={"kind": "regex", "text": "forge pr claim"})
-    (_, cell), = concepts._label_cards(ws(), concepts.find_concept(ws(), "claims a PR")["id"])
-    assert cell["created_by"] == f"chat:{tid}" and group_of(cell["id"])["kind"] == notebook.LOOSE_KIND
+    k = concepts.find_concept(ws(), "claims a PR")
+    assert k["created_by"] == f"chat:{tid}" and concepts._label_cards(ws(), k["id"]) == [] and len(all_cards()) == cards
     monkeypatch.setattr(subagents, "CALLER_WAIT_S", 0.05)
     sf.add_caller(ws(), "toolu_stranger", "fork2", sf.FORK_TYPE)
     r = await tools.call(CORPUS, "add_card", {"kind": "note", "question": "Whose?", "text": "x"},

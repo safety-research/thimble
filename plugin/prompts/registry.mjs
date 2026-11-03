@@ -24,7 +24,7 @@ export const TEXTS = {
     fills: ['TMPDIR'],
   },
   'card-tool': {
-    about: 'how a card reads its rows and draws them, and how to test it',
+    about: 'the kinds of card thimble draws from the data a call gives, a custom card that reads its rows and draws them, and how to test a card',
     terminal: 'cards/tool.ts',
     use: 'the description of the card tool',
     fills: ['TMPDIR', 'KEPT'],

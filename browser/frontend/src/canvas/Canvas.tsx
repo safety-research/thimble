@@ -1189,8 +1189,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (p?.kind === 'cell') id = p.cellId
     else if (p?.kind === 'group') id = p.groupId
     else if (p?.kind === 'concept') id = data.cells.find((c) => (c.payload as { concept?: unknown } | undefined)?.concept === p.conceptId)?.id ?? null
-    // a label the workspace holds with no card of its own (the orientation's, backend concepts.apply_scoped) opens its
-    // review in the side panel; one not listed yet may be a label whose card is on its way, and is waited for
+    // a label the workspace holds opens its review in the side panel, unless an older thimble made it a card (backend
+    // concepts._label_cards), which the board goes to; one not listed yet may be a label just made, and is waited for
     if (p?.kind === 'concept' && !id && concepts.has(p.conceptId)) {
       pendingRef.current = null
       pendingSince.current = 0
@@ -1215,8 +1215,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       if (Date.now() - pendingSince.current > WAIT_MS) {
         pendingRef.current = null
         pendingSince.current = 0
-        const what = p?.kind === 'group' ? 'This group is' : p?.kind === 'concept' ? "This label's card is" : 'This card is'
-        bus.emit('toast', { text: `${what} not on the canvas.`, kind: 'info' })
+        const text = p?.kind === 'concept' ? 'This label is not in this workspace.' : `${p?.kind === 'group' ? 'This group is' : 'This card is'} not on the canvas.`
+        bus.emit('toast', { text, kind: 'info' })
       }
       return
     }

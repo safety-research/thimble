@@ -94,9 +94,9 @@ LABEL_SCOPES = ("files", "canvas", "report")
 UNIT_WORDS = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}
 # apply_label's `unit` for files: what one value goes to, as concepts.FILE_UNITS names it
 LABEL_UNITS = {"records": "record", "files": "agent", "runs": "run"}
+# the kinds a stored card has: `label` is a label's card, which an older thimble made and a workspace may still hold
 CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom", "plan")
-# add_card's and edit_card's enum, in the order of thimble's grammar of cards, then custom and plan. The grammar's
-# classifier is the label card, which apply_label makes.
+# add_card's and edit_card's enum, in the order of thimble's grammar of cards, then custom and plan
 ADD_CELL_KINDS = ("example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan")
 EDIT_CELL_KINDS = ADD_CELL_KINDS
 RUN_KINDS = ("plot", "table", "code", "timeline", "diagram")  # notebook.RUNNABLE_KINDS: the kinds that run `code`
@@ -155,7 +155,8 @@ class Spec:
     `handler(ctx, args)`. `sessions` names the session kinds whose shims alone list it; `aliases` are alternative
     names a
     call still reaches but no listing shows; with `drop_stops`, a call whose request the caller drops is cancelled.
-    `makes_cards`: the call makes a card, which a call of a thread's fork makes for the thread (call, _as_fork)."""
+    `makes_cards`: the call makes a card, or a label, which a call of a thread's fork makes for the thread (call,
+    _as_fork)."""
 
     name: str
     roles: tuple[str, ...]
@@ -180,8 +181,8 @@ REGISTRY: dict[str, Spec] = {
         Spec("apply_label", (ANALYST,), _H + "apply_label", makes_cards=True),
         # a label over files on or off in Files and the views, which runs nothing (concepts.show_concept)
         Spec("show_label", (ANALYST,), _H + "show_label"),
-        # a label deleted with its marks, its card and its filters, as the Labels pane's Delete label does; main's, as
-        # the analyst asks it
+        # a label deleted with its marks and its filters, as the Labels pane's Delete label does; main's, as the analyst
+        # asks it
         Spec("delete_label", (ANALYST,), _H + "delete_label", sessions=MAIN_ONLY),
         # the filters the browser's Filter menu and label chips set, by a label that exists or by the cards' own facts
         Spec("set_filter", (ANALYST,), "app.filters:tool_set_filter"),
@@ -1229,8 +1230,6 @@ def _payload_args(kind: str, args: dict[str, Any], tool: str = "add_card", c: st
         libs = view_libs.entries(args.get("libs"))  # the libraries its frame loads (card_libs)
         payload = {"html": html, **({"libs": libs} if libs else {})}
         return (payload, "") if html.strip() else (None, f"{tool}: a custom card needs `html`")
-    if kind == "label":
-        return None, f"{tool}: a label card is made by `apply_label`"
     if kind == "plan":
         return _plan_payload(args.get("steps"), tool)
     return None, _needs_code(tool, kind)
@@ -1312,8 +1311,6 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     from . import notebook
 
     kind = str(args.get("kind") or notebook.DEFAULT_KIND).strip().lower()
-    if kind == "label":
-        return err("add_card: a label card is made by `apply_label`")
     if kind not in ADD_CELL_KINDS:
         return err(f"add_card: `kind` must be one of {', '.join(ADD_CELL_KINDS)}")
     title = _question(args.get("question") or args.get("title"))
@@ -2492,9 +2489,9 @@ def _chip(c: str, kind: str, text: str, **fields: Any) -> None:
 
 
 async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """Define a category and apply it over one scope's units (concepts.apply_scoped): the label is a card (in `group`,
-    else loose on the canvas) and, when `filter` is true, the scope's filter. The orientation's labels get no card. A
-    changed label names the cards that read it before (`## apply_label-stale`)."""
+    """Define a category and apply it over one scope's units (concepts.apply_scoped), and when `filter` is true make it
+    the scope's filter. A label makes no card: the analyst reads it in its panel and in Files. A changed label names the
+    cards that read it before (`## apply_label-stale`)."""
     from . import concepts
 
     scope = str(args.get("scope") or "files").strip().lower()
@@ -2534,20 +2531,13 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if prior is not None and concepts.SCOPE_OF_UNIT.get(prior["unit"]) != scope:
         return err(hint("apply_label-other-scope", label=prior["name"], ref=f"concept:{prior['id']}",
                         scope=concepts.SCOPE_OF_UNIT.get(prior["unit"]), new=scope))
-    orienting = session_kind(ctx.session) == ORIENT_SESSION
-    group = str(args.get("group") or "").strip()
-    # a label's card stands loose unless the call names its group, as any card does, and a thread's fork's label and
-    # its card are the thread's (call); a card the label has already stays where it is (concepts.label_card)
-    target = None if orienting else _group_id(ctx, group, []) if group else default_group(ctx)
-    question = _question(args.get("question")) or None
     within = args.get("within") or None
     if isinstance(within, str):
         within = {"label": within}
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
-                                    created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
-                                    card=not orienting, within=within, show=bool(args.get("show")),
-                                    unit=LABEL_UNITS.get(unit_arg))
+                                    created_by=ctx.created_by, chat=ctx.chat, within=within,
+                                    show=bool(args.get("show")), unit=LABEL_UNITS.get(unit_arg))
     if s.get("asked"):
         # a big prompt label waits for the analyst's choice in the page (concepts.ask_first, label_asks.py)
         a = s["asked"]
@@ -2555,10 +2545,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                 f"It would read {a['units']:,} units with {a['model_words']} ({a['meta']}), so the page asks the analyst "
                 f"to run it on all of them, on a sample of {a['sample']:,}, or not at all. Do not apply it again or wait "
                 f"for it: a `label_ask` event brings their choice, and a `label_done` event the counts of a run they chose.")
-        if s.get("cell"):
-            line += f" The label's card is [[card:{s['cell']}]]."
         return ok(line)
-    if s.get("partial") and not orienting and ctx.session is None:
+    if s.get("partial") and ctx.session is None:
         concepts.tell_when_done(ctx.c, str(s["concept"]))
     # the counts as thimble.labels() and the label's panel read the rows: each record the analyst set to another value
     # counted under that value (live check term-fix5, new quirk 5: a fork took the one row a verdict moved for a bug)
@@ -2594,10 +2582,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         line += " " + hint("apply_label-unchanged")
     if s.get("partial"):
         line += (" The run goes on in the background, and a label_done event comes when it finishes."
-                 if not orienting and ctx.session is None else
-                 " The run goes on in the background; the counts are final when its card stops spinning.")
-    if s.get("cell"):
-        line += f" The label's card is [[card:{s['cell']}]]."
+                 if ctx.session is None else " The run goes on in the background.")
     if s.get("stale"):
         line += " " + hint("apply_label-stale", cards=", ".join(f"[[card:{x}]]" for x in s["stale"]))
     if s.get("filter"):
@@ -2608,16 +2593,6 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         # the rows a card reads: thimble.labels(name) holds only the first value's units (kernel_thimble.labels), not
         # one row per labeled unit, and the hint says so
         line += " " + hint("apply_label-rows", label=s.get("name", name))
-    if s.get("cell") and not s.get("partial"):
-        # the counts are final, so the label's card is asked for its finding, as a card of code is once it ran clean
-        # (_takeaway_missing)
-        from . import notebook
-
-        card = notebook.get_cell(ctx.c, str(s["cell"])) or {}
-        if not str(card.get("takeaway") or "").strip():
-            line += _takeaway_missing(ctx, target, {**card, "status": "ok"})
-        elif prior is not None and not s.get("unchanged"):
-            line += " " + hint("apply_label-takeaway-stale", cid=str(s["cell"]))
     return ok(line)
 
 
@@ -2660,8 +2635,9 @@ async def _h_show_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 
 async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """Delete a label as the Labels pane's Delete label does (concepts.delete_concept_route): its marks, its card, any
-    filter that uses it and its run state, which ends first. The browser's Undo restores it."""
+    """Delete a label as the Labels pane's Delete label does (concepts.delete_concept_route): its marks, any filter that
+    uses it and its run state, which ends first, and a card an older thimble made of it. The browser's Undo restores
+    it."""
     from . import concepts
 
     name = " ".join(str(args.get("name") or "").split())
@@ -2673,7 +2649,7 @@ async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         names = ", ".join(repr(x["name"]) for x in concepts.list_concepts(ctx.ws)) or "none yet"
         return err(f"delete_label: no label {name!r}; the labels are {names}")
     await concepts.delete_concept_route(ctx.c, str(k["id"]))
-    return ok(f"label {k['name']} ({k['id']}) is deleted, with its marks, its card and any filter that used it.")
+    return ok(f"label {k['name']} ({k['id']}) is deleted, with its marks and any filter that used it.")
 
 
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:

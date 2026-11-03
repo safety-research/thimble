@@ -57,12 +57,15 @@
 // the Button's onPress number, and a click on its cells presses it.
 // A dense card gets blank rows between its parts (space.js), unless the view reads clicks by cell (surface.onPointer);
 // each version keeps the places its first drawing gave them, so a key never moves the card's rows.
+// A card of a ready kind (kinds.js: a table, a chart, …) is a view like any other: its view hands the drawing to
+// surface.ready, the kinds' renderers, whose source each context gets with the palette.
 import fs from 'node:fs'
 import http from 'node:http'
 import { types } from 'node:util'
 import vm from 'node:vm'
 
-import { printable } from '../core/text.js'
+import { charWidth, printable, textWidth } from '../core/text.js'
+import { readyKinds } from './kinds.js'
 import { buttonText, layoutLines, pressAt, rowOf, textAt } from './layout.js'
 import { spaced } from './space.js'
 
@@ -235,16 +238,22 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     const out = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (dot < 0 ? '' : t.slice(dot))
     return (v < 0 && /[1-9]/.test(t) ? '-' : '') + out
   }
+  // the cells a text takes, as everywhere in thimble (core/text.js), for the ready kinds' renderers
+  const charWidth = ${charWidth}
+  const textWidth = ${textWidth}
   const surface = freeze({
     elements,
     colors,
     num,
+    // the ready kinds' renderers (kinds.js), which the view of a ready kind's card draws with
+    get ready() { return ready },
     get state() { return state },
     setState(next) { state = next; dirty = true },
     get columns() { return columns },
     onPointer(fn) { pointer = typeof fn === 'function' ? fn : null; return () => { pointer = null } },
     onKey(fn) { keyListener = typeof fn === 'function' ? fn : null; return () => { keyListener = null } },
   })
+  const ready = (${readyKinds})({ elements, colors, num, textWidth, surface })
   const props = () => ({ title, rows, data, columns })
   // what a terminal would act on or not draw shows as its escape, as Python's repr writes it, so bytes of binary data
   // read as bytes: the hooks' own rule, core/text.js printable (its source, put in this context's code)
@@ -427,7 +436,13 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
       try { got = view() } catch (e) { return { ok: false, phase: 'view', error: errorOf(e) } }
       if (!got || typeof got.view !== 'function') return { ok: false, phase: 'view', error: 'the code defines no function view(props, surface)' }
       fns = got
-      return { summary: summary(), keys: typeof got.keys === 'string' ? got.keys : '' }
+      // keys that depend on the rows (a ready kind's j and k, when its rows take more than a page): a function of the
+      // props, asked once per version
+      let keys = typeof got.keys === 'string' ? got.keys : ''
+      if (typeof got.keys === 'function') {
+        try { keys = Str(got.keys(props(), surface) ?? '') } catch (e) { return { ok: false, phase: 'view', error: errorOf(e) } }
+      }
+      return { summary: summary(), keys }
     },
     draw(a) { if (a.width) columns = a.width; return {} },
     copy() { return {} },
@@ -495,7 +510,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
 `, { filename: 'prelude.js' })
 
 // what the view's function gives back: its view, its onKey and its keys, whichever it defines
-const TAIL = "\n;return { view: typeof view === 'function' ? view : undefined, onKey: typeof onKey === 'function' ? onKey : undefined, keys: typeof keys === 'string' ? keys : '' }"
+const TAIL = "\n;return { view: typeof view === 'function' ? view : undefined, onKey: typeof onKey === 'function' ? onKey : undefined, keys: typeof keys === 'string' || typeof keys === 'function' ? keys : '' }"
 
 /** A JSON answer from inside a context, or the error that stopped it. The request is written into the script as a
  *  string literal, so nothing of this process is put where the view's code could reach it, and only a string comes

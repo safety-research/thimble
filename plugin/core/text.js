@@ -3,6 +3,7 @@
 //
 //   textWidth(s)   the cells a string takes: 2 for a wide character (CJK, most emoji), 0 for a combining mark or a
 //                  zero-width character, 1 for the rest
+//   charWidth(cp)  the cells one code point takes, as textWidth counts them (a card's context runs both: runner.mjs)
 //   cut(s, n, middle)  s in at most n cells, with `…` where it was cut: at its end, or in its middle
 //   cutWords(s, n, keep)  s in at most n cells, cut at a word's edge, its start or its end kept
 //   partsAround(s, words)  s in parts around the last place it holds `words`, which a drawing draws in a look of its own
@@ -13,7 +14,7 @@
 //                  from the session's folder when it lies there, else by its name alone
 
 /** A code point's cells: 0 for combining marks and zero-width characters, 2 for wide and fullwidth ones. */
-function charWidth(cp) {
+export function charWidth(cp) {
   if (cp < 32 || (cp >= 0x7f && cp < 0xa0)) return 0
   if ((cp >= 0x300 && cp <= 0x36f) || (cp >= 0x200b && cp <= 0x200f) || (cp >= 0xfe00 && cp <= 0xfe0f) || cp === 0x200d ||
     (cp >= 0x1ab0 && cp <= 0x1aff) || (cp >= 0x1dc0 && cp <= 0x1dff) || (cp >= 0x20d0 && cp <= 0x20ff) || (cp >= 0xe0100 && cp <= 0xe01ef)) return 0

@@ -20,7 +20,7 @@ When thimble corrects or flags a citation, it tells you with the analyst's next 
 
 ## Cards
 
-Use the `card` tool to show the analyst what is faster to see than to read. A card is how you show a chart or graphic here: it draws in the terminal where the analyst reads your reply, so they never leave it to see one.
+Use the `card` tool to show the analyst what is faster to see than to read. A card is how you show a chart, a table, a timeline, a diagram or quotes in their records here: it draws in the terminal where the analyst reads your reply, so they never leave it to see one.
 
 Principles:
 1. Overview first, zoom and filter, then details on demand. The first view shows the whole, aggregated to fit the card, not a table of raw records. The analyst narrows it with keys and clicks, and a click opens one record. One card answers one question, so the first view shows the evidence the answer rests on, with only the fields that help answer it.

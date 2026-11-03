@@ -4073,9 +4073,8 @@ async def bring_current(c: str, concept_ids: list[str], created_by: str = "user"
         if await ask_first(c, concept, paths, limit, created_by=created_by) is not None:
             continue  # the run waits for the person's choice, and the card runs on the rows the label has
         await start_apply(c, cid, paths, limit, created_by)
-        cards = await asyncio.to_thread(_label_cards, ws, cid)
-        tell_main(c, concept, dict(cards[0][1]) if cards else None)
-        _notify(c, cid, "applying")  # the canvas reads the run record again, so the label card shows its run meanwhile
+        tell_main(c, concept)
+        _notify(c, cid, "applying")  # the page reads the run record again, so the label shows its run meanwhile
         out.append(cid)
     return out
 
@@ -4091,11 +4090,12 @@ def stale_cards(ws: Path, concept: dict) -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- the label card
+# --------------------------------------------------------------------------- an older thimble's label cards
 
 
 def _label_cards(ws: Path, concept_id: str) -> list[tuple[dict, dict]]:
-    """(notebook, cell) for every label card of the concept."""
+    """(notebook, cell) for every label card of the concept: a card of kind `label` with payload {concept}, which an
+    older thimble made of a label it applied. thimble makes none now; a label that goes takes these with it."""
     from . import notebook
 
     out = []
@@ -4106,30 +4106,6 @@ def _label_cards(ws: Path, concept_id: str) -> list[tuple[dict, dict]]:
             if cell.get("kind") == "label" and payload.get("concept") == concept_id:
                 out.append((nb, cell))
     return out
-
-
-def label_card(c: str, concept: dict, group: str | None, created_by: str, question: str | None = None) -> dict:
-    """The concept's card on the canvas: a cell of kind `label` with payload {concept}, in `group`, by default loose on
-    the canvas outside every frame (notebook.loose_group), titled with `question`, else the label's name. An existing
-    card is kept and takes a new question when one is given, unless the analyst locked it."""
-    from . import notebook
-
-    ws = _ws(c)
-    title = " ".join(str(question or "").split())
-    with notebook.editing(ws):
-        for nb, cell in _label_cards(ws, concept["id"]):
-            if title and cell.get("title") != title and cell.get("locked") is not True:
-                cell["title"] = title
-                cell["ts"] = _now()
-                notebook.write_notebook(ws, nb)
-            return dict(cell)
-    nb = notebook.read_notebook(ws, group) if group and ID_RE.match(group) else None
-    if nb is None:
-        nb = notebook.read_notebook(ws, notebook.loose_group(ws))
-    cell = notebook.new_cell("label", created_by, title or concept["name"], nb["id"], payload={"concept": concept["id"]})
-    notebook.insert_cell(c, nb["id"], cell)
-    _emit(c, {"type": "cell", "notebook": nb["id"], "cell": cell["id"], "kind": "note"})
-    return dict(cell)
 
 
 def _drop_label_cards(c: str, concept_id: str) -> None:
@@ -4454,20 +4430,18 @@ def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
 
 
 async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, values: list[str] | None, paths: list[str] | None,
-                       limit: int | None, comment: bool, filter: bool, created_by: str, chat: str | None, group: str | None,
-                       question: str | None = None, card: bool = True, within: Any = None, show: bool = False,
-                       unit: str | None = None) -> dict:
-    """Define a label from a predicate and apply it over one scope: the concept, its card in `group` asking `question` unless
-    `card` is False or the label ran before without one, the run in the background followed by an agent chat of role
-    `labels`, and with `filter` the scope's filter set to the positive value. `within` {label, value?} runs a label over
-    records only over the records that label gave that value (its first by default), and `show` turns a label over files on in
-    Files and the views before it runs, so they draw it as it runs. A `limit` makes a new label a trial. The same
-    predicate under the same name starts no run when its rows already cover the call (`unchanged: true`). Returns when the
-    run ends, when a prompt label has labeled APPLY_ENOUGH units and its eta is longer than the wait left, or after
-    APPLY_WAIT_S, with `stale`, the ids of cards that read the label at an older revision. `unit`, for files, is what
-    one value goes to (FILE_UNITS: record, agent for a whole file, run for a run directory); without it a label that
-    exists keeps its unit, and a new one labels records. The answer's `cut` says which whole files or runs a prompt label
-    read only in part (read_cut)."""
+                       limit: int | None, comment: bool, filter: bool, created_by: str, chat: str | None,
+                       within: Any = None, show: bool = False, unit: str | None = None) -> dict:
+    """Define a label from a predicate and apply it over one scope: the concept, the run in the background followed by
+    an agent chat of role `labels`, and with `filter` the scope's filter set to the positive value; no card. `within`
+    {label, value?} runs a label over records only over the records that label gave that value (its first by default),
+    and `show` turns a label over files on in Files and the views before it runs, so they draw it as it runs. A `limit`
+    makes a new label a trial. The same predicate under the same name starts no run when its rows already cover the call
+    (`unchanged: true`). Returns when the run ends, when a prompt label has labeled APPLY_ENOUGH units and its eta is
+    longer than the wait left, or after APPLY_WAIT_S, with `stale`, the ids of cards that read the label at an older
+    revision. `unit`, for files, is what one value goes to (FILE_UNITS: record, agent for a whole file, run for a run
+    directory); without it a label that exists keeps its unit, and a new one labels records. The answer's `cut` says
+    which whole files or runs a prompt label read only in part (read_cut)."""
     if scope not in SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(SCOPES)}")
     if unit is not None and (scope != "files" or unit not in FILE_UNITS):
@@ -4504,10 +4478,6 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     if concept["told"] != concept["version"]:  # a chat defined it, so main need not hear of it (tell_main)
         concept["told"] = concept["version"]
         write_concept(ws, concept)
-    # a label that ran before without a card (the orientation's) keeps having none
-    cardless = (prior is not None and prior["id"] == concept["id"] and bool(prior["applications"])
-                and not await asyncio.to_thread(_label_cards, ws, concept["id"]))
-    made = await asyncio.to_thread(label_card, c, concept, group, author, question) if card and not cardless else None
     joined = same and running_apply(c, concept["id"]) is not None
     unchanged = same and not joined and await asyncio.to_thread(covered, c, concept, paths or [], limit)
     if show and unit in FILE_UNITS:
@@ -4519,7 +4489,7 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
         stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
         return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": None,
                 "counts": await asyncio.to_thread(_live_counts, ws, concept["id"]), "failed": 0, "message": None,
-                "partial": False, "cell": made["id"] if made else None, "filter": chosen_now,
+                "partial": False, "filter": chosen_now,
                 "labels_path": str(labels_file(ws, concept["id"])), "unchanged": False, "asked": asked,
                 "stale": [x["id"] for x in stale]}
     if not joined and not unchanged:
@@ -4542,7 +4512,7 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": result.get("total"), "counts": counts or {},
             "failed": result.get("failed") or 0, "message": result.get("message"), "partial": partial,
             "blocked": result.get("blocked") or 0,
-            "cell": made["id"] if made else None, "filter": chosen, "labels_path": str(labels_file(ws, concept["id"])),
+            "filter": chosen, "labels_path": str(labels_file(ws, concept["id"])),
             "unchanged": unchanged, "stale": [x["id"] for x in stale], "cut": None if partial else result.get("cut")}
 
 
@@ -4729,8 +4699,8 @@ def _check_takeaways(c: str, cards: list[dict]) -> None:
 
 def tell_when_done(c: str, concept_id: str) -> None:
     """Post `label_done` to main once the label's running apply ends and thimble ran the cards that read it again
-    (rerun_readers): its counts, its card, and those cards whose takeaway is stale or that failed, with their new output.
-    A run that fails or is stopped posts nothing."""
+    (rerun_readers): its counts, and those cards whose takeaway is stale or that failed, with their new output. A run
+    that fails or is stopped posts nothing."""
     from . import events
 
     key = (c, concept_id)
@@ -4752,7 +4722,6 @@ def tell_when_done(c: str, concept_id: str) -> None:
         if concept is None:
             return
         counts = await asyncio.to_thread(_live_counts, ws, concept_id)
-        cards = await asyncio.to_thread(_label_cards, ws, concept_id)
         told = ", ".join(f"{v} {n:,}" for v, n in counts.items()) or "no values"
         if (summary.get("cut") or {}).get("line"):
             told += f". {summary['cut']['line']}"
@@ -4760,10 +4729,8 @@ def tell_when_done(c: str, concept_id: str) -> None:
             after = "thimble ran the cards that read it again, and these need you:\n\n" + rerun_text(c, reran)
         else:
             after = "No card that read it needs you."
-        text = (f"label {concept['name']} [[concept:{concept_id}]] finished: {told}. "
-                + (f"Its card is [[card:{cards[0][1]['id']}]]. " if cards else "") + after)
+        text = f"label {concept['name']} [[concept:{concept_id}]] finished: {told}. " + after
         payload = {"text": text, "name": concept["name"], "ref": f"concept:{concept_id}",
-                   "card": f"card:{cards[0][1]['id']}" if cards else None,
                    "cards": ", ".join(f"card:{x['id']}" for x in reran) or None}
         try:
             events.post(c, LABEL_DONE_KIND, payload)
@@ -4776,9 +4743,9 @@ def tell_when_done(c: str, concept_id: str) -> None:
     task_.add_done_callback(_watching.discard)
 
 
-def tell_main(c: str, concept: dict, card: dict | None) -> bool:
+def tell_main(c: str, concept: dict) -> bool:
     """Post `labeled` to main for a label the analyst ran from the browser at a version main has not heard of (`told`), with
-    its definition as the text and its name, ref, scope, classifier, values, files, card and stale cards as attributes. The
+    its definition as the text and its name, ref, scope, classifier, values, files and stale cards as attributes. The
     version is marked told only once an event went out. Never raises."""
     if concept.get("told") == concept["version"]:
         return False
@@ -4788,7 +4755,6 @@ def tell_main(c: str, concept: dict, card: dict | None) -> bool:
     payload = {"text": (concept["description"] if concept["kind"] == "prompt" else concept["spec"]).strip(),
                "name": concept["name"], "ref": f"concept:{concept['id']}", "scope": scope, "classifier": concept["kind"],
                "values": ", ".join(concept["labels"]), "paths": concept["glob"] if scope == "files" else None,
-               "card": f"card:{card['id']}" if card else None,
                "what": "changed" if concept["told"] > 0 or concept["version"] > 1 else "defined",
                "stale": ", ".join(f"card:{x['id']}" for x in stale_cards(_ws(c), concept)) or None}
     try:
@@ -4980,9 +4946,10 @@ def update_concept_route(c: str, concept_id: str, body: ConceptPatch) -> dict:
 
 @router.delete("/ws/{c}/concepts/{concept_id}")
 async def delete_concept_route(c: str, concept_id: str) -> dict:
-    """Delete the concept, its labels, its card, any filter naming it and its run state; an apply in progress ends first.
-    The concept file and its labels file go to the undo step's trash folder, so the top bar's Undo restores the label
-    with its card and its filters (undo.label_deleted, restore_concept)."""
+    """Delete the concept, its labels, any filter naming it, its run state and a card an older thimble made of it
+    (_label_cards); an apply in progress ends first. The concept file and its labels file go to the undo step's trash
+    folder, so the top bar's Undo restores the label with its filters and such a card (undo.label_deleted,
+    restore_concept)."""
     from . import undo  # noqa: PLC0415 — undo reaches this module to restore a label
 
     ws, concept = load_concept(c, concept_id)
@@ -5042,8 +5009,8 @@ def delete_again(c: str, concept_id: str, trash: Path) -> None:
 
 def restore_concept(c: str, concept_id: str, trash: Path, cards: list[dict], filters: dict) -> None:
     """A deleted label back, as Undo asks: its concept file and its labels file from `trash` (the store is built again
-    from the jsonl on its first read), its cards where they stood, and each filter that named it in a scope whose label
-    filter is not set now. 409 when the label is back already or its files are gone."""
+    from the jsonl on its first read), the cards an older thimble made of it where they stood, and each filter that
+    named it in a scope whose label filter is not set now. 409 when the label is back already or its files are gone."""
     from . import undo  # noqa: PLC0415
 
     ws = _ws(c)
@@ -5083,26 +5050,19 @@ def restore_concept(c: str, concept_id: str, trash: Path, cards: list[dict], fil
 
 @router.post("/ws/{c}/concepts/{concept_id}/apply")
 async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Response) -> dict:
-    """Start an apply: 202 with the run record (409 while one runs), or with `wait: true` the summary once the run ends (202
-    with `partial: true` past APPLY_WAIT_S). File units run over `paths`, else the label's glob. The label is the analyst's:
-    a new label gets its card, and main hears of a version it has not heard of (tell_main)."""
-    ws, concept = load_concept(c, concept_id)
+    """Start an apply: 202 with the run record (409 while one runs), or with `wait: true` the summary once the run ends
+    (202 with `partial: true` past APPLY_WAIT_S). File units run over `paths`, else the label's glob. The label is the
+    analyst's, and main hears of a version it has not heard of (tell_main)."""
+    _, concept = load_concept(c, concept_id)
     paths = _patterns(body.paths) or (glob_patterns(concept["glob"]) if concept["unit"] in FILE_UNITS else [])
     if concept["unit"] in FILE_UNITS and not paths:
         raise HTTPException(400, "paths is required: corpus-relative globs or a directory (e.g. ['*/board.jsonl'], 'agents'; '*' is the whole dataset)")
-    ran_before = bool(concept["applications"])
     if running_apply(c, concept_id) is None and (
             asked := await ask_first(c, concept, paths, body.limit, comment=body.comment, created_by=body.created_by)):
         response.status_code = 202
         return {"asked": asked}
     record = await start_apply(c, concept_id, paths, body.limit, body.created_by, comment=body.comment)
-    # the browser is the analyst: their label gets its card and main hears of it; a label that ran before without a card
-    # keeps having none
-    cards = await asyncio.to_thread(_label_cards, ws, concept_id)
-    card = dict(cards[0][1]) if cards else None
-    if card is None and not ran_before:
-        card = await asyncio.to_thread(label_card, c, concept, None, body.created_by)
-    tell_main(c, concept, card)  # on the loop: the events module's queues are the loop's
+    tell_main(c, concept)  # on the loop: the events module's queues are the loop's
     if not body.wait:
         response.status_code = 202
         return record
