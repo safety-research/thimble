@@ -116,8 +116,8 @@ export const SWITCHES = [
   },
   {
     key: 'labels', title: 'Labels', group: 'Panes', default: true,
-    does: 'Press l to see the labels Claude made, with their values and records. No model call.',
-    says: { on: 'Press l to see the labels Claude made, with their values and records.', off: 'No Labels pane.' },
+    does: 'Press l to see the labels Claude made, with their values and records. No model call. off: no Labels pane, and Claude makes a label only when you ask for one.',
+    says: { on: 'Press l to see the labels Claude made, with their values and records.', off: 'No Labels pane. Claude makes a label only when you ask for one.' },
   },
   {
     key: 'coverage', title: 'Coverage', group: 'Panes', default: true,
@@ -248,8 +248,9 @@ export function valueIn(values, key) {
  *  after each answer still writes explainers and heads-ups; where Claude Code reports the pointer (its fullscreen
  *  layout, with its mouse reports on) its answers are plain, these showing only for the paragraph under the pointer
  *  (marks/register.ts, view.ts `plain`), and elsewhere they stand at rest; Claude draws a card only when asked; Rewrite,
- *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts),
- *  and the rows show them; a row changed away from them turns it off. */
+ *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off, and with Labels off Claude makes a label only
+ *  when asked (guidance/guidance.ts modesNow). Turning it on saves them (settings/term.ts), and the rows show them; a
+ *  row changed away from them turns it off. */
 export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false }
 
 /** The modes Minimal set from 0.10.4 to 0.10.7: rows that still hold them stand for it, and the first session sets its

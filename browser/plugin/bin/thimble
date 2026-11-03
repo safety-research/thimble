@@ -663,7 +663,7 @@ for kv in $switches; do export "$kv"; done
 for v in $unset_vars; do unset "$v"; done
 if [ -n "$notes" ]; then
   IFS=$'\t' read -r -a note_lines <<<"$notes"
-  for n in "${note_lines[@]}"; do printf '%s\n' "$n" >&2; done
+  for n in ${note_lines[@]+"${note_lines[@]}"}; do printf '%s\n' "$n" >&2; done
 fi
 resume=()
 if [ -n "$last" ]; then

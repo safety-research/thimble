@@ -404,7 +404,7 @@ test('words that begin with / reach Claude in quotes, and the fix takes them as 
     await s.tick()
     expect(s.prompts).toEqual([])
     expect(s.toasts).toHaveLength(1)
-    expect(skillText(await skillCall(s, 'new')).text).toMatch(/^thimble started no fix: /)
+    expect(skillText(await skillCall(s, 'new')).text).toBe('PROMPT fix-not-given')
     expect(s.ran.some(x => x.argv.includes('new'))).toBe(false)
   }
 })
@@ -444,10 +444,8 @@ test("after /thimble-fix words that never reached Claude, the fix-thimble skill 
     await s.tick()
     // the turn that runs ends; in the next one the person asks Claude to start the fix they asked for
     await s.call('turn.complete', { turnId: 't-1', reason: 'answer', answer: 'ok', durationMs: 9, isAborted: false }, async () => ({}))
-    const said = String(skillText(await skillCall(s, 'new')).text)
-    expect(said).toMatch(/^thimble started no fix: /)
-    expect(said).toContain('did not reach you')
-    expect(said).toContain('type /thimble-fix and their words again')
+    // prompts/fix-not-given.md, the browser workbench's answer in the same case too
+    expect(skillText(await skillCall(s, 'new')).text).toBe('PROMPT fix-not-given')
     expect(s.ran.some(x => x.argv.includes('new'))).toBe(false)
     // /thimble-fix alone is now their last: the skill reads that a fix starts from their words
     expect(await s.call('command.run', { command: 'thimble-fix', args: '' }, own)).toEqual({ text: FIX_ALONE })
@@ -1744,4 +1742,18 @@ test("the fix takes the person's own words, never Claude's, and the fix they nam
   await s.end('Title: Citations model setting\nWhat it does: The settings pane picks the model that checks citations.')
   await (await fixKey(s.$, 'd'))!.later()
   expect((await fixLineRows(s.$, ELS, 160)).map(textOf)).toContain(`    You asked   ${mine}`)
+})
+
+test('a fix whose round ended as a request with no code takes `N <words>` as its next round, never a new fix, and Claude reads it among the fixes (fix/changeable.mjs, the list the browser reads too)', async () => {
+  const s = setup()
+  await requested(s, 'Title: Bar says read\nRequest: Which of two ways do you want?')
+  expect(s.fix.state).toBe('request')
+  const ran = await s.call('command.run', { command: 'thimble-fix', args: '1 the first way' }, async () => ({}))
+  expect(ran.context[1]).toContain('\n1  "Bar says read" (request)')
+  await s.tick()
+  s.prompts.splice(0)
+  await skillCall(s, '1')
+  expect(s.verbs().filter(v => v.startsWith('new'))).toEqual(['new --made-in terminal'])
+  expect(s.verbs()).toContain('round 1')
+  expect(s.ran.find(x => x.argv.includes('round'))?.stdin).toBe('the first way')
 })

@@ -89,16 +89,15 @@ export function notStarted(error: { kind?: string; message?: string } | undefine
 /** What Claude reads when it starts the skill with no /thimble-fix of the person's to answer. */
 export const NOT_ASKED = 'thimble started no fix: a fix starts from the person\'s own words, which they type after /thimble-fix. Tell them in one short line that /thimble-fix <what should work differently> asks for one.'
 
-/** What Claude reads when it starts the skill after the words of the person's last /thimble-fix did not reach it
- *  (notGiven). The command's request may have shown Claude the words, but no prompt of the person's gave them. */
-const NOT_GIVEN = 'thimble started no fix: Claude Code did not run the prompt with the words the person typed after their last /thimble-fix, so the words did not reach you as their prompt. Tell them in one short line that their words did not reach you, so they type /thimble-fix and their words again.'
-
 /** The fix-thimble skill after the person's /thimble-fix <words>: the request in their words, as they typed them, and
- *  what Claude reads of it in the skill's place. Claude's `form` names only the fix the words change (`N`, or `new`). */
+ *  what Claude reads of it in the skill's place. Claude's `form` names only the fix the words change (`N`, or `new`).
+ *  After the words of the person's last /thimble-fix did not reach Claude (notGiven), Claude reads so
+ *  (prompts/fix-not-given.md, which the browser workbench's fix_thimble answers with too): the command's request may
+ *  have shown Claude the words, but no prompt of the person's gave them. */
 async function startFromSkill($: Engine, form: string): Promise<string> {
   const asked = Number((await $.state.get(ASKED)).value ?? 0) > 0
   const words = asked ? String((await $.state.get(ASKED_WORDS)).value ?? '').trim() : ''
-  if (!words) return (await $.state.get(ASKED_NOT_GIVEN)).value ? NOT_GIVEN : NOT_ASKED
+  if (!words) return (await $.state.get(ASKED_NOT_GIVEN)).value ? (await promptText($, 'fix-not-given')).trim() : NOT_ASKED
   await $.state.set(ASKED, 0 as never)
   await $.state.set(ASKED_WORDS, '' as never)
   const r = await request($, form, words)
@@ -174,7 +173,7 @@ const GIVE_AGAIN = 'Type /thimble-fix and your words again: they did not reach C
 
 /** /thimble-fix's words did not reach Claude (Claude Code refused thimble's prompt with them, or it did not enter): one
  *  line says what to do, the debug log says why, and no fix starts from them in a later turn: the skill reads that they
- *  did not reach Claude (NOT_GIVEN). */
+ *  did not reach Claude (prompts/fix-not-given.md). */
 async function notGiven($: Engine, words: string, err: unknown): Promise<void> {
   $.ui.toast(GIVE_AGAIN)
   $.ui.log(`/thimble-fix's words did not reach Claude: ${String((err as Error)?.message || err)}`, { to: 'debug' })

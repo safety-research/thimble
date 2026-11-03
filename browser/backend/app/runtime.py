@@ -317,11 +317,13 @@ class Conv:
 
     def waiting_messages(self) -> list[str]:
         """The messages the analyst typed in main's chat while its turn ran (Space.said), in main's queue, oldest first.
-        Every other event, such as a /thimble-fix request, which Claude Code too keeps for the turn's end as it keeps a
-        command, waits for the turn to end, and so does any other conversation's queue."""
+        Every other event, such as the request of the analyst's /thimble-fix (Space.commands), which Claude Code too
+        keeps for the turn's end as it keeps a command, waits for the turn to end, and so does any other conversation's
+        queue."""
         if self.kind != "main":
             return []
-        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in self.space.said]
+        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in self.space.said
+                and m.group(1) not in self.space.commands]
 
     def take_waiting(self) -> list[str]:
         """The analyst's messages that wait for main's running turn, read now, with the results of the turn's tool
@@ -403,9 +405,13 @@ class Space:
         self.main = self._main_conv()
         self.convs: dict[str, Conv] = {}
         self.notes: dict[str, list[str]] = {}
-        # by event id, the analyst's words of each message that came while main's turn ran (events.post): main's chat
-        # shows them waiting (unread), and their line goes in where main reads them (said_line)
+        # by event id, the analyst's words of each message that came while main's turn ran (events.post), or the line of
+        # the command a request carries out (their /thimble-fix): main's chat shows them waiting (unread), and their line
+        # goes in where main reads them (said_line)
         self.said: dict[str, str] = {}
+        # the ids of `said` whose request main reads at its turn's end, as Claude Code keeps a command typed mid-turn
+        # (Conv.waiting_messages)
+        self.commands: set[str] = set()
 
     def _main_conv(self) -> Conv:
         tr = Transcript(self.main_path, self.sid)
@@ -495,20 +501,27 @@ class Space:
 
     def said_line(self, text: str) -> None:
         """The analyst's line of `text`, a browser event main reads now (Conv.heard, _main_loop) or never will
-        (drop_waiting), into main's chat, when it is a message that waited for main's turn: events.post logs the line of
-        any other as it posts it."""
+        (drop_waiting), into main's chat, when it is a message or a command of theirs that waited for main's turn:
+        events.post logs the line of any other as it posts it."""
         from . import agents  # noqa: PLC0415
 
         m = EVENT_ID_RE.match(text)
         words = self.said.pop(m.group(1), None) if m else None
+        if m:
+            self.commands.discard(m.group(1))
         if m and words is not None:
             agents.mirror(self.c, "user", by=agents.BROWSER, text=words, event=m.group(1))
 
     def drop_waiting(self) -> None:
         """What waits for main goes unread (main's chat changes, the workspace's folder goes, the server stops): the
-        analyst's messages among it still get their lines in main's chat, as they sent them."""
+        analyst's messages and commands among it still get their lines in main's chat, as they sent them, and a
+        /thimble-fix's words are known not to have reached main (fixes.words_dropped)."""
+        from . import fixes  # noqa: PLC0415
+
         for text in self.main.queue:
             self.said_line(text)
+            if m := EVENT_ID_RE.match(text):
+                fixes.words_dropped(self.c, m.group(1))
         self.main.queue.clear()
 
     # ---- what each agent runs with
@@ -868,8 +881,9 @@ def _failure_text(e: BaseException) -> str:
 def deliver(c: str, note: dict[str, Any]) -> None:
     """A browser event for main (events._publish): a thread's starts or continues its fork; any other starts a turn of
     main, or waits for main's running turn: a message the analyst typed in main's chat (`said`, events.post) until the
-    turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat shows such a message
-    waiting until main reads it (unread)."""
+    turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat shows such a message,
+    and the command a request carries out (`said` with `command`, their /thimble-fix), waiting until main reads it
+    (unread)."""
     from . import agents, events  # noqa: PLC0415
 
     sp = ensure(c)
@@ -881,7 +895,10 @@ def deliver(c: str, note: dict[str, Any]) -> None:
     main = sp.main
     main.queue.append(text)
     if note.get("said"):
-        sp.said[str(meta.get("event") or "")] = str(note["said"])
+        eid = str(meta.get("event") or "")
+        sp.said[eid] = str(note["said"])
+        if note.get("command"):
+            sp.commands.add(eid)
         agents.notify(c, agents.MAIN_ID)
     if _in_loop():
         main.arrived.set()
@@ -948,8 +965,9 @@ def after_stop(c: str) -> None:
 
 
 def unread(c: str) -> list[dict[str, str]]:
-    """The analyst's messages that came while main's turn ran and that main has not read yet, oldest first, for main's
-    chat (agents._main_state): {event, text}. Empty when the runtime is off."""
+    """The analyst's messages, and the lines of their commands (their /thimble-fix), that came while main's turn ran and
+    that main has not read yet, oldest first, for main's chat (agents._main_state): {event, text}. Empty when the
+    runtime is off."""
     sp = _spaces.get(c) if enabled() else None
     if sp is None:
         return []

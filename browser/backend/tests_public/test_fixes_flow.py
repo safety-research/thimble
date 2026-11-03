@@ -106,12 +106,14 @@ def fixing(on, monkeypatch, tmp_path):
     fixes._fixers.clear()
     fixes._asked.clear()
     fixes._waiting.clear()
+    fixes._not_given.clear()
     k.restarts = restarts  # type: ignore[attr-defined]
     yield k
     fixes._phase.clear()
     fixes._fixers.clear()
     fixes._asked.clear()
     fixes._waiting.clear()
+    fixes._not_given.clear()
 
 
 WAIT_S = 60.0  # the most a test waits for the event it waits on, which a busy machine delays but never skips
@@ -129,7 +131,7 @@ async def _until(cond: Any, what: str) -> None:
 
 async def _ended(fid: int = 1) -> None:
     """Fix `fid`'s fixer ended, and so did the kernel's checks after it (fixes.settle, which runs in the fixer's task):
-    no fixer of it runs and its phase is neither fixing nor testing."""
+    no fixer of it runs and its phase is neither fixing nor testing, which settle ends as it writes the fix's notice."""
     end = time.monotonic() + WAIT_S
     while True:
         conv = fixes._fixers.get(fid)
@@ -409,6 +411,23 @@ def test_main_reads_each_fix_the_words_may_change_by_its_number_name_and_state()
     assert fixes.fixes_context(recs[2:]) == "(none yet)"
 
 
+async def test_words_for_a_fix_whose_round_ended_as_a_request_are_its_next_round_and_main_reads_it_among_the_fixes(
+        fixing, monkeypatch):
+    # a round of fix 1 ended as a request with no code (its fixer's question back to the person): the person's
+    # `/thimble-fix 1 <words>` in main's chat is the fix's next round, which the kernel starts in a new copy, never a new
+    # fix, and main reads the fix beside their words; the list of such fixes is the terminal's (plugin/fix/changeable.mjs)
+    fixing.recs[1] = {"id": 1, "title": "Views install their files", "state": "request", "updated": 1.0, "work": None,
+                      "words": ["views should install their files"], "summary": "Which of two ways do you want?"}
+    assert fixes.fixes_context(list(fixing.recs.values())) == (
+        '1  "Views install their files" (request): Which of two ways do you want?')
+    api_key(monkeypatch, [text("Title: Views install their files\nWhat it does: A build writes its view's own folder.")])
+    fixes._asked[CORPUS] = fixes._Asking("1 the first way", "", fixes.ASKED_TURNS)
+    got = await fixes.from_tool(CORPUS, "1")
+    assert got["kind"] == "round" and _fix_calls(fixing) == [("round", "1")]
+    assert fixing.recs[1]["words"] == ["views should install their files", "the first way"]
+    await _ended()
+
+
 async def test_words_in_the_fix_s_thread_go_to_its_fixer_while_it_works(fixing, monkeypatch, analyst):
     client = api_key(monkeypatch, [text("Working on it."), text("Title: Card counts rows\nWhat it does: Rows and columns.")])
     # the fixer's first answer comes once the words are in, so they come while it works
@@ -453,6 +472,32 @@ async def test_a_fix_that_fails_its_checks_says_why_and_offers_redo(fixing, monk
     row = fixes.status()["fixes"][0]
     assert row["kind"] == "failed"
     assert row["said"] == "“Bar counts rows” did not pass: its tests failed in the sandbox"
+
+
+async def test_a_fix_s_row_goes_from_its_checks_to_its_notice_with_no_moment_between(fixing, monkeypatch):
+    # the look at the page the checks built takes a while, as on a busy machine: until the notice is there, the row
+    # still shows the checks, so the page never lists the fix without a row, and a wait for the phase's end (_ended)
+    # finds the notice in main's chat
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows.")])
+    monkeypatch.setattr(fixes, "_recovered", True)
+    built = fixes.built_tree
+
+    def slow(fid: int, commit: str) -> str:
+        time.sleep(0.5)
+        return built(fid, commit)
+
+    monkeypatch.setattr(fixes, "built_tree", slow)
+    await fixes.request(CORPUS, "count the rows", "")
+    rows: list[tuple[str | None, str | None] | None] = []
+    end = time.monotonic() + WAIT_S
+    while not rows or rows[-1] is None or rows[-1][1] != "ready":
+        assert time.monotonic() < end, f"the fix's notice did not come within {WAIT_S:g} s: {rows[-5:]}"
+        row = next((r for r in fixes.status()["fixes"] if r["id"] == 1), None)
+        rows.append(None if row is None else (row["phase"], row["kind"]))
+        await asyncio.sleep(0.01)
+    assert None not in rows, "the page listed no row of the fix between its checks and its notice"
+    chips = [(r["status"], r["ref"]) for r in _log(CORPUS) if r["type"] == "chip" and r.get("kind") == "fix"]
+    assert chips == [("ready", "fix:1")]
 
 
 async def test_later_leaves_the_fix_ready_in_your_fixes_and_use_it_there_puts_it_on(fixing, monkeypatch, analyst):
@@ -1186,6 +1231,35 @@ async def test_main_s_own_call_before_its_turn_reads_the_person_s_words_starts_n
     assert "thimble started no fix" in said
     assert [c[0] for c in _fix_calls(fixing)] == ["new"]
     assert fixing.recs[1]["words"] == ["the legend hides its last row"]
+
+
+async def test_after_a_thimble_fix_whose_words_never_reached_main_fix_thimble_says_so_in_the_terminal_s_words(
+        fixing, monkeypatch, analyst):
+    # the person's /thimble-fix waits for main's running turn, and main's chat changes before main reads it: no fix
+    # starts from its words, and main's fix_thimble reads that they did not reach it, so the person types them again,
+    # as the terminal's skill reads it in the same case (one text, plugin/prompts/fix-not-given.md); the person's next
+    # /thimble-fix is their last one
+    from app import claude_access, llm, runtime
+    from test_main_waits import HangFirst
+
+    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    client = HangFirst([])
+    monkeypatch.setattr(llm, "client", lambda: client)
+    events.post(CORPUS, "main", {"text": "Which runs failed?"})
+    await _until(lambda: client.bodies, "main's first request was not sent")
+    await fixes.request_route(CORPUS, fixes.Asked(words="the legend hides its last row", page=PAGE), analyst)
+    assert await runtime._spaces[CORPUS].switch(None)  # a new chat: what waited for main goes unread
+    said = (await tools.call(CORPUS, "fix_thimble", {"words": "new"}, tool_use_id="toolu_f1")).text
+    shared = (fixes.plugin_dir() / "prompts" / "fix-not-given.md").read_text().strip()
+    assert said.endswith(f"\n{shared}") and said.count("thimble started no fix") == 1
+    assert shared.startswith("thimble started no fix: ") and "did not reach you" in shared
+    assert shared.endswith("so they type /thimble-fix and their words again.")
+    assert _fix_calls(fixing) == [] and _fixer_chats(CORPUS) == []
+    # the person's next /thimble-fix is their last one: until main reads its words, main reads how to ask for a fix
+    monkeypatch.setattr(events, "post", lambda *a, **k: {"id": k["event_id"]})
+    await fixes.ask(CORPUS, "the legend's title too")
+    said = (await tools.call(CORPUS, "fix_thimble", {"words": "new"}, tool_use_id="toolu_f2")).text
+    assert "/thimble-fix <what should work differently>" in said and "did not reach you" not in said
 
 
 async def test_a_fix_s_number_alone_tries_a_fix_that_failed_or_does_not_fit_again_as_its_try_again_does(

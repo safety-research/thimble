@@ -120,6 +120,11 @@ export const TEXTS = {
     use: "beside the person's words after /thimble-fix <words>, which a prompt of thimble's gives Claude as theirs",
     fills: ['WORDS'],
   },
+  'fix-not-given': {
+    about: "the words of the person's last /thimble-fix did not reach Claude: no fix starts, and the person types them again",
+    reader: 'fix/register.ts',
+    use: "what Claude reads when it starts a fix after such words, in the fix-thimble skill's place, and in the browser workbench as fix_thimble's answer (browser/backend/app/fixes.py)",
+  },
   fixer: {
     about: 'make the change the person asked for to their thimble, in a scratch copy, test it, and say what it does',
     terminal: 'fix/fixer.ts',

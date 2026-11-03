@@ -339,13 +339,16 @@ def _cut(line: str, n: int) -> str:
 
 
 def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
-         mirror: bool = True, line: str | None = None, event_id: str | None = None) -> dict[str, Any]:
+         mirror: bool = True, line: str | None = None, event_id: str | None = None,
+         command: str | None = None) -> dict[str, Any]:
     """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
     as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
     main's terminal shows instead of terminal_line's: at once, or, when the server runs main and main's turn runs, where
-    main reads it, and as waiting until then (runtime.deliver). `event_id` is the event's id when the caller recorded it
-    first (fixes.ask keeps it). 409 when no session listens, 400 for a kind main.md names no bullet
-    for (when `check_kind`), or for a message with no text."""
+    main reads it, and as waiting until then (runtime.deliver). A request that carries out the analyst's command
+    (`command`, their `/thimble-fix <words>`) shows that line in the same way; main reads it when its turn ends, as
+    Claude Code keeps a command typed mid-turn, where a message reaches main at the turn's next tool call. `event_id` is
+    the event's id when the caller recorded it first (fixes.ask keeps it). 409 when no session
+    listens, 400 for a kind main.md names no bullet for (when `check_kind`), or for a message with no text."""
     from . import agents, runtime, session, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
@@ -361,14 +364,18 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         words = str(payload.pop("text", "") or "").strip()
         if not words:
             raise HTTPException(400, "empty message")
-        # a message that comes while the server's main works waits for main to read it: its line goes in there, so the
-        # rest of the turn does not read as its answer (runtime.deliver)
-        waits = mirror and runtime.enabled() and runtime.ensure(c).main.running
-        if mirror and not waits:
-            agents.mirror(c, "user", by=agents.BROWSER, text=words, event=event_id)
+        # the analyst's line: their message, or the command a request carries out
+        said = words if mirror else command
+        # a line that comes while the server's main works waits for main to read it: it goes in there, so the rest of
+        # the turn does not read as its answer (runtime.deliver)
+        waits = bool(said) and runtime.enabled() and runtime.ensure(c).main.running
+        if said and not waits:
+            agents.mirror(c, "user", by=agents.BROWSER, text=said, event=event_id)
         note = build_note(kind, event_id, words, {**payload, **_ultracode(c), **_filters(c)})
         if waits:
-            note["said"] = words
+            note["said"] = said
+            if not mirror:
+                note["command"] = True
     elif kind == THREAD:
         words = str(payload.get("text") or "")
         built = threads.event(c, payload, event_id)
