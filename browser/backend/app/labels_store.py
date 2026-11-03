@@ -143,7 +143,7 @@ def _plain(*paths: Path) -> None:
         except OSError as e:
             raise sqlite3.OperationalError(f"{p}: {e}") from None
         if not stat.S_ISREG(st.st_mode):
-            raise sqlite3.OperationalError(f"{p} is a link or not a file, so thimble leaves it alone")
+            raise sqlite3.OperationalError(f"{p} is a link or not a file, so thimble left it alone")
 
 
 def mend_tail(jsonl: Path) -> bool:
