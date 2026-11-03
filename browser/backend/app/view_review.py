@@ -248,7 +248,7 @@ async def begin(c: str, slug: str, *, again: bool = False, route: str = subagent
     if not _reviewed_dir(c, slug).is_dir():
         await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug))
     await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug, last=True))
-    work_dir(c, slug).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(work_dir(c, slug))
     _set(c, slug, state="running", round=0, revised=revised, left=[], note="", undo=False, shots=0, agent_id=None,
          chat=None, finished=None, digest=views.digest(d), pictured=None, extra_left=None, refused=None)
     _again[(c, slug)] = again

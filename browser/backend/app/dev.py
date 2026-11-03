@@ -383,7 +383,7 @@ def _emit_ws(c: str, event: dict[str, Any]) -> None:
     try:
         from . import investigation  # noqa: PLC0415
 
-        (config.WORKSPACES_DIR / c / "investigations" / "main").mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(config.WORKSPACES_DIR / c / "investigations" / "main")
         investigation.emit(c, "main", event)
     except Exception:  # noqa: BLE001
         log.debug("could not emit %s to %s", event.get("type"), c, exc_info=True)

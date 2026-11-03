@@ -307,7 +307,7 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
         unlinked(config.workspace_dir(c), d / "type.json")
     except ValueError as e:
         raise HTTPException(409, f"the type's folder cannot be written: {e}") from None
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     meta = dict(existing) if isinstance(existing, dict) else {"slug": slug, "created_by": created_by, "ts": _now()}
     meta.update(name=_collapse(name) or slug, description=(description or "").strip(), renderer=renderer, updated=_now())
     if forked_from:

@@ -521,7 +521,7 @@ class Space:
         from . import cc_settings, config, events, ledger, runtime_tools, subagents, tools, userconf  # noqa: PLC0415
 
         tmp = self.dir / "tmp" / conv.id
-        tmp.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(tmp)
         temp: Path | None = None
         reads = [self.corpus, self.ws, config.REPO_ROOT / "docs", config.REPO_ROOT / "plugin" / "viewers",
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
@@ -562,7 +562,7 @@ class Space:
             fast = False
             with contextlib.suppress(Exception):
                 for d in writes:
-                    d.mkdir(parents=True, exist_ok=True)
+                    nofollow.makedirs(d)
         cwd = self.corpus
         if conv.kind == "fork" and conv.role == FIXER:
             # thimble fix's fixer (fixes.py): main's conversation and tools, and Edit and Write, in the fix's copy of

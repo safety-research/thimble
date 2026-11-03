@@ -763,7 +763,7 @@ def claude_argv(run: Run, argv: list[str], tmp: Path | None = None) -> tuple[lis
     append = "\n\n".join([*appended, shared])
     deny = list(dict.fromkeys([*denied, *agent_session.not_own(job.tools), *agent_session.LATER_TOOLS]))
     added = [a for w in job.writes for a in ("--add-dir", str(w))]
-    work.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(work)
     settings["env"] = agent_session.settings_env(job.c, job.key, {**agent_session.fence_env(work),
                                                                   **agent_session.skill_prompts_env(corpus, work)})
     settings = agent_session.with_home_shell(settings)

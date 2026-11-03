@@ -98,7 +98,7 @@ def _emit(c: str, event: dict) -> None:
         try:
             from . import investigation
 
-            (config.WORKSPACES_DIR / c / "investigations" / "main").mkdir(parents=True, exist_ok=True)
+            nofollow.makedirs(config.WORKSPACES_DIR / c / "investigations" / "main")
             investigation.emit(c, "main", event)
         except Exception:  # noqa: BLE001
             log.debug("could not emit %s for %s", event.get("type"), c, exc_info=True)
@@ -700,7 +700,7 @@ def _store_ready(ws: Path, concept_id: str, *, wait: bool = True) -> labels_stor
                 if state == "fresh":
                     return st
                 if state == "none":
-                    p.parent.mkdir(parents=True, exist_ok=True)
+                    nofollow.makedirs(p.parent)
                     st.connect(write=True).close()
                     return st
                 if _sync_tail(p, state, m) <= labels_store.SYNC_INLINE_BYTES or started >= 2:
@@ -3361,7 +3361,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
         cancel = _cancel_event(c, concept_id)
         cancel.clear()
         out = labels_file(ws, concept_id)
-        out.parent.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(out.parent)
         run_id = run_id or _new_id()
         started = started or _now()
         _run_record(c, concept_id, run_id, started, created_by, patterns, sources)
@@ -3712,7 +3712,7 @@ def record_verdict(ws: Path, concept: dict, ref: str, label: str, note: str | No
         raise HTTPException(400, "ref and label are required")
     row = _row(ref, label, 1.0, "analyst", (note or "").strip() or None, line=_record_line(ws.name, ref))
     out = labels_file(ws, concept["id"])
-    out.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(out.parent)
     stored = concept.get("label_stats")
     with _store_lock(out):
         st = _store_ready(ws, concept["id"], wait=False)
