@@ -436,10 +436,12 @@ function r0(r) { return '▸ ' + r.name + ' scored ' + r.score }`
 test("the card tool's test of a click at a cell presses a Button laid out inline with its words, as a live click does", async () => {
   const { id, r: loaded } = await load(STRIP)
   assert.deepEqual(loaded.lines, ['runs  ××✓', 'Click a run.'])
-  const r = await ask('act', { id, width: 40, actions: [{ click: [7, 0] }, { click: [8, 0] }, { click: [1, 0] }] })
+  const r = await ask('act', { id, width: 40, actions: [{ click: [7, 0] }, { click: [8, 0] }, { click: [1, 0] }, { click: [20, 0] }] })
   assert.equal(r.ok, true)
-  assert.deepEqual(r.copies.map(c => c.lines[1]), ['▸ bram scored 5', '▸ cleo scored 1', '▸ cleo scored 1'])
-  assert.deepEqual(r.copies.map(c => c.note), [undefined, undefined, 'a click there asks the analyst\'s side thread about "runs": no Button, onPointer listener or item the card\'s keys select stands there'])
+  assert.deepEqual(r.copies.map(c => c.lines[1]), ['▸ bram scored 5', '▸ cleo scored 1', '▸ cleo scored 1', '▸ cleo scored 1'])
+  // a click on words that no Button holds asks a side thread, live; one on a cell where nothing is drawn missed
+  assert.deepEqual(r.copies.map(c => c.note), [undefined, undefined, 'a click there asks the analyst\'s side thread about "runs": no Button, onPointer listener or item the card\'s keys select stands there',
+    'nothing is drawn there, so nothing takes the click; x counts the columns of the text copy and y its lines, both from 0'])
   // the card is as it was before the actions
   assert.equal(JSON.parse(r.state), null)
   // live, Claude Code's own Button takes a click on a run and sends its press, and no pointer event comes for it: a

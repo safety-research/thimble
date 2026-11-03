@@ -730,7 +730,8 @@ function act(a) {
       const at = { x: Math.trunc(Number(x.click[0]) || 0), y: Math.trunc(Number(x.click[1]) || 0) }
       what = `click at ${at.x},${at.y}`
       r = click(card, { down: at, up: at })
-      if (r.ok && !r.handled) r.note = r.run ? `a click there asks the analyst's side thread about "${String(r.run.text).trim().slice(0, 60)}": no Button, onPointer listener or item the card's keys select stands there` : 'a click at a cell reaches a Button around lines, an onPointer listener or an item the card\'s keys select, and the view has none there'
+      // a cell where nothing is drawn: the click missed what it aimed at, and the note says so, with how cells count
+      if (r.ok && !r.handled) r.note = r.run ? `a click there asks the analyst's side thread about "${String(r.run.text).trim().slice(0, 60)}": no Button, onPointer listener or item the card's keys select stands there` : 'nothing is drawn there, so nothing takes the click; x counts the columns of the text copy and y its lines, both from 0'
     } else {
       copies.push({ what: JSON.stringify(x).slice(0, 80), error: 'not a key or a click' })
       continue
