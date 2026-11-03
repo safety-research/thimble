@@ -6,10 +6,11 @@ ROWS_MAX), columns and types, the column that names each row in a ref (`label`),
 number formats). The canvas draws it (canvas/FrameTable.tsx), the model reads its text/plain and the citation check
 reads frame_cells, so all three see the same values in the same format.
 
-A DataFrame or Series a card's code prints is kept as data too, beside its text: the kernel notes each with the text
-print wrote for it (kernel_thimble._printed, PRINTED_CAPTURE in the same request), and attach_printed puts it on the
-stdout bundle that text stands in (PRINTED_KEY: the lines it stands on and its frame). The canvas shows the text; the
-citation check counts the table's rows from the frame (marks.session_cards).
+A DataFrame or Series a card's code prints is kept as data too, beside its text: the kernel notes each text pandas
+writes for one (its to_string, which print(df) calls too) with the table's rows (kernel_thimble._printed,
+PRINTED_CAPTURE in the same request), and attach_printed puts each on the stdout bundle its text stands in
+(PRINTED_KEY: the lines it stands on and its frame). The canvas shows the text; the citation check counts the table's
+rows from the frame (marks.session_cards).
 
 Row names: the index when the code set one, else the first column of distinct text, else the position. An unnamed index
 keeps pandas' name (`index`, `level_0`) and has no header over it.
