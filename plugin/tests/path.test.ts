@@ -1,5 +1,6 @@
-// The session's temp folders (hooks/path.ts): Claude Code keeps its own temp folder where it started, which its Bash
-// sandbox lets commands write, while the session's commands get thimble's folder as their TMPDIR. All data is made up.
+// The session's environment (hooks/path.ts): Claude Code keeps its own temp folder where it started, which its Bash
+// sandbox lets commands write, while the session's commands get thimble's folder as their TMPDIR; and while Labels is
+// off, they get the line `thimble label` answers Claude with (THIMBLE_LABELS_OFF). All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
