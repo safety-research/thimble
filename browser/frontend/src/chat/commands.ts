@@ -1,8 +1,8 @@
 // The slash commands the chat's composer handles itself, the one list of them. A handler reads a message with
-// commandIn, which knows only these, so each command the composer handles is listed here (fix.ts fixWords, which
-// ChatPanel's send asks first). A "/" at the start of the composer lists the commands the text can still become
-// (commandsFor), each with what it does, as Claude Code lists its own (chat/Composer.tsx), so a command added here is
-// in that list too.
+// commandIn, which knows only these, so each command the composer handles is listed here (rewind.ts isRewindCommand
+// and fix.ts fixWords, which ChatPanel's send asks first). A "/" at the start of the composer lists the commands the
+// text can still become (commandsFor), each with what it does, as Claude Code lists its own (chat/Composer.tsx), so a
+// command added here is in that list too.
 import { FIX_DESCRIPTION } from '../../../../plugin/fix/command.mjs'
 
 export interface ChatCommand {
@@ -16,7 +16,13 @@ export interface ChatCommand {
  * (plugin/fix/command.mjs). */
 export const FIX_COMMAND = '/thimble-fix'
 
-export const COMMANDS: readonly ChatCommand[] = [{ name: FIX_COMMAND, about: FIX_DESCRIPTION }]
+/** Main back to before the analyst's latest message there, asked first under the message (rewind.ts). */
+export const REWIND_COMMAND = '/rewind'
+
+export const COMMANDS: readonly ChatCommand[] = [
+  { name: FIX_COMMAND, about: FIX_DESCRIPTION },
+  { name: REWIND_COMMAND, about: 'Take main back to before your latest message' },
+]
 
 /** The command a message is, space before it aside, and the words after it, trimmed; null for a message that starts
  * with none of `commands`. Pure. */

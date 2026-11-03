@@ -770,7 +770,44 @@ button.chat-call-chip:hover,
 /* the analyst's message stands in from the left, and its right edge is the column's, so it reads apart from the
    agent's rows */
 .chat-user {
+  position: relative;
   padding-left: 32px;
+}
+/* Rewind on one of the analyst's messages in main (Rows RewindAsk): a quiet ↶ in the message's left margin while the
+   pointer is over the message, and the question under it once pressed */
+.chat-rewind {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  opacity: 0;
+  color: var(--text-tertiary);
+  transition: opacity 120ms ease;
+}
+.chat-user:hover .chat-rewind,
+.chat-rewind:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .chat-rewind {
+    opacity: 1;
+  }
+}
+.chat-rewind-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.chat-rewind-ask-text {
+  flex: 1 1 220px;
+}
+.chat-rewind-ask-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
 }
 /* a message to the orientation on its way, or queued until the run going on ends, and one to main until main reads it:
    the analyst's tile, a step quieter, with a line under it while the server holds it */

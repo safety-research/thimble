@@ -7,6 +7,7 @@
 // fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx). In main's
 // chat a check's comments on an answer tint their passages; a click on one, or Go to it on `answer:<turn>#s<n>`, opens
 // the comment as the canvas's comment card in a popover beside the passage (chat/answerComments.ts, AnswerComment.tsx).
+// Each of the analyst's messages in main has Rewind in its left margin, which asks first under the message (chat/rewind.ts).
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -31,7 +32,7 @@ import { AnswerCommentPop } from './AnswerComment'
 import { answeredAsk, askedAnswer, commentAsked, commentsOfRow, marksOf, useAnswerComments, type AnswerAsk, type AnswerComment, type AnswerMark } from './answerComments'
 import { MarksFooter } from '../marks/MarksFooter'
 import { FixResult } from './FixStrip'
-import { API_ERROR_KIND, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
+import { API_ERROR_KIND, REWIND_CHIP, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
@@ -147,7 +148,37 @@ export const CallFocusContext = createContext<CallFocus | null>(null)
  * orientation whose calls these rows hold: every call is then a chip line with its `call:` ref. `retry` names the error
  * row whose Retry sends the analyst's message again, and `note` its line.
  */
-export function Rows({ rows, ws, chat, streaming = false, nested = false, calls, live = false, retry }: { rows: readonly (Row | BranchRow)[]; ws: string; chat?: string; streaming?: boolean; nested?: boolean; calls?: string; live?: boolean; retry?: ErrorRetry }) {
+/** What main's chat lets the analyst do to go back to one of their messages (ChatPanel): `ask` opens the question under
+ * the message whose event is `asked` (null closes it), and `go` rewinds main to before it. */
+export interface RewindHooks {
+  asked: string | null
+  ask: (event: string | null) => void
+  go: (event: string) => void
+  busy?: boolean
+}
+
+/** Rewind on one of the analyst's messages in main: a quiet ↶ in the message's left margin, which asks first under the
+ * message, since Claude then forgets the message and everything after it. */
+function RewindAsk({ event, rewind }: { event: string; rewind: RewindHooks }) {
+  if (rewind.asked !== event) {
+    return <Button className="chat-rewind" variant="icon" size="sm" icon="undo" title="Rewind to here" onClick={() => rewind.ask(event)} />
+  }
+  return (
+    <div className="chat-rewind-ask" role="group" aria-label="Rewind to here">
+      <span className="chat-rewind-ask-text">Rewind to before this message? Claude forgets it and everything after it, and your words go back in the box. Files and cards stay as they are.</span>
+      <span className="chat-rewind-ask-actions">
+        <Button variant="secondary" size="sm" onClick={() => rewind.ask(null)}>
+          Cancel
+        </Button>
+        <Button variant="primary" size="sm" icon="undo" busy={rewind.busy} onClick={() => rewind.go(event)}>
+          Rewind
+        </Button>
+      </span>
+    </div>
+  )
+}
+
+export function Rows({ rows, ws, chat, streaming = false, nested = false, calls, live = false, retry, rewind }: { rows: readonly (Row | BranchRow)[]; ws: string; chat?: string; streaming?: boolean; nested?: boolean; calls?: string; live?: boolean; retry?: ErrorRetry; rewind?: RewindHooks }) {
   const lastText = streaming ? [...rows].reverse().find((r): r is Extract<Row, { kind: 'text' }> => r.kind === 'text') : undefined
   const lastRow = rows[rows.length - 1]
   const toolPending = lastRow?.kind === 'tool' && !lastRow.result
@@ -201,12 +232,14 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             if (r.by === 'thimble') return null
             if (r.by === 'extension') return <ExtensionLead key={r.index} name={r.extension ?? ''} text={r.text} ws={ws} />
             return (
-              <div key={r.index} className="chat-msg chat-user" data-event={r.event}>
+              <div key={r.index} className="chat-msg chat-user" data-event={r.event} data-rewind-asked={rewind && r.event && rewind.asked === r.event ? true : undefined}>
                 {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
                 {byLabel(r.by, chat, r.tray) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat, r.tray)!} />}
+                {rewind && r.by === 'browser' && r.event && rewind.asked !== r.event && <RewindAsk event={r.event} rewind={rewind} />}
                 <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
                   <RefText text={stripHarness(r.text)} workspace={ws} />
                 </UserMessage>
+                {rewind && r.by === 'browser' && r.event && rewind.asked === r.event && <RewindAsk event={r.event} rewind={rewind} />}
               </div>
             )
           case 'text': {
@@ -784,6 +817,7 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
       </div>
     )
   }
+  if (item.chip === REWIND_CHIP) return <Note className="chat-chip-row chat-rewound" data-chip={REWIND_CHIP} text={item.text} />
   if (item.chip === 'follow_up_ran_on') return <Note className="chat-chip-row chat-ran-on" data-chip="follow_up_ran_on" text={item.text} />
   if (item.chip === 'view_failed') {
     // a proposal nobody asked for that failed through its repairs: the line, and the view's chip with ✕ and Retry

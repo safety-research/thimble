@@ -1054,7 +1054,7 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
         sid = runtime_api.cc_main_session(c) if kind == "cc" else None
         if not sid:
             return {"error": "thimble cannot reach Claude yet" if not kind else "main has no Claude Code session yet"}
-        main, cut = {**main, "sid": sid, "config_known": False}, None
+        main, cut = {**main, "sid": sid, "config_known": False}, runtime_api.cc_main_cut(c)
         # the fork's python runs in Claude Code's sandbox where it can, as main's Bash does on Claude Code sign-in (in a
         # short TMPDIR of its own), so it never reads the ANTHROPIC_* variables Claude Code signs in with; the sandbox's
         # .claude/.cc-writes/ in the corpus goes when the last session there ends (runtime_cc._tidy)

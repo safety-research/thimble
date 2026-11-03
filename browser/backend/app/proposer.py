@@ -596,7 +596,8 @@ async def _fork(lv: Any, cut: str, prompt: str, model_id: str, effort: str, spee
         if not sid:
             return {"code": 1, "stdout": "", "stderr": "thimble cannot reach Claude yet", "timed_out": False,
                     "seconds": 0.0}
-        lv, cut = SimpleNamespace(sid=sid, cwd=lv.cwd, config=None, config_known=False, c=lv.c), None
+        cut = runtime_api.cc_main_cut(lv.c)
+        lv = SimpleNamespace(sid=sid, cwd=lv.cwd, config=None, config_known=False, c=lv.c)
     argv = _argv(lv, cut, model_id, effort, speed)
     cap = capture.begin("view-propose", model=model_id, effort=effort, speed=speed, path="fork")
     cap.fenced("Command", [a if a else '""' for a in argv])
