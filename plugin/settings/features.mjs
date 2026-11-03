@@ -245,11 +245,11 @@ export function valueIn(values, key) {
 }
 
 /** Minimal: the modes it sets. Claude still cites, each citation verified when it is opened (auto cite), and the look
- *  after each answer still writes explainers and heads-ups; in Claude Code's fullscreen layout its answers are plain,
- *  these showing only for the paragraph under the pointer (marks/register.ts, view.ts `plain`), and elsewhere, where no
- *  pointer is reported, they stand at rest; Claude draws a card only when asked; Rewrite, Catch-up and the
- *  session-wide panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts), and the rows show
- *  them; a row changed away from them turns it off. */
+ *  after each answer still writes explainers and heads-ups; where Claude Code reports the pointer (its fullscreen
+ *  layout, with its mouse reports on) its answers are plain, these showing only for the paragraph under the pointer
+ *  (marks/register.ts, view.ts `plain`), and elsewhere they stand at rest; Claude draws a card only when asked; Rewrite,
+ *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts),
+ *  and the rows show them; a row changed away from them turns it off. */
 export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false }
 
 /** The modes Minimal set from 0.10.4 to 0.10.7: rows that still hold them stand for it, and the first session sets its

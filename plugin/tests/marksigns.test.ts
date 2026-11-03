@@ -33,9 +33,12 @@ const view = { columns: 100, rows: 40, isFullscreen: true }
 const above = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 100, scroll: { offset: 0, bodyRows: 19 }, view: {} }, viewport: view } as never
 const answer = { plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: 'row-t1', viewport: view, props: { text: TEXT, isFirstOfReply: true } } as never
 
-/** A resumed session with one answer, TEXT, whose citations the check left as `items`. */
-async function resumed($: Any, on: Any, items: Any[]): Promise<void> {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+/** A resumed session with one answer, TEXT, whose citations the check left as `items`; `more`, more of the process's
+ *  variables, which a test may change as it runs. */
+async function resumed($: Any, on: Any, items: Any[], more?: Record<string, string | undefined>): Promise<void> {
+  const env: Record<string, string> = { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' }
+  if (more) on('env.get', (_$: unknown, e: { name: string }) => ({ value: e.name in more ? more[e.name] : env[e.name] }))
+  else mock.env(on, env)
   mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-marksigns' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
@@ -185,4 +188,29 @@ test("with Minimal on outside Claude Code's fullscreen layout, which reports no 
   const full = await $.ui.render(answer)
   expect(words(full, '15 of 40').underline).toBeUndefined()
   expect(signAfter(full, 2).sign).toBe('')
+})
+
+test("with Minimal on in Claude Code's fullscreen layout while it reports no pointer (CLAUDE_CODE_DISABLE_MOUSE turns its mouse reports off, CLAUDE_CODE_DISABLE_MOUSE_CLICKS keeps only the wheel's), a reply's citations stand at rest as in any mode; with either set to a false value, or to one Claude Code reads as neither, the reply is plain", { options: { minimal: true, ...PRESET } }, async ($, on) => {
+  const env: Record<string, string | undefined> = {}
+  await resumed($, on, [
+    { n: 1, row: 'row-t1', words: '15 of 40', ...at('15 of 40'), sentence: TEXT, status: 'verified', shown: '15 of 40', reason: 'Counted.' },
+    { n: 2, row: 'row-t1', words: 'p95 check', ...at('p95 check'), sentence: TEXT, status: 'failed', failedBy: 'evidence', shown: 'p95 check', reason: 'No record shows it.' },
+  ], env)
+  const words = (d: Any, w: string) => all(d).find(x => x.type === 'Text' && textOf(x) === w)?.props ?? {}
+  /** The reply in fullscreen with the mouse's variables `vars`: whether its citation stands underlined at rest, and the
+   *  sign after the failed one. */
+  const drawn = async (vars: Record<string, string>) => {
+    for (const k of ['CLAUDE_CODE_DISABLE_MOUSE', 'CLAUDE_CODE_DISABLE_MOUSE_CLICKS']) delete env[k]
+    Object.assign(env, vars)
+    const d = await $.ui.render(answer)
+    return { underline: words(d, '15 of 40').underline === true, sign: signAfter(d, 2).sign }
+  }
+  // no pointer reported, read as Claude Code reads them: the marks at rest, as outside fullscreen
+  for (const vars of [{ CLAUDE_CODE_DISABLE_MOUSE: '1' }, { CLAUDE_CODE_DISABLE_MOUSE: 'TRUE' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'yes' }]) {
+    expect([vars, await drawn(vars)]).toEqual([vars, { underline: true, sign: '×' }])
+  }
+  // the pointer reported: plain; CLAUDE_CODE_DISABLE_MOUSE set either way decides alone
+  for (const vars of [{}, { CLAUDE_CODE_DISABLE_MOUSE: '0' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'off' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'maybe' }, { CLAUDE_CODE_DISABLE_MOUSE: 'false', CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }]) {
+    expect([vars, await drawn(vars)]).toEqual([vars, { underline: false, sign: '' }])
+  }
 })

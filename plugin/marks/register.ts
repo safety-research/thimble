@@ -29,8 +29,8 @@
 //                    Claude Code's own ask answered allow where nobody is asked, as don't ask mode would refuse it
 //                    (checker.ts allowsPython)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone;
-//                    while Minimal is on, in Claude Code's fullscreen layout, plain: its marks show for the paragraph
-//                    under the pointer (view.ts `plain`).
+//                    while Minimal is on, where Claude Code reports the pointer (its fullscreen layout, with its mouse
+//                    reports on), plain: its marks show for the paragraph under the pointer (view.ts `plain`).
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
 //                    citation the tray shows, the lines under its words (the labels it used), a press on a citation,
@@ -38,6 +38,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { SPIN, spinNow } from '../bar/busy'
+import { clicksReach } from '../bar/intro'
 import { checkSpans, markFocus, markPressed, passagesFor, spansFor, textView, underText, type Span } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
@@ -262,6 +263,15 @@ export const registerMarks: Register = on => {
   }).catch(($, e, next) => next(e))
 }
 
+/** Whether Claude Code reports the pointer over the drawing `e` (its ui.render input), so a row of a plain reply can
+ *  show its marks under it: only in its fullscreen layout, and there only while it asks the terminal for every mouse
+ *  report, the pointer's moves among them, as clicks need too (bar/intro.ts clicksReach). With
+ *  CLAUDE_CODE_DISABLE_MOUSE it asks for none, and with CLAUDE_CODE_DISABLE_MOUSE_CLICKS for presses and the wheel
+ *  alone, which say nothing of where the pointer is. */
+async function pointerReported($: Engine, e: Any): Promise<boolean> {
+  return e.viewport?.isFullscreen === true && (await clicksReach($, e).catch(() => true))
+}
+
 /** A row of Claude's words as marks/register.ts draws it: its marks, spans and lines under it, or the drawing beneath
  *  (`below`) when it has none of these. */
 async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
@@ -334,9 +344,9 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
       spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
-      // Minimal: plain words at rest, each row's marks under the pointer (view.ts), in Claude Code's fullscreen layout,
-      // which alone reports the pointer; elsewhere the marks stand at rest as in any mode
-      plain: minimalOn() && e.viewport?.isFullscreen === true,
+      // Minimal: plain words at rest, each row's marks under the pointer (view.ts), where Claude Code reports the
+      // pointer; elsewhere the marks stand at rest as in any mode
+      plain: minimalOn() && (await pointerReported($, e)),
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
       // a press on a citation's words, or on the sign after them (view.ts markEl)

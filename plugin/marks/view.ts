@@ -51,7 +51,8 @@
 // row shows its marks in their colors: a citation underlined (a failed one red), an explainer on its teal and a heads-up
 // on its orange (their fills at rest elsewhere). A click opens one as
 // at any time, and the mark the tray shows stands in its look, its sign after it, as in any reply. Only Claude Code's
-// fullscreen layout reports the pointer, so a reply is plain only there (marks/register.ts).
+// fullscreen layout reports the pointer, and not while its mouse reports are off or keep only the wheel's
+// (CLAUDE_CODE_DISABLE_MOUSE, CLAUDE_CODE_DISABLE_MOUSE_CLICKS), so a reply is plain only there (marks/register.ts).
 import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
