@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -72,6 +73,39 @@ def test_a_resolved_path_is_opened_from_the_root_and_a_path_outside_every_root_a
         nofollow.read_text(tmp_path.resolve() / "link" / "f.txt", root="/")
     assert nofollow.split(tmp_path / "link" / "f.txt") is None  # outside the workspaces: followed, as before
     assert nofollow.read_text(tmp_path / "link" / "f.txt") == "in place\n"
+
+
+def deep_chain(top: Path, depth: int) -> int:
+    """A chain of `depth` folders named d below the folder `top`, made one folder at a time by descriptor (its path is
+    longer than a path may be), as a card's code can make one; the descriptor of its last folder, which the caller
+    closes."""
+    fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
+    for _ in range(depth):
+        os.mkdir("d", dir_fd=fd)
+        below = os.open("d", os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+        os.close(fd)
+        fd = below
+    return fd
+
+
+def test_a_tree_deeper_than_python_s_recursion_limit_goes_and_no_link_in_it_is_followed(tmp_path_factory):
+    """A card's code can make a chain of folders deeper than Python's recursion limit where the server removes a tree
+    (an srt kernel's HOME, a folder in scratch/). The removal recursed and raised RecursionError, which is no OSError, so
+    neither its ignore_errors nor its callers' suppress(OSError) caught it, and every later start of the kernel failed.
+    Now the removal walks with a stack of its own: the whole tree goes, and a link at its bottom goes as a link."""
+    outside = _outside(tmp_path_factory)
+    top = config.workspace_dir(CORPUS) / "made-up-home"
+    top.mkdir(parents=True)
+    fd = deep_chain(top, sys.getrecursionlimit() + 500)
+    try:
+        os.symlink(outside, "a-link", dir_fd=fd)
+        os.close(os.open("a-file", os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=fd))
+    finally:
+        os.close(fd)
+    nofollow.rmtree(top)
+    assert not os.path.lexists(top)
+    assert sorted(os.listdir(outside)) == ["made-up-dotfile"]
+    assert (outside / "made-up-dotfile").read_text() == "# the person's own\n"
 
 
 def test_main_s_conversation_state_is_saved_through_no_link_left_at_its_temp_file_s_name(tmp_path_factory):
@@ -620,3 +654,21 @@ def test_undo_of_a_document_s_first_save_removes_no_file_through_a_link_a_card_l
     finally:
         undo.forget()
     assert (outside / "report.json").read_text() == '{"made": "up", "keep": true}\n'
+
+
+def test_a_rewrite_writes_into_the_file_that_is_there_and_through_no_link(tmp_path_factory):
+    """nofollow.rewrite (the workspace's settings.json and config.json, which a kernel wrapper hides by a mount on each
+    file) writes the file in place, never a new file renamed over it: the file keeps its inode, a shorter text leaves
+    nothing of the longer one, and a link at its name is replaced by a file of the server's own, never followed."""
+    outside = _outside(tmp_path_factory)
+    ws = config.workspace_dir(CORPUS)
+    p = ws / "settings.json"
+    p.write_text('{"a": "a long value the next text is shorter than"}\n')
+    inode = p.stat().st_ino
+    nofollow.rewrite(p, b'{"a": 1}\n')
+    assert p.read_text() == '{"a": 1}\n' and p.stat().st_ino == inode and p.stat().st_mode & 0o777 == 0o600
+    p.unlink()
+    p.symlink_to(outside / "made-up-dotfile")
+    nofollow.rewrite(p, b'{"b": 2}\n')
+    assert not p.is_symlink() and p.read_text() == '{"b": 2}\n'
+    assert (outside / "made-up-dotfile").read_text() == "# the person's own\n"

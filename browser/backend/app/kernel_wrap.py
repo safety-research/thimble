@@ -12,14 +12,14 @@ Both draw the same boundary:
            writes its files; tmp/; view-indexes/, where the view readers keep their indexes) and nothing else of it:
            the server keeps its own state in the rest of the workspace (the undo journal, the chats, the sessions, the
            groups, the labels and the rest), which the kernel reads but can neither change, move nor remove, nor put a
-           link or a file in place of. settings.json and config.json (thimble's config for the workspace) and the lock
-           of subagents.json's writers (LOCK_FILES) the kernel can neither read nor write.
+           link or a file in place of. settings.json and config.json (thimble's config for the workspace) and the
+           workspace's lock files (LOCKS_DIR) the kernel can neither read nor write.
            HOME is fresh at each start: a folder on a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt (`write`). TMPDIR is main's Bash's (runtime.shell_temp): the workspace's temp folder (TEMP_DIR) on
            the Messages API, and on Claude Code sign-in the temp folder Claude Code's sandbox gives main's commands,
            outside the workspace, which the kernel may write too (`write`; bwrap binds it by the descriptor of the
            folder the server checked, `write_fds`, since main's Bash may put a link in its place, and under srt the
-           server checks that the kernel got that folder, notebook._sandbox_problem)
+           server checks that the kernel got that folder before the kernel's Python starts, GATE)
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
@@ -48,7 +48,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Sequence
+from typing import NamedTuple, Sequence
 
 from . import srt
 
@@ -70,11 +70,13 @@ NO_SIDE_WRITES = {"PYTHONDONTWRITEBYTECODE": "1", "GIT_OPTIONAL_LOCKS": "0"}
 # nor write it
 HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
-# the lock subagents.json's writers take (subagent_files.LOCK), hidden as HIDDEN_FILES are: a file the kernel may read
-# it may also open and flock, and a cell that held the lock would make every hook and the server wait for it and then
-# write without it, so that two writers no longer exclude each other. The server makes it before a kernel starts, and
-# nothing renames it
-LOCK_FILES = ("subagents.json.lock",)
+# the workspace's folder of every lock file its writers take (nofollow.lock_file: the stores' locks, ledger.locked and
+# calls_file; subagent_files.LOCK), which a kernel can neither read nor write: a lock file the kernel may read it may
+# also open and flock, and a cell that held a lock made every writer of that store wait for it (the server on its event
+# loop) and then write without it. bwrap mounts an empty read-only tmpfs over the folder, srt denies it; the server
+# makes the folder before a kernel starts and never removes it, since a folder removed and made again would show
+# inside a running kernel's sandbox
+LOCKS_DIR = "locks"
 # the kernel's own folders of the workspace, the only ones it writes, each made by the server before the kernel starts
 SCRATCH_DIR = "scratch"  # its working folder: a link per corpus entry (notebook.mirror_corpus) and what cells write
 # the workspace's temp folder (config.temp_dir): on the Messages API every kernel's TMPDIR, and that of main's and its
@@ -83,7 +85,7 @@ SCRATCH_DIR = "scratch"  # its working folder: a link per corpus entry (notebook
 TEMP_DIR = "tmp"
 INDEXES_DIR = "view-indexes"  # the view readers' indexes, which the views kernel and the cards' kernels build
 KERNEL_DIRS = (SCRATCH_DIR, TEMP_DIR, INDEXES_DIR)
-# the workspace's files and folders that no agent's command writes either, beside HIDDEN_FILES and LOCK_FILES, where
+# the workspace's files and folders that no agent's command writes either, beside HIDDEN_FILES and LOCKS_DIR, where
 # one of the agent's write folders holds the workspace (runtime.protected):
 READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")  # the telemetry log and the view log, which its export merges
 REGISTRY_DIR = "registry"  # the card types and extensions as the server found them (cardtypes.py, extensions.py)
@@ -95,6 +97,10 @@ LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), wh
 TRUSTED_DIR = "trusted"
 READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR, TRUSTED_DIR)
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
+# what a wrapped kernel's command runs first, inside its sandbox: a shell that waits for a line on its stdin and only
+# then runs the kernel's Python, so the server checks through /proc what the sandbox shows before any Python code runs
+# there (notebook._open_gate); a stdin that ends with no line runs nothing
+GATE = ("/bin/sh", "-c", 'read -r _ && exec "$@"', "thimble-kernel-gate")
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
 SRT_HELPERS = ("vendor", "seccomp")  # srt's apply-seccomp, which runs inside the sandbox on Linux
@@ -211,7 +217,7 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
     writes (none for an agent's command, whose caller names its write folders, runtime_tools._rules)."""
     ws = Path(workspace_dir)
     system = "darwin" if platform == "darwin" else "linux"
-    hidden = [str(ws / name) for name in (*HIDDEN_FILES, *LOCK_FILES)]
+    hidden = [str(ws / name) for name in (*HIDDEN_FILES, LOCKS_DIR)]
     writes = [*(str(ws / name) for name in own), *map(str, write)]
     deny_read = [str(home), *SRT_HIDDEN[system], *map(str, hide), *hidden]
     allow_read = [str(corpus_dir), str(ws), *map(str, interpreter_dirs(python)), *map(str, read), *map(str, write)]
@@ -243,6 +249,48 @@ def _outermost(deny: Sequence[str], allow: Sequence[str]) -> list[str]:
         return any(d != p and _under(p, d) and not any(_under(p, a) and _under(a, d) for a in shown) for d in real)
 
     return [s for s, p in zip(deny, real) if not hidden(p)]
+
+
+BWRAP_WRITES = ("--bind", "--bind-try", "--dev-bind", "--dev-bind-try", "--bind-fd")  # each with a source, then the path
+BWRAP_READS = ("--ro-bind", "--ro-bind-try", "--ro-bind-fd")
+
+
+class Sandbox(NamedTuple):
+    """What a kernel's wrapper shows it, as its command line says (sandbox_of): the paths it writes, those it reads and
+    those it hides."""
+    wrap: str
+    writes: list[str]
+    reads: list[str]
+    hides: list[str]
+
+
+def sandbox_of(argv: Sequence[str]) -> Sandbox | None:
+    """The wrapper a kernel's command line runs it in and what that wrapper shows it, read from the line as the system
+    shows it (procs.argv: /proc/<pid>/cmdline or `ps`), which no code inside the sandbox can change: for bwrap its
+    writable binds, its read-only binds and its tmpfs mounts, from its options up to its `--`; for srt (kernel_srt.mjs)
+    its rules' allowWrite, allowRead and denyRead, the rules read from the line as a whole, since `ps` splits a line at
+    its spaces. None for a line of neither, or one whose rules do not read."""
+    if argv and os.path.basename(argv[0]) == "bwrap":
+        box = Sandbox("bwrap", [], [], [])
+        i = 1
+        while i < len(argv) and argv[i] != "--":
+            if argv[i] in (*BWRAP_WRITES, *BWRAP_READS) and i + 2 < len(argv):
+                (box.writes if argv[i] in BWRAP_WRITES else box.reads).append(argv[i + 2])
+                i += 3
+            elif argv[i] == "--tmpfs" and i + 1 < len(argv):
+                box.hides.append(argv[i + 1])
+                i += 2
+            else:
+                i += 1
+        return box
+    if len(argv) > 1 and os.path.basename(argv[1]) == SRT_LAUNCHER.name:
+        line = " ".join(argv)
+        try:
+            fs = json.JSONDecoder().raw_decode(line, line.index('{"filesystem"'))[0]["filesystem"]
+            return Sandbox("srt", *([str(p) for p in fs.get(k) or []] for k in ("allowWrite", "allowRead", "denyRead")))
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return None
+    return None
 
 
 def srt_env(env: dict[str, str], *, home: str | Path) -> dict[str, str]:
@@ -277,8 +325,9 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     `read` names more paths bound read-only, `write` more folders bound writable (its TMPDIR outside the workspace, on
     the private /tmp too), and `write_fds` folders bound writable by a descriptor the caller opened, at their paths
     (`--bind-fd`: the folder opened, whatever is at its path by then; the process that runs this argv must inherit
-    them). `--ro-bind-try` and `--bind-try` skip what does not exist. The workspace is bound read-only, and each of
-    KERNEL_DIRS writable over it; each of those and of HIDDEN_FILES and LOCK_FILES must exist, or bwrap fails."""
+    them). `--ro-bind-try` and `--bind-try` skip what does not exist. The workspace is bound read-only, each of
+    KERNEL_DIRS writable over it, and an empty read-only tmpfs over LOCKS_DIR; each of those and of HIDDEN_FILES must
+    exist, or bwrap fails."""
     corpus, ws = Path(corpus_dir), Path(workspace_dir)
     out: list[str] = [*SIGINT_PREFIX, bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns",  # --unshare-user spelled out: --disable-userns checks for it by name (bwrap 0.9.0)
                       "--ro-bind", "/usr", "/usr"]
@@ -302,8 +351,9 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     out += ["--ro-bind", str(corpus), str(corpus), "--ro-bind", str(ws), str(ws)]
     for name in KERNEL_DIRS:  # each a mount point of its own, which a card's code can neither move nor remove
         out += ["--bind", str(ws / name), str(ws / name)]
-    for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
+    for name in HIDDEN_FILES:
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
+    out += ["--tmpfs", str(ws / LOCKS_DIR), "--remount-ro", str(ws / LOCKS_DIR)]  # no lock file shows in it
     for p in write:  # after the workspace and the corpus, which would cover a write folder inside them
         out += ["--bind-try", str(p), str(p)]
     for fd, p in write_fds:

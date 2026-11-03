@@ -606,6 +606,85 @@ def test_a_link_to_a_file_outside_the_folder_and_a_pipe_are_no_evidence(tmp_path
     assert check_mark(mark('"x"'), quote("pipe", 1, "x"), [], str(data))["status"] == "failed"
 
 
+def _code_and_secret(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    """A corpus folder, a temp folder holding a file of Claude's code (tmp/sub/code.py), and outside both a file the
+    check must never show a line of."""
+    corpus, tmp, outside = (tmp_path.resolve() / n for n in ("corpus", "ws-tmp", "outside"))
+    for d in (corpus, tmp / "sub", outside):
+        d.mkdir(parents=True)
+    (tmp / "sub" / "code.py").write_text("x = 1  # made-up code\n")
+    (outside / "secret.txt").write_text("TOPSECRET-LINE-OF-A-FILE-OUTSIDE\n")
+    return corpus, tmp, tmp / "sub" / "code.py", outside / "secret.txt"
+
+
+def test_a_link_put_in_place_of_a_cited_file_after_its_real_path_was_compared_shows_nothing_outside(tmp_path: Path, monkeypatch):
+    """The check compared a cited file's real path with the folders, then opened the file by its path, so a link that
+    code a card runs put in the temp folder in place of the file, or of a folder on its way, between the two steps had
+    the check read the file it points to: its line stood in the reason and in the lines shown, which main reads. Here
+    the real path is taken as the comparison saw it (before the link came), and the file is read as it lies inside the
+    folder now, never through the link."""
+    import os
+
+    import kernel.evidence as E
+
+    corpus, tmp, code, secret = _code_and_secret(tmp_path)
+    elsewhere = tmp_path.resolve() / "elsewhere"  # a folder outside that holds a file by the cited file's name
+    elsewhere.mkdir()
+    (elsewhere / "code.py").write_text(secret.read_text())
+    real = os.path.realpath
+    for swapped, target in ((code, secret), (code.parent, elsewhere)):
+        aside = swapped.with_name(swapped.name + ".real")
+        swapped.rename(aside)
+        swapped.symlink_to(target, target_is_directory=target.is_dir())
+        monkeypatch.setattr(os.path, "realpath", lambda p, *a, **k: os.fspath(p) if os.fspath(p) == str(code) else real(p, *a, **k))
+        try:
+            problems, shown, hay, _ = E.place({"file": str(code), "line": "1", "substring": "made-up"}, str(corpus), str(corpus), [str(tmp)])
+        finally:
+            monkeypatch.setattr(os.path, "realpath", real)
+            swapped.unlink()
+            aside.rename(swapped)
+        assert "TOPSECRET" not in repr((problems, shown, hay)), (problems, shown, hay)
+        assert problems == ["sub/code.py has no line 1"] and shown is None, problems
+    problems, shown, _, _ = E.place({"file": str(code), "line": "1", "substring": "made-up"}, str(corpus), str(corpus), [str(tmp)])
+    assert problems == [] and shown["lines"][0]["text"] == "x = 1  # made-up code"
+
+
+def test_a_link_that_keeps_taking_a_cited_file_s_place_never_shows_a_line_outside(tmp_path: Path):
+    """The race itself, as a card's code in the temp folder can run it: a thread keeps putting a link to a file outside
+    in place of a cited file and the file back. No check shows a line of the file outside."""
+    import os
+    import threading
+    import time
+
+    import kernel.evidence as E
+
+    corpus, tmp, code, secret = _code_and_secret(tmp_path)
+    stop, flips = threading.Event(), [0]
+
+    def flip():
+        while not stop.is_set():
+            try:
+                os.rename(code, f"{code}.real")
+                os.symlink(secret, code)
+                time.sleep(0.0003)
+                os.unlink(code)
+                os.rename(f"{code}.real", code)
+                flips[0] += 1
+                time.sleep(0.0003)
+            except OSError:
+                pass
+
+    t = threading.Thread(target=flip, daemon=True)
+    t.start()
+    try:
+        leaks = [r for r in (E.place({"file": str(code), "line": "1", "substring": "made-up"}, str(corpus), str(corpus), [str(tmp)])
+                             for _ in range(1500)) if "TOPSECRET" in repr(r)]
+    finally:
+        stop.set()
+        t.join()
+    assert flips[0] > 10 and leaks == [], (flips[0], leaks[:1])
+
+
 def test_a_reason_that_opens_with_the_cited_file_names_it_as_it_is(tmp_path: Path):
     """A failed citation's reason that opens with the cited file keeps the file's name as it is: with its first letter
     capital it named a file that does not exist (`Notes.md has no line 9.` for notes.md), also when the name is one

@@ -617,10 +617,13 @@ def leaves(patch: dict[str, Any], at: tuple[str, ...] = ()) -> list[tuple[tuple[
 
 
 def _write(path: Path, data: dict[str, Any]) -> None:
-    from .ledger import atomic_write_text  # noqa: PLC0415 — ledger imports config, which imports this module lazily
+    """A config file (or a workspace's settings.json, migrate) written whole, in place (ledger.rewrite_text): a kernel
+    wrapper hides a workspace's config.json and settings.json by a mount on each, which a new file renamed over it
+    would take off inside a running kernel."""
+    from .ledger import rewrite_text  # noqa: PLC0415 — ledger imports config, which imports this module lazily
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    rewrite_text(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def save(c: str | None, patch: dict[str, Any]) -> None:

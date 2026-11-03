@@ -18,6 +18,7 @@ call rather than lead outside.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fnmatch
 import itertools
 import json
@@ -479,6 +480,8 @@ async def _bash(box: Box, a: dict[str, Any]) -> Out:
     home = box.home or box.write_roots[0]
     tmp = box.temp or home / "tmp"
     nofollow.makedirs(tmp)
+    with contextlib.suppress(OSError):  # srt hides it (_rules), and puts a file of its own where nothing is
+        nofollow.makedirs(box.workspace / kernel_wrap.LOCKS_DIR)
     argv = kernel_wrap.srt_argv(["/bin/bash", "-c", command], node=str(srt.node()),
                                 srt_dir=srt.package(config.REPO_ROOT) or config.REPO_ROOT, rules=_rules(box))
     env = {k: v for k in ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME") if (v := os.environ.get(k))}
