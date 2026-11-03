@@ -10,7 +10,9 @@ the callbacks are called as Claude Code calls them. Main's prompt says so (test_
 from __future__ import annotations
 
 import asyncio
+import http.server
 import json
+import threading
 import uuid
 from typing import Any
 
@@ -19,8 +21,8 @@ import pytest
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPermissionContext
 from fastapi import FastAPI
 
-from app import agents, claude_access, host_asks, ledger, runtime, runtime_cc, session
-from tests_public.test_runtime import CORPUS, fake_sdk, on  # noqa: F401 — fixtures
+from app import agents, claude_access, events, host_asks, ledger, llm, runtime, runtime_cc, runtime_tools, session
+from tests_public.test_runtime import CORPUS, FakeClient, call, fake_sdk, main_turn, on, text  # noqa: F401 — fixtures
 
 HOST = "data.example-lab.test"
 
@@ -219,3 +221,71 @@ async def test_settings_say_where_main_s_network_reaches(cc):
     assert ledger.agent_rows(CORPUS)["main"]["network"] == "ask"
     claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
     assert ledger.agent_rows(CORPUS)["main"]["network"] == "on"
+
+
+def _asked(monkeypatch) -> list[str]:
+    """The hosts host_asks asks the analyst about, each refused at once."""
+    seen: list[str] = []
+
+    async def ask(c: str, chat: Any, host: str, running: Any = None) -> bool:
+        seen.append(host)
+        return False
+
+    monkeypatch.setattr(host_asks, "ask", ask)
+    return seen
+
+
+def _permissions(prompt: str) -> str:
+    return prompt.split("## Permission requests", 1)[1].split("\n## ", 1)[0]
+
+
+async def test_main_s_prompt_on_claude_code_sign_in_says_a_bash_command_s_new_host_asks_and_nothing_else_does(
+        cc, monkeypatch):
+    """On Claude Code sign-in a Bash command's request to a new host asks the analyst (host_asks), while web fetches and
+    searches are allowed tools, which never reach the callback that asks; main's prompt says so, as Settings' row for
+    main does."""
+    asked = _asked(monkeypatch)
+    opts = options(cc.main)
+    said = _permissions(opts.system_prompt)
+    assert events.NETWORK["ask"] in said and ledger.agent_rows(CORPUS)["main"]["network"] == "ask"
+    assert isinstance(await asyncio.wait_for(network_ask(opts), 2), PermissionResultDeny) and asked == [HOST]
+    assert {"WebFetch", "WebSearch"} <= set(opts.allowed_tools)
+
+
+async def test_main_s_prompt_with_an_api_key_says_no_request_to_a_host_asks_as_its_bash_reaches_one_unasked(
+        on, monkeypatch):
+    """With an API key or WIF main's Bash runs in the sandbox runtime with the host's network, and nothing asks the
+    analyst before a request reaches a host: main's prompt said a request to a host the analyst had not allowed asks
+    them first, and in the same turn a command reached such a host unasked. It says now that nothing asks, as Settings'
+    row for main does."""
+    if why := runtime_tools.sandbox_reason():
+        pytest.skip(why)
+    hits: list[str] = []
+
+    class Recorder(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 — the handler's name
+            hits.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *a: Any) -> None:
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Recorder)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    asked = _asked(monkeypatch)
+    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    client = FakeClient([call("Bash", {"command": f"curl -sS -m 20 http://127.0.0.1:{server.server_address[1]}/rows"}),
+                         text("Done.")])
+    monkeypatch.setattr(llm, "client", lambda: client)
+    try:
+        await main_turn("Fetch the rows from my server.")
+    finally:
+        server.shutdown()
+        server.server_close()
+    said = _permissions(client.bodies[0]["system"][0]["text"])
+    assert events.NETWORK["on"] in said and "asks them first" not in said
+    assert ledger.agent_rows(CORPUS)["main"]["network"] == "on"
+    assert hits == ["/rows"] and asked == []

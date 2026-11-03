@@ -432,7 +432,7 @@ def agent_rows(c: str | None) -> dict[str, Any]:
 
     main = fence("orientation")
     out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"], "web": main["web"], "data": main["data"],
-                                    "network": "on" if runtime.engine() == "api" else "ask", "config": main["config"]}}
+                                    "network": runtime.network(), "config": main["config"]}}
     for agent in userconf.SUBAGENT_ROLES:
         role = by_role.get(agent) or blank
         out[userconf.ROLES[agent]] = {"way": role["way"], "extension": role["extension"],
