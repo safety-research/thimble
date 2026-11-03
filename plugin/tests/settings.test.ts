@@ -239,6 +239,40 @@ test("Minimal pressed off while its modes are still being set, one change per lo
   setOptions({})
 })
 
+test("Minimal pressed on again while it is still being turned off: it turns on, and off again every row comes back to what it held before the first press, or to what the person set it to while Minimal turned off", async ($, on) => {
+  const rows: Record<string, boolean | string> = { ...OWN, defaultsAt: DEFAULTS.at }
+  settingsWorld(on, rows)
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET })
+  // off, and three loads in: Catch-up, Claims, Labels and Coverage still hold Minimal's modes
+  await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($, 3)
+  expect(rows).toMatchObject({ minimal: false, catchUp: false, claimsMode: 'off', labels: false, coverage: false })
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET })
+  await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($)
+  expect(rows).toEqual({ ...OWN, defaultsAt: DEFAULTS.at })
+  // a row the person sets while Minimal turns off keeps their mode through Minimal on and off again
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
+  await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($, 2)
+  await pane.press({ key: 'mode-claimsMode-on demand' })
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET })
+  await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($)
+  expect(rows).toEqual({ ...OWN, claimsMode: 'on demand', defaultsAt: DEFAULTS.at })
+  await pane.unmount()
+  setOptions({})
+})
+
 /** The first session's settling, with what it reaches of the engine: rows Claude Code keeps, and the plugin's store. */
 function settleEngine(rows: Record<string, boolean | string>, store: Map<string, unknown>): Any {
   return {

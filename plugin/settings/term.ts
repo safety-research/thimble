@@ -131,9 +131,14 @@ async function setRow($: Engine, key: string, to: boolean | string): Promise<str
 }
 
 /** Minimal on: the modes of its rows now are kept, over them the earlier modes it kept of the rows it set before
- *  0.10.8 (`kept`); then its modes are set (PRESET), then Minimal, one change at a time (minimalStep). */
+ *  0.10.8 (`kept`); then its modes are set (PRESET), then Minimal, one change at a time (minimalStep). Pressed while
+ *  turning Minimal off still puts its rows back, a row that still holds Minimal's mode keeps the mode kept before, as
+ *  it was not put back yet, and any other row its mode now (put back, or set by the person since). */
 async function minimalOn($: Engine, held: Record<string, boolean | string>, kept: Record<string, boolean | string> = {}): Promise<string | void> {
-  if (!atPreset(held)) await $.store.set(BEFORE, { ...Object.fromEntries(Object.keys(PRESET).map(k => [k, held[k]])), ...kept })
+  const preset = PRESET as Record<string, boolean | string>
+  const earlier = (await doingNow($)) == null ? {} : (((await $.store.get(BEFORE)) ?? {}) as Record<string, boolean | string>)
+  const keep = (k: string) => (held[k] === preset[k] && k in earlier ? earlier[k] : held[k])
+  if (!atPreset(held)) await $.store.set(BEFORE, { ...Object.fromEntries(Object.keys(PRESET).map(k => [k, keep(k)])), ...kept })
   await $.store.set(DOING, 'on')
   return minimalStep($)
 }
