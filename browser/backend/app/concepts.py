@@ -472,15 +472,19 @@ def new_concept(name: str, description: str = "", kind: str = "prompt", spec: st
                                   "glob": glob, "model": model, "classes": classes, "shown": shown})
 
 
+_NONE = object()  # read_concept's default: no file
+
+
 def read_concept(ws: Path, concept_id: str) -> dict | None:
+    """The label `concept_id`, None when there is none: missing, unreadable, or no regular file, such as a link a card's
+    code left in its place, which is never followed there (read_json)."""
     p = _concept_file(ws, concept_id)
-    if not p.is_file():
-        return None
     try:
-        return _normalize(concept_id, json.loads(p.read_text("utf-8")))
+        data = read_json(p, _NONE)
     except ValueError:
         log.warning("unreadable concept %s", p)
         return None
+    return None if data is _NONE else _normalize(concept_id, data)
 
 
 def write_concept(ws: Path, concept: dict) -> None:

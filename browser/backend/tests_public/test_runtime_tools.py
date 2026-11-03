@@ -98,7 +98,8 @@ async def test_main_s_tools_never_go_through_a_link_a_card_swaps_in_while_they_r
     in place of a folder on the way between the two led the open outside: with a card swapping the workspace's tmp/
     with a link to an outside folder, some of main's Writes there landed in that folder and some Reads returned its
     file. Now each tool opens the real path Box checked one part at a time without following a link (nofollow): a call
-    the swap catches fails, and none reaches the folder."""
+    the swap catches fails, and none reaches the folder. (The kernel's sandbox binds tmp/ itself as a folder of its own,
+    kernel_wrap.PINNED_DIRS, which a card cannot move, so the swap here is of another folder the tools write.)"""
     from app import kernel_wrap, notebook, runtime, srt
 
     works = kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)) if wrap == "srt" else (
@@ -109,7 +110,9 @@ async def test_main_s_tools_never_go_through_a_link_a_card_swaps_in_while_they_r
     monkeypatch.setattr(runtime, "engine", lambda: "api")
     outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
     (outside / "secret.txt").write_text("OUTSIDE-SECRET")
-    ws, temp, corpus = config.workspace_dir("mini"), config.temp_dir("mini"), config.corpus_dir("mini")
+    ws, corpus = config.workspace_dir("mini"), config.corpus_dir("mini")
+    temp = ws / "made-up-folder"
+    temp.mkdir()
     (temp / "secret.txt").write_text("the workspace's own\n")
     box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[ws / "card-libs", temp],
                             temp=temp)
@@ -162,3 +165,67 @@ async def test_main_s_bash_reads_no_folder_a_link_a_card_left_in_the_workspace_l
     out = await runtime_tools.call(box, "Bash", {"command": f"cat {ws}/made-up-planted/secret.txt 2>&1; "
                                                             f"echo w > {ws}/card-libs/own.txt && cat {ws}/card-libs/own.txt"})
     assert "OUTSIDE-SECRET" not in out.text and out.text.splitlines()[-1] == "w", out.text
+
+
+async def test_grep_says_which_files_it_left_out_because_they_lead_outside_the_folders_it_may_read(tmp_path):
+    """Grep reads a corpus file that is a link only where Read would, by its real path inside the folders the agent may
+    read, so it leaves out one that leads outside them, as Read refuses it. It said nothing of that, and main could not
+    tell a file it left out from one with no match."""
+    corpus, ws, out = tmp_path / "corpus", tmp_path / "ws", tmp_path / "elsewhere"
+    for d in (corpus / "logs", ws, out / "more"):
+        d.mkdir(parents=True)
+    (corpus / "notes.txt").write_text("before the Friday deadline\n")
+    (out / "extra.jsonl").write_text('{"summary": "meet the deadline for export docs"}\n')
+    (out / "more" / "m.txt").write_text("an outside note about a deadline\n")
+    (corpus / "inside-link.txt").symlink_to("notes.txt")
+    (corpus / "outside.jsonl").symlink_to(out / "extra.jsonl")
+    (corpus / "outside-dir").symlink_to(out / "more", target_is_directory=True)
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus], write_roots=[ws / "tmp"])
+    real = corpus.resolve()
+    got = await runtime_tools.call(box, "Grep", {"pattern": "deadline"})
+    left = ("[1 file not searched, since it is a link that leads outside the folders you may read: "
+            f"{real / 'outside.jsonl'}]")
+    assert got.text.split("\n") == [f"{real / 'inside-link.txt'}:1: before the Friday deadline",
+                                     f"{real / 'notes.txt'}:1: before the Friday deadline", left]
+    read = await runtime_tools.call(box, "Read", {"file_path": "outside.jsonl"})
+    assert read.is_error and "outside the folders this agent may read" in read.text
+    none = await runtime_tools.call(box, "Grep", {"pattern": "made-up words", "glob": "*.jsonl"})
+    assert none.text == f"No matches found\n{left}"
+
+
+async def test_the_tools_work_below_a_folder_the_person_may_enter_but_not_list_on_macos_as_on_linux(tmp_path,
+                                                                                                  monkeypatch):
+    """The tools open a path one folder at a time without following a link (nofollow). On macOS, which has no O_PATH,
+    each folder so opened needs read permission, so a walk from / failed below a folder the person may enter but not
+    list (another account's 0711 folder, a lab share): Read, Edit and Write failed, and Glob and Grep found nothing. A
+    walk starts at the agent's folder that holds the path, which no sandboxed code can replace."""
+    monkeypatch.setattr(runtime_tools.nofollow, "PASS_FLAGS", runtime_tools.nofollow.DIR_FLAGS)  # as on macOS
+    share = tmp_path / "made-up-share"
+    corpus, ws = share / "made-up-corpus", tmp_path / "ws"
+    corpus.mkdir(parents=True)
+    (ws / "tmp").mkdir(parents=True)
+    (corpus / "notes.txt").write_text("alpha line\nbeta line\n")
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[corpus, ws / "tmp"])
+    real = corpus.resolve()
+    share.chmod(0o311)  # entered, never listed
+    try:
+        got = {name: await runtime_tools.call(box, name, args) for name, args in (
+            ("Read", {"file_path": "notes.txt"}), ("Grep", {"pattern": "beta"}), ("Glob", {"pattern": "*.txt"}),
+            ("Edit", {"file_path": "notes.txt", "old_string": "alpha", "new_string": "gamma"}),
+            ("Write", {"file_path": "new.txt", "content": "made-up\n"}))}
+    finally:
+        share.chmod(0o755)
+    assert {k: (v.is_error, v.text) for k, v in got.items()} == {
+        "Read": (False, f"{1:>6}\talpha line\n{2:>6}\tbeta line"),
+        "Grep": (False, f"{real / 'notes.txt'}:2: beta line"),
+        "Glob": (False, str(real / "notes.txt")), "Edit": (False, f"edited {real / 'notes.txt'}"),
+        "Write": (False, f"wrote {real / 'new.txt'} (8 characters)")}
+    assert (corpus / "notes.txt").read_text() == "gamma line\nbeta line\n" and (corpus / "new.txt").is_file()
+    # a folder the tools cannot list fails the call, rather than read as a folder with no files
+    corpus.chmod(0o311)
+    try:
+        glob, grep = (await runtime_tools.call(box, "Glob", {"pattern": "*.txt"}),
+                      await runtime_tools.call(box, "Grep", {"pattern": "beta"}))
+    finally:
+        corpus.chmod(0o755)
+    assert glob.is_error and grep.is_error and "Permission denied" in glob.text and "Permission denied" in grep.text

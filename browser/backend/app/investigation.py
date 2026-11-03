@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from . import config, nofollow
-from .ledger import write_json_once
+from .ledger import read_json, write_json_once
 
 log = logging.getLogger("thimble.investigation")
 router = APIRouter()
@@ -81,11 +81,15 @@ def ensure_main(c: str) -> Path:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
-    """Every parseable object line. A torn last line (a crash mid-append) is skipped, never a failure."""
+    """Every parseable object line. A torn last line (a crash mid-append) is skipped, never a failure. The log lies in
+    the workspace, which a card's code writes, so it is read as nofollow reads it: a link or a FIFO left in its place
+    reads as no log, rather than lead the read outside or hold it."""
     out: list[dict] = []
-    if not path.is_file():
+    try:
+        text = nofollow.read_text(path)
+    except (FileNotFoundError, NotADirectoryError, nofollow.Linked):
         return out
-    for line in path.read_text("utf-8").splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -101,9 +105,10 @@ def _read_jsonl(path: Path) -> list[dict]:
 
 def _read_jsonl_after(path: Path, pos: int) -> tuple[list[dict], int]:
     """The parseable object lines after byte `pos` that end in a newline, and the offset after the last of them: what
-    was appended since a reader stopped at `pos`. A file shorter than `pos`, written again, is read from its start."""
+    was appended since a reader stopped at `pos`. A file shorter than `pos`, written again, is read from its start. Read
+    as _read_jsonl reads it."""
     try:
-        with open(path, "rb") as f:
+        with os.fdopen(nofollow.open(path, os.O_RDONLY), "rb") as f:
             size = os.fstat(f.fileno()).st_size
             if size < pos:
                 pos = 0
@@ -145,7 +150,7 @@ def log_id(c: str, inv_id: str = MAIN) -> str:
     """Which log the stream serves: the investigation's creation stamp. The tab sends it back on reopen (?log=), so a
     reopen onto another log is told apart even when seq numbers overlap."""
     try:
-        data = json.loads((inv_dir(c, inv_id) / "investigation.json").read_text("utf-8"))
+        data = read_json(inv_dir(c, inv_id) / "investigation.json", None)  # never through a link or a FIFO left there
     except (OSError, ValueError):
         return ""
     return str(data.get("created") or "") if isinstance(data, dict) else ""
@@ -162,9 +167,9 @@ def reset_streams(c: str, inv_id: str = MAIN) -> None:
 
 def _last_stored_seq(path: Path) -> int:
     """The highest seq in the file's tail (-1 when none): another process may have appended since this process last
-    did."""
+    did. Read as _read_jsonl reads it, so a FIFO a card's code left there holds no emit, nor the event loop."""
     try:
-        with open(path, "rb") as f:
+        with os.fdopen(nofollow.open(path, os.O_RDONLY), "rb") as f:
             f.seek(0, 2)
             size = f.tell()
             f.seek(max(0, size - 16_384))

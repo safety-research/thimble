@@ -215,6 +215,8 @@ def start(c: str, cid: str, author: str, *, again: bool = False) -> _Run | None:
     check of the same card is cancelled first. `again` re-reads a card already read as it stands (again_route)."""
     from . import card_size, checkstore, notebook  # noqa: PLC0415
 
+    if not notebook.ID_RE.match(cid or ""):  # a card whose id a group's file, which a card's code writes, made up
+        return None
     old = _runs.pop((c, cid), None)
     if old is not None and old.task is not None and not old.task.done():
         old.outcome = "superseded"
@@ -493,6 +495,12 @@ def stop_all(c: str, reason: str = STOPPED) -> list[str]:
 
 
 def _shot_path(c: str, cid: str, name: str) -> Path:
+    """card-checks/<card>/<name>, made when missing; ValueError for a card's id a route would not take, as one with ../
+    parts that a card's code wrote into its group's file."""
+    from . import notebook  # noqa: PLC0415
+
+    if not notebook.ID_RE.match(cid or ""):
+        raise ValueError(f"{cid!r} is no card's id")
     d = config.workspace_dir(c) / SHOTS_DIR / cid
     nofollow.makedirs(d)
     return d / name
@@ -1264,7 +1272,8 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -
     images = []
     if isinstance(inp.get("picture"), str) and inp["picture"]:
         try:
-            png = await asyncio.to_thread(Path(inp["picture"]).read_bytes)
+            # kept in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+            png = await asyncio.to_thread(nofollow.read_bytes, inp["picture"])
             images = [(await asyncio.to_thread(fit_image, png), "image/png")]
         except OSError:
             log.warning("card check: the picture %s could not be read", inp["picture"])

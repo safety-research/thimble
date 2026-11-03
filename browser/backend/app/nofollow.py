@@ -183,6 +183,14 @@ def open(path: PathLike, flags: int, mode: int = 0o666, *, root: PathLike | None
         return open_at(fd, name, flags, mode)
 
 
+def reader(path: PathLike, mode: str = "rb", encoding: str | None = None, errors: str | None = None, *,
+           root: PathLike | None = None):  # noqa: ANN201 — a file object of `mode`
+    """The file `path` opened to read as a file object (`mode` "rb" or "r", with `encoding` and `errors`), as `open`
+    opens it: never through a link in a workspace, and never a FIFO or another entry that is no regular file
+    (Linked)."""
+    return os.fdopen(open(path, os.O_RDONLY, root=root), mode, encoding=encoding, errors=errors)
+
+
 def read_bytes(path: PathLike, *, root: PathLike | None = None) -> bytes:
     with os.fdopen(open(path, os.O_RDONLY, root=root), "rb") as f:
         return f.read()

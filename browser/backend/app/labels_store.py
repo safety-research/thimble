@@ -894,8 +894,8 @@ def _read_rows(jsonl: Path, start: int, end: int, mark: list[int] | None = None,
     """The rows of the labels file's bytes [start, end), parsed one at a time, yielding the interpreter every
     YIELD_EVERY rows, and with `markers` its cover and clear lines in place. `mark[0]` receives the offset after the
     last full line."""
-    try:
-        f = open(jsonl, "rb")
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        f = nofollow.reader(jsonl)
     except OSError:
         return
     with f:

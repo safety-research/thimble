@@ -632,7 +632,7 @@ def progress(c: str, cid: str) -> dict[str, Any] | None:
         out["phase"] = "call"
     if call.progress is not None:
         with contextlib.suppress(OSError, ValueError):
-            raw = json.loads(call.progress.read_text("utf-8"))
+            raw = json.loads(nofollow.read_text(call.progress))  # where the views kernel writes: never a link or a FIFO
             if isinstance(raw, dict):
                 for k in ("phase", "note"):
                     if isinstance(raw.get(k), str):

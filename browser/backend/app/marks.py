@@ -585,7 +585,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         ev = evidence()
         cited = cited_outputs(answer)
         # the calls of whoever wrote the marks: main, or the thread's fork for a side thread's answer
-        wrote = thread["calls"] if thread else main.get("transcript_path")
+        wrote = _fork_transcript(c, thread) if thread else main.get("transcript_path")
         mains = [k for k in bash_calls(_transcript_messages(wrote), "main")
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
@@ -781,13 +781,29 @@ def bash_calls(messages: list[dict[str, Any]], by: str) -> list[dict[str, Any]]:
     return out
 
 
+def _fork_transcript(c: str, thread: dict[str, Any]) -> str | None:
+    """The transcript of a side thread's fork that a reply's record keeps (answer_ended): a subagent's file,
+    agent-<id>.jsonl in the folder of a session whose transcript is where the mirror finds one (session.own_transcript),
+    or in its subagents/; None for any other path, since a card's code writes the record."""
+    from . import session  # noqa: PLC0415
+
+    path = thread.get("calls")
+    if not isinstance(path, str) or not os.path.isabs(path):
+        return None
+    p = Path(os.path.normpath(path))
+    folder = p.parent.parent if p.parent.name == "subagents" else p.parent
+    sid = folder.name
+    return path if session.AGENT_FILE_RE.match(p.name) and session.own_transcript(
+        c, sid, str(folder.with_name(f"{sid}.jsonl"))) else None
+
+
 def _transcript_messages(path: Any) -> list[dict[str, Any]]:
     """Main's transcript records, each a dict (a line that does not parse is skipped)."""
     out: list[dict[str, Any]] = []
     if not path:
         return out
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
+    try:  # a transcript in the workspace (the server's own runtime's) lies where a card's code writes (nofollow)
+        with nofollow.reader(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 with contextlib.suppress(ValueError):
                     rec = json.loads(line)

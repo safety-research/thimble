@@ -436,7 +436,7 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
             check["prompt"] = prompt
             check["version"] = int(check.get("version") or 1) + 1
             for doc, run in (check.get("runs") or {}).items():
-                d = report_types.read_doc(c, inv.MAIN, doc) if doc not in (CANVAS, ANSWERS) else None
+                d = report_types.read_doc(c, inv.MAIN, doc) if _is_doc(doc) else None
                 locked = {p["fp"] for p in passages(doc, d) if p["locked"]} if d else set()
                 run["seen"] = [fp for fp in run.get("seen") or [] if fp in locked]
     if colour is not None:
@@ -704,7 +704,10 @@ def recover(root: Path | None = None) -> list[str]:
         c = p.parent.parent.name
         changed = False
         for doc, rec in check["runs"].items():
-            if not isinstance(rec, dict) or rec.get("status") != "running":
+            # a run's target, which a card's code can write into the check's file: the cards, the answers or a
+            # document whose name a route takes, since it names the run's folder and the files its end reads
+            if not isinstance(rec, dict) or rec.get("status") != "running" \
+                    or not (doc in (CANVAS, ANSWERS) or _is_doc(doc)):
                 continue
             aid = str(rec.get("agent_id") or "")
             try:
@@ -923,9 +926,11 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
     elif doc == ANSWERS:
         cover = answer_cover(c, check, passages_, force, since) if covers(check, "answers") else []  # type: ignore[arg-type]
         notify, route, call = False, route if route != TYPED else "follow-on", None  # a run over answers wakes no one
-    else:
+    elif _is_doc(doc):
         d = report_types.read_doc(c, inv.MAIN, doc)
         cover = to_cover(check, doc, d, passages_, force) if d is not None else []
+    else:  # no run target: a document's name is one a route takes, since it names the run's folder and files
+        return None
     if not cover:
         return None
     old = _current(c, cid, doc)
@@ -1429,6 +1434,14 @@ async def refresh(c: str, cid: str, route: str = "click") -> list[dict[str, Any]
     return out
 
 
+def _is_doc(doc: Any) -> bool:
+    """Whether `doc` names a document as a route takes its name (report_types.SLUG_RE): a check's run target besides
+    the cards (CANVAS) and the answers (ANSWERS)."""
+    from . import report_types  # noqa: PLC0415
+
+    return isinstance(doc, str) and doc not in (CANVAS, ANSWERS) and report_types.SLUG_RE.match(doc) is not None
+
+
 def _spawn(c: str, coro: Any) -> None:
     t = asyncio.ensure_future(coro)
     _tasks[t] = c
@@ -1444,6 +1457,8 @@ def _writer_ended(c: str, meta: dict[str, Any]) -> None:
     if meta.get("role") != WRITER_ROLE or meta.get("status") != "done" or not meta.get("doc"):
         return
     doc = str(meta["doc"])
+    if not _is_doc(doc):  # the meta lies in the workspace, which a card's code writes
+        return
     shown = [x for x in list_checks(c) if x.get("shown") and covers(x, "documents")]
     if not shown:
         return

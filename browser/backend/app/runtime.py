@@ -389,9 +389,11 @@ class Space:
         self.corpus = config.corpus_dir(c)
         self.dir = self.ws / DIR  # in the workspace: its files are written and moved as nofollow does
         nofollow.makedirs(self.dir)
-        rec = _read_json(self.dir / "main.json")
-        self.sid = str(rec.get("session") or "") or str(uuid.uuid4())
-        if not rec.get("session"):
+        # main's chat names main's files (main_path, Conv.state_path), and a card's code writes main.json: a chat id no
+        # route would take (SID_OK) is none, and main starts a new chat
+        kept = str(_read_json(self.dir / "main.json").get("session") or "")
+        self.sid = kept if SID_OK.match(kept) else str(uuid.uuid4())
+        if self.sid != kept:
             nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         for kind in ("api", "cc"):  # main's state from before chats were kept apart is its chat's
             old, new = self.dir / "convs" / f"{MAIN}.{kind}.json", self.dir / "convs" / f"{MAIN}-{self.sid}.{kind}.json"
@@ -626,9 +628,9 @@ def _read_json(p: Path) -> dict[str, Any]:
 
 
 def _last_uuid(path: Path) -> str | None:
-    try:
-        with path.open("rb") as f:
-            f.seek(max(0, path.stat().st_size - 65536))
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        with nofollow.reader(path) as f:
+            f.seek(max(0, os.fstat(f.fileno()).st_size - 65536))
             lines = f.read().splitlines()
     except OSError:
         return None
@@ -644,8 +646,8 @@ def _chat_of(path: Path) -> dict[str, Any]:
     """{turns, first, start}: how many turns a main transcript holds (the user records that open one), the first message
     the analyst typed in it, as one line, and when its first turn began (the record's timestamp, '' when none)."""
     turns, first, other, start = 0, "", "", ""
-    try:
-        f = path.open(encoding="utf-8")
+    try:  # as _last_uuid reads it
+        f = nofollow.reader(path, "r", encoding="utf-8")
     except OSError:
         return {"turns": 0, "first": "", "start": ""}
     with f:

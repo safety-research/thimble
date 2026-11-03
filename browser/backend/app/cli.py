@@ -967,24 +967,40 @@ def _is_kernel(pid: int | None, conn: str) -> bool:
     return any("ipykernel_launcher" in a for a in argv) and conn in argv
 
 
+def _own_conn(rec_path: Path, conn: str) -> bool:
+    """Whether `conn` names the connection file of the kernel whose record is `rec_path`, <key>.conn.json beside it, as
+    notebook writes it: the record lies in kernels/ of a workspace, which a card's code writes, so the connection file
+    it names, which says which process is the kernel and which file goes with it, is checked to be the record's own."""
+    p = Path(conn)
+    return p.is_absolute() and p.name == rec_path.name[: -len(".json")] + ".conn.json" \
+        and os.path.realpath(p.parent) == os.path.realpath(rec_path.parent)
+
+
 def kernel_processes(ws_dir: Path) -> list[tuple[int, int | None, str, Path | None]]:
     """(pid, pgid, connection file, record) of every kernel of the workspaces under `ws_dir`: the ones the records
     name, plus any live ipykernel of this user no record claims whose connection file or working directory lies under
-    a workspace. A record whose pid is dead or another program's is listed with pid 0."""
+    a workspace. A record whose pid is dead or another program's, or whose connection file is not its own (_own_conn),
+    is listed with pid 0 and no connection file. A kernel leads its own process group (notebook._launch), so the group
+    signalled is its pid's, never one a record names."""
+    from . import nofollow  # noqa: PLC0415
+
     out: list[tuple[int, int | None, str, Path | None]] = []
     seen: set[str] = set()
     for rec_path in sorted(ws_dir.glob(f"*/{KERNELS_DIR}/*.json")):
         if rec_path.name.endswith(".conn.json"):
             continue
-        rec = _read_json(rec_path)
+        try:  # in a workspace a card's code writes: never through a link or a FIFO left there
+            rec = json.loads(nofollow.read_text(rec_path, root=ws_dir))
+        except (OSError, ValueError):
+            continue
         if not isinstance(rec, dict):
             continue
         conn = str(rec.get("connection_file") or "")
-        pid, pgid = rec.get("pid"), rec.get("pgid")
+        conn = conn if _own_conn(rec_path, conn) else ""
+        pid = rec.get("pid")
         pid = pid if isinstance(pid, int) and pid > 0 else 0
-        pgid = pgid if isinstance(pgid, int) and pgid > 0 else None
         seen.add(conn)
-        out.append((pid if _is_kernel(pid, conn) else 0, pgid, conn, rec_path))
+        out.append((pid if conn and _is_kernel(pid, conn) else 0, None, conn, rec_path))
     prefix = f"{ws_dir}/"
     for pid, argv in procs.commands().items():
         if not any("ipykernel_launcher" in a for a in argv) or "-f" not in argv:
@@ -1010,8 +1026,18 @@ def _cwd_in_workspace(pid: int, ws_dir: Path) -> bool:
         return False
 
 
+def _kernel_file(conn: str, ws_dir: Path) -> bool:
+    """Whether `conn` is a kernel's connection file in kernels/ of a workspace under `ws_dir`
+    (<ws>/kernels/<key>.conn.json), the only file a kernel's command line names that thimble removes."""
+    p = Path(conn)
+    return p.is_absolute() and p.name.endswith(".conn.json") and p.parent.name == KERNELS_DIR \
+        and os.path.realpath(p.parent.parent.parent) == os.path.realpath(ws_dir)
+
+
 def stop_kernels(ws_dir: Path | None = None) -> str:
     """End every notebook kernel of the workspaces under `ws_dir` and drop their records and connection files."""
+    from . import nofollow  # noqa: PLC0415
+
     ws_dir = Path(ws_dir if ws_dir is not None else resolve_env()["workspaces_dir"]).expanduser()
     found = kernel_processes(ws_dir) if ws_dir.is_dir() else []
     live = [(pid, pgid, conn) for pid, pgid, conn, _ in found if pid]
@@ -1026,12 +1052,14 @@ def stop_kernels(ws_dir: Path | None = None) -> str:
             _signal_group(pid, pgid, signal.SIGKILL)
     dropped = 0
     for _pid, _pgid, conn, rec_path in found:
-        for f in (rec_path, Path(conn) if conn and procs.under(conn, ws_dir) else None):
+        # a record and the connection file a kernel was started on (`-f`) when it is one of kernels/ of a workspace,
+        # each removed as nofollow removes it, never through a link
+        for f in (rec_path, Path(conn) if conn and _kernel_file(conn, ws_dir) else None):
             if f is not None and f.is_file():
                 try:
-                    f.unlink()
+                    nofollow.unlink(f, root=ws_dir, missing_ok=False)
                     dropped += 1
-                except OSError:
+                except (OSError, ValueError):
                     pass
     if not live:
         return "kernels: none running" + (f" ({dropped} stale file(s) dropped)" if dropped else "")
@@ -2661,10 +2689,13 @@ def has_ui_build() -> bool:
 def orient_status(name: str | None) -> str:
     if not name:
         return "no workspace"
-    p = Path(resolve_env()["workspaces_dir"]) / name / "orient" / "run.json"
-    try:
-        return str(json.loads(p.read_text("utf-8")).get("status") or "unknown")
-    except (OSError, ValueError):
+    from . import nofollow  # noqa: PLC0415
+
+    root = Path(resolve_env()["workspaces_dir"])
+    p = root / name / "orient" / "run.json"
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there
+        return str(json.loads(nofollow.read_text(p, root=root)).get("status") or "unknown")
+    except (OSError, ValueError, AttributeError):
         return "not started"
 
 

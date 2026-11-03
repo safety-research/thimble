@@ -89,6 +89,12 @@ READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR, TRUSTED_DIR)
 # the workspace's temp folder (config.temp_dir): on the Messages API every kernel's TMPDIR, and that of main's and its
 # thread forks' shell commands (runtime.shell_temp), so a card's code reads what such a command wrote in $TMPDIR
 TEMP_DIR = "tmp"
+# the workspace's folders that main's Bash on the Messages API writes by their paths (runtime.spec_of's write roots of
+# fixed names): on Linux each is bound as a folder of its own, writable, over the workspace's bind, so a card's code can
+# neither move nor remove one (a mount point cannot be) to put a link in its place in the moment srt binds main's write
+# roots by their paths, after its own check that none is a link. The server makes them before the kernel starts. macOS
+# has no mounts, and srt there follows the rules of its own Seatbelt profile
+PINNED_DIRS = (TEMP_DIR, "card-libs")
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
@@ -213,10 +219,12 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
         allow_read.append(str(Path(srt_dir).joinpath(*SRT_HELPERS)))
         deny_read = _outermost(deny_read, allow_read)
     read_only = [str(ws / name) for name in (*READ_ONLY_FILES, *READ_ONLY_DIRS)]
+    # on Linux srt binds each allowWrite path by itself, so each of PINNED_DIRS is a mount point of its own there
+    pinned = [str(ws / name) for name in PINNED_DIRS] if system == "linux" else []
     return {"filesystem": {
         "denyRead": list(dict.fromkeys(deny_read)),
         "allowRead": list(dict.fromkeys(allow_read)),
-        "allowWrite": [str(ws), *map(str, write)],
+        "allowWrite": [str(ws), *pinned, *map(str, write)],
         "denyWrite": [*hidden, *read_only, *SRT_NO_WRITE[system]],
     }}
 
@@ -294,6 +302,8 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     for fd, p in write_fds:
         out += ["--bind-fd", str(fd), str(p)]
     out += ["--ro-bind", str(corpus), str(corpus), "--bind", str(ws), str(ws)]
+    for name in PINNED_DIRS:  # each a mount point of its own, which a card's code can neither move nor remove
+        out += ["--bind-try", str(ws / name), str(ws / name)]
     for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
     for name in READ_ONLY_FILES:  # read-only over the workspace bind (the server writes from outside)

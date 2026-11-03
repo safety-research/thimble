@@ -109,8 +109,8 @@ def global_name(e: Entry) -> str:
 
 def lock(folder: Path) -> dict[str, dict[str, Any]]:
     """The view's LOCK_FILE, {} when there is none."""
-    try:
-        raw = json.loads((folder / LIB_DIR / LOCK_FILE).read_text("utf-8"))
+    try:  # a folder a card's or an agent's code may write (card-libs): never a link or a FIFO there (nofollow)
+        raw = json.loads(nofollow.read_text(folder / LIB_DIR / LOCK_FILE))
     except (OSError, ValueError):
         return {}
     return {str(k): v for k, v in raw.items() if isinstance(v, dict)} if isinstance(raw, dict) else {}
@@ -125,7 +125,10 @@ def vendored(folder: Path, entry: str) -> tuple[str, str] | None:
     f = folder / LIB_DIR / str(item.get("file") or "")
     if f.parent != folder / LIB_DIR or f.is_symlink() or not f.is_file():
         return None
-    data = f.read_bytes()
+    try:  # as lock reads it
+        data = nofollow.read_bytes(f)
+    except OSError:
+        return None
     if item.get("sha256") and hashlib.sha256(data).hexdigest() != item["sha256"]:
         return None
     return str(item.get("kind") or "js"), data.decode("utf-8")
