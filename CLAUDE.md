@@ -73,8 +73,9 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
      The line above the prompt shows the keys: `v` visualize, `s` rewrite, `w` claims, `r` coverage. A click on
      `thimble` in that line, or `/thimble-settings`, opens the settings; `/plugin` turns thimble off.
    - The workbench, when they want to work in a web page, with the folder's files and views of them beside the chat, a
-     canvas of cards, labels and a report: run `thimble-browser` in a folder of files, in a terminal of its own, and open
-     the sign-in link it prints. Run with `!` here, its link has no sign-in code, since what it prints reaches you.
+     canvas of cards, labels and a report: run `thimble-browser` in a folder of files, in a terminal of its own, and
+     open the sign-in link it prints. Started with `!` here, it prints a link with no sign-in code, since what it
+     prints reaches you.
 6. When the plugin works, offer to show it on `examples/sample/runs.csv` in the folder of step 3 (40 made-up nightly
    test runs), in one short line, and never ask the user to type the question or a path. When that folder lies outside
    this session's folder (a citation can name only files in the folder its session works in), or after a change to
