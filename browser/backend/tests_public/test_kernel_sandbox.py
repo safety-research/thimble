@@ -47,11 +47,11 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     """The kernel under srt on macOS reads neither the home folder, other users' folders, other volumes, the temp
     folders nor thimble's and Claude Code's folders; it reads the corpus, the workspace, the venv, each folder its
     interpreter resolves through and the fonts; of the workspace it writes only its own folders (scratch/, tmp/,
-    view-indexes/), and the workspace's config stays hidden. On Linux each of its own folders is hidden by a rule of its
-    own too, so srt binds it back writable over the workspace's read-only bind."""
+    view-indexes/), and the workspace's config and its locks folder stay hidden. On Linux each of its own folders is
+    hidden by a rule of its own too, so srt binds it back writable over the workspace's read-only bind."""
     rules, (venv, minor, real) = _rules(tmp_path, "darwin")
     fs = rules["filesystem"]
-    hidden = {f"{WS}/settings.json", f"{WS}/config.json", f"{WS}/subagents.json.lock"}
+    hidden = {f"{WS}/settings.json", f"{WS}/config.json", f"{WS}/locks"}
     own = [f"{WS}/scratch", f"{WS}/tmp", f"{WS}/view-indexes"]
     assert {HOME, "/Users", "/Volumes", "/private/tmp", "/private/var/folders", f"{HOME}/.thimble", f"{HOME}/.claude",
             *hidden} <= set(fs["denyRead"])
@@ -132,12 +132,10 @@ def test_on_linux_a_venv_whose_python_goes_through_uv_s_minor_version_folder_run
     venv, ws, corpus = (tmp_path / n for n in ("venv", "ws", "corpus"))
     (venv / "bin").mkdir(parents=True)
     (venv / "bin" / "python").symlink_to(minor / "bin" / "python3.12")
-    for d in (ws, corpus, *(ws / name for name in kernel_wrap.KERNEL_DIRS)):
-        d.mkdir()
+    for d in (ws, corpus, *(ws / name for name in (*kernel_wrap.KERNEL_DIRS, kernel_wrap.LOCKS_DIR))):
+        d.mkdir()  # as the server makes them before a kernel starts
     for name in kernel_wrap.HIDDEN_FILES:
         (ws / name).write_text("{}\n")
-    for name in kernel_wrap.LOCK_FILES:  # as the server makes it before a kernel starts
-        (ws / name).write_text("")
     py = str(venv / "bin" / "python")
     cmd = [py, "-c", "print('ran')"]
     if wrap == "srt":
@@ -774,14 +772,17 @@ SERVER_FILES = {
 }
 # a card's code that tries every way to change the workspace outside its own folders (OWN, and its HOME) and prints
 # what it managed as JSON: a file written, emptied, linked into its own temp folder, removed, moved, or its mode or
-# times changed; a file, a folder, a link or a FIFO made in a folder; a folder moved; one of its own folders moved
+# times changed; a file, a folder, a link or a FIFO made in a folder; a folder moved; one of its own folders moved. A
+# folder the sandbox hides (HIDDEN) shows the kernel a stand-in, under srt an empty tmpfs of the sandbox's own whose
+# writes never reach the disk: it is only moved
 ATTACK_SRC = r"""
 import json, os
 ws = os.path.realpath('..')
 own = [os.path.join(ws, n) for n in OWN]
+stand_ins = [os.path.join(ws, n) for n in HIDDEN]
 home = os.path.realpath(os.environ['HOME'])
 def mine(p):
-    return any(p == o or p.startswith(o + os.sep) for o in [*own, home])
+    return any(p == o or p.startswith(o + os.sep) for o in [*own, *stand_ins, home])
 done, tried = [], 0
 def attempt(what, fn):
     global tried
@@ -796,6 +797,8 @@ for root, dirs, files in os.walk(ws):
     dirs[:] = [d for d in dirs if not mine(os.path.join(root, d))]
     entries += [(os.path.join(root, d), True) for d in dirs] + [(os.path.join(root, f), False) for f in files]
 hard = os.path.join(ws, 'tmp', 'made-up-hard-link')
+for s in stand_ins:
+    attempt('move ' + s, lambda: os.rename(s, s + '.moved'))
 for p, folder in entries:
     if folder:
         attempt('file in ' + p, lambda: open(os.path.join(p, 'planted.json'), 'x').close())
@@ -844,7 +847,8 @@ async def test_a_card_s_code_changes_nothing_of_the_workspace_but_its_own_folder
                                          *(ws / "trusted").iterdir()]}
     try:
         await notebook.run_code("mini", "print('a first card')", "main")  # the kernel's files, the group, the history
-        cell = await notebook.run_code("mini", f"OWN = {list(kernel_wrap.KERNEL_DIRS)!r}\n{ATTACK_SRC}", "main")
+        cell = await notebook.run_code(
+            "mini", f"OWN = {list(kernel_wrap.KERNEL_DIRS)!r}\nHIDDEN = {[kernel_wrap.LOCKS_DIR]!r}\n{ATTACK_SRC}", "main")
     finally:
         await notebook.shutdown_all()
     got = json.loads(_text(cell))
@@ -1210,3 +1214,63 @@ def test_a_kernel_s_sandbox_is_read_from_its_wrapper_s_command_line_as_the_syste
     for shown in (line, " ".join(line).split()):
         assert kernel_wrap.sandbox_of(shown) == ("srt", rules["filesystem"]["allowWrite"], [])
     assert kernel_wrap.sandbox_of(["/usr/bin/python3", "-P", "-m", "ipykernel_launcher"]) is None
+
+
+# a card's code that opens every lock file it finds in its workspace and holds an flock on each, as long as it runs
+HOLD_LOCKS_CELL = r"""
+import fcntl, os
+ws = os.path.realpath('..')
+held = globals().setdefault('_made_up_held', [])
+names = []
+for root, dirs, files in os.walk(ws):
+    for f in files:
+        if f.endswith('.lock') or os.path.relpath(root, ws).split(os.sep)[0] == 'locks':
+            try:
+                fd = os.open(os.path.join(root, f), os.O_RDONLY)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(fd)
+                names.append(os.path.relpath(os.path.join(root, f), ws))
+            except OSError:
+                pass
+print(sorted(names))
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_a_card_s_code_holds_no_lock_of_the_workspace_s_stores(wrap, monkeypatch, workspaces_tmp):
+    """A lock file a kernel may read it may also open and flock: a card that held the groups' lock (notebooks/.lock)
+    made every later change of the groups wait ledger.LOCK_WAIT_S for it, on the server's event loop, and then go on
+    without the lock, so every card run took 6 s and the server stood still 2 s at a time. Now every lock of the
+    workspace lies in its locks folder, which the kernel sees empty (bwrap) or not at all (srt): the card finds no lock
+    to hold, and the runs after it take no longer."""
+    import asyncio
+    import time
+
+    from app import ledger
+
+    if not (LINUX and _wrap_works(wrap)):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    gaps: list[float] = []
+    stop = asyncio.Event()
+
+    async def ticker():
+        last = time.monotonic()
+        while not stop.is_set():
+            await asyncio.sleep(0.05)
+            gaps.append(time.monotonic() - (last := time.monotonic() - 0) + 0 if False else time.monotonic() - last)
+            last = time.monotonic()
+
+    try:
+        await notebook.run_code("mini", "print(1)", "main")  # the kernel, the group and their locks
+        held = await notebook.run_code("mini", HOLD_LOCKS_CELL, "main")
+        tick = asyncio.create_task(ticker())
+        t0 = time.monotonic()
+        later = await notebook.run_code("mini", "print(2)", "main")
+        took = time.monotonic() - t0
+        stop.set()
+        await tick
+    finally:
+        await notebook.shutdown_all()
+    assert _text(held).strip() == "[]", held["outputs"]
+    assert _said(later) == ["2"] and took < ledger.LOCK_WAIT_S and max(gaps) < 1.0, (took, max(gaps))

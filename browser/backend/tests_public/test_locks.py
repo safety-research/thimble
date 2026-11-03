@@ -20,6 +20,7 @@ from pathlib import Path
 from app import config, notebook
 ws, group, tag, n = Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
 config.workspace_dir = lambda c: ws
+config.WORKSPACES_DIR = ws.parent
 async def main():
     for i in range(n):
         notebook.insert_cell(ws, group, notebook.new_cell("note", "test", f"{{tag}}{{i}}", group, payload={{"text": f"{{tag}}{{i}}"}}))
@@ -44,7 +45,8 @@ def test_two_processes_adding_cards_to_one_group_keep_every_card(tmp_path: Path)
     cells = json.loads((ws / "notebooks" / "g1.json").read_text())["cells"]
     assert len(cells) == 30
     assert sorted(c["title"] for c in cells) == sorted([f"a{i}" for i in range(15)] + [f"b{i}" for i in range(15)])
-    assert (ws / "notebooks" / ".lock").exists()  # the folder's lock file, inside the folder main's sandbox may write
+    # the folder's lock file, in the workspace's locks folder, which no kernel sees (nofollow.lock_file)
+    assert (ws / "locks" / "notebooks.lock").exists() and not (ws / "notebooks" / ".lock").exists()
 
 
 def test_a_run_saves_into_the_group_as_another_process_left_it(workspaces_tmp: Path) -> None:
@@ -106,3 +108,16 @@ def test_chat_meta_changes_from_two_processes_both_land(workspaces_tmp: Path, tm
     assert other.wait(timeout=60) == 0
     got = agents.read_meta("mini", meta["id"])
     assert got["a"] == list(range(30)) and got["b"] == list(range(30))
+
+
+def test_a_hook_and_the_server_take_one_lock_of_a_calls_store_in_the_workspace_s_locks_folder(tmp_path: Path) -> None:
+    """Every lock of a workspace's stores lies in its locks folder, which no kernel sees: the lock calls_file takes in
+    a hook is the one ledger.locked takes in the server, and a store outside the workspaces keeps its lock beside it."""
+    from app import calls_file, nofollow
+
+    ws = config.workspace_dir("mini")
+    store = calls_file.path(ws, "made-up-chat")
+    assert calls_file._Lock(store).lf == ledger.lock_file(store) == ws / "locks" / "calls" / "made-up-chat.jsonl.lock"
+    assert ledger.lock_file(ws / "notebooks") == ws / "locks" / "notebooks.lock"
+    elsewhere = tmp_path / "made-up" / "store.json"
+    assert nofollow.lock_file(elsewhere) == elsewhere.with_name("store.json.lock")

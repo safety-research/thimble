@@ -377,8 +377,9 @@ def test_the_state_file_is_replaced_whole_under_its_lock(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     sf.ensure(ws)
-    assert sorted(p.name for p in ws.iterdir()) == sorted([sf.DIR, sf.LOCK])
+    assert sorted(p.name for p in ws.iterdir()) == sorted([sf.DIR, sf.LOCKS])
     assert sorted(p.name for p in sf.trusted_dir(ws).iterdir()) == sorted(sf.FILES)
+    assert [p.name for p in sf.lock_path(ws).parent.iterdir()] == [sf.LOCK]
     with sf.update(ws) as state:
         state["agents"] = {"a": {"status": "running"}}
     inode = sf.state_path(ws).stat().st_ino
@@ -616,11 +617,21 @@ def test_a_write_waits_for_the_lock_module_bridge_takes(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     sf.ensure(ws)
-    assert (ws / sf.LOCK).is_file()
-    fd = os.open(ws / sf.LOCK, os.O_RDWR)
+    assert sf.lock_path(ws).is_file()
+    fd = os.open(sf.lock_path(ws), os.O_RDWR)
     fcntl.flock(fd, fcntl.LOCK_EX)
     threading.Timer(0.3, lambda: os.close(fd)).start()
     t0 = time.monotonic()
     with sf.update(ws) as state:
         state["module"] = {"session": "s"}
     assert time.monotonic() - t0 >= 0.25 and sf.read(ws)["module"] == {"session": "s"}
+    # a lock on subagents.json itself, which a kernel may read and so flock, holds no write
+    held = os.open(sf.state_path(ws), os.O_RDONLY)
+    fcntl.flock(held, fcntl.LOCK_EX)
+    try:
+        t0 = time.monotonic()
+        with sf.update(ws) as state:
+            state["module"] = {"session": "t"}
+        assert time.monotonic() - t0 < 0.5 and sf.read(ws)["module"] == {"session": "t"}
+    finally:
+        os.close(held)

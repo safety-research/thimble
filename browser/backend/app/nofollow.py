@@ -74,6 +74,24 @@ def split(path: PathLike, root: PathLike | None = None) -> tuple[str, tuple[str,
     return None
 
 
+LOCK_SUFFIX = ".lock"
+
+
+def lock_file(path: PathLike) -> Path:
+    """The lock file of the store at `path`, the one every process that writes the store flocks (ledger.locked,
+    calls_file). For a store in a workspace, <workspace>/locks/<the store's path in the workspace>.lock: every lock of
+    a workspace lies in its locks folder (kernel_wrap.LOCKS_DIR), which no kernel can see, so no card's code can hold
+    one. A store elsewhere keeps its lock beside it: `<path>.lock` beside a file, `<path>/.lock` inside a folder."""
+    p = Path(path)
+    sp = split(p)
+    if sp is not None and len(sp[1]) > 1:
+        from .kernel_wrap import LOCKS_DIR  # noqa: PLC0415
+
+        base, (workspace, *inside, name) = sp
+        return Path(base, workspace, LOCKS_DIR, *inside, name + LOCK_SUFFIX)
+    return p / LOCK_SUFFIX if p.is_dir() else p.with_name(p.name + LOCK_SUFFIX)
+
+
 def _down(fd: int, name: str, make: bool, mode: int, flags: int = DIR_FLAGS) -> int:
     """The folder `name` in the folder `fd`, opened with `flags` without following a link, made first when missing and
     `make`."""

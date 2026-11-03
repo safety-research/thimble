@@ -2657,16 +2657,15 @@ def _kernel_hides() -> list[Path]:
 
 
 def _guarded_files(workspace: str) -> None:
-    """Each of kernel_wrap.HIDDEN_FILES (`{}`) and LOCK_FILES (empty) made in the workspace when missing, since a
-    wrapper hides a file that exists (bwrap fails on a missing one, and srt would leave an empty read-only file in its
-    place while the kernel runs, which the server could not write). Each of the kernel's own folders
-    (kernel_wrap.KERNEL_DIRS) is made too, the only ones it writes, since bwrap fails on a missing one and srt leaves it
-    read-only, in place of a link or a file an earlier version's kernel left there: the wrapper would show it a link's
-    target, and a file stops the folder from being made."""
-    for name in kernel_wrap.KERNEL_DIRS:
+    """Each of kernel_wrap.HIDDEN_FILES (`{}`) made in the workspace when missing, since a wrapper hides a file that
+    exists (bwrap fails on a missing one, and srt would leave an empty read-only file in its place while the kernel
+    runs, which the server could not write). Each of the kernel's own folders (kernel_wrap.KERNEL_DIRS), the only ones
+    it writes, and the locks folder (kernel_wrap.LOCKS_DIR), which it cannot see, is made too, since bwrap fails on a
+    missing one and srt leaves it as it finds it, in place of a link or a file an earlier version's kernel left there:
+    the wrapper would show it a link's target, and a file stops the folder from being made."""
+    for name in (*kernel_wrap.KERNEL_DIRS, kernel_wrap.LOCKS_DIR):
         config.private_dir(_ws_dir(workspace) / name, no_link=True)
-    files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES), *((n, "") for n in kernel_wrap.LOCK_FILES)]
-    for name, text in files:
+    for name, text in ((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES):
         p = _ws_dir(workspace) / name
         with contextlib.suppress(FileExistsError):
             with open(p, "x", encoding="utf-8") as f:

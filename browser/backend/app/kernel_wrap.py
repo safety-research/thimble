@@ -12,8 +12,8 @@ Both draw the same boundary:
            writes its files; tmp/; view-indexes/, where the view readers keep their indexes) and nothing else of it:
            the server keeps its own state in the rest of the workspace (the undo journal, the chats, the sessions, the
            groups, the labels and the rest), which the kernel reads but can neither change, move nor remove, nor put a
-           link or a file in place of. settings.json and config.json (thimble's config for the workspace) and the lock
-           of subagents.json's writers (LOCK_FILES) the kernel can neither read nor write.
+           link or a file in place of. settings.json and config.json (thimble's config for the workspace) and the
+           workspace's lock files (LOCKS_DIR) the kernel can neither read nor write.
            HOME is fresh at each start: a folder on a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt (`write`). TMPDIR is main's Bash's (runtime.shell_temp): the workspace's temp folder (TEMP_DIR) on
            the Messages API, and on Claude Code sign-in the temp folder Claude Code's sandbox gives main's commands,
@@ -70,11 +70,13 @@ NO_SIDE_WRITES = {"PYTHONDONTWRITEBYTECODE": "1", "GIT_OPTIONAL_LOCKS": "0"}
 # nor write it
 HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
-# the lock subagents.json's writers take (subagent_files.LOCK), hidden as HIDDEN_FILES are: a file the kernel may read
-# it may also open and flock, and a cell that held the lock would make every hook and the server wait for it and then
-# write without it, so that two writers no longer exclude each other. The server makes it before a kernel starts, and
-# nothing renames it
-LOCK_FILES = ("subagents.json.lock",)
+# the workspace's folder of every lock file its writers take (nofollow.lock_file: the stores' locks, ledger.locked and
+# calls_file; subagent_files.LOCK), which a kernel can neither read nor write: a lock file the kernel may read it may
+# also open and flock, and a cell that held a lock made every writer of that store wait for it (the server on its event
+# loop) and then write without it. bwrap mounts an empty read-only tmpfs over the folder, srt denies it; the server
+# makes the folder before a kernel starts and never removes it, since a folder removed and made again would show
+# inside a running kernel's sandbox
+LOCKS_DIR = "locks"
 # the kernel's own folders of the workspace, the only ones it writes, each made by the server before the kernel starts
 SCRATCH_DIR = "scratch"  # its working folder: a link per corpus entry (notebook.mirror_corpus) and what cells write
 # the workspace's temp folder (config.temp_dir): on the Messages API every kernel's TMPDIR, and that of main's and its
@@ -83,7 +85,7 @@ SCRATCH_DIR = "scratch"  # its working folder: a link per corpus entry (notebook
 TEMP_DIR = "tmp"
 INDEXES_DIR = "view-indexes"  # the view readers' indexes, which the views kernel and the cards' kernels build
 KERNEL_DIRS = (SCRATCH_DIR, TEMP_DIR, INDEXES_DIR)
-# the workspace's files and folders that no agent's command writes either, beside HIDDEN_FILES and LOCK_FILES, where
+# the workspace's files and folders that no agent's command writes either, beside HIDDEN_FILES and LOCKS_DIR, where
 # one of the agent's write folders holds the workspace (runtime.protected):
 READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")  # the telemetry log and the view log, which its export merges
 REGISTRY_DIR = "registry"  # the card types and extensions as the server found them (cardtypes.py, extensions.py)
@@ -215,7 +217,7 @@ def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | 
     writes (none for an agent's command, whose caller names its write folders, runtime_tools._rules)."""
     ws = Path(workspace_dir)
     system = "darwin" if platform == "darwin" else "linux"
-    hidden = [str(ws / name) for name in (*HIDDEN_FILES, *LOCK_FILES)]
+    hidden = [str(ws / name) for name in (*HIDDEN_FILES, LOCKS_DIR)]
     writes = [*(str(ws / name) for name in own), *map(str, write)]
     deny_read = [str(home), *SRT_HIDDEN[system], *map(str, hide), *hidden]
     allow_read = [str(corpus_dir), str(ws), *map(str, interpreter_dirs(python)), *map(str, read), *map(str, write)]
@@ -312,8 +314,9 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     `read` names more paths bound read-only, `write` more folders bound writable (its TMPDIR outside the workspace, on
     the private /tmp too), and `write_fds` folders bound writable by a descriptor the caller opened, at their paths
     (`--bind-fd`: the folder opened, whatever is at its path by then; the process that runs this argv must inherit
-    them). `--ro-bind-try` and `--bind-try` skip what does not exist. The workspace is bound read-only, and each of
-    KERNEL_DIRS writable over it; each of those and of HIDDEN_FILES and LOCK_FILES must exist, or bwrap fails."""
+    them). `--ro-bind-try` and `--bind-try` skip what does not exist. The workspace is bound read-only, each of
+    KERNEL_DIRS writable over it, and an empty read-only tmpfs over LOCKS_DIR; each of those and of HIDDEN_FILES must
+    exist, or bwrap fails."""
     corpus, ws = Path(corpus_dir), Path(workspace_dir)
     out: list[str] = [*SIGINT_PREFIX, bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns",  # --unshare-user spelled out: --disable-userns checks for it by name (bwrap 0.9.0)
                       "--ro-bind", "/usr", "/usr"]
@@ -337,8 +340,9 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     out += ["--ro-bind", str(corpus), str(corpus), "--ro-bind", str(ws), str(ws)]
     for name in KERNEL_DIRS:  # each a mount point of its own, which a card's code can neither move nor remove
         out += ["--bind", str(ws / name), str(ws / name)]
-    for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
+    for name in HIDDEN_FILES:
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
+    out += ["--tmpfs", str(ws / LOCKS_DIR), "--remount-ro", str(ws / LOCKS_DIR)]  # no lock file shows in it
     for p in write:  # after the workspace and the corpus, which would cover a write folder inside them
         out += ["--bind-try", str(p), str(p)]
     for fd, p in write_fds:

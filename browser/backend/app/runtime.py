@@ -649,12 +649,12 @@ def agent_writes(c: str, conv: Conv) -> list[Path]:
 
 
 def protected(ws: Path) -> list[Path]:
-    """The workspace's files no agent writes: its hidden files and lock, and the files and folders kernel_wrap keeps
-    from agents' commands (READ_ONLY_FILES, READ_ONLY_DIRS). They matter where a write root holds the workspace, as a
-    corpus folder that holds thimble's home would."""
+    """The workspace's files no agent writes: its hidden files and its locks folder, and the files and folders
+    kernel_wrap keeps from agents' commands (READ_ONLY_FILES, READ_ONLY_DIRS). They matter where a write root holds
+    the workspace, as a corpus folder that holds thimble's home would."""
     from . import kernel_wrap  # noqa: PLC0415
 
-    return [ws / n for n in (*kernel_wrap.HIDDEN_FILES, *kernel_wrap.LOCK_FILES, *kernel_wrap.READ_ONLY_FILES,
+    return [ws / n for n in (*kernel_wrap.HIDDEN_FILES, kernel_wrap.LOCKS_DIR, *kernel_wrap.READ_ONLY_FILES,
                              *kernel_wrap.READ_ONLY_DIRS)]
 
 

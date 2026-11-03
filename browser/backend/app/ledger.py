@@ -133,15 +133,14 @@ def append_jsonl(path: Path, obj: Any) -> None:
 
 # --------------------------------------------------------------------------- locks between processes
 #
-# A store that more than one process writes (the server and the hooks) is changed under locked(): an flock on a lock
-# file beside the store, then a read of the store as it is now, then an atomic replace or an append. The lock is
-# re-entrant in one thread, so a store function that calls another under the same lock does not wait on itself. Never
-# await while holding it: the coroutines of one event loop share its thread. A holder that keeps the lock past `wait_s`
-# (a stuck process, or a cell that took the lock file) does not block the caller for ever: the caller waits `wait_s`,
-# logs, and goes on without the lock, as subagents.json's lock does.
+# A store that more than one process writes (the server and the hooks) is changed under locked(): an flock on the
+# store's lock file (lock_file: a workspace's in its locks folder, which no kernel sees, so no card's code can hold
+# one), then a read of the store as it is now, then an atomic replace or an append. The lock is re-entrant in one
+# thread, so a store function that calls another under the same lock does not wait on itself. Never await while holding
+# it: the coroutines of one event loop share its thread. A holder that keeps the lock past `wait_s` (a stuck process)
+# does not block the caller for ever: the caller waits `wait_s`, logs, and goes on without the lock, as subagents.json's
+# lock does.
 
-LOCK_SUFFIX = ".lock"  # a file store's lock file is <file>.lock beside it
-DIR_LOCK = ".lock"  # a folder store's lock file is <folder>/.lock inside it
 LOCK_WAIT_S = 2.0
 _LOCK_POLL_S = (0.002, 0.005, 0.01, 0.02, 0.05)  # the waits between flock tries, the last repeated until wait_s
 _held = threading.local()  # .depth: {lock file: how many times this thread holds it}
@@ -150,9 +149,8 @@ _guards_lock = threading.Lock()
 
 
 def lock_file(path: Path) -> Path:
-    """The lock file of the store at `path`: `<path>.lock` beside a file, `<path>/.lock` inside a folder."""
-    path = Path(path)
-    return path / DIR_LOCK if path.is_dir() else path.with_name(path.name + LOCK_SUFFIX)
+    """The lock file of the store at `path` (nofollow.lock_file): in a workspace, in its locks folder."""
+    return nofollow.lock_file(path)
 
 
 def _guard(key: str) -> threading.Lock:
