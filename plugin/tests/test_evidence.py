@@ -971,6 +971,26 @@ def test_a_terminal_diagram_card_s_count_is_its_rows_out_of_its_table(tmp_path):
     assert (got[3]["status"], got[3]["reason"]) == ("failed", "None of the 2 cited cells of the card shows 6.")
 
 
+THEMES = [{"id": "f2a7c4d1", "title": "Themes by the participants who raised them", "outputs": [{"out": 0, "lines": [
+    [1, "theme              participants"], [2, "slow onboarding   7"], [3, "unclear pricing   7"], [4, "missing export   7"],
+    [5, "flaky sync        7"], [6, "dark mode         3"], [7, "bulk edit         7"], [8, "offline mode      2"],
+    [9, "audit log         7"]]}]}]
+
+
+def test_the_checker_is_not_asked_to_cite_a_count_at_the_places_it_counts():
+    """R5's sentence in the checker's text had it cite any count a card shows at the places of the things it counts, as
+    a diagram's edges. The validator reads such places as a count only in the shapes counted() takes, so a true count of
+    a printed table's rows (made up: "6 of the 8 themes" came up with all 7 participants) failed at its rows, as checks
+    did once the text asked for it, where a count computed from the records verifies. The text no longer asks for it;
+    a diagram's edges cited so still verify (above)."""
+    text = (Path(__file__).resolve().parents[1] / "prompts" / "checker.md").read_text(encoding="utf-8")
+    assert "A card shows a count by the places of the things it counts" not in text
+    rows = {"ref": [f"card:f2a7c4d1@out0#L{n}" for n in range(2, 10)]}
+    m = {"n": 1, "words": "6 of the 8", "sentence": "[6 of the 8] themes came up with all 7 participants."}
+    r = check_mark(m, {**card(""), "evidence": rows}, [], "/data", cards=THEMES)
+    assert (r["status"], r["reason"]) == ("failed", "None of the 8 cited lines of the card's output shows 6.")
+
+
 def test_computed_output_that_is_a_printed_dataframe_carries_its_table():
     out = "            merged  total\nagent                  \nagent-03         4     10\nagent-07        12     40\n"
     r = check_mark(mark("12"), computed("agent-07        12     40"), [call(CODE, out)], "/data")
