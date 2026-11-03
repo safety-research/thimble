@@ -89,7 +89,7 @@ describe('which mark a click on words that carry several opens', () => {
   })
 })
 
-describe("an explainer or a heads-up on a citation's words, in main's chat", () => {
+describe("words that carry more than one mark, in main's chat", () => {
   test("an explainer inside the citation's words opens first, the citation next, then the explainer", async () => {
     const el = await chat([comment({})])
     const words = el.querySelector<HTMLElement>('.mark-words')!
@@ -167,8 +167,33 @@ describe("an explainer or a heads-up on a citation's words, in main's chat", () 
     expect(open()).toBe('citation')
     await key(g1, ' ')
     expect(open()).toBe('g1')
-    await escape()
+    // Enter on the citation's words opens the citation, and the explainer makes way for it
     await key(words, 'Enter')
+    expect(open()).toBe('citation')
+  })
+
+  test("a citation in the comment's own details opens over the comment, which stays open", async () => {
+    const el = await chat([comment({ details: 'Counted as [[0|card:c1a2b3#messages/after]] in the card.' })])
+    await press(tint(el, 'g1'))
+    await press(document.querySelector('.answer-cm-pop .wu-cm-more')!)
+    const own = document.querySelector('.answer-cm-pop .mark-words')!
+    expect(own.textContent).toBe('0')
+    await press(own)
+    expect(open()).toBe('g1+citation')
+  })
+
+  test("a press on the explainer's words released on the citation's other words opens the citation alone", async () => {
+    const el = await chat([comment({})])
+    const words = el.querySelector<HTMLElement>('.mark-words')!
+    await press(tint(el, 'g1'))
+    expect(open()).toBe('g1')
+    // the browser ends a drag out of the tint with a click on the element that holds both ends
+    const g1 = tint(el, 'g1')
+    await act(async () => {
+      for (const type of ['pointerdown', 'mousedown']) g1.dispatchEvent(new MouseEvent(type, { bubbles: true }))
+      for (const type of ['pointerup', 'mouseup']) words.dispatchEvent(new MouseEvent(type, { bubbles: true }))
+      words.click()
+    })
     expect(open()).toBe('citation')
   })
 })

@@ -8,7 +8,8 @@
 // passage's line (components/RefChip placeBeside, the citation label's placing), so a comment on a long answer reads
 // where its words are. It follows the passage while the chat scrolls and hides while the passage is out of view. Esc or
 // a press outside it closes it; a press on a tinted passage, a citation's words in it too, leaves it to the passage's
-// own click, which opens the next mark over the words (chat/markdown MdMark).
+// own click, which opens the next mark over the words (chat/markdown MdMark). A citation's label pinned open outside it
+// closes it.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { placeBeside } from '../components/RefChip'
@@ -118,9 +119,15 @@ export function AnswerCommentPop(props: CardProps) {
     }
     document.addEventListener('keydown', onKey)
     document.addEventListener('mousedown', onDown)
+    // a citation's label pinned open (marks/Mark.tsx), by a key or by a click that began on a tint; not one of the
+    // comment's own citations
+    const off = bus.on('citeOpen', (e) => {
+      if (!popEl.current?.contains(e.el)) close.current()
+    })
     return () => {
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('mousedown', onDown)
+      off()
     }
   }, [])
 

@@ -50,6 +50,7 @@ import { citedTable, placePop, printedTable, TablePreview, useRefLabel } from '.
 import { Spinner } from '../components/Spinner'
 import { highlightLines, renderTokens, useHljs } from '../files/highlight'
 import { api, marksApi } from '../lib/api'
+import { bus } from '../lib/bus'
 import { glyphOf } from '../lib/fileGlyph'
 import { wordsSpanRef } from '../lib/quoteFind'
 import { cardPartLabel, parseRef } from '../lib/refs'
@@ -153,30 +154,23 @@ export function Mark({ k, item: given, anchor, children }: { k: number; item?: M
     window.clearTimeout(showTimer.current)
     scheduleHide()
   }
-  const toggle = () => {
+  // the label pinned open, which a comment open beside its passage makes way for (lib/bus citeOpen); or closed
+  const pin = () => {
     window.clearTimeout(showTimer.current)
     cancelHide()
     const r = rect()
-    setPop((p) => (p?.pinned ? null : r ? { rect: r, pinned: true } : null))
+    if (!r) return
+    setPop({ rect: r, pinned: true })
+    bus.emit('citeOpen', { el: words.current })
+  }
+  const close = () => {
+    window.clearTimeout(showTimer.current)
+    cancelHide()
+    setPop(null)
   }
   const pinned = !!pop?.pinned
-  const cite = useMemo<CiteWords>(
-    () => ({
-      pinned: () => pinned,
-      pin: () => {
-        window.clearTimeout(showTimer.current)
-        cancelHide()
-        const r = rect()
-        if (r) setPop({ rect: r, pinned: true })
-      },
-      close: () => {
-        window.clearTimeout(showTimer.current)
-        cancelHide()
-        setPop(null)
-      },
-    }),
-    [pinned],
-  )
+  const toggle = () => (pinned ? close() : pin())
+  const cite = useMemo<CiteWords>(() => ({ pinned: () => pinned, pin, close }), [pinned])
 
   const openPlace = (ref: string) => {
     window.clearTimeout(showTimer.current)
