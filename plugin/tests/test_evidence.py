@@ -958,6 +958,12 @@ def test_a_count_of_a_diagram_s_edges_is_counted_from_its_edges():
         assert (r["status"], r["reason"]) == ("failed", "None of the 3 cited lines of the card's output shows 2."), r
     one = check_mark({"n": 1, "words": "1 path"}, card("card:d1a6e7f0@out0#L7"), [], "/data", cards=DIAGRAM)
     assert one["status"] == "failed" and one["reason"] == "Line 7 of the card's output reads “merge -> deploy (release)”, not 1."
+    # edges are named by both their ends, so sources that repeat once are no name written twice
+    chain = [("draft", "lint"), ("lint", "review"), ("review", "merge"), ("merge", "deploy"), ("deploy", "ship"), ("draft", "review")]
+    flow = [{"id": "e9a3c7f1", "title": "made up", "outputs": [{"out": 0, "lines": [[1, "diagram: 6 nodes, 6 edges"]] + [
+        [i, f"{a} -> {b}"] for i, (a, b) in enumerate(chain, 2)], "tables": [{"columns": ["source", "target", "label"], "rows": [[a, b, None] for a, b in chain],
+        "names": [f"{a} -> {b}" for a, b in chain], "label": None, "total": 6, "lines": [2, 7]}]}]}]
+    assert counted("2 of the 6 paths", {"ref": "card:e9a3c7f1@out0", "count": {"source": "draft"}}, flow, "[2 of the 6 paths] start at the draft.")["status"] == "verified"
 
 
 def test_a_terminal_card_s_count_is_counted_from_its_rows_json(tmp_path):

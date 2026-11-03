@@ -2229,15 +2229,19 @@ def _count_table(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, tup
 
 def _twice(t: dict[str, Any]) -> str:
     """Why one thing may stand in two rows of the table, or "": two rows share a name, when a column names the rows, or
-    when no column does, the first column of text in every row repeats in a tenth of its rows at most (a service twice
-    among 9: a column of names with one written twice); or two rows have the same value in every column."""
+    when nothing names them but their places, the first column of text in every row repeats in a tenth of its rows at
+    most (a service twice among 9: a column of names with one written twice); or two rows have the same value in every
+    column."""
     names = [str(x) for x in t.get("names") or []]
     if t.get("label"):
         seen_at = Counter(names)
         twice = next((x for x in names if seen_at[x] > 1), None)
         return f"two rows of the card's table are named {twice}" if twice is not None else ""
     rows = t.get("rows") or []
-    for j in range(len(t.get("columns") or [])):
+    # rows the host names by their place alone (a diagram's edges are named by both their ends, a timeline's events by
+    # their times)
+    unnamed = names == [str(i) for i in range(len(rows))]
+    for j in range(len(t.get("columns") or []) if unnamed else 0):
         col = [r[j] if j < len(r) else None for r in rows]
         if col and all(isinstance(x, str) and x.strip() for x in col):
             seen_at = Counter(col)

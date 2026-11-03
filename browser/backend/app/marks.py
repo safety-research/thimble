@@ -204,9 +204,9 @@ def card_tables(b: dict[str, Any]) -> list[dict[str, Any]]:
         part, raw = main
         rows = [r for r in raw[:cite.CHART_ROWS_MAX] if isinstance(r, dict)]
         cols = list(dict.fromkeys(str(k) for r in rows for k in r))
-        # another part with other rows of the same columns draws the rest of them (a layer each for some services); a
-        # part that draws the same rows again (a layer of labels over its bars) splits nothing
-        if any(p is not part and got is not raw and got != raw and {str(k) for r in got if isinstance(r, dict) for k in r} == set(cols)
+        # another part with other rows of the columns draws the rest of them (a layer each for some services, one with a
+        # column more); a part that draws the same rows again (a layer of labels over its bars) splits nothing
+        if any(p is not part and got is not raw and got != raw and {str(k) for r in got if isinstance(r, dict) for k in r} >= set(cols)
                for p, got in cite._row_parts(spec)):
             return []
         return [{"columns": cols, "rows": [[r.get(k) for k in cols] for r in rows], "names": table.labels, "label": table.label,

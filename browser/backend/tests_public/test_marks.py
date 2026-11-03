@@ -379,7 +379,8 @@ def test_a_count_of_a_table_a_card_printed_is_counted_from_the_rows_it_keeps(_fr
 
 def test_the_tables_a_card_holds_as_data_are_its_frame_its_chart_s_rows_its_drawing_s_items_and_what_it_printed():
     """B20: the tables a count of a card's rows counts (marks.card_tables), from the values, never their text: a table
-    card's frame, a chart's rows (none when its layers split them, the same rows twice are one table), a diagram's
+    card's frame, a chart's rows (none when its layers split them, also with a column more in one; the same rows twice
+    are one table), a diagram's
     edges and a timeline's events on the lines of their listing, and each table the card's code printed."""
     from app import frames, kernel_thimble
 
@@ -398,6 +399,9 @@ def test_the_tables_a_card_holds_as_data_are_its_frame_its_chart_s_rows_its_draw
     split = {kernel_thimble.VEGALITE_MIME: {"layer": [{"data": {"values": rows[:2]}, "mark": "bar", "encoding": enc},
                                                       {"data": {"values": rows[2:]}, "mark": "bar", "encoding": enc}]}}
     assert marks.card_tables(split) == []
+    wider = {kernel_thimble.VEGALITE_MIME: {"layer": [{"data": {"values": rows[:2]}, "mark": "bar", "encoding": enc},
+                                                      {"data": {"values": [{**r, "flag": True} for r in rows[2:]]}, "mark": "bar", "encoding": enc}]}}
+    assert marks.card_tables(wider) == []
     twice = {kernel_thimble.VEGALITE_MIME: {"layer": [{"data": {"values": rows}, "mark": "bar", "encoding": enc},
                                                       {"data": {"values": rows}, "mark": "text", "encoding": enc}]}}
     assert len(marks.card_tables(twice)) == 1
