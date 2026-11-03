@@ -84,9 +84,11 @@ def paths(c: str, chat_id: str) -> tuple[Path, Path]:
 
 def read_meta(c: str, chat_id: str) -> dict:
     meta_path, _ = paths(c, chat_id)
-    if not meta_path.is_file():
-        raise HTTPException(404, f"no such chat: {chat_id}")
-    return _defaults(json.loads(meta_path.read_text("utf-8")))
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        text = nofollow.read_text(meta_path)
+    except (FileNotFoundError, NotADirectoryError, nofollow.Linked):
+        raise HTTPException(404, f"no such chat: {chat_id}") from None
+    return _defaults(json.loads(text))
 
 
 def meta_or_none(c: str, chat_id: str) -> dict | None:
@@ -168,17 +170,23 @@ def log_permission(c: str, event: str, **fields: Any) -> None:
 
 
 def count_lines(path: Path) -> int:
-    if not path.is_file():
+    try:  # a chat's log, read as nofollow reads it (read_events)
+        f = nofollow.reader(path)
+    except OSError:
         return 0
-    with path.open("rb") as f:
+    with f:
         return sum(1 for _ in f)
 
 
 def read_events(log_path: Path) -> list[dict]:
-    if not log_path.is_file():
-        return []
+    """A chat's records. Its log lies in the workspace, which a card's code writes, so it is read as nofollow reads
+    it: a link or a FIFO left in its place reads as no log."""
     out: list[dict] = []
-    with log_path.open(encoding="utf-8") as f:
+    try:
+        f = nofollow.reader(log_path, "r", encoding="utf-8")
+    except (FileNotFoundError, NotADirectoryError, nofollow.Linked):
+        return out
+    with f:
         for line in f:
             line = line.strip()
             if not line:
@@ -226,7 +234,7 @@ def _read_on(log_path: Path, keep: bool = False) -> _Tally | None:
                 _kept.move_to_end(key)
             return t
         try:
-            with log_path.open("rb") as f:
+            with nofollow.reader(log_path) as f:  # never through a link or a FIFO a card's code left there
                 st = os.fstat(f.fileno())
                 if t is not None and (t.ino != st.st_ino or st.st_size < t.offset or (keep and t.lines is None)):
                     t = None
@@ -435,8 +443,7 @@ def _meta_text(path: str) -> str:
     hit = _meta_texts.get(path)
     if hit is not None and hit[0] == key:
         return hit[1]
-    with open(path, encoding="utf-8") as f:
-        text = f.read()
+    text = nofollow.read_text(path)  # never through a link or a FIFO a card's code left among the chats
     _meta_texts[path] = (key, text)
     return text
 

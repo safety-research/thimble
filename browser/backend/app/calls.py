@@ -103,8 +103,8 @@ def _load(c: str, chat: str) -> _Index:
         idx = _indexes[key] = _Index()
     if st is None or st.st_size == idx.offset:
         return idx
-    try:
-        with p.open("rb") as f:
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        with nofollow.reader(p) as f:
             f.seek(idx.offset)
             chunk = f.read()
     except OSError:
@@ -556,8 +556,8 @@ def backfill(c: str, chat: str) -> int:
     stored = 0
     with _lock:
         for agent, p in paths:
-            try:
-                raw = p.read_bytes()
+            try:  # Claude Code's transcripts, each a regular file (nofollow)
+                raw = nofollow.read_bytes(p)
             except OSError:
                 continue
             for line in raw.splitlines():

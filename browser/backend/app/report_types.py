@@ -317,8 +317,8 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
         if schema is None and isinstance(existing, dict):
             schema = existing.get("schema")
         expand_schema(schema)
-        if component is None and (d / "renderer.tsx").is_file():
-            component = (d / "renderer.tsx").read_text("utf-8")
+        if component is None:
+            component = _type_text(d / "renderer.tsx") or None
         if not (component or "").strip():
             raise HTTPException(400, "a custom renderer needs its component source")
     try:

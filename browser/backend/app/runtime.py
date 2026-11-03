@@ -628,9 +628,9 @@ def _read_json(p: Path) -> dict[str, Any]:
 
 
 def _last_uuid(path: Path) -> str | None:
-    try:
-        with path.open("rb") as f:
-            f.seek(max(0, path.stat().st_size - 65536))
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        with nofollow.reader(path) as f:
+            f.seek(max(0, os.fstat(f.fileno()).st_size - 65536))
             lines = f.read().splitlines()
     except OSError:
         return None
@@ -646,8 +646,8 @@ def _chat_of(path: Path) -> dict[str, Any]:
     """{turns, first, start}: how many turns a main transcript holds (the user records that open one), the first message
     the analyst typed in it, as one line, and when its first turn began (the record's timestamp, '' when none)."""
     turns, first, other, start = 0, "", "", ""
-    try:
-        f = path.open(encoding="utf-8")
+    try:  # as _last_uuid reads it
+        f = nofollow.reader(path, "r", encoding="utf-8")
     except OSError:
         return {"turns": 0, "first": "", "start": ""}
     with f:

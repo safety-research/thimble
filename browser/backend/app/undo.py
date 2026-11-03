@@ -156,9 +156,8 @@ def _load(c: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     undo: list[dict[str, Any]] = []
     redo: list[dict[str, Any]] = []
     lines = 0
-    try:
-        path = log_path(c)
-        text = path.read_text("utf-8") if path.is_file() else ""
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        text = nofollow.read_text(log_path(c))
     except (OSError, ValueError, HTTPException):
         text = ""
     for raw in text.splitlines():
@@ -357,10 +356,9 @@ def labels(c: str) -> dict[str, str | None]:
 def batch_steps(c: str, batch: str) -> list[dict[str, Any]]:
     """Every step the journal holds with the batch `batch`, oldest first, whichever stack it is on now: what a
     follow-up of the orientation changed (orient_session counts them)."""
-    try:
-        path = log_path(c)
-        text = path.read_text("utf-8") if path.is_file() else ""
-    except (OSError, HTTPException):
+    try:  # as _load reads it
+        text = nofollow.read_text(log_path(c))
+    except (OSError, ValueError, HTTPException):
         return []
     out: list[dict[str, Any]] = []
     seen: set[str] = set()

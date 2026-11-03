@@ -418,8 +418,8 @@ def held_line(note: dict[str, Any]) -> str:
 def held(c: str) -> list[dict[str, Any]]:
     """The quiet events waiting for the workspace's next event, as notes."""
     if c not in _held:
-        try:
-            notes = json.loads((config.workspace_dir(c) / HELD_FILE).read_text("utf-8"))
+        try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+            notes = json.loads(nofollow.read_text(config.workspace_dir(c) / HELD_FILE))
         except (OSError, ValueError):
             notes = []
         _held[c] = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []

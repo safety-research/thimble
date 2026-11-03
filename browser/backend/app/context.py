@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
-from . import agents, cite, config, events, investigation, prompts, report_types, session, threads, tools
+from . import agents, cite, config, events, investigation, nofollow, prompts, report_types, session, threads, tools
 
 PROMPT = "context"  # prompts/context.md
 PARTS = ("conversation", "threads", "canvas", "views", "documents")  # every part render gives by default
@@ -99,8 +99,8 @@ class _Entry:
 
 
 def _records(path: Path) -> list[dict]:
-    try:
-        data = path.read_bytes()
+    try:  # a transcript in the workspace (the server's own runtime's) lies where a card's code writes (nofollow)
+        data = nofollow.read_bytes(path)
     except OSError:
         return []
     out = []

@@ -1272,7 +1272,8 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -
     images = []
     if isinstance(inp.get("picture"), str) and inp["picture"]:
         try:
-            png = await asyncio.to_thread(Path(inp["picture"]).read_bytes)
+            # kept in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+            png = await asyncio.to_thread(nofollow.read_bytes, inp["picture"])
             images = [(await asyncio.to_thread(fit_image, png), "image/png")]
         except OSError:
             log.warning("card check: the picture %s could not be read", inp["picture"])

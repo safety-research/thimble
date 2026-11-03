@@ -31,7 +31,7 @@ from urllib.parse import urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import cite, config, frames, headless, prompts, read_parts
+from . import cite, config, frames, headless, nofollow, prompts, read_parts
 from .kernel_thimble import CARD_MIME  # a card type's graphic, which counts as a chart and is read through its listing
 
 log = logging.getLogger("thimble.tools")
@@ -1761,8 +1761,8 @@ def _citing_documents(c: str, cid: str) -> "builtins.list[str]":
     for p in paths:
         if p.name == "investigation.json":
             continue
-        try:
-            if pat.search(p.read_text("utf-8")):
+        try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+            if pat.search(nofollow.read_text(p)):
                 found[f"report:{p.name.removesuffix('.json').removesuffix('.frame')}"] = None
         except OSError:
             continue

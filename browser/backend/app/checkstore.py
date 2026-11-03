@@ -471,8 +471,8 @@ def undo_fix(c: str, cid: str, fix_id: str) -> dict:
     before = fix.get("before") or {}
     content, shown = notebook.content_of(cell), notebook.shown_of(cell)  # for the card's history (notebook.stamp_edit)
     if "code" in fields:
-        try:
-            run = json.loads(_before_path(c, cid, fix_id).read_text("utf-8"))
+        try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+            run = json.loads(nofollow.read_text(_before_path(c, cid, fix_id)))
         except (OSError, ValueError):
             run = None
         cell["code"] = before.get("code") or ""

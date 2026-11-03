@@ -2689,10 +2689,13 @@ def has_ui_build() -> bool:
 def orient_status(name: str | None) -> str:
     if not name:
         return "no workspace"
-    p = Path(resolve_env()["workspaces_dir"]) / name / "orient" / "run.json"
-    try:
-        return str(json.loads(p.read_text("utf-8")).get("status") or "unknown")
-    except (OSError, ValueError):
+    from . import nofollow  # noqa: PLC0415
+
+    root = Path(resolve_env()["workspaces_dir"])
+    p = root / name / "orient" / "run.json"
+    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there
+        return str(json.loads(nofollow.read_text(p, root=root)).get("status") or "unknown")
+    except (OSError, ValueError, AttributeError):
         return "not started"
 
 

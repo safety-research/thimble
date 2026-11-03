@@ -808,7 +808,12 @@ def _chats(b: Bundle, ws: Path, first: list[str]) -> None:
     kept = 0
     for p in chats[:MAX_CHATS]:
         meta = p.with_name(p.stem + ".meta.json")
-        meta_text = text_only(meta.read_text("utf-8", "replace")) if _own_file(meta, ws) else ""
+        try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+            from . import nofollow  # noqa: PLC0415 — standard library only, as this module is, with its root given
+
+            meta_text = text_only(nofollow.read_text(meta, "utf-8", "replace", root=ws)) if _own_file(meta, ws) else ""
+        except (OSError, ValueError):
+            meta_text = ""
         limit = min(CHAT_MAX, room - len(meta_text.encode("utf-8")))
         if limit <= 0:
             break

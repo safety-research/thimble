@@ -1145,20 +1145,26 @@ def fork_ref(tool_input: dict[str, Any]) -> str | None:
 
 def thread_question(ws: Path | None, name: str) -> str:
     """The first question of the thread whose forks run under `name` (or whose id it is) in workspace `ws`, on one line
-    and cut at a word; '' when none is found."""
+    and cut at a word; '' when none is found. The chats lie in the workspace, which a card's code writes: each file is
+    read as nofollow reads it (from `ws`, so no link on the way is followed and no FIFO holds the hook), and a meta's
+    id names a log only when a route would take it."""
+    from . import nofollow  # noqa: PLC0415 — standard library only, as this module is, with its root given
+
     chats = ws / "chats" if ws is not None else None
     if chats is None or not name:
         return ""
     for meta_path in sorted(chats.glob("*.meta.json")):
         try:
-            meta = json.loads(meta_path.read_text("utf-8"))
+            meta = json.loads(nofollow.read_text(meta_path, root=ws))
         except (OSError, ValueError):
             continue
         if not isinstance(meta, dict) or meta.get("kind") != "thread" or name not in (meta.get("fork_name"), meta.get("id")):
             continue
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(meta.get("id") or "")):
+            continue
         try:
-            lines = meta_path.with_name(f"{meta.get('id')}.jsonl").read_text("utf-8").splitlines()
-        except OSError:
+            lines = nofollow.read_text(meta_path.with_name(f"{meta['id']}.jsonl"), root=ws).splitlines()
+        except (OSError, ValueError):
             return ""
         for line in lines:
             with contextlib.suppress(ValueError):

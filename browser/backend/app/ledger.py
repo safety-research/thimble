@@ -340,8 +340,8 @@ def next_seq(path: Path, n: int = 1) -> int:
 def last_seq(path: Path, key: str = "seq") -> int:
     """The highest integer `key` among the parseable lines in the file's last TAIL_BYTES (-1 when none): what a
     per-log sequence resumes after. A torn or foreign last line is skipped, never counted."""
-    try:
-        with open(path, "rb") as f:
+    try:  # a log in a workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
+        with nofollow.reader(path) as f:
             f.seek(0, 2)
             size = f.tell()
             f.seek(max(0, size - TAIL_BYTES))

@@ -2435,7 +2435,7 @@ def _file_fork_ref(path: Path, tool_use_id: str | None) -> str | None:
     if not tool_use_id:
         return None
     try:
-        with path.open("rb") as f:
+        with nofollow.reader(path) as f:  # a transcript, read as _tail_main reads one
             head = f.read(FORK_CALL_SCAN_BYTES)
     except OSError:
         return None
@@ -2660,8 +2660,8 @@ def _agent_dir(lv: Live) -> Path | None:
 
 
 def _read_meta_json(path: Path) -> dict:
-    try:
-        d = json.loads(path.with_name(path.name[: -len(".jsonl")] + ".meta.json").read_text("utf-8"))
+    try:  # beside a transcript, read as _tail_main reads one
+        d = json.loads(nofollow.read_text(path.with_name(path.name[: -len(".jsonl")] + ".meta.json")))
     except (OSError, ValueError):
         return {}
     return d if isinstance(d, dict) else {}
@@ -2776,8 +2776,9 @@ def _spawn_workflow(lv: Live, tool_use_id: str, inp: dict) -> Sub:
         return sub
     script = str(inp.get("script") or "")
     if not script and inp.get("scriptPath"):
-        with contextlib.suppress(OSError, UnicodeDecodeError):
-            script = Path(str(inp["scriptPath"])).read_text("utf-8")[:SCRIPT_READ_CHARS]
+        with contextlib.suppress(OSError, UnicodeDecodeError):  # a regular file, never a FIFO (nofollow)
+            with nofollow.reader(str(inp["scriptPath"]), "r", encoding="utf-8") as f:
+                script = f.read(SCRIPT_READ_CHARS)
     meta = workflow_meta(script)
     name = meta.get("name") or str(inp.get("name") or "").strip()
     title = " ".join((meta.get("description") or name).split()) or WORKFLOW_TITLE
@@ -2824,9 +2825,10 @@ def _tail_sub(lv: Live, sub: Sub) -> int:
         sub.offset, sub.buf = 0, b""
     if size == sub.offset:
         return 0
-    with sub.path.open("rb") as f:
-        f.seek(sub.offset)
-        data = f.read(size - sub.offset)
+    try:
+        data = _read_from(sub.path, sub.offset, size)
+    except OSError:  # gone, or a link or a FIFO a card's code left in its place: nothing to read
+        return 0
     sub.offset = size
     sub.quiet_since = time.monotonic()
     if sub.thread and sub.done:
@@ -3018,9 +3020,7 @@ def _call_holder(lv: Live, tool_use_id: str, needle: bytes, read: dict[str, int]
         if size <= start:
             continue
         try:
-            with path.open("rb") as f:
-                f.seek(start)
-                data = f.read(size - start)
+            data = _read_from(path, start, size)
         except OSError:
             continue
         read[key] = max(start, size - len(needle))
@@ -3075,7 +3075,7 @@ def _began_since(path: str | None, since: str | None) -> bool:
     if start is None or not path:
         return True
     try:
-        with open(path, "rb") as f:
+        with nofollow.reader(path) as f:  # a transcript, read as _tail_main reads one
             for _, line in zip(range(STAMP_LINES), f):
                 stamp = _stamp(line)
                 if stamp:
@@ -3091,7 +3091,7 @@ def _take_copied(lv: Live) -> None:
     src = lv.came_from or {}
     uuids: set[str] = set()
     with contextlib.suppress(OSError, TypeError):
-        with open(src.get("transcript"), "rb") as f:
+        with nofollow.reader(src.get("transcript")) as f:  # a transcript, read as _tail_main reads one
             uuids = {m.group(1).decode() for line in f for m in UUID_RE.finditer(line)}
     lv.copied = (uuids, _stamp({"timestamp": src.get("at")}))
 
@@ -3109,8 +3109,8 @@ def _continued_in(path: str | None) -> tuple[str, str] | None:
     """(session, time) of the continued-in record a transcript ends with, when only records with no uuid (Claude Code's
     queue of the events the parked session never reads) follow it, within its last CONTINUED_TAIL bytes; else None."""
     try:
-        with open(path, "rb") as f:  # type: ignore[arg-type]
-            f.seek(max(0, _size(Path(path)) - CONTINUED_TAIL))  # type: ignore[arg-type]
+        with nofollow.reader(path) as f:  # type: ignore[arg-type]  # a transcript, read as _tail_main reads one
+            f.seek(max(0, os.fstat(f.fileno()).st_size - CONTINUED_TAIL))
             data = f.read()
     except (OSError, TypeError):
         return None
@@ -3646,6 +3646,15 @@ def _size(path: Path) -> int:
         return 0
 
 
+def _read_from(path: Path | str, start: int, end: int) -> bytes:
+    """The bytes [start, end) of a transcript, read as nofollow reads it: the server's own runtime keeps main's and its
+    agents' transcripts in the workspace, which a card's code writes, so a link there is not followed and a FIFO holds
+    no read; Claude Code's own, outside any workspace, must be regular files too. OSError otherwise."""
+    with nofollow.reader(path) as f:
+        f.seek(start)
+        return f.read(max(0, end - start))
+
+
 def _tail_main(lv: Live) -> None:
     if lv.degraded or not lv.transcript_path:
         return
@@ -3664,9 +3673,10 @@ def _tail_main(lv: Live) -> None:
         lv.offset, lv.buf = 0, b""
     if size == lv.offset:
         return
-    with p.open("rb") as f:
-        f.seek(lv.offset)
-        data = f.read(size - lv.offset)
+    try:
+        data = _read_from(p, lv.offset, size)
+    except OSError:  # gone, or a link or a FIFO a card's code left in its place: nothing to read
+        return
     lv.offset = size
     lines = (lv.buf + data).split(b"\n")
     lv.buf = lines.pop()  # a partial last line waits for the rest

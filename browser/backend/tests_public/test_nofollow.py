@@ -265,3 +265,335 @@ def test_a_label_s_definition_is_read_through_no_link_a_card_left_in_its_place(t
     (concepts.concepts_dir(ws) / "made-up0.json").symlink_to(outside / "made-up.json")
     assert concepts.read_concept(ws, "made-up0") is None
     assert concepts.list_concepts(ws) == []
+
+
+# --------------------------------------------------------------------------- the server's reads of the workspace's files
+# A file of the workspace that the server reads may be a FIFO or a link a card's code left in its place: a FIFO held the
+# read (and, on the event loop, the whole server), and a link had it read the file it points to into a chat, an agent's
+# context, a store of the workspace's or the export. Each case below plants one where a reader of the server's reads,
+# and the reader reads it as no file.
+
+_FIFOS: list[Path] = []
+
+
+def _fifo(path: Path) -> Path:
+    """A FIFO at `path`, as a card's code can make one in its workspace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink() or path.exists():
+        path.unlink()
+    os.mkfifo(path)
+    _FIFOS.append(path)
+    return path
+
+
+def _link(path: Path, outside: Path, text: str) -> Path:
+    """A link at `path` to a file outside the workspace that holds `text`, as a card's code can leave one."""
+    target = outside / f"made-up-{len(list(outside.iterdir()))}"
+    target.write_text(text)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink() or path.exists():
+        path.unlink()
+    path.symlink_to(target)
+    return path
+
+
+def _line(**rec) -> str:
+    return json.dumps(rec) + "\n"
+
+
+def _ws() -> Path:
+    return config.workspace_dir(CORPUS)
+
+
+def _secret_line() -> str:
+    return _line(type="user", origin={"kind": "human"}, message={"content": "OUTSIDE-SECRET"}, ts="2026-11-03T00:00:00Z",
+                 text="OUTSIDE-SECRET", n=1, id="toolu_made_up", seq=99, uuid="u-1")
+
+
+def _case_tail_records(out):
+    from app import plans
+    return lambda: plans.tail_records(_fifo(_ws() / "chats" / "made-up.jsonl")), lambda r: r == []
+
+
+def _case_last_uuid(out):
+    from app import runtime
+    return lambda: runtime._last_uuid(_fifo(_ws() / "runtime" / "made-up.jsonl")), lambda r: r is None
+
+
+def _case_chat_of(out):
+    from app import runtime
+    return lambda: runtime._chat_of(_fifo(_ws() / "runtime" / "made-up.jsonl")), lambda r: r["turns"] == 0
+
+
+def _case_context_records(out):
+    from app import context
+    return lambda: context._records(_fifo(_ws() / "runtime" / "made-up.jsonl")), lambda r: r == []
+
+
+def _case_marks_transcript(out):
+    from app import marks
+    return lambda: marks._transcript_messages(str(_fifo(_ws() / "runtime" / "made-up.jsonl"))), lambda r: r == []
+
+
+def _case_session_cost(out):
+    from app import proposer
+    return lambda: proposer.session_cost(str(_fifo(_ws() / "runtime" / "made-up.jsonl"))), lambda r: r == 0.0
+
+
+def _case_sub_meta(out):
+    from app import session
+    path = _ws() / "runtime" / "s" / "subagents" / "agent-made-up.jsonl"
+    _fifo(path.with_name("agent-made-up.meta.json"))
+    return lambda: session._read_meta_json(path), lambda r: r == {}
+
+
+def _case_fork_ref(out):
+    from app import session
+    return lambda: session._file_fork_ref(_fifo(_ws() / "runtime" / "made-up.jsonl"), "toolu_made_up"), \
+        lambda r: r is None
+
+
+def _case_began_since(out):
+    from app import session
+    return lambda: session._began_since(str(_fifo(_ws() / "runtime" / "made-up.jsonl")), "2026-11-03T00:00:00Z"), \
+        lambda r: r is True
+
+
+def _case_continued_in(out):
+    from app import session
+    return lambda: session._continued_in(str(_fifo(_ws() / "runtime" / "made-up.jsonl"))), lambda r: r is None
+
+
+def _case_held_events(out):
+    from app import events
+    events._held.pop(CORPUS, None)
+    _fifo(_ws() / events.HELD_FILE)
+    return lambda: events.held(CORPUS), lambda r: r == []
+
+
+def _case_citing_documents(out):
+    from app import investigation, tools
+    _fifo(investigation.ensure_main(CORPUS) / "made-up.json")
+    return lambda: tools._citing_documents(CORPUS, "c0ffee01"), lambda r: r == []
+
+
+def _case_mark_interrupted(out):
+    from app import checkstore, notebook
+    return lambda: notebook._mark_interrupted(_fifo(_ws() / "notebooks" / "madeup01.json"), checkstore), \
+        lambda r: r == []
+
+
+def _case_migrate_scratch(out):
+    from app import notebook
+    _fifo(_ws() / "notebooks" / "madeup01.json")
+    notebook._scratch_migrated.clear()
+    return lambda: notebook.migrate_scratch(CORPUS), lambda r: r == []
+
+
+def _case_work_texts(out):
+    from app import work_files
+    _fifo(_ws() / "notebooks" / "madeup01.json")
+    return lambda: work_files._texts(_ws()), lambda r: r == []
+
+
+def _case_work_read_text(out):
+    from app import work_files
+    return lambda: work_files._read_text(_fifo(_ws() / "check-work" / "made-up" / "notes.txt")), lambda r: r is None
+
+
+def _case_render_theme(out):
+    from app import render
+    _fifo(_ws() / render.THEMES_FILE)
+    return lambda: render.theme(CORPUS), lambda r: r == dict(render.DEFAULT_THEME)
+
+
+def _case_libs_lock(out):
+    from app import card_libs, view_libs
+    _fifo(card_libs.folder(CORPUS) / view_libs.LIB_DIR / view_libs.LOCK_FILE)
+    return lambda: view_libs.lock(card_libs.folder(CORPUS)), lambda r: r == {}
+
+
+def _case_last_seq(out):
+    from app import ledger
+    return lambda: ledger.last_seq(_fifo(_ws() / "chats" / "made-up.jsonl")), lambda r: r == -1
+
+
+def _case_label_rows(out):
+    from app import labels_store
+    return lambda: list(labels_store._read_rows(_fifo(_ws() / "labels" / "made-up.jsonl"), 0, 100)), lambda r: r == []
+
+
+def _case_view_progress(out):
+    from app import view_calls
+    view_calls._calls[(CORPUS, "made-up")] = view_calls.Call("made-up", CORPUS, "made-up", 0.0,
+                                                             progress=_fifo(_ws() / "view-indexes" / "made-up.json"))
+    return lambda: view_calls.progress(CORPUS, "made-up"), lambda r: r is not None and "done" not in r
+
+
+def _case_cli_orient_status(out, monkeypatch=None):
+    from app import cli
+    _fifo(_ws() / "orient" / "run.json")
+    return lambda: cli.orient_status(CORPUS), lambda r: r == "not started"
+
+
+def _case_thread_question(out):
+    from app import subagent_files
+    _fifo(_ws() / "chats" / "made-up.meta.json")
+    return lambda: subagent_files.thread_question(_ws(), "made-up"), lambda r: r == ""
+
+
+def _case_undo_journal(out):
+    from app import undo
+    undo.forget()
+    _link(undo.log_path(CORPUS), out, _line(type="step", id="made0001", ts="2026-11-03T00:00:00Z", kind="card",
+                                             op="deleted", target="madeup01", by="", label="OUTSIDE-SECRET",
+                                             before={"id": "madeup01"}, after=None))
+    return lambda: (undo.labels(CORPUS), undo.forget())[0], lambda r: r["undo"] is None
+
+
+def _case_calls_store(out):
+    from app import calls
+    calls._indexes.clear()
+    _link(calls.path(CORPUS, "made-up"), out, _line(n=1, id="toolu_made_up", name="OUTSIDE-SECRET", chat="made-up"))
+    return lambda: calls.get(CORPUS, "made-up", 1), lambda r: r is None
+
+
+def _case_chat_events(out):
+    from app import agents
+    return lambda: agents.read_events(_link(_ws() / "chats" / "made-up.jsonl", out, _secret_line())), lambda r: r == []
+
+
+def _case_chat_lines(out):
+    from app import agents
+    return lambda: agents.count_lines(_link(_ws() / "chats" / "made-up.jsonl", out, _secret_line())), \
+        lambda r: r == 0
+
+
+def _case_chat_meta(out):
+    from fastapi import HTTPException
+
+    from app import agents
+    agents.ensure_main(CORPUS)
+    _link(_ws() / "chats" / "madeup01.meta.json", out, json.dumps({"id": "madeup01", "title": "OUTSIDE-SECRET"}))
+
+    def read():
+        try:
+            return agents.read_meta(CORPUS, "madeup01")
+        except HTTPException as e:
+            return e.status_code
+    return read, lambda r: r == 404
+
+
+def _case_chats_listed(out):
+    from app import agents
+    agents.ensure_main(CORPUS)
+    _link(_ws() / "chats" / "madeup01.meta.json", out, json.dumps({"id": "madeup01", "title": "OUTSIDE-SECRET"}))
+    return lambda: json.dumps(agents.list_chats(CORPUS)), lambda r: "OUTSIDE-SECRET" not in r
+
+
+def _case_telemetry_events(out):
+    from app import telemetry
+    return lambda: telemetry._read_jsonl(_link(_ws() / "investigations" / "main" / "events.jsonl", out, _secret_line())), \
+        lambda r: r == []
+
+
+_SCHEMA = {"type": "object", "properties": {"claim": {"$sentence": True}}}
+
+
+def _case_type_component(out):
+    from app import report_types
+    report_types.write_type(CORPUS, "made-up", name="Made-up", description="", renderer="custom", prompt="made-up",
+                            rubric="", schema=_SCHEMA, component="export default () => null", create=True)
+    _link(report_types._type_dir(CORPUS, "made-up") / "renderer.tsx", out, "OUTSIDE-SECRET")
+
+    def save():
+        from fastapi import HTTPException
+        try:
+            report_types.write_type(CORPUS, "made-up", name="Made-up", description="", renderer="custom",
+                                    prompt="made-up", rubric="", schema=_SCHEMA)
+        except HTTPException:
+            pass
+        p = report_types._type_dir(CORPUS, "made-up") / "renderer.tsx"  # what the server wrote there, a card reads
+        return "" if p.is_symlink() or not p.is_file() else p.read_text()
+    return save, lambda r: "OUTSIDE-SECRET" not in r
+
+
+READERS = {f.__name__.removeprefix("_case_"): f for f in (
+    _case_tail_records, _case_last_uuid, _case_chat_of, _case_context_records, _case_marks_transcript,
+    _case_session_cost, _case_sub_meta, _case_fork_ref, _case_began_since, _case_continued_in, _case_held_events,
+    _case_citing_documents, _case_mark_interrupted, _case_migrate_scratch, _case_work_texts, _case_work_read_text,
+    _case_render_theme, _case_libs_lock, _case_last_seq, _case_label_rows, _case_view_progress,
+    _case_cli_orient_status, _case_thread_question, _case_undo_journal, _case_calls_store, _case_chat_events,
+    _case_chat_lines, _case_chat_meta, _case_chats_listed, _case_telemetry_events, _case_type_component)}
+
+
+@pytest.mark.parametrize("reader", sorted(READERS))
+def test_a_reader_of_the_workspace_s_files_reads_a_fifo_or_a_link_a_card_left_as_no_file(reader, tmp_path_factory):
+    outside = _outside(tmp_path_factory)
+    _FIFOS.clear()
+    call, ok = READERS[reader](outside)
+    got: dict = {}
+    t = threading.Thread(target=lambda: got.setdefault("result", call()), daemon=True)
+    t.start()
+    t.join(3.0)
+    held = t.is_alive()
+    for fifo in _FIFOS:  # a read still held on a FIFO sees its end and goes
+        try:
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+    t.join(3.0)
+    assert not held, f"{reader} was held by a FIFO in the workspace"
+    assert "result" in got and ok(got["result"]), f"{reader} read {got.get('result')!r}"
+
+
+def test_the_mirror_reads_no_link_a_card_left_in_place_of_main_s_transcript(tmp_path_factory):
+    """On the Messages API main's transcript lies in the workspace's runtime folder (runtime.py), which a card's code
+    writes; the mirror read it by its path, so a link left in its place had the server put the file it points to into
+    main's chat."""
+    from app import agents, session
+
+    outside = _outside(tmp_path_factory)
+    t = _ws() / "runtime" / "made-up-session.jsonl"
+    t.parent.mkdir(parents=True)
+    t.write_text("")
+    session._live.clear()
+    try:
+        lv = session.attach(CORPUS, "made-up-session", str(config.corpus_dir(CORPUS)), str(t))
+        assert lv is not None
+        session.tail_once(lv)  # the tail stands at the transcript's end
+        _link(t, outside, _secret_line())
+        session.tail_once(lv)
+        assert "OUTSIDE-SECRET" not in agents.paths(CORPUS, agents.MAIN_ID)[1].read_text()
+    finally:
+        session._live.clear()
+
+
+def test_the_export_copies_no_link_and_waits_on_no_fifo_a_card_left_in_the_workspace(tmp_path_factory, tmp_path):
+    """The export reads the workspace's files by their paths: a link a card's code left in place of a chat's log had
+    the person's own file copied into the zip they share, and a FIFO in place of sessions.json held the export."""
+    import zipfile
+
+    from app import agents, export
+
+    outside = _outside(tmp_path_factory)
+    agents.ensure_main(CORPUS)
+    (_ws() / "chats" / "madeup01.meta.json").write_text(json.dumps({"id": "madeup01", "title": "made-up"}))
+    _link(_ws() / "chats" / "madeup01.jsonl", outside, _secret_line())
+    _FIFOS.clear()
+    _fifo(_ws() / "sessions.json")
+    done: dict = {}
+    t = threading.Thread(target=lambda: done.setdefault("manifest", export.build(CORPUS, tmp_path / "made-up.zip")),
+                         daemon=True)
+    t.start()
+    t.join(10.0)
+    held = t.is_alive()
+    for fifo in _FIFOS:
+        try:
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+    t.join(10.0)
+    assert not held, "the export was held by a FIFO in the workspace"
+    with zipfile.ZipFile(tmp_path / "made-up.zip") as z:
+        assert all(b"OUTSIDE-SECRET" not in z.read(n) for n in z.namelist())

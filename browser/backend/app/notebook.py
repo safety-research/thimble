@@ -331,8 +331,10 @@ def notebooks_dir(ws: Path) -> Path:
     d = ws / "notebooks"
     old = ws / "notebook.json"
     if old.is_file() and not (d / f"{MAIN}.json").exists():
-        try:
-            data = json.loads(old.read_text("utf-8"))
+        try:  # never through a link or a FIFO a card's code left there (nofollow); one is no notebook
+            data = json.loads(nofollow.read_text(old))
+        except OSError:
+            return d
         except ValueError:
             log.warning("%s is not valid JSON; migrating an empty main notebook and keeping it as notebook.json.bad", old)
             data, bad = {}, True
@@ -1101,8 +1103,8 @@ def mark_interrupted_cells(root: Path | None = None) -> list[str]:
 def _mark_interrupted(p: Path, checkstore: Any) -> list[str]:
     """mark_interrupted_cells for one group file, with the store's lock held."""
     marked: list[str] = []
-    try:
-        nb = json.loads(p.read_text("utf-8"))
+    try:  # never through a link or a FIFO a card's code left there (nofollow)
+        nb = json.loads(nofollow.read_text(p))
     except (OSError, ValueError):
         return marked
     cells = nb.get("cells") if isinstance(nb, dict) else None
@@ -3973,8 +3975,8 @@ def migrate_scratch(c: str) -> list[str]:
     for p in sorted(d.glob("*.json")) if d.is_dir() else ():
         if not ID_RE.match(p.stem):
             continue
-        try:
-            data = json.loads(p.read_text("utf-8"))
+        try:  # never through a link or a FIFO a card's code left there (nofollow)
+            data = json.loads(nofollow.read_text(p))
         except (OSError, ValueError):
             continue
         if not isinstance(data, dict):

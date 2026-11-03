@@ -802,8 +802,8 @@ def _transcript_messages(path: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if not path:
         return out
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
+    try:  # a transcript in the workspace (the server's own runtime's) lies where a card's code writes (nofollow)
+        with nofollow.reader(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 with contextlib.suppress(ValueError):
                     rec = json.loads(line)

@@ -53,8 +53,8 @@ def _texts(ws: Path) -> list[str]:
     for sub, keys, pattern in TEXT_SOURCES:
         folder = ws / sub
         for p in sorted(folder.glob(pattern)) if folder.is_dir() else []:
-            try:
-                _strings(json.loads(p.read_text("utf-8")), out, keys)
+            try:  # never through a link or a FIFO a card's code left there (nofollow)
+                _strings(json.loads(nofollow.read_text(p)), out, keys)
             except (OSError, ValueError):
                 continue
     return out
@@ -109,10 +109,11 @@ def _named(rel: str, blob: str) -> bool:
 
 
 def _read_text(path: Path) -> str | None:
-    try:
-        if path.stat().st_size > TEXT_MAX:
-            return None
-        raw = path.read_bytes()
+    try:  # in a work folder, which an agent's commands and a card's code write: never a link or a FIFO (nofollow)
+        with nofollow.reader(path) as f:
+            if os.fstat(f.fileno()).st_size > TEXT_MAX:
+                return None
+            raw = f.read()
     except OSError:
         return None
     return None if b"\0" in raw[:4096] else raw.decode("utf-8", "replace")
