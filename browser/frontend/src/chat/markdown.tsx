@@ -8,7 +8,7 @@
 import { Fragment, createContext, memo, useContext, useMemo, useState, type JSX, type ReactNode } from 'react'
 import Markdown, { type Components, type ExtraProps, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Element, Properties, Root, Text } from 'hast'
+import type { Element, Properties, Root, RootContent, Text } from 'hast'
 import { MarkdownCode } from '../components/Code'
 import { findQuote } from '../lib/quoteFind'
 import { plainQuote, type AnswerMark } from './answerComments'
@@ -229,6 +229,24 @@ export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {
   }
 }
 
+/** The text a node starts with, inside the elements it opens with (a tint's <mark>), or null. */
+const leadText = (node: RootContent | undefined): Text | null => (node?.type === 'text' ? node : node?.type === 'element' && node.tagName !== 'br' ? leadText(node.children[0]) : null)
+
+/** rehype plugin: a hard break is its <br> alone. The line ending markdown writes after each <br> is dropped, also
+ * inside a tint that wraps it, since a paragraph that shows its line endings (styles/chat.css, white-space: pre-line)
+ * would break the line there a second time. It runs last, so the passes before it read that line ending as the space
+ * between the two lines' words. */
+export function rehypeOneBreak() {
+  const walk = (node: Root | Element): void =>
+    node.children.forEach((child, i) => {
+      if (child.type !== 'element') return
+      if (child.tagName !== 'br') return walk(child)
+      const next = leadText(node.children[i + 1])
+      if (next?.value.startsWith('\n')) next.value = next.value.slice(1)
+    })
+  return (tree: Root) => walk(tree)
+}
+
 /** What a tinted passage's click does: open its comment in a popover beside it (chat/Rows, AnswerComment.tsx). */
 export const AnswerMarksContext = createContext<{ open: (id: string) => void } | null>(null)
 
@@ -271,12 +289,12 @@ function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
 const components: Components = { span: MdSpan, a: MdLink, code: MarkdownCode, img: MdImage, mark: MdMark }
 // a single ~ is no strikethrough: page and file names hold it (`dse~Agent`, live check L21); ~~two~~ still is
 const remarkPlugins: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
-const rehypePlugins = [rehypeRefChips, rehypeNumericCells]
+const rehypePlugins = [rehypeRefChips, rehypeNumericCells, rehypeOneBreak]
 
 const NO_MARKS: readonly AnswerMark[] = []
 
 const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { text: string; marks?: readonly AnswerMark[] }) {
-  const plugins: Options['rehypePlugins'] = marks.length ? [rehypeRefChips, [rehypeAnswerMarks, { marks }], rehypeNumericCells] : rehypePlugins
+  const plugins: Options['rehypePlugins'] = marks.length ? [rehypeRefChips, [rehypeAnswerMarks, { marks }], rehypeNumericCells, rehypeOneBreak] : rehypePlugins
   return (
     <Markdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={components}>
       {protectTokens(text)}
