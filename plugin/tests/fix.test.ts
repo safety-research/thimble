@@ -1745,3 +1745,17 @@ test("the fix takes the person's own words, never Claude's, and the fix they nam
   await (await fixKey(s.$, 'd'))!.later()
   expect((await fixLineRows(s.$, ELS, 160)).map(textOf)).toContain(`    You asked   ${mine}`)
 })
+
+test('a fix whose round ended as a request with no code takes `N <words>` as its next round, never a new fix, and Claude reads it among the fixes (fix/changeable.mjs, the list the browser reads too)', async () => {
+  const s = setup()
+  await requested(s, 'Title: Bar says read\nRequest: Which of two ways do you want?')
+  expect(s.fix.state).toBe('request')
+  const ran = await s.call('command.run', { command: 'thimble-fix', args: '1 the first way' }, async () => ({}))
+  expect(ran.context[1]).toContain('\n1  "Bar says read" (request)')
+  await s.tick()
+  s.prompts.splice(0)
+  await skillCall(s, '1')
+  expect(s.verbs().filter(v => v.startsWith('new'))).toEqual(['new --made-in terminal'])
+  expect(s.verbs()).toContain('round 1')
+  expect(s.ran.find(x => x.argv.includes('round'))?.stdin).toBe('the first way')
+})

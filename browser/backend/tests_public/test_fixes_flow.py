@@ -409,6 +409,23 @@ def test_main_reads_each_fix_the_words_may_change_by_its_number_name_and_state()
     assert fixes.fixes_context(recs[2:]) == "(none yet)"
 
 
+async def test_words_for_a_fix_whose_round_ended_as_a_request_are_its_next_round_and_main_reads_it_among_the_fixes(
+        fixing, monkeypatch):
+    # a round of fix 1 ended as a request with no code (its fixer's question back to the person): the person's
+    # `/thimble-fix 1 <words>` in main's chat is the fix's next round, which the kernel starts in a new copy, never a new
+    # fix, and main reads the fix beside their words; the list of such fixes is the terminal's (plugin/fix/changeable.mjs)
+    fixing.recs[1] = {"id": 1, "title": "Views install their files", "state": "request", "updated": 1.0, "work": None,
+                      "words": ["views should install their files"], "summary": "Which of two ways do you want?"}
+    assert fixes.fixes_context(list(fixing.recs.values())) == (
+        '1  "Views install their files" (request): Which of two ways do you want?')
+    api_key(monkeypatch, [text("Title: Views install their files\nWhat it does: A build writes its view's own folder.")])
+    fixes._asked[CORPUS] = fixes._Asking("1 the first way", "", fixes.ASKED_TURNS)
+    got = await fixes.from_tool(CORPUS, "1")
+    assert got["kind"] == "round" and _fix_calls(fixing) == [("round", "1")]
+    assert fixing.recs[1]["words"] == ["views should install their files", "the first way"]
+    await _ended()
+
+
 async def test_words_in_the_fix_s_thread_go_to_its_fixer_while_it_works(fixing, monkeypatch, analyst):
     client = api_key(monkeypatch, [text("Working on it."), text("Title: Card counts rows\nWhat it does: Rows and columns.")])
     # the fixer's first answer comes once the words are in, so they come while it works

@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -937,7 +938,18 @@ async def request(c: str, words: str, page: str = "", *, title: str | None = Non
     return {"fix": {"id": rec["id"], "title": rec.get("title"), "state": rec.get("state")}}
 
 
-CHANGEABLE = ("on", "off", "ready", "working", "failed", "redo")  # the fixes more words can change (plugin/fix/request.ts)
+# the states of the fixes more words can change: the terminal's list (plugin/fix/changeable.mjs), whose line is JSON
+CHANGEABLE_LINE = re.compile(r"^export const CHANGEABLE = (\[.*\])$", re.M)
+
+
+@functools.cache
+def changeable() -> tuple[str, ...]:
+    """The states of the fixes the person's `N <words>` changes, as a round of fix N: the list the terminal's request.ts
+    imports (plugin/fix/changeable.mjs), read once. Raises when that file holds no such list."""
+    m = CHANGEABLE_LINE.search((plugin_dir() / "fix" / "changeable.mjs").read_text("utf-8"))
+    if m is None:
+        raise ValueError("plugin/fix/changeable.mjs holds no `export const CHANGEABLE = [...]` line")
+    return tuple(str(s) for s in json.loads(m.group(1)))
 
 
 def head_of(words: str) -> tuple[int | None, bool, str] | None:
@@ -949,7 +961,7 @@ def head_of(words: str) -> tuple[int | None, bool, str] | None:
 
 
 def _changeable(n: int | None, recs: list[dict[str, Any]]) -> bool:
-    return n is not None and any(int(r.get("id") or 0) == n and r.get("state") in CHANGEABLE for r in recs)
+    return n is not None and any(int(r.get("id") or 0) == n and r.get("state") in changeable() for r in recs)
 
 
 def form_of(words: str, recs: list[dict[str, Any]]) -> tuple[str, int | None]:
@@ -1024,7 +1036,7 @@ def fixes_context(recs: list[dict[str, Any]]) -> str:
     """The person's fixes as main reads them beside their /thimble-fix (prompts/thimble-fix.md's list): one line each,
     the number as the handle for fix_thimble's `N <words>`, then the name and state (plugin/fix/request.ts
     fixesContext); `(none yet)` when they have none."""
-    shown = [r for r in recs if r.get("state") in CHANGEABLE][:20]
+    shown = [r for r in recs if r.get("state") in changeable()][:20]
 
     def word(r: dict[str, Any]) -> str:
         prev = r.get("prev") or {}
