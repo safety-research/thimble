@@ -514,9 +514,14 @@ class Space:
 
     def drop_waiting(self) -> None:
         """What waits for main goes unread (main's chat changes, the workspace's folder goes, the server stops): the
-        analyst's messages and commands among it still get their lines in main's chat, as they sent them."""
+        analyst's messages and commands among it still get their lines in main's chat, as they sent them, and a
+        /thimble-fix's words are known not to have reached main (fixes.words_dropped)."""
+        from . import fixes  # noqa: PLC0415
+
         for text in self.main.queue:
             self.said_line(text)
+            if m := EVENT_ID_RE.match(text):
+                fixes.words_dropped(self.c, m.group(1))
         self.main.queue.clear()
 
     # ---- what each agent runs with

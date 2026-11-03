@@ -404,7 +404,7 @@ test('words that begin with / reach Claude in quotes, and the fix takes them as 
     await s.tick()
     expect(s.prompts).toEqual([])
     expect(s.toasts).toHaveLength(1)
-    expect(skillText(await skillCall(s, 'new')).text).toMatch(/^thimble started no fix: /)
+    expect(skillText(await skillCall(s, 'new')).text).toBe('PROMPT fix-not-given')
     expect(s.ran.some(x => x.argv.includes('new'))).toBe(false)
   }
 })
@@ -444,10 +444,8 @@ test("after /thimble-fix words that never reached Claude, the fix-thimble skill 
     await s.tick()
     // the turn that runs ends; in the next one the person asks Claude to start the fix they asked for
     await s.call('turn.complete', { turnId: 't-1', reason: 'answer', answer: 'ok', durationMs: 9, isAborted: false }, async () => ({}))
-    const said = String(skillText(await skillCall(s, 'new')).text)
-    expect(said).toMatch(/^thimble started no fix: /)
-    expect(said).toContain('did not reach you')
-    expect(said).toContain('type /thimble-fix and their words again')
+    // prompts/fix-not-given.md, the browser workbench's answer in the same case too
+    expect(skillText(await skillCall(s, 'new')).text).toBe('PROMPT fix-not-given')
     expect(s.ran.some(x => x.argv.includes('new'))).toBe(false)
     // /thimble-fix alone is now their last: the skill reads that a fix starts from their words
     expect(await s.call('command.run', { command: 'thimble-fix', args: '' }, own)).toEqual({ text: FIX_ALONE })

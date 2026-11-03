@@ -118,6 +118,8 @@ _phase: dict[int, str] = {}  # fix id → fixing | testing | applying | restarti
 _asked: dict[str, _Asking] = {}
 # workspace → each /thimble-fix posted there that no turn of main's read yet, by the id of the event that carries it
 _waiting: dict[str, dict[str, _Asking]] = {}
+# the workspaces whose person's last /thimble-fix never reached main (words_dropped), until their next one
+_not_given: set[str] = set()
 _since: dict[int, float] = {}  # fix id → when this server's work on it began (a new fix, a round, a redo)
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
 _where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
@@ -1071,6 +1073,7 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     words = (words or "").strip()
     if not words:
         raise HTTPException(400, EMPTY)
+    _not_given.discard(c)  # this is the person's last /thimble-fix now
     head = head_of(words)
     if head is not None and not head[2]:
         if why := problem():
@@ -1116,6 +1119,18 @@ def words_read(c: str, event_id: str) -> None:
             return
 
 
+def words_dropped(c: str, event_id: str) -> None:
+    """An event that waited for main's turn goes unread (runtime.Space.drop_waiting: main's chat changed, the workspace's
+    folder went, the server stops): when it carries the person's /thimble-fix, its words never reached main, so no fix
+    starts from them, and main's fix_thimble reads that they did not reach it (NotGiven) until the person's next
+    /thimble-fix, as the terminal's skill reads it after words that never reached Claude."""
+    waiting = _waiting.get(c)
+    if not waiting or waiting.pop(event_id, None) is None:
+        return
+    _asked.pop(c, None)
+    _not_given.add(c)
+
+
 def main_turn_ended(c: str) -> None:
     """Main's turn ended (session.py): the person's /thimble-fix words go after ASKED_TURNS of main's turns from the turn
     that read them, as the terminal's do, so that fix_thimble called later on main's own (on the person's yes to main's
@@ -1131,13 +1146,22 @@ def main_turn_ended(c: str) -> None:
 NOT_ASKED = "a fix starts from the person's own words, which they type after /thimble-fix <what should work differently>."
 
 
+class NotGiven(HTTPException):
+    """fix_thimble after the person's last /thimble-fix whose words never reached main (words_dropped): no fix starts,
+    and `detail` is main's whole answer, the terminal's in the same case (plugin/prompts/fix-not-given.md)."""
+
+    def __init__(self) -> None:
+        super().__init__(409, (plugin_dir() / "prompts" / "fix-not-given.md").read_text("utf-8").strip())
+
+
 async def from_tool(c: str, form: str) -> dict[str, Any]:
     """Main's fix_thimble after the person's /thimble-fix <words> here: their words, as they typed them, go to the fix,
     never main's; main's `form` names the fix they change, `N` a round of fix N (change), `new` or none a new fix
     (request), and the person's own `N …` or `new …` names it first. The page is as their /thimble-fix sent it. Main's
     chat gets the line that opens the fix's thread; main heard of it in the tool's result. With no /thimble-fix of the
     person's that main read to answer (none, one answered already, one older than ASKED_TURNS of main's turns, or one
-    still waiting for main's turn), no fix starts. {fix, kind: new | round | live}."""
+    still waiting for main's turn), no fix starts; when the words of their last one never reached main, main reads so
+    (NotGiven). {fix, kind: new | round | live}."""
     if c not in _asked and _waiting.get(c):
         # the record that brought the words to main's turn may be one the mirror has not read yet: it reads it now
         from . import session  # noqa: PLC0415
@@ -1147,6 +1171,8 @@ async def from_tool(c: str, form: str) -> dict[str, Any]:
             session._read_now(lv)
     a = _asked.pop(c, None)
     if a is None or not a.words:
+        if c in _not_given:
+            raise NotGiven()
         raise HTTPException(409, NOT_ASKED)
     if why := problem():
         raise HTTPException(409, why)
