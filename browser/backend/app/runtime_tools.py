@@ -10,7 +10,9 @@ as the Claude Code tools 0.8's agents had, so the prompts read the same in both 
     WebSearch WebFetch  the Messages API's own server tools (web_search, web_fetch)
 
 A tool that cannot run here (Bash without the sandbox) is left out of the agent's list (available). Nothing here
-reaches past those folders: every path is resolved, symlinks included, and checked against them.
+reaches past those folders: every path is resolved, symlinks included, and checked against them (Box.path), and the
+file or folder is then opened by that real path one part at a time from / without following a link (nofollow), so a
+link a card's code or a command puts on the way after the check fails the call rather than lead outside.
 """
 from __future__ import annotations
 
@@ -24,7 +26,9 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, BinaryIO, Iterator
+
+from . import nofollow
 
 READ_LINES = 2000
 LINE_CHARS = 2000
@@ -155,36 +159,55 @@ def _cut(text: str) -> str:
     return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + f"\n[cut at {RESULT_CHARS} characters]"
 
 
-def _binary(p: Path) -> bool:
-    try:
-        with p.open("rb") as f:
-            return b"\0" in f.read(4096)
-    except OSError:
-        return False
+def _opened(q: Path) -> BinaryIO:
+    """The regular file at the real path `q` (Box.path), opened from / one part at a time without following a link
+    (nofollow): a link put on its way after Box checked it fails the open."""
+    return os.fdopen(nofollow.open(q, os.O_RDONLY, root="/"), "rb")
 
 
-def _lines(p: Path) -> Iterator[str]:
+def _binary(f: BinaryIO) -> bool:
+    """Whether the open file `f` holds a NUL byte in its first 4096 bytes; read from its start, and left there."""
+    f.seek(0)
+    head = f.read(4096)
+    f.seek(0)
+    return b"\0" in head
+
+
+def _lines(f: BinaryIO) -> Iterator[str]:
     """A text file's lines, read one at a time, as the citation check reads them (the terminal's evidence.read_lines):
     each ends at a newline alone, without it and a carriage return before it, so a U+2028 in a JSON string ends no
     line, and the number Read or Grep gives a line is the one a citation of it names."""
-    with p.open("rb") as f:
-        for raw in f:
-            yield raw.decode("utf-8", errors="replace").removesuffix("\n").removesuffix("\r")
+    for raw in f:
+        yield raw.decode("utf-8", errors="replace").removesuffix("\n").removesuffix("\r")
 
 
-def _window(p: Path, offset: int, limit: int) -> tuple[list[str], int]:
-    """Lines `offset` to `offset + limit - 1` of a text file (from 1), and how many lines follow them."""
-    lines = _lines(p)
-    shown = list(itertools.islice(lines, offset - 1, offset - 1 + limit))
-    return shown, sum(1 for _ in lines)
+def _window(q: Path, offset: int, limit: int) -> tuple[list[str], int] | None:
+    """Lines `offset` to `offset + limit - 1` of the text file at the real path `q` (from 1), and how many lines follow
+    them; None for a binary file."""
+    with _opened(q) as f:
+        if _binary(f):
+            return None
+        lines = _lines(f)
+        shown = list(itertools.islice(lines, offset - 1, offset - 1 + limit))
+        return shown, sum(1 for _ in lines)
 
 
-def _files(base: Path) -> list[Path]:
-    out = []
-    for d, dirs, files in os.walk(base):
-        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS)
-        out.extend(Path(d) / f for f in sorted(files))
-    return out
+def _files(base: Path) -> Iterator[tuple[Path, int, str]]:
+    """Each file below the real folder `base`, as (its path, the descriptor of its folder, its name there), from a walk
+    that opens each folder by its own name in the one above it and enters no link (os.fwalk over nofollow's folder);
+    the descriptors are open only while the caller iterates. Nothing for a `base` that is no folder (any longer)."""
+    try:
+        top = nofollow.walk(base, root="/")
+    except OSError:
+        return
+    try:
+        for d, dirs, files, fd in os.fwalk(".", dir_fd=top):
+            dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS)
+            here = base / os.path.normpath(d)
+            for name in sorted(files):
+                yield here / name, fd, name
+    finally:
+        os.close(top)
 
 
 def sandbox_reason() -> str:
@@ -254,11 +277,12 @@ async def _read(box: Box, a: dict[str, Any]) -> Out:
         return Out(f"{a.get('file_path')} is a folder: list it with Glob or Bash ls", True)
     if not q.exists():
         return Out(f"there is no file {a.get('file_path')}", True)
-    if _binary(q):
-        return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
     offset = max(1, int(a.get("offset") or 1))
     limit = max(1, min(int(a.get("limit") or READ_LINES), READ_LINES))
-    lines, more = await asyncio.to_thread(_window, q, offset, limit)
+    got = await asyncio.to_thread(_window, q, offset, limit)
+    if got is None:
+        return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
+    lines, more = got
     out = [f"{n:>6}\t{ln[:LINE_CHARS]}" for n, ln in enumerate(lines, offset)]
     if more > 0:
         out.append(f"[{more} more lines: read on with offset {offset + limit}]")
@@ -271,7 +295,7 @@ async def _glob(box: Box, a: dict[str, Any]) -> Out:
 
     def run() -> list[str]:
         hits = []
-        for f in _files(base):
+        for f, _fd, _name in _files(base):
             rel = str(f.relative_to(base))
             if fnmatch.fnmatch(rel, pat) or (pat.startswith("**/") and fnmatch.fnmatch(rel, pat[3:])):
                 hits.append(str(f))
@@ -292,20 +316,32 @@ async def _grep(box: Box, a: dict[str, Any]) -> Out:
         return Out(f"the pattern is not a regular expression: {e}", True)
     glob = a.get("glob")
 
+    def opened(f: Path, fd: int | None, name: str) -> BinaryIO:
+        """A file of the walk by its name in its folder's descriptor, never through a link; a link there is read as
+        Read reads a path, by its real path once Box finds it in a read root."""
+        if fd is not None:
+            try:
+                return os.fdopen(nofollow.open_at(fd, name, os.O_RDONLY), "rb")
+            except nofollow.Linked:
+                pass
+        return _opened(box.path(str(f)))
+
     def run() -> list[str]:
         out: list[str] = []
-        for f in [base] if base.is_file() else _files(base):
+        files = [(base, None, base.name)] if base.is_file() else _files(base)
+        for f, fd, name in files:
             if glob and not fnmatch.fnmatch(f.name, glob) and not fnmatch.fnmatch(str(f), glob):
                 continue
-            if _binary(f):
-                continue
             try:
-                for n, line in enumerate(_lines(f), 1):
-                    if rx.search(line):
-                        out.append(f"{f}:{n}: {line[:400]}")
-                        if len(out) >= GREP_MAX:
-                            return out
-            except OSError:
+                with opened(f, fd, name) as fh:
+                    if _binary(fh):
+                        continue
+                    for n, line in enumerate(_lines(fh), 1):
+                        if rx.search(line):
+                            out.append(f"{f}:{n}: {line[:400]}")
+                            if len(out) >= GREP_MAX:
+                                return out
+            except (OSError, ValueError):
                 continue
         return out
 
@@ -318,9 +354,9 @@ async def _grep(box: Box, a: dict[str, Any]) -> Out:
 
 async def _write(box: Box, a: dict[str, Any]) -> Out:
     q = box.path(a.get("file_path"), write=True)
-    q.parent.mkdir(parents=True, exist_ok=True)
     text = str(a.get("content") or "")
-    await asyncio.to_thread(q.write_text, text, "utf-8")
+    # by the real path Box checked, its missing folders made, never through a link (nofollow)
+    await asyncio.to_thread(nofollow.write_text, q, text, root="/", make=True)
     return Out(f"wrote {q} ({len(text)} characters)")
 
 
@@ -328,15 +364,15 @@ async def _edit(box: Box, a: dict[str, Any]) -> Out:
     q = box.path(a.get("file_path"), write=True)
     if not q.is_file():
         return Out(f"there is no file {a.get('file_path')}", True)
-    text = await asyncio.to_thread(q.read_text, "utf-8")
+    text = await asyncio.to_thread(nofollow.read_text, q, root="/")
     old, new = str(a.get("old_string") or ""), str(a.get("new_string") or "")
     n = text.count(old) if old else 0
     if n == 0:
         return Out("old_string is not in the file", True)
     if n > 1 and not a.get("replace_all"):
         return Out(f"old_string is in the file {n} times: give more context, or set replace_all", True)
-    await asyncio.to_thread(q.write_text, text.replace(old, new) if a.get("replace_all") else text.replace(old, new, 1),
-                            "utf-8")
+    await asyncio.to_thread(nofollow.write_text, q,
+                            text.replace(old, new) if a.get("replace_all") else text.replace(old, new, 1), root="/")
     return Out(f"edited {q}")
 
 
@@ -402,7 +438,7 @@ async def _bash(box: Box, a: dict[str, Any]) -> Out:
     timeout = min(max(int(a.get("timeout") or BASH_TIMEOUT_S * 1000), 1000), BASH_TIMEOUT_MAX_S * 1000) / 1000
     home = box.home or box.write_roots[0]
     tmp = box.temp or home / "tmp"
-    tmp.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(tmp)
     argv = kernel_wrap.srt_argv(["/bin/bash", "-c", command], node=str(srt.node()),
                                 srt_dir=srt.package(config.REPO_ROOT) or config.REPO_ROOT, rules=_rules(box))
     env = {k: v for k in ("LANG", "LC_ALL", "TZ", "TERM", "USER", "LOGNAME") if (v := os.environ.get(k))}
