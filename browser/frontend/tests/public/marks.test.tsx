@@ -319,6 +319,33 @@ test("a label's version the check read shows as the label was then, under what c
   }
 })
 
+test("a label's own place shows the version the check read, and its chip opens the label, which has no card", async () => {
+  const { api } = await import('../../src/lib/api.ts')
+  const table = { corner: 'value', cols: ['records', 'share'], rows: [{ label: 'navigation', values: ['13', '33%'] }, { label: 'all', values: ['40', ''] }], at: { r: 0, c: 0 } }
+  const ev = { kind: 'card' as const, card: 'label-k3f9a1', title: 'label theme', ref: 'card:label-k3f9a1@v1#records/navigation', value: '13', table, version: 1, at: 1780000000, made: 'run over 40 records', after: 'run over 423 records' }
+  const was = api.resolveRef
+  const read = vi.fn(async () => {
+    throw new Error('no card label-k3f9a1')
+  })
+  api.resolveRef = read as unknown as typeof api.resolveRef
+  const opened: unknown[] = []
+  const off = bus.on('openRef', (e) => opened.push(e))
+  try {
+    const el = await mount(<ChatMarkdown text="[13](#) were about navigation" checks={[item(0, '13', { evidence: ev })]} />)
+    await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await settle()
+    const chip = document.querySelector<HTMLElement>('.mark-pop .refchip-pop-chip')
+    const note = document.querySelector('.mark-pop .mark-ev-changed')?.textContent
+    expect([chip?.textContent, document.querySelector('.mark-pop .cite-cell')?.textContent, note]).toEqual(['label theme', '13', 'The label changed after this version (run over 40 records): run over 423 records.'])
+    expect(read).not.toHaveBeenCalled()
+    await act(async () => chip!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(opened).toEqual([{ ref: 'concept:k3f9a1' }])
+  } finally {
+    off()
+    api.resolveRef = was
+  }
+})
+
 test("a card's evidence shows the card as it is now when it changed after the check, or says the place is gone", async () => {
   const { api } = await import('../../src/lib/api.ts')
   const table = { corner: 'run', cols: ['of_40_open'], rows: [{ label: 'run-a', values: ['12'] }], at: { r: 0, c: 0 } }
