@@ -1,7 +1,7 @@
 // Assistant markdown: react-markdown with remark-gfm, the `[[value|ref]]` tokens turned into chips, and each mark,
 // `[words](#)`, drawn as its check says (marks/Mark.tsx). In main's chat a rehype pass wraps the words of each passage
 // a check commented on in <mark>, tinted in the check's color, which opens its comment on a click (AnswerMarksContext,
-// chat/answerComments.ts). The tokens are
+// chat/answerComments.ts), before a citation on the same words opens (MdMark). The tokens are
 // hidden from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns
 // the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
 // re-parses only the tail.
@@ -11,12 +11,12 @@ import remarkGfm from 'remark-gfm'
 import type { Element, Properties, Root, RootContent, Text } from 'hast'
 import { MarkdownCode } from '../components/Code'
 import { findQuote } from '../lib/quoteFind'
-import { plainQuote, type AnswerMark } from './answerComments'
+import { nextMark, plainQuote, type AnswerMark } from './answerComments'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip, ShownTogether } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { parseRef, refPaths, shownValue, splitValueRef } from '../lib/refs'
-import { Mark, MarkItems } from '../marks/Mark'
+import { CiteWordsContext, Mark, MarkItems } from '../marks/Mark'
 import { asChecked, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
 export interface ChipCtx {
@@ -249,29 +249,61 @@ export function rehypeOneBreak() {
   return (tree: Root) => walk(tree)
 }
 
-/** What a tinted passage's click does: open its comment in a popover beside it (chat/Rows, AnswerComment.tsx). */
-export const AnswerMarksContext = createContext<{ open: (id: string) => void } | null>(null)
+/** The comment open beside its passage in main's chat, and what opens one in its place or, with null, closes it
+ * (chat/Rows, AnswerComment.tsx). */
+export interface AnswerMarks {
+  opened: string | null
+  show: (id: string | null) => void
+}
+export const AnswerMarksContext = createContext<AnswerMarks | null>(null)
+
+const TINT = 'mark.answer-tint[data-answer-comment]'
+
+/** The comments whose tints stand over a tint's words, from the innermost out: a tint wraps words alone, so those over
+ * them are the tint itself and the tints around it. */
+function tintsOver(el: HTMLElement): string[] {
+  const out: string[] = []
+  for (let t = el.closest<HTMLElement>(TINT); t; t = t.parentElement?.closest<HTMLElement>(TINT) ?? null) {
+    const id = t.dataset.answerComment
+    if (id && !out.includes(id)) out.push(id)
+  }
+  return out
+}
 
 function MdMark(props: JSX.IntrinsicElements['mark'] & ExtraProps) {
   const ctx = useContext(AnswerMarksContext)
+  const cite = useContext(CiteWordsContext)
   const { node: _node, ...rest } = props
   const id = (props as Record<string, unknown>)['data-answer-comment']
   if (typeof id !== 'string' || !ctx) return <mark {...rest} />
+  // a click, or Enter or Space, on the words opens the next of the marks over them (answerComments.ts nextMark): the
+  // comments from the innermost out, then the citation whose words hold the tint, one of them open at a time
+  const press = (el: HTMLElement) => {
+    const over = tintsOver(el)
+    const shown = ctx.opened == null ? -1 : over.indexOf(ctx.opened)
+    const next = nextMark(over.length + (cite ? 1 : 0), shown >= 0 ? shown : cite?.pinned() ? over.length : -1)
+    if (next != null && next < over.length) {
+      cite?.close()
+      ctx.show(over[next])
+    } else {
+      if (shown >= 0) ctx.show(null)
+      if (next != null) cite?.pin()
+    }
+  }
   return (
     <mark
       {...rest}
       role="button"
       tabIndex={0}
       onClick={(e) => {
-        // a citation's words in the passage open the citation (marks/Mark), so the two popovers never open at once
-        if ((e.target as HTMLElement).closest?.('.mark-words')) return
         e.stopPropagation()
-        ctx.open(id)
+        press(e.currentTarget)
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          ctx.open(id)
+          e.stopPropagation()
+          press(e.currentTarget)
         }
       }}
     />

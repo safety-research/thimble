@@ -7,7 +7,8 @@
 // It opens as a popover beside its passage: to the right of the chat's column, over the canvas, its top on the
 // passage's line (components/RefChip placeBeside, the citation label's placing), so a comment on a long answer reads
 // where its words are. It follows the passage while the chat scrolls and hides while the passage is out of view. Esc or
-// a press outside it closes it; a press on a tinted passage leaves the toggle to the passage's own click.
+// a press outside it closes it; a press on a tinted passage, a citation's words in it too, leaves it to the passage's
+// own click, which opens the next mark over the words (chat/markdown MdMark).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { placeBeside } from '../components/RefChip'
@@ -109,9 +110,10 @@ export function AnswerCommentPop(props: CardProps) {
     const onDown = (e: MouseEvent) => {
       const t = e.target as Element | null
       if (popEl.current?.contains(t)) return
-      // a press on a tinted passage: its click opens that comment, or closes this one when it is its own; a press on a
-      // citation's words in it opens the citation, which this comment makes way for
-      if (t?.closest?.('mark.answer-tint[data-answer-comment]') && !t.closest('.mark-words')) return
+      // a press on a tinted passage: its click opens the next mark over its words, which is another comment, or the
+      // citation whose words hold them, or none; a press on a citation's other words opens the citation, which this
+      // comment makes way for
+      if (t?.closest?.('mark.answer-tint[data-answer-comment]')) return
       close.current()
     }
     document.addEventListener('keydown', onKey)

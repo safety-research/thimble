@@ -38,6 +38,10 @@
 // citation does (components/RefChip): the card place the mark cites, else the ref of the text it stands in (a reply, a
 // takeaway's card), with the words it shows as the anchor's text. A ⌘-click on them asks about the citation, as the
 // terminal's a on a citation does, never about the whole text: the words are a control, where the pointer finds no text.
+//
+// Its words may hold a check's comment on them (an explainer, a heads-up), tinted in main's chat (chat/markdown
+// MdMark): a click on the tinted words opens the comment first, as the terminal opens an explainer before the citation
+// it stands on, and the citation on the next click (CiteWords). Its other words open the citation.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
@@ -73,6 +77,16 @@ const OpenPlace = createContext<(ref: string) => void>(teleport)
 /** The card the mark's words are drawn in (its takeaway, its details: `data-cite-home`), as for a card's citation
  * (RefChip): the label of a value of that card's printed output names the line without the card's title */
 const CiteHome = createContext<string | null>(null)
+
+/** The citation whose words hold a comment's tint, for a click on the tint (chat/markdown MdMark): whether its label is
+ * pinned open, and to pin it or close it (pinned, or shown while the pointer rests on the words), so a click on words
+ * both carry opens one of them at a time. */
+export interface CiteWords {
+  pinned: () => boolean
+  pin: () => void
+  close: () => void
+}
+export const CiteWordsContext = createContext<CiteWords | null>(null)
 
 /** A mark: the k-th of its text's marks (MarkItems), or `item` when the caller has it (an old card citation). With
  * `anchor`, its words carry the ⌘ pointer's anchor, so a ⌘-click on them asks about the citation. */
@@ -145,6 +159,24 @@ export function Mark({ k, item: given, anchor, children }: { k: number; item?: M
     const r = rect()
     setPop((p) => (p?.pinned ? null : r ? { rect: r, pinned: true } : null))
   }
+  const pinned = !!pop?.pinned
+  const cite = useMemo<CiteWords>(
+    () => ({
+      pinned: () => pinned,
+      pin: () => {
+        window.clearTimeout(showTimer.current)
+        cancelHide()
+        const r = rect()
+        if (r) setPop({ rect: r, pinned: true })
+      },
+      close: () => {
+        window.clearTimeout(showTimer.current)
+        cancelHide()
+        setPop(null)
+      },
+    }),
+    [pinned],
+  )
 
   const openPlace = (ref: string) => {
     window.clearTimeout(showTimer.current)
@@ -184,7 +216,11 @@ export function Mark({ k, item: given, anchor, children }: { k: number; item?: M
           }
         }}
       >
-        {corrected ? plain(item.shown!) : children}
+        {corrected ? (
+          plain(item.shown!)
+        ) : (
+          <CiteWordsContext.Provider value={cite}>{children}</CiteWordsContext.Provider>
+        )}
       </span>
       {look === 'failed' && <span className="mark-glyph">×</span>}
       {look === 'checking' && <Spinner size={9} className="mark-spin" label="checking" />}
