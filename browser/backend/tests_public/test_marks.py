@@ -1312,7 +1312,9 @@ def test_b19_a_trial_citation_that_fails_after_a_redefinition_and_a_full_run_say
             out = [{"mark": 3, "kind": "card", "evidence": {"ref": tests}, "status": "corrected",
                     "correction": {"words": "2 of the 4"}, "reason": "the card shows 2 of its 4 posts"}]
             return {"answer": _answer(out), "calls": [], "error": None}
-        # while the check runs, the analyst redefines the first label and runs it on all 8 posts
+        # while the check runs, the analyst redefines the first label and runs it on all 8 posts, in a later second than
+        # the reply's end (the change log keeps whole seconds, and a change in the reply's own second may precede it)
+        await asyncio.sleep(1.1)
         concepts.define_concept(CORPUS, "asks for a review", "a post that asks someone to review a pull request",
                                 unit="record", labels=["yes", "no"], created_by="user")
         _label_rows(kid, 8, 5)
