@@ -2970,8 +2970,7 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
         k.wrap = wrap
         _write_record(k, {"name": k.name, "workspace": workspace, "pid": proc.pid, "pgid": proc.pid,
                           "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
-                          "home": str(_home()), "attached": _now(), "wrap": wrap,
-                          **({"writes": list(kernel_wrap.KERNEL_DIRS)} if wrapped else {})})
+                          "home": str(_home()), "attached": _now(), "wrap": wrap})
         if proc.stdin is not None:
             await _open_gate(k, proc, wanted)
         kc = _client(info)
@@ -2987,9 +2986,34 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
     return kc
 
 
+def _wrap_of(k: _Kernel, pid: int) -> str | None:
+    """The wrapper the recorded kernel process `pid` runs in, when it is a kernel this server may take back. Read from
+    the process's command line (kernel_wrap.sandbox_of), which no code in its sandbox can change, never from its record,
+    which an earlier version's kernel could write (its sandbox let it write kernels/). A wrapped kernel's sandbox must
+    let it write, of its workspace, only its own folders (kernel_wrap.KERNEL_DIRS) and under srt its HOME, as this
+    version's does, and bwrap must bind the workspace read-only; a kernel in no wrapper is taken back only where the
+    workspace's kernels run in none now. None for any other: an earlier version's sandbox, which let it write the whole
+    workspace, or a process of a sandbox named in the record in its wrapper's place."""
+    got = kernel_wrap.sandbox_of(procs.argv(pid))
+    if got is None:
+        wrap, _ = config.resolve_kernel_wrap(_ws_settings(k.workspace))
+        return config.KERNEL_WRAP_NONE if wrap not in config.KERNEL_WRAPPED else None
+    wrap, writes, reads = got
+    ws = Path(os.path.realpath(_ws_dir(k.workspace)))
+    own = {ws / name for name in kernel_wrap.KERNEL_DIRS}
+    if wrap == config.KERNEL_WRAP_SRT:
+        own.add(Path(os.path.realpath(k.home)))
+    for w in (Path(os.path.realpath(p)) for p in writes):
+        if w not in own and (w == ws or ws in w.parents or w in ws.parents):
+            return None
+    if wrap == config.KERNEL_WRAP_BWRAP and ws not in {Path(os.path.realpath(p)) for p in reads}:
+        return None
+    return wrap
+
+
 async def _attach(k: _Kernel) -> bool:
     """Reconnect to the kernel its record describes. True when it answers; otherwise the record, and a silent live
-    kernel or a wrapped one whose sandbox lets it write more than its own folders (an earlier version's), are gone
+    kernel or one whose sandbox lets it write more than its own folders (an earlier version's, _wrap_of), are gone
     afterwards. Call with k.lock held."""
     rec = _read_record(k.record)
     if rec is None:
@@ -3000,7 +3024,8 @@ async def _attach(k: _Kernel) -> bool:
         _drop_files(k.record, k.conn)
         return False
     k.pid = k.pgid = pid  # it leads its own process group (_launch); the record, an older kernel's to write, names none
-    if rec.get("wrap") in config.KERNEL_WRAPPED and rec.get("writes") != list(kernel_wrap.KERNEL_DIRS):
+    wrap = await asyncio.to_thread(_wrap_of, k, pid)
+    if wrap is None:
         log.warning("kernel %s of %s (pid %s): an earlier version of thimble started it in a sandbox that lets it "
                     "write more of the workspace than its own folders; stopped, and the next card starts a new one",
                     k.key, k.workspace, pid)
@@ -3024,11 +3049,12 @@ async def _attach(k: _Kernel) -> bool:
         await _kill(k)
         return False
     k.kc = kc
-    k.wrap = rec.get("wrap")
+    k.wrap = wrap
     _refresh_thimble(k)
     if k.wrap in config.KERNEL_WRAPPED:
         await asyncio.to_thread(_hold_lease, k)  # a wrapped kernel's watchdog reads this server's presence off it
-    _write_record(k, {**rec, "server_pid": os.getpid(), "attached": _now()})
+    _write_record(k, {**{f: v for f, v in rec.items() if f != "writes"}, "wrap": wrap, "server_pid": os.getpid(),
+                      "attached": _now()})
     log.info("reconnected kernel %s of %s (pid %s)", k.key, k.workspace, pid)
     return True
 

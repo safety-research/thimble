@@ -249,6 +249,37 @@ def _outermost(deny: Sequence[str], allow: Sequence[str]) -> list[str]:
     return [s for s, p in zip(deny, real) if not hidden(p)]
 
 
+BWRAP_WRITES = ("--bind", "--bind-try", "--dev-bind", "--dev-bind-try", "--bind-fd")  # each with a source, then the path
+BWRAP_READS = ("--ro-bind", "--ro-bind-try", "--ro-bind-fd")
+
+
+def sandbox_of(argv: Sequence[str]) -> tuple[str, list[str], list[str]] | None:
+    """The wrapper a kernel's command line runs it in and what that wrapper lets it write, read from the line as the
+    system shows it (procs.argv: /proc/<pid>/cmdline or `ps`), which no code inside the sandbox can change:
+    ("bwrap", the paths it binds writable, the paths it binds read-only), from bwrap's options up to its `--`, and
+    ("srt", the rules' allowWrite, []) for kernel_srt.mjs, the rules read from the line as a whole, since `ps` splits a
+    line at its spaces. None for a line of neither, or one whose rules do not read."""
+    if argv and os.path.basename(argv[0]) == "bwrap":
+        writes: list[str] = []
+        reads: list[str] = []
+        i = 1
+        while i < len(argv) and argv[i] != "--":
+            if argv[i] in (*BWRAP_WRITES, *BWRAP_READS) and i + 2 < len(argv):
+                (writes if argv[i] in BWRAP_WRITES else reads).append(argv[i + 2])
+                i += 3
+            else:
+                i += 1
+        return "bwrap", writes, reads
+    if len(argv) > 1 and os.path.basename(argv[1]) == SRT_LAUNCHER.name:
+        line = " ".join(argv)
+        try:
+            rules, _ = json.JSONDecoder().raw_decode(line, line.index('{"filesystem"'))
+            return "srt", [str(p) for p in rules["filesystem"]["allowWrite"]], []
+        except (ValueError, KeyError, TypeError):
+            return None
+    return None
+
+
 def srt_env(env: dict[str, str], *, home: str | Path) -> dict[str, str]:
     """`env` for a kernel under srt: HOME `home` (a folder of the workspace, since the kernel may write nowhere else),
     and no XDG_* folders."""

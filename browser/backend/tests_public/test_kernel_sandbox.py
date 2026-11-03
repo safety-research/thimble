@@ -991,23 +991,46 @@ async def test_srt_s_kernel_shown_the_folders_the_server_checked_runs(monkeypatc
 async def test_a_kernel_an_earlier_version_started_is_stopped_rather_than_taken_back(wrap, monkeypatch,
                                                                                      workspaces_tmp):
     """Kernels outlive a server's restart, an update's among them, and the next server takes each back. One an earlier
-    version started runs in a sandbox that lets it write the whole workspace, so the next server stops it rather than
-    take it back (its record names no folders it writes, or others than this version's), and the next card starts a
-    kernel in the sandbox of this version: the variables of the one stopped are gone."""
+    version started runs in a sandbox that lets it write the whole workspace, its record among it, so the next server
+    tells it by its wrapper's command line, which no code in the sandbox can change, and stops it rather than take it
+    back whatever its record says: the check that read the record's `writes` took back a kernel that had written this
+    version's folders there, and its next card wrote sessions.json. The next card starts a kernel in the sandbox of this
+    version: the variables of the one stopped are gone."""
     if not _wrap_works(wrap):
         pytest.skip(f"{wrap} can't sandbox a process here")
     monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    real_argv, real_rules = kernel_wrap.kernel_wrap_argv, kernel_wrap.srt_rules
+
+    def earlier_argv(*a, **kw):  # 0.10.8's bwrap: the workspace bound writable
+        out, ws = list(real_argv(*a, **kw)), str(kw["workspace_dir"])
+        for i in range(len(out) - 2):
+            if out[i:i + 3] == ["--ro-bind", ws, ws]:
+                out[i] = "--bind"
+        return out
+
+    def earlier_rules(*a, **kw):  # 0.10.8's srt rules: the workspace among the folders it writes
+        rules = real_rules(*a, **kw)
+        rules["filesystem"]["allowWrite"].insert(0, str(kw["workspace_dir"]))
+        return rules
+
+    monkeypatch.setattr(kernel_wrap, "kernel_wrap_argv", earlier_argv)
+    monkeypatch.setattr(kernel_wrap, "srt_rules", earlier_rules)
+    ws = config.workspace_dir("mini")
+    (ws / "sessions.json").write_text('{"sessions": {}}\n')
     try:
         await notebook.run_code("mini", "made_up = 42", "main", kernel="made-up")
         k = notebook._kernel("mini", "made-up")
         old = k.pid
-        rec = notebook._read_record(k.record)
-        assert rec["writes"] == list(kernel_wrap.KERNEL_DIRS)
-        del rec["writes"]  # as an earlier version wrote it
-        notebook.write_json(k.record, rec)
+        rec = notebook._read_record(k.record)  # as the earlier version's kernel may write its record
+        notebook.write_json(k.record, {**rec, "wrap": wrap, "writes": list(kernel_wrap.KERNEL_DIRS)})
+        monkeypatch.setattr(kernel_wrap, "kernel_wrap_argv", real_argv)  # the update
+        monkeypatch.setattr(kernel_wrap, "srt_rules", real_rules)
         await notebook.detach_all()  # a restart: the kernel runs on for the next server
-        cell = await notebook.run_code("mini", "print(globals().get('made_up'))", "main", kernel="made-up")
-        assert _said(cell) == ["None"], cell["outputs"]
+        cell = await notebook.run_code(
+            "mini", "print(globals().get('made_up'))\nopen('../sessions.json', 'w').write('{\"forged\": true}')", "main",
+            kernel="made-up")
+        assert _said(cell) == ["None"] and "Read-only file system" in str(cell["outputs"]), cell["outputs"]
+        assert (ws / "sessions.json").read_text() == '{"sessions": {}}\n'
         assert not notebook.procs.alive(old) and notebook._kernel("mini", "made-up").pid != old
         # the kernel this version started is taken back over a restart, its variables with it
         await notebook.run_code("mini", "made_up = 43", "main", kernel="made-up")
@@ -1169,3 +1192,21 @@ def test_a_kernel_s_python_starts_with_its_working_folder_off_sys_path_until_its
     argv = notebook.kernel_argv(tmp_path / "k.conn.json", tmp_path / "k.json", roots=(str(tmp_path),), workspace=tmp_path)
     assert argv[:4] == [notebook.PYTHON, "-P", "-m", "ipykernel_launcher"] and "--IPKernelApp.ignore_cwd=True" in argv
     assert argv[-1] == f"--IPKernelApp.exec_lines={notebook.CWD_LAST}"
+
+
+def test_a_kernel_s_sandbox_is_read_from_its_wrapper_s_command_line_as_the_system_shows_it(tmp_path):
+    """What a kernel's wrapper lets it write is read from the wrapper's command line: bwrap's binds up to its `--`, and
+    srt's rules, from the line as a whole, as `ps` shows it on macOS (split at every space, a path with spaces too)."""
+    ws, corpus = tmp_path / "work space", tmp_path / "corpus"
+    argv = kernel_wrap.kernel_wrap_argv(["python", "-m", "ipykernel_launcher", "--bind", "/x", "/x"], corpus_dir=corpus,
+                                        workspace_dir=ws, venv=None, python="/usr/bin/python3", write_fds=[(5, "/t")])
+    wrap, writes, reads = kernel_wrap.sandbox_of(argv[len(kernel_wrap.SIGINT_PREFIX):])  # the shell execs bwrap
+    assert (wrap, writes) == ("bwrap", [*(str(ws / n) for n in kernel_wrap.KERNEL_DIRS), "/t"])
+    assert str(ws) in reads and str(corpus) in reads
+    rules = kernel_wrap.srt_rules(corpus_dir=corpus, workspace_dir=ws, venv=None, python="/usr/bin/python3",
+                                  srt_dir="/srt", home=tmp_path / "home", platform="darwin", write=[ws / "kernels" / "k.home"])
+    line = kernel_wrap.srt_argv(["python", "-m", "ipykernel_launcher"], node="/usr/bin/node", srt_dir=Path("/srt"),
+                                rules=rules)
+    for shown in (line, " ".join(line).split()):
+        assert kernel_wrap.sandbox_of(shown) == ("srt", rules["filesystem"]["allowWrite"], [])
+    assert kernel_wrap.sandbox_of(["/usr/bin/python3", "-P", "-m", "ipykernel_launcher"]) is None
