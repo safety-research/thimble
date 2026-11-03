@@ -13,6 +13,8 @@
 import { expect } from 'claude-code/testing'
 
 import { busyNow, busySteps } from '../bar/busy'
+import { registerAnswers, resetAnswers, sinceLast, turnOf } from '../core/answers'
+import { registerTurn } from '../core/turn'
 import { FIX_ARGUMENT_HINT, FIX_DESCRIPTION } from '../fix/command.mjs'
 import { FIX_ALONE, fixSlug, fixingWord, noticeText, refreshFixes } from '../fix/fixes'
 import { askClaudeText, fixKey, fixLineRows } from '../fix/line'
@@ -52,13 +54,19 @@ let now = 0
 
 /** The fix module's hooks on an engine that keeps state, files and timers in memory, with a faked kernel. `keys`: the
  *  keys' hook too (hooks/keys.ts), registered first as the plugin registers it, so that a key typed at the prompt goes
- *  where the person's key goes. */
-function setup(o: { keys?: boolean } = {}) {
+ *  where the person's key goes. `answers`: the record of main's turns too (core/turn.ts, core/answers.ts), registered
+ *  before the others as the plugin registers it. */
+function setup(o: { keys?: boolean; answers?: boolean } = {}) {
   const hooks: Record<string, { m: Any; fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? { m: null, fn: a } : { m: a, fn: b })
     const reg: Any = { catch: () => reg }
     return reg
+  }
+  if (o.answers) {
+    resetAnswers()
+    registerTurn(on, {} as never)
+    registerAnswers(on, {} as never)
   }
   if (o.keys) registerKeys(on, {} as never)
   registerFix(on, {} as never)
@@ -83,6 +91,9 @@ function setup(o: { keys?: boolean } = {}) {
   const fills: Any[] = []
   const prompts: Any[] = []
   const redraws: string[] = []
+  // a plugin's prompt that does not enter, as a test says: Claude Code refuses it (`refuse`, thrown) or it is dropped
+  // (`drop`, such as the person taking it out of the queue)
+  const handOff: { refuse?: string; drop?: string } = {}
   const fix: Any = { id: 1, title: 'make the bar say read', words: ["make the bar's coverage item say read"], rounds: 1, made_in: 'terminal', created: 1761200000, state: 'working', work: WORK, commit: null, files: [], tests: null, summary: '', error: null }
   // the kernel's records: none until the first request
   let made = false
@@ -210,7 +221,14 @@ function setup(o: { keys?: boolean } = {}) {
         box.text = a.mode === 'append' ? box.text + a.text : a.text
         return { isFilled: true, text: box.text, cursor: box.text.length }
       },
-      submit: async (a: Any) => { prompts.push(a); return { text: a.text } },
+      // as Claude Code takes a plugin's prompt: never a text that begins with /, which would run a command as the person
+      submit: async (a: Any) => {
+        if (String(a.text).trimStart().startsWith('/')) throw new Error('thimble: $.prompt.submit submits a prompt to the model; a text beginning with / would run a command as the user; run one with $.command.run({ command })')
+        if (handOff.refuse) throw new Error(handOff.refuse)
+        if (handOff.drop) return { drop: handOff.drop }
+        prompts.push(a)
+        return { text: a.text }
+      },
     },
     model: { complete: async (req: Any) => { asked.push(req); return { isAnswered: true, text: JSON.stringify({ title: 'Bar says coverage, not read', wrong: 'The bar said coverage after Claude read a file.', fixed: 'The bar says read.' }) } } },
     ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: (ev: string) => { redraws.push(ev) } },
@@ -235,7 +253,7 @@ function setup(o: { keys?: boolean } = {}) {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, registered, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, prompts, redraws }
+  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, registered, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, prompts, redraws, handOff }
 }
 
 /** The person's /thimble-fix <words>: the command's answer gives Claude the request with the words (prompts/
@@ -359,6 +377,70 @@ test("two sessions share the fixes' folder: a fix another session's fixer works 
   expect(s.ran.find(x => x.argv.includes('done'))?.argv).toEqual(expect.arrayContaining(['done', '1', '--session', 's-fix']))
   expect(s.verbs().filter(v => /^done (7|8)\b/.test(v))).toEqual([])
   expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+})
+
+test('words that begin with / reach Claude in quotes, and the fix takes them as typed; words that never reach Claude start no fix', async () => {
+  const own = async () => { throw new Error('/thimble-fix with words runs no command of its own') }
+  // Claude Code takes no prompt of a plugin's that begins with /: such words go to Claude in quotes
+  for (const words of ['/thimble-settings should list Cards first', '/made-up/data/runs.csv should open as a table']) {
+    const s = setup()
+    await s.call('session.start', { cwd: '/made-up/data' })
+    answersWithRequest(await s.call('command.run', { command: 'thimble-fix', args: words }, own), words)
+    await s.tick()
+    expect(s.prompts).toEqual([{ text: `“${words}”`, asUser: true }])
+    expect(s.toasts).toEqual([])
+    expect(String(skillText(await skillCall(s, 'new')).text)).toContain('thimble started a fork of this conversation that fixes thimble')
+    expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe(words)
+  }
+  // the prompt does not enter (Claude Code refuses it, or the person takes it out of the queue): one line says so and
+  // what to do, and no fix starts from those words in a later turn
+  for (const how of [{ refuse: 'thimble: $.prompt.submit (a made-up refusal)' }, { drop: 'the prompt was removed from the queue before it ran' }]) {
+    const s = setup()
+    await s.call('session.start', { cwd: '/made-up/data' })
+    Object.assign(s.handOff, how)
+    await s.call('command.run', { command: 'thimble-fix', args: 'the bar should list Cards first' }, own)
+    await s.tick()
+    expect(s.prompts).toEqual([])
+    expect(s.toasts).toEqual([`thimble started no fix: it could not give your words to Claude (${how.refuse ?? how.drop}). To try again, type /thimble-fix and your words.`])
+    expect(skillText(await skillCall(s, 'new')).text).toBe(NOT_ASKED)
+    expect(s.ran.some(x => x.argv.includes('new'))).toBe(false)
+  }
+})
+
+test("the turn /thimble-fix's words start is the person's prompt, so the replies before it are nothing to catch up on; words that never reach Claude wait for no turn", async () => {
+  const s = setup({ answers: true })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  const own = async () => { throw new Error('/thimble-fix with words runs no command of its own') }
+  const row = (text: string) => ({ type: 'user', content: [{ type: 'text', text }] })
+  /** Claude's reply in main's turn, and the turn's end. */
+  const reply = async (turnId: string, text: string) => {
+    await s.call('session.append', { door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, message: { type: 'assistant', content: [{ type: 'text', text }] } }, async () => ({ uuid: `${turnId}-row-0` }))
+    await s.call('turn.complete', { turnId, reason: 'answer', answer: text, durationMs: 9, isAborted: false }, async () => ({}))
+  }
+  // the person's question, and Claude's answer
+  const asked = 'How many data rows does runs.csv have?'
+  await s.call('prompt.submit', { text: asked, origin: { kind: 'composer' } })
+  await s.call('turn.start', { text: asked, turnId: 't1' })
+  await s.call('session.append', { door: 'prompt', origin: { kind: 'composer' }, message: row(asked) }, async () => ({ uuid: 'prompt-t1' }))
+  await reply('t1', 'runs.csv has 40 data rows.')
+  // /thimble-fix <words>: Claude Code runs no prompt.submit hook of thimble's for thimble's own prompt; it keeps the
+  // prompt's row, then starts the turn with the prompt's text
+  for (const [turnId, words, text] of [['t2', 'the bar should say hello', 'the bar should say hello'], ['t3', '/thimble-settings should list Cards first', '“/thimble-settings should list Cards first”']] as const) {
+    await s.call('command.run', { command: 'thimble-fix', args: words }, own)
+    await s.tick()
+    expect(s.prompts.splice(0)).toEqual([{ text, asUser: true }])
+    await s.call('session.append', { door: 'prompt', origin: { kind: 'plugin', name: 'thimble', asUser: true }, message: row(text) }, async () => ({ uuid: `prompt-${turnId}` }))
+    await s.call('turn.start', { text, turnId })
+    await reply(turnId, 'Starting the fix.')
+    expect((await turnOf(s.$, turnId))!.prompt).toEqual({ text, by: 'plugin', row: `prompt-${turnId}` })
+    expect(await sinceLast(s.$)).toEqual({ prompt: { row: `prompt-${turnId}`, text }, rows: [`${turnId}-row-0`], replies: [`${turnId}-row-0`] })
+  }
+  // words that never reach Claude start no turn: a turn with no prompt (a continuation) is not theirs
+  s.handOff.drop = 'the prompt was removed from the queue before it ran'
+  await s.call('command.run', { command: 'thimble-fix', args: 'the pane title too' }, own)
+  await s.tick()
+  await s.call('turn.start', { text: '', turnId: 't4' })
+  expect((await turnOf(s.$, 't4'))!.prompt.by).toBe('continuation')
 })
 
 test('more words while the fixer works go to the same fixer, as a round of its fix', async () => {

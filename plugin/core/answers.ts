@@ -22,6 +22,7 @@
 //                                     { and } (answerStepKey) or by opening one of its marks, else the newest; a new
 //                                     turn of main's gives the keys back to its answer (s squeezes the newest alone)
 //   sinceLast($)                      since the person's last prompt: the prompt, Claude's text rows, the answers
+//   expectPrompt(text)                a prompt of thimble's own that Claude reads as the person's, whose turn is theirs
 //   questionOf($, row)                the words of the prompt the row's turn answers
 //   partOf($, row, feature), setPart($, row, feature, value)   a feature's own part of a message
 //   labelsOf($, turnId, beforeSeq?)   the labels the turn's `thimble label` commands ran, before a step of the turn
@@ -69,6 +70,16 @@ function wait(p: Prompt): void {
 
 function unwait(p: Prompt): void {
   waiting = waiting.filter(x => x !== p)
+}
+
+/** A prompt of thimble's own that Claude reads as the person's (`$.prompt.submit` with `asUser`: /thimble-fix's words),
+ *  which starts a turn of its own: Claude Code runs no prompt.submit hook of thimble's for it, so it waits from the
+ *  call, and its turn takes it by its text, its row too (Claude Code keeps the row before the turn starts). The
+ *  function returned takes it back, for a prompt that did not enter. */
+export function expectPrompt(text: string, by = 'plugin'): () => void {
+  const p: Prompt = { text: text.slice(0, PROMPT_MAX), by, row: null }
+  wait(p)
+  return () => unwait(p)
 }
 
 /** The waiting prompt a turn that starts with `text` takes: the oldest with its words, or for a slash command's turn

@@ -4,6 +4,7 @@ and one refused value drops them all)."""
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -215,7 +216,7 @@ def test_a_login_shell_that_cannot_start_as_a_terminal_starts_it_is_said(tmp_pat
 
 # a terminal (a pty) whose shell runs a command as a person's shell does: in a process group of its own, which it puts
 # in the terminal's foreground; then it says how the command ended, or that it stopped. It answers the command's
-# question ("[Y/n]: ") with n, and prints what the terminal showed
+# question against its default ("[Y/n]: " with n, "[y/N]: " with y), and prints what the terminal showed
 TERMINAL = r'''
 import os, pty, select, signal, sys, time
 pid, fd = pty.fork()
@@ -250,9 +251,10 @@ while time.time() < end:
     if not got:
         break
     shown += got
-    if not answered and b"[Y/n]: " in shown:
-        os.write(fd, b"n\n")
-        answered = True
+    for asked, answer in ((b"[Y/n]: ", b"n\n"), (b"[y/N]: ", b"y\n")):
+        if not answered and asked in shown:
+            os.write(fd, answer)
+            answered = True
 if time.time() >= end:
     os.kill(pid, signal.SIGKILL)
 os.waitpid(pid, 0)
@@ -999,18 +1001,23 @@ def test_claude_knows_0_9_by_what_the_install_script_finds():
     """Claude's install steps (CLAUDE.md, step 2) know thimble 0.9 by what scripts/install.sh finds and says, and name
     no file in the person's home as its sign for Claude to look for first: on a machine without 0.9 that look ends the
     install's first steps in a red "Exit code 1", and the install of 0.10 makes ~/.local/bin/thimble too (a link to its
-    own command), which the script tells from 0.9's."""
+    own command), which the script tells from 0.9's. The script also stops on a link to a thimble folder that is gone,
+    which names no version: 0.9 is here when the stop's first line names it, and Claude tells the user what the script
+    found in its words."""
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
     step = text.split(" 2. thimble 0.9 is here", 1)[1].split(" 3. ", 1)[0]
     when = step.split("Before you remove anything", 1)[0]
     assert "`scripts/install.sh` (step 3) stops with what it found" in when and "~/" not in when, when
+    gone = "a link to a thimble folder that is gone"
+    assert gone in (ROOT / "scripts" / "thimble09.py").read_text()
+    assert "its first line names thimble 0.9" in when and gone in when, when
 
 
 def test_a_thimble_link_into_a_folder_that_is_gone_is_called_that_and_its_fix_is_still_rm_f(tmp_path):
     """A ~/.local/bin/thimble that links into a thimble folder that is gone (a 0.10 clone installed with --local, then
     deleted) says nothing of which thimble it was. The install stops and calls it what it is, a link to a thimble folder
-    that is gone, never 0.9's thimble command, and its fix is rm -f of the link, as before. A link to the command of a
-    0.9 tree is still 0.9's."""
+    that is gone, never 0.9's thimble command, and its fix is rm -f of the link, as before; --remove-0.9 names the link
+    as it asks and removes it. A link to the command of a 0.9 tree is still 0.9's."""
     bin_ = tmp_path / "stubs"
     stub(bin_ / "node", "echo v22.20.0\n")
     stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
@@ -1024,6 +1031,18 @@ def test_a_thimble_link_into_a_folder_that_is_gone_is_called_that_and_its_fix_is
     def install():
         return subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
                               capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+
+    def remove_in_a_terminal():
+        """--remove-0.9 in a terminal, which answers its question with y: the lines the terminal showed until the
+        install went on."""
+        script = tmp_path / "remove.sh"
+        argv = [ROOT / "scripts" / "install.sh", "--no-browser", "--bin-dir", tmp_path / "bin", "--remove-0.9"]
+        script.write_text(" ".join(shlex.quote(str(x)) for x in argv) + "\n")
+        terminal = tmp_path / "terminal.py"
+        terminal.write_text(TERMINAL)
+        shown = subprocess.run([sys.executable, str(terminal), str(script)], capture_output=True, text=True,
+                               env={**env, "TERM": "xterm-256color"}, timeout=150).stdout.replace("\r\n", "\n")
+        return shown.split("thimble: what the install needs is here.", 1)[0].splitlines()
 
     p = install()
     assert p.returncode == 1, p.stdout + p.stderr
@@ -1040,12 +1059,21 @@ def test_a_thimble_link_into_a_folder_that_is_gone_is_called_that_and_its_fix_is
     cmds = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "thimble09.py"), "commands"], cwd="/",
                           capture_output=True, text=True, env=env).stdout.splitlines()
     assert [c.split("\t")[0] for c in cmds] == ["rm -f ~/.local/bin/thimble"], cmds
+    # --remove-0.9 asks about the link and says it is removed: 0.9 only in the option's name
+    shown = remove_in_a_terminal()
+    assert "Remove ~/.local/bin/thimble now? This cannot be undone. [y/N]: y" in shown, shown
+    assert "~/.local/bin/thimble is removed." in shown and not any("0.9" in x for x in shown), shown
+    assert not os.path.lexists(home / ".local" / "bin" / "thimble")
     # the link to the command of a 0.9 tree that is here: 0.9's
+    (home / ".local" / "bin" / "thimble").symlink_to(home / "thimble" / "plugin" / "bin" / "thimble")
     stub(home / "thimble" / "plugin" / "bin" / "thimble", "echo 'thimble uninstall'\n")
     (home / "thimble" / "backend").mkdir()
     lines = install().stdout.splitlines()
     assert lines[0] == "thimble 0.9 left files here, which 0.10 does not use. Remove them before you install 0.10.", lines
     assert "  - ~/.local/bin/thimble, 0.9's thimble command, a link to ~/thimble/plugin/bin/thimble" in lines, lines
+    shown = remove_in_a_terminal()
+    assert "Remove thimble 0.9 now? This cannot be undone. [y/N]: y" in shown, shown
+    assert "thimble 0.9 is removed." in shown, shown
 
 
 def test_the_guide_says_to_start_the_workbench_in_a_terminal_of_its_own():
