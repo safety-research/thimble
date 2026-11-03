@@ -186,3 +186,55 @@ def test_a_kernel_s_connection_file_names_no_socket_but_the_loopback_s():
                 notebook._close_client(kc)
     finally:
         notebook._exec_kernels.pop((CORPUS, "made-up"), None)
+
+
+@pytest.fixture()
+def runtime_on(monkeypatch):
+    """The server's own runtime on (runtime.py), in workspace `mini`, as test_runtime's `on` fixture has it."""
+    from app import runtime
+
+    monkeypatch.setenv("THIMBLE_RUNTIME", "on")
+    monkeypatch.setenv("THIMBLE_SANDBOX", "0")
+    runtime._spaces.clear()
+    yield runtime
+    runtime._spaces.clear()
+
+
+def test_main_s_chat_that_runtime_main_json_names_is_one_a_route_would_take(runtime_on, tmp_path_factory):
+    """runtime/main.json names main's chat, whose id the server puts in the names of main's transcript and state files
+    (runtime/<id>.jsonl, runtime/convs/main-<id>.*.json); a card's code writes that file, so an id with ../ parts had
+    the server move, write and read main's files wherever they led."""
+    runtime = runtime_on
+    outside = _outside(tmp_path_factory)
+    d = config.workspace_dir(CORPUS) / runtime.DIR
+    (d / "convs").mkdir(parents=True)
+    (d / "convs" / "main.api.json").write_text('[{"role": "user", "content": "made-up"}]')  # a state from before chats
+    planted = _up_from(d / "convs", outside / "made-up")
+    (d / "main.json").write_text(json.dumps({"session": planted}))
+    sp = runtime.ensure(CORPUS)
+    assert runtime.SID_OK.match(sp.sid) and sp.main_path.parent == d
+    assert json.loads((d / "main.json").read_text())["session"] == sp.sid
+    assert sorted(os.listdir(outside)) == ["made-up-settings.json"]
+
+
+def test_the_claude_code_session_a_card_names_in_a_state_file_is_never_resumed(runtime_on, tmp_path_factory):
+    """On Claude Code sign-in, the session main and its agents resume is kept in runtime/convs/<chat>.cc.json, which a
+    card's code writes; the server passed that id to Claude Code as it was (`--resume <id>` for the checker's fork of
+    main, which runs outside any sandbox), so an id that starts with a dash was read as an option, and a link there had
+    the server read the file it points to."""
+    from app import runtime_api, runtime_cc
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.cc.json").write_text(json.dumps({"session_id": "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"}))
+    sp = runtime_on.ensure(CORPUS)
+    state = sp.main.state_path("cc")
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(json.dumps({"session_id": "--made-up-option"}))
+    assert runtime_api.cc_main_session(CORPUS) is None
+    assert runtime_cc.options(sp.main, sp.main.spec(), {}).resume is None
+    state.unlink()
+    state.symlink_to(outside / "made-up.cc.json")
+    assert runtime_api.cc_main_session(CORPUS) is None
+    state.unlink()
+    state.write_text(json.dumps({"session_id": "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"}))
+    assert runtime_api.cc_main_session(CORPUS) == "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"

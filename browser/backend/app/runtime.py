@@ -389,9 +389,11 @@ class Space:
         self.corpus = config.corpus_dir(c)
         self.dir = self.ws / DIR  # in the workspace: its files are written and moved as nofollow does
         nofollow.makedirs(self.dir)
-        rec = _read_json(self.dir / "main.json")
-        self.sid = str(rec.get("session") or "") or str(uuid.uuid4())
-        if not rec.get("session"):
+        # main's chat names main's files (main_path, Conv.state_path), and a card's code writes main.json: a chat id no
+        # route would take (SID_OK) is none, and main starts a new chat
+        kept = str(_read_json(self.dir / "main.json").get("session") or "")
+        self.sid = kept if SID_OK.match(kept) else str(uuid.uuid4())
+        if self.sid != kept:
             nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         for kind in ("api", "cc"):  # main's state from before chats were kept apart is its chat's
             old, new = self.dir / "convs" / f"{MAIN}.{kind}.json", self.dir / "convs" / f"{MAIN}-{self.sid}.{kind}.json"

@@ -51,6 +51,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import tempfile
 import uuid
@@ -71,6 +72,7 @@ TMP_PREFIX = "thimble-cc-"
 TMP_MAX = 60  # short_tmp's path at most: Claude Code's sandbox starts with a TMPDIR of up to 74 characters
 TMP_TAG = 8  # workspace_tmp's name: TMP_PREFIX and this many hex digits of a hash of the workspace's folder
 TMP_OWNER = ".thimble-workspace"  # in workspace_tmp: the workspace's folder, which it goes with
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")  # a Claude Code session id as a state file keeps it
 CC_WRITES = (".claude", ".cc-writes")  # what Claude Code's sandbox makes in the session's working folder
 SANDBOX_FAILED = "Sandbox is required but failed to initialize"  # Claude Code's Bash result when it refuses the call
 SANDBOX_KEY = "cc-sandbox"  # the notice's key (notices.py)
@@ -96,6 +98,14 @@ def _load(path: Any) -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
+
+
+def session_id(state: dict[str, Any]) -> str | None:
+    """The Claude Code session a conversation's state names (`session_id`), which Claude Code resumes, or None: the
+    state lies in the workspace, which a card's code writes, so an id that is not one Claude Code makes (letters,
+    digits, dashes; never a leading dash, which would read as an option) is none."""
+    sid = str(state.get("session_id") or "")
+    return sid if SESSION_ID_RE.match(sid) else None
 
 
 def _save(path: Any, data: dict[str, Any]) -> None:
@@ -343,12 +353,11 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
     allowed = [b for b in builtins if b not in ("Edit", "Write")]
     allowed += [f"Edit(/{w}/**)" for w in spec.write_roots]
     allowed += [tools.thimble_tool(n) for n in spec.thimble]
-    state = _load(conv.state_path("cc"))
-    resume, fork = str(state.get("session_id") or "") or None, False
+    resume, fork = session_id(_load(conv.state_path("cc"))), False
     if resume is None and conv.base:
         base = conv.space.main if conv.base == runtime.MAIN else conv.space.convs.get(conv.base)
-        if base is not None and (sid := _load(base.state_path("cc")).get("session_id")):
-            resume, fork = str(sid), True
+        if base is not None and (sid := session_id(_load(base.state_path("cc")))):
+            resume, fork = sid, True
     sent = spec.effort if spec.effort and config.has_effort(spec.model) else None
     return ClaudeAgentOptions(
         cwd=str(spec.cwd),

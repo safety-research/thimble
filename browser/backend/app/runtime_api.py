@@ -236,14 +236,11 @@ async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, al
 
 
 def cc_main_session(c: str) -> str | None:
-    """Main's Claude Code session id on the Claude Code sign-in runtime (runtime_cc), which a fork resumes."""
-    from . import runtime  # noqa: PLC0415
+    """Main's Claude Code session id on the Claude Code sign-in runtime (runtime_cc), which a fork resumes: its state
+    read as nofollow reads it, and the id checked (runtime_cc.session_id), since a card's code writes the workspace."""
+    from . import runtime, runtime_cc  # noqa: PLC0415
 
-    try:
-        got = json.loads(runtime.ensure(c).main.state_path("cc").read_text("utf-8"))
-    except (OSError, ValueError):
-        return None
-    return str(got.get("session_id") or "") or None if isinstance(got, dict) else None
+    return runtime_cc.session_id(runtime_cc._load(runtime.ensure(c).main.state_path("cc")))
 
 
 async def turn(conv: Any, text: str) -> Any:
