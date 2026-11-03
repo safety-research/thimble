@@ -1,5 +1,6 @@
 // Whether the product tour runs now (shell/TourHost sets it from the welcome to the tour's end). While it runs, the
-// chat shows no view proposal above its composer (chat/ProposalCard), so only the tour's examples show.
+// chat shows no view proposal above its composer (chat/ProposalCard), so only the tour's examples show, and the sidebar
+// it opens on Comments under its example looks at no new comments (shell/TopBar.tsx).
 import { useSyncExternalStore } from 'react'
 
 let touring = false

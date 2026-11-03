@@ -58,6 +58,14 @@ export function waitingAt(id: string | null | undefined, metas: Iterable<ChatMet
   return waitingChats(all.filter((m) => under.has(m.id)))[0] ?? null
 }
 
+/** Whether main's turn or a thread's fork, the chat `m`, waits for the analyst itself: on an ask about a host on its
+ * meta, or on a request main's session relays for it (`main`'s meta; a request that names no chat is main's own). The
+ * chats under it are sessions of their own, which wait on their own rows. Pure. */
+export function waitsItself(m: Pick<ChatMeta, 'id' | 'hosts'> | null | undefined, main: Pick<ChatMeta, 'permissions'> | null | undefined): boolean {
+  if (!m) return false
+  return hostAsks(m).length > 0 || (main?.permissions ?? []).some((p) => (p.chat || 'main') === m.id)
+}
+
 /** The workspace's chat metas, read again on the stream's `chat` records, for a surface outside the chat panel; none
  * read while `enabled` is off. */
 export function useChatMetas(ws: string, enabled = true): ChatMeta[] {
