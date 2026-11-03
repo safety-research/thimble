@@ -21,7 +21,8 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
                              N or `new` for a new fix, or first asks the person one short question. The fix takes the
                              person's words as they typed them, never main's, and only in the turn of main's that reads
                              them or the next one (words_read, main_turn_ended), as in the terminal: a later call of
-                             main's own starts no fix. A fix's number alone tries a fix that failed or no longer fits
+                             main's own starts no fix, nor does one after a rewind of main takes the words back
+                             (taken_back). A fix's number alone tries a fix that failed or no longer fits
                              again (tries_again), as its Try again does; anything else alone says how to ask (EMPTY)
     request(c, words, page)  a new fix (`fix new --made-in browser`) and its fixer
     change(c, fid, words)    more words for a fix the person has (fix_thimble's `N <words>`, or a message in the fix's
@@ -112,6 +113,7 @@ class _Asking:
     words: str  # what they typed after /thimble-fix
     page: str  # the text copy of the page then
     turns: int = ASKED_TURNS  # main's turn ends, from the turn that reads the words, before they go (main_turn_ended)
+    event: str = ""  # the id of the event that brought the words to main's turn (words_read), for a rewind (taken_back)
 
 
 _phase: dict[int, str] = {}  # fix id → fixing | testing | applying | restarting, while this server works on it
@@ -1114,8 +1116,20 @@ def words_read(c: str, event_id: str) -> None:
         eid, a = next(iter(waiting.items()))
         del waiting[eid]
         if eid == event_id:
-            _asked[c] = _Asking(a.words, a.page)
+            _asked[c] = _Asking(a.words, a.page, event=eid)
             return
+
+
+def taken_back(c: str, event_ids: set[str]) -> None:
+    """A rewind of main took back the person's messages of the events `event_ids` (runtime.rewind_main): main no longer
+    has the words of a /thimble-fix among them, read or still waiting, so fix_thimble answers as when no /thimble-fix
+    was asked, and starts no fix from them."""
+    a = _asked.get(c)
+    if a is not None and a.event in event_ids:
+        _asked.pop(c, None)
+    waiting = _waiting.get(c) or {}
+    for eid in event_ids:
+        waiting.pop(eid, None)
 
 
 def main_turn_ended(c: str) -> None:
@@ -1138,8 +1152,8 @@ async def from_tool(c: str, form: str) -> dict[str, Any]:
     never main's; main's `form` names the fix they change, `N` a round of fix N (change), `new` or none a new fix
     (request), and the person's own `N …` or `new …` names it first. The page is as their /thimble-fix sent it. Main's
     chat gets the line that opens the fix's thread; main heard of it in the tool's result. With no /thimble-fix of the
-    person's that main read to answer (none, one answered already, one older than ASKED_TURNS of main's turns, or one
-    still waiting for main's turn), no fix starts. {fix, kind: new | round | live}."""
+    person's that main read to answer (none, one answered already, one older than ASKED_TURNS of main's turns, one
+    still waiting for main's turn, or one a rewind took back), no fix starts. {fix, kind: new | round | live}."""
     if c not in _asked and _waiting.get(c):
         # the record that brought the words to main's turn may be one the mirror has not read yet: it reads it now
         from . import session  # noqa: PLC0415

@@ -433,8 +433,9 @@ def pop_held(c: str) -> list[dict[str, Any]]:
 
 
 def hold_again(c: str, notes: list[dict[str, Any]]) -> None:
-    """Quiet events that rode along with an event main never read, which a rewind took back (runtime.Space.take_back):
-    they wait again for main's next event, before those held since."""
+    """Quiet events that rode along with the analyst's message a rewind goes back to, or with an event main never read,
+    which a rewind took back (runtime.Space.take_back): they wait again for main's next event, before those held
+    since."""
     _keep_held(c, [*notes, *held(c)])
 
 
@@ -569,7 +570,8 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     if runtime.enabled():
         if held(c) and (note.get("meta") or {}).get("kind") != THREAD:
             riders = pop_held(c)
-            # `riders` too, so a rewind that takes the event back before main reads it holds them again (hold_again)
+            # `riders` too, so a rewind that takes the event back, or goes back to its message, holds them again
+            # (hold_again)
             note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}", "riders": riders}
         runtime.deliver(c, note)
         log.info("%s: event %s kind=%s delivered to the runtime", c, (note.get("meta") or {}).get("event"),

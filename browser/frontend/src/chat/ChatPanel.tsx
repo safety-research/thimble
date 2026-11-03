@@ -52,7 +52,7 @@ import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
 import { offerDraft, replayHeld } from './pending'
-import { isRewindCommand, lastRewindable, NOTHING_TO_REWIND } from './rewind'
+import { chatStart, isRewindCommand, lastRewindable, NOTHING_TO_REWIND, notePutBack, wordsOnLine, wordsPutBack } from './rewind'
 import { ThreadRows } from './ThreadRows'
 import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
@@ -711,32 +711,59 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     [chats],
   )
 
-  // Rewind (chat/rewind.ts): the ↶ on one of the analyst's messages in main asks under it, and its Rewind takes main back
-  // to before the message; the message's words come back in main's composer
+  // Rewind (chat/rewind.ts): the ↶ on one of the analyst's messages in main's current chat asks under it, and its Rewind
+  // takes main back to before the message; the words it takes back come back in main's composer, from its reply, or from
+  // its line when this page never got the reply (it loaded while the rewind waited, or the request failed on its way)
   const [rewindAsked, setRewindAsked] = useState<string | null>(null)
   const [rewinding, setRewinding] = useState(false)
+  const rewindFrom = useMemo(() => chatStart(main.records), [main.records])
+  const asking = useRef(new Set<string>()) // the rewinds this page asked for and has no reply to yet, by event
+  const putBack = useRef(new Set<string>()) // the rewinds whose words this page put back, by event
+  const [rewindsEnded, setRewindsEnded] = useState(0)
+  const giveBack = useCallback(
+    (event: string, words: string) => {
+      putBack.current.add(event)
+      notePutBack(ws, event)
+      offerDraft('main', words)
+    },
+    [ws],
+  )
   const rewindTo = useCallback(
     (event: string) => {
       track('ui-click', { target: 'chat:rewind' })
       setRewinding(true)
+      asking.current.add(event)
       api
         .rewindMain(ws, event)
         .then((r) => {
           setRewindAsked(null)
-          if (r.text) offerDraft('main', r.text)
+          if (r.text) giveBack(event, r.text)
           void reloadMain()
         })
         .catch((e: Error) => bus.emit('toast', { text: `Could not rewind: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }))
-        .finally(() => setRewinding(false))
+        .finally(() => {
+          asking.current.delete(event)
+          setRewinding(false)
+          setRewindsEnded((n) => n + 1)
+        })
     },
-    [ws, reloadMain],
+    [ws, reloadMain, giveBack],
   )
-  const rewind = useMemo<RewindHooks>(() => ({ asked: rewindAsked, ask: setRewindAsked, go: rewindTo, busy: rewinding }), [rewindAsked, rewindTo, rewinding])
+  useEffect(() => {
+    if (main.loading) return
+    const back = wordsOnLine(main.records)
+    if (!back || asking.current.has(back.event) || putBack.current.has(back.event) || wordsPutBack(ws) === back.event) return
+    giveBack(back.event, back.words)
+  }, [ws, main.loading, main.records, rewindsEnded, giveBack])
+  const rewind = useMemo<RewindHooks>(
+    () => ({ asked: rewindAsked, ask: setRewindAsked, go: rewindTo, busy: rewinding, from: rewindFrom }),
+    [rewindAsked, rewindTo, rewinding, rewindFrom],
+  )
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
-    // `/rewind`: the question of Rewind on the latest of the analyst's messages in main, as Claude Code's /rewind asks
-    // which message to go back to
+    // `/rewind`: the question of Rewind on the latest of the analyst's messages in main's current chat, as Claude Code's
+    // /rewind asks which message to go back to
     if (isRewindCommand(text)) {
       const last = lastRewindable(main.records, mainSkip)
       if (current !== 'main') setCurrent('main')

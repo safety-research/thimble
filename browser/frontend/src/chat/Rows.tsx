@@ -7,7 +7,8 @@
 // fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx). In main's
 // chat a check's comments on an answer tint their passages; a click on one, or Go to it on `answer:<turn>#s<n>`, opens
 // the comment as the canvas's comment card in a popover beside the passage (chat/answerComments.ts, AnswerComment.tsx).
-// Each of the analyst's messages in main has Rewind in its left margin, which asks first under the message (chat/rewind.ts).
+// Each of the analyst's messages in main's current chat has Rewind in its left margin, which asks first under the message
+// (chat/rewind.ts).
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -149,12 +150,14 @@ export const CallFocusContext = createContext<CallFocus | null>(null)
  * row whose Retry sends the analyst's message again, and `note` its line.
  */
 /** What main's chat lets the analyst do to go back to one of their messages (ChatPanel): `ask` opens the question under
- * the message whose event is `asked` (null closes it), and `go` rewinds main to before it. */
+ * the message whose event is `asked` (null closes it), and `go` rewinds main to before it. Only a message at the place
+ * `from` in main's log or after it has Rewind: those of main's current chat (rewind.ts chatStart). */
 export interface RewindHooks {
   asked: string | null
   ask: (event: string | null) => void
   go: (event: string) => void
   busy?: boolean
+  from: number
 }
 
 /** Rewind on one of the analyst's messages in main: a quiet ↶ in the message's left margin, which asks first under the
@@ -226,22 +229,25 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
       <AnswerMarksContext.Provider value={marksCtx}>
       {shown.map((r, i) => {
         switch (r.kind) {
-          case 'user':
+          case 'user': {
             // a prompt thimble sent one of its agents is no one's message: the thread's own card says what it asked (a
             // view's Proposal, a ticket's request)
             if (r.by === 'thimble') return null
             if (r.by === 'extension') return <ExtensionLead key={r.index} name={r.extension ?? ''} text={r.text} ws={ws} />
+            // a message the analyst sent main from the page, in main's current chat
+            const back = rewind && r.by === 'browser' && r.event && r.index >= rewind.from ? r.event : null
             return (
-              <div key={r.index} className="chat-msg chat-user" data-event={r.event} data-rewind-asked={rewind && r.event && rewind.asked === r.event ? true : undefined}>
+              <div key={r.index} className="chat-msg chat-user" data-event={r.event} data-rewind-asked={rewind && back && rewind.asked === back ? true : undefined}>
                 {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
                 {byLabel(r.by, chat, r.tray) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat, r.tray)!} />}
-                {rewind && r.by === 'browser' && r.event && rewind.asked !== r.event && <RewindAsk event={r.event} rewind={rewind} />}
+                {rewind && back && rewind.asked !== back && <RewindAsk event={back} rewind={rewind} />}
                 <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
                   <RefText text={stripHarness(r.text)} workspace={ws} />
                 </UserMessage>
-                {rewind && r.by === 'browser' && r.event && rewind.asked === r.event && <RewindAsk event={r.event} rewind={rewind} />}
+                {rewind && back && rewind.asked === back && <RewindAsk event={back} rewind={rewind} />}
               </div>
             )
+          }
           case 'text': {
             const own = rowMarks.get(r.index)
             const open = own?.comments.find((c) => c.id === opened)

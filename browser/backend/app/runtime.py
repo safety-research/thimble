@@ -413,6 +413,10 @@ class Space:
         # by event id, the quiet events that rode along with an event for main (events._publish) while it waits in
         # main's queue: a rewind that takes the event back holds them again for main's next event (take_back)
         self.riders: dict[str, list[dict[str, Any]]] = {}
+        # by event id, the quiet events that rode along with an event main read (said_line): they came before it, so a
+        # rewind to the analyst's message of that event, which cuts the prompt that carried them, holds them again
+        # (take_back)
+        self.carried: dict[str, list[dict[str, Any]]] = {}
 
     def _main_conv(self) -> Conv:
         tr = Transcript(self.main_path, self.sid)
@@ -432,6 +436,7 @@ class Space:
             self.attach()
             return False
         self.drop_waiting()
+        self.carried.clear()  # a rewind goes back only within main's chat now (rewind_main)
         if self.main.running:
             await _cancel(self.main.task)
         self.sid = sid or str(uuid.uuid4())
@@ -500,53 +505,61 @@ class Space:
 
     # ---- the analyst's messages that wait for main
 
-    def said_line(self, text: str) -> None:
-        """The analyst's line of `text`, a browser event main reads now (Conv.heard, _main_loop) or never will
-        (drop_waiting), into main's chat, when it is a message that waited for main's turn: events.post logs the line of
-        any other as it posts it. The quiet events the event carried (riders) leave with it."""
+    def said_line(self, text: str, *, read: bool = True) -> None:
+        """The analyst's line of `text`, a browser event main reads now (Conv.heard, _main_loop) or, with `read` false,
+        never will (drop_waiting), into main's chat, when it is a message that waited for main's turn: events.post logs
+        the line of any other as it posts it. The quiet events the event carried (riders) leave with it; those of an
+        event main reads are what its prompt carried (carried)."""
         from . import agents  # noqa: PLC0415
 
         m = EVENT_ID_RE.match(text)
-        words = self.said.pop(m.group(1), None) if m else None
-        if m:
-            self.riders.pop(m.group(1), None)
-        if m and words is not None:
+        if not m:
+            return
+        words = self.said.pop(m.group(1), None)
+        riders = self.riders.pop(m.group(1), None)
+        if read and riders:
+            self.carried[m.group(1)] = riders
+        if words is not None:
             agents.mirror(self.c, "user", by=agents.BROWSER, text=words, event=m.group(1))
 
     def drop_waiting(self) -> None:
         """What waits for main goes unread (main's chat changes, the workspace's folder goes, the server stops): the
         analyst's messages among it still get their lines in main's chat, as they sent them."""
         for text in self.main.queue:
-            self.said_line(text)
+            self.said_line(text, read=False)
         self.main.queue.clear()
 
-    def take_back(self, logged: dict[str, str]) -> list[tuple[str, str]]:
-        """What a rewind takes back of what waits for main (rewind_main): each message the analyst typed in main's chat
-        while its turn ran (said), and the event of each message of the analyst's that the rewind hides and main has
-        not read (`logged`: the words of each, by event id, such as a /thimble-fix's), leave main's queue unread, and
-        the quiet events they carried wait again for main's next event (events.hold_again). (event id, words) of each,
-        oldest first, for the composer. Every other event, such as an agent's report or a notice of thimble's, stays
-        for main's next turn."""
+    def take_back(self, logged: dict[str, str], rewound: str) -> list[tuple[str, str]]:
+        """What a rewind to the analyst's message `rewound` takes back of what waits for main (rewind_main): each
+        message the analyst typed in main's chat while its turn ran (said), and the event of each message of the
+        analyst's that the rewind hides and main has not read (`logged`: the words of each, by event id, such as a
+        /thimble-fix's). The quiet events that rode along with the rewound message's own prompt, which came before it
+        (carried), then those that ride along with what is taken back, wait again for main's next event
+        (events.hold_again); only after that does what is taken back leave main's queue, unread, so when they cannot
+        wait again, it all stays for main. (event id, words) of each taken back, oldest first, for the composer. Every
+        other event, such as an agent's report or a notice of thimble's, stays for main's next turn."""
         from . import events  # noqa: PLC0415
 
-        taken: list[tuple[str, str]] = []
-        kept: list[str] = []
-        riders: list[dict[str, Any]] = []
-        for text in self.main.queue:
+        taken: list[tuple[str, str, str]] = []  # (event id, words, its text in main's queue)
+        riders: list[dict[str, Any]] = list(self.carried.get(rewound, []))
+        for text in list(self.main.queue):
             m = EVENT_ID_RE.match(text)
             eid = m.group(1) if m else ""
-            words = self.said.pop(eid, None) if eid else None
+            words = self.said.get(eid, logged.get(eid)) if eid else None
             if words is None:
-                words = logged.get(eid) if eid else None
-            if words is None:
-                kept.append(text)
                 continue
-            taken.append((eid, words))
-            riders += self.riders.pop(eid, [])
-        self.main.queue[:] = kept
+            taken.append((eid, words, text))
+            riders += self.riders.get(eid, [])
         if riders:
             events.hold_again(self.c, riders)
-        return taken
+        for eid, _, text in taken:
+            self.said.pop(eid, None)
+            self.riders.pop(eid, None)
+            with contextlib.suppress(ValueError):  # a message that came meanwhile stays (deliver, from any thread)
+                self.main.queue.remove(text)
+        for eid in logged:  # the prompts of the messages the rewind hides are cut, and what rode along with them
+            self.carried.pop(eid, None)
+        return [(eid, words) for eid, words, _ in taken]
 
     # ---- what each agent runs with
 
@@ -1014,12 +1027,19 @@ def unread(c: str) -> list[dict[str, str]]:
 
 async def _cancel(task: Any) -> None:
     """Cancel a conversation's task (an asyncio Task, or the future of one started from another thread) and wait for
-    it to end."""
+    it to end. When the caller's own task is cancelled meanwhile, such as a request's when the server stops, the
+    cancellation goes on to the caller (CancelledError), so it does nothing more."""
     if task is None:
         return
     task.cancel()
-    with contextlib.suppress(asyncio.CancelledError, Exception):
+    try:
         await (task if isinstance(task, asyncio.Future) else asyncio.wrap_future(task))
+    except asyncio.CancelledError:
+        me = asyncio.current_task()
+        if me is not None and me.cancelling():
+            raise
+    except Exception:  # noqa: BLE001 — how the stopped task ended is its own to tell
+        pass
 
 
 # ---- rewind
@@ -1034,14 +1054,20 @@ async def _cancel(task: Any) -> None:
 # grows: the rewind's line (REWIND_CHIP) names the message, and the page hides the records from that message to the
 # line (rewound), so nothing that refers to a record by its place changes. The transcript the mirror reads is left
 # whole. Files and cards are not put back: Claude's edits of the folder and its cards stay as they are (Undo takes a
-# card back).
+# card back). Main's log holds each of its chats (Space.switch), and main's conversation is the latest one's, so a
+# rewind goes back only to a message after the latest chat line (_chat_start), and the records it hides stay in that
+# chat.
 #
 # Nothing the analyst typed is lost. The rewind stops main's running turn, and takes back what it hides that main never
 # read: the messages the analyst sent while the turn ran, which wait for it (said), and the event of a message the
 # chat logged as it was posted, such as a /thimble-fix, which waits for the turn's end. Their words come back in the
-# composer after the message's own, oldest first (Space.take_back). Every other event that waits, such as an agent's
-# report, is main's next turn, as after a Stop (after_stop). An ask before a request to a host that waits on main's
-# chat (host_asks) ends with the stopped turn's session, unanswered, so nothing is allowed or kept.
+# composer after the message's own, oldest first (Space.take_back), from the rewind's reply, or from its line for a page
+# that never got the reply. A request cancelled while the turn stops cuts and takes back nothing; once the cut is made,
+# a later step that fails is logged, and the words still come back. The quiet events that rode along with the message's
+# own prompt came before it, so they wait again for main's next event, and a /thimble-fix the rewind hides starts no fix
+# (fixes.taken_back). Every other event that waits, such as an agent's report, is main's next turn, as after a Stop
+# (after_stop). An ask before a request to a host that waits on main's chat (host_asks) ends with the stopped turn's
+# session, unanswered, so nothing is allowed or kept.
 #
 # The workspace's files are read and written as nofollow opens them (main's log, its conversations' states, where
 # removal is nofollow.unlink), and the Claude Code session's id and the entry it resumes at are checked
@@ -1054,6 +1080,7 @@ class RewindRefused(Exception):
 
 UNREAD_SESSION = "thimble could not read main's Claude Code session, so it cannot rewind it."
 UNCHANGED = "thimble could not change main's saved conversation, so it did not rewind it."
+EARLIER_CHAT = "You can rewind only to a message sent since this chat started or resumed."
 # the entries of a Claude Code transcript that a resumed conversation keeps, one of which it resumes at (_cc_cut)
 RESUMABLE = ("user", "assistant", "attachment", "system")
 
@@ -1078,6 +1105,20 @@ def rewound(records: list[Any]) -> set[int]:
         if start is not None:
             hidden.update(range(start, i))
     return hidden
+
+
+def _chat_start(records: list[Any]) -> int:
+    """The place in main's log of the first record of main's current chat: the one after the latest line where a chat
+    starts or comes back (Space.switch: NEW_CHAT, RESUMED_CHAT), 0 when there is none. A rewind goes back only to a
+    message from there on, as the page offers it (frontend chat/rewind chatStart)."""
+    resumed = RESUMED_CHAT.split("{first}")[0]
+    for i in range(len(records) - 1, -1, -1):
+        rec = records[i]
+        if isinstance(rec, dict) and rec.get("type") == "chip" and rec.get("kind") == CHAT_CHIP:
+            said = str(rec.get("text") or "")
+            if said == NEW_CHAT or said.startswith(resumed):
+                return i + 1
+    return 0
 
 
 def _prompt_events(content: Any) -> set[str]:
@@ -1170,11 +1211,14 @@ def _rewind_plan(conv: Conv, ids: set[str]) -> list[tuple[Path, Any, Any]]:
 async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
     """Rewind main to before the analyst's message `event_id` (module note above): main's running turn stops, its
     conversation is cut before the message, what main never read of what the rewind hides is taken back, and main's
-    log gets the rewind's line; what else waited is main's next turn. {text: the message's words, then those of each
-    message taken back, which the page puts back in the composer, event}. RewindRefused, with nothing changed, for a
-    message the chat no longer shows and for a Claude Code session that cannot be read; when that read fails only
-    once main's turn has stopped, or main's state cannot be changed, the turn stays stopped, as after a Stop."""
-    from . import agents, session  # noqa: PLC0415
+    log gets the rewind's line, which keeps the words that come back; what else waited is main's next turn. {text: the
+    message's words, then those of each message taken back, which the page puts back in the composer, event}.
+    RewindRefused, with nothing changed, for a message the chat no longer shows or one of an earlier chat, and for a
+    Claude Code session that cannot be read; when that read fails only once main's turn has stopped, or main's state
+    cannot be changed, the turn stays stopped, as after a Stop. A request cancelled while main's turn stops does no
+    more than a Stop. Once the cut is made, a step after it that fails is logged, and the words come back all the
+    same."""
+    from . import agents, fixes, session  # noqa: PLC0415
 
     sp = ensure(c)
     records = agents.read_events(agents.paths(c, agents.MAIN_ID)[1])
@@ -1183,12 +1227,19 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
     at = next((i for i in shown if records[i]["event"] == event_id), None)
     if at is None:
         raise RewindRefused("That message is not in main's chat any more.")
+    if at < _chat_start(records):  # main's conversation is the current chat's: the cut would miss the earlier one
+        raise RewindRefused(EARLIER_CHAT)
     # the message and each of the analyst's after it, by event id: the first of them the engine holds is where its
     # state is cut, and the rewind hides them all
     later = {str(records[i]["event"]): str(records[i].get("text") or "") for i in shown if i >= at}
     plan = _rewind_plan(sp.main, set(later))  # a session that cannot be read refuses it before anything changes
     if sp.main.running:
-        await _cancel(sp.main.task)
+        task = sp.main.task
+        try:
+            await _cancel(task)
+        except asyncio.CancelledError:  # the request itself is cancelled (_cancel): nothing is cut or taken back
+            task.add_done_callback(lambda _t: _as_after_stop(c))  # type: ignore[union-attr]
+            raise
         session.turn_stopped(c)
         try:
             plan = _rewind_plan(sp.main, set(later))  # again, as the stopped turn left main's states
@@ -1205,10 +1256,38 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
         log.warning("%s: main's conversation was not cut for the rewind", c, exc_info=True)
         after_stop(c)
         raise RewindRefused(UNCHANGED) from None
-    taken = [words for eid, words in sp.take_back(later) if eid != event_id]
-    agents.chip(c, REWIND_CHIP, REWOUND, event=event_id)
+    # the cut is made: whatever fails from here, the words come back and what waits is main's next turn (after_stop)
+    text = later[event_id]
+    try:
+        try:
+            taken = [words for eid, words in sp.take_back(later, event_id) if eid != event_id]
+        except Exception:  # noqa: BLE001 — such as quiet events that cannot wait again: what waited stays for main
+            taken = []
+            log.warning("%s: the rewind took back nothing of what waits for main", c, exc_info=True)
+        # a /thimble-fix main no longer has, cut or taken back, starts no fix; one that still waits is main's to read
+        waits = {m.group(1) for t in sp.main.queue if (m := EVENT_ID_RE.match(t))}
+        fixes.taken_back(c, set(later) - waits)
+        text = "\n\n".join(w for w in [later[event_id], *taken] if w)
+        try:
+            agents.chip(c, REWIND_CHIP, REWOUND, event=event_id, words=text or None)
+        except Exception:  # noqa: BLE001 — such as a full disk: the words still come back in the reply
+            log.warning("%s: the rewind's line was not written in main's chat", c, exc_info=True)
+    finally:
+        after_stop(c)
+    return {"text": text, "event": event_id}
+
+
+def _as_after_stop(c: str) -> None:
+    """Main's turn that a rewind stopped has ended, and the rewind's request was cancelled while it waited for that, so
+    the rewind did nothing more (rewind_main): the turn ends in main's chat as after a Stop, and what waited for it is
+    main's next turn."""
+    from . import session  # noqa: PLC0415
+
+    try:
+        session.turn_stopped(c)
+    except Exception:  # noqa: BLE001 — what waited for main still goes to it
+        log.warning("%s: main's stopped turn did not end in its chat", c, exc_info=True)
     after_stop(c)
-    return {"text": "\n\n".join(w for w in [later[event_id], *taken] if w), "event": event_id}
 
 
 # ---- threads
