@@ -87,7 +87,14 @@ test("every text reads in each mode with what it includes and slots.json's words
 test("each section that guidance/guidance.ts leaves out with its feature off is a heading of guidance.md", () => {
   const src = readFileSync(join(ROOT, 'guidance', 'guidance.ts'), 'utf8')
   const headings = [...(/const SECTIONS[^{]*\{([^}]*)\}/.exec(src)?.[1] ?? '').matchAll(/'([^']+)'/g)].map(m => m[1])
-  assert.deepEqual(headings, ['Citing claims', 'Cards'])
+  assert.deepEqual(headings, ['Citing claims', 'Cards', 'Labels'])
   const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
   for (const h of headings) assert.match(text, new RegExp(`^## ${h}$`, 'm'), `guidance.md has ## ${h}`)
+})
+
+test("with Labels off, the guidance names no label: its Labels section goes, and no other section names a label or `thimble label` (a chart's axis label is no label of thimble's)", () => {
+  const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
+  const kept = text.split(/^(?=## )/m).filter(part => /^## (.+)/.exec(part)?.[1]?.trim() !== 'Labels').join('')
+  assert.notEqual(kept, text)
+  assert.deepEqual(kept.replace(/\baxis label\b/g, '').match(/label/gi), null)
 })

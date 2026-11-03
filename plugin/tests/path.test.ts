@@ -3,7 +3,9 @@
 // `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
-import { claudeTempRoot } from '../hooks/path'
+import { claudeTempRoot, registerPath } from '../hooks/path'
+import { resetPrompts } from '../prompts/prompts'
+import { noteChange, setOptions } from '../settings/features.mjs'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
@@ -125,4 +127,66 @@ test('a session started in a command of a thimble 0.10.5 session keeps the TMPDI
   const w = world(on, { system: 'Linux', env: { TMPDIR: '/made-up/outer/thimble' } })
   await $.session.start(START)
   expect(w.set[0]).toEqual(['CLAUDE_CODE_TMPDIR', '/made-up/outer/thimble'])
+})
+
+/** What THIMBLE_LABELS_OFF holds as each Bash call reaches Claude Code, in order: the test's engine runs a call after
+ *  thimble's hooks. */
+function bashSees(on: Any, w: { env: Record<string, string | undefined> }): (string | undefined)[] {
+  const seen: (string | undefined)[] = []
+  on('tool.call', () => {
+    seen.push(w.env.THIMBLE_LABELS_OFF)
+    return { result: '' }
+  })
+  return seen
+}
+
+const BASH = { tool: 'Bash', command: 'ls' } as never
+
+test("with Labels off, the session's commands get the line of prompts/labels-off.md, which `thimble label` answers Claude with, from the session's start and at each Bash call", { options: { labels: false } }, async ($, on) => {
+  resetPrompts()
+  const w = world(on, { system: 'Linux', env: {} })
+  const seen = bashSees(on, w)
+  await $.session.start(START)
+  expect(w.env.THIMBLE_LABELS_OFF).toBe('PROMPT labels-off')
+  await $.tool.call(BASH)
+  expect(seen).toEqual(['PROMPT labels-off'])
+})
+
+test("with Labels on, the session's commands get no THIMBLE_LABELS_OFF, and one an earlier load left goes", { options: { labels: true } }, async ($, on) => {
+  resetPrompts()
+  const w = world(on, { system: 'Linux', env: { THIMBLE_LABELS_OFF: 'PROMPT labels-off' } })
+  const seen = bashSees(on, w)
+  await $.session.start(START)
+  expect(w.env.THIMBLE_LABELS_OFF).toBeUndefined()
+  await $.tool.call(BASH)
+  expect(seen).toEqual([undefined])
+})
+
+test('a change of Labels in the settings pane reaches the next Bash call, before Claude Code loads the plugin again', async () => {
+  resetPrompts()
+  const hooks: Record<string, Any> = {}
+  const on: Any = (event: string, a: Any, b?: Any) => {
+    hooks[event] = typeof a === 'function' ? a : b
+    return { catch: () => undefined }
+  }
+  registerPath(on, {} as never)
+  const env: Record<string, string | undefined> = {}
+  const $: Any = {
+    plugin: { root: '/made-up/plugin' },
+    env: { get: async (k: string) => env[k], set: async (k: string, v?: string) => { env[k] = v; return {} } },
+    fs: { read: async (p: string) => (p === '/made-up/plugin/prompts/labels-off.md' ? 'Labels are off in a made-up way.\n' : '') },
+  }
+  const seen: (string | undefined)[] = []
+  const bash = () => hooks['tool.call']($, BASH, async () => { seen.push(env.THIMBLE_LABELS_OFF); return { result: '' } })
+  setOptions({ labels: true })
+  try {
+    await bash()
+    noteChange('labels', false)
+    await bash()
+    noteChange('labels', true)
+    await bash()
+  } finally {
+    setOptions({})
+  }
+  expect(seen).toEqual([undefined, 'Labels are off in a made-up way.', undefined])
 })

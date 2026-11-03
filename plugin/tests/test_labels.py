@@ -451,3 +451,60 @@ def test_the_folders_labels_of_thimble_0_10_stay_on_disk_and_only_the_conversati
     (own / "mine.json").write_text(json.dumps({**lab, "name": "mine", "sessions": ["conv-own"]}))
     assert in_conversation(root, "conv-new2", "label", "--json").stdout.strip() == "[]"
     assert [x["name"] for x in json.loads(in_conversation(root, "conv-own", "label", "--json").stdout)] == ["mine"]
+
+
+# ------------------------------------------------------------------ Labels off (hooks/path.ts, cli.labels_off)
+
+LABELS_OFF_LINE = (Path(__file__).resolve().parents[1] / "prompts" / "labels-off.md").read_text().strip()
+
+
+def off(root: Path, *args: str, session: str = "s-test") -> subprocess.CompletedProcess:
+    """A `thimble` command of a session whose Labels is off: the plugin gives its commands the line of
+    prompts/labels-off.md as THIMBLE_LABELS_OFF."""
+    env = {**os.environ, "THIMBLE_ROOT": str(root), "THIMBLE_PYTHON": sys.executable, "THIMBLE_SESSION": session,
+           "THIMBLE_LABELS_OFF": LABELS_OFF_LINE}
+    return subprocess.run([str(THIMBLE), *args], capture_output=True, text=True, env=env, cwd=root, timeout=120)
+
+
+def test_with_labels_off_every_thimble_label_of_claude_s_answers_with_the_one_line_and_changes_nothing(root: Path):
+    assert LABELS_OFF_LINE == "Labels are off in thimble's settings, so thimble made no label."
+    (root / "rule.py").write_text("def label(u):\n    return 'yes' if 'sorry' in u['_text'].lower() else 'no'\n")
+    asks = [("label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog"),
+            ("label", "kind", "--in", "chat/*.jsonl", "--code", "rule.py"),
+            ("label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes."),
+            ("label", "sorry", "--set", "chat/room.jsonl#L1=yes"),
+            ("label",), ("label", "sorry"), ("label", "sorry", "--csv"), ("label", "--help"), ("label", "sorry", "--wait", "1")]
+    for args in asks:
+        r = off(root, *args)
+        assert (r.returncode, r.stdout, r.stderr) == (1, LABELS_OFF_LINE + "\n", ""), args
+    # no label, no record of one, and nothing for the plugin to start
+    assert LB.names(Store(root)) == [] and feed(root) == []
+    assert not (Path(os.environ["THIMBLE_HOME"]) / "conversations").exists() or not list(
+        (Path(os.environ["THIMBLE_HOME"]) / "conversations").rglob("*.json"))
+
+
+def test_with_labels_off_the_person_s_own_commands_still_run_and_with_labels_on_claude_s_do(root: Path):
+    # the plugin's own reads and the person's keys run as `person-…` (core/env.ts runThimble)
+    r = off(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog", session="person-s-test")
+    assert r.returncode == 0 and "sorry: yes 2 · no 4 of 6 records" in r.stdout, r.stdout + r.stderr
+    # Labels on: no THIMBLE_LABELS_OFF, and Claude's command makes its label as before
+    r = run(root, "label", "sorry2", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    assert r.returncode == 0 and "sorry2: yes 2 · no 4 of 6 records" in r.stdout, r.stdout + r.stderr
+
+
+def test_with_labels_off_the_command_s_help_and_coverage_name_no_label(root: Path):
+    on_help = run(root, "--help").stdout
+    off_help = off(root, "--help").stdout
+    assert "thimble label" in on_help and "Claude runs it to label records and to see what it read" in on_help
+    assert "label" not in off_help.lower(), off_help
+    # the rest of the help stays as it was: only the label lines go
+    kept = [x for x in on_help.splitlines() if x in off_help.splitlines()]
+    assert "    thimble coverage [--all]                   what entered Claude's context, what was only computed over, and what" in kept
+    assert "Add --json to coverage for the whole record." in off_help and "Claude runs it to see what it read." in off_help
+    # an unknown command's usage names no label command either
+    assert "label" not in off(root, "nope").stderr
+    # what code computed over is said with no rule label
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    cov = off(root, "coverage").stdout
+    assert "Computed over by a program, none of it read: 6 of 6 records (100%)." in cov and "label" not in cov.lower(), cov
+    assert "Computed over by a program or a rule label" in run(root, "coverage").stdout
