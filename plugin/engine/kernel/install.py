@@ -18,8 +18,7 @@ commands thimble and thimble-browser in ~/.local/bin.
     --folder DIR                         plugin, sandbox, browser and commands from the clone DIR in place of live: the
                                          dev install (scripts/install.sh --local), as before 0.10.8
     thimble install switch --folder DIR  before the dev install's steps: the release installed in thimble's home goes
-                                         aside, with its fixes, and this clone's fixes that a release install set aside
-                                         come back
+                                         aside, with its fixes, and this clone's fixes that were set aside come back
     thimble install launcher             not the script's: thimble-browser, run from live, points the launcher on PATH
                                          (--bin-dir) at live, when an install before 0.10.8 wrote it for its own folder
 
@@ -532,8 +531,8 @@ def path_line(to_dir: Path) -> str:
 def unused(a: Any, r: Run, folder: Path | None) -> None:
     """Where Claude Code loaded thimble from before this install moved it (plugin), and each folder of the earlier
     install that nothing uses now: not the plugin's marketplace, not a command's target, not the workbench's packages'
-    source, not the clone whose dev install's fixes went aside (release), and not in thimble's or Claude Code's own
-    folders."""
+    source, not the clone whose dev install's fixes went aside (release), not in thimble's or Claude Code's own folders,
+    and not a clone that holds work of the person's (holds_work)."""
     st = r.get()
     to_dir = bin_dir(a)
     m = FX._marketplace().get("source") or {}
@@ -553,7 +552,7 @@ def unused(a: Any, r: Run, folder: Path | None) -> None:
             continue
         if any(real == os.path.realpath(k) or real.startswith(os.path.realpath(k) + os.sep) for k in keep):
             continue
-        if real not in [os.path.realpath(g) for g in gone]:
+        if real not in [os.path.realpath(g) for g in gone] and not holds_work(Path(real)):
             gone.append(p)
     before = st.get("before")
     if not before and not gone:
@@ -563,6 +562,16 @@ def unused(a: Any, r: Run, folder: Path | None) -> None:
         say(f"Claude Code loaded thimble from {before}. It now loads it from {st.get('now') or tilde(thimble_home())}.")
     for p in gone:
         say(f"{'  ' if before else ''}{tilde(p)} is no longer used, so you can delete it.")
+
+
+def holds_work(folder: Path) -> bool:
+    """Whether `folder` is a git checkout of its own with work of the person's in it that no remote has: changes not
+    committed (new files too), or commits on no remote branch, such as a dev install's (scripts/install.sh --local).
+    The install never says that such a folder can go."""
+    if not FX._own_checkout(folder):
+        return False
+    changed = FX.git("status", "--porcelain", cwd=folder, check=False)
+    return bool(changed or FX.git("rev-list", "-n", "1", "--branches", "--not", "--remotes", cwd=folder, check=False))
 
 
 # ------------------------------------------------------------------ the dev install and the release take turns
@@ -636,8 +645,8 @@ def come_back(src: Path, other: str) -> None:
 
 def switch(a: Any, r: Run) -> int:
     """scripts/install.sh --local, before the dev install's steps: the release installed in thimble's home goes aside,
-    with its fixes, and so does a dev install of another clone; then this clone's fixes, which a release install set
-    aside, come back. A dev install of this clone stays as it is. Each move says where it went, in one line."""
+    with its fixes, and so does a dev install of another clone; then this clone's dev install's fixes, set aside
+    before, come back. A dev install of this clone stays as it is. Each move says where it went, in one line."""
     folder = Path(a.folder).resolve()
     rel = install_in(FX.home())
     first = True
@@ -661,8 +670,7 @@ def switch(a: Any, r: Run) -> int:
     back = None if rel else newest("dev", folder)
     if back:
         come_back(back, "release")
-        tell(f"The fixes of this clone's dev install, which the release install set aside, are back in "
-             f"{tilde(thimble_home())}.")
+        tell(f"The fixes of this clone's dev install, set aside before, are back in {tilde(thimble_home())}.")
     return 0
 
 

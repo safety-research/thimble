@@ -33,7 +33,7 @@ install in ~/.thimble stays as it is, with your fixes, and thimble update moves 
   --local            in a clone of thimble: install from the clone (the dev install, for work on thimble's own code).
                      thimble update then follows the clone, which you pull yourself. A release installed in ~/.thimble
                      goes aside with its fixes, and the install without --local brings it back
-  --remove-0.9      when thimble 0.9 is here, remove it first: the install shows the steps, and runs them after you
+  --remove-0.9       when thimble 0.9 is here, remove it first: the install shows the steps, and runs them after you
                      answer y, in a terminal
 EOF
 }
@@ -299,7 +299,7 @@ main() {
       stop "--local installs from a clone of thimble: git clone https://github.com/safety-research/thimble, then" \
         "run scripts/install.sh --local in it"
     no09 "$code"
-    # the release installed in ~/.thimble goes aside with its fixes, and this clone's that it set aside come back
+    # the release installed in ~/.thimble goes aside with its fixes, and this clone's fixes set aside before come back
     kernel install switch --folder "$code" || exit 1
     say ""
     say "The plugin"

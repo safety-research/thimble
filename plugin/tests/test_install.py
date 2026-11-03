@@ -767,7 +767,12 @@ def test_local_sets_the_release_aside_with_its_fixes_and_the_install_brings_it_b
     assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
     assert os.readlink(w.home / ".local" / "bin" / "thimble") == str(clone / "plugin" / "bin" / "thimble")
     assert "Claude Code loaded thimble from ~/.thimble/fixes/live. It now loads it from ~/thimble." in lines
-    # the install without --local brings it back, and points Claude Code and the command at it again
+    # the install without --local brings it back, and points Claude Code and the command at it again; the clone,
+    # which holds an edit of the person's, is not called one to delete. The fixes folder that a lock of the dev
+    # install made (thimble update takes one) goes, since it holds nothing else
+    (clone / "README.md").write_text("a made-up edit\n")
+    fixes.mkdir()
+    (fixes / "fixes.lock").touch()
     p = w.install("--no-browser")
     assert p.returncode == 0, text_of(p)
     lines = p.stdout.splitlines()
@@ -783,6 +788,7 @@ def test_local_sets_the_release_aside_with_its_fixes_and_the_install_brings_it_b
                                                                            "path": str(fixes / "live")}
     assert os.readlink(w.home / ".local" / "bin" / "thimble") == str(fixes / "release" / "plugin" / "bin" / "thimble")
     assert "Claude Code loaded thimble from ~/thimble. It now loads it from ~/.thimble." in lines
+    assert "no longer used" not in p.stdout and (clone / "README.md").read_text() == "a made-up edit\n"
 
 
 def test_a_dev_install_s_fixes_go_aside_for_the_release_and_come_back_with_local(w, monkeypatch):
@@ -818,12 +824,38 @@ def test_a_dev_install_s_fixes_go_aside_for_the_release_and_come_back_with_local
     assert lines[at:at + 2] == [
         f"The release installed in ~/.thimble is set aside, with its fixes, in ~/.thimble/{release.name}. The "
         "install without --local brings it back.",
-        "The fixes of this clone's dev install, which the release install set aside, are back in ~/.thimble."], lines
+        "The fixes of this clone's dev install, set aside before, are back in ~/.thimble."], lines
     assert not aside.exists() and w.release()["kind"] == "clone" and FX.get(fix["id"])["state"] == "on"
     assert sh("git", "rev-parse", "mine", cwd=clone) == mine
     assert checkouts(clone)[1:] == [str(fixes / "live"), str(fixes / "release")]
     assert ("  Claude Code loads it from your fixes, in ~/.thimble/fixes/live: thimble update moves them to this "
             "clone's commit.") in lines and w.calls()[-1] == "plugin update thimble@thimble"
+
+
+def test_a_dev_install_of_another_clone_goes_aside_and_comes_back_with_its_clone(w, monkeypatch):
+    """--local in clone a with a fix on, then in clone b: a's dev install goes aside, as a dev install of a; --local in a
+    again brings it back."""
+    from kernel import fixes as FX  # noqa: PLC0415
+
+    a, b = w.home / "a" / "thimble", w.home / "b" / "thimble"
+    for clone in (a, b):
+        sh("git", "clone", "-q", str(w.bare), str(clone))
+    assert w.install("--local", "--no-browser", script=a / "scripts" / "install.sh").returncode == 0
+    fix = made_fix(w, monkeypatch, "say read, not coverage")
+    p = w.install("--local", "--no-browser", script=b / "scripts" / "install.sh")
+    assert p.returncode == 0, text_of(p)
+    [aside] = aside_of(w, "dev")
+    assert (f"The dev install of ~/a/thimble is set aside, with its fixes, in ~/.thimble/{aside.name}. "
+            "scripts/install.sh --local in ~/a/thimble brings it back.") in p.stdout.splitlines(), p.stdout
+    assert not (w.th / "fixes").exists() and checkouts(a)[1:] == [str(aside / "live"), str(aside / "release")]
+    assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(b)}
+    p = w.install("--local", "--no-browser", script=a / "scripts" / "install.sh")
+    assert p.returncode == 0, text_of(p)
+    assert ("The fixes of this clone's dev install, set aside before, are back in ~/.thimble."
+            in p.stdout.splitlines()), p.stdout
+    assert not aside.exists() and FX.get(fix["id"])["state"] == "on" and w.release()["repo"] == str(a)
+    assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory",
+                                                                           "path": str(w.th / "fixes" / "live")}
 
 
 def test_local_outside_a_clone_says_where_it_works(w):
