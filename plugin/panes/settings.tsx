@@ -4,7 +4,8 @@
 // Comments, Panes), every row the same: the name in a column of its own, its choices (`on · off` for a switch; the one
 // set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
 // `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
-// it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
+// it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs, one row per load of
+// the plugin, while Minimal shows the choice pressed (settings/term.ts shownValues). The row picked is
 // tinted across the pane, with no mark of its own (a `›` there read as a row that opens), and the pane keeps that row
 // and its line in view at any height (core/pane.ts keepsInView), as the pick moves with ↑ and ↓. A setting that
 // changes the work of another feature (`under`: Checker and its Effort, the checks of Citations) shows only while that
@@ -25,7 +26,7 @@ import { barRows } from '../bar/bar'
 import { arrowsOwn, keepsInView, PANE_ID } from '../core/pane'
 import { treeRows } from '../core/trail.mjs'
 import { choicesIn, SWITCHES, switchesFrom } from '../settings/features.mjs'
-import { firstPartyApi, heldValues, settingsAction } from '../settings/term'
+import { firstPartyApi, heldValues, settingsAction, shownValues } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -90,7 +91,7 @@ async function chooseHere($: Engine, s: Switch, c: string): Promise<void> {
 /** Pick a row, and land the ring on `c`, else its choice set. */
 async function pick($: Engine, s: Switch, c?: string): Promise<void> {
   await $.state.set(PICKED, s.key)
-  const v = (await heldValues($))[s.key]
+  const v = (await shownValues($))[s.key]
   await $.ui.focus({ requestId: PANE_ID, key: choiceKey(s, c ?? shownOf(s, v)) } as Any).catch(() => undefined)
   $.ui.invalidate('ui.render')
 }
@@ -101,7 +102,7 @@ export async function settingsFocus($: Engine, e: { element?: string; origin?: {
   const to = parseKey(e.element)
   if (!to || e.origin?.kind !== 'person') return next(e)
   const picked = await pickedNow($)
-  const v = (await heldValues($))[to.s.key]
+  const v = (await shownValues($))[to.s.key]
   if (to.s.key === picked && to.c) {
     if (to.c !== shownOf(to.s, v)) await choose($, to.s, to.c)
     return next(e)
@@ -114,7 +115,7 @@ export async function settingsFocus($: Engine, e: { element?: string; origin?: {
 export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any): Promise<unknown> {
   const { Box, Button, Text } = els
   const width = Math.max(30, Number(e.props?.bodyColumns) || 60)
-  const values = await heldValues($)
+  const values = await shownValues($)
   const shown = shownRows(values, await firstPartyApi($))
   const picked = await pickedNow($, shown)
   const at = shown.findIndex(s => s.key === picked)
