@@ -28,7 +28,7 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
-Claude asks whether you want both the terminal plugin and the browser workbench (the default) or the plugin alone, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
+Claude asks whether you want both the terminal plugin and the browser workbench (the default) or the plugin alone, and helps with troubleshooting. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
 
 ### Manual installation
 
@@ -36,17 +36,17 @@ Claude asks whether you want both the terminal plugin and the browser workbench 
 curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
 ```
 
-It installs thimble in `~/.thimble`, where the browser workbench takes about 1 GB. Adding `-s -- --no-browser` after `bash` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
+It installs thimble in `~/.thimble`. Adding `-s -- --no-browser` after `bash` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and troubleshooting.
 
 ## Usage
 
 ### Terminal plugin
 
-Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.
-
-When thimble does something wrong, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble, and a key puts the change to use, or not; a fix that changes the sandbox, the hooks file or a command hook, the launcher or a package says so first. A fix never changes the way back: `thimble fix off` in a shell, or `sh ~/.thimble/fixes/off.sh` when thimble does not load, brings back the plain release. In a shell, `thimble file issue N` gives a link to GitHub's new-issue form with fix N's text, which you read and submit there, and `thimble file pr N` shows you the text and the code, then opens a pull request with them.
+Run `claude` in a folder with files you'd like to analyze. By default, thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off. Run `/plugin` to turn the thimble plugin off.
 
 ![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
+
+When thimble does something wrong or you'd like a new feature, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble. In the shell, `thimble fixes` shows all existing fixes. `thimble file issue <id>` gives a link to file a GitHub's issue, and `thimble file pr <id>` opens a pull request with the fix.
 
 ### Browser workbench
 
