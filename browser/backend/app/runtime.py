@@ -84,6 +84,10 @@ NEW_CHAT = "New chat"
 RESUMED_CHAT = "Resumed the chat that began with: {first}"
 SID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 EVENT_BODY_RE = re.compile(r'^\s*<thimble-event\s[^>]*?kind="([^"]*)"[^>]*>\n?(.*?)\n?</thimble-event>\s*$', re.S)
+EVENT_ID_RE = re.compile(r'<thimble-event\s[^>]*?\bevent="([^"]*)"')  # the ids of the events a prompt carries (rewind)
+REWIND_CHIP = "rewind"  # the kind of main's line where a rewind cut its chat (rewind_main), which names the message
+REWOUND = ("Rewound to before your message. Claude no longer sees it or anything after it; files and cards it changed "
+           "stay as they are.")
 
 
 def enabled() -> bool:
@@ -845,6 +849,122 @@ async def _cancel(task: Any) -> None:
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError, Exception):
         await (task if isinstance(task, asyncio.Future) else asyncio.wrap_future(task))
+
+
+# ---- rewind
+#
+# Rewind main to one of the analyst's messages, as Claude Code's /rewind restores a conversation: main's conversation
+# goes back to where it stood before that message, so its next turn sees neither the message nor anything after it.
+# The engine's state is cut there: the Messages API's message list is cut before the message's prompt, and the Claude
+# Code session's next turn resumes it at the entry before that prompt as a fork (resume_session_at), which Claude Code
+# keeps beside the session it leaves. Main's log only grows: the rewind's line (REWIND_CHIP) names the message, and the
+# page hides the records from that message to the line (rewound), so nothing that refers to a record by its place
+# changes. The transcript the mirror reads is left whole. Files and cards are not put back: Claude's edits of the
+# folder and its cards stay as they are (Undo takes a card back).
+
+
+class RewindRefused(Exception):
+    """Why main cannot be rewound to a message, in the words the page shows."""
+
+
+def _analyst_message(rec: Any, event_id: str | None = None) -> bool:
+    """Whether a record of main's log is a message the analyst sent from the page (events.post), `event_id`'s when
+    given: what a rewind goes back to."""
+    from . import agents  # noqa: PLC0415
+
+    return (isinstance(rec, dict) and rec.get("type") == "user" and rec.get("by") == agents.BROWSER
+            and bool(rec.get("event")) and (event_id is None or rec.get("event") == event_id))
+
+
+def rewound(records: list[Any]) -> set[int]:
+    """The places of main's records that a rewind hid: each rewind line hides the records from the message it names up
+    to itself, the line staying. The page hides the same (frontend chat/model rewoundRecords)."""
+    hidden: set[int] = set()
+    for i, rec in enumerate(records):
+        if not (isinstance(rec, dict) and rec.get("type") == "chip" and rec.get("kind") == REWIND_CHIP):
+            continue
+        start = next((j for j in range(i) if j not in hidden and _analyst_message(records[j], rec.get("event"))), None)
+        if start is not None:
+            hidden.update(range(start, i))
+    return hidden
+
+
+def _prompt_events(content: Any) -> set[str]:
+    """The ids of the events a prompt carries: its text's `<thimble-event … event="…">` tags. A tool's result carries
+    none, so a result that quotes a message is never its prompt."""
+    if isinstance(content, str):
+        return set(EVENT_ID_RE.findall(content))
+    if isinstance(content, list):
+        return {e for b in content if isinstance(b, dict) and b.get("type") == "text"
+                for e in EVENT_ID_RE.findall(str(b.get("text") or ""))}
+    return set()
+
+
+def _first_prompt(contents: list[Any], ids: set[str]) -> int | None:
+    """The place of the first prompt among `contents` that carries one of the events `ids`, None when none does."""
+    return next((i for i, content in enumerate(contents) if _prompt_events(content) & ids), None)
+
+
+def _session_messages(sid: str, cwd: Path) -> list[Any]:
+    """The messages of Claude Code session `sid`, from its transcript (the Agent SDK's get_session_messages)."""
+    from claude_agent_sdk import get_session_messages  # noqa: PLC0415
+
+    return get_session_messages(sid, directory=str(cwd)) or get_session_messages(sid)
+
+
+def _rewind_plan(conv: Conv, cwd: Path, ids: set[str]) -> list[tuple[Path, Any]]:
+    """How each engine's state of `conv` is cut before the first prompt that carries one of the events `ids`: (state
+    file, what it holds next; None removes it). An engine whose state holds none of them is left alone, since none of
+    those messages reached it. RewindRefused when the Claude Code session cannot be read."""
+    from . import runtime_api  # noqa: PLC0415
+
+    plan: list[tuple[Path, Any]] = []
+    api = conv.state_path("api")
+    messages = runtime_api._load(api)
+    at = _first_prompt([m.get("content") if m.get("role") == "user" else None for m in messages], ids)
+    if at is not None:
+        plan.append((api, messages[:at]))
+    cc = conv.state_path("cc")
+    sid = str(_read_json(cc).get("session_id") or "")
+    if sid:
+        got = _session_messages(sid, cwd)
+        if not got:
+            raise RewindRefused("thimble could not read main's Claude Code session, so it cannot rewind it.")
+        at = _first_prompt([(m.message or {}).get("content") if m.type == "user" else None for m in got], ids)
+        if at is not None:
+            plan.append((cc, {"session_id": sid, "resume_at": got[at - 1].uuid} if at else None))
+    return plan
+
+
+async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
+    """Rewind main to before the analyst's message `event_id` (module note above): main's running turn stops, its
+    conversation is cut before the message, and main's log gets the rewind's line. {text: the message's words, which
+    the page puts back in the composer, event}. RewindRefused for a message the chat no longer shows, and when the
+    Claude Code session cannot be read."""
+    from . import agents, session  # noqa: PLC0415
+
+    sp = ensure(c)
+    records = agents.read_events(agents.paths(c, agents.MAIN_ID)[1])
+    hidden = rewound(records)
+    shown = [i for i in range(len(records)) if i not in hidden and _analyst_message(records[i])]
+    at = next((i for i in shown if records[i]["event"] == event_id), None)
+    if at is None:
+        raise RewindRefused("That message is not in main's chat any more.")
+    # the message and each of the analyst's after it: the first of them the engine holds is where its state is cut
+    ids = {str(records[i]["event"]) for i in shown if i >= at}
+    if sp.main.running:
+        sp.main.queue.clear()
+        await _cancel(sp.main.task)
+        session.turn_stopped(c)
+    for path, held in _rewind_plan(sp.main, sp.corpus, ids):
+        if held is None:
+            path.unlink(missing_ok=True)
+        else:
+            from . import runtime_api  # noqa: PLC0415
+
+            runtime_api._save(path, held)
+    agents.chip(c, REWIND_CHIP, REWOUND, event=event_id)
+    return {"text": str(records[at].get("text") or ""), "event": event_id}
 
 
 # ---- threads

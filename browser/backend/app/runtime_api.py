@@ -228,15 +228,25 @@ async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, al
     return "\n".join(out) + "\n"
 
 
-def cc_main_session(c: str) -> str | None:
-    """Main's Claude Code session id on the Claude Code sign-in runtime (runtime_cc), which a fork resumes."""
+def _cc_main_state(c: str) -> dict[str, Any]:
     from . import runtime  # noqa: PLC0415
 
     try:
         got = json.loads(runtime.ensure(c).main.state_path("cc").read_text("utf-8"))
     except (OSError, ValueError):
-        return None
-    return str(got.get("session_id") or "") or None if isinstance(got, dict) else None
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def cc_main_session(c: str) -> str | None:
+    """Main's Claude Code session id on the Claude Code sign-in runtime (runtime_cc), which a fork resumes."""
+    return str(_cc_main_state(c).get("session_id") or "") or None
+
+
+def cc_main_cut(c: str) -> str | None:
+    """Where a fork of main's Claude Code session resumes it up to (`--resume-session-at`): the entry a rewind left
+    main at until main's next turn (runtime.rewind_main), else None, its whole conversation."""
+    return str(_cc_main_state(c).get("resume_at") or "") or None
 
 
 async def turn(conv: Any, text: str) -> Any:

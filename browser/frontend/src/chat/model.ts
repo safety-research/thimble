@@ -1558,15 +1558,39 @@ export function isFeedbackChip(e: ChatRecord): boolean {
   return e.type === 'chip' && e.kind === 'feedback'
 }
 
+/** The kind of main's line where a rewind cut its chat (backend runtime.REWIND_CHIP): it names the analyst's message by
+ * its event. */
+export const REWIND_CHIP = 'rewind'
+
+/** Whether a record is a message the analyst sent main from the page, `event`'s when given: what a rewind goes back to
+ * (backend runtime._analyst_message). Pure. */
+export function isRewindable(e: ChatRecord, event?: string): e is Extract<ChatRecord, { type: 'user' }> {
+  return e.type === 'user' && e.by === 'browser' && !!e.event && (event == null || e.event === event)
+}
+
+/** The records of main's log a rewind took out of the conversation, by index: each rewind line hides the records from
+ * the message it names up to itself, the line staying (backend runtime.rewound). Pure. */
+export function rewoundRecords(records: readonly ChatRecord[]): Set<number> {
+  const hidden = new Set<number>()
+  records.forEach((e, i) => {
+    if (e.type !== 'chip' || e.kind !== REWIND_CHIP || typeof e.event !== 'string') return
+    const event = e.event
+    const start = records.findIndex((r, j) => j < i && !hidden.has(j) && isRewindable(r, event))
+    if (start < 0) return
+    for (let j = start; j < i; j++) hidden.add(j)
+  })
+  return hidden
+}
+
 /**
- * The records of main's log its transcript leaves out, by index: Agent or Workflow calls whose agents show as their own
+ * The records of main's log its transcript leaves out, by index: those a rewind took out (rewoundRecords), Agent or Workflow calls whose agents show as their own
  * card or thread (with their results), text that repeats a summary the orientation handed back, label runs a subagent
  * or a call in main started, view chips of the views an orientation from before 0.8.0 proposed and the start and saves
  * of its report pass's writer (isOrientWriterRecord), main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
  * (isFeedbackChip). Pure.
  */
 export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set<number> {
-  const skip = new Set<number>()
+  const skip = rewoundRecords(records)
   const hidden = new Set<string>()
   const summaries = new Set(ctx.summaries.map(squash).filter(Boolean))
   const labelsApplied = new Set<string>()

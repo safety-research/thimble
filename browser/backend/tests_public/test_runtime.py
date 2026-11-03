@@ -1053,3 +1053,126 @@ async def test_on_claude_code_sign_in_a_reply_claude_code_moved_to_another_model
     await main_turn("What happened?")
     said = [(n["text"], n["chat"]) for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
     assert said == [("Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8.", agents.MAIN_ID)]
+
+
+# --------------------------------------------------------------------------- rewind
+
+
+def analyst_messages() -> list[tuple[int, str, str]]:
+    """(place, words, event id) of each message the analyst sent main from the page that the chat still shows."""
+    recs = main_records()
+    hidden = runtime.rewound(recs)
+    return [(i, r["text"], r["event"]) for i, r in enumerate(recs)
+            if i not in hidden and r["type"] == "user" and r.get("by") == agents.BROWSER]
+
+
+async def test_a_rewind_cuts_main_s_conversation_before_the_message_and_hides_it_and_what_came_after(on, monkeypatch):
+    client = api_key(monkeypatch, [text("Two incidents."), text("The second was worse."), text("Yes."),
+                                   text("Three incidents, counting the outage.")])
+    for words in ("What happened?", "Which was worse?", "Sure?"):
+        await main_turn(words)
+    second = analyst_messages()[1]
+    got = await runtime.rewind_main(CORPUS, second[2])
+    assert got == {"text": "Which was worse?", "event": second[2]}  # the words go back in the composer
+    recs = main_records()
+    assert recs[-1]["type"] == "chip" and recs[-1]["kind"] == runtime.REWIND_CHIP and recs[-1]["event"] == second[2]
+    # the page shows the first turn alone, then the rewind's line
+    assert runtime.rewound(recs) == set(range(second[0], len(recs) - 1))
+    assert [w for _, w, _ in analyst_messages()] == ["What happened?"]
+    await main_turn("Count the outage too?")
+    sent = asked(client, 3)
+    assert "What happened?" in sent and "Two incidents." in sent
+    assert "Which was worse?" not in sent and "Sure?" not in sent and "worse." not in sent
+    assert [w for _, w, _ in analyst_messages()] == ["What happened?", "Count the outage too?"]
+    # a message a rewind hid is no place to rewind to
+    with pytest.raises(runtime.RewindRefused):
+        await runtime.rewind_main(CORPUS, second[2])
+
+
+async def test_a_rewind_to_a_message_that_never_reached_claude_keeps_main_s_conversation(on, monkeypatch):
+    """A message whose turn never ran (Claude could not be reached) is in no engine's state: the conversation is cut
+    before the first later message that is, and kept whole when none is."""
+    client = api_key(monkeypatch, [text("Two incidents."), text("Still two.")])
+    await main_turn("What happened?")
+    unreachable = {"what": "no key", "fix": ""}
+    real = claude_access.problem
+    monkeypatch.setattr(claude_access, "problem", lambda: unreachable or real())
+    await main_turn("Which was worse?")
+    assert len(client.bodies) == 1  # that turn never reached Claude
+    unreachable = {}
+    await runtime.rewind_main(CORPUS, analyst_messages()[1][2])
+    await main_turn("And now?")
+    assert "What happened?" in asked(client, 1) and "Two incidents." in asked(client, 1)
+
+
+async def test_on_claude_code_sign_in_a_rewind_resumes_the_session_before_the_message_as_a_fork(on, monkeypatch):
+    from types import SimpleNamespace
+
+    import claude_agent_sdk
+    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock
+
+    def script(sid: str) -> list[Any]:
+        return [SystemMessage(subtype="init", data={"session_id": sid}),
+                AssistantMessage(content=[TextBlock(text="ok")], model="claude-opus-5-5"),
+                ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                              session_id=sid)]
+
+    # Claude Code's transcript of the session: each turn's prompt, then its reply
+    held: list[Any] = []
+    seen: dict[str, Any] = {}
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    for n, words in enumerate(("What happened?", "Which was worse?")):
+        fake_sdk(monkeypatch, script("sess-1"), seen)
+        await main_turn(words)
+        held += [SimpleNamespace(type="user", uuid=f"u{n}", message={"role": "user", "content": seen["prompt"]}),
+                 SimpleNamespace(type="assistant", uuid=f"a{n}", message={"role": "assistant", "content": "ok"})]
+    asked_for: list[tuple] = []
+    monkeypatch.setattr(claude_agent_sdk, "get_session_messages",
+                        lambda sid, directory=None: asked_for.append((sid, directory)) or (held if sid == "sess-1" else []))
+    sp = runtime._spaces[CORPUS]
+    await runtime.rewind_main(CORPUS, analyst_messages()[1][2])
+    assert json.loads(sp.main.state_path("cc").read_text()) == {"session_id": "sess-1", "resume_at": "a0"}
+    assert asked_for[0] == ("sess-1", str(sp.corpus))
+    assert runtime_api_cut() == "a0"  # the checker's and the proposer's forks take main where the rewind left it
+    fake_sdk(monkeypatch, script("sess-2"), seen)
+    await main_turn("Count the outage too?")
+    opts = seen["options"]
+    assert (opts.resume, opts.resume_session_at, opts.fork_session) == ("sess-1", "a0", True)
+    assert json.loads(sp.main.state_path("cc").read_text()) == {"session_id": "sess-2"}  # the fork is main's now
+
+    # back to the first message: nothing is left to resume, so the next turn starts a session of its own
+    held[:] = [SimpleNamespace(type="user", uuid="u0", message={"role": "user", "content": seen["prompt"]})]
+    monkeypatch.setattr(claude_agent_sdk, "get_session_messages", lambda sid, directory=None: held)
+    await runtime.rewind_main(CORPUS, analyst_messages()[1][2])
+    assert not sp.main.state_path("cc").exists()
+    fake_sdk(monkeypatch, script("sess-3"), seen)
+    await main_turn("Start over")
+    assert seen["options"].resume is None and seen["options"].resume_session_at is None
+
+    # a session thimble cannot read is not rewound blind
+    monkeypatch.setattr(claude_agent_sdk, "get_session_messages", lambda sid, directory=None: [])
+    before = len(main_records())
+    with pytest.raises(runtime.RewindRefused):
+        await runtime.rewind_main(CORPUS, analyst_messages()[-1][2])
+    assert json.loads(sp.main.state_path("cc").read_text()) == {"session_id": "sess-3"}
+    assert len(main_records()) == before
+
+
+def runtime_api_cut() -> str | None:
+    from app import runtime_api
+
+    return runtime_api.cc_main_cut(CORPUS)
+
+
+async def test_the_rewind_route_is_the_analyst_s_and_says_why_it_cannot(on, monkeypatch, analyst):
+    from fastapi import HTTPException
+
+    api_key(monkeypatch, [text("Two incidents.")])
+    await main_turn("What happened?")
+    event = analyst_messages()[0][2]
+    with pytest.raises(HTTPException) as e:
+        await agents.rewind_route(CORPUS, agents.RewindBody(event="nope"), analyst)
+    assert e.value.status_code == 409
+    got = await agents.rewind_route(CORPUS, agents.RewindBody(event=event), analyst)
+    assert got["text"] == "What happened?"
+    assert analyst_messages() == []

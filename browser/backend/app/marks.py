@@ -960,7 +960,7 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
         sid = runtime_api.cc_main_session(c) if kind == "cc" else None
         if not sid:
             return {"error": "thimble cannot reach Claude yet" if not kind else "main has no Claude Code session yet"}
-        main, cut = {**main, "sid": sid, "config_known": False}, None
+        main, cut = {**main, "sid": sid, "config_known": False}, runtime_api.cc_main_cut(c)
     argv = fork_argv(main, cut, model_id, effort)
     try:
         proc = await asyncio.create_subprocess_exec(

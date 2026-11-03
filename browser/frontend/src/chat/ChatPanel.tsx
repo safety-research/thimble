@@ -26,6 +26,7 @@ import { bus } from '../lib/bus'
 import { fetchCall } from '../lib/calls'
 import { newest, STALE } from '../lib/newest'
 import { callRef, parseRef } from '../lib/refs'
+import { revealAnchor } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import { useTouring } from '../lib/touring'
@@ -42,12 +43,13 @@ import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
 import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
-import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
+import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry, type RewindHooks } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
 import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
-import { replayHeld } from './pending'
+import { offerDraft, replayHeld } from './pending'
+import { isRewindCommand, lastRewindable, NOTHING_TO_REWIND } from './rewind'
 import { ThreadRows } from './ThreadRows'
 import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
@@ -701,8 +703,42 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     [chats],
   )
 
+  // Rewind (chat/rewind.ts): the ↶ on one of the analyst's messages in main asks under it, and its Rewind takes main back
+  // to before the message; the message's words come back in main's composer
+  const [rewindAsked, setRewindAsked] = useState<string | null>(null)
+  const [rewinding, setRewinding] = useState(false)
+  const rewindTo = useCallback(
+    (event: string) => {
+      track('ui-click', { target: 'chat:rewind' })
+      setRewinding(true)
+      api
+        .rewindMain(ws, event)
+        .then((r) => {
+          setRewindAsked(null)
+          if (r.text) offerDraft('main', r.text)
+          void reloadMain()
+        })
+        .catch((e: Error) => bus.emit('toast', { text: `Could not rewind: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }))
+        .finally(() => setRewinding(false))
+    },
+    [ws, reloadMain],
+  )
+  const rewind = useMemo<RewindHooks>(() => ({ asked: rewindAsked, ask: setRewindAsked, go: rewindTo, busy: rewinding }), [rewindAsked, rewindTo, rewinding])
+
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
+    // `/rewind`: the question of Rewind on the latest of the analyst's messages in main, as Claude Code's /rewind asks
+    // which message to go back to
+    if (isRewindCommand(text)) {
+      const last = lastRewindable(main.records, mainSkip)
+      if (current !== 'main') setCurrent('main')
+      if (!last) bus.emit('toast', { text: NOTHING_TO_REWIND })
+      else {
+        setRewindAsked(last.event)
+        window.setTimeout(() => revealAnchor(`chat:main#${last.index}`), 0)
+      }
+      return Promise.resolve(true)
+    }
     // `/thimble-fix <words>`: a change to the person's own thimble, made by a fork of main with what the page shows now
     const fixing = fixWords(text)
     if (fixing === '') {
@@ -850,7 +886,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {chat.error && <div className="chat-error">{chat.error}</div>}
             {!chat.loading && !chat.error && kind === 'main' && (
               <>
-                <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming || main.writing} retry={mainRetry} />
+                <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming || main.writing} retry={mainRetry} rewind={rewind} />
               </>
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}

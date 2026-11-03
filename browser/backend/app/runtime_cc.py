@@ -160,11 +160,14 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
     allowed += [f"Edit(/{w}/**)" for w in spec.write_roots]
     allowed += [tools.thimble_tool(n) for n in spec.thimble]
     state = _load(conv.state_path("cc"))
-    resume, fork = str(state.get("session_id") or "") or None, False
+    # a rewind (runtime.rewind_main) left `resume_at`: the session resumes up to that entry, as a fork of it
+    resume, at = str(state.get("session_id") or "") or None, str(state.get("resume_at") or "") or None
+    fork = bool(resume and at)
     if resume is None and conv.base:
         base = conv.space.main if conv.base == runtime.MAIN else conv.space.convs.get(conv.base)
-        if base is not None and (sid := _load(base.state_path("cc")).get("session_id")):
-            resume, fork = str(sid), True
+        held = _load(base.state_path("cc")) if base is not None else {}
+        if sid := held.get("session_id"):
+            resume, fork, at = str(sid), True, str(held.get("resume_at") or "") or None
     sent = spec.effort if spec.effort and config.has_effort(spec.model) else None
     return ClaudeAgentOptions(
         cwd=str(spec.cwd),
@@ -186,6 +189,7 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])]},
         resume=resume,
         fork_session=fork,
+        resume_session_at=at,
     )
 
 
