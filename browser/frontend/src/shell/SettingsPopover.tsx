@@ -10,7 +10,9 @@
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
 // Under the table, "Claude can edit files in this folder", whether main and its thread forks may write the corpus
-// folder of this workspace (on by default; thimble's other agents never write it); the View proposals switch, which a view proposal's Don't ask again turns off; the
+// folder of this workspace (on by default; thimble's other agents never write it); Labels, whether Claude makes labels
+// in this workspace, as the terminal's Labels setting (on by default; off, main's prompt and the tools' texts say
+// nothing of labels, and no agent has a label tool); the View proposals switch, which a view proposal's Don't ask again turns off; the
 // Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
 // canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents as the workbench runs
 // them (web, edits of this folder, the shell's sandbox and where its network reaches), with the CLAUDE.md files each
@@ -257,6 +259,10 @@ export const NEXT_START_LINE = "An agent's row applies to its next start; a run 
 export const PROPOSE_LABEL = 'View proposals'
 /** The switch that lets main and its thread forks write the corpus folder, per workspace (backend ledger.EDITS_KEY). */
 export const EDITS_LABEL = 'Claude can edit files in this folder'
+/** The switch of whether Claude makes labels, per workspace, as the terminal's Labels setting (backend
+ * ledger.LABELS_KEY), and what each way of it gives, its tooltip. */
+export const LABELS_LABEL = 'Labels'
+export const LABELS_SAYS = { on: 'Claude makes labels, which show in Files.', off: 'Claude makes no labels.' } as const
 
 /** The Ask key choice's name and its options as the platform writes them (⌘-click and ⌥-click on a Mac, Ctrl-click and
  * Alt-click elsewhere). */
@@ -280,6 +286,12 @@ export function changedPropose(loaded: Settings | null, on: boolean): { propose_
  * (on), nothing when the switch did not change. Pure. */
 export function changedEdits(loaded: Settings | null, on: boolean): { corpus_edits?: false | null } {
   return (loaded?.corpus_edits !== false) === on ? {} : { corpus_edits: on ? null : false }
+}
+
+/** What a save sends for Labels: false to turn it off, null to put back the default (on), nothing when the switch did
+ * not change. Pure. */
+export function changedLabels(loaded: Settings | null, on: boolean): { labels?: false | null } {
+  return (loaded?.labels !== false) === on ? {} : { labels: on ? null : false }
 }
 
 /** An extension's agent, whose row is keyed `<extension>:<agent>` as thimble's config keys it. */
@@ -381,6 +393,19 @@ function WebSwitch({ role, on, onChange, why }: { role: string; on: boolean; onC
   )
 }
 
+/** The Labels switch, with what each way of it gives as its tooltip (LABELS_SAYS). */
+function LabelsSwitch({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  const { props, tip } = useTooltip(LABELS_SAYS[on ? 'on' : 'off'])
+  return (
+    <>
+      <span className="settings-web" data-on={on} {...props}>
+        <Switch checked={on} onChange={() => onChange(!on)} aria-label={LABELS_LABEL} />
+      </span>
+      {tip}
+    </>
+  )
+}
+
 export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anchor: HTMLElement | null; open: boolean; onClose: () => void }) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [models, setModels] = useState<Models>({})
@@ -399,6 +424,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [propose, setPropose] = useState(true)
   // Claude can edit files in this folder (the workspace's settings.json `corpus_edits`)
   const [edits, setEdits] = useState(true)
+  // Labels (the workspace's settings.json `labels`)
+  const [labels, setLabels] = useState(true)
   // the ask key (thimble's config `askKey`)
   const [ask, setAsk] = useState<AskKey>('meta')
   const mac = isMacPlatform()
@@ -421,6 +448,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setWeb(webRows(s))
         setPropose(s.propose_views !== false)
         setEdits(s.corpus_edits !== false)
+        setLabels(s.labels !== false)
         setAsk(s.ask_key === 'alt' ? 'alt' : 'meta')
         setAttached(a)
         const fast = mainFast(a)
@@ -444,7 +472,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const proposeNow = changedPropose(settings, propose)
       const askNow = changedAskKey(settings, ask)
       const editsNow = changedEdits(settings, edits)
-      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow || 'corpus_edits' in editsNow)
+      const labelsNow = changedLabels(settings, labels)
+      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow || 'corpus_edits' in editsNow || 'labels' in labelsNow)
         await api.putSettings(ws, {
           ...(Object.keys(changed).length ? { models: changed } : {}),
           ...(Object.keys(modes).length ? { permission_modes: modes } : {}),
@@ -452,6 +481,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
           ...proposeNow,
           ...askNow,
           ...editsNow,
+          ...labelsNow,
         })
       // the pointer, the canvas, the tour and the views' frames take the key at once
       if ('ask_key' in askNow) setAskKey(ask)
@@ -621,6 +651,17 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               <span className="settings-web" data-on={edits}>
                 <Switch checked={edits} onChange={() => setEdits(!edits)} aria-label={EDITS_LABEL} />
               </span>
+            </div>
+          </div>
+        )}
+        {settings && (
+          <div className="settings-grid settings-modes settings-auto" role="table" aria-label={LABELS_LABEL}>
+            <div className="settings-row settings-headrow" role="row">
+              <span className="label">labels</span>
+            </div>
+            <div className="settings-row" role="row" data-auto="labels">
+              <span className="settings-role">{LABELS_LABEL}</span>
+              <LabelsSwitch on={labels} onChange={setLabels} />
             </div>
           </div>
         )}

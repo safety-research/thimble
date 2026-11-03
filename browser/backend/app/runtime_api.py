@@ -104,7 +104,7 @@ def _api_content(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def tool_entries(spec: Any) -> list[dict[str, Any]]:
     from . import tools  # noqa: PLC0415
 
-    secs = tools.tool_sections(spec.thimble)
+    secs = tools.tool_sections(spec.thimble, getattr(spec, "labels", True))
     out = [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in spec.thimble if n in secs]
     out += runtime_tools.definitions(spec.builtins, getattr(spec, "corpus_edits", None))
     if out:

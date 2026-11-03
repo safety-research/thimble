@@ -11,7 +11,7 @@
 // the page at once.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ASK_KEY_LABEL, BYPASS_LINE, EDITS_LABEL, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyOptions, changedAskKey, changedEdits, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, fenceTip, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { ASK_KEY_LABEL, BYPASS_LINE, EDITS_LABEL, LABELS_LABEL, LABELS_SAYS, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyOptions, changedAskKey, changedEdits, changedLabels, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, fenceTip, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { getAskKey, setAskKey } from '../../src/lib/platform.ts'
 import type { Attached, Settings } from '../../src/lib/types.ts'
@@ -195,6 +195,28 @@ describe('the popover', () => {
     await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
     await settle()
     expect(puts).toEqual([['/api/ws/mini/settings', { corpus_edits: false }]])
+  })
+
+  test("Labels, as the terminal's Labels setting: on by default, a save sends false to turn it off, null to turn it back on, and its tooltip says what each way gives", async () => {
+    expect(changedLabels(SETTINGS, true)).toEqual({})
+    expect(changedLabels({ ...SETTINGS, labels: false }, false)).toEqual({})
+    expect(changedLabels({ ...SETTINGS, labels: false }, true)).toEqual({ labels: null })
+    expect(LABELS_SAYS).toEqual({ on: 'Claude makes labels, which show in Files.', off: 'Claude makes no labels.' })
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const doc = document.body
+    const row = doc.querySelector('.settings-row[data-auto="labels"]')!
+    expect(row.querySelector('.settings-role')?.textContent).toBe(LABELS_LABEL)
+    const sw = row.querySelector<HTMLButtonElement>('[role="switch"]')!
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    await act(async () => sw.click())
+    expect(sw.getAttribute('aria-checked')).toBe('false')
+    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
+    await settle()
+    expect(puts).toEqual([['/api/ws/mini/settings', { labels: false }]])
   })
 
   test('the Ask key choice, ⌘ by default: picking the other key and saving sends it, and the page takes it at once', async () => {

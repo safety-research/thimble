@@ -101,23 +101,28 @@ test('with Citations manual, the guidance ends with one sentence that says what 
   expect(text.endsWith('These come only when the analyst asks: citations (they select words and press c).')).toBe(true)
 })
 
-test('with Minimal on, the guidance keeps the Citing claims, Cards and Labels sections and ends with the sentences that say to draw a card and to make a label only when the analyst asks, since Minimal turns Labels off', { options: { minimal: true, ...PRESET } }, async ($, on) => {
+test('with Minimal on, the guidance keeps the Citing claims and Cards sections, leaves out the Labels section, since Minimal turns Labels off, and ends with the one sentence that says to draw a card only when the analyst asks', { options: { minimal: true, ...PRESET } }, async ($, on) => {
   const text = await thimbleText($, world(on))
   expect(text).toContain('## Citing claims')
   expect(text).toContain('## Cards\n\nDraw a card with the `card` tool.')
-  expect(text).toContain('## Labels\n')
-  expect(text.endsWith('Draw a card only when the analyst asks for one. Make a label only when the analyst asks for one.')).toBe(true)
+  expect(text).not.toMatch(/label/i)
+  expect(text.endsWith('Draw a card only when the analyst asks for one.')).toBe(true)
   expect(text).not.toContain('These come only')
 })
 
-test('with Labels off alone, the guidance keeps the Labels section, for a label the analyst asks for, and ends with the one sentence that says to make a label only when they ask, as the Labels setting tells the analyst', { options: { labels: false } }, async ($, on) => {
+test('with Labels off, the guidance is guidance.md without its Labels section, and no sentence of it names a label; the Labels setting says that Claude then makes no labels', { options: { labels: false, citations: 'auto cite' } }, async ($, on) => {
   const text = await thimbleText($, world(on))
-  expect(text).toContain('## Labels\n')
-  expect(text.endsWith('Make a label only when the analyst asks for one.')).toBe(true)
-  expect(text).not.toContain('Draw a card only')
+  expect(text).toBe(GUIDANCE.slice(0, GUIDANCE.indexOf('## Labels')).trim())
+  expect(text).not.toMatch(/label/i)
   const labels = SWITCHES.find(s => s.key === 'labels')!
-  expect(labels.says.off).toContain('Claude makes a label only when you ask for one.')
-  expect(labels.does).toContain('Claude makes a label only when you ask for one.')
+  expect(labels.says.off).toBe('No Labels pane, and Claude makes no labels.')
+  expect(labels.does.endsWith('off: no Labels pane, and Claude makes no labels.')).toBe(true)
+})
+
+test('with Labels on, the guidance keeps its Labels section as guidance.md has it, and adds no sentence about labels', { options: { labels: true, citations: 'auto cite' } }, async ($, on) => {
+  const text = await thimbleText($, world(on))
+  expect(text).toBe(GUIDANCE.trim())
+  expect(text.endsWith('Sort records with a label: [7 of 30](#) tickets.')).toBe(true)
 })
 
 test('with every mode after each reply, the guidance adds no sentence of modes', { options: { citations: 'auto cite' } }, async ($, on) => {

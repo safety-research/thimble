@@ -6,3 +6,5 @@ import { join } from 'node:path'
 
 const real = join(homedir(), '.thimble')
 if (!process.env.THIMBLE_HOME || process.env.THIMBLE_HOME === real) process.env.THIMBLE_HOME = mkdtempSync(join(tmpdir(), 'thimble-test-home-'))
+// a test's `thimble label` runs as with Labels on, whatever the session that runs the tests set (hooks/path.ts)
+delete process.env.THIMBLE_LABELS_OFF

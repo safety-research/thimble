@@ -17,9 +17,15 @@
 // the folder Claude Code started with. A TMPDIR moved alone would take Claude Code's folder along on Linux, out of the
 // sandbox's reach, and every sandboxed command would fail. So CLAUDE_CODE_TMPDIR is set first to where Claude Code
 // keeps its folder, unless the person set it, and TMPDIR moves only once it is.
+//
+// THIMBLE_LABELS_OFF. While the Labels setting is off, the session's commands get the line of prompts/labels-off.md,
+// with which `thimble label` answers Claude's commands and makes no label (engine/kernel/cli.py labels_off); while it is
+// on, none. It is set at each load of the plugin, which a change of the setting starts, and before each Bash call.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { keptTempDir, tempDir } from '../core/home'
+import { promptText } from '../prompts/prompts'
+import { featureOn } from '../settings/features.mjs'
 
 type Engine = EngineInterface
 
@@ -86,6 +92,13 @@ async function startTmp($: Engine): Promise<string | undefined> {
   return kept.endsWith('/thimble') ? kept.slice(0, -'/thimble'.length) || '/' : undefined
 }
 
+/** THIMBLE_LABELS_OFF as the Labels setting has it now: the line of prompts/labels-off.md while it is off, unset while
+ *  it is on. */
+async function labelsOff($: Engine): Promise<void> {
+  const line = featureOn('labels') ? undefined : (await promptText($, 'labels-off')).trim()
+  if ((await $.env.get('THIMBLE_LABELS_OFF')) !== line) await $.env.set('THIMBLE_LABELS_OFF', line)
+}
+
 export const registerPath: Register = on => {
   // the cwd matcher keeps this hook apart from the other modules' (one hook per event and matcher in a module)
   on('session.start', { cwd: /^\// }, async ($, e, next) => {
@@ -103,6 +116,12 @@ export const registerPath: Register = on => {
     } catch {
       // the texts name thimble's temp folder by its path
     }
+    await labelsOff($).catch(() => undefined)
     return r
   })
+  // a Bash call runs with the Labels setting as it is now, also one changed since this load began
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    await labelsOff($).catch(() => undefined)
+    return next(e)
+  }).catch(($, e, next) => next(e))
 }

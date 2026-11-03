@@ -200,6 +200,9 @@ class Spec:
     # main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
     corpus_edits: bool | None = None
     no_write: list[Path] = field(default_factory=list)  # the workspace's protected files, never written (protected)
+    # Settings' Labels switch for the workspace (ledger.labels_on): off, `thimble` holds no label tool, and the tools'
+    # texts say nothing of labels (tools.tool_sections)
+    labels: bool = True
 
 
 @dataclass
@@ -557,11 +560,14 @@ class Space:
         return [home / n for n in PRIVATE_FILES]
 
     def spec_of(self, conv: Conv) -> Spec:
-        from . import cc_settings, config, events, ledger, runtime_tools, subagents, tools, userconf  # noqa: PLC0415
+        from . import (cc_settings, config, events, labels_off, ledger, runtime_tools, subagents,  # noqa: PLC0415
+                       tools, userconf)
 
         tmp = self.dir / "tmp" / conv.id
         nofollow.makedirs(tmp)
         temp: Path | None = None
+        # Settings' Labels switch: off, main and thimble's agents are offered no label tool (labels_off.py)
+        labels = ledger.labels_on(self.c)
         reads = [self.corpus, self.ws, config.REPO_ROOT / "docs", config.REPO_ROOT / "plugin" / "viewers",
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
         if conv.kind in ("main", "fork"):
@@ -570,7 +576,8 @@ class Space:
             edits: bool | None = ledger.corpus_edits(self.c)
             system = events.session_prompt(str(self.corpus), edits=edits)
             names = [s.name for s in tools.REGISTRY.values()
-                     if tools.ANALYST in s.roles and (not s.sessions or None in s.sessions)]
+                     if tools.ANALYST in s.roles and (not s.sessions or None in s.sessions)
+                     and (labels or s.name not in labels_off.TOOLS)]
             builtins = list(MAIN_BUILTINS)
             choice = _main_choice(self.ws)
             model = str(choice.get("model") or MAIN_MODEL)
@@ -590,7 +597,8 @@ class Space:
             denied = set(role.get("disallowedTools") or [])
             own = subagents.own_tools(conv.role)
             names = [s.name for s in tools.REGISTRY.values() if tools.ANALYST in s.roles
-                     and (own is None or s.name in own) and tools.thimble_tool(s.name) not in denied]
+                     and (own is None or s.name in own) and tools.thimble_tool(s.name) not in denied
+                     and (labels or s.name not in labels_off.TOOLS)]
             builtins = [b for b in AGENT_BUILTINS if b not in denied]
             if role.get("tools"):
                 builtins = [b for b in builtins if b in role["tools"]]
@@ -625,7 +633,7 @@ class Space:
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
                     thimble=names, model=model, effort=effort, cwd=cwd, workspace=self.ws,
                     read_roots=reads, write_roots=writes, private=self.private(), home=tmp, temp=temp, fast=fast,
-                    corpus_edits=edits, no_write=no_write)
+                    corpus_edits=edits, no_write=no_write, labels=labels)
 
 
 def agent_writes(c: str, conv: Conv) -> list[Path]:

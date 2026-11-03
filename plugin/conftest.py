@@ -7,6 +7,9 @@ from pathlib import Path
 _real = str(Path.home() / ".thimble")
 if not os.environ.get("THIMBLE_HOME") or os.environ.get("THIMBLE_HOME") == _real:
     os.environ["THIMBLE_HOME"] = tempfile.mkdtemp(prefix="thimble-test-home-")
+# a test's `thimble label` runs as with Labels on, whatever the session that runs the tests set (hooks/path.ts: a
+# fixer's tests run in a session whose Labels may be off)
+os.environ.pop("THIMBLE_LABELS_OFF", None)
 # git reads no setting of the person's or the machine's: a global core.hooksPath would run their hooks (a secret scan, a
 # policy check) at each of the many commits the tests make, which made the kernel's tests several times slower. A test
 # that needs a git setting makes it in its own repository.

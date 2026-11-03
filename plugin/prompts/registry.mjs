@@ -60,6 +60,12 @@ export const TEXTS = {
     use: 'one model call per batch of up to 50 records',
     fills: ['NAME', 'DEFINITION', 'VALUES', 'REASON_FIELD', 'RECORDS'],
   },
+  'labels-off': {
+    about: "Labels is off in thimble's settings: thimble made no label, and the command or call that asked for one changed nothing",
+    terminal: 'hooks/path.ts',
+    browser: 'browser/backend/app/labels_off.py',
+    use: "the answer of Claude's `thimble label` while Labels is off, which the plugin gives the session's commands (engine/kernel/cli.py prints it), and in the browser workbench of a label tool's call while the workspace's Settings turn Labels off (browser/backend/app/tools.py)",
+  },
   observer: {
     about: "the observer's frame: the shared principles of the look after each answer, with the enabled lenses' sections",
     terminal: 'observer/observer.ts',

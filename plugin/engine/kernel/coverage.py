@@ -723,7 +723,9 @@ def _few(paths: list[str], n: int = 4, total: int | None = None) -> str:
     return ", ".join(paths[:n]) + (f" and {total - min(n, len(paths)):,} more" if total > min(n, len(paths)) else "")
 
 
-def coverage_text(cov: dict[str, Any], max_lines: int = 40) -> str:
+def coverage_text(cov: dict[str, Any], max_lines: int = 40, labels: bool = True) -> str:
+    """What `thimble coverage` prints. Without `labels` (Labels is off in thimble's settings, cli.labels_off), its fixed
+    words name no label: what a label's data put in the record stays."""
     t = cov["total"]
     head = f"Coverage of {'every session' if cov['session'] is None else 'this session'} · {t['files']:,} file{'s' if t['files'] != 1 else ''}"
     sizes = _sizes(t.get("units") or [])
@@ -747,12 +749,13 @@ def coverage_text(cov: dict[str, Any], max_lines: int = 40) -> str:
             lines.append(f"  {sum(g['files'] for g in others):,} other files: "
                          + ", ".join(f"{sum(g['by_status'].get(k, 0) for g in others):,} {SAID[k]}" for k in ORDER if any(g['by_status'].get(k) for g in others)))
         if ranked:
-            lines.append("  read, read by a label's model, searched or computed over:")
+            lines.append("  read, read by a label's model, searched or computed over:" if labels else
+                         "  read, searched or computed over:")
             for o in ranked[:15]:
                 lines.append(f"    {o['path']}  {o['said']}")
             if len(ranked) > 15:
                 lines.append(f"    … and {len(ranked) - 15} more")
-    lines.append(coverage_sentence(cov))
+    lines.append(coverage_sentence(cov, labels))
     return "\n".join(lines)
 
 
@@ -779,10 +782,11 @@ def percent(part: float) -> str:
     return f"{min(99, int(p + 0.5))}%"
 
 
-def coverage_sentence(cov: dict[str, Any]) -> str:
+def coverage_sentence(cov: dict[str, Any], labels: bool = True) -> str:
     """What the session did, in words that claim no more than happened: first the files touched (the bar's number:
     read, searched or computed over), then what was read, each unit apart; what a label's model read and what a rule
-    label or Claude's code computed over are said apart; then the files not read, by what happened to them."""
+    label or Claude's code computed over are said apart; then the files not read, by what happened to them. Without
+    `labels` (coverage_text), what code computed over names no rule label."""
     t = cov["total"]
     if not t["files"]:
         return "There are no files."
@@ -803,7 +807,7 @@ def coverage_sentence(cov: dict[str, Any]) -> str:
     if model:
         out.append(f"Read by a label's model: {model}.")
     if computed:
-        out.append(f"Computed over by a program or a rule label, none of it read: {computed}.")
+        out.append(f"Computed over by {'a program or a rule label' if labels else 'a program'}, none of it read: {computed}.")
     if t["not_seen_files"]:
         by = {k: [o["path"] for o in cov["files"] if o["status"] == k] for k in ("model", "searched", "computed")}
         q = cov.get("untouched") or {}

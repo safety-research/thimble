@@ -262,9 +262,14 @@ def role_of(actor: str) -> str:
     return actor
 
 
-def sections() -> dict[str, str]:
-    """Every `## <name>` section of prompts/tools.md as written, read fresh; PromptError when the file is unusable."""
-    return _sections_of(prompts.load(TOOLS_PROMPT))
+def sections(labels: bool = True) -> dict[str, str]:
+    """Every `## <name>` section of prompts/tools.md as written, read fresh; PromptError when the file is unusable.
+    Without `labels` (Labels off in the workspace's Settings), the parts that name labels are left out
+    (labels_off.tools_text)."""
+    from . import labels_off  # noqa: PLC0415
+
+    text = prompts.load(TOOLS_PROMPT)
+    return _sections_of(text if labels else labels_off.tools_text(text))
 
 
 def _sections_of(text: str) -> dict[str, str]:
@@ -313,11 +318,13 @@ def descriptions() -> dict[str, str]:
     return out
 
 
-def tool_sections(names: "builtins.list[str] | tuple[str, ...] | None" = None) -> dict[str, tuple[str, dict[str, Any]]]:
+def tool_sections(names: "builtins.list[str] | tuple[str, ...] | None" = None,
+                  labels: bool = True) -> dict[str, tuple[str, dict[str, Any]]]:
     """{tool: (description, input schema)} from prompts/tools.md for the registry tools named (every one when None);
-    ToolsFileError naming the first whose section is missing or has no ```json block holding an object schema."""
+    ToolsFileError naming the first whose section is missing or has no ```json block holding an object schema. Without
+    `labels`, as the tools read while Labels is off (sections)."""
     try:
-        secs = sections()
+        secs = sections(labels)
     except prompts.PromptError as e:
         raise ToolsFileError(f"prompts/{TOOLS_PROMPT}.md is unusable: {e}") from e
     out: dict[str, tuple[str, dict[str, Any]]] = {}
@@ -365,15 +372,20 @@ def session_kind(session: str | None) -> str | None:
     return str(session).split(":", 1)[0] or None if session else None
 
 
-def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict[str, Any]]":  # noqa: A001 — the contract names it `tools.list`
+def list(role: str = ANALYST, session: str | None = None,  # noqa: A001 — the contract names it `tools.list`
+         labels: bool = True) -> "builtins.list[dict[str, Any]]":
     """[{name, description, input_schema}] for the tools the role may use in the session `session` (a THIMBLE_SESSION),
     in registry order. A tool with `sessions` of its own is listed in those alone, but main's shim (no session) lists
     them all, since thimble's agents are main's subagents and call through it: each agent's registration takes away
-    the tools that are not its own, and a call is refused when its caller may not make it (call_route)."""
+    the tools that are not its own, and a call is refused when its caller may not make it (call_route). Without
+    `labels` (Labels off in the workspace's Settings), no label tool, and the others as they read then (sections)."""
+    from . import labels_off  # noqa: PLC0415
+
     role_of(role)
     kind = session_kind(session)
-    names = [s.name for s in REGISTRY.values() if role in s.roles and (kind is None or not s.sessions or kind in s.sessions)]
-    secs = tool_sections(names)
+    names = [s.name for s in REGISTRY.values() if role in s.roles and (kind is None or not s.sessions or kind in s.sessions)
+             and (labels or s.name not in labels_off.TOOLS)]
+    secs = tool_sections(names, labels)
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
 
 
@@ -567,6 +579,11 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
 
     name = canonical(name)
     spec = REGISTRY[name]
+    from . import labels_off, ledger  # noqa: PLC0415
+
+    if name in labels_off.TOOLS and not ledger.labels_on(c):
+        # Labels is off in the workspace's Settings: no label is made, shown or deleted (labels_off.py)
+        return with_call_line(name, args, err(labels_off.line()))
     batch = None
     # a session thimble started (the orientation, a writer) owns the steps its calls make (undo, sessions)
     with undo.batching(batch), undo.acting_session(session):
