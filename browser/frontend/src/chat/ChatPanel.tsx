@@ -467,12 +467,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     }
   }, [])
 
-  // the chats a permission prompt waits on: a session's own, and main's that name the thread or subagent that asked
-  const waitingIds = useMemo(() => {
-    const ids = new Set(waitingChats(chats).map((m) => m.id))
-    for (const p of main.meta?.permissions ?? []) if (p.chat) ids.add(p.chat)
-    return ids
-  }, [chats, main.meta?.permissions])
+  // the chats that wait for the analyst, each request at the thread the permission card's head names (chat/waiting.ts)
+  const waitingIds = useMemo(() => new Set(waitingChats(chats, main.meta).map((m) => m.id)), [chats, main.meta])
   const items = useMemo(
     () =>
       pickItems(
@@ -604,11 +600,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // the orientation the strip follows in main (its retry below), and the session whose strip it is in its own thread
   const stripMeta = orienting ?? (kind === 'orient' ? curMeta : null)
   const stripSession = orienting ?? (kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'step' || kind === 'dev' ? curMeta : null)
-  // the session the strip follows is waiting for the analyst while one of its permission prompts, or its critique's, is
-  // open (chat/waiting.ts); main's turn and a thread's fork while an ask of their own is (waitsItself)
+  // the session the strip follows is waiting for the analyst while a request that waits at it, or at its critique, is
+  // open (chat/waiting.ts: at the thread the permission card's head names); main's turn and a thread's fork while one of
+  // their own is (waitsItself)
   const stripped = !!strip
-  const waitingFor = useMemo(() => (stripped && stripSession ? waitingAt(stripSession.id, metaMap.values()) : null), [stripped, stripSession, metaMap])
-  const waiting = !!waitingFor || (stripped && !stripSession && (kind === 'main' || kind === 'thread') && waitsItself(curMeta, main.meta))
+  const waitingFor = useMemo(() => (stripped && stripSession ? waitingAt(stripSession.id, metaMap.values(), main.meta) : null), [stripped, stripSession, metaMap, main.meta])
+  const waiting = !!waitingFor || (stripped && !stripSession && (kind === 'main' || kind === 'thread') && waitsItself(curMeta, main.meta, metaMap.values()))
   // every request of every session that waits for the analyst, on the one card above the composer
   const asks = useMemo(() => pendingRequests(main.meta, metaMap.values()), [main.meta, metaMap])
   // the latest orientation, which the orientation's composer and main's message_orientation reach

@@ -232,17 +232,19 @@ export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {
 /** The text a node starts with, inside the elements it opens with (a tint's <mark>), or null. */
 const leadText = (node: RootContent | undefined): Text | null => (node?.type === 'text' ? node : node?.type === 'element' && node.tagName !== 'br' ? leadText(node.children[0]) : null)
 
-/** rehype plugin: a hard break is its <br> alone. The line ending markdown writes after each <br> is dropped, also
- * inside a tint that wraps it, since a paragraph that shows its line endings (styles/chat.css, white-space: pre-line)
- * would break the line there a second time. It runs last, so the passes before it read that line ending as the space
- * between the two lines' words. */
+/** rehype plugin: a hard break breaks the line once. The line ending markdown writes after each <br> becomes a space,
+ * also inside a tint that wraps it, since a paragraph that shows its line endings (styles/chat.css, white-space:
+ * pre-line) would break the line there a second time. The space does not show at the start of the line, and it keeps
+ * the two lines' words apart for code that reads the text alone, such as a click on text with the ask key
+ * (pointer/anchors.ts chunkAt), which takes the paragraph's words for the new thread. It runs last, so the passes before
+ * it read the line ending as it was. */
 export function rehypeOneBreak() {
   const walk = (node: Root | Element): void =>
     node.children.forEach((child, i) => {
       if (child.type !== 'element') return
       if (child.tagName !== 'br') return walk(child)
       const next = leadText(node.children[i + 1])
-      if (next?.value.startsWith('\n')) next.value = next.value.slice(1)
+      if (next?.value.startsWith('\n')) next.value = ` ${next.value.slice(1)}`
     })
   return (tree: Root) => walk(tree)
 }
