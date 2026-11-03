@@ -786,12 +786,14 @@ def _label_card(takeaway: str) -> str:
 
 def test_a_label_card_s_values_are_places_its_takeaway_s_count_is_checked_against(_fresh):
     """B13: a label card draws its values from its label, not from outputs, so the cards' index listed none of its places,
-    and the check of its takeaway's "[33 of the 72]" named no value or line of a card. Each value it lists, with its
-    count and share under the card's headers, and the units the label labeled are its places now: the index lists them,
-    the validator reads them, and the page reads a cited one back from the card."""
+    and the check of its takeaway's "[33 of the 72]" named no value or line of a card. Each value a label lists, with its
+    count and share under a label card's headers, and the units the label labeled are its places now: the index lists
+    them as the label's (`card:label-<id>`, as the terminal names its labels), and the label card an older thimble made
+    keeps working: the validator reads its places as its label's, and the page reads a cited one back from the card."""
     from app import notebook, refs
 
     cid = _label_card("[33 of the 72](#) messages ask about the agents' behavior.")
+    label = marks.LABEL_PLACE + notebook.get_cell(CORPUS, cid)["payload"]["concept"]
     count, total = f"card:{cid}#records/investigate%20the%20agents", f"card:{cid}#records/all"
     listed: list[str] = []
 
@@ -804,9 +806,9 @@ def test_a_label_card_s_values_are_places_its_takeaway_s_count_is_checked_agains
 
     main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
     asyncio.run(marks.start_check(CORPUS, main, marks.new_turn(), [], "cut", fork=fork, cards={cid}))
-    assert f"# card:{cid} What did the people ask for?\n" in listed[0]
-    for place in (f"{count}\t33", f"card:{cid}#share/investigate%20the%20agents\t46%", f"card:{cid}#records/other\t39",
-                  f"card:{cid}#share/other\t54%", f"{total}\t72"):
+    assert f"# card:{label} label what the person asked for\n" in listed[0] and f"card:{cid}" not in listed[0], listed[0]
+    for place in (f"card:{label}#records/investigate%20the%20agents\t33", f"card:{label}#share/investigate%20the%20agents\t46%",
+                  f"card:{label}#records/other\t39", f"card:{label}#share/other\t54%", f"card:{label}#records/all\t72"):
         assert place + "\n" in listed[0], place
     (m,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
     assert m["status"] == "verified", m

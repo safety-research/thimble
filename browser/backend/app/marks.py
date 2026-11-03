@@ -16,9 +16,9 @@
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
    lies in the corpus folder or main's, or is a label's definition, which holds the label's rule (_rules_dir); code
    may also cite the workspace's temp folder, and the one Claude Code's sandbox gives main's commands on Claude Code
-   sign-in (_temp_dirs). Its result is what the analyst sees. A label card is read as it was when the reply was
-   written (`at`, the time thimble keeps for the check's words, label_versions.keep_time), from the versions thimble
-   kept of it, never from the label's files in the workspace (session_cards).
+   sign-in (_temp_dirs). Its result is what the analyst sees. A label is read as it was when the reply was written
+   (`at`, the time thimble keeps for the check's words, label_versions.keep_time), from the versions thimble kept of
+   it, never from the label's files in the workspace (session_cards).
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
@@ -27,12 +27,14 @@
    autoRepair); a repair's own end starts none, so a mark that fails again waits for Repair.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
-a chart's data row, a label card's count or share, a line of printed output) is written to a file the checker greps
-first (session_cards, the validator's card_index), and the validator confirms a card's place by reading it (check_card).
-A label card's places are those of the versions its label kept (label_versions): the label as it was when the cited
-words were written, then its earlier versions (`card:<id>@v<n>#…`), never a version made after the words. So a trial's
-counts cited before the run on everything replaced them hold against the trial, and no later change of the label (a
-run, a correction, a write to its files by a card's code) confirms words written before it.
+a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
+validator's card_index), and the validator confirms a card's place by reading it (check_card). So is every label of the
+workspace, as the terminal lists its labels: `card:label-<label id>`, a place for each value's count and share, from
+the versions the label kept (label_versions): the label as it was when the cited words were written, then its earlier
+versions (`card:label-<id>@v<n>#…`), never a version made after the words. So a trial's counts cited before the run on
+everything replaced them hold against the trial, and no later change of the label (a run, a correction, a write to its
+files by a card's code) confirms words written before it. A label card an older thimble made reads the same versions
+under its own id, which the file leaves out, so the checker finds each label once.
 
 A card's takeaway is checked the same way: its marks, `[words](#)`, are checked as soon as the card's write lands
 (card_written: after the add_card or edit_card call that wrote it, after the card check that may rewrite it, after the
@@ -101,6 +103,9 @@ TELL_KIND = "citations"
 LAST_REPLY = "your last reply"
 THREAD_ANSWER = ("an answer that a side thread of this session gave the analyst about {about}. That thread's work is "
                  "not in your conversation, so find the evidence in the files")
+# the id a label is cited by in the check, `card:label-<label id>`, as the terminal names its labels
+# (evidence.LABEL_CARD): session_cards
+LABEL_PLACE = "label-"
 
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 # (workspace, card, takeaway) of the takeaways a check has taken until their marks are on the card, so a check that
@@ -131,50 +136,67 @@ def check_folders(c: str, main: dict[str, Any]) -> tuple[str, str]:
 
 
 def session_cards(c: str) -> list[dict[str, Any]]:
-    """The workspace's cards as the validator reads them (evidence.check_card): each card that ran with outputs, its
-    title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html table) or the
-    lines of its printed text, as the card's citations name them (cite.bundle_cells, cite.numbered_lines), with the
-    tables the output holds as data (card_tables), whose rows a count counts (evidence.check_count). A label card is
-    each version its label kept (label_versions), its table as the card showed it then (concepts.card_table) and as
-    data, which names the row that totals its values (`totals`), with when that version was made, what made it and
-    what changed after it: the validator reads it as it was when the cited words were written, never from the label's
-    files in the workspace, which a card's code can write."""
-    from . import cite, notebook  # noqa: PLC0415
+    """The workspace's cards and labels as the validator reads them (evidence.check_card): each card that ran with
+    outputs, its title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html
+    table) or the lines of its printed text, as the card's citations name them (cite.bundle_cells,
+    cite.numbered_lines), with the tables the output holds as data (card_tables), whose rows a count counts
+    (evidence.check_count). Then each label of the workspace, as the terminal gives its labels
+    (evidence.terminal_label_cards): `label-<label id>`, titled `label <name>`, an entry for each version the label kept
+    (label_versions), its table as the label showed it then (concepts.card_table) and as data, which names the row that
+    totals its values (`totals`), with when that version was made, what made it and what changed after it. The
+    validator reads a label as it was when the cited words were written, never from its files in the workspace, which a
+    card's code can write. A label card an older thimble made (kind `label`) gives its label's entries again under its
+    own id, so a citation of it reads the same versions, `listed` False: the checker's file lists each label once
+    (cards_index)."""
+    from . import cite, concepts, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
+    older: list[tuple[dict[str, Any], str]] = []  # an older thimble's label cards: (the card, its label's id)
     for _, nb in notebook._stored(ws):
         for cell in nb.get("cells") or []:
+            cid = str(cell.get("id") or "")
             # a card is read once, by the first cell of its id: a second cell of that id (the canvas's files are the
-            # workspace's, which a card's code writes) adds no versions or values under it
-            if not cell.get("id") or str(cell["id"]) in seen:
+            # workspace's, which a card's code writes) adds no versions or values under it; nor does a cell whose id is
+            # a label's (no card's id starts so: notebook._new_id)
+            if not cid or cid in seen or cid.startswith(LABEL_PLACE):
                 continue
-            seen.add(str(cell["id"]))
-            card = {"id": str(cell["id"]), "title": str(cell.get("title") or "")}
+            seen.add(cid)
+            card = {"id": cid, "title": str(cell.get("title") or "")}
             if cell.get("kind") == "label":
-                try:
-                    out += _label_versions(c, ws, card, cell)
-                except Exception:  # noqa: BLE001 — a label that cannot be read leaves its card out, not the others
-                    log.exception("%s: the versions of label card %s were not read", c, cell["id"])
+                payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
+                older.append((card, str(payload.get("concept") or "")))
             elif notebook.runnable(cell) and cell.get("outputs"):
                 outs = _outputs(list(cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"]))))
                 if outs:
                     out.append({**card, "outputs": outs})
+    labels: dict[str, list[dict[str, Any]]] = {}
+    try:
+        listed = concepts.list_concepts(ws)
+    except Exception:  # noqa: BLE001 — labels that cannot be listed leave the cards to the check
+        log.exception("%s: the labels were not read for the check", c)
+        listed = []
+    for concept in listed:
+        try:
+            labels[concept["id"]] = _label_versions(c, concept)
+        except Exception:  # noqa: BLE001 — a label that cannot be read is left out, not the others
+            log.exception("%s: the versions of label %s were not read", c, concept["id"])
+        out += labels.get(concept["id"]) or []
+    for card, kid in older:
+        out += [{**v, **card, "listed": False} for v in labels.get(kid) or []]
     return out
 
 
-def _label_versions(c: str, ws: Path, card: dict[str, Any], cell: dict[str, Any]) -> list[dict[str, Any]]:
-    """A label card as the validator reads it (session_cards): an entry for each version its label kept, oldest first."""
-    from . import concepts, label_versions  # noqa: PLC0415
+def _label_versions(c: str, concept: dict[str, Any]) -> list[dict[str, Any]]:
+    """A label as the validator reads it (session_cards): an entry for each version it kept, oldest first."""
+    from . import label_versions  # noqa: PLC0415
 
-    payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
-    kid = str(payload.get("concept") or "")
-    kept = label_versions.read(c, kid) if concepts.ID_RE.match(kid) else []
-    # a card that shows other counts now than the newest version, which no step of thimble's kept (a write to the
-    # label's files): that version is shown no longer, and nothing is evidence of what the card shows
-    concept = concepts.read_concept(ws, kid) if kept else None
-    since = time.time() if concept is not None and label_versions.shows_other(c, concept, kept[-1]) else None
+    kept = label_versions.read(c, concept["id"])
+    # a label that shows other counts now than its newest version, which no step of thimble's kept (a write to its
+    # files): that version is shown no longer, and nothing is evidence of what the label shows
+    since = time.time() if kept and label_versions.shows_other(c, concept, kept[-1]) else None
+    card = {"id": f"{LABEL_PLACE}{concept['id']}", "title": f"label {concept['name']}"}
     out = []
     for i, v in enumerate(kept):
         newest = since is not None and i == len(kept) - 1
@@ -262,14 +284,15 @@ def card_tables(b: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def cards_index(c: str, cards: list[dict[str, Any]], at: float | None = None) -> str:
-    """The file the checker greps for a value a card shows (the validator's card_index), the labels as they were at
-    `at`, when the cited words were written, in a folder of its own in the workspace's temp folder; its path. Each check
-    has its own: a card rewritten while a check runs starts another check, whose index must not take the place of the
-    one this check's validator reads `cards` as."""
+    """The file the checker greps for a value a card or a label shows (the validator's card_index), the labels as they
+    were at `at`, when the cited words were written, in a folder of its own in the workspace's temp folder; its path.
+    The entries of an older thimble's label card are left out (`listed` False, session_cards): its label is listed by
+    its own id. Each check has its own: a card rewritten while a check runs starts another check, whose index must not
+    take the place of the one this check's validator reads `cards` as."""
     folder = _temp_dir(c) / f"check-{secrets.token_hex(4)}"
     p = folder / "cards-index.tsv"
     # in the temp folder a card's code writes: made and written as nofollow does, never through a link put there
-    nofollow.write_text(p, evidence().card_index(cards, at), make=True)
+    nofollow.write_text(p, evidence().card_index([x for x in cards if x.get("listed", True)], at), make=True)
     return str(p)
 
 
