@@ -5,14 +5,14 @@ plugin/prompts/labels-off.md), changing nothing. thimble tells main of no label 
 agents that never make a label (a writer's, a view's builder's and reviewer's) keep their words.
 
 Each text keeps its words while Labels is on. While it is off, the parts of a text that name labels go (CUTS, by the
-prompt file that holds them): a `## ` section by its heading, up to the next `## ` heading, and any other part by its
-words exactly as the file has them. Each part must stand in the text exactly once, so a part reworded in its file
-fails loudly (PromptError names it) rather than reach a model; the parts take out words only, and add none. The card
-types' text, a way to answer with labels, is left out whole (events.render_prompts), with the event that brings a new
-one and what the card tool says of them."""
+prompt file that holds them, in order): words exactly as the file has them, or a run of the text from its first words
+up to the words that follow it, as (from, up to). Each part must stand exactly once in the text the parts before it
+left, so a part reworded in its file fails loudly (PromptError names it) rather than reach a model; the parts take out
+words only, and add none.
+shared.md's Labels section goes but for its last paragraph, on how a card decides an outcome, which stays without its
+words on labels. The card types' text, a way to answer with labels, is left out whole (events.render_prompts), with the
+event that brings a new one and what the card tool says of them."""
 from __future__ import annotations
-
-import re
 
 from . import prompts
 
@@ -22,7 +22,7 @@ TOOLS = ("apply_label", "show_label", "delete_label")
 # the events that tell main of a label, or of card types, which thimble sends no session while Labels is off
 EVENTS = ("labeled", "label_ask", "label_done", "rerun", "card_types")
 
-CUTS: dict[str, tuple[str, ...]] = {
+CUTS: dict[str, tuple[str | tuple[str, str], ...]] = {
     "main.md": (
         "- `labeled` says the analyst defined or changed a label themselves, with its definition as the text. It needs "
         "no words from you until the analyst asks about it.\n",
@@ -48,7 +48,10 @@ CUTS: dict[str, tuple[str, ...]] = {
         "report\n",
     ),
     "shared.md": (
-        "## Labels",
+        ("## Labels\n", "A label or a card that sorts outcomes"),
+        ", another label",
+        "label or a ",
+        " or a label",
         ' I defined the "product named" label [[card:<id>]] to classify which product each request is about.',
         ", says nothing about how the requests were sorted,",
         ', from the model label "outage cause"',
@@ -70,22 +73,24 @@ CUTS: dict[str, tuple[str, ...]] = {
     ),
 }
 TOOLS_FILE = "tools.md"
-_HEADING = re.compile(r"^## .*$", re.M)
 
 
-def _cut(text: str, part: str, file: str) -> str:
-    """`text` without `part` of prompts/`file`, which stands in it once: a `## ` heading's section, else these words."""
-    if part.startswith("## ") and "\n" not in part:
-        at = [m for m in _HEADING.finditer(text) if m.group(0).rstrip() == part]
-        if len(at) != 1:
-            raise prompts.PromptError(f"prompts/{file}: Labels off leaves out its section {part!r}, which the text has "
-                                      f"{len(at)} times, not once")
-        nxt = _HEADING.search(text, at[0].end())
-        return text[:at[0].start()] + (text[nxt.start():] if nxt else "")
-    if (n := text.count(part)) != 1:
-        raise prompts.PromptError(f"prompts/{file}: Labels off leaves out these words, which the text has {n} times, "
-                                  f"not once: {part[:90]!r}")
-    return text.replace(part, "", 1)
+def _once(text: str, words: str, file: str, start: int = 0) -> int:
+    """Where `words` of prompts/`file` stand in `text` from `start`, which they must do exactly once."""
+    if (n := text.count(words, start)) != 1:
+        raise prompts.PromptError(f"prompts/{file}: Labels off leaves out words by these, which the text has {n} times, "
+                                  f"not once: {words[:90]!r}")
+    return text.index(words, start)
+
+
+def _cut(text: str, part: str | tuple[str, str], file: str) -> str:
+    """`text` without `part` of prompts/`file`: these words, or the run from its first words up to the next (CUTS)."""
+    if isinstance(part, tuple):
+        at = _once(text, part[0], file)
+        end = _once(text, part[1], file, at)
+        return text[:at] + text[end:]
+    at = _once(text, part, file)
+    return text[:at] + text[at + len(part):]
 
 
 def cut(text: str, files: list[str] | tuple[str, ...]) -> str:

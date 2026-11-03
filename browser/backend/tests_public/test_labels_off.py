@@ -41,9 +41,10 @@ def test_each_part_labels_off_leaves_out_stands_once_in_its_text(monkeypatch):
     texts = {"main.md": prompts.load("main"), "shared.md": prompts.load("shared"), "tools.md": prompts.load("tools")}
     for file, parts in labels_off.CUTS.items():
         for part in parts:
-            n = len(re.findall(rf"^{re.escape(part)}[ \t]*$", texts[file], re.M)) if part.startswith("## ") \
-                else texts[file].count(part)
-            assert n == 1, (file, part)
+            for words in part if isinstance(part, tuple) else (part,):
+                assert words in texts[file], (file, words)
+        # each part, in order, stands once in what the parts before it left (labels_off.cut raises else)
+        assert len(labels_off.cut(texts[file], [file])) < len(texts[file]), file
     with pytest.raises(prompts.PromptError, match="main.md"):
         labels_off.cut("no such words", ["main.md"])
 
@@ -57,7 +58,8 @@ def test_with_labels_off_main_s_prompt_and_the_shared_text_say_nothing_of_labels
     assert "## Labels" in on_main and "apply_label" in on_main and "`label_done`" in on_main
     assert "## Labels" in on_shared and on_shared in on_main
     for part in labels_off.CUTS["main.md"] + labels_off.CUTS["shared.md"]:
-        assert part.strip() in on_main, part
+        for words in part if isinstance(part, tuple) else (part,):
+            assert words.strip() in on_main, words
     # the switch off: the same prompts, less what they say of labels
     ledger.put_settings_route(CORPUS, analyst, {"labels": False})
     assert not ledger.labels_on(CORPUS) and ledger.get_settings(CORPUS)["labels"] is False
@@ -67,10 +69,14 @@ def test_with_labels_off_main_s_prompt_and_the_shared_text_say_nothing_of_labels
         assert "## Citations" in text and "### Several cards" in text
     assert "## Events from the browser" in off_main and "`written`, `view` and `citations` do not start a turn" in off_main
     assert "The second gives a count without its base and quotes" in off_shared
+    # the Labels section's last paragraph, on how a card decides an outcome, stays without its words on labels
+    assert ("A card that sorts outcomes, such as which attempts worked, decides each one by what the analyst asked about"
+            in off_shared and "Once a card defines an outcome" in off_shared and "in a takeaway or a view you propose"
+            in off_shared)
     # what stays is as it was: each kept line of main's prompt stands in the prompt with Labels on
     on_lines = set(on_main.splitlines())
     changed = [ln for ln in off_main.splitlines() if ln not in on_lines]
-    assert len(changed) == 6, changed  # the lines a part was cut out of, each now without it
+    assert len(changed) == 7, changed  # the lines a part was cut out of, each now without it
     # on again: every word is back, as before
     ledger.put_settings_route(CORPUS, analyst, {"labels": None})
     assert "labels" not in ledger.stored_settings(CORPUS) and events.session_prompt(workdir, edits=True) == on_main
