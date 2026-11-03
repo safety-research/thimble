@@ -286,13 +286,34 @@ def _box_probe() -> bool:
     return ok
 
 
+# A `claude` thimble starts gets the ANTHROPIC_* variables of this process (config.launch_environ), so that Claude Code
+# signs in with them as in the analyst's terminal, and Claude Code passes its environment on to the commands it runs.
+# So the sandbox unsets those variables for its commands (`credentials.envVars`, mode deny), as the card kernels go
+# without them (notebook.kernel_env_of). CLAUDE_CODE_SUBPROCESS_ENV_SCRUB would unset them outside a sandbox too, but
+# in Claude Code 2.1.307 it is a CI hardening mode: it writes empty files in place of a missing .bash_profile, .profile,
+# .gitconfig, .netrc and others in the home folder, and of package.json, .env and lock files in the folder the session
+# starts in (the corpus), and it forces the default permission mode.
+ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # a name Claude Code takes in credentials.envVars
+
+
+def env_denies(environ: Mapping[str, str] | None = None) -> list[dict[str, str]]:
+    """The `credentials.envVars` entries that unset each ANTHROPIC_* variable of `environ` (default this process's) for
+    a command in the sandbox."""
+    env = os.environ if environ is None else environ
+    return [{"name": k, "mode": "deny"} for k in sorted(env) if k.startswith("ANTHROPIC_") and ENV_NAME.fullmatch(k)]
+
+
 def offline_sandbox(auto_allow: bool = False, network: bool = False, required: bool = False) -> dict[str, Any]:
     """The `sandbox` settings of a session thimble fences (agent_session.fence, view builds): on, with no network unless
-    `network` (then the analyst's own sandbox settings say where it reaches), and no command run outside it;
-    `auto_allow` lets a command that runs in it skip its permission request; `required` (sandbox.enforce) has Claude
-    Code refuse to start the session when its sandbox can't run, rather than run its commands unsandboxed."""
-    out = {"enabled": True, "failIfUnavailable": required, "autoAllowBashIfSandboxed": auto_allow,
-           "allowUnsandboxedCommands": False}
+    `network` (then the analyst's own sandbox settings say where it reaches), no command run outside it, and none of
+    this process's ANTHROPIC_* variables in its commands' environment (env_denies); `auto_allow` lets a command that
+    runs in it skip its permission request; `required` (sandbox.enforce) has Claude Code refuse to start the session
+    when its sandbox can't run, rather than run its commands unsandboxed."""
+    out: dict[str, Any] = {"enabled": True, "failIfUnavailable": required, "autoAllowBashIfSandboxed": auto_allow,
+                           "allowUnsandboxedCommands": False}
+    denies = env_denies()
+    if denies:
+        out["credentials"] = {"envVars": denies}
     return out if network else {**out, "network": {"deniedDomains": ["*"]}}
 
 

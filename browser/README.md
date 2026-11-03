@@ -9,7 +9,7 @@ agents (side threads, the writers, the view builders, the report checks) itself,
 
 | Way | What runs |
 |---|---|
-| Your Claude Code sign-in (the default) | The server runs Claude Code in the background, through the Agent SDK, on your Claude plan. Claude Code gets the environment as it is, so it signs in as it does in your terminal. |
+| Your Claude Code sign-in (the default) | The server runs Claude Code in the background, through the Agent SDK, on your Claude plan. Claude Code gets the environment as it is, so it signs in as it does in your terminal; the commands it runs in its sandbox get none of the `ANTHROPIC_*` variables. |
 | An Anthropic API key | `ANTHROPIC_API_KEY` when it is set where the workbench runs, else a key pasted in Settings. The server calls the Claude API itself. No Claude Code process starts. |
 | Workload Identity Federation | The same, with the IDs and token source of a config file you name (`backend/app/wif.py` lists its keys). |
 
