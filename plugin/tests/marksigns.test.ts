@@ -170,3 +170,19 @@ test("with Minimal on, a reply's citations read as its plain words, with no sign
   expect(signAfter(open, 2).sign).toBe('?')
   expect(words(open, '15 of 40').underline).toBeUndefined()
 })
+
+test("with Minimal on outside Claude Code's fullscreen layout, which reports no pointer, a reply's citations stand at rest as in any mode: underlined, a failed one red with its ×", { options: { minimal: true, ...PRESET } }, async ($, on) => {
+  await resumed($, on, [
+    { n: 1, row: 'row-t1', words: '15 of 40', ...at('15 of 40'), sentence: TEXT, status: 'verified', shown: '15 of 40', reason: 'Counted.' },
+    { n: 2, row: 'row-t1', words: 'p95 check', ...at('p95 check'), sentence: TEXT, status: 'failed', failedBy: 'evidence', shown: 'p95 check', reason: 'No record shows it.' },
+  ])
+  const words = (d: Any, w: string) => all(d).find(x => x.type === 'Text' && textOf(x) === w)?.props ?? {}
+  const classic = await $.ui.render({ ...(answer as Any), viewport: { ...view, isFullscreen: false } } as never)
+  expect(words(classic, '15 of 40').underline).toBe(true)
+  expect(words(classic, 'p95 check')).toMatchObject({ underline: true, color: 'error' })
+  expect(signAfter(classic, 2).sign).toBe('×')
+  // in fullscreen the same reply is plain at rest
+  const full = await $.ui.render(answer)
+  expect(words(full, '15 of 40').underline).toBeUndefined()
+  expect(signAfter(full, 2).sign).toBe('')
+})

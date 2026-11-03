@@ -31,7 +31,8 @@
 //                    Claude Code's own ask answered allow where nobody is asked, as don't ask mode would refuse it
 //                    (checker.ts allowsPython)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone;
-//                    while Minimal is on, plain: its marks show for the paragraph under the pointer (view.ts `plain`).
+//                    while Minimal is on, in Claude Code's fullscreen layout, plain: its marks show for the paragraph
+//                    under the pointer (view.ts `plain`).
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
 //                    citation the tray shows, the lines under its words (the labels it used), a press on a citation,
@@ -343,8 +344,9 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
       spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
-      // Minimal: plain words at rest, each row's marks under the pointer (view.ts)
-      plain: minimalOn(),
+      // Minimal: plain words at rest, each row's marks under the pointer (view.ts), in Claude Code's fullscreen layout,
+      // which alone reports the pointer; elsewhere the marks stand at rest as in any mode
+      plain: minimalOn() && e.viewport?.isFullscreen === true,
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
       // a press on a citation's words, or on the sign after them (view.ts markEl)

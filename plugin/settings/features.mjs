@@ -15,7 +15,7 @@
 import { ALIASES, EFFORTS, modelById, modelNamed, modelOf, shownName } from '../core/models.js'
 
 /** What Minimal does, as the settings pane says it under its row. */
-const MINIMAL_SAYS = 'Citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.'
+const MINIMAL_SAYS = 'In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.'
 
 /** Words in a list: `a, b or c`. */
 const listed = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(', ')} or ${ws.at(-1)}` : ws.join(''))
@@ -244,11 +244,12 @@ export function valueIn(values, key) {
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
 
-/** Minimal: the modes it sets. Its answers are plain: Claude still cites, each citation verified when it is opened
- *  (auto cite), and the look after each answer still writes explainers and heads-ups, but they show only for the
- *  paragraph under the pointer (marks/register.ts, view.ts `plain`); Claude draws a card only when asked; Rewrite,
- *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts),
- *  and the rows show them; a row changed away from them turns it off. */
+/** Minimal: the modes it sets. Claude still cites, each citation verified when it is opened (auto cite), and the look
+ *  after each answer still writes explainers and heads-ups; in Claude Code's fullscreen layout its answers are plain,
+ *  these showing only for the paragraph under the pointer (marks/register.ts, view.ts `plain`), and elsewhere, where no
+ *  pointer is reported, they stand at rest; Claude draws a card only when asked; Rewrite, Catch-up and the
+ *  session-wide panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts), and the rows show
+ *  them; a row changed away from them turns it off. */
 export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false }
 
 /** The modes Minimal set from 0.10.4 to 0.10.7: rows that still hold them stand for it, and the first session sets its

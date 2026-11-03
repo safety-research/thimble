@@ -133,7 +133,7 @@ test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Exp
   const pane = await $.ui.mount(PANE)
   // first, its name and what it does in plain words
   expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^\s*MINIMAL MODE\s+on · off/)
-  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('Citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.')
+  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.')
   for (const w of [/^ rewrite$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
   await pane.press({ key: 'mode-minimal-on' })
   // one change per hook, as each loads the plugin again; the new load's session start makes the next
