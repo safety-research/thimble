@@ -174,6 +174,9 @@ class World:
         stub(self.bin / "node", NODE)
         stub(self.bin / "uv", UV)
         stub(self.bin / "npm", NPM)
+        if os.environ.get("THIMBLE_TEST_BASH"):
+            # the bash that runs the scripts: THIMBLE_TEST_BASH names another, such as the bash 3.2 that macOS has
+            (self.bin / "bash").symlink_to(os.environ["THIMBLE_TEST_BASH"])
 
     def publish(self, tag: str = "", branch: str = "main") -> str:
         """One more commit on `branch` of thimble's repository, tagged `tag` when it is a release."""
@@ -463,6 +466,7 @@ def github_install(w, configs: dict) -> Path:
     (bin_ / "thimble").symlink_to(clone / "plugin" / "bin" / "thimble")
     (bin_ / "thimble-browser").write_text(f"#!/bin/sh\n# thimble-browser, {IN.MARKER}: starts the browser workbench of "
                                           f"this checkout.\nexec '{old}/browser/scripts/thimble-browser' \"$@\"\n")
+    (bin_ / "thimble-browser").chmod(0o755)
     (w.home / ".thimble-browser").mkdir()
     (w.home / ".thimble-browser" / "checkout").write_text(f"{old / 'browser'}\n")
     return old
@@ -530,6 +534,102 @@ def test_an_install_whose_claude_code_loads_live_keeps_it_and_its_fixes(w):
         "thimble 0.10.7 is installed in ~/.thimble. The plugin and the commands are in place.",
         "thimble 0.10.8 is out: thimble update moves to it and keeps your fixes."], text_of(p)
     assert sh("git", "rev-parse", "mine", cwd=live) == fix, "the fix stays"
+
+
+# ------------------------------------------------------------------ an earlier install moved by thimble update alone
+
+
+def updated_by_thimble_update(w) -> tuple[Path, Path]:
+    """thimble 0.10.7 as its install left it (github_install), moved to a newer release by thimble update alone: Claude
+    Code loads live, the workbench is built there (browser-ready), and the launcher on PATH still starts the clone's
+    workbench, whose script hands it to live's. Both scripts are this repository's; live's server is a stand-in that
+    logs its start. The clone, and that log."""
+    old = github_install(w, {})
+    w.publish("v0.10.9")
+    p = subprocess.run([str(w.home / ".local" / "bin" / "thimble"), "update"], capture_output=True, text=True,
+                       env=w.env())
+    assert p.returncode == 0, text_of(p)
+    live = w.th / "fixes" / "live"
+    assert (w.th / "fixes" / "browser-ready").read_text().strip() == str(live / "browser")
+    for b in (old / "browser", live / "browser"):
+        shutil.copy(ROOT / "browser" / "scripts" / "thimble-browser", b / "scripts" / "thimble-browser")
+    log = w.tmp / "server.log"
+    stub(live / "browser" / "backend" / ".venv" / "bin" / "python", f'echo "server $*" >> "{log}"\n')
+    (w.home / "data").mkdir()
+    return old, log
+
+
+def start(w) -> subprocess.CompletedProcess:
+    """thimble-browser in ~/data, by the launcher on PATH, as the person starts it in a terminal."""
+    env = w.env(PATH=f"{w.bin}:{w.home / '.local' / 'bin'}:/usr/bin:/bin")
+    return subprocess.run(["thimble-browser"], capture_output=True, text=True, env=env, cwd=w.home / "data",
+                          stdin=subprocess.DEVNULL, timeout=120)
+
+
+def test_thimble_browser_from_live_points_an_earlier_install_s_launcher_at_live_and_the_clone_can_go(w):
+    old, log = updated_by_thimble_update(w)
+    launcher = w.home / ".local" / "bin" / "thimble-browser"
+    live_script = w.th / "fixes" / "live" / "browser" / "scripts" / "thimble-browser"
+    p = start(w)
+    assert p.returncode == 0, text_of(p)
+    # the clone's script handed the workbench to live's, which pointed the launcher at live and said nothing of it
+    assert p.stderr.splitlines() == ["thimble-browser: from ~/.thimble/fixes/live, the release thimble update "
+                                     "installed, with your fixes"], p.stderr
+    assert launcher.read_text().splitlines() == [
+        "#!/bin/sh", f"# thimble-browser, {IN.MARKER}: starts the browser workbench in ~/.thimble/fixes/live/browser.",
+        f'exec {live_script} "$@"']
+    assert launcher.stat().st_mode & 0o777 == 0o755
+    assert log.read_text().splitlines() == [f"server -m app.cli browser --cwd {w.home / 'data'} --session new"]
+    # the clone can go: the launcher starts live's workbench itself, with nothing to say
+    shutil.rmtree(old)
+    p = start(w)
+    assert (p.returncode, p.stderr) == (0, ""), text_of(p)
+    assert len(log.read_text().splitlines()) == 2
+
+
+def test_a_dev_install_s_launcher_stays_on_its_clone(w):
+    """A dev install (--local) whose workbench runs from live: its launcher starts the clone on purpose."""
+    old, log = updated_by_thimble_update(w)
+    rel = {**w.release(), "kind": "clone", "repo": str(old)}
+    (w.th / "fixes" / "release.json").write_text(json.dumps(rel, indent=1) + "\n")
+    launcher = w.home / ".local" / "bin" / "thimble-browser"
+    before = launcher.read_text()
+    p = start(w)
+    assert p.returncode == 0 and len(log.read_text().splitlines()) == 1, text_of(p)
+    assert launcher.read_text() == before
+    # the kernel's step alone leaves it too
+    p = subprocess.run([sys.executable, str(ROOT / "plugin" / "engine" / "thimble.py"), "install", "launcher",
+                        "--bin-dir", str(launcher.parent)], capture_output=True, text=True, env=w.env())
+    assert (p.returncode, p.stdout, p.stderr) == (0, "", "") and launcher.read_text() == before
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes a folder it may not write")
+def test_a_launcher_that_cannot_be_pointed_at_live_says_why_and_the_workbench_starts(w):
+    old, log = updated_by_thimble_update(w)
+    bin_ = w.home / ".local" / "bin"
+    bin_.chmod(0o555)
+    try:
+        p = start(w)
+    finally:
+        bin_.chmod(0o755)
+    assert p.returncode == 0 and len(log.read_text().splitlines()) == 1, text_of(p)
+    assert p.stderr.splitlines()[1:] == [
+        "thimble-browser: ~/.local/bin/thimble-browser could not be pointed at ~/.thimble/fixes/live (Permission "
+        "denied), so it still starts the workbench through ~/thimble: keep that folder until it can."], p.stderr
+    assert IN.launcher_target(bin_ / "thimble-browser") == str(old / "browser" / "scripts" / "thimble-browser")
+
+
+def test_a_launcher_names_its_script_in_the_shell_s_quotes(tmp_path):
+    to = tmp_path / "it's here" / "browser" / "scripts" / "thimble-browser"
+    p = tmp_path / "thimble-browser"
+    IN.write_launcher(p, to)
+    assert IN.launcher_target(p) == str(to) and p.stat().st_mode & 0o777 == 0o755
+    # as the installs of 0.10.2 to 0.10.7 wrote it
+    p.write_text(f"#!/bin/sh\n# thimble-browser, {IN.MARKER}: starts the browser workbench of this checkout.\n"
+                 "exec '/a b/thimble/browser/scripts/thimble-browser' \"$@\"\n")
+    assert IN.launcher_target(p) == "/a b/thimble/browser/scripts/thimble-browser"
+    # the workbench's own script names the marker in its code: no launcher
+    assert IN.launcher_target(ROOT / "browser" / "scripts" / "thimble-browser") == ""
 
 
 # ------------------------------------------------------------------ thimble 0.9
@@ -611,15 +711,119 @@ def test_local_installs_from_the_clone_as_the_dev_install(w):
     assert not (w.th / "fixes").exists()
 
 
-def test_local_stops_while_the_release_is_installed_in_thimbles_home(w):
+def made_fix(w, monkeypatch, words: str, on: bool = True) -> dict:
+    """A fix made as thimble makes one, in the test's process with the person's environment: its copy cut from mine,
+    the fixer's change written here, done with no tests, then on with a made-up key press (`on`); a fix left ready
+    keeps its copy, a checkout in fixes/work."""
+    from kernel import fixes as FX  # noqa: PLC0415
+
+    for k, v in w.env().items():
+        monkeypatch.setenv(k, v)
+    rec = FX.new(words)
+    (Path(rec["work"]) / "plugin" / f"made-up-{rec['id']}.txt").write_text(f"{words}\n")
+    rec = FX.done(rec["id"], words, "", tests=False)
+    assert rec["state"] == "ready", rec
+    if on:
+        secret = os.urandom(16).hex()
+        FX.write_json(FX.home() / "asks" / f"{rec['id']}.json", {"key": FX.key_hash(secret)})
+        FX.apply(rec["id"], secret)
+    return FX.get(rec["id"])
+
+
+def checkouts(repo: Path) -> list[str]:
+    """The checkouts of `repo`'s repository, as git lists them (its own first), each one that git runs in."""
+    out = sh("git", "worktree", "list", "--porcelain", cwd=repo)
+    paths = [x[len("worktree "):] for x in out.splitlines() if x.startswith("worktree ")]
+    for p in paths:
+        sh("git", "status", "--short", cwd=Path(p))
+    return [paths[0], *sorted(paths[1:])]
+
+
+def aside_of(w, kind: str) -> list[Path]:
+    return sorted(p for p in w.th.iterdir() if p.name.startswith(f"fixes-{kind}-"))
+
+
+def test_local_sets_the_release_aside_with_its_fixes_and_the_install_brings_it_back(w, monkeypatch):
+    """release, --local, release: the release install goes aside with its fixes (one on, one ready with its copy) into
+    a dated folder whose checkouts work there, and comes back as it was; Claude Code and the command follow."""
+    from kernel import fixes as FX  # noqa: PLC0415
+
     assert w.install("--no-browser").returncode == 0
+    on, ready = made_fix(w, monkeypatch, "say read, not coverage"), made_fix(w, monkeypatch, "name the tab", on=False)
+    fixes = w.th / "fixes"
+    mine = sh("git", "rev-parse", "mine", cwd=fixes / "live")
     clone = w.home / "thimble"
     sh("git", "clone", "-q", str(w.bare), str(clone))
     p = w.install("--local", "--no-browser", script=clone / "scripts" / "install.sh")
-    assert p.returncode == 1, text_of(p)
-    assert ("Claude Code loads thimble from ~/.thimble/fixes/live, the release installed in ~/.thimble, so this clone "
-            "was not installed.") in " ".join(p.stdout.split()), p.stdout
-    assert "mv ~/.thimble/fixes ~/.thimble/fixes-release" in p.stdout
+    assert p.returncode == 0, text_of(p)
+    [aside] = aside_of(w, "release")
+    lines = p.stdout.splitlines()
+    at = lines.index("Checking what thimble needs...") + 3
+    assert lines[at:at + 3] == [f"The release installed in ~/.thimble is set aside, with its fixes, in ~/.thimble/"
+                                f"{aside.name}. The install without --local brings it back.", "", "The plugin"], lines
+    assert re.fullmatch(r"fixes-release-\d{8}-\d{6}", aside.name) and not fixes.exists()
+    assert checkouts(aside / "live") == [str(aside / "live"), str(aside / "release"), str(aside / "work" / "2")]
+    assert sh("git", "rev-parse", "mine", cwd=aside / "live") == mine
+    assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
+    assert os.readlink(w.home / ".local" / "bin" / "thimble") == str(clone / "plugin" / "bin" / "thimble")
+    assert "Claude Code loaded thimble from ~/.thimble/fixes/live. It now loads it from ~/thimble." in lines
+    # the install without --local brings it back, and points Claude Code and the command at it again
+    p = w.install("--no-browser")
+    assert p.returncode == 0, text_of(p)
+    lines = p.stdout.splitlines()
+    at = lines.index("Downloading thimble 0.10.8 for its install steps... done.")
+    assert lines[at + 1:at + 4] == ["The release that scripts/install.sh --local set aside is back in ~/.thimble, with "
+                                    "its fixes.", "thimble 0.10.8 is installed in ~/.thimble.", ""], lines
+    assert not aside.exists() and sh("git", "rev-parse", "mine", cwd=fixes / "live") == mine
+    assert checkouts(fixes / "live") == [str(fixes / "live"), str(fixes / "release"), str(fixes / "work" / "2")]
+    assert (FX.get(on["id"])["state"], FX.get(ready["id"])["state"]) == ("on", "ready")
+    assert (fixes / "live" / "plugin" / f"made-up-{on['id']}.txt").is_file()
+    assert "  Added to Claude Code from ~/.thimble." in lines and w.calls()[-1] == "plugin update thimble@thimble"
+    assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory",
+                                                                           "path": str(fixes / "live")}
+    assert os.readlink(w.home / ".local" / "bin" / "thimble") == str(fixes / "release" / "plugin" / "bin" / "thimble")
+    assert "Claude Code loaded thimble from ~/thimble. It now loads it from ~/.thimble." in lines
+
+
+def test_a_dev_install_s_fixes_go_aside_for_the_release_and_come_back_with_local(w, monkeypatch):
+    """--local with a fix on (live, a worktree of the clone), then the release, then --local again: the dev install's
+    fixes go aside with the clone's links to them, the clone is not called unused, and they come back."""
+    from kernel import fixes as FX  # noqa: PLC0415
+
+    clone = w.home / "thimble"
+    sh("git", "clone", "-q", str(w.bare), str(clone))
+    script = clone / "scripts" / "install.sh"
+    assert w.install("--local", "--no-browser", script=script).returncode == 0
+    fix = made_fix(w, monkeypatch, "say read, not coverage")
+    fixes = w.th / "fixes"
+    mine = sh("git", "rev-parse", "mine", cwd=clone)
+    assert w.release()["kind"] == "clone" and checkouts(clone)[1:] == [str(fixes / "live"), str(fixes / "release")]
+    p = w.install("--no-browser")
+    assert p.returncode == 0, text_of(p)
+    [aside] = aside_of(w, "dev")
+    lines = p.stdout.splitlines()
+    at = lines.index("Downloading thimble 0.10.8 into ~/.thimble... done.")
+    assert lines[at + 1] == (f"The fixes of your dev install are set aside in ~/.thimble/{aside.name}. "
+                             "scripts/install.sh --local in ~/thimble brings them back."), lines
+    assert w.release()["kind"] == "github" and "~/thimble is no longer used" not in p.stdout
+    assert checkouts(clone)[1:] == [str(aside / "live"), str(aside / "release")]
+    # Claude Code copies the release, which took the place of the dev install's live
+    assert "  Claude Code loads it from ~/.thimble." in lines and w.calls()[-1] == "plugin update thimble@thimble"
+    # --local again: the release goes aside, and the dev install's fixes come back
+    p = w.install("--local", "--no-browser", script=script)
+    assert p.returncode == 0, text_of(p)
+    [release] = aside_of(w, "release")
+    lines = p.stdout.splitlines()
+    at = lines.index("Checking what thimble needs...") + 3
+    assert lines[at:at + 2] == [
+        f"The release installed in ~/.thimble is set aside, with its fixes, in ~/.thimble/{release.name}. The "
+        "install without --local brings it back.",
+        "The fixes of this clone's dev install, which the release install set aside, are back in ~/.thimble."], lines
+    assert not aside.exists() and w.release()["kind"] == "clone" and FX.get(fix["id"])["state"] == "on"
+    assert sh("git", "rev-parse", "mine", cwd=clone) == mine
+    assert checkouts(clone)[1:] == [str(fixes / "live"), str(fixes / "release")]
+    assert ("  Claude Code loads it from your fixes, in ~/.thimble/fixes/live: thimble update moves them to this "
+            "clone's commit.") in lines and w.calls()[-1] == "plugin update thimble@thimble"
 
 
 def test_local_outside_a_clone_says_where_it_works(w):

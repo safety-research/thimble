@@ -16,9 +16,10 @@ scripts/install.sh --local
 ```
 
 `--local` installs the plugin from your checkout, so Claude Code loads it from `plugin/` and most edits show at the next
-session start or after `/reload-plugins`. When thimble's release is installed in `~/.thimble`, the script says how to
-move it aside first. To load your checkout for one session only, without installing it, start Claude Code in a folder
-of data files with `claude --plugin-dir /path/to/thimble/plugin`.
+session start or after `/reload-plugins`. When thimble's release is installed in `~/.thimble`, the script sets it
+aside first, with its fixes, and the install without `--local` brings it back (INSTALL.md, The dev install). To load
+your checkout for one session only, without installing it, start Claude Code in a folder of data files with
+`claude --plugin-dir /path/to/thimble/plugin`.
 
 Once you have fixes (thimble fix), Claude Code loads thimble from `~/.thimble/fixes/live` instead: after `git pull`,
 `thimble update` moves thimble and your fixes onto the commit you checked out. The way back from a fix (`thimble fix`,

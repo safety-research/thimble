@@ -68,7 +68,8 @@ place any part that is missing. It does the same when you run it from a download
 
 An install from before 0.10.8 (from a clone such as `~/thimble`, or from `~/thimble-0.10.8`) moves into `~/.thimble`
 when you run the script: Claude Code loads the plugin from there, with its settings as they were, your fixes stay, and
-the script says which old folder is no longer used.
+the script says which old folder is no longer used. `thimble update` alone moves it too: the plugin and the `thimble`
+command at once, and `thimble-browser` the next time it starts. After that start, the old folder is no longer used.
 
 ## Update
 
@@ -99,8 +100,12 @@ To work on thimble's own code, clone the repository and run the script with `--l
 Claude Code then loads the plugin from the clone, and the workbench is built in it. `thimble update` follows the
 clone: pull it, then run `thimble update`, which moves thimble and your fixes onto the commit you checked out (it never
 pulls, and says when the clone is behind what it pulls from). Your fixes also live in the clone, as the branch `mine`
-and the refs under `refs/thimble/`. The script stops when the release is installed in `~/.thimble`, and says how to
-move it aside. To try a branch without working on it, use `--ref`.
+and the refs under `refs/thimble/`. To try a branch without working on it, use `--ref`.
+
+A release installed in `~/.thimble` goes aside first, with its fixes, into a dated folder beside them, such as
+`~/.thimble/fixes-release-20261103-183000`, and the script says where. Run the script without `--local` to switch back:
+the release comes back with its fixes, and the dev install's fixes go aside in the same way
+(`~/.thimble/fixes-dev-<date>`) until `--local` in the same clone brings them back.
 
 ## thimble 0.9
 
