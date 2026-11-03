@@ -1292,9 +1292,12 @@ function TicketView({ ws, id, chat, mainRecords, ticket, onTicket: setTicket }: 
   )
 }
 
-/** The strip behind the composer's top edge while the thread works: the spinner, what it is doing, how many steps; it
- * opens on the steps. A pending permission prompt shows a still dot in place of the spinner; a session waiting to retry
- * after an API capacity error shows a countdown row with Retry now. */
+/** The strip behind the composer's top edge while the thread works: the spinner, what it is doing, how many steps. Its
+ * head opens the steps, so it is a button with a chevron only while there are steps to show (taskStrip: a session's
+ * subagents and workflow agents); main's strip and a side thread's, which list none, and a session's before its first
+ * subagent are the spinner and the title alone, and the first step gives the head its chevron. A pending permission
+ * prompt shows a still dot in place of the spinner; a session waiting to retry after an API capacity error shows a
+ * countdown row with Retry now. */
 function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry = null, onRetry }: { title: string; steps: ToolStep[]; count: string; open: boolean; onToggle: () => void; waiting?: boolean; retry?: SessionAlert | null; onRetry?: () => Promise<unknown> }) {
   const retryLine = useRetryText(retry)
   const [retrying, setRetrying] = useState(false)
@@ -1311,16 +1314,27 @@ function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [open, steps.length])
+  const hasSteps = steps.length > 0
+  const shown = open && hasSteps
+  const head = (
+    <>
+      {waiting || retry ? <span className="chat-strip-wait-dot" aria-hidden="true" /> : <Spinner label="working" />}
+      <span className="chat-strip-title">{title}</span>
+      {/* subagents only (subagentCount); the strip shows while the session runs, so all ended does not mean finished */}
+      {count && <span className="chat-strip-meta">{count}</span>}
+    </>
+  )
   return (
-    <div className={`chat-strip${open ? ' open' : ''}${waiting ? ' is-waiting' : ''}`} data-steps={steps.length} data-waiting={waiting || undefined} data-retry={retry ? '' : undefined}>
+    <div className={`chat-strip${shown ? ' open' : ''}${waiting ? ' is-waiting' : ''}`} data-steps={steps.length} data-waiting={waiting || undefined} data-retry={retry ? '' : undefined}>
       <div className="chat-strip-bar">
-        <button type="button" className="chat-strip-head" aria-expanded={open} onClick={onToggle}>
-          {waiting || retry ? <span className="chat-strip-wait-dot" aria-hidden="true" /> : <Spinner label="working" />}
-          <span className="chat-strip-title">{title}</span>
-          {/* subagents only (subagentCount); the strip shows while the session runs, so all ended does not mean finished */}
-          {count && <span className="chat-strip-meta">{count}</span>}
-          <Icon name="chevron-down" size={12} className="chat-strip-caret" />
-        </button>
+        {hasSteps ? (
+          <button type="button" className="chat-strip-head" aria-expanded={open} onClick={onToggle}>
+            {head}
+            <Icon name="chevron-down" size={12} className="chat-strip-caret" />
+          </button>
+        ) : (
+          <div className="chat-strip-head">{head}</div>
+        )}
       </div>
       {retry && (
         <div className="chat-strip-retry-row">
@@ -1334,7 +1348,7 @@ function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry
           )}
         </div>
       )}
-      {open && steps.length > 0 && (
+      {shown && (
         <ol ref={listRef} className="chat-strip-steps">
           {steps.map((s, i) => (
             <li key={s.key ?? i} className={`toolcard-step toolcard-step-${s.state ?? 'done'}`}>

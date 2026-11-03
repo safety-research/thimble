@@ -1149,7 +1149,7 @@ button.model-line-part[aria-expanded='true'] {
   color: inherit;
 }
 /* -------- the task strip: glass on the pane's paper, riding 4px behind the composer's top edge while the thread works;
-   the spinner, what it does, how many of its steps are done, and a chevron that opens the steps -------- */
+   the spinner, what it does, how many of its steps are done, and a chevron that opens them when it has some -------- */
 .chat-strip {
   position: relative;
   z-index: 0;
@@ -1188,9 +1188,12 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-primary);
   font: var(--type-ui-sm);
   text-align: left;
+}
+/* the head is a button only while there are steps to open */
+button.chat-strip-head {
   cursor: pointer;
 }
-.chat-strip-head:hover {
+button.chat-strip-head:hover {
   background: rgba(var(--ink-rgb), 0.03);
 }
 /* the spinner and the title at the left; the count, when there is one, and the chevron at the right edge */
