@@ -241,7 +241,9 @@ def newest() -> Row:
     except FX.FixError as e:
         return False, "thimble could not look for a newer release", str(e)[:1].upper() + str(e)[1:]
     if not r["newer"]:
-        return True, (r.get("line") or f"thimble {r['from']} is the newest release").rstrip("."), ""
+        newest = (f"thimble {r['from']} is the newest release" if r["from"] == r["to"] else
+                  f"thimble {r['from']} is up to date; the newest release is {r['to']}")
+        return True, (r.get("line") or newest).rstrip("."), ""
     return (False, f"your checkout is at {r['to']}, and thimble runs {r['from']}" if r.get("dev") else
             f"thimble {r['to']} is out (you have {r['from']})", "Get it: thimble update")
 

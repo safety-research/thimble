@@ -241,3 +241,24 @@ def test_a_claude_code_that_is_not_signed_in_is_said(tmp_path, capsys, monkeypat
     assert rc == 2
     assert out.splitlines()[0] == ("Sign-in: your Claude Code sign-in. The check failed: Claude Code is not signed in. "
                                    "Run claude in a terminal and sign in.")
+
+
+def test_a_refused_key_says_where_to_check_it(monkeypatch):
+    """A 401 names the way and where the key comes from: ANTHROPIC_API_KEY where the workbench runs, which Settings
+    cannot change, or the key pasted in Settings."""
+    import anthropic
+    import httpx
+
+    from app import llm
+
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    refused = anthropic.AuthenticationError("bad key", response=httpx.Response(401, request=req), body=None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_KEY)
+    claude_access.save(claude_access.API_KEY)
+    said = llm.failure(refused)
+    assert "for an API key, from ANTHROPIC_API_KEY. Check ANTHROPIC_API_KEY where the workbench runs." in said
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    claude_access.save(claude_access.API_KEY, key=FAKE_KEY)
+    assert llm.failure(refused).endswith("for an API key, the one saved in Settings. Check them in Settings, Claude "
+                                         "access.")
+    assert FAKE_KEY not in said

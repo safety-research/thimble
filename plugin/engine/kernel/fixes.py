@@ -4727,8 +4727,11 @@ def cmd_update(a) -> int:
             lines = r["lines"] or ["No commit to record, and no fix is set aside."]
         elif getattr(a, "check", False):
             r = update(check=True, once=getattr(a, "once", False))
+            # a branch that holds the newest release (scripts/install.sh --ref) is up to date, and no release itself
             lines = [r.get("line") or (f"thimble {r['to']} is out (you have {r['from']}): thimble update in a shell"
-                                       if r["newer"] else f"thimble {r['from']} is the newest release.")]
+                                       if r["newer"] else f"thimble {r['from']} is the newest release."
+                                       if r["from"] == r["to"] else
+                                       f"thimble {r['from']} is up to date; the newest release is {r['to']}.")]
         else:
             if in_claude_code():
                 raise FixError(SHELL_ONLY.format(what="thimble update"))

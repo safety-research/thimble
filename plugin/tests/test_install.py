@@ -569,7 +569,8 @@ def test_ref_installs_a_branch_which_thimble_update_tells_from_a_newer_release(w
     # the branch holds the newest release, 0.10.8: no newer release is out
     link = w.home / ".local" / "bin" / "thimble"
     got = subprocess.run([str(link), "update", "--check"], capture_output=True, text=True, env=w.env())
-    assert got.stdout.strip() == f"thimble try-r109 at {tip[:7]} is the newest release.", text_of(got)
+    assert got.stdout.strip() == (f"thimble try-r109 at {tip[:7]} is up to date; the newest release is 0.10.8."), \
+        text_of(got)
 
 
 def test_ref_moves_an_install_that_is_there_to_that_branch(w):

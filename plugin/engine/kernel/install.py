@@ -314,6 +314,9 @@ def plugin(a: Any, r: Run) -> int:
     src = m.get("source") if isinstance(m.get("source"), dict) else {}
     had = installed_in_claude_code()
     if from_folder(src, to) and had:
+        if folder:
+            # the clone moves on as the person pulls and edits it: Claude Code copies what it has now
+            FX.run([FX.claude(), "plugin", "update", "thimble@thimble"])
         say(f"  Claude Code loads it from {where}.")
     else:
         FX.add_marketplace(to, "to add thimble's plugin to it")

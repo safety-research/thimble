@@ -126,13 +126,14 @@ def failure(e: BaseException) -> str:
         return f"No identity token at {now} for {claude_access.describe()}: {e}."
     if isinstance(e, WorkloadIdentityError):
         code = f" ({e.status_code})" if getattr(e, "status_code", None) else ""
-        return (f"The identity token was not exchanged{code} at {now} with {claude_access.describe()}. Check the IDs "
-                "and the token source in the config file; whoever manages the federation rule can see the reason.")
+        return (f"The identity token was not exchanged{code} at {now}, for {claude_access.describe()}. Check the "
+                "IDs and the token source in the config file; whoever manages the federation rule can see the reason.")
     if isinstance(e, anthropic.AuthenticationError):
-        return (f"Claude refused the credentials (401) at {now}, with {claude_access.describe()}. Check them in "
-                "Settings, Claude access.")
+        where = ("ANTHROPIC_API_KEY where the workbench runs" if claude_access.how() == claude_access.API_KEY
+                 and claude_access.env_key() else "them in Settings, Claude access")
+        return f"Claude refused the credentials (401) at {now}, for {claude_access.describe()}. Check {where}."
     if isinstance(e, anthropic.PermissionDeniedError):
-        return f"These credentials may not use this model or feature (403) at {now}, with {claude_access.describe()}."
+        return f"These credentials may not use this model or feature (403) at {now}, for {claude_access.describe()}."
     if isinstance(e, anthropic.RateLimitError):
         return "Claude's rate limit was reached and the retries ran out. Send the message again in a minute."
     if isinstance(e, anthropic.APIStatusError):
