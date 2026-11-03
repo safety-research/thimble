@@ -2862,7 +2862,8 @@ async def _attach(k: _Kernel) -> bool:
     try:
         kc = _client(k.conn)
     except (OSError, ValueError) as e:
-        log.warning("kernel %s of %s (pid %s): its connection file does not read (%s); killed", k.key, k.workspace, pid, e)
+        log.warning("kernel %s of %s (pid %s): its connection file does not read (%s); killed", k.key, k.workspace,
+                    pid, e)
         await _kill(k)
         return False
     try:

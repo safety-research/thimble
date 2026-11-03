@@ -1027,8 +1027,8 @@ def _cwd_in_workspace(pid: int, ws_dir: Path) -> bool:
 
 
 def _kernel_file(conn: str, ws_dir: Path) -> bool:
-    """Whether `conn` is a kernel's connection file in kernels/ of a workspace under `ws_dir` (<ws>/kernels/<key>.conn.json),
-    the only file a kernel's command line names that thimble removes."""
+    """Whether `conn` is a kernel's connection file in kernels/ of a workspace under `ws_dir`
+    (<ws>/kernels/<key>.conn.json), the only file a kernel's command line names that thimble removes."""
     p = Path(conn)
     return p.is_absolute() and p.name.endswith(".conn.json") and p.parent.name == KERNELS_DIR \
         and os.path.realpath(p.parent.parent.parent) == os.path.realpath(ws_dir)

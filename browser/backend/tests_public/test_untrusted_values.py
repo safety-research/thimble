@@ -41,8 +41,8 @@ def _up_to(folder: Path, target: Path) -> str:
 
 def test_undo_skips_a_step_a_card_appended_whose_names_lead_outside_the_workspace(tmp_path_factory):
     """undo.jsonl lies in the workspace: a step a card's code appended there named the document to restore or remove
-    by its `target`, its investigation by `inv` and a deleted label's files by `trash`, each taken as it was, so the next
-    Undo or Redo wrote, removed or moved files wherever their ../ parts led."""
+    by its `target`, its investigation by `inv` and a deleted label's files by `trash`, each taken as it was, so the
+    next Undo or Redo wrote, removed or moved files wherever their ../ parts led."""
     outside = _outside(tmp_path_factory)
     (outside / "made-up0.json").write_text(json.dumps({"name": "the person's own"}))
     inv = investigation.ensure_main(CORPUS).resolve()
@@ -244,6 +244,11 @@ def test_the_claude_code_session_a_card_names_in_a_state_file_is_never_resumed(r
 SID = "e7b0a1f2-0000-4000-8000-0000000000ab"
 
 
+def _human(text: str) -> str:
+    """A transcript's line of the analyst's message `text`, as Claude Code writes it."""
+    return json.dumps({"type": "user", "origin": {"kind": "human"}, "message": {"content": text}}) + "\n"
+
+
 @pytest.fixture()
 def mirror(tmp_path, monkeypatch):
     """The mirror (session.py) with no session attached, and Claude Code's config dir the test's own, whose projects
@@ -258,7 +263,7 @@ def mirror(tmp_path, monkeypatch):
     for table in (session._live, session._shim_pids, session._shim_configs, events._subs):
         table.clear()
     transcript = project / f"{SID}.jsonl"
-    transcript.write_text(json.dumps({"type": "user", "origin": {"kind": "human"}, "message": {"content": "hello"}}) + "\n")
+    transcript.write_text(_human("hello"))
     yield transcript
     for table in (session._live, session._shim_pids, session._shim_configs, events._subs):
         table.clear()
@@ -283,7 +288,7 @@ def test_what_sessions_json_names_is_taken_only_where_the_mirror_itself_keeps_it
 
     outside = _outside(tmp_path_factory)
     planted = outside / f"{SID}.jsonl"
-    planted.write_text(json.dumps({"type": "user", "origin": {"kind": "human"}, "message": {"content": "OUTSIDE-SECRET"}}) + "\n")
+    planted.write_text(_human("OUTSIDE-SECRET"))
     (config.workspace_dir(CORPUS) / "sessions.json").write_text(json.dumps({SID: {
         "session": SID, "cwd": str(outside), "transcript_path": str(planted), "pid": "../made-up",
         "since": "2026-11-03T00:00:00+00:00",
@@ -346,8 +351,9 @@ def test_a_fork_s_transcript_is_read_only_from_main_s_session_folder(tmp_path_fa
     from app import context
 
     outside = _outside(tmp_path_factory)
-    (outside / "made-up.jsonl").write_text(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
-        {"type": "tool_use", "id": "toolu_x", "name": "Read", "input": {"file_path": "OUTSIDE-SECRET"}}]}}) + "\n")
+    call = {"type": "tool_use", "id": "toolu_x", "name": "Read", "input": {"file_path": "OUTSIDE-SECRET"}}
+    (outside / "made-up.jsonl").write_text(
+        json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [call]}}) + "\n")
     d = config.workspace_dir(CORPUS) / "runtime"
     subagents = d / "made-up-session" / "subagents"
     (subagents / "agent-x").mkdir(parents=True)  # what a card's code can make there

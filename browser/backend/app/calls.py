@@ -319,7 +319,7 @@ def result_text(block: dict[str, Any], rec: dict[str, Any] | None = None, transc
     if saved is not None:
         try:
             root = None if nofollow.split(saved) is not None else saved.parents[2]
-            with os.fdopen(nofollow.open(saved, os.O_RDONLY, root=root), "r", encoding="utf-8", errors="replace") as f:
+            with nofollow.reader(saved, "r", encoding="utf-8", errors="replace", root=root) as f:
                 return f.read(RESULT_CHARS)
         except (OSError, ValueError):
             pass

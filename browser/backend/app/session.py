@@ -379,16 +379,17 @@ def _sessions_path(c: str) -> Path:
 
 
 def sessions(c: str) -> dict[str, dict]:
-    """sessions.json: the record of each session that was main, by its id. The file lies in the workspace, which a card's
-    code writes, so it is read as nofollow reads it, and each record keeps only what the mirror itself would have
-    written there (_checked)."""
+    """sessions.json: the record of each session that was main, by its id. The file lies in the workspace, which a
+    card's code writes, so it is read as nofollow reads it, and each record keeps only what the mirror itself would
+    have written there (_checked)."""
     try:
         d = json.loads(nofollow.read_text(_sessions_path(c)))
     except (OSError, ValueError):
         return {}
     if not isinstance(d, dict):
         return {}
-    return {str(sid): _checked(c, str(sid), rec) for sid, rec in d.items() if SID_RE.match(str(sid)) and isinstance(rec, dict)}
+    return {str(sid): _checked(c, str(sid), rec) for sid, rec in d.items()
+            if SID_RE.match(str(sid)) and isinstance(rec, dict)}
 
 
 def _checked(c: str, sid: str, rec: dict) -> dict:

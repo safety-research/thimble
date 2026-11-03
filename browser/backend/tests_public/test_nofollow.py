@@ -218,9 +218,11 @@ def test_the_event_log_s_readers_read_no_fifo_and_no_link_a_card_left_as_the_log
         path.unlink()
         os.mkfifo(path)
     got: dict = {}
-    readers = {"whole": lambda: investigation._read_jsonl(log), "after": lambda: investigation._read_jsonl_after(log, 0),
+    readers = {"whole": lambda: investigation._read_jsonl(log),
+               "after": lambda: investigation._read_jsonl_after(log, 0),
                "tail": lambda: investigation._last_stored_seq(log), "id": lambda: investigation.log_id(CORPUS)}
-    threads = [threading.Thread(target=lambda k=k, f=f: got.__setitem__(k, f()), daemon=True) for k, f in readers.items()]
+    threads = [threading.Thread(target=lambda k=k, f=f: got.__setitem__(k, f()), daemon=True)
+               for k, f in readers.items()]
     for t in threads:
         t.start()
     for t in threads:
@@ -267,7 +269,7 @@ def test_a_label_s_definition_is_read_through_no_link_a_card_left_in_its_place(t
     assert concepts.list_concepts(ws) == []
 
 
-# --------------------------------------------------------------------------- the server's reads of the workspace's files
+# --------------------------------------------------------------------- the server's reads of the workspace's files
 # A file of the workspace that the server reads may be a FIFO or a link a card's code left in its place: a FIFO held the
 # read (and, on the event loop, the whole server), and a link had it read the file it points to into a chat, an agent's
 # context, a store of the workspace's or the export. Each case below plants one where a reader of the server's reads,
@@ -306,8 +308,8 @@ def _ws() -> Path:
 
 
 def _secret_line() -> str:
-    return _line(type="user", origin={"kind": "human"}, message={"content": "OUTSIDE-SECRET"}, ts="2026-11-03T00:00:00Z",
-                 text="OUTSIDE-SECRET", n=1, id="toolu_made_up", seq=99, uuid="u-1")
+    return _line(type="user", origin={"kind": "human"}, message={"content": "OUTSIDE-SECRET"},
+                 ts="2026-11-03T00:00:00Z", text="OUTSIDE-SECRET", n=1, id="toolu_made_up", seq=99, uuid="u-1")
 
 
 def _case_tail_records(out):
@@ -493,8 +495,8 @@ def _case_chats_listed(out):
 
 def _case_telemetry_events(out):
     from app import telemetry
-    return lambda: telemetry._read_jsonl(_link(_ws() / "investigations" / "main" / "events.jsonl", out, _secret_line())), \
-        lambda r: r == []
+    log = _link(_ws() / "investigations" / "main" / "events.jsonl", out, _secret_line())
+    return lambda: telemetry._read_jsonl(log), lambda r: r == []
 
 
 _SCHEMA = {"type": "object", "properties": {"claim": {"$sentence": True}}}

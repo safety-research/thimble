@@ -183,14 +183,14 @@ async def test_grep_says_which_files_it_left_out_because_they_lead_outside_the_f
     box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus], write_roots=[ws / "tmp"])
     real = corpus.resolve()
     got = await runtime_tools.call(box, "Grep", {"pattern": "deadline"})
-    assert got.text.split("\n") == [
-        f"{real / 'inside-link.txt'}:1: before the Friday deadline", f"{real / 'notes.txt'}:1: before the Friday deadline",
-        f"[1 file not searched, since it is a link that leads outside the folders you may read: {real / 'outside.jsonl'}]"]
+    left = ("[1 file not searched, since it is a link that leads outside the folders you may read: "
+            f"{real / 'outside.jsonl'}]")
+    assert got.text.split("\n") == [f"{real / 'inside-link.txt'}:1: before the Friday deadline",
+                                     f"{real / 'notes.txt'}:1: before the Friday deadline", left]
     read = await runtime_tools.call(box, "Read", {"file_path": "outside.jsonl"})
     assert read.is_error and "outside the folders this agent may read" in read.text
     none = await runtime_tools.call(box, "Grep", {"pattern": "made-up words", "glob": "*.jsonl"})
-    assert none.text == ("No matches found\n[1 file not searched, since it is a link that leads outside the folders you "
-                         f"may read: {real / 'outside.jsonl'}]")
+    assert none.text == f"No matches found\n{left}"
 
 
 async def test_the_tools_work_below_a_folder_the_person_may_enter_but_not_list_on_macos_as_on_linux(tmp_path,
@@ -216,7 +216,8 @@ async def test_the_tools_work_below_a_folder_the_person_may_enter_but_not_list_o
     finally:
         share.chmod(0o755)
     assert {k: (v.is_error, v.text) for k, v in got.items()} == {
-        "Read": (False, f"{1:>6}\talpha line\n{2:>6}\tbeta line"), "Grep": (False, f"{real / 'notes.txt'}:2: beta line"),
+        "Read": (False, f"{1:>6}\talpha line\n{2:>6}\tbeta line"),
+        "Grep": (False, f"{real / 'notes.txt'}:2: beta line"),
         "Glob": (False, str(real / "notes.txt")), "Edit": (False, f"edited {real / 'notes.txt'}"),
         "Write": (False, f"wrote {real / 'new.txt'} (8 characters)")}
     assert (corpus / "notes.txt").read_text() == "gamma line\nbeta line\n" and (corpus / "new.txt").is_file()
