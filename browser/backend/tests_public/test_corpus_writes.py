@@ -259,10 +259,14 @@ async def test_a_view_s_builder_s_bash_writes_its_folders_alone_on_the_api_engin
 
 
 async def test_no_other_agent_writes_a_view_s_folder(space, tmp_path):
-    from app import views  # noqa: PLC0415
+    """No other agent writes a view's folder or its builder's own folder, nor a folder that holds either: srt binds a
+    builder's write folders by their paths, so a command that could write the folder that holds one could put a link
+    in its place in the moment of the bind and have the builder's command write where the link leads."""
+    from app import dev, views  # noqa: PLC0415
 
     folder = views.views_dir(CORPUS) / "posts"
     folder.mkdir(parents=True)
+    work = dev.view_work_dir(CORPUS, "posts")
     others = {"writer": agent(space, "writer", "writer:report"), "main": space.spec_of(space.main),
               # a view's role whose start names no view, another view's kind or a slug that is no slug
               "builder without a key": agent(space, "view-builder"),
@@ -271,7 +275,8 @@ async def test_no_other_agent_writes_a_view_s_folder(space, tmp_path):
               "builder with a path for a slug": agent(space, "view-builder", "view:../../trusted")}
     for who, spec in others.items():
         assert views.local_dir(CORPUS) in spec.no_write, who
-        assert not any(w == folder or folder in w.parents or w in folder.parents for w in spec.write_roots), who
+        held = [w for w in spec.write_roots for d in (folder, work) if w == d or d in w.parents or w in d.parents]
+        assert not held, (who, held)
         got = await write(spec, folder / "view.json")
         assert got.is_error and not (folder / "view.json").exists(), who
         deny = runtime_cc.settings(spec, True, tmp_path)["permissions"]["deny"]
