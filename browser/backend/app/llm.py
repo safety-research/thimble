@@ -2,9 +2,11 @@
 
 The client is built from what the person chose, passed to the SDK by name, so that no other credential of the
 environment stands in for it: the API key (ANTHROPIC_API_KEY when it is set where the workbench runs, else the key
-pasted in Settings), or the WIF config file they named (wif.py), passed to `WorkloadIdentityCredentials`. The rest of
-the environment is used as it is (ANTHROPIC_BASE_URL, a proxy), as the SDK uses it in the person's terminal. failure()
-says a failed call in one plain sentence, never a raw exception name such as NoCredentials.
+pasted in Settings), or the WIF config file they named (wif.py), passed to `WorkloadIdentityCredentials`. The calls go
+to claude_access.base_url(): ANTHROPIC_BASE_URL only with ANTHROPIC_API_KEY, as Claude Code sends them, so a pasted key
+or an identity token never goes to an address the shell set. The rest of the environment is used as it is (a proxy),
+as the SDK uses it in the person's terminal. failure() says a failed call in one plain sentence, never a raw exception
+name such as NoCredentials.
 """
 from __future__ import annotations
 
@@ -58,7 +60,7 @@ def client() -> Any:
         raise NoCredentials(f"{p['what']} {p['fix']}")
     if how not in (claude_access.API_KEY, claude_access.WIF):
         raise NoCredentials("this way of reaching Claude runs Claude Code sessions, not the Messages API")
-    sig = json.dumps(rec, sort_keys=True)
+    sig = json.dumps(rec, sort_keys=True) + claude_access.base_url()
     if how == claude_access.API_KEY:
         # the key it uses, by its hash: ANTHROPIC_API_KEY, or the one pasted, which Settings may change
         sig += hashlib.sha256(claude_access.api_key().encode()).hexdigest()
@@ -80,9 +82,10 @@ def client() -> Any:
                 organization_id=conf.ids["organization_id"],
                 service_account_id=conf.ids.get("service_account_id"),
                 workspace_id=conf.ids.get("workspace_id"),
-            ), max_retries=MAX_RETRIES)
+            ), base_url=conf.base_url, max_retries=MAX_RETRIES)
         else:
-            made = AsyncAnthropic(api_key=claude_access.api_key(), max_retries=MAX_RETRIES)
+            made = AsyncAnthropic(api_key=claude_access.api_key(), base_url=claude_access.base_url(),
+                                  max_retries=MAX_RETRIES)
         _cache.clear()
         _cache[sig] = made
         return made

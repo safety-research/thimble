@@ -8,6 +8,11 @@
     wif           Workload Identity Federation, from the config file the person names (wif.py). The server calls the
                   Messages API itself.
 
+The calls of api-key and wif go to base_url(): ANTHROPIC_BASE_URL only with ANTHROPIC_API_KEY, which come from the
+same shell, as Claude Code sends them; a pasted key goes to API_URL, and WIF to the config file's base_url (API_URL by
+default), so a key or a token the workbench keeps never goes to an address the shell set. describe() names the host when
+it is not API_HOST.
+
 With api-key and wif nothing launches a `claude` process: every agent runs in the server (runtime_api.py). The choice
 is kept in <home>/claude-access.json ({how, wif_file, consent}), a pasted key in <home>/anthropic-api-key (0600).
 scripts/install.sh sets the choice (`thimble-browser --setup`, with --sign-in, or asked in a terminal); the page's
@@ -42,6 +47,9 @@ CHOICES = (CLAUDE_CODE, API_KEY, WIF)  # the order of the install's question and
 ACCESS_FILE = "claude-access.json"
 KEY_FILE = "anthropic-api-key"
 ENV_KEY = "ANTHROPIC_API_KEY"  # the API key of the environment the workbench runs in, which wins over a pasted one
+ENV_BASE_URL = "ANTHROPIC_BASE_URL"  # where the calls with ENV_KEY go, when it is set (base_url)
+API_URL = wif.DEFAULT_BASE_URL  # Anthropic's API, where a pasted key's calls go
+API_HOST = "api.anthropic.com"
 # each way in a few words, as the install's question and the page's dialog give them; the Claude Code sign-in's words
 # are what the person consents to when they choose it (CONSENT)
 LABELS = {CLAUDE_CODE: "Your Claude Code sign-in", API_KEY: "An Anthropic API key", WIF: "Workload Identity Federation"}
@@ -117,6 +125,34 @@ def has_key() -> bool:
     return bool(api_key())
 
 
+def base_url() -> str:
+    """Where the Messages API calls of api-key and wif go (module note): ANTHROPIC_BASE_URL when it is set and the key
+    is ANTHROPIC_API_KEY, the config file's base_url with wif, else API_URL."""
+    h = how()
+    if h == WIF:
+        try:
+            return wif.load(str(read().get("wif_file") or "")).base_url
+        except wif.WifError:
+            return API_URL
+    if h == API_KEY and env_key():
+        return (os.environ.get(ENV_BASE_URL) or "").strip() or API_URL
+    return API_URL
+
+
+def _sent_to() -> str:
+    """describe()'s words for the host of base_url() when it is not API_HOST, else ''; the host alone, never the rest
+    of the address."""
+    from urllib.parse import urlparse  # noqa: PLC0415
+
+    try:
+        host = urlparse(base_url()).hostname or "an address with no host"
+    except ValueError:
+        host = "an address with no host"
+    if host == API_HOST:
+        return ""
+    return f", sent to {host}" + (f" ({ENV_BASE_URL})" if how() == API_KEY else "")
+
+
 class AccessError(ValueError):
     """A choice that cannot be saved, in one sentence for the person."""
 
@@ -158,13 +194,15 @@ def _tilde(p: str) -> str:
 
 
 def describe() -> str:
-    """The way in words, for Settings, the log and setup's line; never a key or an ID."""
+    """The way in words, for Settings, the log and setup's line, with the host its calls go to when it is not API_HOST
+    (_sent_to); never a key or an ID."""
     rec, h = read(), how()
     if h == API_KEY:
-        return ("an API key, from ANTHROPIC_API_KEY" if env_key() else "an API key, the one saved in Settings"
-                if saved_key() else "an API key (none yet)")
+        if env_key():
+            return "an API key, from ANTHROPIC_API_KEY" + _sent_to()
+        return "an API key, the one saved in Settings" if saved_key() else "an API key (none yet)"
     if h == WIF:
-        return f"Workload Identity Federation, with {_tilde(str(rec.get('wif_file') or '(no file)'))}"
+        return f"Workload Identity Federation, with {_tilde(str(rec.get('wif_file') or '(no file)'))}" + _sent_to()
     if h == CLAUDE_CODE:
         return "your Claude Code sign-in"
     return "not chosen yet"
