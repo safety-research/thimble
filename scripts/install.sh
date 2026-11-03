@@ -187,9 +187,11 @@ if [ "$plugin" = 1 ]; then
            say "Moved: $keep" ;;
       esac
     fi
-    say "Removing 0.9 runs:"
+    # what it removes, by its name: thimble 0.9, or the link to a thimble folder that is gone, which names no version
+    noun="$(old09 noun)"
+    say "Removing $noun runs:"
     while IFS=$'\t' read -r shown _; do say "  $shown"; done < <(old09 commands)
-    printf 'Remove thimble 0.9 now? This cannot be undone. [y/N]: '
+    printf 'Remove %s now? This cannot be undone. [y/N]: ' "$noun"
     read -r answer || answer=""
     case "$answer" in
       y | Y | yes | Yes) ;;
@@ -200,11 +202,11 @@ if [ "$plugin" = 1 ]; then
       eval "$run" </dev/null || { say "That step failed, so the install stopped. Do it by hand, then run scripts/install.sh again."; exit 1; }
     done 3< <(old09 commands)
     if [ -n "$(old09 report)" ]; then
-      say "thimble 0.9 is still here:"
+      say "$noun is still here:"
       old09 report
       exit 1
     fi
-    say "thimble 0.9 is removed."
+    say "$noun is removed."
     notes+=("restart the claude sessions that were open during the upgrade, or run /reload-plugins in them: until then they report \"Plugin directory does not exist\" after each tool call")
   fi
 fi
