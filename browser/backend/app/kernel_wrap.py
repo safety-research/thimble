@@ -48,7 +48,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Sequence
+from typing import NamedTuple, Sequence
 
 from . import srt
 
@@ -255,29 +255,40 @@ BWRAP_WRITES = ("--bind", "--bind-try", "--dev-bind", "--dev-bind-try", "--bind-
 BWRAP_READS = ("--ro-bind", "--ro-bind-try", "--ro-bind-fd")
 
 
-def sandbox_of(argv: Sequence[str]) -> tuple[str, list[str], list[str]] | None:
-    """The wrapper a kernel's command line runs it in and what that wrapper lets it write, read from the line as the
-    system shows it (procs.argv: /proc/<pid>/cmdline or `ps`), which no code inside the sandbox can change:
-    ("bwrap", the paths it binds writable, the paths it binds read-only), from bwrap's options up to its `--`, and
-    ("srt", the rules' allowWrite, []) for kernel_srt.mjs, the rules read from the line as a whole, since `ps` splits a
-    line at its spaces. None for a line of neither, or one whose rules do not read."""
+class Sandbox(NamedTuple):
+    """What a kernel's wrapper shows it, as its command line says (sandbox_of): the paths it writes, those it reads and
+    those it hides."""
+    wrap: str
+    writes: list[str]
+    reads: list[str]
+    hides: list[str]
+
+
+def sandbox_of(argv: Sequence[str]) -> Sandbox | None:
+    """The wrapper a kernel's command line runs it in and what that wrapper shows it, read from the line as the system
+    shows it (procs.argv: /proc/<pid>/cmdline or `ps`), which no code inside the sandbox can change: for bwrap its
+    writable binds, its read-only binds and its tmpfs mounts, from its options up to its `--`; for srt (kernel_srt.mjs)
+    its rules' allowWrite, allowRead and denyRead, the rules read from the line as a whole, since `ps` splits a line at
+    its spaces. None for a line of neither, or one whose rules do not read."""
     if argv and os.path.basename(argv[0]) == "bwrap":
-        writes: list[str] = []
-        reads: list[str] = []
+        box = Sandbox("bwrap", [], [], [])
         i = 1
         while i < len(argv) and argv[i] != "--":
             if argv[i] in (*BWRAP_WRITES, *BWRAP_READS) and i + 2 < len(argv):
-                (writes if argv[i] in BWRAP_WRITES else reads).append(argv[i + 2])
+                (box.writes if argv[i] in BWRAP_WRITES else box.reads).append(argv[i + 2])
                 i += 3
+            elif argv[i] == "--tmpfs" and i + 1 < len(argv):
+                box.hides.append(argv[i + 1])
+                i += 2
             else:
                 i += 1
-        return "bwrap", writes, reads
+        return box
     if len(argv) > 1 and os.path.basename(argv[1]) == SRT_LAUNCHER.name:
         line = " ".join(argv)
         try:
-            rules, _ = json.JSONDecoder().raw_decode(line, line.index('{"filesystem"'))
-            return "srt", [str(p) for p in rules["filesystem"]["allowWrite"]], []
-        except (ValueError, KeyError, TypeError):
+            fs = json.JSONDecoder().raw_decode(line, line.index('{"filesystem"'))[0]["filesystem"]
+            return Sandbox("srt", *([str(p) for p in fs.get(k) or []] for k in ("allowWrite", "allowRead", "denyRead")))
+        except (ValueError, KeyError, TypeError, AttributeError):
             return None
     return None
 

@@ -991,30 +991,42 @@ async def test_srt_s_kernel_shown_the_folders_the_server_checked_runs(monkeypatc
     assert (shell / "own.csv").is_file()
 
 
+@pytest.mark.parametrize("earlier", ["writes the workspace", "shows the locks"])
 @pytest.mark.parametrize("wrap", ["srt", "bwrap"])
-async def test_a_kernel_an_earlier_version_started_is_stopped_rather_than_taken_back(wrap, monkeypatch,
+async def test_a_kernel_an_earlier_version_started_is_stopped_rather_than_taken_back(wrap, earlier, monkeypatch,
                                                                                      workspaces_tmp):
     """Kernels outlive a server's restart, an update's among them, and the next server takes each back. One an earlier
-    version started runs in a sandbox that lets it write the whole workspace, its record among it, so the next server
-    tells it by its wrapper's command line, which no code in the sandbox can change, and stops it rather than take it
-    back whatever its record says: the check that read the record's `writes` took back a kernel that had written this
-    version's folders there, and its next card wrote sessions.json. The next card starts a kernel in the sandbox of this
-    version: the variables of the one stopped are gone."""
+    version started runs in a sandbox that lets it write the whole workspace, its record among it (0.10.8), or shows it
+    the workspace's locks (this version before its locks folder was hidden), so the next server tells it by its
+    wrapper's command line, which no code in the sandbox can change, and stops it rather than take it back whatever its
+    record says: the check that read the record's `writes` took back a kernel that had written this version's folders
+    there, and its next card wrote sessions.json. The next card starts a kernel in the sandbox of this version: the
+    variables of the one stopped are gone."""
     if not _wrap_works(wrap):
         pytest.skip(f"{wrap} can't sandbox a process here")
     monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
     real_argv, real_rules = kernel_wrap.kernel_wrap_argv, kernel_wrap.srt_rules
 
-    def earlier_argv(*a, **kw):  # 0.10.8's bwrap: the workspace bound writable
+    def earlier_argv(*a, **kw):  # 0.10.8's bwrap binds the workspace writable; the next one hid no locks folder
         out, ws = list(real_argv(*a, **kw)), str(kw["workspace_dir"])
+        if earlier == "shows the locks":
+            locks = str(Path(ws) / kernel_wrap.LOCKS_DIR)
+            i = out.index("--tmpfs", out.index(ws))
+            assert out[i:i + 4] == ["--tmpfs", locks, "--remount-ro", locks]
+            return out[:i] + out[i + 4:]
         for i in range(len(out) - 2):
             if out[i:i + 3] == ["--ro-bind", ws, ws]:
                 out[i] = "--bind"
         return out
 
-    def earlier_rules(*a, **kw):  # 0.10.8's srt rules: the workspace among the folders it writes
+    def earlier_rules(*a, **kw):  # 0.10.8's srt rules: the workspace among the folders it writes; then no locks hidden
         rules = real_rules(*a, **kw)
-        rules["filesystem"]["allowWrite"].insert(0, str(kw["workspace_dir"]))
+        fs, ws = rules["filesystem"], str(kw["workspace_dir"])
+        if earlier == "shows the locks":
+            for k in ("denyRead", "denyWrite"):
+                fs[k] = [p for p in fs[k] if p != str(Path(ws) / kernel_wrap.LOCKS_DIR)]
+        else:
+            fs["allowWrite"].insert(0, ws)
         return rules
 
     monkeypatch.setattr(kernel_wrap, "kernel_wrap_argv", earlier_argv)
@@ -1199,20 +1211,22 @@ def test_a_kernel_s_python_starts_with_its_working_folder_off_sys_path_until_its
 
 
 def test_a_kernel_s_sandbox_is_read_from_its_wrapper_s_command_line_as_the_system_shows_it(tmp_path):
-    """What a kernel's wrapper lets it write is read from the wrapper's command line: bwrap's binds up to its `--`, and
-    srt's rules, from the line as a whole, as `ps` shows it on macOS (split at every space, a path with spaces too)."""
+    """What a kernel's wrapper shows it is read from the wrapper's command line: bwrap's binds and tmpfs mounts up to
+    its `--`, and srt's rules, from the line as a whole, as `ps` shows it on macOS (split at every space, a path with
+    spaces too)."""
     ws, corpus = tmp_path / "work space", tmp_path / "corpus"
     argv = kernel_wrap.kernel_wrap_argv(["python", "-m", "ipykernel_launcher", "--bind", "/x", "/x"], corpus_dir=corpus,
                                         workspace_dir=ws, venv=None, python="/usr/bin/python3", write_fds=[(5, "/t")])
-    wrap, writes, reads = kernel_wrap.sandbox_of(argv[len(kernel_wrap.SIGINT_PREFIX):])  # the shell execs bwrap
-    assert (wrap, writes) == ("bwrap", [*(str(ws / n) for n in kernel_wrap.KERNEL_DIRS), "/t"])
-    assert str(ws) in reads and str(corpus) in reads
+    box = kernel_wrap.sandbox_of(argv[len(kernel_wrap.SIGINT_PREFIX):])  # the shell execs bwrap
+    assert (box.wrap, box.writes) == ("bwrap", [*(str(ws / n) for n in kernel_wrap.KERNEL_DIRS), "/t"])
+    assert {str(ws), str(corpus)} <= set(box.reads) and box.hides == ["/tmp", str(ws / kernel_wrap.LOCKS_DIR)]
     rules = kernel_wrap.srt_rules(corpus_dir=corpus, workspace_dir=ws, venv=None, python="/usr/bin/python3",
                                   srt_dir="/srt", home=tmp_path / "home", platform="darwin", write=[ws / "kernels" / "k.home"])
     line = kernel_wrap.srt_argv(["python", "-m", "ipykernel_launcher"], node="/usr/bin/node", srt_dir=Path("/srt"),
                                 rules=rules)
+    fs = rules["filesystem"]
     for shown in (line, " ".join(line).split()):
-        assert kernel_wrap.sandbox_of(shown) == ("srt", rules["filesystem"]["allowWrite"], [])
+        assert kernel_wrap.sandbox_of(shown) == ("srt", fs["allowWrite"], fs["allowRead"], fs["denyRead"])
     assert kernel_wrap.sandbox_of(["/usr/bin/python3", "-P", "-m", "ipykernel_launcher"]) is None
 
 

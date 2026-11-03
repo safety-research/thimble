@@ -2989,25 +2989,30 @@ def _wrap_of(k: _Kernel, pid: int) -> str | None:
     """The wrapper the recorded kernel process `pid` runs in, when it is a kernel this server may take back. Read from
     the process's command line (kernel_wrap.sandbox_of), which no code in its sandbox can change, never from its record,
     which an earlier version's kernel could write (its sandbox let it write kernels/). A wrapped kernel's sandbox must
-    let it write, of its workspace, only its own folders (kernel_wrap.KERNEL_DIRS) and under srt its HOME, as this
-    version's does, and bwrap must bind the workspace read-only; a kernel in no wrapper is taken back only where the
-    workspace's kernels run in none now. None for any other: an earlier version's sandbox, which let it write the whole
-    workspace, or a process of a sandbox named in the record in its wrapper's place."""
-    got = kernel_wrap.sandbox_of(procs.argv(pid))
-    if got is None:
+    let it write, of its workspace, only its own folders (kernel_wrap.KERNEL_DIRS) and under srt its HOME, and hide the
+    workspace's locks folder, as this version's does, and bwrap must bind the workspace read-only; a kernel in no
+    wrapper is taken back only where the workspace's kernels run in none now. None for any other: an earlier version's
+    sandbox, which let it write the whole workspace or showed it the locks, or a process of a sandbox named in the
+    record in its wrapper's place."""
+    box = kernel_wrap.sandbox_of(procs.argv(pid))
+    if box is None:
         wrap, _ = config.resolve_kernel_wrap(_ws_settings(k.workspace))
         return config.KERNEL_WRAP_NONE if wrap not in config.KERNEL_WRAPPED else None
-    wrap, writes, reads = got
+
+    def real(paths: list[str]) -> set[Path]:
+        return {Path(os.path.realpath(p)) for p in paths}
+
     ws = Path(os.path.realpath(_ws_dir(k.workspace)))
     own = {ws / name for name in kernel_wrap.KERNEL_DIRS}
-    if wrap == config.KERNEL_WRAP_SRT:
+    if box.wrap == config.KERNEL_WRAP_SRT:
         own.add(Path(os.path.realpath(k.home)))
-    for w in (Path(os.path.realpath(p)) for p in writes):
-        if w not in own and (w == ws or ws in w.parents or w in ws.parents):
-            return None
-    if wrap == config.KERNEL_WRAP_BWRAP and ws not in {Path(os.path.realpath(p)) for p in reads}:
+    if any(w not in own and (w == ws or ws in w.parents or w in ws.parents) for w in real(box.writes)):
         return None
-    return wrap
+    if ws / kernel_wrap.LOCKS_DIR not in real(box.hides):
+        return None
+    if box.wrap == config.KERNEL_WRAP_BWRAP and ws not in real(box.reads):
+        return None
+    return box.wrap
 
 
 async def _attach(k: _Kernel) -> bool:
