@@ -17,9 +17,8 @@
 // listeners) between calls.
 //
 // Requests are POST /<op> with a JSON body; each answers JSON: {ok: true, ...} or {ok: false, error}.
-//   load     {id, version, title, view, rows, state, width, beside}  a new version from its view source and rows file;
-//            answers the tree, state, keys, the rows' summary and the text copy, and the copy at `beside` (the width a
-//            side pane leaves it) when texts wrap there. A version that fails keeps the old one.
+//   load     {id, version, title, view, rows, state, width}  a new version from its view source and rows file; answers
+//            the tree, state, keys, the rows' summary and the text copy. A version that fails keeps the old one.
 //   draw     {id, width}              the tree at a width, which the card is drawn at from now on
 //   copy     {id, width}              the text copy at a width; the card stays as it is
 //   key      {id, key}                the view's onKey; `handled` says whether it has one
@@ -34,7 +33,9 @@
 //                                     `handled` false, the card as it was, when it stands on no item
 //   undo     {id, n}                  the state as it was before the last n keys
 //   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was, at
-//                                     `width`, which the card is drawn at from now on
+//                                     `width`, which the card is drawn at from now on; a click at a cell does what a
+//                                     live click there does: a Button of words there is pressed too, which Claude Code's
+//                                     own Button presses live (client.tsx)
 //   ping
 // Any request may also name `theme`, 'dark' or 'light' (Claude Code's theme): the palette surface.colors gives every
 // card from then on (the hooks send it with each request, and draw the cards again when it changes).
@@ -594,31 +595,16 @@ function load(a) {
   card.tree = r.tree
   card.keys = typeof r.keys === 'string' ? r.keys : ''
   cards.set(a.id, card)
-  const own = copy(r.tree, a.width)
-  return { ...r, ...own, ...besideOf(card, own, Number(a.beside) || 0) }
+  return { ...r, ...copy(r.tree, a.width) }
 }
 
-/** The copy at `width`, the narrower width a side pane leaves the card, when a row that fits at the card's width wraps
- *  there: `beside: {width, lines, cut, wrapped}`, `wrapped` the numbers of the lines they start on. A row laid out for
- *  the wider card (fixed columns, parts side by side: layout.js `row`) breaks its columns there, and Claude sees it
- *  before the person does. A sentence that wraps on its own line reads the same at either width, so it alone brings
- *  nothing back, and no reason for a new version. Nothing when no row wraps, or the view fails at that width (it is
- *  told when the card draws there). */
-function besideOf(card, own, width) {
-  if (!width || width >= card.width) return {}
-  const r = inContext(card, 'copy', { width }, EVENT_MS)
-  if (!r.ok) return {}
-  const c = copy(r.tree, width)
-  const before = new Set(own.wrapped.map(w => w.text))
-  const wrapped = [...new Set(c.wrapped.filter(w => w.row && !before.has(w.text)).map(w => w.line))]
-  return wrapped.length ? { beside: { width, lines: c.lines, cut: c.cut, wrapped } } : {}
-}
-
-/** A click: a Button around lines that holds the cell where it ended, else the view's onPointer listener, else the
- *  item of a card that steps with keys on that line (pick). A click none of these takes names the words it fell on
- *  (`run`), which the hooks ask a side thread about. */
-function click(card, at) {
-  const press = pressAt(card.tree, card.width, at.up.x, at.up.y)
+/** A click: a Button that holds the cell where it ended, else the view's onPointer listener, else the item of a card
+ *  that steps with keys on that line (pick). A click none of these takes names the words it fell on (`run`), which the
+ *  hooks ask a side thread about. `live`: a click the Client sent (client.tsx). There Claude Code's own Button takes a
+ *  click on a Button of words and sends its press, and no pointer event comes for it, so a live click presses only a
+ *  Button around lines; the card tool's test of a click (act) presses either, as the live click does. */
+function click(card, at, live = false) {
+  const press = pressAt(card.tree, card.width, at.up.x, at.up.y, { inline: !live })
   if (press !== null) return inContext(card, 'press', { button: press }, EVENT_MS)
   const cells = !!(card.tree && card.tree.p && card.tree.p.cells)
   if (!cells) {
@@ -744,7 +730,8 @@ function act(a) {
       const at = { x: Math.trunc(Number(x.click[0]) || 0), y: Math.trunc(Number(x.click[1]) || 0) }
       what = `click at ${at.x},${at.y}`
       r = click(card, { down: at, up: at })
-      if (r.ok && !r.handled) r.note = r.run ? `a click there asks the analyst's side thread about "${String(r.run.text).trim().slice(0, 60)}": no Button, onPointer listener or item the card's keys select stands there` : 'a click at a cell reaches a Button around lines, an onPointer listener or an item the card\'s keys select, and the view has none there'
+      // a cell where nothing is drawn: the click missed what it aimed at, and the note says so, with how cells count
+      if (r.ok && !r.handled) r.note = r.run ? `a click there asks the analyst's side thread about "${String(r.run.text).trim().slice(0, 60)}": no Button, onPointer listener or item the card's keys select stands there` : 'nothing is drawn there, so nothing takes the click; x counts the columns of the text copy and y its lines, both from 0'
     } else {
       copies.push({ what: JSON.stringify(x).slice(0, 80), error: 'not a key or a click' })
       continue
@@ -769,7 +756,7 @@ const OPS = {
   pointer: a => {
     const card = cards.get(a.id)
     if (!card) return { ok: false, missing: true }
-    const r = click(card, { down: a.down, up: a.up ?? a.down, button: a.button })
+    const r = click(card, { down: a.down, up: a.up ?? a.down, button: a.button }, true)
     if (r.ok) keep(card, r)
     return r
   },

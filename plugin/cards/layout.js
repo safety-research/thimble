@@ -9,7 +9,8 @@
 //                             The tree is laid out in a column Box `width` cells wide, the box client.tsx draws it in.
 //   wrapText(text, cols, mode) a text's rows: wrapped at words, or cut with …
 //   buttonText(p, c)          what a Button shows: `[ label ]`, or the label alone when plain
-//   pressAt(tree, width, x, y) the Button around lines (a Box with onPress) that a click on a cell presses
+//   pressAt(tree, width, x, y) the Button that a click on a cell presses: a Button of words, wherever the layout places
+//                             it, or a Button around lines (a Box with onPress)
 //   textAt(tree, width, x, y)  the words a click on a cell falls on: {text, line}, the Text there and its line
 //   rowOf(tree, width, path)   the line the node at `path` (child indices from the root) starts on, or -1
 //
@@ -206,12 +207,19 @@ function build(n) {
   const p = n.p && typeof n.p === 'object' ? n.p : {}
   if (p.display === 'none') return null
   if (n.t === 'Text') return { kind: 'text', p: {}, text: flatText(n.c), wrap: p.wrap || 'wrap', ...(p.__at ? { at: true } : {}) }
-  // Claude Code draws a Button as a Box that neither shrinks nor stretches, around its text
-  if (n.t === 'Button') return build({ t: 'Box', p: { flexShrink: 0, alignSelf: 'flex-start' }, c: [{ t: 'Text', p: {}, c: [buttonText(p, n.c)] }] })
+  // Claude Code draws a Button as a Box that neither shrinks nor stretches, around its text. The Box keeps the
+  // Button's onPress, wherever the layout places it (alone on its line, or in a row beside Texts), so a click on its
+  // cells presses it (pressAt)
+  if (n.t === 'Button') {
+    const box = build({ t: 'Box', p: { flexShrink: 0, alignSelf: 'flex-start' }, c: [{ t: 'Text', p: {}, c: [buttonText(p, n.c)] }] })
+    return typeof p.onPress === 'number' ? { ...box, press: p.onPress, inline: true } : box
+  }
   const kids = (Array.isArray(n.c) ? n.c : n.c == null ? [] : [n.c]).map(build).filter(Boolean)
   const border = typeof p.borderStyle === 'string' && BORDERS[p.borderStyle] ? p.borderStyle : null
   return {
     kind: 'box', p, kids, border,
+    // a Button around lines: a column Box with the Button's onPress (runner.mjs)
+    ...(typeof p.onPress === 'number' ? { press: p.onPress } : {}),
     row: p.flexDirection === 'row' || p.flexDirection === 'row-reverse' || p.flexDirection === undefined,
     reverse: p.flexDirection === 'row-reverse' || p.flexDirection === 'column-reverse',
     pad: edges(p, 'padding'),
@@ -483,16 +491,18 @@ function laidOut(tree, cols) {
   return root
 }
 
-/** The onPress number of the innermost Box with one (a Button around lines, runner.mjs) that holds the cell (x, y) of
- *  the tree laid out at `width`, or null. Places round as paint() rounds them. */
-export function pressAt(tree, width, x, y) {
+/** The onPress number of the innermost Button that holds the cell (x, y) of the tree laid out at `width`, or null: a
+ *  Button of words, wherever the layout places it (alone on its line, or in a row beside Texts, as a strip of one
+ *  Button per item), or a Button around lines (a Box with onPress, runner.mjs). With `inline: false`, only a Button
+ *  around lines. Places round as paint() rounds them. */
+export function pressAt(tree, width, x, y, { inline = true } = {}) {
   let found = null
   const walk = (node, x0, y0) => {
     if (node.kind !== 'box') return
     const bx = x0 + Math.round(node.lay.x || 0)
     const by = y0 + Math.round(node.lay.y || 0)
     if (x < bx || y < by || x >= bx + Math.round(node.lay.w) || y >= by + Math.round(node.lay.h)) return
-    if (typeof node.p.onPress === 'number') found = node.p.onPress
+    if (typeof node.press === 'number' && (inline || !node.inline)) found = node.press
     for (const k of node.kids) if (k.lay) walk(k, bx, by)
   }
   if (tree) walk(laidOut(tree, Math.max(1, Math.floor(width))), 0, 0)
