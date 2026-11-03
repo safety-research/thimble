@@ -3473,19 +3473,25 @@ def labels_read(reply: Any) -> dict[str, int | None]:
 async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: float | None,
                          extra_exprs: dict[str, str] | None = None) -> tuple[list[dict], int | None, str]:
     """_execute for a card's code, with the caller holding the kernel's lock: a table card's DataFrame is read in the
-    same request and kept in place of pandas' display, and the labels the code read land on k.last_labels and
-    k.last_label_revs. `extra_exprs` are more user expressions for the same request."""
+    same request and kept in place of pandas' display, each table the code printed is kept as data beside its text
+    (frames.attach_printed), and the labels the code read land on k.last_labels and k.last_label_revs. `extra_exprs`
+    are more user expressions for the same request."""
     from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
 
     if cardtypes.CARD_CALL in code:
         await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
+    exprs[frames.PRINTED_EXPR_KEY] = frames.PRINTED_CAPTURE
     exprs.update(extra_exprs or {})
     outputs, exec_count, status = await _execute(k, code, timeout_s, exprs)
     read = labels_read((k.last_expr or {}).get(LABELS_EXPR_KEY))
     k.last_labels = list(read)
     k.last_label_revs = {cid: rev for cid, rev in read.items() if rev is not None}
+    try:
+        outputs = frames.attach_printed(outputs, frames.read_printed((k.last_expr or {}).get(frames.PRINTED_EXPR_KEY)))
+    except Exception:  # noqa: BLE001 — a printed table that cannot be kept as data leaves its text as it is
+        log.exception("the tables a card printed were not kept as data")
     if frames.EXPR_KEY in exprs:
         try:
             outputs = frames.apply_run(outputs, status, (k.last_expr or {}).get(frames.EXPR_KEY), k.last_result)

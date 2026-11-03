@@ -916,79 +916,320 @@ def test_words_no_cited_place_shows_are_said_of_the_places_together_never_with_o
 
 FLOW = ["diagram: 5 nodes, 6 edges", "draft -> lint (submit)", "lint -> review (clean)", "lint -> draft (lint errors)",
         "review -> draft (changes requested)", "review -> merge (approved)", "merge -> deploy (release)"]
-DIAGRAM = [{"id": "d1a6e7f0", "title": "How a change moves through review", "outputs": [{"out": 0, "lines": [[i, t] for i, t in enumerate(FLOW, 1)]}]}]
+EDGES = [("draft", "lint", "submit"), ("lint", "review", "clean"), ("lint", "draft", "lint errors"),
+         ("review", "draft", "changes requested"), ("review", "merge", "approved"), ("merge", "deploy", "release")]
+# a diagram card as the browser gives it (marks.card_tables): its listing, and its edges as data on the lines after the first
+DIAGRAM = [{"id": "d1a6e7f0", "title": "How a change moves through review", "outputs": [{"out": 0, "lines": [[i, t] for i, t in enumerate(FLOW, 1)],
+            "tables": [{"columns": ["source", "target", "label"], "rows": [list(e) for e in EDGES], "names": [f"{a} -> {b}" for a, b, _ in EDGES],
+                        "label": None, "total": 6, "lines": [2, 7]}]}]}]
 
 
-def test_a_count_of_what_a_diagram_shows_cites_the_things_it_counts():
-    """R5: a count that only follows from a diagram card (made up), "2 of the 6 paths", cited as the line that states the
-    6 edges and the 2 edges it counts. No line states the 2, so it failed; the 2 counted lines show it by their number,
-    each highlighted whole. A wrong count still fails, and one line is a value's own place, never a count of one."""
-    places = {"ref": ["card:d1a6e7f0@out0#L1", "card:d1a6e7f0@out0#L4", "card:d1a6e7f0@out0#L5"]}
-    m = {"n": 1, "words": "2 of the 6 paths", "sentence": "[2 of the 6 paths] send the change back to the draft."}
-    r = check_mark(m, {**card(""), "evidence": places}, [], "/data", cards=DIAGRAM)
+def counted(words: str, ev, cards: list[dict], sentence: str | None = None, status: str = "verified", correction: dict | None = None) -> dict:
+    """The check of words whose evidence is `ev` over the made-up cards, in a sentence that holds them in brackets."""
+    item = {"kind": "card", "status": status, "evidence": ev, "correction": correction, "reason": "the card shows it"}
+    return check_mark({"n": 1, "words": words, "sentence": sentence or f"[{words}]."}, item, [], "/data", cards=cards)
+
+
+def tinted(ev: dict) -> list[str]:
+    """The rows a count's evidence cites, by their names."""
+    t = ev["table"]
+    return sorted(t["rows"][x["r"]]["label"] for x in [t["at"], *t.get("also", [])])
+
+
+def test_a_count_of_a_diagram_s_edges_is_counted_from_its_edges():
+    """R5, then B20: "2 of the 6 paths" over a diagram card (made up). R5 verified it at the line that states the 6 edges
+    and the 2 edges it counts, read as a count of the places; the same reading verified "2 of the 5 paths" from the
+    5 of "5 nodes" (B20's attacks). Places count nothing now: the check names the diagram and the edges' condition,
+    and thimble counts the diagram's edges, which the browser keeps as data."""
+    sentence = "[2 of the 6 paths] send the change back to the draft."
+    r = counted("2 of the 6 paths", {"ref": "card:d1a6e7f0@out0", "count": {"target": "draft"}}, DIAGRAM, sentence)
     assert r["status"] == "verified", r
-    ev = r["evidence"]
-    assert [ev["output"][a:b] for a, b in ev["highlight"]] == ["6", "lint -> draft (lint errors)", "review -> draft (changes requested)"]
-    wrong = check_mark({**m, "words": "3 of the 6 paths"}, {**card(""), "evidence": places}, [], "/data", cards=DIAGRAM)
-    assert (wrong["status"], wrong["failedBy"], wrong["reason"]) == ("failed", "evidence", "None of the 3 cited lines of the card's output shows 3.")
-    # the total stands on a line of its own: the counted lines alone do not show it
-    two = check_mark(m, {**card(""), "evidence": {"ref": ["card:d1a6e7f0@out0#L4", "card:d1a6e7f0@out0#L5"]}}, [], "/data", cards=DIAGRAM)
-    assert two["reason"] == "None of the 2 cited lines of the card's output shows 6."
+    assert tinted(r["evidence"]) == ["lint -> draft", "review -> draft"] and r["evidence"]["ref"] == "card:d1a6e7f0@out0#L2"
+    # a line of the listing names the same table, and a wrong count or total fails with what the edges give
+    assert counted("2 of the 6 paths", {"ref": "card:d1a6e7f0@out0#L4", "count": {"target": "draft"}}, DIAGRAM, sentence)["status"] == "verified"
+    wrong = counted("3 of the 6 paths", {"ref": "card:d1a6e7f0@out0", "count": {"target": "draft"}}, DIAGRAM, "[3 of the 6 paths] go back to the draft.")
+    assert (wrong["status"], wrong["reason"]) == ("failed", "The card's table has 2 rows with target draft, not 3.")
+    five = counted("2 of the 5 paths", {"ref": "card:d1a6e7f0@out0", "count": {"target": "draft"}}, DIAGRAM, "[2 of the 5 paths] go back to the draft.")
+    assert five["reason"] == "The card's table has 6 rows, not 5."
+    # the places of the counted edges and of the summary line show no count of them
+    places = {"ref": ["card:d1a6e7f0@out0#L1", "card:d1a6e7f0@out0#L4", "card:d1a6e7f0@out0#L5"]}
+    for words in ("2 of the 6 paths", "2 of the 5 paths"):
+        r = counted(words, places, DIAGRAM, f"[{words}] send the change back to the draft.")
+        assert (r["status"], r["reason"]) == ("failed", "None of the 3 cited lines of the card's output shows 2."), r
     one = check_mark({"n": 1, "words": "1 path"}, card("card:d1a6e7f0@out0#L7"), [], "/data", cards=DIAGRAM)
     assert one["status"] == "failed" and one["reason"] == "Line 7 of the card's output reads “merge -> deploy (release)”, not 1."
-    # an edge that carries a number of its own is counted too, when it is no number of the words
-    runs = [{"id": "e4b8c2a1", "title": "Runs by config and outcome", "outputs": [{"out": 0, "lines": [
-        [1, "diagram: 4 nodes, 3 edges"], [2, "config v1 -> failed (5 runs)"], [3, "config v1 -> passed (15 runs)"], [4, "config v2 -> failed (20 runs)"]]}]}]
-    v1 = {**card(""), "evidence": {"ref": ["card:e4b8c2a1@out0#L2", "card:e4b8c2a1@out0#L3"]}}
-    assert check_mark({"n": 1, "words": "2 different outcomes"}, v1, [], "/data", cards=runs)["status"] == "verified"
-    assert check_mark({"n": 1, "words": "3 different outcomes"}, v1, [], "/data", cards=runs)["status"] == "failed"
+    # edges are named by both their ends, so sources that repeat once are no name written twice
+    chain = [("draft", "lint"), ("lint", "review"), ("review", "merge"), ("merge", "deploy"), ("deploy", "ship"), ("draft", "review")]
+    flow = [{"id": "e9a3c7f1", "title": "made up", "outputs": [{"out": 0, "lines": [[1, "diagram: 6 nodes, 6 edges"]] + [
+        [i, f"{a} -> {b}"] for i, (a, b) in enumerate(chain, 2)], "tables": [{"columns": ["source", "target", "label"], "rows": [[a, b, None] for a, b in chain],
+        "names": [f"{a} -> {b}" for a, b in chain], "label": None, "total": 6, "lines": [2, 7]}]}]}]
+    assert counted("2 of the 6 paths", {"ref": "card:e9a3c7f1@out0", "count": {"source": "draft"}}, flow, "[2 of the 6 paths] start at the draft.")["status"] == "verified"
 
 
-def test_a_terminal_diagram_card_s_count_is_its_rows_out_of_its_table(tmp_path):
-    """R5 in the terminal's check path (engine/validate.py over the cards folder): a diagram card's rows are its edges
-    (made up), and "2 of the 6 paths" cites the 2 edges back to the draft: 2 rows of the card's table of 6. The table's
-    6 shows only beside a count its rows show, never alone; a wrong count still fails."""
-    d = tmp_path / "cards" / "c5e1a9b20d"
-    (d / "v1").mkdir(parents=True)
-    (d / "meta.json").write_text(json.dumps({"id": "c5e1a9b20d", "title": "How a change moves through review", "version": 1}))
-    edges = [("draft", "lint", "submit"), ("lint", "review", "clean"), ("lint", "draft", "lint errors"),
-             ("review", "draft", "changes requested"), ("review", "merge", "approved"), ("merge", "deploy", "release")]
-    (d / "v1" / "rows.json").write_text(json.dumps([{"from": a, "to": b, "why": w} for a, b, w in edges]))
-    back = ["card:c5e1a9b20d#to/lint%20errors", "card:c5e1a9b20d#to/changes%20requested"]
+def test_a_terminal_card_s_count_is_counted_from_its_rows_json(tmp_path):
+    """R5 and B20 in the terminal's check path (engine/validate.py over the cards folder): a card's rows.json is its
+    table (made up: a diagram's edges), which the index lists with its columns, and "2 of the 6 paths" is counted from
+    the rows whose `to` is draft. The 2 cells of the counted rows no longer count themselves; a rows.json longer than
+    the cards keep gives no count."""
+    def put(cid: str, rows) -> None:
+        d = tmp_path / "cards" / cid
+        (d / "v1").mkdir(parents=True)
+        (d / "meta.json").write_text(json.dumps({"id": cid, "title": "How a change moves through review", "version": 1}))
+        (d / "v1" / "rows.json").write_text(json.dumps(rows))
+
+    put("c5e1a9b20d", [{"from": a, "to": b, "why": w} for a, b, w in EDGES])
+    put("c7f3a9b5e1", [{"run": f"run-{i:04d}", "failed": i % 3 == 0} for i in range(5003)])
     out = tmp_path / "index.tsv"
     subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"index": str(out), "cards_dir": str(tmp_path / "cards")}), capture_output=True, text=True, check=True)
-    assert all(f"{ref}\tdraft\n" in out.read_text() for ref in back)
-    words = ["2 of the 6 paths", "3 of the 6 paths", "6 paths"]
-    answer = "```json\n" + json.dumps([{"mark": n, **card(""), "evidence": {"ref": back}} for n in (1, 2, 3)]) + "\n```"
-    req = {"marks": [{"n": n, "words": w, "sentence": f"[{w}] go back to the draft."} for n, w in enumerate(words, 1)],
+    index = out.read_text()
+    assert "card:c5e1a9b20d@out0\ta table of 6 rows: from, to, why\n" in index and "card:c5e1a9b20d#to/lint%20errors\tdraft\n" in index
+    assert "card:c7f3a9b5e1@out0\ta table of 5,003 rows, of which the card keeps 5,000: run, failed\n" in index
+    table = {"ref": "card:c5e1a9b20d@out0", "count": {"to": "draft"}}
+    back = {"ref": ["card:c5e1a9b20d#to/lint%20errors", "card:c5e1a9b20d#to/changes%20requested"]}
+    cases = [("2 of the 6 paths", table), ("3 of the 6 paths", table), ("2 of the 7 paths", table), ("2 of the 6 paths", back),
+             ("2 of the 5,003 runs", {"ref": "card:c7f3a9b5e1@out0", "count": {"failed": True}})]
+    answer = "```json\n" + json.dumps([{"mark": n, **card(""), "evidence": ev} for n, (_, ev) in enumerate(cases, 1)]) + "\n```"
+    req = {"marks": [{"n": n, "words": w, "sentence": f"[{w}] go back to the draft."} for n, (w, _) in enumerate(cases, 1)],
            "answer": answer, "calls": [], "cwd": "/data", "cards_dir": str(tmp_path / "cards")}
     ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True)
     got = {r["n"]: r for r in json.loads(ran.stdout)["results"]}
     assert got[1]["status"] == "verified", got[1]
-    t = got[1]["evidence"]["table"]
-    assert sorted(t["rows"][x["r"]]["label"] for x in [t["at"], *t["also"]]) == ["changes requested", "lint errors"]
-    assert (got[2]["status"], got[2]["reason"]) == ("failed", "None of the 2 cited cells of the card shows 3 or 6.")
-    assert (got[3]["status"], got[3]["reason"]) == ("failed", "None of the 2 cited cells of the card shows 6.")
+    assert tinted(got[1]["evidence"]) == ["changes requested", "lint errors"] and got[1]["evidence"]["ref"] == "card:c5e1a9b20d#to/lint%20errors"
+    assert [(got[n]["status"], got[n]["reason"]) for n in (2, 3, 4, 5)] == [
+        ("failed", "The card's table has 2 rows with to draft, not 3."), ("failed", "The card's table has 6 rows, not 7."),
+        ("failed", "None of the 2 cited cells of the card shows 2 or 6."),
+        ("failed", "The card keeps 5,000 of the table's 5,003 rows, so they cannot be counted.")]
 
 
+THEME_ROWS = [("slow onboarding", 7), ("unclear pricing", 7), ("missing export", 7), ("flaky sync", 7), ("dark mode", 3),
+              ("bulk edit", 7), ("offline mode", 2), ("audit log", 7)]
+# B20's shape (made up): a card that printed a table of 8 themes, 6 of them raised by all 7 participants, with its rows as
+# data on the lines the table stands on, as the browser keeps a table a card's code printed (frames.attach_printed)
 THEMES = [{"id": "f2a7c4d1", "title": "Themes by the participants who raised them", "outputs": [{"out": 0, "lines": [
-    [1, "theme              participants"], [2, "slow onboarding   7"], [3, "unclear pricing   7"], [4, "missing export   7"],
-    [5, "flaky sync        7"], [6, "dark mode         3"], [7, "bulk edit         7"], [8, "offline mode      2"],
-    [9, "audit log         7"]]}]}]
+    [1, "theme              participants"]] + [[n, f"{t:<18}{p}"] for n, (t, p) in enumerate(THEME_ROWS, 2)],
+    "tables": [{"columns": ["theme", "participants"], "rows": [list(x) for x in THEME_ROWS], "names": [t for t, _ in THEME_ROWS],
+                "label": "theme", "total": 8, "lines": [1, 9]}]}]}]
 
 
-def test_the_checker_is_not_asked_to_cite_a_count_at_the_places_it_counts():
-    """R5's sentence in the checker's text had it cite any count a card shows at the places of the things it counts, as
-    a diagram's edges. The validator reads such places as a count only in the shapes counted() takes, so a true count of
-    a printed table's rows (made up: "6 of the 8 themes" came up with all 7 participants) failed at its rows, as checks
-    did once the text asked for it, where a count computed from the records verifies. The text no longer asks for it;
-    a diagram's edges cited so still verify (above)."""
-    text = (Path(__file__).resolve().parents[1] / "prompts" / "checker.md").read_text(encoding="utf-8")
-    assert "A card shows a count by the places of the things it counts" not in text
+def test_a_true_count_of_a_printed_table_s_rows_verifies_from_the_rows_the_card_keeps():
+    """B20: "Six of the eight themes came up with all 7 participants" failed with "None of the 9 cited lines of the
+    card's output shows 6 or 8": a printed table's lines show values, never how many of them meet a condition. The card
+    keeps the rows of a table its code printed, and the count names that table and its condition: thimble counts 6 of
+    its 8 rows with 7 participants. The rows cited as places still show no count, and the checker's text asks for the
+    table and the condition."""
+    ev = {"ref": "card:f2a7c4d1@out0#L2", "count": {"participants": 7}}
+    for words, sentence in (("6 of the 8", "[6 of the 8] themes came up with all 7 participants."),
+                            ("Six of the eight themes came up with all 7 participants", None),
+                            ("six of the eight themes", "[six of the eight themes] came up with all seven participants.")):
+        r = counted(words, ev, THEMES, sentence)
+        assert r["status"] == "verified", (words, r)
+    shown = r["evidence"]
+    assert tinted(shown) == sorted(t for t, p in THEME_ROWS if p == 7) and shown["ref"] == "card:f2a7c4d1@out0#L2"
+    assert shown["table"]["cols"] == ["participants"] and [shown["output"][a:b] for a, b in shown["highlight"]] == ["slow onboarding   7"]
+    assert shown["count"] == "6 of 8 rows with participants 7"
+    for ref in ("card:f2a7c4d1@out0", "card:f2a7c4d1@out0#L1-L9"):
+        assert counted("6 of the 8", {**ev, "ref": ref}, THEMES, "[6 of the 8] themes came up with all 7 participants.")["status"] == "verified"
     rows = {"ref": [f"card:f2a7c4d1@out0#L{n}" for n in range(2, 10)]}
-    m = {"n": 1, "words": "6 of the 8", "sentence": "[6 of the 8] themes came up with all 7 participants."}
-    r = check_mark(m, {**card(""), "evidence": rows}, [], "/data", cards=THEMES)
-    assert (r["status"], r["reason"]) == ("failed", "None of the 8 cited lines of the card's output shows 6.")
+    r = counted("6 of the 8", rows, THEMES, "[6 of the 8] themes came up with all 7 participants.")
+    assert (r["status"], r["reason"]) == ("failed", "None of the 8 cited lines of the card's output shows 6 or 8.")
+    text = (Path(__file__).resolve().parents[1] / "prompts" / "checker.md").read_text(encoding="utf-8")
+    assert '`{"ref": "card:<id>@out1", "count": {"nights_failed": 5}}`' in text
+    assert "A card shows a count by the places of the things it counts" not in text
+
+
+SERVICES = [("auth-gateway", 5, 40, "platform", 1.0), ("billing-sync", 5, 38, "platform", 1.0), ("cart-api", 5, 37, "product", 1.0),
+            ("catalog-indexer", 2, 35, "product", 0.4), ("email-relay", 3, 33, "platform", 0.6), ("geo-lookup", 1, 31, "product", 0.2),
+            ("ledger-writer", 0, 30, "platform", 0.0), ("search-proxy", 4, 29, "product", 0.8), ("thumbnailer", 0, 22, "product", 0.0)]
+COLS = ["service", "nights_failed", "runs", "team", "share_failed"]
+NIGHTS_TABLE = {"columns": COLS, "rows": [list(s) for s in SERVICES], "names": [s[0] for s in SERVICES], "label": "service", "total": 9}
+NIGHTS_TEXT = [f"{'':<16}{'  '.join(COLS[1:])}", "service"] + [f"{s:<16}{n:>13}{r:>6}{t:>10}{f:>14}" for s, n, r, t, f in SERVICES]
+# made up: nightly runs of 9 services over 5 nights; 3 failed every night. A table card's frame (cells) and the same
+# table printed by the card's code (lines), each with its rows as data
+NIGHTLY = [{"id": "e8d2b6f4", "title": "Nights each service failed, of 5", "outputs": [
+    {"out": 0, "corner": "service", "cells": [[c, s[0], str(v)] for s in SERVICES for c, v in zip(COLS[1:], s[1:])], "tables": [NIGHTS_TABLE]},
+    {"out": 1, "lines": [[n, t] for n, t in enumerate(NIGHTS_TEXT, 1)], "tables": [{**NIGHTS_TABLE, "lines": [1, 11]}]}]}]
+EVERY_NIGHT = sorted(s[0] for s in SERVICES if s[1] == 5)
+
+
+def test_a_count_of_a_card_s_rows_names_its_table_and_condition_and_thimble_counts_them():
+    """B20: a count that no single place of a card shows names the card's table and the condition each counted row
+    meets, and thimble counts the rows that meet it in the rows the card keeps (made-up nightly runs): from a table's
+    cells or a printed table, by number words, every row, a bound, a part of the table (`of`), words, a share as a
+    percent, a yes column named by the sentence, and a correction. The counted rows are cited, at the condition's
+    column."""
+    five = {"nights_failed": 5}
+    for ref in ("card:e8d2b6f4@out0", "card:e8d2b6f4#runs/cart-api", "card:e8d2b6f4@out1", "card:e8d2b6f4@out1#L4", "card:e8d2b6f4@out1#L3-L11"):
+        r = counted("3 of the 9", {"ref": ref, "count": five}, NIGHTLY, "[3 of the 9] services failed on all 5 nights.")
+        assert r["status"] == "verified" and tinted(r["evidence"]) == EVERY_NIGHT, (ref, r)
+    r = counted("3 of the 9", {"ref": "card:e8d2b6f4@out0", "count": five}, NIGHTLY, "[3 of the 9] services failed on all 5 nights.")
+    t = r["evidence"]["table"]
+    assert r["evidence"]["ref"] == "card:e8d2b6f4#nights%5Ffailed/auth-gateway" and t["cols"][t["at"]["c"]] == "nights_failed"
+    true = [("three of the nine services failed on all five nights", five, None),
+            ("all 9 services", {}, None),
+            ("4 of the 9 services failed on at least 4 nights", {"nights_failed": {">=": 4}}, None),
+            ("4 of the 9", {"nights_failed": {">=": 4}}, "[4 of the 9] services failed on 4 nights or more."),
+            ("5 of the 9 services", {"team": "product"}, "[5 of the 9 services] belong to the product team."),
+            ("3 of the 9 services failed on 100% of nights", {"share_failed": 1}, None),
+            ("3 of the 9", {"nights_failed": 5}, "Of the services, [3 of the 9] failed on all [5] nights.")]
+    for words, cond, sentence in true:
+        assert counted(words, {"ref": "card:e8d2b6f4@out0", "count": cond}, NIGHTLY, sentence)["status"] == "verified", words
+    platform = counted("2 of the 4 platform services", {"ref": "card:e8d2b6f4@out0", "count": five, "of": {"team": "platform"}}, NIGHTLY,
+                       "[2 of the 4 platform services] failed on all 5 nights.")
+    assert platform["status"] == "verified" and tinted(platform["evidence"]) == ["auth-gateway", "billing-sync"]
+    yes = [{"id": "f9a3c7e5", "title": "Services that failed every night", "outputs": [{"out": 0, "corner": "service", "cells": [
+        ["failed every night", s[0], "yes" if s[1] == 5 else "no"] for s in SERVICES], "tables": [{
+        "columns": ["service", "failed every night"], "rows": [[s[0], s[1] == 5] for s in SERVICES], "names": [s[0] for s in SERVICES],
+        "label": "service", "total": 9}]}]}]
+    assert counted("3 of the 9 services failed every night", {"ref": "card:f9a3c7e5@out0", "count": {"failed every night": True}}, yes)["status"] == "verified"
+    fixed = counted("4 of the 9", {"ref": "card:e8d2b6f4@out0", "count": five}, NIGHTLY, "[4 of the 9] services failed on all 5 nights.",
+                    "corrected", {"words": "3 of the 9"})
+    assert (fixed["status"], fixed["shown"], fixed["was"]) == ("corrected", "3 of the 9", "4 of the 9"), fixed
+
+
+def test_a_count_fails_when_the_rows_do_not_give_it_or_the_sentence_does_not_state_its_condition():
+    """B20, the verifier's attacks in the new form (made-up nightly runs): a count the rows do not give, a condition
+    the sentence does not state (a bound, a value that only the count's own number shows, a value of another column), a
+    number of the words that is neither the count nor the condition's, a count the words put under a bound it does not
+    meet, an average of 4.6 or a share of 0.6 that rounds to the words, `of` that picks the counted rows themselves, a
+    column every row meets that the sentence does not name, and evidence thimble cannot read each fail, with why."""
+    def why(words: str, cond: dict, sentence: str | None = None, **more) -> str:
+        r = counted(words, {"ref": "card:e8d2b6f4@out0", "count": cond, **more}, NIGHTLY, sentence)
+        assert (r["status"], r["failedBy"]) == ("failed", "evidence"), (words, cond, r)
+        return r["reason"]
+
+    five = {"nights_failed": 5}
+    assert why("4 of the 9 services failed on all 5 nights", five) == "The card's table has 3 rows with nights_failed 5, not 4."
+    assert why("3 of the 10 services failed on all 5 nights", five) == "The card's table has 9 rows, not 10."
+    assert why("all 9 services failed on all 5 nights", five) == "The card's table has 3 rows with nights_failed 5, which the words do not state."
+    assert why("all 3 services failed on all 5 nights", five) == "The card's table has 9 rows, not 3."
+    assert why("4 of the 9 services failed on all 5 nights", {"nights_failed": {">=": 4}}) == (
+        "The check counts the rows with nights_failed at least 4, which the sentence does not say.")
+    assert why("3 of the 9", five, "[3 of the 9] services failed every night.") == (
+        "The check counts the rows with nights_failed 5, which the sentence does not say.")
+    assert why("2 of the 9", {"nights_failed": 0}, "[2 of the 9] services never failed.") == (
+        "The check counts the rows with nights_failed 0, which the sentence does not say.")
+    # the count's own number states no condition: 5 rows of the product team are no "5 of the 9 services"
+    assert why("5 of the 9", {"team": "product"}, "[5 of the 9] services failed at least once.") == (
+        "The check counts the rows with team product, which the sentence does not say.")
+    assert why("5 of the 9 services failed on more than 3 nights", {"nights_failed": {">=": 3}}) == (
+        "The check counts the rows with nights_failed at least 3, which the sentence does not say.")
+    assert why("3 of the 9 services failed on all 5 nights in 2026", five) == "The words' 2026 is neither the count nor a value of its condition."
+    assert why("more than 3 of the 9 services failed on all 5 nights", five) == "The card's table has 3 rows with nights_failed 5, not over 3."
+    assert why("almost 4 of the 9 services failed on all 5 nights", five) == (
+        "The card's table has 3 rows with nights_failed 5, and the words give no exact number of them.")
+    assert why("-3 of the 9 services failed on all 5 nights", five) == "The card's table has 3 rows with nights_failed 5, which the words do not state."
+    assert counted("at least 3 of the 9 services failed on all 5 nights", {"ref": "card:e8d2b6f4@out0", "count": five}, NIGHTLY)["status"] == "verified"
+    # a condition every row meets picks no row out: the sentence names its column
+    run = [{"id": "c2e6a0d4", "title": "Nights each service ran and failed", "outputs": [{"out": 0, "corner": "service", "cells": [
+        [c, s[0], str(v)] for s in SERVICES for c, v in (("nights_run", 5), ("nights_failed", s[1]))], "tables": [{
+        "columns": ["service", "nights_run", "nights_failed"], "rows": [[s[0], 5, s[1]] for s in SERVICES], "names": [s[0] for s in SERVICES],
+        "label": "service", "total": 9}]}]}]
+    every = counted("all 9 services failed on all 5 nights", {"ref": "card:c2e6a0d4@out0", "count": {"nights_run": 5}}, run)
+    assert every["reason"] == "Every row of the card's table has nights_run 5, and the sentence does not name nights_run."
+    assert counted("all 9 services were run on all 5 nights", {"ref": "card:c2e6a0d4@out0", "count": {"nights_run": 5}}, run)["status"] == "verified"
+    assert why("5 of the 9 services failed on 100% of nights", {"share_failed": 1}) == "The card's table has 3 rows with share_failed 1, not 5."
+    assert why("3 of the 3 services failed on all 5 nights", {}, of=five) == "The check counts 3 of the 3 rows with nights_failed 5, which are the same rows."
+    assert why("2 of the 9 services failed on all 6 nights", {"nights_failed": 6}) == "The card's table has 0 rows with nights_failed 6, not 2."
+    assert why("0 of the 9 services failed on all 6 nights", {"nights_failed": 6}) == "No row of the card's table has nights_failed 6, so the count shows no row."
+    assert why("3 of the 9", {"nights": 5}, "[3 of the 9] failed on all 5 nights.") == "The card's table has no column nights."
+    assert why("3 of the 9", [["nights_failed", 5]], "[3 of the 9] failed on all 5 nights.") == "The check gave the count's condition in a form thimble cannot read."
+    avg = [{"id": "a4c8e2f6", "title": "Average nights failed", "outputs": [{"out": 0, "corner": "service", "cells": [
+        ["avg_nights_failed", s, str(v)] for s, v in (("auth-gateway", 5.0), ("billing-sync", 5.0), ("cart-api", 5.0), ("search-proxy", 4.6))],
+        "tables": [{"columns": ["service", "avg_nights_failed"], "rows": [["auth-gateway", 5.0], ["billing-sync", 5.0], ["cart-api", 5.0], ["search-proxy", 4.6]],
+                    "names": ["auth-gateway", "billing-sync", "cart-api", "search-proxy"], "label": "service", "total": 4}]}]}]
+    r = counted("4 of the 4 services failed on all 5 nights", {"ref": "card:a4c8e2f6@out0", "count": {"avg_nights_failed": 5}}, avg)
+    assert r["reason"] == "The card's table has 3 rows with avg_nights_failed 5, not 4."
+    two = counted("3 of the 9", {"ref": ["card:e8d2b6f4@out0", "card:a4c8e2f6@out0"], "count": five}, NIGHTLY + avg, "[3 of the 9] failed on all 5 nights.")
+    assert two["reason"] == "The check named more than one table for one count."
+
+
+def test_a_table_the_card_keeps_in_part_or_whose_rows_are_not_one_thing_each_gives_no_count():
+    """B20, the verifier's attacks on the table itself (made up): a table the card keeps only part of, a table whose
+    rows two share a name (also a column of names with one written twice, in rows no column names), or two rows the
+    same in every column, printed text the card keeps no rows of, and a table the card shows only as text, give no
+    count; a row that sums up the others (pandas' margins, a mean row) is left out of the count, never counted as a
+    service. A log whose rows repeat a name often still counts."""
+    def why(table: dict, words: str = "3 of the 9", cond: dict | None = None, out: dict | None = None) -> str:
+        cards = [{"id": "b5d9f3a7", "title": "made up", "outputs": [{"out": 0, "corner": "service", "cells": [["runs", "auth-gateway", "40"]],
+                                                                     **({"tables": [table]} if table else {}), **(out or {})}]}]
+        r = counted(words, {"ref": "card:b5d9f3a7@out0", "count": cond if cond is not None else {"nights_failed": 5}}, cards,
+                    f"[{words}] services failed on all 5 nights.")
+        assert r["status"] == "failed", r
+        return r["reason"]
+
+    assert why({**NIGHTS_TABLE, "rows": NIGHTS_TABLE["rows"][:5], "total": 60}) == (
+        "The card keeps 5 of the table's 60 rows, so they cannot be counted.")
+    twice = {**NIGHTS_TABLE, "rows": [list(SERVICES[0])] + NIGHTS_TABLE["rows"][:8], "names": [SERVICES[0][0]] + NIGHTS_TABLE["names"][:8]}
+    assert why(twice, "4 of the 9") == "Two rows of the card's table are named auth-gateway, so its rows cannot be counted."
+    rows = [[s[0], s[1], s[2]] for s in SERVICES]
+    total = {"columns": ["service", "nights_failed", "runs"], "rows": rows + [["All", sum(r[1] for r in rows), sum(r[2] for r in rows)]],
+             "names": [r[0] for r in rows] + ["All"], "label": "service", "total": 10}
+    assert why(total, "3 of the 10") == "The card's table has 9 rows besides the row All that sums them up, not 10."
+    mean = {**total, "rows": rows + [["mean", 2.8, 32.8]], "names": [r[0] for r in rows] + ["mean"]}
+    assert why(mean, "3 of the 10") == "The card's table has 9 rows besides the row mean that sums them up, not 10."
+    meant = [{"id": "b5d9f3a7", "title": "made up", "outputs": [{"out": 0, "corner": "service", "cells": [["runs", "auth-gateway", "40"]], "tables": [mean]}]}]
+    r = counted("3 of the 9", {"ref": "card:b5d9f3a7@out0", "count": {"nights_failed": 5}}, meant, "[3 of the 9] services failed on all 5 nights.")
+    assert r["status"] == "verified" and r["evidence"]["count"] == "3 of 9 rows with nights_failed 5 besides the row mean that sums them up"
+    unnamed = {"columns": ["service", "nights_failed", "runs"], "names": [str(i) for i in range(9)], "label": None, "total": 9,
+               "rows": [["auth-gateway", 5, 40], ["auth-gateway", 5, 41]] + [list(x[:3]) for x in SERVICES[1:8]]}
+    assert why(unnamed, "4 of the 9") == "Two rows of the card's table are named auth-gateway, so its rows cannot be counted."
+    same = {**unnamed, "columns": ["nights_failed", "runs"], "rows": [[5, 40], [5, 40]] + [list(x[1:3]) for x in SERVICES[1:8]]}
+    assert why(same, "4 of the 9") == "Two rows of the card's table have the same value in every column, so its rows cannot be counted."
+    log = {"columns": ["agent", "pr", "merged"], "names": [str(i) for i in range(6)], "label": None, "total": 6,
+           "rows": [["a1", 1, True], ["a1", 2, False], ["a2", 3, True], ["a3", 4, True], ["a2", 5, False], ["a1", 6, True]]}
+    cards = [{"id": "d8f2b6c0", "title": "made up", "outputs": [{"out": 0, "lines": [[1, "a log"]], "tables": [{**log, "lines": [1, 1]}]}]}]
+    assert counted("4 of the 6 pull requests were merged", {"ref": "card:d8f2b6c0@out0", "count": {"merged": True}}, cards)["status"] == "verified"
+    assert why({}) == "The card keeps that table only as the text it shows, so its rows cannot be counted."
+    printed = [{"id": "c6e0a4b8", "title": "made up", "outputs": [{"out": 0, "lines": [[n, t] for n, t in enumerate(NIGHTS_TEXT, 1)]}]}]
+    r = counted("3 of the 9", {"ref": "card:c6e0a4b8@out0#L4", "count": {"nights_failed": 5}}, printed, "[3 of the 9] failed on all 5 nights.")
+    assert r["reason"] == "Line 4 of the card's output is printed text, not rows the card keeps as data, so its rows cannot be counted."
+
+
+def test_places_never_count_themselves_and_n_of_the_m_stands_in_one_row():
+    """B20, the verifier's attacks in the form of places (made up): rows cited as places, with or without the table's
+    header, show their values, never how many they are, and "N of the M" takes N and M from one row: never one
+    service's 4 nights and the 9 of a title line, red's 3 negatives and the 12 runs of all teams, or the 3 and the 4 of
+    two themes' mentions. The cells of one row, a column named for a total and a label card's count beside its total
+    still show it."""
+    rows = [f"card:e8d2b6f4@out1#L{n}" for n in range(3, 12)]
+    for ref in (rows[:3], ["card:e8d2b6f4@out1#L1"] + rows[:3], [rows[:3], rows], [f"card:e8d2b6f4#nights%5Ffailed/{s}" for s in EVERY_NIGHT]):
+        assert counted("3 of the 9 services", {"ref": ref}, NIGHTLY)["status"] == "failed", ref
+    titled = [{"id": "d7f1b5c9", "title": "made up", "outputs": [{"out": 0, "lines": [[1, "Nightly runs of 9 services"]] + [
+        [n + 1, t] for n, t in enumerate(NIGHTS_TEXT, 1)]}]}]
+    r = counted("4 of the 9 services", {"ref": ["card:d7f1b5c9@out0#L11", "card:d7f1b5c9@out0#L1"]}, titled)
+    assert (r["status"], r["reason"]) == ("failed", "The cited places show 4 and 9 in different rows, not 4 out of 9.")
+    tone = [{"id": "e8a2c6d0", "title": "Runs by team and tone", "outputs": [{"out": 0, "lines": [
+        [1, "tone   neg  pos  All"], [2, "team"], [3, "blue     2    1    3"], [4, "green    1    3    4"], [5, "red      3    2    5"], [6, "All      6    6   12"]]}]}]
+    r = counted("3 of the 12 runs were negative", {"ref": ["card:e8a2c6d0@out0#L5", "card:e8a2c6d0@out0#L6"]}, tone)
+    assert r["reason"] == "The cited places show 3 and 12 in different rows, not 3 out of 12."
+    assert counted("6 of the 12 runs were negative", {"ref": "card:e8a2c6d0@out0#L6"}, tone)["status"] == "verified"
+    mentions = [{"id": "f9b3d7e1", "title": "Users who raised each theme", "outputs": [{"out": 0, "corner": "theme", "cells": [
+        [c, t, str(v)] for t, a, b, m in (("sync", 7, 7, 3), ("search", 7, 7, 4), ("offline mode", 7, 7, 2), ("price", 5, 7, 1))
+        for c, v in (("raised_by", a), ("of_users", b), ("mentions", m))]}]}]
+    r = counted("3 of the 4 themes came up with all 7 users", {"ref": ["card:f9b3d7e1#raised%5Fby/sync", "card:f9b3d7e1#mentions/sync",
+                                                                         "card:f9b3d7e1#mentions/search"]}, mentions)
+    assert r["reason"] == "The cited places show 3 and 4 in different rows, not 3 out of 4."
+    assert counted("7 of the 7 users", {"ref": ["card:f9b3d7e1#raised%5Fby/sync", "card:f9b3d7e1#of%5Fusers/sync"]}, mentions)["status"] == "verified"
+    label = [{"id": "a1c7e3f9", "title": "Requests by kind", "outputs": [{"out": 0, "corner": "value", "totals": "all", "cells": [
+        ["records", "faster search", "33"], ["records", "other", "39"], ["records", "all", "72"]]}]}]
+    assert counted("33 of the 72", {"ref": ["card:a1c7e3f9#records/faster%20search", "card:a1c7e3f9#records/all"]}, label)["status"] == "verified"
+    assert counted("33 of the 39", {"ref": ["card:a1c7e3f9#records/faster%20search", "card:a1c7e3f9#records/other"]}, label)["status"] == "failed"
+
+
+def test_a_percent_is_a_share_as_exact_as_it_and_a_count_is_never_a_rounded_value():
+    """B20, the verifier's attacks on values (made up): 100% read as the share 1 matched a share of 0.6, and 50% as 0.5
+    matched 0.46, since the share lost the percent's places; an average of 4.6 nights showed "all 5 nights". A percent
+    is a share as exact as the percent (100% is 1.00), and a count the words state ("all 5", "3 of the 9") is never a
+    rounded value; other words still round as the reply does."""
+    def value(words: str, shown: str) -> str:
+        cards = [{"id": "c8e4a0b2", "title": "made up", "outputs": [{"out": 0, "corner": "service", "cells": [["v", "search-proxy", shown]]}]}]
+        return check_mark({"n": 1, "words": words}, card("card:c8e4a0b2#v/search-proxy"), [], "/data", cards=cards)["status"]
+
+    assert [value("failed on 100% of nights", x) for x in ("0.6", "1.0", "0.996", "1")] == ["failed", "verified", "verified", "verified"]
+    assert [value("failed on 50% of nights", x) for x in ("0.46", "0.5", "0.497", "0.54")] == ["failed", "verified", "verified", "failed"]
+    assert [value(w, "4.6") for w in ("failed on all 5 nights", "failed on 5 nights", "4.6 nights")] == ["failed", "verified", "verified"]
+    assert value("3 of the 9", "3 of 9.4") == "failed" and value("3 of the 9", "3 of 9") == "verified"
+    assert value("59.7% of runs", "0.59718") == "verified"
 
 
 def test_computed_output_that_is_a_printed_dataframe_carries_its_table():

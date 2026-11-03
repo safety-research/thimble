@@ -133,10 +133,12 @@ def check_folders(c: str, main: dict[str, Any]) -> tuple[str, str]:
 def session_cards(c: str) -> list[dict[str, Any]]:
     """The workspace's cards as the validator reads them (evidence.check_card): each card that ran with outputs, its
     title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html table) or the
-    lines of its printed text, as the card's citations name them (cite.bundle_cells, cite.numbered_lines). A label card
-    is each version its label kept (label_versions), its table as the card showed it then (concepts.card_table), with
-    when that version was made, what made it and what changed after it: the validator reads it as it was when the cited
-    words were written, never from the label's files in the workspace, which a card's code can write."""
+    lines of its printed text, as the card's citations name them (cite.bundle_cells, cite.numbered_lines), with the
+    tables the output holds as data (card_tables), whose rows a count counts (evidence.check_count). A label card is
+    each version its label kept (label_versions), its table as the card showed it then (concepts.card_table) and as
+    data, which names the row that totals its values (`totals`), with when that version was made, what made it and
+    what changed after it: the validator reads it as it was when the cited words were written, never from the label's
+    files in the workspace, which a card's code can write."""
     from . import cite, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -178,13 +180,25 @@ def _label_versions(c: str, ws: Path, card: dict[str, Any], cell: dict[str, Any]
         newest = since is not None and i == len(kept) - 1
         out.append({**card, "version": v["v"], "from": v["at"], "made": v["made"],
                     "after": label_versions.CHANGED if newest else label_versions.after_text(kept, i),
-                    **({"to": since} if newest else {}), "outputs": _outputs([(0, concepts.card_table(v))])})
+                    **({"to": since} if newest else {}), "outputs": _version_outputs(v)})
     return out
+
+
+def _version_outputs(v: dict[str, Any]) -> list[dict[str, Any]]:
+    """A label version's output as the validator reads it (session_cards): the cells of its table as the card showed it
+    (concepts.card_table), and the same rows as data (concepts.card_rows), which a count of the label's values counts,
+    with the row that totals them (`totals`)."""
+    from . import concepts  # noqa: PLC0415
+
+    t = concepts.card_rows(v)
+    totals = t.pop("totals")
+    return [{**o, "tables": [t], **({"totals": totals} if totals else {})}
+            for o in _outputs([(0, concepts.card_table(v))])]
 
 
 def _outputs(bundles: list[tuple[int, dict[str, Any]]]) -> list[dict[str, Any]]:
     """A card's output bundles as the validator reads them (session_cards): each table's cells, else the lines of each
-    printed text."""
+    printed text, each with the tables it holds as data (card_tables)."""
     from . import cite, notebook  # noqa: PLC0415
 
     outs: list[dict[str, Any]] = []
@@ -192,13 +206,59 @@ def _outputs(bundles: list[tuple[int, dict[str, Any]]]) -> list[dict[str, Any]]:
         if notebook.ERROR_MIME in b:
             continue
         cells = cite.bundle_cells(b)
+        tables = card_tables(b)
         if cells:
-            outs.append({"out": i, "corner": cite._row_names(b)[0], "cells": [list(x) for x in cells]})
+            outs.append({"out": i, "corner": cite._row_names(b)[0], "cells": [list(x) for x in cells],
+                         **({"tables": tables} if tables else {})})
         elif cite.chart_spec(b) is None and not any(k.startswith("image/") for k in b):
             lines = [[n, t] for n, t in cite.numbered_lines(b) if t.strip()]
             if lines:
-                outs.append({"out": i, "lines": lines})
+                outs.append({"out": i, "lines": lines, **({"tables": tables} if tables else {})})
     return outs
+
+
+def card_tables(b: dict[str, Any]) -> list[dict[str, Any]]:
+    """The tables an output holds as data, which a count of a card's rows counts (evidence.check_count), each {columns,
+    rows, names, label, total, lines?}: a table card's DataFrame (frames.py), the rows of a chart's main part (none when
+    another part draws rows of the same columns, so the chart's rows are split), a diagram's edges and a timeline's
+    events (on the lines of their listing after its first), and each table the card's code printed (on its lines). The
+    rows are the values themselves, never their text; names are the rows' names as the output's citations write them."""
+    from . import cite, frames  # noqa: PLC0415
+    from .kernel_thimble import DIAGRAM_MIME, TIMELINE_MIME  # noqa: PLC0415
+
+    def frame_table(f: dict[str, Any], lines: list[int] | None = None) -> dict[str, Any]:
+        t = {"columns": [str(x) for x in f["columns"]], "rows": f["rows"], "names": frames.row_labels(f), "label": f.get("label"),
+             "total": int(f.get("total") or len(f["rows"]))}
+        return {**t, "lines": lines} if lines else t
+
+    f = frames.frame_of(b)
+    if f is not None:
+        return [frame_table(f)]
+    spec = cite.chart_spec(b)
+    if spec is not None:
+        main = cite._main_part(spec)
+        table = cite.chart_table(b)
+        if main is None or table is None:
+            return []
+        part, raw = main
+        rows = [r for r in raw[:cite.CHART_ROWS_MAX] if isinstance(r, dict)]
+        cols = list(dict.fromkeys(str(k) for r in rows for k in r))
+        # another part with other rows of the columns draws the rest of them (a layer each for some services, one with a
+        # column more); a part that draws the same rows again (a layer of labels over its bars) splits nothing
+        if any(p is not part and got is not raw and got != raw and {str(k) for r in got if isinstance(r, dict) for k in r} >= set(cols)
+               for p, got in cite._row_parts(spec)):
+            return []
+        return [{"columns": cols, "rows": [[r.get(k) for k in cols] for r in rows], "names": table.labels, "label": table.label,
+                 "total": len(raw)}]
+    drawn = b.get(DIAGRAM_MIME) if isinstance(b.get(DIAGRAM_MIME), dict) else b.get(TIMELINE_MIME) if isinstance(b.get(TIMELINE_MIME), dict) else None
+    if drawn is not None:
+        edges = DIAGRAM_MIME in b
+        items = [x for x in drawn.get("edges" if edges else "events") or [] if isinstance(x, dict)]
+        cols = ["source", "target", "label"] if edges else ["time", "label", "lane", "end"]
+        names = [f"{x.get('source')} -> {x.get('target')}" if edges else str(x.get("time") or "") for x in items]
+        return [{"columns": cols, "rows": [[x.get(k) for k in cols] for x in items], "names": names, "label": None,
+                 "total": len(items), "lines": [2, 1 + len(items)]}] if items else []
+    return [frame_table(f, span) for span, f in frames.printed_frames(b)]
 
 
 def cards_index(c: str, cards: list[dict[str, Any]], at: float | None = None) -> str:

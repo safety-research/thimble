@@ -17,11 +17,11 @@ T0 = 1_780_000_000.0  # when the trial's version was made; the others follow it
 
 
 def label(version: int, nav: str, total: str, at: float, made: str, after: str = "", cid: str = "q7r2t5") -> dict:
-    """A version of a label card as a host gives it: its table (value, records), when it was made and what made it,
-    and what changed after it."""
+    """A version of a label card as a host gives it: its table (value, records), whose row `all` totals the values
+    (`totals`), when it was made and what made it, and what changed after it."""
     return {"id": cid, "title": "Which theme?", "version": version, "from": at, "made": made, "after": after,
-            "outputs": [{"out": 0, "corner": "value", "cells": [["records", "navigation", nav], ["records", "clutter", "4"],
-                                                                 ["records", "all", total]]}]}
+            "outputs": [{"out": 0, "corner": "value", "totals": "all",
+                         "cells": [["records", "navigation", nav], ["records", "clutter", "4"], ["records", "all", total]]}]}
 
 
 # the live case: a trial (v1), the label redefined in main's own turn (v2, its rows gone), then, after the reply, the
@@ -112,8 +112,13 @@ def test_places_shown_at_one_time_stand_together():
               sentence="In the trial, [13 and 9] records were about navigation.")
     assert r["status"] == "verified", r
     # the label as it is now, unchanged since its version, beside a card as it is now
-    r = check("118 of the 423", item(["card:q7r2t5#records/navigation", "card:t0ta15#records/all"]), [*V, TOTAL], LATER)
+    both = ["card:q7r2t5#records/navigation", "card:t0ta15#records/all"]
+    r = check("118 and 423", item(both), [*V, TOTAL], LATER,
+              sentence="Now [118 and 423] records are about navigation and in the files.")
     assert r["status"] == "verified", r
+    # B20: places shown at one time are still two rows of two cards, which show no count of one out of the other
+    assert outcome(check("118 of the 423", item(both), [*V, TOTAL], LATER)) == (
+        "failed", "evidence", "The cited places show 118 and 423 in different rows, not 118 out of 423.")
 
 
 @pytest.mark.parametrize("name, ref, cards, reason", [
@@ -215,12 +220,13 @@ def test_the_terminal_s_labels_are_cards_of_their_kept_versions_and_validate_rea
     ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({**req, "answer": answer, "at": T0 + 200}),
                          capture_output=True, text=True, check=True)
     assert json.loads(ran.stdout)["results"][0]["status"] == "verified"
-    # the index the checker greps lists the labels as of the reply
+    # the index the checker greps lists the labels as of the reply, each version's counts also as a table a count names
     out = tmp_path / "index.tsv"
     subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"index": str(out), "labels_dir": str(labels), "at": T0 + 30}),
                    capture_output=True, text=True, check=True)
     assert ("# card:label-theme label theme (as it was when the cited words were written; made by: a trial over 40 records; it "
-            "changed after: run over 423 records)\ncard:label-theme#records/navigation\t13\n") in out.read_text()
+            "changed after: run over 423 records)\ncard:label-theme@out0\ta table of 3 rows: value, records\n"
+            "card:label-theme#records/navigation\t13\n") in out.read_text()
 
 
 def test_check_all_reads_every_mark_at_the_time_its_words_were_written():
@@ -228,3 +234,40 @@ def test_check_all_reads_every_mark_at_the_time_its_words_were_written():
     marks = [{"n": 1, "words": "13 of the 40", "sentence": "[13 of the 40] records"}]
     assert check_all(marks, answer, [], "/data", cards=V, at=T0 + 30)["results"][0]["status"] == "verified"
     assert check_all(marks, answer, [], "/data", cards=V, at=LATER)["results"][0]["status"] == "failed"
+
+
+def test_a_count_of_a_label_s_values_reads_one_version_as_it_was_when_the_words_were_written(tmp_path):
+    """B19 with B20: a label's version is also a table a count of its rows names (`card:<id>@out0`, `@v<n>` an earlier
+    one), its row `all` left out as the row that totals the values. The count reads the version the words could have
+    read: an earlier one by its `@v<n>`, never one made after them, and one count reads one version."""
+    labels = tmp_path / "labels"
+    labels.mkdir()
+    themes = ("navigation", "clutter", "pricing")
+    versions = [{"v": 1, "at": T0, "made": "a trial over 40 records", "cols": ["records"],
+                 "rows": [[t, [str(n)]] for t, n in zip(themes, (13, 9, 18))] + [["all", ["40"]]]},
+                {"v": 2, "at": T0 + 120, "made": "run over 423 records", "cols": ["records"],
+                 "rows": [[t, [str(n)]] for t, n in zip(themes, (118, 205, 100))] + [["all", ["423"]]]}]
+    (labels / "theme.json").write_text(json.dumps({"name": "theme", "versions": versions}))
+    cards = terminal_label_cards(str(labels))
+    ten = {"records": {">=": 10}}
+
+    def count(words: str, ref, at: float) -> dict:
+        sentence = f"In the trial, [{words}] themes came up in at least 10 records."
+        return check(words, {**item(None), "evidence": {"ref": ref, "count": ten}}, cards, at, sentence)
+
+    # the trial by its version after the full run, and the label as it was when the words were written
+    assert count("2 of the 3", "card:label-theme@v1@out0", LATER)["status"] == "verified"
+    assert count("2 of the 3", "card:label-theme@out0", T0 + 30)["status"] == "verified"
+    assert outcome(count("2 of the 3", "card:label-theme@out0", LATER)) == (
+        "failed", "evidence", "The card's table has 3 rows with records at least 10, not 2.")
+    # a version made after the words, versions of two times, and the total row as a theme
+    assert outcome(count("3 of the 3", "card:label-theme@v2@out0", T0 + 30)) == (
+        "failed", "evidence", "The card's version 2 was made after these words were written.")
+    assert outcome(count("3 of the 3", ["card:label-theme@v1@out0", "card:label-theme@v2@out0"], LATER)) == (
+        "failed", "evidence", "The check named more than one table for one count.")
+    assert outcome(count("3 of the 4", "card:label-theme@out0", LATER)) == (
+        "failed", "evidence", "The card's table has 3 rows besides the row all that sums them up, not 4.")
+    # the index lists each version's table under its heading, and none made after the words
+    index = card_index(cards, T0 + 30)
+    assert "card:label-theme@out0\ta table of 4 rows: value, records\n" in index and index.count("\ta table of") == 1
+    assert "card:label-theme@v1@out0\ta table of 4 rows: value, records\n" in card_index(cards, LATER)

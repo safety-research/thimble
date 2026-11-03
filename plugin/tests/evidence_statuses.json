@@ -80,8 +80,6 @@
 "test_a_card_s_printed_line_is_evidence_and_a_printed_table_reads_as_a_table": "v",
 "test_words_that_hold_a_range_or_a_pair_cite_a_place_for_each_value": "v v v fe fe c",
 "test_words_no_cited_place_shows_are_said_of_the_places_together_never_with_one_line_under_another_s_number": "fe fe fe fe fe fe fe",
-"test_a_count_of_what_a_diagram_shows_cites_the_things_it_counts": "v fe fe fe v fe",
-"test_a_terminal_diagram_card_s_count_is_its_rows_out_of_its_table": "",
 "test_computed_output_that_is_a_printed_dataframe_carries_its_table": "v v",
 "test_the_checker_s_index_lists_each_place_with_its_value_and_the_terminal_s_cards_read_from_their_folder": "v",
 "test_a_narrowing_cites_only_the_part_of_the_words_the_evidence_shows_and_leaves_claudes_own_words_out": "fe fe c c fe fe fe fe c",

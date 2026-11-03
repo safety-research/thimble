@@ -4,11 +4,11 @@
 // wrong or unconfirmed, with its evidence. `thimble dev validate` (engine/validate.py) then checks that evidence without a model and
 // without running code (engine/kernel/evidence.py): a quote must be in the file's line, and computed evidence names one
 // of the session's real Bash calls (the checker's or main's) by a part of its output, and that call's real output must
-// show the words; card evidence names places of the session's cards (cards/store.ts), whose values must show them, or
-// whose number shows a count of what they are. The conversation's labels are cards too, each version of its counts
-// kept (engine/kernel/labels.py keep_version), read as they were when the marks' words were written (`wroteAt`), never
-// as a later run or check made them. Before the forks start, the cards' places and values are written to a file the
-// checker greps (cardsIndex).
+// show the words; card evidence names places of the session's cards (cards/store.ts), whose values must show them, or a
+// card's table and a condition, whose rows the validator counts from the card's rows.json. The conversation's labels
+// are cards too, each version of its counts kept (engine/kernel/labels.py keep_version), read as they were when the
+// marks' words were written (`wroteAt`), never as a later run or check made them; a version's counts are a table too.
+// Before the forks start, the cards' tables, places and values are written to a file the checker greps (cardsIndex).
 // Its result is what the person sees.
 //
 //   noteRow($, row, text)     a text row of main's reply, as session.append stored it

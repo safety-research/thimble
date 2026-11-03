@@ -1,7 +1,8 @@
 """B19 changed the words of the validator's reasons and no status: each case of the validator's tests (test_evidence.py)
 ends as it ended before B19, which evidence_statuses.json keeps for each test of that file then, so a citation that
 failed still fails and one that verified still verifies; and no reason of a case names the folder the case made, where
-its files lie on this machine."""
+its files lie on this machine. B20 took out R5's two tests of a count read from the places it cites, which counts of a
+card's rows replace (test_a_count_of_a_diagram_s_edges_is_counted_from_its_edges)."""
 from __future__ import annotations
 
 import inspect
