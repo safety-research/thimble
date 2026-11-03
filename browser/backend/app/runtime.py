@@ -1162,7 +1162,8 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
     conversation is cut before the message, what main never read of what the rewind hides is taken back, and main's
     log gets the rewind's line; what else waited is main's next turn. {text: the message's words, then those of each
     message taken back, which the page puts back in the composer, event}. RewindRefused, with nothing changed, for a
-    message the chat no longer shows, and when the Claude Code session cannot be read."""
+    message the chat no longer shows and for a Claude Code session that cannot be read; when that read fails only
+    once main's turn has stopped, or main's state cannot be changed, the turn stays stopped, as after a Stop."""
     from . import agents, session  # noqa: PLC0415
 
     sp = ensure(c)
