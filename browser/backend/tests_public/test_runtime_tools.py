@@ -98,7 +98,8 @@ async def test_main_s_tools_never_go_through_a_link_a_card_swaps_in_while_they_r
     in place of a folder on the way between the two led the open outside: with a card swapping the workspace's tmp/
     with a link to an outside folder, some of main's Writes there landed in that folder and some Reads returned its
     file. Now each tool opens the real path Box checked one part at a time without following a link (nofollow): a call
-    the swap catches fails, and none reaches the folder."""
+    the swap catches fails, and none reaches the folder. (The kernel's sandbox binds tmp/ itself as a folder of its own,
+    kernel_wrap.PINNED_DIRS, which a card cannot move, so the swap here is of another folder the tools write.)"""
     from app import kernel_wrap, notebook, runtime, srt
 
     works = kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)) if wrap == "srt" else (
@@ -109,7 +110,9 @@ async def test_main_s_tools_never_go_through_a_link_a_card_swaps_in_while_they_r
     monkeypatch.setattr(runtime, "engine", lambda: "api")
     outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
     (outside / "secret.txt").write_text("OUTSIDE-SECRET")
-    ws, temp, corpus = config.workspace_dir("mini"), config.temp_dir("mini"), config.corpus_dir("mini")
+    ws, corpus = config.workspace_dir("mini"), config.corpus_dir("mini")
+    temp = ws / "made-up-folder"
+    temp.mkdir()
     (temp / "secret.txt").write_text("the workspace's own\n")
     box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[ws / "card-libs", temp],
                             temp=temp)

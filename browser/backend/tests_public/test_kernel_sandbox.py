@@ -367,14 +367,6 @@ async def test_card_code_can_t_write_the_files_the_hooks_trust_after_the_server_
         await notebook.shutdown_all()
 
 
-# a cell that puts a link to `target` in place of its TMPDIR, the workspace's tmp/ on the Messages API
-LINK_CELL = """
-import os, shutil
-t = os.environ['TMPDIR']
-shutil.rmtree(t)
-os.symlink({target!r}, t)
-print(os.path.islink(t))
-"""
 # a cell that tries to read `secret` and write `write` in a folder outside the workspace, then writes its own TMPDIR
 OUTSIDE_CELL = """
 import os
@@ -415,7 +407,9 @@ async def test_a_link_a_card_left_at_the_workspace_s_tmp_gives_no_later_kernel_t
     """On the Messages API every kernel's TMPDIR is the workspace's tmp/ (config.temp_dir), which a card's code can put a
     link to any folder in place of. The next kernel, a dedicated one or the shared one after Restart, had the link's
     target as its TMPDIR, the wrapper let it read and write that folder as one outside the workspace, and the server
-    made the folder private (0700). Now the TMPDIR is tmp/ in the workspace, a folder made again in place of a link."""
+    made the folder private (0700). Now the TMPDIR is tmp/ in the workspace, a folder made again in place of a link.
+    (A card's own kernel binds tmp/ as a folder of its own, kernel_wrap.PINNED_DIRS, so here the link is put there by
+    other means, as a kernel started before that could.)"""
     from app import runtime
 
     if not _wrap_works(wrap):
@@ -424,7 +418,9 @@ async def test_a_link_a_card_left_at_the_workspace_s_tmp_gives_no_later_kernel_t
     monkeypatch.setattr(runtime, "engine", lambda: "api")
     outside, secret = _outside(tmp_path_factory)
     try:
-        assert _said(await notebook.run_code("mini", LINK_CELL.format(target=str(outside)), "main")) == ["True"]
+        tmp = config.temp_dir("mini")
+        shutil.rmtree(tmp)
+        tmp.symlink_to(outside, target_is_directory=True)
         dedicated = await notebook.run_code("mini", OUTSIDE_CELL.format(secret=str(secret), write=str(outside / "k2.txt")),
                                             "main", kernel="k2")
         await notebook.restart("mini")
@@ -438,6 +434,46 @@ async def test_a_link_a_card_left_at_the_workspace_s_tmp_gives_no_later_kernel_t
     assert sorted(os.listdir(outside)) == ["secret.txt"]
     assert stat.S_IMODE(os.stat(outside).st_mode) == 0o755
     assert (config.temp_dir("mini") / "own.csv").is_file()
+
+
+# a card's code that tries to move each of `folders` away and to remove it, so that a link could take its place
+MOVE_CELL = """
+import os, shutil
+for d in {folders!r}:
+    try:
+        os.rename(d, d + '.moved')
+        print('moved')
+    except OSError:
+        try:
+            shutil.rmtree(d)
+            print('removed' if not os.path.exists(d) else 'kept')
+        except OSError:
+            print('kept')
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_card_code_can_t_move_the_workspace_s_folders_main_s_bash_writes_by_their_paths(
+        wrap, monkeypatch, workspaces_tmp):
+    """Main's Bash on the Messages API writes the workspace's tmp/ and card-libs/, which srt binds by their paths when
+    each command starts, after its own check that neither is a link. A card's code that moved one away and put a link
+    in its place in that moment had srt bind the folder the link points to, and main's Bash wrote and read outside its
+    folders. In the kernel's sandbox each is a folder of its own (a mount point), which no card's code can move or
+    remove."""
+    from app import card_libs, runtime
+
+    if not (LINUX and _wrap_works(wrap)):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    monkeypatch.setattr(runtime, "engine", lambda: "api")
+    card_libs.folder("mini").mkdir()  # as main's first npm install makes it
+    folders = [str(config.temp_dir("mini")), str(card_libs.folder("mini"))]
+    try:
+        said = _said(await notebook.run_code("mini", MOVE_CELL.format(folders=folders), "main"))
+    finally:
+        await notebook.shutdown_all()
+    assert said == ["kept", "kept"], said
+    assert all(os.path.isdir(d) and not os.path.islink(d) for d in folders)
 
 
 @pytest.mark.parametrize("wrap", ["srt", "bwrap"])
