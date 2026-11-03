@@ -20,7 +20,8 @@ A PreToolUse hook callback (in this process, not a plugin hook) hears each call 
 id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8, and each
 Bash call with its input, until a PostToolUse or PostToolUseFailure hook callback hears that it ended. The
 session's id is kept in <workspace>/runtime/convs/<id>.cc.json and resumed at the next turn; a fork resumes main's
-session as a fork of it (fork_session).
+session as a fork of it (fork_session). After a rewind of main (runtime.rewind_main) the state also names the entry of
+the session that main's next turn, and a fork until then, resumes it up to (resume_at), as a fork of it.
 
 A message the analyst sends while main's turn runs goes to main's session at once (_hand), as a message typed in Claude
 Code's prompt mid-turn: Claude Code gives it to the model at the turn's next tool call, or runs it as the session's next
@@ -74,6 +75,7 @@ TMP_TAG = 8  # workspace_tmp's name: TMP_PREFIX and this many hex digits of a ha
 TMP_OWNER = ".thimble-workspace"  # in workspace_tmp: the workspace's folder, which it goes with
 # a Claude Code session id, or the uuid of an entry of its transcript, as a state file keeps it
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+TRANSCRIPT_TYPES = ("user", "assistant", "progress", "system", "attachment")  # the records of a session's conversation
 CC_WRITES = (".claude", ".cc-writes")  # what Claude Code's sandbox makes in the session's working folder
 SANDBOX_FAILED = "Sandbox is required but failed to initialize"  # Claude Code's Bash result when it refuses the call
 SANDBOX_KEY = "cc-sandbox"  # the notice's key (notices.py)
@@ -115,6 +117,33 @@ def resume_at(state: dict[str, Any]) -> str | None:
     --resume-session-at."""
     at = str(state.get("resume_at") or "")
     return at if SESSION_ID_RE.match(at) else None
+
+
+def session_entries(sid: str) -> list[dict[str, Any]]:
+    """The entries of Claude Code session `sid`'s conversation, in the order its transcript holds them: each record with
+    a uuid of TRANSCRIPT_TYPES (a prompt, a reply, a tool's result, a message the session read mid-turn, which Claude
+    Code keeps as a queued_command attachment, a system or progress record), a subagent's own (isSidechain) left out.
+    Empty when no transcript of the session is found (session.find_transcript) or it cannot be read. `sid` is an id
+    session_id took."""
+    from . import session  # noqa: PLC0415
+
+    path = session.find_transcript(sid)
+    if path is None:
+        return []
+    out: list[dict[str, Any]] = []
+    try:  # in Claude Code's config folder, read as nofollow reads a file there: a FIFO holds no read
+        with nofollow.reader(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if (isinstance(rec, dict) and rec.get("type") in TRANSCRIPT_TYPES and isinstance(rec.get("uuid"), str)
+                        and not rec.get("isSidechain")):
+                    out.append(rec)
+    except OSError:
+        return []
+    return out
 
 
 def _save(path: Any, data: dict[str, Any]) -> None:

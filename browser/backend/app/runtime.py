@@ -410,6 +410,9 @@ class Space:
         # by event id, the analyst's words of each message that came while main's turn ran (events.post): main's chat
         # shows them waiting (unread), and their line goes in where main reads them (said_line)
         self.said: dict[str, str] = {}
+        # by event id, the quiet events that rode along with an event for main (events._publish) while it waits in
+        # main's queue: a rewind that takes the event back holds them again for main's next event (take_back)
+        self.riders: dict[str, list[dict[str, Any]]] = {}
 
     def _main_conv(self) -> Conv:
         tr = Transcript(self.main_path, self.sid)
@@ -500,11 +503,13 @@ class Space:
     def said_line(self, text: str) -> None:
         """The analyst's line of `text`, a browser event main reads now (Conv.heard, _main_loop) or never will
         (drop_waiting), into main's chat, when it is a message that waited for main's turn: events.post logs the line of
-        any other as it posts it."""
+        any other as it posts it. The quiet events the event carried (riders) leave with it."""
         from . import agents  # noqa: PLC0415
 
         m = EVENT_ID_RE.match(text)
         words = self.said.pop(m.group(1), None) if m else None
+        if m:
+            self.riders.pop(m.group(1), None)
         if m and words is not None:
             agents.mirror(self.c, "user", by=agents.BROWSER, text=words, event=m.group(1))
 
@@ -514,6 +519,34 @@ class Space:
         for text in self.main.queue:
             self.said_line(text)
         self.main.queue.clear()
+
+    def take_back(self, logged: dict[str, str]) -> list[tuple[str, str]]:
+        """What a rewind takes back of what waits for main (rewind_main): each message the analyst typed in main's chat
+        while its turn ran (said), and the event of each message of the analyst's that the rewind hides and main has
+        not read (`logged`: the words of each, by event id, such as a /thimble-fix's), leave main's queue unread, and
+        the quiet events they carried wait again for main's next event (events.hold_again). (event id, words) of each,
+        oldest first, for the composer. Every other event, such as an agent's report or a notice of thimble's, stays
+        for main's next turn."""
+        from . import events  # noqa: PLC0415
+
+        taken: list[tuple[str, str]] = []
+        kept: list[str] = []
+        riders: list[dict[str, Any]] = []
+        for text in self.main.queue:
+            m = EVENT_ID_RE.match(text)
+            eid = m.group(1) if m else ""
+            words = self.said.pop(eid, None) if eid else None
+            if words is None:
+                words = logged.get(eid) if eid else None
+            if words is None:
+                kept.append(text)
+                continue
+            taken.append((eid, words))
+            riders += self.riders.pop(eid, [])
+        self.main.queue[:] = kept
+        if riders:
+            events.hold_again(self.c, riders)
+        return taken
 
     # ---- what each agent runs with
 
@@ -884,8 +917,11 @@ def deliver(c: str, note: dict[str, Any]) -> None:
         return
     main = sp.main
     main.queue.append(text)
+    event = str(meta.get("event") or "")
+    if note.get("riders"):  # the quiet events it carries (events._publish), which a rewind holds again (take_back)
+        sp.riders[event] = list(note["riders"])
     if note.get("said"):
-        sp.said[str(meta.get("event") or "")] = str(note["said"])
+        sp.said[event] = str(note["said"])
         agents.notify(c, agents.MAIN_ID)
     if _in_loop():
         main.arrived.set()
@@ -944,8 +980,9 @@ async def abort_main(c: str) -> bool:
 
 def after_stop(c: str) -> None:
     """The analyst's Stop of main is told (agents.interrupt_route: the stopped turn ended in main's chat, with its
-    note): what waited for the stopped turn, such as a message the analyst sent while it ran, is main's next turn.
-    Nothing when the runtime is off or nothing waits."""
+    note), or a rewind is done (rewind_main): what waited for the stopped turn, such as a message the analyst sent
+    while it ran (after a rewind, what it did not take back), is main's next turn. Nothing when the runtime is off or
+    nothing waits."""
     sp = _spaces.get(c) if enabled() else None
     if sp is not None and sp.main.queue and not sp.main.running:
         sp.main.task = _spawn_task(_main_loop(sp), f"main:{c}")
@@ -979,16 +1016,36 @@ async def _cancel(task: Any) -> None:
 #
 # Rewind main to one of the analyst's messages, as Claude Code's /rewind restores a conversation: main's conversation
 # goes back to where it stood before that message, so its next turn sees neither the message nor anything after it.
-# The engine's state is cut there: the Messages API's message list is cut before the message's prompt, and the Claude
-# Code session's next turn resumes it at the entry before that prompt as a fork (resume_session_at), which Claude Code
-# keeps beside the session it leaves. Main's log only grows: the rewind's line (REWIND_CHIP) names the message, and the
-# page hides the records from that message to the line (rewound), so nothing that refers to a record by its place
-# changes. The transcript the mirror reads is left whole. Files and cards are not put back: Claude's edits of the
-# folder and its cards stay as they are (Undo takes a card back).
+# The engine's state is cut there (_rewind_plan): the Messages API's message list is cut before the message's prompt,
+# and the Claude Code session's next turn resumes it at the entry before that prompt as a fork (resume_session_at),
+# which Claude Code keeps beside the session it leaves. A message main read mid-turn (Conv.take_waiting) is cut where
+# main read it: on the Messages API inside the user message that carries it, whose results of the turn's tool calls
+# stay, since those calls ran; on Claude Code before the queued_command entry Claude Code keeps it as. Main's log only
+# grows: the rewind's line (REWIND_CHIP) names the message, and the page hides the records from that message to the
+# line (rewound), so nothing that refers to a record by its place changes. The transcript the mirror reads is left
+# whole. Files and cards are not put back: Claude's edits of the folder and its cards stay as they are (Undo takes a
+# card back).
+#
+# Nothing the analyst typed is lost. The rewind stops main's running turn, and takes back what it hides that main never
+# read: the messages the analyst sent while the turn ran, which wait for it (said), and the event of a message the
+# chat logged as it was posted, such as a /thimble-fix, which waits for the turn's end. Their words come back in the
+# composer after the message's own, oldest first (Space.take_back). Every other event that waits, such as an agent's
+# report, is main's next turn, as after a Stop (after_stop). An ask before a request to a host that waits on main's
+# chat (host_asks) ends with the stopped turn's session, unanswered, so nothing is allowed or kept.
+#
+# The workspace's files are read and written as nofollow opens them (main's log, its conversations' states, where
+# removal is nofollow.unlink), and the Claude Code session's id and the entry it resumes at are checked
+# (runtime_cc.session_id, resume_at) before the id names the session's transcript or either goes to Claude Code.
 
 
 class RewindRefused(Exception):
     """Why main cannot be rewound to a message, in the words the page shows."""
+
+
+UNREAD_SESSION = "thimble could not read main's Claude Code session, so it cannot rewind it."
+UNCHANGED = "thimble could not change main's saved conversation, so it did not rewind it."
+# the entries of a Claude Code transcript that a resumed conversation keeps, one of which it resumes at (_cc_cut)
+RESUMABLE = ("user", "assistant", "attachment", "system")
 
 
 def _analyst_message(rec: Any, event_id: str | None = None) -> bool:
@@ -1024,47 +1081,88 @@ def _prompt_events(content: Any) -> set[str]:
     return set()
 
 
-def _first_prompt(contents: list[Any], ids: set[str]) -> int | None:
-    """The place of the first prompt among `contents` that carries one of the events `ids`, None when none does."""
-    return next((i for i, content in enumerate(contents) if _prompt_events(content) & ids), None)
+def _api_cut(messages: list[Any], ids: set[str]) -> list[Any] | None:
+    """Main's Messages API conversation cut before the first prompt that carries one of the events `ids`, None when
+    none does: before the user message whose text carries it, or, for a message main read with the results of its tool
+    calls (Conv.take_waiting), inside that user message, whose blocks before the message stay, since those calls ran."""
+    for i, m in enumerate(messages):
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            if _prompt_events(content) & ids:
+                return messages[:i]
+            continue
+        for j, b in enumerate(content if isinstance(content, list) else []):
+            if isinstance(b, dict) and b.get("type") == "text" and _prompt_events(b.get("text")) & ids:
+                return [*messages[:i], *([{**m, "content": content[:j]}] if j else [])]
+    return None
 
 
-def _session_messages(sid: str, cwd: Path) -> list[Any]:
-    """The messages of Claude Code session `sid`, from its transcript (the Agent SDK's get_session_messages)."""
-    from claude_agent_sdk import get_session_messages  # noqa: PLC0415
+def _entry_events(entry: dict[str, Any]) -> set[str]:
+    """The events an entry of a Claude Code transcript carries as a prompt: a user entry's text (a turn's prompt, or a
+    message the session ran as its next turn), or a queued_command attachment's (a message the session read mid-turn,
+    runtime_cc._hand)."""
+    if entry.get("type") == "user":
+        msg = entry.get("message")
+        return _prompt_events(msg.get("content")) if isinstance(msg, dict) else set()
+    att = entry.get("attachment")
+    if entry.get("type") == "attachment" and isinstance(att, dict) and att.get("type") == "queued_command":
+        return _prompt_events(att.get("prompt"))
+    return set()
 
-    return get_session_messages(sid, directory=str(cwd)) or get_session_messages(sid)
+
+def _cc_cut(entries: list[dict[str, Any]], ids: set[str], kept: str | None) -> tuple[bool, str | None]:
+    """Where main's Claude Code session resumes once it is cut before the first prompt among `entries` (its transcript,
+    runtime_cc.session_entries) that carries one of the events `ids`: (found, the entry before that prompt that Claude
+    Code keeps in a resumed conversation, or None when the prompt is the session's first). `kept`: where an earlier
+    rewind left the session, which main's next turn has not taken up yet, so the entries after it are cut already.
+    RewindRefused when that entry is not in the transcript."""
+    from . import runtime_cc  # noqa: PLC0415
+
+    if kept is not None:
+        at = next((i for i, e in enumerate(entries) if e.get("uuid") == kept), None)
+        if at is None:
+            raise RewindRefused(UNREAD_SESSION)
+        entries = entries[: at + 1]
+    at = next((i for i, e in enumerate(entries) if _entry_events(e) & ids), None)
+    if at is None:
+        return False, None
+    before = [e for e in entries[:at] if e.get("type") in RESUMABLE and runtime_cc.SESSION_ID_RE.match(e["uuid"])]
+    return True, str(before[-1]["uuid"]) if before else None
 
 
-def _rewind_plan(conv: Conv, cwd: Path, ids: set[str]) -> list[tuple[Path, Any]]:
+def _rewind_plan(conv: Conv, ids: set[str]) -> list[tuple[Path, Any, Any]]:
     """How each engine's state of `conv` is cut before the first prompt that carries one of the events `ids`: (state
-    file, what it holds next; None removes it). An engine whose state holds none of them is left alone, since none of
-    those messages reached it. RewindRefused when the Claude Code session cannot be read."""
-    from . import runtime_api  # noqa: PLC0415
+    file, what it holds next, that engine's save; None removes the file). An engine whose state holds none of them is
+    left alone, since none of those messages reached it. RewindRefused when the Claude Code session's transcript
+    cannot be read."""
+    from . import runtime_api, runtime_cc  # noqa: PLC0415
 
-    plan: list[tuple[Path, Any]] = []
+    plan: list[tuple[Path, Any, Any]] = []
     api = conv.state_path("api")
-    messages = runtime_api._load(api)
-    at = _first_prompt([m.get("content") if m.get("role") == "user" else None for m in messages], ids)
-    if at is not None:
-        plan.append((api, messages[:at]))
+    cut = _api_cut(runtime_api._load(api), ids)
+    if cut is not None:
+        plan.append((api, cut, runtime_api._save))
     cc = conv.state_path("cc")
-    sid = str(_read_json(cc).get("session_id") or "")
+    state = runtime_cc._load(cc)
+    sid = runtime_cc.session_id(state)
     if sid:
-        got = _session_messages(sid, cwd)
-        if not got:
-            raise RewindRefused("thimble could not read main's Claude Code session, so it cannot rewind it.")
-        at = _first_prompt([(m.message or {}).get("content") if m.type == "user" else None for m in got], ids)
-        if at is not None:
-            plan.append((cc, {"session_id": sid, "resume_at": got[at - 1].uuid} if at else None))
+        entries = runtime_cc.session_entries(sid)
+        if not entries:
+            raise RewindRefused(UNREAD_SESSION)
+        found, at = _cc_cut(entries, ids, runtime_cc.resume_at(state))
+        if found:
+            plan.append((cc, {"session_id": sid, "resume_at": at} if at else None, runtime_cc._save))
     return plan
 
 
 async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
     """Rewind main to before the analyst's message `event_id` (module note above): main's running turn stops, its
-    conversation is cut before the message, and main's log gets the rewind's line. {text: the message's words, which
-    the page puts back in the composer, event}. RewindRefused for a message the chat no longer shows, and when the
-    Claude Code session cannot be read."""
+    conversation is cut before the message, what main never read of what the rewind hides is taken back, and main's
+    log gets the rewind's line; what else waited is main's next turn. {text: the message's words, then those of each
+    message taken back, which the page puts back in the composer, event}. RewindRefused, with nothing changed, for a
+    message the chat no longer shows, and when the Claude Code session cannot be read."""
     from . import agents, session  # noqa: PLC0415
 
     sp = ensure(c)
@@ -1074,21 +1172,32 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
     at = next((i for i in shown if records[i]["event"] == event_id), None)
     if at is None:
         raise RewindRefused("That message is not in main's chat any more.")
-    # the message and each of the analyst's after it: the first of them the engine holds is where its state is cut
-    ids = {str(records[i]["event"]) for i in shown if i >= at}
+    # the message and each of the analyst's after it, by event id: the first of them the engine holds is where its
+    # state is cut, and the rewind hides them all
+    later = {str(records[i]["event"]): str(records[i].get("text") or "") for i in shown if i >= at}
+    plan = _rewind_plan(sp.main, set(later))  # a session that cannot be read refuses it before anything changes
     if sp.main.running:
-        sp.main.queue.clear()
         await _cancel(sp.main.task)
         session.turn_stopped(c)
-    for path, held in _rewind_plan(sp.main, sp.corpus, ids):
-        if held is None:
-            path.unlink(missing_ok=True)
-        else:
-            from . import runtime_api  # noqa: PLC0415
-
-            runtime_api._save(path, held)
+        try:
+            plan = _rewind_plan(sp.main, set(later))  # again, as the stopped turn left main's states
+        except RewindRefused:
+            after_stop(c)  # the turn stopped all the same: what waited for it is main's next turn, as after a Stop
+            raise
+    try:
+        for path, held, save in plan:
+            if held is None:
+                nofollow.unlink(path)  # in the workspace: the entry itself, never through a link a card's code left
+            else:
+                save(path, held)
+    except OSError:  # such as a link a card's code left on the way (nofollow.Linked)
+        log.warning("%s: main's conversation was not cut for the rewind", c, exc_info=True)
+        after_stop(c)
+        raise RewindRefused(UNCHANGED) from None
+    taken = [words for eid, words in sp.take_back(later) if eid != event_id]
     agents.chip(c, REWIND_CHIP, REWOUND, event=event_id)
-    return {"text": str(records[at].get("text") or ""), "event": event_id}
+    after_stop(c)
+    return {"text": "\n\n".join(w for w in [later[event_id], *taken] if w), "event": event_id}
 
 
 # ---- threads

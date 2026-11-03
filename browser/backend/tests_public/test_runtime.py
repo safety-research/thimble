@@ -1302,10 +1302,43 @@ async def test_a_rewind_to_a_message_that_never_reached_claude_keeps_main_s_conv
     assert "What happened?" in asked(client, 1) and "Two incidents." in asked(client, 1)
 
 
-async def test_on_claude_code_sign_in_a_rewind_resumes_the_session_before_the_message_as_a_fork(on, monkeypatch):
-    from types import SimpleNamespace
+@pytest.fixture()
+def claude_config(tmp_path, monkeypatch) -> Path:
+    """Claude Code's config folder the test's own (CLAUDE_CONFIG_DIR), where cc_transcript keeps a session's
+    transcript."""
+    d = tmp_path / "claude-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(d))
+    return d
 
-    import claude_agent_sdk
+
+def cc_record(kind: str, uuid: str, body: Any) -> dict[str, Any]:
+    """A record of a Claude Code transcript as Claude Code writes it: a user entry (a prompt, or a tool's results), an
+    assistant entry, or the queued_command attachment of a message the session read mid-turn, whose `prompt` is
+    `body`."""
+    if kind == "attachment":
+        return {"type": "attachment", "uuid": uuid,
+                "attachment": {"type": "queued_command", "prompt": body, "commandMode": "prompt"}}
+    return {"type": kind, "uuid": uuid, "message": {"role": kind, "content": body}}
+
+
+def cc_transcript(sid: str, records: list[dict[str, Any]]) -> Path:
+    """Session `sid`'s transcript where Claude Code keeps it, in the test's own config folder (claude_config): one
+    record per line, each after the one before it (parentUuid)."""
+    import os
+
+    project = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-made-up-corpus"
+    project.mkdir(parents=True, exist_ok=True)
+    path = project / f"{sid}.jsonl"
+    lines, parent = [], None
+    for r in records:
+        lines.append(json.dumps({**r, "parentUuid": parent, "sessionId": sid, "isSidechain": False}) + "\n")
+        parent = r["uuid"]
+    path.write_text("".join(lines))
+    return path
+
+
+async def test_on_claude_code_sign_in_a_rewind_resumes_the_session_before_the_message_as_a_fork(on, monkeypatch,
+                                                                                                 claude_config):
     from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock
 
     def script(sid: str) -> list[Any]:
@@ -1315,21 +1348,19 @@ async def test_on_claude_code_sign_in_a_rewind_resumes_the_session_before_the_me
                               session_id=sid)]
 
     # Claude Code's transcript of the session: each turn's prompt, then its reply
-    held: list[Any] = []
+    held: list[dict[str, Any]] = []
     seen: dict[str, Any] = {}
     claude_access.save(claude_access.CLAUDE_CODE, consent=True)
     for n, words in enumerate(("What happened?", "Which was worse?")):
         fake_sdk(monkeypatch, script("sess-1"), seen)
         await main_turn(words)
-        held += [SimpleNamespace(type="user", uuid=f"u{n}", message={"role": "user", "content": seen["prompt"]}),
-                 SimpleNamespace(type="assistant", uuid=f"a{n}", message={"role": "assistant", "content": "ok"})]
-    asked_for: list[tuple] = []
-    monkeypatch.setattr(claude_agent_sdk, "get_session_messages",
-                        lambda sid, directory=None: asked_for.append((sid, directory)) or (held if sid == "sess-1" else []))
+        held += [cc_record("user", f"u{n}", seen["prompt"]), cc_record("assistant", f"a{n}", [{"type": "text",
+                                                                                                "text": "ok"}])]
+    cc_transcript("sess-1", held)
+    cc_transcript("sess-other", [cc_record("user", "x0", held[2]["message"]["content"])])  # another session's
     sp = runtime._spaces[CORPUS]
     await runtime.rewind_main(CORPUS, analyst_messages()[1][2])
     assert json.loads(sp.main.state_path("cc").read_text()) == {"session_id": "sess-1", "resume_at": "a0"}
-    assert asked_for[0] == ("sess-1", str(sp.corpus))
     assert runtime_api_cut() == "a0"  # the checker's and the proposer's forks take main where the rewind left it
     fake_sdk(monkeypatch, script("sess-2"), seen)
     await main_turn("Count the outage too?")
@@ -1337,17 +1368,16 @@ async def test_on_claude_code_sign_in_a_rewind_resumes_the_session_before_the_me
     assert (opts.resume, opts.resume_session_at, opts.fork_session) == ("sess-1", "a0", True)
     assert json.loads(sp.main.state_path("cc").read_text()) == {"session_id": "sess-2"}  # the fork is main's now
 
-    # back to the first message: nothing is left to resume, so the next turn starts a session of its own
-    held[:] = [SimpleNamespace(type="user", uuid="u0", message={"role": "user", "content": seen["prompt"]})]
-    monkeypatch.setattr(claude_agent_sdk, "get_session_messages", lambda sid, directory=None: held)
-    await runtime.rewind_main(CORPUS, analyst_messages()[1][2])
+    # back to the first message: the fork's transcript holds the conversation it resumed, then its own turn, and the
+    # first message's prompt is its first entry, so nothing is left to resume: the next turn starts a session of its own
+    cc_transcript("sess-2", [*held[:2], cc_record("user", "u2", seen["prompt"]), cc_record("assistant", "a2", "ok")])
+    await runtime.rewind_main(CORPUS, analyst_messages()[0][2])
     assert not sp.main.state_path("cc").exists()
     fake_sdk(monkeypatch, script("sess-3"), seen)
     await main_turn("Start over")
     assert seen["options"].resume is None and seen["options"].resume_session_at is None
 
-    # a session thimble cannot read is not rewound blind
-    monkeypatch.setattr(claude_agent_sdk, "get_session_messages", lambda sid, directory=None: [])
+    # a session thimble cannot read (no transcript of sess-3) is not rewound blind
     before = len(main_records())
     with pytest.raises(runtime.RewindRefused):
         await runtime.rewind_main(CORPUS, analyst_messages()[-1][2])

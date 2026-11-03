@@ -1053,7 +1053,8 @@ REWIND_OFF = "Rewind needs the server to run main (the runtime is off)."
 @router.post("/ws/{c}/chats/main/rewind")
 async def rewind_route(c: str, body: RewindBody, request: Request) -> dict:
     """Rewind main to before one of the analyst's messages (runtime.rewind_main), a click, so the analyst's cookie (403
-    without it): {text, event}, the message's words for the composer. 409 with the reason when it cannot."""
+    without it): {text, event}, the words for the composer, the message's and those of each message after it that main
+    had not read, which the rewind took back too. 409 with the reason when it cannot."""
     from . import runtime, subagents  # noqa: PLC0415 — both import this module
 
     subagents.analyst_only(request)
