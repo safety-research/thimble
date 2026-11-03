@@ -404,7 +404,7 @@ test('words that begin with / reach Claude in quotes, and the fix takes them as 
     await s.tick()
     expect(s.prompts).toEqual([])
     expect(s.toasts).toHaveLength(1)
-    expect(skillText(await skillCall(s, 'new')).text).toBe(NOT_ASKED)
+    expect(skillText(await skillCall(s, 'new')).text).toMatch(/^thimble started no fix: /)
     expect(s.ran.some(x => x.argv.includes('new'))).toBe(false)
   }
 })
@@ -432,6 +432,36 @@ test("the line for words that never reach Claude says what to do in its first 11
     expect(s.debug).toHaveLength(1)
     expect(s.debug[0]).toContain(how.refuse ?? how.drop)
   }
+})
+
+test("after /thimble-fix words that never reached Claude, the fix-thimble skill reads that they did not reach it, so the person types /thimble-fix and their words again; no fix starts, and their next /thimble-fix is their last one", async () => {
+  const own = async () => { throw new Error('/thimble-fix with words runs no command of its own') }
+  for (const how of [{ refuse: 'thimble: $.prompt.submit (a made-up refusal)' }, { drop: 'the prompt was removed from the queue before it ran' }]) {
+    const s = setup()
+    await s.call('session.start', { cwd: '/made-up/data' })
+    Object.assign(s.handOff, how)
+    await s.call('command.run', { command: 'thimble-fix', args: '/thimble-settings should list Cards first' }, own)
+    await s.tick()
+    // the turn that runs ends; in the next one the person asks Claude to start the fix they asked for
+    await s.call('turn.complete', { turnId: 't-1', reason: 'answer', answer: 'ok', durationMs: 9, isAborted: false }, async () => ({}))
+    const said = String(skillText(await skillCall(s, 'new')).text)
+    expect(said).toMatch(/^thimble started no fix: /)
+    expect(said).toContain('did not reach you')
+    expect(said).toContain('type /thimble-fix and their words again')
+    expect(s.ran.some(x => x.argv.includes('new'))).toBe(false)
+    // /thimble-fix alone is now their last: the skill reads that a fix starts from their words
+    expect(await s.call('command.run', { command: 'thimble-fix', args: '' }, own)).toEqual({ text: FIX_ALONE })
+    expect(skillText(await skillCall(s, 'new')).text).toBe(NOT_ASKED)
+  }
+  // words that reach Claude after words that did not: the fix starts from them
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  s.handOff.drop = 'the prompt was removed from the queue before it ran'
+  await s.call('command.run', { command: 'thimble-fix', args: 'the bar should list Cards first' }, own)
+  await s.tick()
+  delete s.handOff.drop
+  expect((await ask(s, 'the pane title should say Cards')).text).toContain('thimble started a fork of this conversation that fixes thimble')
+  expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe('the pane title should say Cards')
 })
 
 test("the turn /thimble-fix's words start is the person's prompt, so the replies before it are nothing to catch up on; words that never reach Claude wait for no turn", async () => {

@@ -155,6 +155,8 @@ declare module 'claude-code' {
       fixAsked: number
       /** the words the person typed after /thimble-fix, which the fix the skill starts takes (fix/register.ts) */
       fixAskedWords: string
+      /** whether the words of the person's last /thimble-fix did not reach Claude (fix/register.ts) */
+      fixAskedNotGiven: boolean
       /** the strays from before rounds changed a fix in place that the fix's line told of already (fix/register.ts) */
       fixStrays: string[]
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */

@@ -16,8 +16,9 @@
 //                          works, else the fix the line shows, else a new fix (request.ts). The person's own `N …` or
 //                          `new …` names the fix before Claude's does. Claude's words never reach the fix: with no
 //                          /thimble-fix of the person's, no fix starts, and Claude reads that the person asks for one
-//                          with /thimble-fix (skills/fix-thimble/SKILL.md). Claude reads what came of it in the
-//                          skill's place
+//                          with /thimble-fix (skills/fix-thimble/SKILL.md), or, when the words of their last one did
+//                          not reach Claude, that they type them again. Claude reads what came of it in the skill's
+//                          place
 //   /thimble-fix           alone, or a fix's number alone: how to ask for a fix, at once, without a turn of Claude's.
 //                          The number of a fix that failed or no longer fits (fixes.ts triesAgain: also a new version
 //                          that did not fit at y) tries it again, in the person's words of before, as y on its failed
@@ -88,12 +89,16 @@ export function notStarted(error: { kind?: string; message?: string } | undefine
 /** What Claude reads when it starts the skill with no /thimble-fix of the person's to answer. */
 export const NOT_ASKED = 'thimble started no fix: a fix starts from the person\'s own words, which they type after /thimble-fix. Tell them in one short line that /thimble-fix <what should work differently> asks for one.'
 
+/** What Claude reads when it starts the skill after the words of the person's last /thimble-fix did not reach it
+ *  (notGiven). The command's request may have shown Claude the words, but no prompt of the person's gave them. */
+const NOT_GIVEN = 'thimble started no fix: Claude Code did not run the prompt with the words the person typed after their last /thimble-fix, so the words did not reach you as their prompt. Tell them in one short line that their words did not reach you, so they type /thimble-fix and their words again.'
+
 /** The fix-thimble skill after the person's /thimble-fix <words>: the request in their words, as they typed them, and
  *  what Claude reads of it in the skill's place. Claude's `form` names only the fix the words change (`N`, or `new`). */
 async function startFromSkill($: Engine, form: string): Promise<string> {
   const asked = Number((await $.state.get(ASKED)).value ?? 0) > 0
   const words = asked ? String((await $.state.get(ASKED_WORDS)).value ?? '').trim() : ''
-  if (!words) return NOT_ASKED
+  if (!words) return (await $.state.get(ASKED_NOT_GIVEN)).value ? NOT_GIVEN : NOT_ASKED
   await $.state.set(ASKED, 0 as never)
   await $.state.set(ASKED_WORDS, '' as never)
   const r = await request($, form, words)
@@ -144,6 +149,8 @@ const fixerAgents = new Set<string>()
  *  (the turn of the command, and the one after Claude's question), and the words they typed. */
 const ASKED = { plugin: 'thimble', key: 'fixAsked' } as const
 const ASKED_WORDS = { plugin: 'thimble', key: 'fixAskedWords' } as const
+/** Whether the words of the person's last /thimble-fix did not reach Claude (notGiven), until their next one. */
+const ASKED_NOT_GIVEN = { plugin: 'thimble', key: 'fixAskedNotGiven' } as const
 
 /** /thimble-fix with a fix's number and no words: a fix that failed or no longer fits (fixes.ts triesAgain) starts again
  *  in the person's words of before (request.ts redoFix: in its copy while that holds a change no check took, such as
@@ -166,7 +173,8 @@ async function numberAlone($: Engine, n: number | null): Promise<string | null> 
 const GIVE_AGAIN = 'Type /thimble-fix and your words again: they did not reach Claude, so thimble started no fix.'
 
 /** /thimble-fix's words did not reach Claude (Claude Code refused thimble's prompt with them, or it did not enter): one
- *  line says what to do, the debug log says why, and no fix starts from them in a later turn. */
+ *  line says what to do, the debug log says why, and no fix starts from them in a later turn: the skill reads that they
+ *  did not reach Claude (NOT_GIVEN). */
 async function notGiven($: Engine, words: string, err: unknown): Promise<void> {
   $.ui.toast(GIVE_AGAIN)
   $.ui.log(`/thimble-fix's words did not reach Claude: ${String((err as Error)?.message || err)}`, { to: 'debug' })
@@ -174,6 +182,7 @@ async function notGiven($: Engine, words: string, err: unknown): Promise<void> {
     if (String((await $.state.get(ASKED_WORDS)).value ?? '') !== words) return
     await $.state.set(ASKED, 0 as never)
     await $.state.set(ASKED_WORDS, '' as never)
+    await $.state.set(ASKED_NOT_GIVEN, true as never)
   } catch {
     // the request ends with its two turns
   }
@@ -273,6 +282,8 @@ export const registerFix: Register = on => {
   // from a new fix
   on('command.run', { command: 'thimble-fix' }, async ($, e) => {
     const words = String(e.args || '').trim()
+    // this is the person's last /thimble-fix now
+    await $.state.set(ASKED_NOT_GIVEN, false as never)
     if (/^update$/i.test(words)) return { text: UPDATE_IN_SHELL }
     if (!words) return { text: FIX_ALONE }
     // a fix's number (or new) and no words: nothing says what should change
