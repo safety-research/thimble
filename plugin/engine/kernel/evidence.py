@@ -1123,15 +1123,17 @@ def line_span(line: Any) -> tuple[int, int] | None:
     return (a, b) if 1 <= a <= b and b - a <= MAX_RANGE else None
 
 
-def read_lines(path: str, a: int, b: int, partial: bool = False) -> tuple[int, list[str]] | None:
+def read_lines(path: str, a: int, b: int, partial: bool = False, folders: list[str] | None = None) -> tuple[int, list[str]] | None:
     """Lines a to b of a regular file, as (a, lines), each cut at LINE_BYTES; None when the file cannot be read, is no
-    regular file (a pipe would never end), or, unless `partial`, has no line b. The lines before line a are counted in
-    blocks, not read one by one, so a line deep in a big file is found quickly."""
-    if not os.path.isfile(path):
+    regular file (a pipe would never end), or, unless `partial`, has no line b. With `folders`, only a file that lies
+    inside one of them is read, through the descriptor open_inside() opened it with. The lines before line a are counted
+    in blocks, not read one by one, so a line deep in a big file is found quickly."""
+    fd = open_inside(path, folders) if folders is not None else None
+    if fd is None and (folders is not None or not os.path.isfile(path)):
         return None
     out: list[str] = []
     try:
-        with open(path, "rb") as f:
+        with os.fdopen(fd, "rb") if fd is not None else open(path, "rb") as f:
             line = 1
             while line < a:
                 block = f.read(BLOCK)
@@ -1278,6 +1280,42 @@ def inside(path: str, folders: list[str]) -> bool:
     outside it is outside."""
     real = os.path.realpath(path)
     return any(real == r or real.startswith(r + os.sep) for r in map(os.path.realpath, folders))
+
+
+def open_inside(path: str, folders: list[str]) -> int | None:
+    """A descriptor of the regular file at `path` as it lies inside one of the folders now: the folder that holds its
+    real path (inside()) opened by its own real path, then each part below it by its name in the folder above it,
+    never through a link. A link put in place of the file, or of a folder on its way, after its real path was compared
+    (code a card runs may write the temp folder) opens nothing, so the check never reads a file outside the folders.
+    None when there is no such file."""
+    from stat import S_ISREG  # noqa: PLC0415
+
+    # a folder on the way is opened only to go through it (O_PATH where there is one), as an open by path needs
+    passing = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
+    real = os.path.realpath(path)
+    for top in map(os.path.realpath, folders):
+        if not real.startswith(top + os.sep):
+            continue
+        *parts, name = real[len(top) + 1:].split(os.sep)
+        at = got = -1
+        try:
+            at = os.open(top, passing)
+            for part in parts:
+                below = os.open(part, passing | os.O_NOFOLLOW, dir_fd=at)
+                os.close(at)
+                at = below
+            got = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=at)
+            if not S_ISREG(os.fstat(got).st_mode):
+                raise IsADirectoryError(name)  # or a pipe, which would never end
+        except OSError:
+            if got >= 0:
+                os.close(got)
+            continue
+        finally:
+            if at >= 0:
+                os.close(at)
+        return got
+    return None
 
 
 LEADING_CD = re.compile(r"\s*cd\s+(\S+)\s*(?:&&|;|\n)")
@@ -1522,15 +1560,15 @@ def place(ev: dict[str, Any], cwd: str, root: str | None, also: list[str] = (), 
         return [missing(str(file), cwd, root, also, calls)], None, [], ""
     folders = [f for f in (root, cwd, *also) if f]
     names = [file_named(p, folders) or os.path.basename(p) for p in files]
-    looks = [(*look(p, name, line, str(sub), cwd, root), name) for p, name in zip(files, names)]
+    looks = [(*look(p, name, line, str(sub), cwd, root, folders), name) for p, name in zip(files, names)]
     return next((x for x in looks if not x[0]), looks[0])
 
 
-def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) -> tuple[list[str], dict[str, Any] | None, list[str]]:
-    """The cited lines of one file, as place() gives them, `file` the file as a reason names it. A line number is where
-    to look: when the cited lines do not hold the substring and lines up to SHIFT_MAX away do, the nearest such lines
-    are cited in their place: the same number of lines moved, or more lines around them (a quote that runs over three
-    lines cited as two)."""
+def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None, folders: list[str] | None = None) -> tuple[list[str], dict[str, Any] | None, list[str]]:
+    """The cited lines of one file, as place() gives them, `file` the file as a reason names it, read only as it lies
+    inside one of `folders` (read_lines). A line number is where to look: when the cited lines do not hold the
+    substring and lines up to SHIFT_MAX away do, the nearest such lines are cited in their place: the same number of
+    lines moved, or more lines around them (a quote that runs over three lines cited as two)."""
     span = line_span(line)
     if not span:
         # its words only when they are numbers: a check may write a path where the line goes
@@ -1538,7 +1576,7 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
         return [f"the check cited lines {said}, which are not one line or a range of at most {MAX_RANGE} lines" if said
                 else "the check named no line number of the file"], None, []
     a, b = span
-    near = read_lines(path, max(1, a - SHIFT_MAX), b + SHIFT_MAX, partial=True)
+    near = read_lines(path, max(1, a - SHIFT_MAX), b + SHIFT_MAX, partial=True, folders=folders)
     if near is None or near[0] + len(near[1]) - 1 < b:
         return [Named(f"{file} has no line {line}")], None, []
     top, texts = near
