@@ -122,7 +122,8 @@ export const TEXTS = {
   },
   'fix-not-given': {
     about: "the words of the person's last /thimble-fix did not reach Claude: no fix starts, and the person types them again",
-    reader: 'fix/register.ts',
+    terminal: 'fix/register.ts',
+    browser: 'browser/backend/app/fixes.py',
     use: "what Claude reads when it starts a fix after such words, in the fix-thimble skill's place, and in the browser workbench as fix_thimble's answer (browser/backend/app/fixes.py)",
   },
   fixer: {

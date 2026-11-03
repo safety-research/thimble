@@ -104,6 +104,7 @@ ASKED_TURNS = 2
 
 PROMPT = "thimble-fix"  # what main reads of the person's /thimble-fix (prompts/thimble-fix.md)
 FIXER_TEXT = "plugin:fixer"  # what opens the fixer's first message (plugin/prompts/fixer.md)
+NOT_GIVEN_TEXT = "plugin:fix-not-given"  # main's answer when the words never reached it (plugin/prompts/fix-not-given.md)
 
 
 @dataclass
@@ -1154,7 +1155,9 @@ class NotGiven(HTTPException):
     and `detail` is main's whole answer, the terminal's in the same case (plugin/prompts/fix-not-given.md)."""
 
     def __init__(self) -> None:
-        super().__init__(409, (plugin_dir() / "prompts" / "fix-not-given.md").read_text("utf-8").strip())
+        from . import prompts  # noqa: PLC0415
+
+        super().__init__(409, prompts.load(NOT_GIVEN_TEXT).strip())
 
 
 async def from_tool(c: str, form: str) -> dict[str, Any]:
