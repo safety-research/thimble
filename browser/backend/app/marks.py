@@ -40,7 +40,9 @@ record names in the thread's chat (answer_ended). The fork of main that checks t
 checker's text says what holds them (THREAD_ANSWER), and the Bash calls of the thread's fork are evidence where main's
 are for a reply. Main hears nothing of that check, nor of a repair of one of its marks.
 
-Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`. A reply's marks are kept in
+Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`, and an error a mark's reason
+or a notice quotes names each path of this machine in it as the validator names a file (_error_words). A reply's marks
+are kept in
 `<workspace>/marks/<turn>.json`, and each change is written to main's log, or to the thread's chat for a side thread's
 answer, as a `marks` record {turn, items}, which the page reads (the newest record of a turn wins).
 
@@ -473,7 +475,8 @@ async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str]
     try:
         found = await marks_of(list(texts) + [t for _, _, t in takeaways])
     except (OSError, RuntimeError, ValueError) as e:
-        _notice(c, f"thimble could not read the citations of the last reply ({str(e)[:120]}), so they are not checked.")
+        said = _error_words(e, check_folders(c, main))
+        _notice(c, f"thimble could not read the citations of the last reply ({said[:120]}), so they are not checked.")
         return
     if not found:
         return
@@ -572,9 +575,10 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         prompt = checker_prompt(lines, cwd, index, root, holds)
         got = await fork(c, main, cut, f"{prompt}\n\n{request}" if request else prompt)
         if got.get("error"):
-            await give_up(f"the check ended: {got['error']}")
-            _notice(c, f"The check of the citations stopped ({str(got['error'])[:100]}), so some are not checked. The "
-                       "next reply is checked again.")
+            error = _error_words(got["error"], folders)
+            await give_up(f"the check ended: {error}")
+            _notice(c, f"The check of the citations stopped ({error[:100]}), so some are not checked. The next reply is "
+                       "checked again.")
             return
         answer = str(got.get("answer") or "")
         ev = evidence()
@@ -620,8 +624,8 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
             found = [m for m in share if _found_failed(by_n.get(m["n"]))]
     except Exception as e:  # noqa: BLE001 — a check that cannot be validated leaves its marks unchecked, and says so
         log.exception("%s: the check of the marks failed", c)
-        _notice(c, f"thimble could not check the citations ({type(e).__name__}: {str(e)[:80]}), so some are not "
-                   "checked.")
+        _notice(c, f"thimble could not check the citations ({type(e).__name__}: {_error_words(e, folders)[:80]}), so "
+                   "some are not checked.")
     finally:
         await give_up("the check ended before it judged this citation")
     # after give_up, which would leave unchecked a mark whose repair already runs
@@ -633,6 +637,14 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         # a mark that is not failed now has nothing to repair: a takeaway written again meanwhile is under its own check
         if why and why != NOT_FAILED:
             _notice(c, f"The repair of a failed citation did not start ({why[:100]}). Press Repair on it to try again.")
+
+
+def _error_words(error: Any, folders: tuple[str, str]) -> str:
+    """An error's text as a mark's reason or a notice quotes it: each path of this machine in it named as the validator
+    names a cited file, from the check's folders (`folders`, check_folders) when it lies there, else by its name alone
+    (the validator's error_words). The error is thimble's or Claude Code's own, never the records' nor the check's."""
+    cwd, root = folders
+    return evidence().error_words(str(error), cwd, root)
 
 
 def _takeaway_now(c: str, m: dict[str, Any]) -> bool:

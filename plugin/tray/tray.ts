@@ -65,7 +65,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { spinNow } from '../bar/busy'
-import { failNotice, reasonOf } from '../bar/notice'
+import { failNotice } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
 import { tellOpened } from '../core/engaged'
@@ -82,7 +82,7 @@ import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, pendingGloss, pendingSpans, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
-import { checkOpened, launchRepair, repairOf, repairOk } from '../marks/checker'
+import { checkOpened, errorWordsOf, launchRepair, repairOf, repairOk } from '../marks/checker'
 import { highlighted, statusEls } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
@@ -625,7 +625,7 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
       // the OK its check needs, then the spawn, made while this key's hook runs, which waits out the word window
       // (marks/register.ts); a word takes the OK back and refuses the spawn
       const hold = { until, cancelled: false }
-      const failed = (err: unknown) => failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
+      const failed = async (err: unknown) => failNotice($, `The repair did not start: ${await errorWordsOf($, err)}. Press x to try again.`, 'tray:repair')
       return {
         now: async () => {
           await ok.give()
@@ -1228,7 +1228,7 @@ export const registerTray: Register = on => {
       if (!f || !(await repair($, f))) return next(e)
       return { element: e.element }
     } catch (err) {
-      failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
+      failNotice($, `The repair did not start: ${await errorWordsOf($, err)}. Press x to try again.`, 'tray:repair')
       return { element: e.element }
     }
   }).catch(($, e, next) => next(e))

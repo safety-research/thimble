@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
 from kernel.evidence import check_all, check_mark  # noqa: E402
 
 VALIDATE = Path(__file__).resolve().parents[1] / "engine" / "validate.py"
+# the reason of a citation of a file outside every folder a cited file may lie in, which names no path (B19)
+OUTSIDE = "The check cited a file outside the folder this session works in."
 CODE = 'import json\nprs = [json.loads(l) for l in open("prs.jsonl")]\nprint(f"{sum(p[\'merged\'] for p in prs)} of {len(prs)}")'
 
 
@@ -442,7 +444,7 @@ def test_of_the_files_a_check_could_not_read_validate_names_those_no_evidence_ma
     req = {"cwd": str(data), "root": str(root), "tmp": [str(ours), str(cc)], "marks": [mark('"deploy cart-6 rolled back"')], "answer": answer, "calls": [], "unread": unread}
     out = json.loads(subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True).stdout)
     assert out["outside"] == [str(elsewhere / "deploys.log"), str(data / "link.log")]
-    assert out["results"][0]["reason"] == f"{elsewhere / 'deploys.log'} is outside the folder this session works in."
+    assert out["results"][0]["reason"] == OUTSIDE
     # with no file it could not read, the answer is as it was
     del req["unread"]
     assert "outside" not in json.loads(subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True).stdout)
@@ -485,7 +487,7 @@ def test_a_label_s_rule_in_its_definition_is_evidence_as_the_code_reads(tmp_path
     found = check_mark(capitals, wrong, [], str(data), None, None, None, str(rules))
     assert (found["status"], found["failedBy"], found["reason"]) == ("failed", "check", wrong["reason"]) and found["evidence"]["file"] == k1, found
     said = check_mark(capitals, quote(k1, 6, "body.lower()", kind="code"), [], str(data), None, None, None, str(rules))
-    assert said["status"] == "failed" and said["failedBy"] == "evidence" and said["reason"].startswith(f"Line 6 of {k1} reads"), said["reason"]
+    assert said["status"] == "failed" and said["failedBy"] == "evidence" and said["reason"].startswith("Line 6 of k1.json reads"), said["reason"]
 
 
 def test_a_quote_of_a_label_s_definition_holds_what_its_lines_state(tmp_path: Path):
@@ -497,7 +499,7 @@ def test_a_quote_of_a_label_s_definition_holds_what_its_lines_state(tmp_path: Pa
         asks = check_mark(mark("a post that asks for a refund"), quote(k2, 4, "a post that asks for a refund or a credit", kind=kind), [], str(data), None, None, None, str(rules))
         assert asks["status"] == "verified" and asks["evidence"]["file"] == k2, (kind, asks["reason"])
     count = check_mark(mark("72 of the 3,862"), quote(str(rules / "k1.json"), 6, "if not body:"), [], str(data), None, None, None, str(rules))
-    assert count["status"] == "failed" and count["reason"].startswith(f"Line 6 of {rules / 'k1.json'} reads") and count["reason"].endswith(", not 72."), count["reason"]
+    assert count["status"] == "failed" and count["reason"].startswith("Line 6 of k1.json reads") and count["reason"].endswith(", not 72."), count["reason"]
 
 
 def test_beside_the_labels_rules_the_workspace_is_no_evidence(tmp_path: Path):
@@ -511,7 +513,7 @@ def test_beside_the_labels_rules_the_workspace_is_no_evidence(tmp_path: Path):
     for file in (stored, rules / ".." / "marks" / "a1b2c3d4.json", rules / "k3.json"):
         for kind in ("quote", "code"):
             r = check_mark(mark("2 of the 8"), quote(str(file), 5, '"words": "2 of the 8"', kind=kind), [], str(data), None, str(tmp_path / "ws" / "tmp"), None, str(rules))
-            assert r["status"] == "failed" and "is outside the folder this session works in" in r["reason"], (file, kind, r["reason"])
+            assert (r["status"], r["reason"]) == ("failed", OUTSIDE), (file, kind, r["reason"])
 
 
 def test_a_quote_in_a_json_document_written_over_many_lines_reads_its_strings_decoded(tmp_path: Path):
@@ -606,9 +608,9 @@ def test_a_link_to_a_file_outside_the_folder_and_a_pipe_are_no_evidence(tmp_path
 
 def test_a_reason_that_opens_with_the_cited_file_names_it_as_it_is(tmp_path: Path):
     """A failed citation's reason that opens with the cited file keeps the file's name as it is: with its first letter
-    capital it named a file that does not exist (`Peer/run.log is outside …` for peer/run.log), also when the name is
-    one plain word (`Notes is outside …` for notes, `Todo has no line 9.` for todo). A reason that opens with a plain
-    word of its own still opens with a capital."""
+    capital it named a file that does not exist (`Notes.md has no line 9.` for notes.md), also when the name is one
+    plain word (`Todo has no line 9.` for todo). A reason that opens with a plain word of its own still opens with a
+    capital. A file outside the session's folder, through a link in it, is named not at all (B19)."""
     data, shared = tmp_path / "data", tmp_path / "shared"
     data.mkdir()
     shared.mkdir()
@@ -619,11 +621,11 @@ def test_a_reason_that_opens_with_the_cited_file_names_it_as_it_is(tmp_path: Pat
     (data / "notes.md").write_text("the lake shelter seats twenty\n")
     (data / "todo").write_text("buy lemons\n")
     outside = check_mark(mark('"shelter request refused"'), quote("peer/run.log", 1, "shelter request refused"), [], str(data))
-    assert (outside["status"], outside["reason"]) == ("failed", "peer/run.log is outside the folder this session works in."), outside
+    assert (outside["status"], outside["reason"]) == ("failed", OUTSIDE), outside
     short = check_mark(mark('"seats twenty"'), quote("notes.md", 9, "seats twenty"), [], str(data))
     assert (short["status"], short["reason"]) == ("failed", "notes.md has no line 9."), short
     word = check_mark(mark('"bring the striped blanket"'), quote("notes", 1, "bring the striped blanket"), [], str(data))
-    assert (word["status"], word["reason"]) == ("failed", "notes is outside the folder this session works in."), word
+    assert (word["status"], word["reason"]) == ("failed", OUTSIDE), word
     todo = check_mark(mark('"buy lemons"'), quote("todo", 9, "buy lemons"), [], str(data))
     assert (todo["status"], todo["reason"]) == ("failed", "todo has no line 9."), todo
     assert all(one_sentence(r["reason"]) for r in (outside, short, word, todo))
@@ -643,7 +645,7 @@ def test_a_file_read_through_a_link_out_of_the_session_s_folders_is_outside_them
     (root / "run-a" / "shared").symlink_to("../../shared-notes", target_is_directory=True)
     cwd = str(root / "run-a")
     r = check_mark(mark('"bring the striped blanket"'), quote("shared/notes.md", 1, "bring the striped blanket"), [], cwd, str(root))
-    assert (r["status"], r["reason"]) == ("failed", "shared/notes.md is outside the folder this session works in."), r
+    assert (r["status"], r["reason"]) == ("failed", OUTSIDE), r
     gone = check_mark(mark('"x"'), quote("shared/nothing.md", 1, "x"), [], cwd, str(root))
     assert gone["reason"] == "There is no file shared/nothing.md in this session's folder.", gone
 
@@ -1294,3 +1296,140 @@ def test_a_quote_with_a_markdown_escape_reads_as_the_record_writes_it(tmp_path: 
     (tmp_path / "a.py").write_text('parts = re.split(r"\\.", name)\n')
     code = check_mark(mark('`re.split(r"\\.", name)`'), quote("a.py", 1, 're.split(r"\\.", name)', kind="code"), [], str(tmp_path))
     assert code["status"] == "verified"
+
+
+# ------------------------------------------------------------------------------------------------ B19: no path of this machine in a reason
+
+
+def a_home(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
+    """A made-up home (HOME) with a study's records folder in it, the session's folder, and beside it the workbench's own
+    log of a chat of that study, which holds the reply's words as the chat wrote them: (home, records, log)."""
+    home = tmp_path / "home" / "analyst"
+    data = home / "studies" / "quillbook"
+    log = home / ".thimble-browser" / "workspaces" / "quillbook" / "chats" / "f00dcafe.jsonl"
+    for d in (data / "sessions", log.parent):
+        d.mkdir(parents=True)
+    (data / "sessions" / "session-P02.jsonl").write_text('{"participant": "P02", "text": "For my own projects I\'d want tags, not folders."}\n')
+    (data / "notes.md").write_text("tags came up twice\n")
+    log.write_text(json.dumps({"text": "In the trial, navigation, 13 of the 40, was the most common theme."}) + "\n")
+    monkeypatch.setenv("HOME", str(home))
+    return home, data, log
+
+
+def test_a_cited_file_outside_the_session_s_folders_gives_one_plain_sentence_whatever_form_its_path_takes(tmp_path: Path, monkeypatch):
+    """B19: the check cited the workbench's own chat log by its path, and the reason was that path, cut in the tray, so
+    the analyst read where the log lies on their machine and no reason. A cited file is found where its path leads, and
+    when that is outside every folder a cited file may lie in, the reason is one plain sentence that names no path: by
+    its absolute path, from the home folder (`~/`, `$HOME/`, `${HOME}/`), as a `file:` URL in any case, with `//`, or
+    leaving the folder (`../`). The citation fails as it did before, not confirmed, as a quote, as code, and through
+    validate.py."""
+    home, data, log = a_home(tmp_path, monkeypatch)
+    rel = str(log.relative_to(home))
+    forms = [str(log), f"~/{rel}", f"$HOME/{rel}", f"${{HOME}}/{rel}", f"file://{log}", f"FILE://{log}", f"File:{log}",
+             f"file://localhost{log}", f"file://{log}".replace("f00dcafe", "f00d%63afe"), f"/{log}", f"../../{rel}"]
+    words = '"navigation, 13 of the 40"'
+    for form in forms:
+        for kind in ("quote", "code"):
+            r = check_mark(mark(words), quote(form, 1, "navigation, 13 of the 40", kind=kind), [], str(data), None, str(tmp_path / "tmp"))
+            assert (r["status"], r["failedBy"], r["reason"]) == ("failed", "evidence", OUTSIDE), (form, kind, r)
+            assert "evidence" not in r, (form, r)
+    answer = "```json\n" + json.dumps([{"mark": n, **quote(form, 1, "navigation, 13 of the 40")} for n, form in enumerate(forms, 1)]) + "\n```"
+    req = {"cwd": str(data), "marks": [mark(words, n) for n in range(1, len(forms) + 1)], "answer": answer, "calls": []}
+    out = json.loads(subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True).stdout)
+    assert [(r["status"], r["failedBy"], r["reason"]) for r in out["results"]] == [("failed", "evidence", OUTSIDE)] * len(forms), out
+
+
+def test_a_cited_file_inside_the_session_s_folders_is_named_by_its_path_from_its_folder(tmp_path: Path, monkeypatch):
+    """B19: a reason names a cited file by its path from the folder it lies in, never by where that folder lies: the
+    session's folder (a file named by its absolute path, with `//`, or from the shell's folder), a folder of labels'
+    rules, or the temp folder of Claude's own code. A path from the home folder or a `file:` URL that leads into the
+    session's folder is not read, as before, and the reason names the file from the folder; one that leads nowhere is a
+    file that is not there."""
+    home, data, log = a_home(tmp_path, monkeypatch)
+    p02 = data / "sessions" / "session-P02.jsonl"
+    record = "For my own projects I'd want tags, not folders."
+    for form in (str(p02), f"/{p02}", "sessions/session-P02.jsonl", "./sessions/../sessions/session-P02.jsonl"):
+        r = check_mark(mark('"tags, not labels"'), quote(form, 1, "tags, not labels"), [], str(data))
+        assert (r["status"], r["reason"]) == ("failed", f"Line 1 of sessions/session-P02.jsonl reads “{record}”, not these words."), (form, r)
+        assert r["evidence"]["file"] == "sessions/session-P02.jsonl", (form, r)
+        r = check_mark(mark('"tags, not folders"'), quote(form, 9, "tags, not folders"), [], str(data))
+        assert (r["status"], r["reason"]) == ("failed", "sessions/session-P02.jsonl has no line 9."), (form, r)
+    gone = check_mark(mark('"tags"'), quote(str(data / "sessions" / "session-P09.jsonl"), 1, "tags"), [], str(data))
+    assert (gone["status"], gone["reason"]) == ("failed", "There is no file sessions/session-P09.jsonl in this session's folder."), gone
+    # main's shell in a folder inside the one the session started in: a path from either is named from the start folder
+    r = check_mark(mark('"tags came up often"'), quote("../notes.md", 1, "tags came up often"), [], str(data / "sessions"), str(data))
+    assert (r["status"], r["reason"]) == ("failed", "Line 1 of notes.md reads “tags came up twice”, not these words."), r
+    # from the home folder or as a URL into the session's folder: not read, as before, and named from the folder
+    for form in ("~/studies/quillbook/sessions/session-P02.jsonl", "$HOME/studies/quillbook/sessions/session-P02.jsonl",
+                 f"file://{p02}", f"FILE:{p02}"):
+        r = check_mark(mark('"tags, not folders"'), quote(form, 1, "tags, not folders"), [], str(data))
+        assert (r["status"], r["failedBy"], r["reason"]) == ("failed", "evidence", "The check named sessions/session-P02.jsonl in a form thimble does not read."), (form, r)
+    r = check_mark(mark('"tags"'), quote("~/studies/quillbook/sessions/session-P09.jsonl", 1, "tags"), [], str(data))
+    assert (r["status"], r["reason"]) == ("failed", "There is no file sessions/session-P09.jsonl in this session's folder."), r
+    r = check_mark(mark('"tags"'), quote("$STUDY_DIR/sessions/session-P02.jsonl", 1, "tags"), [], str(data))
+    assert (r["status"], r["reason"]) == ("failed", "The check named a file in a form thimble does not read."), r
+    # a label's rule in the workspace's folder of rules, and Claude's own code in a temp folder
+    rules, tmp = home / ".thimble-browser" / "workspaces" / "quillbook" / "concepts", tmp_path / "tmp" / "thimble"
+    rules.mkdir(parents=True)
+    tmp.mkdir(parents=True)
+    (rules / "k1.json").write_text(json.dumps({"id": "k1", "kind": "code", "spec": RULE}, indent=1))
+    (tmp / "count.py").write_text("import json\nprint(sum(1 for l in open('sessions/session-P02.jsonl')))\n")
+    said = check_mark(mark("72 of the 3,862"), quote(str(rules / "k1.json"), 4, "if not body:"), [], str(data), None, None, None, str(rules))
+    assert said["status"] == "failed" and said["reason"].startswith("Line 4 of k1.json reads “") and said["reason"].endswith(", not 72."), said
+    code = check_mark(mark("counts each line"), quote(str(tmp / "count.py"), 2, "for l in open(sessions)", kind="code"), [], str(data), None, str(tmp))
+    assert code["status"] == "failed" and code["reason"].startswith("Line 2 of count.py reads “"), code
+    short = check_mark(mark("counts each line"), quote(str(tmp / "count.py"), 7, "for l in", kind="code"), [], str(data), None, str(tmp))
+    assert (short["status"], short["reason"]) == ("failed", "count.py has no line 7."), short
+    for r in (said, code, short):
+        assert str(tmp_path) not in r["reason"], r
+
+
+def test_a_record_s_own_paths_and_the_check_s_own_words_are_quoted_word_for_word(tmp_path: Path, monkeypatch):
+    """B19 names a cited file by its path from its folder, and changes nothing else of a reason: a record that holds a
+    path of this machine is quoted as it reads, and so is the check's own reason, so a record is never misquoted."""
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("HOME", "/made-up/home/analyst")
+    line = "step 4: rm -rf /made-up/home/analyst/build/cache.db and ~/build/old.db"
+    (data / "run.log").write_text(line + "\n")
+    r = check_mark(mark("deleted /tmp/build/cache.db"), quote(str(data / "run.log"), 1, "deleted /tmp/build/cache.db"), [], str(data))
+    assert (r["status"], r["reason"]) == ("failed", f"Line 1 of run.log reads “{line}”, not these words."), r
+    own = "It deleted /made-up/home/analyst/build/cache.db and ~/build/old.db, not /tmp/build/cache.db."
+    wrong = {**quote(str(data / "run.log"), 1, "rm -rf /made-up/home/analyst/build/cache.db"), "status": "wrong", "reason": own}
+    r = check_mark(mark("deleted /tmp/build/cache.db"), wrong, [], str(data))
+    assert (r["status"], r["failedBy"], r["reason"], r["evidence"]["file"]) == ("failed", "check", own, "run.log"), r
+    note = {**quote("run.log", 1, "rm -rf /made-up/home/analyst/build/cache.db"), "note": "The log also removes ~/build/old.db."}
+    assert check_mark(mark("rm -rf /made-up/home/analyst/build/cache.db"), note, [], str(data))["note"] == note["note"]
+    out = "removed /made-up/home/analyst/build/cache.db\n"
+    r = check_mark(mark('removed "/tmp/build/cache.db"'), computed("removed"), [call("print(1)", out)], str(data))
+    assert (r["status"], r["reason"]) == ("failed", "The result reads “removed /made-up/home/analyst/build/cache.db”, not “/tmp/build/cache.db”."), r
+
+
+def test_an_error_the_check_quotes_names_each_path_of_this_machine_as_a_reason_names_a_file(tmp_path: Path, monkeypatch):
+    """B19: a check thimble could not validate says why with the error's own words, and each path of this machine in
+    them is named as a reason names a cited file: from the session's folder when it lies there, else by its name alone.
+    The words of a record or of the check are never read so (above); the error's are thimble's own, and each case of
+    error_paths.json, which the terminal's notices answer alike (core/text.js errorWords), reads so here."""
+    import kernel.evidence as E
+    home, data, _ = a_home(tmp_path, monkeypatch)
+    meta = home / ".thimble" / "conversations" / "s-1" / "cards" / "k1" / "meta.json"
+    answer = "```json\n" + json.dumps([computed("12 of 40") | {"mark": 1}, computed("12 of 40") | {"mark": 2}]) + "\n```"
+    errors = {1: FileNotFoundError(2, "No such file or directory", str(meta)),
+              2: PermissionError(13, "Permission denied", str(data / "sessions" / "session-P02.jsonl"))}
+    monkeypatch.setattr(E, "check_mark", lambda m, *a: (_ for _ in ()).throw(errors[m["n"]]))
+    out = E.check_all([mark("12 of 40", 1), mark("12 of 40", 2)], answer, [], str(data))["results"]
+    assert [(r["status"], r["failedBy"], r["reason"]) for r in out] == [
+        ("failed", "none", "The check did not run. thimble could not validate this citation (FileNotFoundError: [Errno 2] No such file or directory: 'meta.json')."),
+        ("failed", "none", "The check did not run. thimble could not validate this citation (PermissionError: [Errno 13] Permission denied: 'sessions/session-P02.jsonl')."),
+    ], out
+    table = json.loads((Path(__file__).with_name("error_paths.json")).read_text(encoding="utf-8"))
+    root = table["root"].replace("{home}", table["home"])
+    cwd = table["cwd"].replace("{root}", root)
+
+    def fill(s: str) -> str:
+        return s.replace("{cwd}", cwd).replace("{root}", root).replace("{home}", table["home"])
+
+    monkeypatch.setenv("HOME", table["home"])
+    monkeypatch.delenv("THIMBLE_RUNS", raising=False)
+    for text, want in table["cases"]:
+        assert E.error_words(fill(text), cwd, root) == fill(want), (text, want)

@@ -55,6 +55,8 @@
 //                             needed; a repair's own failure starts none. Call it in a hook around endCheck's
 //                             (marks/register.ts): the repair's fork skips the hook that spawned it, so its end still
 //                             reaches endCheck
+//   errorWordsOf($, x, n)     the words of an error or a refusal a line quotes (bar/notice.ts reasonOf), each path of
+//                             this machine in them named as the validator names a cited file (core/text.js errorWords)
 //
 // The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + verify`,
 // Claude's marks after each reply; `auto cite` (the default), a reply's marks wait `deferred` (drawn as the reply's own
@@ -124,7 +126,7 @@ import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
 import { claudeTempDir, tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
-import { fenced } from '../core/text.js'
+import { errorWords, fenced } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { choiceOf, claudeCites } from '../settings/features.mjs'
@@ -366,6 +368,24 @@ export function refusalOf(deny: string | undefined): Refusal {
   return { kind: 'other', reason: reasonOf(said || 'no reason given') }
 }
 
+/** The words of an error or a refusal that a line, a reason or a repair request of the citations quotes (bar/notice.ts
+ *  reasonOf), each path of this machine in them named as the validator names a cited file: by its path from the
+ *  session's folder when it lies there, else by its name alone (core/text.js errorWords), never by where that folder
+ *  lies. They are thimble's own words or Claude Code's, never the records' nor the check's, which are quoted as they
+ *  are. `n`: reasonOf's length. */
+export async function errorWordsOf($: Engine, x: unknown, n?: number): Promise<string> {
+  return reasonOf(errorWords(String((x as Error)?.message || x || ''), await whereOf($)), n)
+}
+
+/** The folders errorWords names a path from: the session's (the shell's, the one it started in), and the home folder. */
+async function whereOf($: Engine): Promise<{ cwd?: string; root?: string; home?: string }> {
+  try {
+    return { cwd: String(await $.session.cwd()), root: await startDir($), home: String((await $.env.get('HOME')) ?? '') }
+  } catch {
+    return {} // with no folder known, each path is named by its name alone
+  }
+}
+
 /** The key that gives thimble the person's OK to start its checks where Claude Code would ask about them and nobody
  *  is asked (auto mode's classifier gives no verdict, don't ask mode refuses), and the sentence that offers it, which
  *  ends each line that offers it. A letter, so a word typed after it undoes it (hooks/keys.ts), and no other line's or
@@ -454,7 +474,9 @@ const STANDING: Refusal['kind'][] = ['unreviewed', 'mode', 'judged', 'rule']
  *  takes thimble's allow. A refusal that stands for the session (STANDING) is kept, with its line, until a check starts
  *  (repairOk). */
 async function refusedLine($: Engine, deny: string | undefined): Promise<Line> {
-  const line = cannotStart(deny, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
+  // its words, each path of this machine in them named as errorWordsOf names it, before its line quotes them
+  const said = deny === undefined ? deny : errorWords(String(deny), await whereOf($))
+  const line = cannotStart(said, { allowed: await checksAllowed($), cowork: await remoteCowork($) })
   if (STANDING.includes(line.kind)) await $.state.set(REFUSING, line as never)
   return line
 }
@@ -690,7 +712,7 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
     template = await promptText($, 'checker')
   } catch (err) {
     await notChecked($, whole, now)
-    await sayCannotStart($, { notice: false, text: `thimble could not read its checker text (${reasonOf(err)}), so the citations are not checked. Reinstall thimble.` })
+    await sayCannotStart($, { notice: false, text: `thimble could not read its checker text (${await errorWordsOf($, err)}), so the citations are not checked. Reinstall thimble.` })
     return
   }
   const started: string[] = []
@@ -863,7 +885,7 @@ export async function repairOf($: Engine, row: string, n: number): Promise<Repai
   try {
     template = await promptText($, 'checker')
   } catch (err) {
-    return `thimble could not read its checker text (${reasonOf(err)}). Reinstall thimble.`
+    return `thimble could not read its checker text (${await errorWordsOf($, err)}). Reinstall thimble.`
   }
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
@@ -887,7 +909,7 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
       // which g answers for this repair where it offers g
       const line = await refusedLine($, fork.deny)
       if (line.kind !== 'other') { await sayCannotStart($, line, true, { kind: 'repair', repair: r }); return '' }
-      return `The repair did not start (${reasonOf(fork.deny || 'no reason given')}). Press x on the citation to try again.`
+      return `The repair did not start (${await errorWordsOf($, fork.deny || 'no reason given')}). Press x on the citation to try again.`
     }
     await checkStarted($)
     const agentId = fork.agentId
@@ -936,7 +958,7 @@ export async function checkOpened($: Engine, row: string, n: number): Promise<vo
       const line = await refusedLine($, fork.deny)
       const at = Number(await $.clock.now())
       const whole: Check = { agentId: '', key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: at, spawnedAt: at, ...(r.thread ? { thread: r.thread.agentId } : {}) }
-      await sayCannotStart($, line.kind !== 'other' ? line : { notice: false, text: `The check of citation ${n} could not start (${reasonOf(fork.deny || 'no reason given')}). Open it again to try again.` }, true, { kind: 'check', whole, reply, note })
+      await sayCannotStart($, line.kind !== 'other' ? line : { notice: false, text: `The check of citation ${n} could not start (${await errorWordsOf($, fork.deny || 'no reason given')}). Open it again to try again.` }, true, { kind: 'check', whole, reply, note })
       return
     }
     await checkStarted($)
@@ -1016,7 +1038,7 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   })
   let out: { parsed: boolean; results: Any[]; outside?: unknown } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
-  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${reasonOf(String(ran.stderr || 'no output').trim().split('\n').pop())}), so they are not checked. ${CHECK_ONE}` }
+  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${await errorWordsOf($, String(ran.stderr || 'no output').trim().split('\n').pop())}), so they are not checked. ${CHECK_ONE}` }
   if (!out.parsed) return { problem: `The check of the citations gave no answer thimble could read, so they are not checked. ${CHECK_ONE}` }
   return { results: out.results, outside: Array.isArray(out.outside) ? out.outside.map(String) : [] }
 }
@@ -1055,7 +1077,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     try {
       v = await validate($, c, e, items, [...new Set(reads.map(u => u.file))])
     } catch (err) {
-      v = { problem: `thimble could not validate the check of the citations (${reasonOf(err)}), so they are not checked. ${CHECK_ONE}` }
+      v = { problem: `thimble could not validate the check of the citations (${await errorWordsOf($, err)}), so they are not checked. ${CHECK_ONE}` }
     }
     if (!v.results) {
       await giveUp($, c, 'thimble could not validate its answer.', forkEnd)
