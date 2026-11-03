@@ -460,16 +460,18 @@ test("Claude Code's refusals, as thimble reads them: the permission mode a refus
   expect(long.startsWith(cut.slice(0, -1))).toBe(true)
 })
 
-test("Claude Code's refusals of a check's read of a file, as x acts on them: the person's OK where it asked nobody, its own ask again where the person said no, nothing where a rule, a setting or auto mode's classifier refused it, and none of these for a refusal of no permission", () => {
-  // asked nobody: don't ask mode; auto mode's classifier gave no verdict, but in a remote Cowork session; no prompt
+test("Claude Code's refusals of a check's read of a file, as x acts on them: the person's OK where it asked nobody, its own ask again where the person said no, nothing where a rule, a setting or auto mode's classifier refused it or gave no verdict on it, and none of these for a refusal of no permission", () => {
+  // asked nobody: don't ask mode; no prompt it could show
   expect(readFix(READ_DONT_ASK)).toBe('ok')
-  expect(readFix(AUTO.replace(/Agent/g, 'Read'))).toBe('ok')
-  expect(readFix(AUTO.replace(/Agent/g, 'Read'), true)).toBeNull()
   expect(readFix("Permission to use Read has been denied. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. ")).toBe('ok')
   expect(readFix('Permission for this tool use was denied: it requires interactive approval, and permission prompts are not available in this session. The action was NOT performed.')).toBe('ok')
   // the person said no to its dialog, a subagent's words and main's
   expect(readFix(READ_REJECTED)).toBe('ask')
   expect(readFix("The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.")).toBe('ask')
+  // auto mode's classifier gave no verdict: Claude Code put its ask to the person, through the classifier, which no OK
+  // of thimble's answers (checker.ts allowsRead), and it gives none on such a call again
+  expect(readFix(AUTO.replace(/Agent/g, 'Read'))).toBeNull()
+  expect(readFix(HARD.replace(/Agent/g, 'Read'))).toBeNull()
   // a rule, a setting, the classifier's judgment
   expect(readFix(READ_RULE)).toBeNull()
   expect(readFix('Permission to use Read has been denied.')).toBeNull()

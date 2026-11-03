@@ -60,7 +60,8 @@ export type MarkItem = {
 export type OneRead = { tool: 'Read' | 'Grep'; file: string }
 /** A file a check could not read, by the tool that read it, and what lets it read the file (checker.ts readFix): `ok`,
  *  the person's OK, where Claude Code asked nobody about it; `ask`, Claude Code's own ask again, which the person did not
- *  say yes to; null, nothing the person can do here (a rule, a setting or auto mode's classifier refused it). */
+ *  say yes to; null, nothing the person can do here (a rule, a setting or auto mode's classifier refused it, or the
+ *  classifier gave no verdict on it). */
 export type Unread = OneRead & { fix: 'ok' | 'ask' | null }
 /** `thread`: the reply is a side thread's answer (threads/thread.ts), by its agent and what it is about. */
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[]; thread?: { agentId: string; about: string } }

@@ -84,10 +84,11 @@
 // (readEnded, MarkItem `unread`): a check of one citation needed each file it could not read; a check of several, each
 // file its answer for the citation names (namesFile). The citation's card names the file, and no repair starts by itself
 // (autoRepair), since the same refusal would stop it; the check's other citations are repaired as any are. Where Claude
-// Code asked nobody (don't ask mode, no verdict in auto mode, no prompt it could show), x gives the person's OK for
-// that one file, read by the same tool, and thimble answers allow on its checks' reads of it (allowsRead); where it
-// asked the person, who did not say yes, x starts the repair, whose read Claude Code asks about again in its own
-// dialog; where a rule, a setting or auto mode's classifier refused it, x is not offered. Only a read of one file
+// Code asked nobody (don't ask mode, no prompt it could show), x gives the person's OK for that one file, read by the
+// same tool, and thimble answers allow on its checks' reads of it (allowsRead); where it asked the person, who did not
+// say yes, x starts the repair, whose read Claude Code asks about again in its own dialog; where a rule, a setting or
+// auto mode's classifier refused it, or the classifier gave no verdict on it (Claude Code put that ask to the person,
+// through the classifier, and the OK answers no such ask), x is not offered. Only a read of one file
 // counts (oneRead): a Read, or a Grep of one regular file. A Grep of a folder reads each file in it, and a Glob lists
 // a folder, so their refusal names no file, and no OK covers them. A file no evidence may cite goes on no citation:
 // one outside every folder the validator takes a cited file from (the session's folders, and the temp folders where
@@ -585,16 +586,16 @@ export async function allowsPython($: Engine, e: { tool?: unknown; input?: unkno
 }
 
 /** What lets a check read a file whose read Claude Code refused with the words `said` (Claude Code 2.1.312's), as x acts
- *  on it (Unread `fix`): `ok`, the person's OK, where Claude Code asked nobody (don't ask mode; auto mode's classifier
- *  gave no verdict, but in a remote Cowork session (`cowork`), where Claude Code takes no plugin's allow; no prompt it
- *  could show); `ask`, Claude Code's own ask again, where the person did not say yes to it; null where a deny rule
- *  (DENY_RULE), a setting or the classifier's judgment refused it. Undefined for a refusal that is no permission's (a
+ *  on it (Unread `fix`): `ok`, the person's OK, where Claude Code asked nobody (don't ask mode; no prompt it could
+ *  show), which thimble answers with allow (allowsRead); `ask`, Claude Code's own ask again, where the person did not
+ *  say yes to it; null where a deny rule (DENY_RULE), a setting or the classifier's judgment refused it, or auto mode's
+ *  classifier gave no verdict on it: Claude Code put that ask to the person, through the classifier, which the OK does
+ *  not answer, and the classifier gives none on such a call again. Undefined for a refusal that is no permission's (a
  *  file that is not there), and for a classifier that could not answer for now, which a later check may get past. */
-export function readFix(said: string, cowork = false): Unread['fix'] | undefined {
+export function readFix(said: string): Unread['fix'] | undefined {
   const r = refusalOf(said)
   if (r.kind === 'mode') return 'ok'
-  if (r.kind === 'unreviewed') return cowork ? null : 'ok'
-  if (r.kind === 'judged' || r.kind === 'rule') return null
+  if (r.kind === 'unreviewed' || r.kind === 'judged' || r.kind === 'rule') return null
   if (r.kind === 'unavailable') return undefined
   if (/\btool use was rejected\b/.test(said)) return 'ask'
   if (/^Permission to use \S+ has been denied\.\s|\bpermission prompts are not available\b/.test(said)) return 'ok'
@@ -635,7 +636,7 @@ export async function readEnded($: Engine, e: { agentId?: string; tool: unknown;
   const read = oneRead(e.tool, e)
   if (!e.agentId || !read) return
   const said = String(r?.deny ?? (r?.isError ? r.text ?? '' : ''))
-  const fix = said ? readFix(said, await remoteCowork($)) : undefined
+  const fix = said ? readFix(said) : undefined
   if (fix === undefined || !(await readsAlone($, read))) return
   const had = unreadBy.get(e.agentId) ?? []
   if (!had.some(u => sameRead(u, read))) unreadBy.set(e.agentId, [...had, { ...read, fix }])

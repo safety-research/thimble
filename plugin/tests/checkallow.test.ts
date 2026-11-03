@@ -12,12 +12,14 @@
 // citations whose answer names the file); its other citations are repaired as any are. Where Claude Code asked nobody,
 // x gives the person's OK for the file, and thimble answers Claude Code's own ask on its checks' reads of that file
 // with allow, by the tool that was refused (a Read of it, or a Grep of it alone; a Grep of a folder, or a Glob, gets no
-// OK); where the person said no to its ask, x gives none, and Claude Code asks again. A file no evidence may cite, as
-// the validator says (outside every folder it takes a cited file from), goes on no citation: they keep the validator's
-// reason, x gives no OK for it, and they are repaired as any are. The OK for thimble's checks also covers its checker
-// forks' Python, which don't ask mode refuses: a Bash call that runs one script with python3 or python, as the browser
-// workbench's checker may, never main's or another agent's. Neither OK answers an ask Claude Code puts to someone (the
-// tool.check event names the person or a host as its approver). All data is made up. `claude plugin test plugin`.
+// OK); where the person said no to its ask, x gives none, and Claude Code asks again; where auto mode's classifier gave
+// no verdict on the read, an ask of the person's that no OK answers, x is not offered, as where a rule refused it. A
+// file no evidence may cite, as the validator says (outside every folder it takes a cited file from), goes on no
+// citation: they keep the validator's reason, x gives no OK for it, and they are repaired as any are. The OK for
+// thimble's checks also covers its checker forks' Python, which don't ask mode refuses: a Bash call that runs one
+// script with python3 or python, as the browser workbench's checker may, never main's or another agent's. Neither OK
+// answers an ask Claude Code puts to someone (the tool.check event names the person or a host as its approver). All
+// data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
@@ -398,6 +400,22 @@ test("a check that could not read a file because the person said no to Claude Co
     await checkThatReads(ruled.$, hooksOn(ruled.$), refusedRead(READ_RULE))
     expect((await itemOf(ruled.$)).unread).toEqual([{ tool: 'Read', file: ELSEWHERE, fix: null }])
     expect(await repairOk(ruled.$, await itemOf(ruled.$))).toBeNull()
+  } finally {
+    setOptions({})
+  }
+})
+
+test("a check that could not read a file because auto mode's classifier gave no verdict on its read: Claude Code put that ask to the person, through its classifier, which no OK of thimble's answers, so each citation it leaves failed names the file, none is repaired by itself, and x is not offered, as where a rule refused the read", async () => {
+  setOptions({ citations: 'auto cite + verify' })
+  try {
+    const { $, spawned } = engine(() => null, FIRST_THREE)
+    await checkThatReads($, hooksOn($), refusedRead(AUTO.replace(/Agent/g, 'Read')))
+    const items = (await rowMarks($, 'row-1'))!.items
+    const unread = [{ tool: 'Read', file: ELSEWHERE, fix: null }]
+    expect(items.map(m => m.unread)).toEqual([unread, unread, unread, undefined, undefined])
+    await autoRepair($, 'agent-1')
+    expect(spawned.length).toBe(2)
+    for (const m of items.slice(0, 3)) expect(await repairOk($, m)).toBeNull()
   } finally {
     setOptions({})
   }
