@@ -4,6 +4,7 @@ until it is checked the way a route checks the same kind of value (a slug, an id
 such a value led the server, which runs in no sandbox, to a file outside the workspace."""
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
 import os
@@ -360,3 +361,63 @@ def test_a_fork_s_transcript_is_read_only_from_main_s_session_folder(tmp_path_fa
             f"<task-notification><task-id>{agent}</task-id><tool-use-id>toolu_fork</tool-use-id>"
             "<status>completed</status></task-notification>")}})) + "\n")
     assert "OUTSIDE-SECRET" not in json.dumps([e.__dict__ for e in context._entries(main)])
+
+
+def test_a_long_output_claude_code_saved_is_read_through_no_link_a_card_left_on_its_way(tmp_path_factory):
+    """An orientation's long tool outputs are stored whole from the file Claude Code saved each to, which the call's
+    record names (toolUseResult.persistedOutputPath, <session>/tool-results/<file> beside the session's transcript). On
+    the Messages API the transcripts lie in the workspace, which a card's code writes, and the server followed a link
+    put in place of tool-results/, so it stored the file the link led to among the calls, where the card reads it."""
+    from app import calls
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.txt").write_text("OUTSIDE-SECRET\n")
+    d = config.workspace_dir(CORPUS) / "runtime"
+    (d / SID).mkdir(parents=True)
+    (d / f"{SID}.jsonl").write_text("")
+    (d / SID / calls.TOOL_RESULTS).symlink_to(outside, target_is_directory=True)
+    rec = {"type": "user", "sessionId": SID,
+           "toolUseResult": {"persistedOutputPath": str(d / SID / calls.TOOL_RESULTS / "made-up.txt")}}
+    block = {"type": "tool_result", "tool_use_id": "toolu_made_up", "content": "the output's preview"}
+    calls.number(CORPUS, "made-up-orient", "toolu_made_up", "Bash", {"command": "made-up"})
+    calls.Numbering(CORPUS, "made-up-orient").result("toolu_made_up", block, rec)
+    assert calls.get(CORPUS, "made-up-orient", 1)["result"] == "the output's preview"
+
+
+async def test_a_thread_s_picture_is_read_only_where_the_server_keeps_it(tmp_path_factory):
+    """The picture the browser took when a thread opened is kept at anchors/<thread>.png, and the thread's meta,
+    chats/<id>.meta.json, which a card's code writes, names it; `screenshot` of the thread read the file the meta named,
+    as it was, and handed it to the model that asked, so a meta that named a file outside gave a model that file."""
+    from app import agents, tools
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.png").write_bytes(b"OUTSIDE-SECRET")
+    meta = agents.new_thread(CORPUS, "board.jsonl:L1", "made-up words")
+    agents.update_agent(CORPUS, meta["id"], anchor_image=str(outside / "made-up.png"))
+    got = await tools.call(CORPUS, "screenshot", {"ref": f"thread:{meta['id']}"})
+    assert base64.b64encode(b"OUTSIDE-SECRET").decode() not in json.dumps(got.content)
+
+
+async def test_a_side_thread_s_calls_are_read_only_from_its_fork_s_transcript(monkeypatch, tmp_path_factory):
+    """The citations of a side thread's answer are checked against the Bash calls of the thread's fork, read from the
+    fork's transcript, whose path the reply's record, marks/<turn>.json, keeps; a card's code writes that file, and the
+    server read whatever file it named."""
+    from app import marks
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.jsonl").write_text("{}\n")
+    turn = "0123abcd"
+    p = config.workspace_dir(CORPUS) / "marks" / f"{turn}.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({"turn": turn, "items": [], "thread": {"chat": "made-up", "about": "made-up",
+                                                                   "calls": str(outside / "made-up.jsonl")}}))
+    read: list = []
+    monkeypatch.setattr(marks, "_transcript_messages", lambda path: read.append(path) or [])
+
+    async def fork(*_a, **_k):
+        return {"answer": "", "calls": []}
+
+    with contextlib.suppress(Exception):
+        await marks._check_share(CORPUS, {"sid": SID}, turn, "", [{"n": 1, "words": "made-up", "sentence": "made-up"}],
+                                 (str(config.corpus_dir(CORPUS)), str(config.corpus_dir(CORPUS))), fork)
+    assert str(outside / "made-up.jsonl") not in map(str, read)

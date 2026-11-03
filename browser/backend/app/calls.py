@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -279,10 +280,11 @@ def lines_of(text: Any) -> list[str]:
     return out
 
 
-def persisted_path(rec: dict[str, Any] | None) -> Path | None:
+def persisted_path(rec: dict[str, Any] | None, transcript: Path | str | None = None) -> Path | None:
     """The file Claude Code saved the record's long tool output to (`toolUseResult.persistedOutputPath`) when it is a
-    regular file in the tool-results folder of the record's own session, beside that session's transcript; else None.
-    The text of a result never names the file: a tool's output can say anything."""
+    regular file in the tool-results folder of the record's own session, beside that session's transcript, and, with
+    `transcript`, the session is the one whose transcript (main's, or a subagent's in the session's folder) holds the
+    record; else None. The text of a result never names the file: a tool's output can say anything."""
     rec = rec or {}
     tur = rec.get("toolUseResult")
     saved = tur.get("persistedOutputPath") if isinstance(tur, dict) else None
@@ -293,6 +295,10 @@ def persisted_path(rec: dict[str, Any] | None) -> Path | None:
     folder = f.parent
     if not f.is_absolute() or folder.name != TOOL_RESULTS or folder.parent.name != sid:
         return None
+    if transcript is not None:
+        t, own = os.path.realpath(transcript), os.path.realpath(folder.parent)
+        if t != own + ".jsonl" and not t.startswith(own + os.sep):
+            return None
     try:
         if not (folder.parent.parent / f"{sid}.jsonl").is_file() or f.is_symlink() or not f.is_file():
             return None
@@ -301,17 +307,21 @@ def persisted_path(rec: dict[str, Any] | None) -> Path | None:
         return None
 
 
-def result_text(block: dict[str, Any], rec: dict[str, Any] | None = None) -> str:
-    """The whole output of a transcript's tool_result `block` (the user record `rec` carries it): the file Claude Code
-    saved a long output to (persisted_path), read up to RESULT_CHARS, when it saved one; else the result's text."""
+def result_text(block: dict[str, Any], rec: dict[str, Any] | None = None, transcript: Path | str | None = None) -> str:
+    """The whole output of a transcript's tool_result `block` (the user record `rec` carries it, in `transcript`): the
+    file Claude Code saved a long output to (persisted_path), read up to RESULT_CHARS, when it saved one; else the
+    result's text. The file is opened as nofollow opens it, from the workspaces folder when it lies in a workspace,
+    where the server's own runtime keeps transcripts and a card's code writes, else from the folder of its session's
+    transcript, so a link below either leads the read nowhere."""
     from . import session  # noqa: PLC0415 — session imports agents, which imports tools
 
-    saved = persisted_path(rec)
+    saved = persisted_path(rec, transcript)
     if saved is not None:
         try:
-            with open(saved, "r", encoding="utf-8", errors="replace") as f:
+            root = None if nofollow.split(saved) is not None else saved.parents[2]
+            with os.fdopen(nofollow.open(saved, os.O_RDONLY, root=root), "r", encoding="utf-8", errors="replace") as f:
                 return f.read(RESULT_CHARS)
-        except OSError:
+        except (OSError, ValueError):
             pass
     return session.response_text(block.get("content"))
 
@@ -496,9 +506,10 @@ class Numbering:
             log.exception("%s: call %s was not numbered", self.c, tool_use_id)
             return None
 
-    def result(self, tool_use_id: str, block: dict[str, Any], rec: dict[str, Any] | None = None) -> None:
+    def result(self, tool_use_id: str, block: dict[str, Any], rec: dict[str, Any] | None = None,
+               transcript: Path | str | None = None) -> None:
         try:
-            result(self.c, self.chat, tool_use_id, result_text(block, rec), bool(block.get("is_error")))
+            result(self.c, self.chat, tool_use_id, result_text(block, rec, transcript), bool(block.get("is_error")))
         except Exception:  # noqa: BLE001
             log.exception("%s: the output of call %s was not stored", self.c, tool_use_id)
 
@@ -567,7 +578,7 @@ def backfill(c: str, chat: str) -> int:
                         number(c, chat, str(b["id"]), str(b.get("name") or ""), b.get("input"), agent=agent)
                         stored += 1
                     elif rec.get("type") == "user" and b.get("type") == "tool_result" and b.get("tool_use_id"):
-                        result(c, chat, str(b["tool_use_id"]), result_text(b, rec), bool(b.get("is_error")))
+                        result(c, chat, str(b["tool_use_id"]), result_text(b, rec, p), bool(b.get("is_error")))
     return stored
 
 

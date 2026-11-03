@@ -3215,7 +3215,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 continue
             sub.seen.add(f"result:{tid}")
             if sub.calls is not None:
-                sub.calls.result(tid, b, rec)
+                sub.calls.result(tid, b, rec, sub.path)
             data = _result_data(tid, sub.names.get(tid, ""), b.get("content"), bool(b.get("is_error")))
             shell = BG_SHELL_RE.search(data["summary"]) if sub.names.get(tid) == "Bash" else None
             owner = str(sub.agent_id if sub.thimble else sub.root or "")

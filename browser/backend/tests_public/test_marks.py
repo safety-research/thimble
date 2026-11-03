@@ -1108,7 +1108,12 @@ def test_a_side_thread_s_answer_is_checked_with_its_fork_s_calls_and_main_hears_
     tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
     code = "runs = ['failed', 'passed', 'failed', 'passed', 'passed', 'failed', 'passed', 'passed']\n" \
            "print(f\"{runs.count('failed')} of {len(runs)}\")"
-    calls = tmp_path / "agent-a0f.jsonl"  # the transcript of the thread's fork, which counted the runs
+    # the transcript of the thread's fork, which counted the runs, in its session's folder beside main's transcript
+    # (here the server's own runtime's, runtime.Space.sub_path)
+    session_dir = config.workspace_dir(CORPUS) / "runtime" / "e7b0a1f2-0000-4000-8000-0000000000cd"
+    (session_dir / "subagents").mkdir(parents=True)
+    session_dir.with_name(session_dir.name + ".jsonl").write_text("")
+    calls = session_dir / "subagents" / "agent-a0f.jsonl"
     calls.write_text("".join(json.dumps(r) + "\n" for r in (
         {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t1", "name": "Bash",
                                                        "input": {"command": f"python3 - <<'PY'\n{code}\nPY"}}]}},
