@@ -169,7 +169,10 @@ def _load(c: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         if not isinstance(r, dict):
             continue
         lines += 1
-        if r.get("type") == "step" and r.get("stack") == "redo":
+        if r.get("type") == "step" and not _names_ok(r):
+            log.warning("%s: undo step %s names a file or folder that no route takes, so it was skipped", c,
+                        str(r.get("id"))[:16])
+        elif r.get("type") == "step" and r.get("stack") == "redo":
             redo.append(r)  # a rewritten journal's redo stack, bottom first
         elif r.get("type") == "step":
             undo.append(r)
@@ -180,13 +183,34 @@ def _load(c: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             undo.append(redo.pop())
         elif r.get("type") == "ran" and isinstance(r.get("after"), dict):
             step = next((s for s in reversed(undo) if s.get("id") == r.get("step")), None)
-            if step is not None and isinstance(step.get("after"), dict):
-                step["after"].update(r["after"])
+            if step is not None and isinstance(step.get("after"), dict):  # a run's fields only (card_ran)
+                step["after"].update({k: v for k, v in r["after"].items() if k in RUN_FIELDS})
     _stacks[c] = (undo, redo)
     _sigs[c] = _sig(c)
     if lines > MAX_LINES:
         _rewrite(c)
     return _stacks[c]
+
+
+def _names_ok(step: dict[str, Any]) -> bool:
+    """Whether each field of `step` that names a file or a folder is a name a route takes for it: a document's slug
+    (report_types.SLUG_RE) and its investigation (investigation.ID_RE), a label's id and its trash folder
+    (concepts.ID_RE), a card's id (notebook.ID_RE). The journal lies in the workspace, which a card's code writes, so a
+    step read from it names no file until it is checked, and one that names anything else is skipped (_load)."""
+    from . import concepts, investigation, notebook, report_types  # noqa: PLC0415 — each of them records steps here
+
+    def name(v: Any, pattern: Any) -> bool:
+        return isinstance(v, str) and pattern.match(v) is not None
+
+    kind, target = step.get("kind"), step.get("target")
+    if kind == "doc":
+        return name(target, report_types.SLUG_RE) and name(step.get("inv") or investigation.MAIN, investigation.ID_RE)
+    if kind == "label":
+        return name(target, concepts.ID_RE) and name(step.get("trash"), concepts.ID_RE)
+    if kind == "card":  # a card added or deleted is kept whole, with its own id
+        cards = [step.get(k) for k in ("before", "after") if step.get("op") in ("created", "deleted")]
+        return name(target, notebook.ID_RE) and all(not isinstance(x, dict) or x.get("id") == target for x in cards)
+    return False
 
 
 def _index(stack: list[dict[str, Any]], step_id: Any) -> int | None:
