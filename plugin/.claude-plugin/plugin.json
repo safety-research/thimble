@@ -113,7 +113,7 @@
     "labels": {
       "type": "boolean",
       "title": "Labels",
-      "description": "Press l to see the labels Claude made, with their values and records. No model call.",
+      "description": "Press l to see the labels Claude made, with their values and records. No model call. off: no Labels pane, and Claude makes a label only when you ask for one.",
       "default": true
     },
     "coverage": {
