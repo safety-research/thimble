@@ -10,6 +10,8 @@ Under $THIMBLE_HOME/fixes:
                      --local) is a worktree of that clone, so `mine` shows there; a release's zip, unpacked, has no
                      git, so its live comes from thimble's repository, at the release whose files the zip's folder has
                      (_zip_release), and the folder stays as it is.
+    live-<time>/     a live that had no release.json beside it that thimble could read, set aside with any fixes in it
+                     when live was made again, never deleted (live_aside)
     release/         the release commit (base) as it is, never changed by a fix: a detached worktree of live's
                      repository, made with live, moved when base moves, made again when it is missing, and put back as
                      the release commit has it before the way back runs from it (place_release, the launcher), never
@@ -455,8 +457,8 @@ def _zip_release(root: Path, prefix: str = "", latest: dict[str, Any] | None = N
         git("init", "-q", "--bare", d, cwd=d)
         git("remote", "add", "origin", latest["url"], cwd=d)
         git("config", "remote.origin.promisor", "true", cwd=d)
-        run(["git", "fetch", "-q", "--depth", "1", "--filter=blob:none", "--no-tags", "origin",
-             *[f"+refs/tags/{t}:refs/tags/{t}" for t in latest["tags"]]], cwd=d, timeout=600)
+        remote_git("fetch", "-q", "--depth", "1", "--filter=blob:none", "--no-tags", "origin",
+                   *[f"+refs/tags/{t}:refs/tags/{t}" for t in latest["tags"]], cwd=d, timeout=600)
         for t in latest["tags"]:
             commit = git("rev-parse", f"refs/tags/{t}^{{commit}}", cwd=d)
             seen.append((t, commit, *_differs(Path(d), commit, root, prefix, memo)))
@@ -474,8 +476,8 @@ def _zip_release(root: Path, prefix: str = "", latest: dict[str, Any] | None = N
 
 def _zip_fetch(live: Path, tag: str) -> None:
     """The release `tag` in live, from thimble's repository (live's origin), with no more history."""
-    run(["git", "fetch", "-q", "--depth", "1", "--no-tags", "origin", f"+refs/tags/{tag}:refs/tags/{tag}"], cwd=live,
-        timeout=600)
+    remote_git("fetch", "-q", "--depth", "1", "--no-tags", "origin", f"+refs/tags/{tag}:refs/tags/{tag}", cwd=live,
+               timeout=600)
 
 
 OFF_SH = """#!/bin/sh
@@ -516,7 +518,8 @@ def ensure_live(src: dict[str, Any] | None = None) -> dict[str, Any]:
     first fix goes on. Until then, the release follows the code that runs (_follow), so that the release checkout is
     never older than it. A home that has live gets off.sh as this kernel writes it when its text is another: an older
     thimble's (the update that installs this one runs the older kernel). `src`: where live comes from, as find_source
-    says it, when it is not the thimble that runs: scripts/install.sh's download of the release (install.py)."""
+    says it, when it is not the thimble that runs: scripts/install.sh's download of the release (install.py). A live
+    with no release.json beside it that thimble can read goes aside first (live_aside), with any fixes in it."""
     rel = release()
     live = live_dir()
     if rel and (live / ".git").exists():
@@ -528,8 +531,8 @@ def ensure_live(src: dict[str, Any] | None = None) -> dict[str, Any]:
     src = src or find_source()
     repo, commit = Path(src["repo"]), src["commit"]
     home().mkdir(parents=True, exist_ok=True)
-    if live.exists():
-        shutil.rmtree(live)
+    if os.path.lexists(live):
+        live_aside()
     if src["kind"] == "zip":
         tag, commit = _zip_release(repo, src["prefix"])
         git("init", "-q", str(live), cwd=home())
@@ -554,6 +557,19 @@ def ensure_live(src: dict[str, Any] | None = None) -> dict[str, Any]:
     rel = _follow(rel)
     place_release(rel["base"])
     return rel
+
+
+def live_aside() -> Path:
+    """A live that thimble cannot use, with no release.json it can read beside it, moved aside by the date and time
+    (live-20261103-184500), never deleted: it may hold the person's fixes as commits. Where it went."""
+    live = live_dir()
+    stamp = aside = live.with_name(f"live-{time.strftime('%Y%m%d-%H%M%S')}")
+    n = 1
+    while os.path.lexists(aside):
+        n += 1
+        aside = stamp.with_name(f"{stamp.name}-{n}")
+    os.rename(live, aside)
+    return aside
 
 
 def _leftovers_aside(repo: Path) -> None:
@@ -820,10 +836,18 @@ def add_marketplace(folder: Path, why: str = "to load thimble from it") -> None:
         raise FixError(f"thimble cannot read Claude Code's settings ({p}) {why}")
 
     def write(t: str) -> None:
-        tmp = p.with_suffix(".json.thimble-tmp")
-        tmp.write_text(t)
-        os.chmod(tmp, p.stat().st_mode & 0o777)
-        tmp.replace(p)
+        # through a link (a settings.json kept in a dotfiles folder): the file it names changes, the link stays
+        real = os.path.realpath(p)
+        fd, tmp = tempfile.mkstemp(prefix=".settings.", suffix=".thimble-tmp", dir=os.path.dirname(real))
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(t)
+            os.chmod(tmp, os.stat(real).st_mode & 0o777)
+            os.replace(tmp, real)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     known = (settings or {}).get("extraKnownMarketplaces")
     changed = isinstance(known, dict) and isinstance(known.get("thimble"), dict)
@@ -2691,6 +2715,18 @@ def update_url() -> str:
     return os.environ.get("THIMBLE_UPDATE_URL") or f"https://github.com/{upstream()}.git"
 
 
+# git with no ext:: transport, which runs a command in place of reaching a repository
+NO_EXT = ["-c", "protocol.ext.allow=never"]
+
+
+def remote_git(*args: str, cwd: str | Path = "/", **kw: Any) -> subprocess.CompletedProcess:
+    """git ARGS against a repository on the network (thimble's, a fork, a clone's upstream), with no ext:: transport
+    (NO_EXT), from / unless it fetches into a repository of thimble's or the person's (`cwd`): run in the folder of a
+    session, git would take the config of a repository around it, which can rewrite thimble's address
+    (url.<x>.insteadOf) into a command."""
+    return run(["git", *NO_EXT, *args], cwd=cwd, said=["git", *args], **kw)
+
+
 def _vtuple(tag: str) -> tuple[int, ...]:
     m = RELEASE_TAG.match(tag if tag.startswith("v") else "v" + tag)
     return tuple(int(x) for x in m.groups()) if m else ()
@@ -2716,7 +2752,7 @@ def latest_release(then: str = "run thimble update again") -> dict[str, Any]:
     release tag's commit (tags), which names a release that a clone without tags has. A tag with more after the numbers
     (v0.11.0-rc1) is not a release. `then`: what the person does after the network, or their sign-in, works again."""
     url = update_url()
-    p = run(["git", "ls-remote", "--tags", url, "refs/tags/v*"], check=False, timeout=120)
+    p = remote_git("ls-remote", "--tags", url, "refs/tags/v*", check=False, timeout=120)
     if p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
         why = no_access(p.stderr or p.stdout, then)
@@ -3484,8 +3520,8 @@ def update(check: bool = False, once: bool = False, say=None, to: dict[str, Any]
         # a release's tag, or the branch `to` names (its folder of patches by a name with no space: r109-a1b2c3d)
         tag = latest["tag"]
         ref = f"refs/thimble/releases/{tag}" if tag else f"refs/thimble/branches/{latest['name']}"
-        run(["git", "fetch", "-q", "--no-tags", latest["url"], f"+{latest.get('ref') or 'refs/tags/' + tag}:{ref}"],
-            cwd=live, timeout=600)
+        remote_git("fetch", "-q", "--no-tags", latest["url"], f"+{latest.get('ref') or 'refs/tags/' + tag}:{ref}",
+                   cwd=live, timeout=600)
         new = git("rev-parse", f"{ref}^{{commit}}", cwd=live)
         version = latest["version"]
         key = version if tag else f"{latest['name'].replace('/', '-')}-{new[:7]}"
@@ -3583,8 +3619,8 @@ def _behind(repo: Path, commit: str) -> dict[str, Any]:
     if not up:
         return {}
     try:
-        p = run(["git", "fetch", "-q", "--no-tags", up["remote"], f"+{up['ref']}:{up['tracking']}"], cwd=repo,
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, check=False, timeout=120)
+        p = remote_git("fetch", "-q", "--no-tags", up["remote"], f"+{up['ref']}:{up['tracking']}", cwd=repo,
+                       env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, check=False, timeout=120)
         err = "" if p.returncode == 0 else next(
             (x.strip() for x in (p.stderr or p.stdout).splitlines() if x.strip()), "no message")
     except FixError as e:
@@ -4573,7 +4609,8 @@ def _pull_request(rec: dict[str, Any], d: Path) -> str:
     branch = f"thimble-fix-{rec['id']}-{secrets.token_hex(3)}"
     name = repo.split("/", 1)[1]
     url = (os.environ.get("THIMBLE_FIX_PUSH_URL") or "https://github.com/{login}/{name}.git").format(login=login, name=name)
-    run([push_git(), "-c", "credential.helper=", "-c", f"credential.https://github.com.helper=!{gh()} auth git-credential",
+    run([push_git(), *NO_EXT, "-c", "credential.helper=", "-c",
+         f"credential.https://github.com.helper=!{gh()} auth git-credential",
          "push", url, f"{sha}:refs/heads/{branch}"], cwd=live)
     out = run([gh(), "pr", "create", "--repo", repo, "--draft", "--head", f"{login}:{branch}", "--title", title,
                "--body-file", str(d / "pr.md")]).stdout.strip().splitlines()

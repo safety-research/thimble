@@ -11,7 +11,8 @@ the sandbox, which leaves its output (<id>.out, <id>.err) and its exit code (<id
 and ends with that code. One the plugin does not take within TAKE_S runs here, with its stdin, as it would with no
 plugin; one it took that gives no result within RUN_S ends with an error that says so (GAVE_UP). However the command
 ends, a signal too, its files go with it; when it is killed outright, the plugin sees its heartbeat stop, stops its run
-and removes them.
+and removes them. `thimble install`, the install's own steps, is never handed off: it runs here, in the sandbox, and
+the install refuses a run the plugin makes (install.py cmd).
 
     handed_off(argv) -> the exit code of the command the plugin ran, or None: it runs here
 """
@@ -117,7 +118,9 @@ def _result(at: str, beat: Callable[[], None]) -> int | str:
 
 def handed_off(argv: list[str]) -> int | None:
     """When this process may not write $THIMBLE_HOME and the plugin serves THIMBLE_HANDOFF: the command `argv`, run by
-    the plugin, its output printed here; its exit code. None when it runs here."""
+    the plugin, its output printed here; its exit code. None when it runs here, as `thimble install` always does."""
+    if argv[:1] == ["install"]:
+        return None
     box = os.environ.get("THIMBLE_HANDOFF") or ""
     if not box or not os.path.isdir(box) or not os.access(box, os.W_OK) or _writable(thimble_home()):
         return None
