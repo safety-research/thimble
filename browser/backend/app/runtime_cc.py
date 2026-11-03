@@ -227,11 +227,12 @@ def shell_tmp(c: str) -> Path | None:
 
 
 def _own(p: Path, root: Path | None = None) -> Path:
-    """`p`, made when missing: a folder this user owns and no link, from `root` (its parent's) on (_mine), then mode
-    0700 through its descriptor, as Claude Code checks its temp folder; OSError for anything else, such as a folder
-    another user made in its place."""
-    with contextlib.suppress(FileExistsError):
-        os.mkdir(p, 0o700)
+    """`p`, made when missing in its folder as nofollow opens that from `root` (its parent's), then a folder this user
+    owns and no link (_mine), then mode 0700 through its descriptor, as Claude Code checks its temp folder; OSError for
+    anything else, such as a folder another user made in its place."""
+    with nofollow.folder(p.parent, root=p.parent if root is None else root) as fd, \
+            contextlib.suppress(FileExistsError):
+        os.mkdir(p.name, 0o700, dir_fd=fd)
     with _mine(p, root) as fd:
         os.fchmod(fd, 0o700)
     return p

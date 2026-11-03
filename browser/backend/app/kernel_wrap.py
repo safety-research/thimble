@@ -16,7 +16,8 @@ Both draw the same boundary:
            HOME is fresh at each start: a folder on a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt. TMPDIR is main's Bash's (runtime.shell_temp): the workspace's temp folder (TEMP_DIR) on the
            Messages API, and on Claude Code sign-in the temp folder Claude Code's sandbox gives main's commands, outside
-           the workspace, which the kernel may write too (`write`)
+           the workspace, which the kernel may write too (`write`; bwrap binds it by the descriptor of the folder the
+           server checked, `write_fds`, since main's Bash may put a link in its place)
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
