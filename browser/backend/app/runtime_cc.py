@@ -91,8 +91,8 @@ _had_claude: dict[str, bool] = {}  # whether .claude/ was in that folder when it
 
 
 def _load(path: Any) -> dict[str, Any]:
-    try:
-        got = json.loads(path.read_text("utf-8"))
+    try:  # in the workspace's runtime folder: never read through a link a card's code left there (nofollow)
+        got = json.loads(nofollow.read_text(path))
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}

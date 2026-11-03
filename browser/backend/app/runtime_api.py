@@ -26,8 +26,8 @@ STOPPED = "The analyst stopped this before it ran."
 
 
 def _load(path: Any) -> list[dict[str, Any]]:
-    try:
-        got = json.loads(path.read_text("utf-8"))
+    try:  # the state sent to the model again: never read through a link a card's code left in the workspace
+        got = json.loads(nofollow.read_text(path))
     except (OSError, ValueError):
         return []
     if not isinstance(got, list):

@@ -149,3 +149,17 @@ def test_a_group_s_file_is_read_through_no_link_left_in_its_place(tmp_path_facto
     path.symlink_to(outside / "made-up.json")
     notebook.clear_cache()
     assert notebook.read_notebook(ws, nb["id"]) is None
+
+
+def test_main_s_conversation_state_is_read_through_no_link_left_in_its_place(tmp_path_factory):
+    """The conversation the Messages API runtime sends the model again is loaded from the workspace's runtime folder
+    (runtime_api._load), by its path, so a link a card's code put in its place had the server send the model the file
+    it points to as main's conversation."""
+    from app import runtime_api
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.json").write_text(json.dumps([{"role": "user", "content": "OUTSIDE-SECRET"}]))
+    state = config.workspace_dir(CORPUS) / "runtime" / "convs" / "main-made-up.api.json"
+    state.parent.mkdir(parents=True)
+    state.symlink_to(outside / "made-up.json")
+    assert runtime_api._load(state) == []
