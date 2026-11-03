@@ -188,3 +188,40 @@ async def test_grep_says_which_files_it_left_out_because_they_lead_outside_the_f
     none = await runtime_tools.call(box, "Grep", {"pattern": "made-up words", "glob": "*.jsonl"})
     assert none.text == ("No matches found\n[1 file not searched, since it is a link that leads outside the folders you "
                          f"may read: {real / 'outside.jsonl'}]")
+
+
+async def test_the_tools_work_below_a_folder_the_person_may_enter_but_not_list_on_macos_as_on_linux(tmp_path,
+                                                                                                  monkeypatch):
+    """The tools open a path one folder at a time without following a link (nofollow). On macOS, which has no O_PATH,
+    each folder so opened needs read permission, so a walk from / failed below a folder the person may enter but not
+    list (another account's 0711 folder, a lab share): Read, Edit and Write failed, and Glob and Grep found nothing. A
+    walk starts at the agent's folder that holds the path, which no sandboxed code can replace."""
+    monkeypatch.setattr(runtime_tools.nofollow, "PASS_FLAGS", runtime_tools.nofollow.DIR_FLAGS)  # as on macOS
+    share = tmp_path / "made-up-share"
+    corpus, ws = share / "made-up-corpus", tmp_path / "ws"
+    corpus.mkdir(parents=True)
+    (ws / "tmp").mkdir(parents=True)
+    (corpus / "notes.txt").write_text("alpha line\nbeta line\n")
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[corpus, ws / "tmp"])
+    real = corpus.resolve()
+    share.chmod(0o311)  # entered, never listed
+    try:
+        got = {name: await runtime_tools.call(box, name, args) for name, args in (
+            ("Read", {"file_path": "notes.txt"}), ("Grep", {"pattern": "beta"}), ("Glob", {"pattern": "*.txt"}),
+            ("Edit", {"file_path": "notes.txt", "old_string": "alpha", "new_string": "gamma"}),
+            ("Write", {"file_path": "new.txt", "content": "made-up\n"}))}
+    finally:
+        share.chmod(0o755)
+    assert {k: (v.is_error, v.text) for k, v in got.items()} == {
+        "Read": (False, f"{1:>6}\talpha line\n{2:>6}\tbeta line"), "Grep": (False, f"{real / 'notes.txt'}:2: beta line"),
+        "Glob": (False, str(real / "notes.txt")), "Edit": (False, f"edited {real / 'notes.txt'}"),
+        "Write": (False, f"wrote {real / 'new.txt'} (8 characters)")}
+    assert (corpus / "notes.txt").read_text() == "gamma line\nbeta line\n" and (corpus / "new.txt").is_file()
+    # a folder the tools cannot list fails the call, rather than read as a folder with no files
+    corpus.chmod(0o311)
+    try:
+        glob, grep = (await runtime_tools.call(box, "Glob", {"pattern": "*.txt"}),
+                      await runtime_tools.call(box, "Grep", {"pattern": "beta"}))
+    finally:
+        corpus.chmod(0o755)
+    assert glob.is_error and grep.is_error and "Permission denied" in glob.text and "Permission denied" in grep.text

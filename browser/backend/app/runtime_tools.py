@@ -11,8 +11,9 @@ as the Claude Code tools 0.8's agents had, so the prompts read the same in both 
 
 A tool that cannot run here (Bash without the sandbox) is left out of the agent's list (available). Nothing here
 reaches past those folders: every path is resolved, symlinks included, and checked against them (Box.path), and the
-file or folder is then opened by that real path one part at a time from / without following a link (nofollow), so a
-link a card's code or a command puts on the way after the check fails the call rather than lead outside.
+file or folder is then opened by that real path one part at a time from the agent's folder that holds it (Box.root)
+without following a link (nofollow), so a link a card's code or a command puts on the way after the check fails the
+call rather than lead outside.
 """
 from __future__ import annotations
 
@@ -148,6 +149,15 @@ class Box:
             raise ValueError(f"{p} is outside the folders this agent may {what}")
         return q
 
+    def root(self, q: Path) -> Path:
+        """The folder a tool opens the real path `q` (path) from, one folder at a time without following a link: the
+        outermost of the workspace and the box's roots that holds it, which no sandboxed code can replace. The folders
+        above it are opened by path, so on macOS, where each folder so opened needs read permission (no O_PATH), a
+        folder above it that the person may enter but not list is no obstacle, as it is none to Claude Code's tools."""
+        held = [r for r in [self.workspace.resolve(), *self._real([*self.read_roots, *self.write_roots])]
+                if self._inside(q, [r])]
+        return min(held, key=lambda r: len(r.parts)) if held else Path("/")
+
 
 @dataclass
 class Out:
@@ -159,10 +169,10 @@ def _cut(text: str) -> str:
     return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + f"\n[cut at {RESULT_CHARS} characters]"
 
 
-def _opened(q: Path) -> BinaryIO:
-    """The regular file at the real path `q` (Box.path), opened from / one part at a time without following a link
-    (nofollow): a link put on its way after Box checked it fails the open."""
-    return os.fdopen(nofollow.open(q, os.O_RDONLY, root="/"), "rb")
+def _opened(q: Path, root: Path) -> BinaryIO:
+    """The regular file at the real path `q` (Box.path), opened from `root` (Box.root) one part at a time without
+    following a link (nofollow): a link put on its way after Box checked it fails the open."""
+    return os.fdopen(nofollow.open(q, os.O_RDONLY, root=root), "rb")
 
 
 def _binary(f: BinaryIO) -> bool:
@@ -181,10 +191,10 @@ def _lines(f: BinaryIO) -> Iterator[str]:
         yield raw.decode("utf-8", errors="replace").removesuffix("\n").removesuffix("\r")
 
 
-def _window(q: Path, offset: int, limit: int) -> tuple[list[str], int] | None:
-    """Lines `offset` to `offset + limit - 1` of the text file at the real path `q` (from 1), and how many lines follow
-    them; None for a binary file."""
-    with _opened(q) as f:
+def _window(q: Path, root: Path, offset: int, limit: int) -> tuple[list[str], int] | None:
+    """Lines `offset` to `offset + limit - 1` of the text file at the real path `q` (from 1, opened from `root`), and
+    how many lines follow them; None for a binary file."""
+    with _opened(q, root) as f:
         if _binary(f):
             return None
         lines = _lines(f)
@@ -192,13 +202,15 @@ def _window(q: Path, offset: int, limit: int) -> tuple[list[str], int] | None:
         return shown, sum(1 for _ in lines)
 
 
-def _files(base: Path) -> Iterator[tuple[Path, int, str]]:
+def _files(base: Path, root: Path) -> Iterator[tuple[Path, int, str]]:
     """Each file below the real folder `base`, as (its path, the descriptor of its folder, its name there), from a walk
-    that opens each folder by its own name in the one above it and enters no link (os.fwalk over nofollow's folder);
-    the descriptors are open only while the caller iterates. Nothing for a `base` that is no folder (any longer)."""
+    from `root` (Box.root) that opens each folder by its own name in the one above it and enters no link (os.fwalk over
+    nofollow's folder); the descriptors are open only while the caller iterates. Nothing for a `base` that is no folder
+    (any longer); another error, such as a folder the person may not read, fails the call, rather than read as no
+    files."""
     try:
-        top = nofollow.walk(base, root="/")
-    except OSError:
+        top = nofollow.walk(base, root=root)
+    except (FileNotFoundError, nofollow.Linked):
         return
     try:
         for d, dirs, files, fd in os.fwalk(".", dir_fd=top):
@@ -279,7 +291,7 @@ async def _read(box: Box, a: dict[str, Any]) -> Out:
         return Out(f"there is no file {a.get('file_path')}", True)
     offset = max(1, int(a.get("offset") or 1))
     limit = max(1, min(int(a.get("limit") or READ_LINES), READ_LINES))
-    got = await asyncio.to_thread(_window, q, offset, limit)
+    got = await asyncio.to_thread(_window, q, box.root(q), offset, limit)
     if got is None:
         return Out(f"{a.get('file_path')} is a binary file ({q.stat().st_size} bytes)", True)
     lines, more = got
@@ -295,7 +307,7 @@ async def _glob(box: Box, a: dict[str, Any]) -> Out:
 
     def run() -> list[str]:
         hits = []
-        for f, _fd, _name in _files(base):
+        for f, _fd, _name in _files(base, box.root(base)):
             rel = str(f.relative_to(base))
             if fnmatch.fnmatch(rel, pat) or (pat.startswith("**/") and fnmatch.fnmatch(rel, pat[3:])):
                 hits.append(str(f))
@@ -324,12 +336,13 @@ async def _grep(box: Box, a: dict[str, Any]) -> Out:
                 return os.fdopen(nofollow.open_at(fd, name, os.O_RDONLY), "rb")
             except nofollow.Linked:
                 pass
-        return _opened(box.path(str(f)))
+        q = box.path(str(f))
+        return _opened(q, box.root(q))
 
     def run() -> tuple[list[str], list[str]]:
         out: list[str] = []
         left: list[str] = []  # the links that lead outside the folders the agent may read, which Read refuses too
-        files = [(base, None, base.name)] if base.is_file() else _files(base)
+        files = [(base, None, base.name)] if base.is_file() else _files(base, box.root(base))
         for f, fd, name in files:
             if glob and not fnmatch.fnmatch(f.name, glob) and not fnmatch.fnmatch(str(f), glob):
                 continue
@@ -374,7 +387,7 @@ async def _write(box: Box, a: dict[str, Any]) -> Out:
     q = box.path(a.get("file_path"), write=True)
     text = str(a.get("content") or "")
     # by the real path Box checked, its missing folders made, never through a link (nofollow)
-    await asyncio.to_thread(nofollow.write_text, q, text, root="/", make=True)
+    await asyncio.to_thread(nofollow.write_text, q, text, root=box.root(q), make=True)
     return Out(f"wrote {q} ({len(text)} characters)")
 
 
@@ -382,7 +395,7 @@ async def _edit(box: Box, a: dict[str, Any]) -> Out:
     q = box.path(a.get("file_path"), write=True)
     if not q.is_file():
         return Out(f"there is no file {a.get('file_path')}", True)
-    text = await asyncio.to_thread(nofollow.read_text, q, root="/")
+    text = await asyncio.to_thread(nofollow.read_text, q, root=box.root(q))
     old, new = str(a.get("old_string") or ""), str(a.get("new_string") or "")
     n = text.count(old) if old else 0
     if n == 0:
@@ -390,7 +403,8 @@ async def _edit(box: Box, a: dict[str, Any]) -> Out:
     if n > 1 and not a.get("replace_all"):
         return Out(f"old_string is in the file {n} times: give more context, or set replace_all", True)
     await asyncio.to_thread(nofollow.write_text, q,
-                            text.replace(old, new) if a.get("replace_all") else text.replace(old, new, 1), root="/")
+                            text.replace(old, new) if a.get("replace_all") else text.replace(old, new, 1),
+                            root=box.root(q))
     return Out(f"edited {q}")
 
 
