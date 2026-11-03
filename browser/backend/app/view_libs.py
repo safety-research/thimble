@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -256,10 +257,13 @@ async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
     if stage.is_symlink() or (stage / "node_modules").is_symlink() or not (stage / "node_modules").is_dir():
         raise RuntimeError(f"{stage / 'node_modules'} is not a folder of its own")
     work = stage / f".build-{os.getpid()}-{hashlib.sha1(str(out).encode()).hexdigest()[:8]}"  # resolves from stage
-    # the server's own work in a folder main's Bash and the kernels write: removed, made and read as nofollow does
+    # the server's own work in a folder main's Bash and the kernels write: removed and made as nofollow does. What
+    # esbuild, which runs outside any sandbox, writes goes to a temp folder of the server's own (`made`), never there,
+    # where its write by its path would follow a link put in place of `work`
     nofollow.rmtree(work, ignore_errors=True)
     nofollow.makedirs(work)
-    meta = work / "meta.json"
+    made = Path(tempfile.mkdtemp(prefix="thimble-bundle-"))
+    meta = made / "meta.json"
 
     def confined() -> None:
         if bad := _outside(stage, work, meta):
@@ -272,11 +276,11 @@ async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
             raise RuntimeError(f"{e.name} has no file {e.path}")
         if e.kind == "css":
             code, _, err = await _run([str(esbuild), str(src), "--bundle", "--minify", "--log-level=error",
-                                       *loaders, f"--metafile={meta}", f"--outfile={work / 'out.css'}"], cwd=stage)
+                                       *loaders, f"--metafile={meta}", f"--outfile={made / 'out.css'}"], cwd=stage)
             if code != 0:
                 raise RuntimeError(_last_line(err) or "esbuild failed")
             confined()
-            atomic_write_text(out, nofollow.read_text(work / "out.css"))
+            atomic_write_text(out, (made / "out.css").read_text("utf-8"))
             return "css"
         entry = work / "entry.cjs"
         target = str(src.resolve()) if e.path else e.name  # a file by its path, since its package's name is external
@@ -288,21 +292,22 @@ async def bundle(stage: Path, e: Entry, others: list[str], out: Path) -> str:
                                    "--platform=browser", "--minify", "--log-level=error", "--charset=utf8",
                                    "--define:process.env.NODE_ENV=\"production\"", "--define:global=globalThis",
                                    "--resolve-extensions=.mjs,.js,.cjs,.json", *loaders, *externals,
-                                   f"--metafile={meta}", f"--outfile={work / 'out.js'}"], cwd=stage)
+                                   f"--metafile={meta}", f"--outfile={made / 'out.js'}"], cwd=stage)
         if code != 0:
             raise RuntimeError(_last_line(err) or "esbuild failed")
         confined()
-        js = nofollow.read_text(work / "out.js")
+        js = (made / "out.js").read_text("utf-8")
         text = WRAP_HEAD + js + WRAP_TAIL % {"key": json.dumps(e.key), "glob": json.dumps(global_name(e))}
-        css = work / "out.css"  # a package whose script imports its own stylesheet
+        css = made / "out.css"  # a package whose script imports its own stylesheet
         if css.is_file():
-            css_text = nofollow.read_text(css)
+            css_text = css.read_text("utf-8")
             text = (f"(function(){{var s=document.createElement('style');s.textContent={json.dumps(css_text)};"
                     f"(document.head||document.documentElement).appendChild(s)}})();\n") + text
         atomic_write_text(out, text)
         return "js"
     finally:
         nofollow.rmtree(work, ignore_errors=True)
+        nofollow.rmtree(made, ignore_errors=True)
 
 
 def _file_name(name: str, version: str, path: str, kind: str) -> str:
