@@ -121,6 +121,7 @@ import os
 import re
 import shlex
 import tokenize
+from collections import Counter
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import unquote
@@ -2236,22 +2237,29 @@ def _sums_up(t: dict[str, Any], cols: list[str]) -> str | None:
     rows = t.get("rows") or []
     if len(rows) < 3:
         return None
-    nums = [j for j in range(len(cols)) if cols[j] != t.get("label") and all(_decimal(r[j] if j < len(r) else None) is not None for r in rows)]
-    if not nums:
+    label = t.get("label")
+    values: dict[int, list[Decimal]] = {}
+    for j in range(len(cols)):
+        col = [_decimal(r[j] if j < len(r) else None) for r in rows] if cols[j] != label else []
+        if col and all(v is not None for v in col):
+            values[j] = col  # type: ignore[assignment]
+    if not values:
         return None
+    # each column's sum and how often each value stands in it, so a row's "others" are the column less the row
+    sums = {j: sum(col, Decimal(0)) for j, col in values.items()}
+    seen = {j: Counter(col) for j, col in values.items()}
     names = t.get("names") or [str(i) for i in range(len(rows))]
     near = lambda a, b: abs(a - b) <= FLOAT_NOISE * max(Decimal(1), abs(b))  # noqa: E731
-    for i, r in enumerate(rows):
+    for i in range(len(rows)):
         name = str(names[i]) if i < len(names) else str(i)
         ok, differ = True, 0
-        for j in nums:
-            v = _decimal(r[j])
-            rest = [_decimal(x[j]) for k, x in enumerate(rows) if k != i]
-            total = sum(rest, Decimal(0))
-            mean = total / len(rest)
+        for j, col in values.items():
+            v = col[i]
+            total = sums[j] - v
+            mean = total / (len(rows) - 1)
             places = -v.as_tuple().exponent if isinstance(v.as_tuple().exponent, int) and v != v.to_integral_value() else 0
             ok = v == total or v == mean or near(v, total) or near(v, mean) or (places > 0 and mean.quantize(Decimal(1).scaleb(-places)) == v)
-            differ += len(set(rest)) > 1
+            differ += len(seen[j]) - (1 if seen[j][v] == 1 else 0) > 1
             if not ok:
                 break
         if ok and (differ > 1 or (differ and name.strip().casefold() in SUMMARY_NAMES)):
