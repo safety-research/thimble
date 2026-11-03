@@ -29,10 +29,10 @@
 //               for one whose check did not run, its check; the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card too (this module's ui.press hook, so the fork starts inside a hook). x gives the person's OK
-//               first (marks/checker.ts repairOk), so one press is enough: for thimble's checks this session, as g
-//               does (their spawn and their Python), and for a file its check could not read, where Claude Code asked
-//               nobody; where nothing the person does here lets the check run, x is not offered, and the failure line
-//               or the card says why
+//               where Claude Code asked nobody (marks/checker.ts repairOk, okOnRefusal), so one press is enough: for
+//               thimble's checks this session, as g does (their spawn, and their Python where nobody is asked), and
+//               for a file its check could not read; where nothing the person does here lets the check run, x is not
+//               offered, and the failure line or the card says why
 //   0 close     back to the mark under it, or close
 //   ] [         on the bar: the next mark or card after the one it shows, and the one before, named by what they
 //               are, in their look

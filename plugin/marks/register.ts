@@ -22,10 +22,14 @@
 //   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g, or x): Claude
 //                    Code's own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask
 //                    mode would refuse it (checker.ts allowsCheck)
+//   tool.call        x's repair, which Claude Code refused asking nobody: the person's OK, and Claude Code asked again
+//                    within the same call (checker.ts okOnRefusal)
 //   tool.check       a checker's Read or Grep of one file the person let thimble's checks read with that tool (x):
-//                    Claude Code's own ask answered allow (checker.ts allowsRead); never a Glob, which lists a folder
+//                    Claude Code's own ask answered allow where nobody is asked (checker.ts allowsRead); never a Glob,
+//                    which lists a folder
 //   tool.check       a checker's Bash call that runs Python, once the person allowed thimble's checks (g, or x):
-//                    Claude Code's own ask answered allow, where don't ask mode would refuse it (checker.ts allowsPython)
+//                    Claude Code's own ask answered allow where nobody is asked, as don't ask mode would refuse it
+//                    (checker.ts allowsPython)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone;
 //                    while Minimal is on, plain: its marks show for the paragraph under the pointer (view.ts `plain`).
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
@@ -45,7 +49,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { checkerEffort, checkerModel, choiceOf, featureOn, minimalOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
-import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { AGAIN_DESCRIPTION, allowsCheck, allowsPython, allowsRead, autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, okOnRefusal, readEnded, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -231,18 +235,26 @@ export const registerMarks: Register = on => {
     return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
+  // x's repair, which Claude Code refused asking nobody (auto mode's classifier gave no verdict, don't ask mode): the
+  // person's OK (checker.ts okOnRefusal), and Claude Code asked again within this call, whose tool.check above then
+  // answers allow, so one press starts the repair
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const r = await next(e)
+    return (await okOnRefusal($, e, next.origin, r)) ? next(e) : r
+  }).catch(($, e, next) => next(e))
+
   // a checker's Read or Grep of one file the person let thimble's checks read with that tool (x, checker.ts
-  // allowsRead): Claude Code's own ask, which don't ask mode would refuse or auto mode's classifier settle, is answered
-  // allow; a deny, and an ask a rule, a hook, a setting or another plugin made, stand
+  // allowsRead): Claude Code's own ask, where it asks nobody and don't ask mode would refuse it, is answered allow; an
+  // ask put to the person or a host, a deny, and an ask a rule, a hook, a setting or another plugin made, stand
   on('tool.check', { tool: /^(Read|Grep)$/, agentId: /./ }, async ($, e, next) => {
     const v = await next(e)
     return forkOf(e.agentId)?.kind === 'checker' && (await allowsRead($, e, v)) ? { ...v, decision: 'allow', reason: READ_ALLOWED } : v
   }).catch(($, e, next) => next(e))
 
   // a checker's Bash call that runs Python, once the person let thimble's checks run (g, x; checker.ts allowsPython):
-  // Claude Code's own ask, which don't ask mode would refuse or auto mode's classifier settle, is answered allow; a
-  // deny, and an ask a rule, a hook, a setting or another plugin made, stand. Main's calls and other agents' are not
-  // thimble's checks
+  // Claude Code's own ask, where it asks nobody and don't ask mode would refuse it, is answered allow; an ask put to the
+  // person or a host, a deny, and an ask a rule, a hook, a setting or another plugin made, stand. Main's calls and other
+  // agents' are not thimble's checks
   on('tool.check', { tool: 'Bash', agentId: /./ }, async ($, e, next) => {
     const v = await next(e)
     return forkOf(e.agentId)?.kind === 'checker' && (await allowsPython($, e, v)) ? { ...v, decision: 'allow', reason: PYTHON_ALLOWED } : v

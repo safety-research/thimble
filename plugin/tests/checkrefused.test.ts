@@ -10,7 +10,8 @@
 // answer for now, or that judged the check, as such;
 // any other refusal by its first sentence whole. g is no other line's key: a fix's line beside it keeps y. The failure
 // line wraps a long text at word edges, no row wider than the line. x on a failed citation stays where the person can
-// let its check run: it gives the OK g gives before it starts the repair, so one press is enough; where a check could
+// let its check run: while such a refusal stands it gives the OK g gives before it starts the repair, and with none
+// seen yet it gives that OK only where Claude Code refuses the repair asking nobody (checkallow.test.ts); where a check could
 // not read a file, the citation's card names the file, and x gives the OK to read it where Claude Code asked nobody,
 // or starts the repair, whose read Claude Code asks about again, where it asked the person. Where nothing the person
 // does lets the check run (auto mode in a remote Cowork session, a refusal after the OK, auto mode's classifier that
@@ -321,13 +322,12 @@ async function pressX($: Any, clock: Any): Promise<string> {
  *  outside which thimble checks; no key. */
 const DONT_ASK_OUTSIDE = "Claude Code's don't ask mode refused thimble's check of citations. Outside don't ask mode, thimble can check them."
 
-for (const [mode, deny, outside] of [
-  ['auto mode, no verdict', AUTO, NO_VERDICT_OUTSIDE],
-  ["don't ask mode", DONT_ASK, DONT_ASK_OUTSIDE],
+for (const [mode, deny, line] of [
+  ['auto mode, no verdict', AUTO, UNREVIEWED_LINE],
+  ["don't ask mode", DONT_ASK, DONT_ASK_LINE],
 ] as const) {
-  test(`${mode}: one x on a citation whose check did not run (the reply was stopped) gives the person's OK before it asks for the repair, so Claude Code, which takes thimble's allow on its checks, starts it at the first press (checkallow.test.ts); the OK stands, as g's, so a later check Claude Code still refuses says what refused it, with no key`, OPTIONS, async ($, on) => {
-    // Claude Code starts the repair, as where thimble answers allow at tool.check (this kit's spawns ask no tool.check),
-    // and refuses every other check
+  test(`${mode}: one x on a citation whose check did not run (the reply was stopped), with no refusal seen yet, asks for the repair at the first press and gives no OK by itself, so a later check Claude Code refuses says what refused it and offers g (where Claude Code refuses the repair itself asking nobody, x gives the OK then and the repair is asked for again: checkallow.test.ts, as this kit's spawns go through no tool.call)`, OPTIONS, async ($, on) => {
+    // Claude Code starts the repair and refuses every other check
     const { spawns, clock } = await session($, on, e => (e.description === REPAIR_DESCRIPTION ? null : deny))
     await reply($, clock, 't1', 'row-a1', 'aborted')
     await openCitation($, 'row-a1', 1)
@@ -337,11 +337,11 @@ for (const [mode, deny, outside] of [
     expect(spawns.length).toBe(1)
     expect(spawns[0]).toMatchObject({ subagent_type: 'fork', description: REPAIR_DESCRIPTION })
     expect(String(spawns[0].prompt)).toContain('The analyst pressed x to check citation 1, whose first check did not run.')
-    // the OK the first x gave stands, as g's: a later check Claude Code refuses says what refused it, with no key
+    // Claude Code refused nothing x asked for, so x gave no OK: a later check it refuses offers g
     await reply($, clock, 't2', 'row-a2')
     const drawn = await $.ui.render(above)
-    expect(lineOf(drawn)).toBe(outside)
-    expect(pressesIn(drawn)).toEqual([])
+    expect(lineOf(drawn)).toBe(line)
+    expect(pressesIn(drawn)).toEqual(['press g'])
   })
 }
 

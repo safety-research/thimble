@@ -22,7 +22,8 @@ declare module 'claude-code' {
       checksRefused: string[]
       /** the person's OK (g, x) for thimble to start its checks of citations this session, which Claude Code refused
        *  where nobody was asked (auto mode's classifier gave no verdict, don't ask mode): thimble answers Claude Code's
-       *  own ask on them, and on their Python, with allow (marks/checker.ts allowsCheck, allowsPython) */
+       *  own ask on them, and on their Python where nobody is asked, with allow (marks/checker.ts allowsCheck,
+       *  allowsPython) */
       checksAllowed: boolean | null
       /** the check the line that offers g is about, which g starts again: { kind: 'check', whole, reply, note? } or
        *  { kind: 'repair', repair } (marks/checker.ts Held) */
