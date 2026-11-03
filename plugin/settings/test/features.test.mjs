@@ -204,8 +204,8 @@ test("the manifest's userConfig is the features, each on by default and turned o
   }
 })
 
-test("where thimble's drawing does not show (core/host.ts), Citations and Cards act as off, whatever the person set, Minimal's modes too; what the person set stays, and the other features act on it", () => {
-  setOptions({ citations: 'auto cite + verify', cards: 'auto', explain: 'on demand' })
+test("where thimble's drawing does not show (core/host.ts), Citations, Cards, Explainers and Heads-ups act as off, whatever the person set, Minimal's modes too; what the person set stays, and the other features act on it", () => {
+  setOptions({ citations: 'auto cite + verify', cards: 'auto', explain: 'on demand', details: 'on demand', labels: true })
   setDrawn(false)
   try {
     assert.equal(choiceOf('citations'), 'off')
@@ -214,8 +214,9 @@ test("where thimble's drawing does not show (core/host.ts), Citations and Cards 
     assert.equal(featureOn('cite'), false)
     assert.equal(choiceOf('cards'), 'off')
     assert.equal(featureOn('cards'), false)
-    assert.equal(choiceOf('explain'), 'on demand')
-    assert.deepEqual(currentValues(), { citations: 'auto cite + verify', cards: 'auto', explain: 'on demand' })
+    assert.deepEqual([choiceOf('explain'), choiceOf('details'), featureOn('heads')], ['off', 'off', false])
+    assert.equal(featureOn('labels'), true)
+    assert.deepEqual(currentValues(), { citations: 'auto cite + verify', cards: 'auto', explain: 'on demand', details: 'on demand', labels: true })
     setOptions({ minimal: true, ...PRESET })
     assert.equal(minimalOn(), true)
     assert.deepEqual([choiceOf('citations'), choiceOf('cards')], ['off', 'off'])

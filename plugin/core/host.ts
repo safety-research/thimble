@@ -3,8 +3,9 @@
 // them, nor does a host that runs Claude Code through its SDK and shows the conversation itself, such as the desktop
 // app's Code tab or a remote Cowork session. There a key at an empty prompt is the person's own, typed as any key, and
 // thimble starts no work that only its drawing shows: the designer's fork (v), the look after each answer (observer/).
-// Citations and Cards act as off there, as if the person had set them off (settings/features.mjs UNDRAWN): the guidance
-// leaves out their sections, no card tool is registered, and no citation is checked.
+// Citations, Cards, Explainers and Heads-ups act as off there, as if the person had set them off (settings/features.mjs
+// UNDRAWN): the guidance leaves out their sections and names no key for them, no card tool is registered, and no
+// citation is checked.
 //
 //   drawsHere()   whether thimble's drawing shows in this session: true until a session's start says it does not (a
 //                 reload of the plugin starts the session again, with the same answer)

@@ -256,10 +256,11 @@ export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswe
 export const OLD_PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
 
 /** The modes that stand where thimble's drawing does not show (core/host.ts drawsHere: the desktop app's Code tab,
- *  remote Cowork, claude -p): Citations and Cards off, as if the person had set them off, since nothing there draws a
- *  citation, its check or a card (a citation would read as a raw link, and a card would show nowhere). The person's own
- *  modes stay as they set them (currentValues), and the terminal acts on them. */
-export const UNDRAWN = { citations: 'off', cards: 'off' }
+ *  remote Cowork, claude -p): Citations, Cards, Explainers and Heads-ups off, as if the person had set them off, since
+ *  nothing there draws a citation, its check, a card, an explainer or a heads-up (a citation would read as a raw link,
+ *  and a card would show nowhere), and no key asks for one (every key types there). The person's own modes stay as they
+ *  set them (currentValues), and the terminal acts on them. */
+export const UNDRAWN = { citations: 'off', cards: 'off', explain: 'off', details: 'off' }
 
 /** Whether `values` hold a preset's modes: Minimal's, or `preset`. */
 export const atPreset = (values, preset = PRESET) => Object.entries(preset).every(([k, v]) => valueIn(values, k) === v)
