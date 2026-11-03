@@ -161,10 +161,15 @@ async function numberAlone($: Engine, n: number | null): Promise<string | null> 
   return null
 }
 
+/** The line when /thimble-fix's words did not reach Claude: what to do first, and all of it within what the terminal's
+ *  toast shows at any width (a box about 40 columns wide, with 3 lines of text). */
+const GIVE_AGAIN = 'Type /thimble-fix and your words again: they did not reach Claude, so thimble started no fix.'
+
 /** /thimble-fix's words did not reach Claude (Claude Code refused thimble's prompt with them, or it did not enter): one
- *  line says so and what to do, and no fix starts from them in a later turn. */
+ *  line says what to do, the debug log says why, and no fix starts from them in a later turn. */
 async function notGiven($: Engine, words: string, err: unknown): Promise<void> {
-  $.ui.toast(`thimble started no fix: it could not give your words to Claude (${cut(String((err as Error)?.message || err), 160)}). To try again, type /thimble-fix and your words.`)
+  $.ui.toast(GIVE_AGAIN)
+  $.ui.log(`/thimble-fix's words did not reach Claude: ${String((err as Error)?.message || err)}`, { to: 'debug' })
   try {
     if (String((await $.state.get(ASKED_WORDS)).value ?? '') !== words) return
     await $.state.set(ASKED, 0 as never)

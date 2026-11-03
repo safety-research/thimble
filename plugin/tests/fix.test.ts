@@ -79,6 +79,8 @@ function setup(o: { keys?: boolean; answers?: boolean } = {}) {
   const registered: Any[] = []
   const opened: string[] = []
   const toasts: string[] = []
+  // each line the plugin gave Claude Code's debug log
+  const debug: string[] = []
   const notes: { text: string; title?: string }[] = []
   const sent: { to: Any; text: string }[] = []
   const agents: { id: string; status: string }[] = []
@@ -231,7 +233,7 @@ function setup(o: { keys?: boolean; answers?: boolean } = {}) {
       },
     },
     model: { complete: async (req: Any) => { asked.push(req); return { isAnswered: true, text: JSON.stringify({ title: 'Bar says coverage, not read', wrong: 'The bar said coverage after Claude read a file.', fixed: 'The bar says read.' }) } } },
-    ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: (ev: string) => { redraws.push(ev) } },
+    ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: (t: string, o: Any = {}) => { if (o.to === 'debug') debug.push(t) }, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: (ev: string) => { redraws.push(ev) } },
   }
   /** An event through the module's hooks that admit it, in order, then `base`. */
   const call = (event: string, e: Any, base: (e: Any) => Any = async x => x) => {
@@ -253,7 +255,7 @@ function setup(o: { keys?: boolean; answers?: boolean } = {}) {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, registered, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, prompts, redraws, handOff }
+  return { $, call, tick, end, made: () => { made = true }, others, listed, ran, spawns, commands, registered, files, fix, opened, toasts, debug, notes, sent, agents, config, state, verbs, copied, asked, where, box, fills, prompts, redraws, handOff }
 }
 
 /** The person's /thimble-fix <words>: the command's answer gives Claude the request with the words (prompts/
@@ -401,9 +403,34 @@ test('words that begin with / reach Claude in quotes, and the fix takes them as 
     await s.call('command.run', { command: 'thimble-fix', args: 'the bar should list Cards first' }, own)
     await s.tick()
     expect(s.prompts).toEqual([])
-    expect(s.toasts).toEqual([`thimble started no fix: it could not give your words to Claude (${how.refuse ?? how.drop}). To try again, type /thimble-fix and your words.`])
+    expect(s.toasts).toHaveLength(1)
     expect(skillText(await skillCall(s, 'new')).text).toBe(NOT_ASKED)
     expect(s.ran.some(x => x.argv.includes('new'))).toBe(false)
+  }
+})
+
+test("the line for words that never reach Claude says what to do in its first 110 characters, which is what Claude Code's toast shows at any width, whatever the reason; the reason goes to the debug log", async () => {
+  const own = async () => { throw new Error('/thimble-fix with words runs no command of its own') }
+  // Claude Code 2.1.312's reasons: the refusals $.prompt.submit throws, and the drops it resolves
+  const reasons = [
+    { refuse: 'thimble: $.prompt.submit submits a prompt to the model; a text beginning with / would run a command as the user; run one with $.command.run({ command })' },
+    { refuse: 'thimble: $.prompt.submit takes text alone; attachments cannot be submitted' },
+    { drop: 'the prompt was removed from the queue before it ran' },
+    { drop: 'a hook answered without passing the prompt on' },
+    { drop: 'an earlier prompt in the batch failed' },
+  ]
+  for (const how of reasons) {
+    const s = setup()
+    await s.call('session.start', { cwd: '/made-up/data' })
+    Object.assign(s.handOff, how)
+    await s.call('command.run', { command: 'thimble-fix', args: '/thimble-settings should list Cards first' }, own)
+    await s.tick()
+    // the terminal draws a toast in a box about 40 columns wide, with 3 lines of text, at every width
+    expect(s.toasts).toHaveLength(1)
+    expect(s.toasts[0]!.slice(0, 110)).toMatch(/type \/thimble-fix and your words/i)
+    expect(s.toasts[0]!.length).toBeLessThanOrEqual(110)
+    expect(s.debug).toHaveLength(1)
+    expect(s.debug[0]).toContain(how.refuse ?? how.drop)
   }
 })
 
