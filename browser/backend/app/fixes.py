@@ -632,7 +632,9 @@ def srt_ready() -> str:
 
 async def settle(fid: int, answer: str) -> None:
     """The fixer ended: the kernel's checks, then one notice: the fix is ready and asks the person, or why not. The fix
-    does not go on by itself: only the person's click (Use it now) applies it."""
+    does not go on by itself: only the person's click (Use it now) applies it. The phase ends as the notice is written,
+    with no wait between them, so the page's row of the fix goes from the checks to the notice at once (status lists
+    no row for a fix that has neither)."""
     _fixers.pop(fid, None)
     _phase_set(fid, "testing")
     name = f"fix {fid}"
@@ -672,9 +674,9 @@ async def settle(fid: int, answer: str) -> None:
         _phase_set(fid, None)
         note(fid, "failed", f"“{title}” did not pass: {done.get('error') or 'its tests failed'}")
     else:
-        _phase_set(fid, None)
         tests = str(done.get("tests") or "")
         page = await asyncio.to_thread(built_tree, fid, str(done.get("commit") or ""))
+        _phase_set(fid, None)
         note(fid, "ready", f"thimble fixed: {title}" + (" · tests pass" if tests == "passed" else ""),
              **({"page": page} if page else {}))
 
