@@ -231,3 +231,37 @@ def test_the_event_log_s_readers_read_no_fifo_and_no_link_a_card_left_as_the_log
         except OSError:
             pass
     assert got == {"whole": [], "after": ([], 0), "tail": -1, "id": ""}
+
+
+def test_a_report_type_s_texts_are_read_through_no_link_a_card_left_in_their_place(tmp_path_factory):
+    """A custom document type is a folder of the workspace, report-types/<slug>/, which a card's code writes: its
+    type.json was read as nofollow reads it, but its prompt.md, rubric.md and renderer.tsx by their paths, so a link a
+    card's code put in their place had the server hand a writer, which reads the type's text (read_ref "type:<slug>"),
+    the file it points to."""
+    from app import report_types
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up-credentials").write_text("MADE-UP-SECRET-TOKEN 0123456789\n")
+    d = report_types.types_dir(CORPUS) / "notes"
+    d.mkdir(parents=True)
+    (d / "type.json").write_text(json.dumps({"slug": "notes", "name": "Notes", "renderer": "custom", "schema": {},
+                                             "created_by": "analyst"}))
+    for name in ("prompt.md", "rubric.md", "renderer.tsx"):
+        (d / name).symlink_to(outside / "made-up-credentials")
+    t = report_types.read_type(CORPUS, "notes")
+    assert t is not None and (t["prompt"], t["rubric"], t["component"]) == ("", "", "")
+    assert "MADE-UP-SECRET-TOKEN" not in report_types.type_form(t)
+
+
+def test_a_label_s_definition_is_read_through_no_link_a_card_left_in_its_place(tmp_path_factory):
+    """A label's definition, concepts/<id>.json, was read by its path, so a link a card's code put in its place had the
+    server read the file it points to as the label, its name and rule shown to main and the analyst."""
+    from app import concepts
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.json").write_text(json.dumps({"name": "OUTSIDE-SECRET", "spec": "OUTSIDE-SECRET"}))
+    ws = config.workspace_dir(CORPUS)
+    concepts.concepts_dir(ws).mkdir(parents=True)
+    (concepts.concepts_dir(ws) / "made-up0.json").symlink_to(outside / "made-up.json")
+    assert concepts.read_concept(ws, "made-up0") is None
+    assert concepts.list_concepts(ws) == []

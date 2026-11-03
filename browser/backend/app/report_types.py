@@ -205,8 +205,7 @@ def read_type(c: str, slug: str) -> dict[str, Any] | None:
     renderer = str(meta.get("renderer") or "document")
     if renderer not in RENDERERS:
         renderer = "document"
-    prompt_file, rubric_file, component_file = d / "prompt.md", d / "rubric.md", d / "renderer.tsx"
-    prompt = prompt_file.read_text("utf-8") if prompt_file.is_file() else ""
+    prompt = _type_text(d / "prompt.md")
     made_from = preset(str(meta.get("preset") or ""), c) if meta.get("preset") else None
     if made_from and not prompt.strip():
         prompt = made_from["prompt"]
@@ -216,7 +215,7 @@ def read_type(c: str, slug: str) -> dict[str, Any] | None:
         "description": str(meta.get("description") or ""),
         "renderer": renderer,
         "prompt": prompt,
-        "rubric": rubric_file.read_text("utf-8") if rubric_file.is_file() else "",
+        "rubric": _type_text(d / "rubric.md"),
         "created_by": str(meta.get("created_by") or ANALYST),
         "ts": meta.get("ts"),
         "updated": meta.get("updated"),
@@ -236,8 +235,17 @@ def read_type(c: str, slug: str) -> dict[str, Any] | None:
         except HTTPException:
             out["schema"] = out["schema_source"]
         # the component is kept as text; nothing installs or renders it (a page is the open form)
-        out["component"] = component_file.read_text("utf-8") if component_file.is_file() else ""
+        out["component"] = _type_text(d / "renderer.tsx")
     return out
+
+
+def _type_text(path: Path) -> str:
+    """A custom type's text file (prompt.md, rubric.md, renderer.tsx), '' when there is none: missing, or no regular
+    file, such as a link a card's code left in the type's folder, which is never followed there (nofollow)."""
+    try:
+        return nofollow.read_text(path)
+    except (FileNotFoundError, NotADirectoryError, nofollow.Linked):
+        return ""
 
 
 def _require_type(c: str, slug: str) -> dict[str, Any]:
