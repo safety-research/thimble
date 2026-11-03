@@ -162,3 +162,29 @@ async def test_main_s_bash_reads_no_folder_a_link_a_card_left_in_the_workspace_l
     out = await runtime_tools.call(box, "Bash", {"command": f"cat {ws}/made-up-planted/secret.txt 2>&1; "
                                                             f"echo w > {ws}/card-libs/own.txt && cat {ws}/card-libs/own.txt"})
     assert "OUTSIDE-SECRET" not in out.text and out.text.splitlines()[-1] == "w", out.text
+
+
+async def test_grep_says_which_files_it_left_out_because_they_lead_outside_the_folders_it_may_read(tmp_path):
+    """Grep reads a corpus file that is a link only where Read would, by its real path inside the folders the agent may
+    read, so it leaves out one that leads outside them, as Read refuses it. It said nothing of that, and main could not
+    tell a file it left out from one with no match."""
+    corpus, ws, out = tmp_path / "corpus", tmp_path / "ws", tmp_path / "elsewhere"
+    for d in (corpus / "logs", ws, out / "more"):
+        d.mkdir(parents=True)
+    (corpus / "notes.txt").write_text("before the Friday deadline\n")
+    (out / "extra.jsonl").write_text('{"summary": "meet the deadline for export docs"}\n')
+    (out / "more" / "m.txt").write_text("an outside note about a deadline\n")
+    (corpus / "inside-link.txt").symlink_to("notes.txt")
+    (corpus / "outside.jsonl").symlink_to(out / "extra.jsonl")
+    (corpus / "outside-dir").symlink_to(out / "more", target_is_directory=True)
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus], write_roots=[ws / "tmp"])
+    real = corpus.resolve()
+    got = await runtime_tools.call(box, "Grep", {"pattern": "deadline"})
+    assert got.text.split("\n") == [
+        f"{real / 'inside-link.txt'}:1: before the Friday deadline", f"{real / 'notes.txt'}:1: before the Friday deadline",
+        f"[1 file not searched, since it is a link that leads outside the folders you may read: {real / 'outside.jsonl'}]"]
+    read = await runtime_tools.call(box, "Read", {"file_path": "outside.jsonl"})
+    assert read.is_error and "outside the folders this agent may read" in read.text
+    none = await runtime_tools.call(box, "Grep", {"pattern": "made-up words", "glob": "*.jsonl"})
+    assert none.text == ("No matches found\n[1 file not searched, since it is a link that leads outside the folders you "
+                         f"may read: {real / 'outside.jsonl'}]")

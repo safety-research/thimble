@@ -318,7 +318,7 @@ async def _grep(box: Box, a: dict[str, Any]) -> Out:
 
     def opened(f: Path, fd: int | None, name: str) -> BinaryIO:
         """A file of the walk by its name in its folder's descriptor, never through a link; a link there is read as
-        Read reads a path, by its real path once Box finds it in a read root."""
+        Read reads a path, by its real path once Box finds it in a read root (ValueError when Box refuses it)."""
         if fd is not None:
             try:
                 return os.fdopen(nofollow.open_at(fd, name, os.O_RDONLY), "rb")
@@ -326,30 +326,48 @@ async def _grep(box: Box, a: dict[str, Any]) -> Out:
                 pass
         return _opened(box.path(str(f)))
 
-    def run() -> list[str]:
+    def run() -> tuple[list[str], list[str]]:
         out: list[str] = []
+        left: list[str] = []  # the links that lead outside the folders the agent may read, which Read refuses too
         files = [(base, None, base.name)] if base.is_file() else _files(base)
         for f, fd, name in files:
             if glob and not fnmatch.fnmatch(f.name, glob) and not fnmatch.fnmatch(str(f), glob):
                 continue
             try:
-                with opened(f, fd, name) as fh:
+                fh = opened(f, fd, name)
+            except ValueError:
+                left.append(str(f))
+                continue
+            except OSError:
+                continue
+            try:
+                with fh:
                     if _binary(fh):
                         continue
                     for n, line in enumerate(_lines(fh), 1):
                         if rx.search(line):
                             out.append(f"{f}:{n}: {line[:400]}")
                             if len(out) >= GREP_MAX:
-                                return out
+                                return out, left
             except (OSError, ValueError):
                 continue
-        return out
+        return out, left
 
-    out = await asyncio.to_thread(run)
+    out, left = await asyncio.to_thread(run)
+    note = _not_searched(left)
     if not out:
-        return Out("No matches found")
+        return Out("No matches found" + note)
     more = "" if len(out) < GREP_MAX else f"\n[stopped at {GREP_MAX} lines: narrow the pattern or the path]"
-    return Out("\n".join(out) + more)
+    return Out("\n".join(out) + more + note)
+
+
+def _not_searched(files: list[str]) -> str:
+    """Grep's line that names the files it did not search, each a link that leads outside the folders the agent may
+    read, so that the agent tells them from files with no match; '' for none."""
+    if not files:
+        return ""
+    what = "1 file not searched, since it is" if len(files) == 1 else f"{len(files)} files not searched, since each is"
+    return f"\n[{what} a link that leads outside the folders you may read: {', '.join(files)}]"
 
 
 async def _write(box: Box, a: dict[str, Any]) -> Out:
