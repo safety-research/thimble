@@ -18,7 +18,7 @@ import { api, docsApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
-import { revealAnchor } from '../lib/teleport'
+import { keepInView, revealAnchor } from '../lib/teleport'
 import type { AnyDoc, TypesState, Writeup } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
 import { ReportProblemButton } from '../shell/ProblemReport'
@@ -245,7 +245,9 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     }
   }, [read, readFilter, readTypes, setSlug])
 
-  // a chip's teleport into a document: the document it names comes forward, then the element
+  // a chip's teleport into a document: the document it names comes forward, then the element; into the document shown,
+  // the element (`asked` runs the reveal again, as a switch's new document does)
+  const [asked, setAsked] = useState(0)
   useEffect(
     () =>
       bus.on('openRef', (e) => {
@@ -253,17 +255,32 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         if (p?.kind !== 'report') return
         pendingRef.current = e.ref
         if (p.slug && p.slug !== slugRef.current) setSlug(p.slug)
+        else setAsked((n) => n + 1)
       }),
     [setSlug],
   )
+  // the element is looked for once the document's view has rendered: the tab shown, the views' module loaded (on the
+  // tab's first show it loads after the teleport) and the document read. Found, it stays in view while the page lays out
+  // around it, until the analyst scrolls, clicks or types in the tab (keepInView), which a hidden tab ends
+  const holding = useRef<(() => void) | null>(null)
   useEffect(() => {
     const ref = pendingRef.current
-    if (!ref || !active || !root.current) return
+    if (!ref || !active || !shown || !views || !root.current) return
     const id = window.requestAnimationFrame(() => {
-      if (revealAnchor(ref, root.current!)) pendingRef.current = null
+      if (!revealAnchor(ref, root.current!)) return
+      pendingRef.current = null
+      holding.current?.()
+      holding.current = keepInView(ref, root.current!)
     })
     return () => window.cancelAnimationFrame(id)
-  }, [active, load])
+  }, [active, shown, views, load, asked])
+  useEffect(
+    () => () => {
+      holding.current?.()
+      holding.current = null
+    },
+    [active],
+  )
 
   const clearFilter = async () => {
     const concept = filter?.concept

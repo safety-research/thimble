@@ -4369,9 +4369,18 @@ def _any_doc(c: str, inv_id: str, slug: str) -> tuple[str, dict[str, Any]]:
     return slug, _load(c, inv_id, slug)
 
 
+def _commented(c: str, inv_id: str, slug: str, sid: Any) -> None:
+    """The analyst changed a comment of document `slug`: the stream carries `report {slug, status: commented, by:
+    analyst}`, as a check's or main's comment does, so every open page reads the document's comments again (the
+    Report's margin, the top bar's Comments)."""
+    if inv_id == investigation.MAIN:
+        _emit(c, {"type": "report", "slug": slug, "status": "commented", "span": f"report:{slug}#{sid}", "by": ANALYST})
+
+
 @router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/comments", status_code=201)
 async def post_comment(c: str, inv_id: str, slug: str, body: CommentBody) -> dict[str, Any]:
-    """Store the analyst's comment on a sentence or a unit heading; returns the comment."""
+    """Store the analyst's comment on a sentence or a unit heading; returns the comment. The stream carries `report
+    {status: commented}` (_commented)."""
     investigation.inv_dir(c, inv_id)
     slug, doc = _any_doc(c, inv_id, slug)
     sid = (body.sentence_id or "").strip()
@@ -4385,12 +4394,14 @@ async def post_comment(c: str, inv_id: str, slug: str, body: CommentBody) -> dic
         comment["kind"] = kind
     doc["comments"].append(comment)
     write_doc(c, inv_id, slug, doc)
+    _commented(c, inv_id, slug, sid)
     return comment
 
 
 @router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/dismiss")
 async def dismiss(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
-    """The analyst resolved a comment: the margin's ✓ (Done). Returns the document."""
+    """The analyst resolved a comment: the margin's ✓ or the top bar's Comments (Done). Returns the document. The
+    stream carries `report {status: commented}` (_commented)."""
     from . import canvas_comments  # noqa: PLC0415
 
     investigation.inv_dir(c, inv_id)
@@ -4398,15 +4409,20 @@ async def dismiss(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
     cm = _find_comment(doc, cid)
     cm.update(status="dismissed", resolution=canvas_comments.RESOLUTION_DONE, resolved_ts=_now())
     write_doc(c, inv_id, slug, doc)
+    _commented(c, inv_id, slug, cm.get("sentence_id"))
     return doc
 
 
 @router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/reopen")
 async def reopen(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
+    """The analyst opened a resolved comment again. Returns the document; a change puts `report {status: commented}`
+    on the stream (_commented)."""
     investigation.inv_dir(c, inv_id)
     slug, doc = _any_doc(c, inv_id, slug)
-    if reopen_comment(_find_comment(doc, cid)):
+    cm = _find_comment(doc, cid)
+    if reopen_comment(cm):
         write_doc(c, inv_id, slug, doc)
+        _commented(c, inv_id, slug, cm.get("sentence_id"))
     return doc
 
 
