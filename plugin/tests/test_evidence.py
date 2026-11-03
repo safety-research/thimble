@@ -1337,6 +1337,10 @@ def test_a_cited_file_outside_the_session_s_folders_gives_one_plain_sentence_wha
     req = {"cwd": str(data), "marks": [mark(words, n) for n in range(1, len(forms) + 1)], "answer": answer, "calls": []}
     out = json.loads(subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True).stdout)
     assert [(r["status"], r["failedBy"], r["reason"]) for r in out["results"]] == [("failed", "evidence", OUTSIDE)] * len(forms), out
+    # other words the check offered from such a file are not confirmed either, and the reason names the check once
+    other = {**quote(f"~/{rel}", 1, "navigation, 13 of the 40"), "status": "corrected", "correction": {"words": '"navigation, 12 of the 40"'}}
+    r = check_mark(mark(words), other, [], str(data))
+    assert (r["status"], r["failedBy"], r["reason"]) == ("failed", "evidence", "The check offered other words, but it cited a file outside the folder this session works in."), r
 
 
 def test_a_cited_file_inside_the_session_s_folders_is_named_by_its_path_from_its_folder(tmp_path: Path, monkeypatch):

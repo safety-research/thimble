@@ -89,9 +89,9 @@
 // a folder, so their refusal names no file, and no OK covers them. A file no evidence may cite goes on no citation:
 // one outside every folder the validator takes a cited file from (the session's folders, and the temp folders where
 // Claude's own code counts), as the validator itself answers for the files the check could not read (its `outside`,
-// engine/kernel/evidence.py uncitable). No read of it would count, so its citations keep the validator's reason (`…
-// is outside the folder this session works in`) and are repaired as any are, since a repair may find evidence inside
-// those folders.
+// engine/kernel/evidence.py uncitable). No read of it would count, so its citations keep the validator's reason (`The
+// check cited a file outside the folder this session works in.`) and are repaired as any are, since a repair may find
+// evidence inside those folders.
 //
 // Claude Code decides the fork's spawn as it decides a call of Claude's (Claude Code 2.1.307). In auto mode it lets a
 // plugin's own call run without auto mode's classifier, unless the person's settings give the classifier rules of

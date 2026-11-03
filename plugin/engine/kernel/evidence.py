@@ -2338,8 +2338,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if problems and new:
         # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the
         # old words nor the new ones are confirmed (a match of the old words there, such as the 250 of a test that
-        # printed False, is no sign that they hold)
-        res.update(status="failed", shown=words, failedBy="evidence", reason=f"The check {did}, but {problems[0]}.")
+        # printed False, is no sign that they hold); a problem that opens with the check is said of it once
+        why = re.sub(r"^the check ", "it ", problems[0])
+        res.update(status="failed", shown=words, failedBy="evidence", reason=f"The check {did}, but {why}.")
         return res
     if problems:
         res.update(status="failed", failedBy="evidence", reason=sentence(problems[0]))
