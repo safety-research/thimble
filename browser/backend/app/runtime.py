@@ -105,9 +105,9 @@ def engine() -> str:
 
 
 def network() -> str:
-    """Where the shell commands of main and its agents reach, as Settings' row for main (ledger.agent_rows) and main's
-    prompt (events.NETWORK) say: "on" with an API key or WIF, any host, unasked; else "ask", where on Claude Code sign-in
-    a request to a host the analyst has not allowed asks them first (host_asks)."""
+    """Where the shell commands of main and its agents reach, as Settings' row for main (ledger.agent_rows) and the prompt
+    of the main this server runs (events.network_words) say: "on" with an API key or WIF, any host, unasked; else "ask",
+    where on Claude Code sign-in a request to a host the analyst has not allowed asks them first (host_asks)."""
     return "on" if engine() == "api" else "ask"
 
 
@@ -578,7 +578,7 @@ class Space:
             if engine() == "api":
                 cwd = work
         with contextlib.suppress(Exception):
-            if (userconf.load_or_defaults(self.c)[0].get("agents") or {}).get("main", {}).get("web") == "off":
+            if userconf.main_web_off(self.c):  # Settings' row for main, which main's prompt follows too
                 builtins = [b for b in builtins if b not in WEB]
         # a protected folder that holds one of the agent's own write folders is left out, since the agent writes only
         # in those: a view's builder writes extension/views/<slug> (agent_writes), and nothing else of extension/

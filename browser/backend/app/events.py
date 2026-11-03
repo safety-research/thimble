@@ -162,14 +162,29 @@ CORPUS_WRITES: dict[bool | None, str] = {
             "back on in Settings."),
 }
 
-# main.md's {{network}} in the browser: which requests to a host ask the analyst first, by the way Claude is reached, as
-# Settings' row for main says (runtime.network): on Claude Code sign-in a Bash command's (host_asks) and nothing else;
-# with an API key or WIF none
-NETWORK: dict[str, str] = {
-    "ask": ("A Bash command's request to a host the analyst has not allowed asks them first, while web fetches, web "
-            "searches and card code reach any host without asking."),
-    "on": "Bash commands, web fetches, web searches and card code reach any host without asking the analyst.",
+# main.md's {{network}} in the browser (network_words), by the way main reaches Claude and whether Settings leaves main
+# its web: which requests to a host ask the analyst first, as Settings' row for main says (runtime.network). On Claude
+# Code sign-in ("ask") a Bash command's (host_asks) and nothing else; with an API key or WIF ("on") none. Web fetches and
+# web searches are named only while main has them (userconf.main_web_off)
+NETWORK: dict[tuple[str, bool], str] = {
+    ("ask", True): ("A Bash command's request to a host the analyst has not allowed asks them first, while web fetches, "
+                    "web searches and card code reach any host without asking."),
+    ("ask", False): ("A Bash command's request to a host the analyst has not allowed asks them first, while card code "
+                     "reaches any host without asking."),
+    ("on", True): "Bash commands, web fetches, web searches and card code reach any host without asking the analyst.",
+    ("on", False): "Bash commands and card code reach any host without asking the analyst.",
 }
+
+
+def network_words(c: str | None, edits: bool | None) -> str:
+    """main.md's {{network}}: NETWORK's sentence for the way main reaches Claude, with its web fetches and web searches
+    while Settings leaves them to it (userconf.main_web_off). The main the server runs (`edits` True or False) reaches
+    Claude the way the workbench is set to (runtime.network); one it does not run (`edits` None), the analyst's own
+    Claude Code session such as the launcher's (plugin/bin/thimble), through Claude Code, so on Claude Code sign-in's
+    terms whatever way the workbench is set to."""
+    from . import runtime, userconf  # noqa: PLC0415
+
+    return NETWORK[(runtime.network() if edits is not None else "ask", not userconf.main_web_off(c))]
 
 
 def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: bool | None = None,
@@ -179,13 +194,13 @@ def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: b
     prompt keeps one ending of a turn with nothing for the analyst (terminal_tools.main_prompt): without closing words
     when `terminal`, or when it is None and this process's environment says so (terminal_tools.on). `edits`: whether
     main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py). Which requests to
-    a host ask the analyst follows the way Claude is reached (NETWORK)."""
-    from . import cardtypes, runtime, terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
+    a host ask the analyst follows the way main reaches Claude (network_words)."""
+    from . import cardtypes, terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
     c = config.workspace_for_cwd(workdir)
     forms = views.forms_text(c) if c else ""
     values = {"workdir": str(workdir), "forms": forms, "card_types": cardtypes.prompt_text(c),
-              "corpus_writes": CORPUS_WRITES[edits], "network": NETWORK[runtime.network()]}
+              "corpus_writes": CORPUS_WRITES[edits], "network": network_words(c, edits)}
     parts = []
     for name in names:
         part = prompts.render(name, values).strip()
