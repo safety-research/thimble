@@ -475,6 +475,45 @@ def test_redo_makes_a_new_copy_with_the_earlier_change(world, monkeypatch):
     assert "earlier" not in FX.get(r["id"])
 
 
+def test_more_words_for_a_fix_whose_round_ended_as_a_request_start_its_next_round_in_a_new_copy(world, monkeypatch):
+    # the tests fail; the person asks a question in the fix's thread, and its fixer answers it with a question back
+    # (`Request:`, no code): the fix is a request, its copy gone. Their answer is the fix's next round, never a refusal
+    # that leaves the fix's thread unable to take a message
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "")["state"] == "failed"
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    r = FX.round_(r["id"], "can you make this a pull request?")
+    q = FX.done(r["id"], "Bar says read", "Which of two ways do you want?", request=True)
+    assert q["state"] == "request" and q["work"] is None and q["commit"] is None
+    with pytest.raises(FX.FixError, match="say what should work differently"):
+        FX.round_(q["id"], "  ")
+    r = FX.round_(q["id"], "the first way", asked="the first way")
+    assert r["state"] == "working" and Path(r["work"]).is_dir() and r["rounds"] == q["rounds"] + 1
+    assert r["words"] == ["say read, not coverage", "can you make this a pull request?", "the first way"]
+    assert sh("git", "rev-parse", "HEAD", cwd=Path(r["work"])) == sh("git", "rev-parse", "HEAD", cwd=FX.live_dir())
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("coverage", "read"))
+    assert FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")["state"] == "ready"
+
+
+def test_a_request_an_earlier_thimble_stored_takes_more_words_in_a_new_process(world):
+    # a fix an earlier thimble left a request (fixes.jsonl, as a server's restart finds it): `thimble fix round`, which
+    # the browser runs as a process of its own for each message in the fix's thread, starts its next round
+    q = FX.done(FX.new("view builds should install their files")["id"], "Views install", "Which way?", request=True)
+    stored = {**FX.get(q["id"]), "words": ["view builds should install their files", "can you make this a pr?"],
+              "rounds": 2}
+    FX.put(stored)
+    p = subprocess.run([sys.executable, "-I", "-B", str(ENGINE / "thimble.py"), "fix", "round", str(q["id"])],
+                       input="let a build under main write its own view's folder", capture_output=True, text=True,
+                       env=os.environ.copy(), cwd=world["tmp"])
+    assert p.returncode == 0, p.stderr
+    r = json.loads(p.stdout)
+    assert r["state"] == "working" and Path(r["work"]).is_dir() and r["rounds"] == 3
+    assert r["words"][-1] == "let a build under main write its own view's folder"
+    assert FX.get(q["id"])["state"] == "working"
+
+
 def _claude_changes(rec: dict) -> Path:
     """What Claude does in the person's session for a fix that did not pass, as d's message asks: a change in its copy."""
     p = Path(rec["work"]) / "plugin" / "bar" / "legend.ts"
