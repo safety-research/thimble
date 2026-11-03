@@ -2,10 +2,13 @@
 added beside it: a message the analyst sends while main works waits for main's next tool call (B14), an ask before a
 request to a host waits on the chat on Claude Code sign-in (B15), and the server opens its own files in a workspace as
 nofollow opens them. Nothing the analyst typed is lost: a message that waits comes back in the composer after the
-rewound message's words, and so does the event of a message the rewind hides that main never read; every other event
-that waits is main's next turn, as after a Stop; an ask that waits on main ends with the stopped turn, unanswered. A
-message main read mid-turn is cut where main read it. The Messages API is test_runtime's fake client and the Agent SDK
-a fake ClaudeSDKClient: no model is called and no `claude` starts."""
+rewound message's words, and so does the event of a message the rewind hides that main never read; the rewind's line
+keeps those words too, for a page that never got its reply; every other event that waits is main's next turn, as after
+a Stop, also when a step after the cut fails; an ask that waits on main ends with the stopped turn, unanswered. A
+message main read mid-turn is cut where main read it, and the quiet events that rode along with the rewound message
+wait again. A rewind goes back only within main's current chat, and a /thimble-fix it takes back starts no fix. The
+Messages API is test_runtime's fake client and the Agent SDK a fake ClaudeSDKClient: no model is called and no `claude`
+starts."""
 from __future__ import annotations
 
 import asyncio
@@ -15,13 +18,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
-from app import agents, claude_access, events, host_asks, llm, marks, proposer, runtime, runtime_api, runtime_cc
+from app import (agents, claude_access, events, fixes, host_asks, llm, marks, proposer, runtime, runtime_api,
+                 runtime_cc, session)
 from test_main_waits import FIRST, SECOND, CCClient, HangFirst, fake_cc, page_unread, result
-from test_runtime import (CORPUS, api_key, call, cc_record, cc_transcript, claude_config, fake_sdk,  # noqa: F401
-                          main_records, main_turn, on, shape, text, until)
+from test_runtime import (CORPUS, FakeClient, Final, Hang, api_key, call, cc_record, cc_transcript,  # noqa: F401
+                          claude_config, fake_sdk, main_records, main_turn, on, shape, text, until)
 
 HOST = "data.example-lab.test"
+FIX_SAID, FIX_WORDS = "/thimble-fix make the legend name the rows", "make the legend name the rows"
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +35,25 @@ def _no_asks():
     host_asks._waits.clear()
     yield
     host_asks._waits.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_fix_words():
+    """No /thimble-fix of an earlier test waits for main or is one fix_thimble may take (fixes._waiting, _asked)."""
+    fixes._asked.pop(CORPUS, None)
+    fixes._waiting.pop(CORPUS, None)
+    yield
+    fixes._asked.pop(CORPUS, None)
+    fixes._waiting.pop(CORPUS, None)
+
+
+def post_fix(eid: str) -> None:
+    """The person's /thimble-fix, posted as fixes.ask posts it (the fixes are off in these tests, so ask refuses): the
+    words wait for the turn of main's that reads them (fixes._waiting), the chat logs the line, and main gets the
+    request as its event."""
+    fixes._waiting.setdefault(CORPUS, {})[eid] = fixes._Asking(FIX_WORDS, "")
+    agents.mirror(CORPUS, "user", by=agents.BROWSER, text=FIX_SAID, event=eid)
+    events.post(CORPUS, "main", {"text": "Make the legend name the rows."}, mirror=False, line=FIX_SAID, event_id=eid)
 
 
 def shown() -> list[tuple[str, str]]:
@@ -123,6 +148,174 @@ async def test_the_quiet_events_a_message_carried_wait_again_for_main_s_next_eve
     await main_turn("And now?")
     last = json.dumps(client.bodies[-1]["messages"][-1])
     assert "319 of 460" in last and events.MEANWHILE in last and SECOND not in last
+
+
+async def test_the_quiet_events_that_rode_along_with_the_rewound_message_wait_again_for_main_s_next_event(
+        on, monkeypatch):
+    """A quiet event that comes while main is idle rides along with the analyst's next message, whose turn reads it. A
+    rewind to that message cuts the prompt that carried it, and the quiet event, which came before the message, waits
+    again, so main reads it with the analyst's next message."""
+    client = api_key(monkeypatch, [text("Two incidents."), text("Noted.")])
+    events.post(CORPUS, "citations", {"text": '"302 of 439" is corrected to "319 of 460"'})
+    await main_turn(FIRST)
+    assert "319 of 460" in json.dumps(client.bodies[0]["messages"]) and events.held(CORPUS) == []
+    await runtime.rewind_main(CORPUS, shown()[0][1])
+    assert [n["meta"]["kind"] for n in events.held(CORPUS)] == ["citations"]
+    await main_turn("And now?")
+    sent = json.dumps(client.bodies[-1]["messages"])
+    assert "319 of 460" in sent and events.MEANWHILE in sent and FIRST not in sent
+
+
+async def test_the_rewind_s_line_keeps_the_words_it_gives_back(on, monkeypatch):
+    """The words a rewind gives back for the composer are in its reply and on its line in main's chat, so a page that
+    never got the reply (closed or reloaded while main's turn stopped) puts them back from the line."""
+    client = hanging(monkeypatch, [])
+    first = await first_turn_runs(client)
+    events.post(CORPUS, "main", {"text": SECOND})
+    got = await runtime.rewind_main(CORPUS, first)
+    lines = [r for r in main_records() if r.get("kind") == runtime.REWIND_CHIP]
+    assert [(r["event"], r["words"]) for r in lines] == [(first, got["text"])]
+    assert got["text"] == f"{FIRST}\n\n{SECOND}"
+
+
+# --------------------------------------------------------------------------- a request cancelled, a step that fails
+
+
+async def test_a_rewind_whose_request_is_cancelled_while_main_s_turn_stops_cuts_and_takes_back_nothing(on, monkeypatch):
+    """The rewind waits for main's running turn to stop. When the request itself is cancelled meanwhile (the server
+    stops, the page's connection goes), the rewind goes no further: nothing is cut or taken back and no line is
+    written. Main's turn ends stopped, as after a Stop, and the message that waited for it is main's next turn."""
+    stopping = asyncio.Event()
+
+    class StopsSlowly(Hang):
+        async def __anext__(self) -> Any:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                stopping.set()
+                await asyncio.Event().wait()  # until a second cancel: the turn takes its time to stop
+            raise StopAsyncIteration
+
+    class Client(FakeClient):
+        def stream(self, **body: Any) -> Any:
+            if not self.bodies:
+                self.bodies.append(json.loads(json.dumps(body, default=str)))
+                return StopsSlowly(Final([], "end_turn"))
+            return super().stream(**body)
+
+    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    client = Client([text("There are 12 files.")])
+    monkeypatch.setattr(llm, "client", lambda: client)
+    first = await first_turn_runs(client)
+    events.post(CORPUS, "main", {"text": SECOND})
+    rewind = asyncio.ensure_future(runtime.rewind_main(CORPUS, first))
+    await asyncio.wait_for(stopping.wait(), 5)
+    rewind.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await rewind
+    await until(lambda: len(client.bodies) == 2, "the message that waited was not main's next turn")
+    await runtime._spaces[CORPUS].main.task
+    sent = json.dumps(client.bodies[1]["messages"])
+    assert FIRST in sent and SECOND in sent, "nothing was cut or taken back"
+    rows = shape(main_records())
+    assert not [r for r in main_records() if r.get("kind") == runtime.REWIND_CHIP]
+    assert [w for w, _ in shown()] == [FIRST, SECOND]
+    assert rows.index(("chip", session.STOPPED_TEXT)) < rows.index(("user", SECOND))
+
+
+async def test_a_rewind_whose_line_cannot_be_written_still_gives_the_words_back_and_main_goes_on(on, monkeypatch,
+                                                                                                 caplog):
+    """Once main's conversation is cut, a step after it that fails, such as writing the rewind's line on a full disk,
+    loses nothing: the words come back for the composer all the same, the failure is logged, and what else waited for
+    main is its next turn, as after a Stop."""
+    client = hanging(monkeypatch, [text("The check left two comments.")])
+    first = await first_turn_runs(client)
+    events.post(CORPUS, "main", {"text": SECOND})
+    events.post(CORPUS, "checked", {"text": "The check of the report ended: 2 comments.", "check": "unverified"})
+    real = agents.chip
+
+    def full(c: str, kind: str, text: str, **fields: Any) -> Any:
+        if kind == runtime.REWIND_CHIP:
+            raise OSError(28, "No space left on device")
+        return real(c, kind, text, **fields)
+
+    monkeypatch.setattr(agents, "chip", full)
+    got = await runtime.rewind_main(CORPUS, first)
+    assert got == {"text": f"{FIRST}\n\n{SECOND}", "event": first}
+    assert any(r.name == "thimble.runtime" and r.exc_info for r in caplog.records), "the failure is logged"
+    sp = runtime._spaces[CORPUS]
+    assert sp.main.running, "the notice is main's next turn"
+    await sp.main.task
+    sent = json.dumps(client.bodies[-1]["messages"])
+    assert "2 comments" in sent and FIRST not in sent and SECOND not in sent
+
+
+async def test_when_the_quiet_events_cannot_wait_again_the_message_that_carries_them_stays_for_main(on, monkeypatch):
+    """A message the rewind takes back leaves main's queue only once the quiet events it carries wait again
+    (events.hold_again). When they cannot, it stays, with its line and the quiet events in it, and is main's next turn:
+    nothing is lost, and the rewound message's words alone come back."""
+    client = hanging(monkeypatch, [text("Noted.")])
+    first = await first_turn_runs(client)
+    events.post(CORPUS, "citations", {"text": '"302 of 439" is corrected to "319 of 460"'})
+    events.post(CORPUS, "main", {"text": SECOND})
+
+    def cannot(c: str, notes: list[dict[str, Any]]) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(events, "hold_again", cannot)
+    got = await runtime.rewind_main(CORPUS, first)
+    assert got["text"] == FIRST
+    await runtime._spaces[CORPUS].main.task
+    sent = json.dumps(client.bodies[-1]["messages"])
+    assert SECOND in sent and "319 of 460" in sent and FIRST not in sent
+    assert [w for w, _ in shown()] == [SECOND]
+
+
+# --------------------------------------------------------------------------- main's chats and the /thimble-fix
+
+
+async def test_a_message_of_an_earlier_chat_of_main_is_no_place_to_rewind_to(on, monkeypatch, analyst):
+    """Main's log holds its chats one after another, each from the line where it starts or comes back (Space.switch),
+    and main's conversation is the latest one's. A rewind goes back only within it: a message of an earlier chat is
+    refused with one line that says so (409), and nothing changes; one after the latest chat line rewinds."""
+    api_key(monkeypatch, [text("Two incidents."), text("The second."), text("Three runs failed.")])
+    for words in (FIRST, "Which was worse?"):
+        await main_turn(words)
+    sp = runtime._spaces[CORPUS]
+    assert await sp.switch(None)
+    await main_turn("How many runs failed?")
+    state = sp.main.state_path("api").read_text()
+    before = main_records()
+    with pytest.raises(HTTPException) as e:
+        await agents.rewind_route(CORPUS, agents.RewindBody(event=shown()[1][1]), analyst)
+    assert e.value.status_code == 409 and e.value.detail == runtime.EARLIER_CHAT
+    assert main_records() == before and sp.main.state_path("api").read_text() == state
+    got = await runtime.rewind_main(CORPUS, shown()[2][1])
+    assert got["text"] == "How many runs failed?"
+    assert [w for w, _ in shown()] == [FIRST, "Which was worse?"]
+
+
+async def test_a_thimble_fix_the_rewind_takes_back_is_one_no_fix_starts_from(on, monkeypatch):
+    """Main's turn reads the person's /thimble-fix, so fix_thimble may take its words in that turn and the next one
+    (fixes.words_read). A rewind to that message takes the words back: fix_thimble then answers as when no /thimble-fix
+    was asked. So does a /thimble-fix that waited for main's turn when a rewind took it back."""
+    client = api_key(monkeypatch, [text("Is this about one of your fixes, or a new fix?")])
+    post_fix("f1c5e0a7")
+    sp = runtime._spaces[CORPUS]
+    await sp.main.task
+    sp.read()
+    assert fixes._asked[CORPUS].words == FIX_WORDS
+    await runtime.rewind_main(CORPUS, "f1c5e0a7")
+    with pytest.raises(HTTPException) as e:
+        await fixes.from_tool(CORPUS, "new")
+    assert e.value.status_code == 409 and e.value.detail == fixes.NOT_ASKED
+    # one that waits for main's running turn
+    client = hanging(monkeypatch, [])
+    first = await first_turn_runs(client)
+    post_fix("f2d6e1b8")
+    assert list(fixes._waiting[CORPUS]) == ["f2d6e1b8"]
+    assert (await runtime.rewind_main(CORPUS, first))["text"] == f"{FIRST}\n\n{FIX_SAID}"
+    assert not fixes._waiting.get(CORPUS) and CORPUS not in fixes._asked
 
 
 # --------------------------------------------------------------------------- a message main read mid-turn
