@@ -1,7 +1,8 @@
 """Labels off: the workspace's Labels switch in Settings (ledger.labels_on) turned off, as the terminal's Labels setting
-does in the plugin. Main and thimble's agents read nothing of labels then, no agent is offered a label tool (TOOLS), and
-a label tool's call is refused with the line both modes read (LINE, plugin/prompts/labels-off.md), changing nothing.
-thimble tells main of no label event either (events.post).
+does in the plugin. Main's prompt, the shared text thimble's agents read and the texts of the tools say nothing of labels
+then, no agent is offered a label tool (TOOLS), and a label tool's call is refused with the line both modes read (LINE,
+plugin/prompts/labels-off.md), changing nothing. thimble tells main of no label event either (events.post). The texts of
+agents that never make a label (a writer's, a view's builder's and reviewer's) keep their words.
 
 Each text keeps its words while Labels is on. While it is off, the parts of a text that name labels go (CUTS, by the
 prompt file that holds them): a `## ` section by its heading, up to the next `## ` heading, and any other part by its

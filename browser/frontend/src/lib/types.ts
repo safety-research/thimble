@@ -1265,8 +1265,8 @@ export interface Settings {
    * workspace's settings.json `corpus_edits`, on by default) */
   corpus_edits?: boolean
   /** Labels: whether Claude makes labels in this workspace, as the terminal's Labels setting (the workspace's
-   * settings.json `labels`, on by default); off, main and thimble's agents read nothing of labels and have no label
-   * tool */
+   * settings.json `labels`, on by default); off, main's prompt and the tools' texts say nothing of labels, and no agent
+   * has a label tool */
   labels?: boolean
   [k: string]: unknown
 }

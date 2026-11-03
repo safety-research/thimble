@@ -11,8 +11,8 @@
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
 // Under the table, "Claude can edit files in this folder", whether main and its thread forks may write the corpus
 // folder of this workspace (on by default; thimble's other agents never write it); Labels, whether Claude makes labels
-// in this workspace, as the terminal's Labels setting (on by default; off, Claude reads nothing of labels and has no
-// label tool); the View proposals switch, which a view proposal's Don't ask again turns off; the
+// in this workspace, as the terminal's Labels setting (on by default; off, main's prompt and the tools' texts say
+// nothing of labels, and no agent has a label tool); the View proposals switch, which a view proposal's Don't ask again turns off; the
 // Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
 // canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents as the workbench runs
 // them (web, edits of this folder, the shell's sandbox and where its network reaches), with the CLAUDE.md files each

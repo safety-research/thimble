@@ -379,7 +379,7 @@ def corpus_edits(c: str | None) -> bool:
 def labels_on(c: str | None) -> bool:
     """Whether Claude makes labels in workspace `c` (LABELS_KEY, Settings' Labels switch, as the terminal's Labels
     setting): on unless the workspace's settings.json sets it false, and on for no workspace or a settings file that
-    cannot be read. Off, main and thimble's agents read nothing of labels and are offered no label tool
+    cannot be read. Off, main's prompt and the tools' texts say nothing of labels, and no agent is offered a label tool
     (labels_off.py)."""
     if not c:
         return True
