@@ -29,13 +29,14 @@ import { update, type EngineInterface, type Register } from 'claude-code'
 import { busyWhile } from '../bar/busy'
 import { cardAsk } from '../core/answerview'
 import { forkOf, spawnFork } from '../core/forks'
+import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut, fenced } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 import { cardText, headOwner } from './draw'
-import { metaOf } from './store'
+import { metaOf, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -104,11 +105,19 @@ async function end($: Engine, m: Made, status: Made['status'], o: { url?: string
   await save($, m)
 }
 
-/** The fork's prompt: the card's title, its rows' file and its text copy as drawn now. */
+/** The fork's prompt: the card's title, its rows' file and its text copy as drawn now. A ready card whose data came in
+ *  its call (cards/ready.ts) has no file of Claude's: the fork reads a copy of the version's data in the temp folder,
+ *  which it reads without a dialog (hooks/temp_allow.py). */
 async function promptOf($: Engine, card: string): Promise<string | null> {
   const meta = await metaOf($, card)
   if (!meta || meta.version < 1) return null
-  return fill(await promptText($, 'artifact'), { TITLE: meta.title, FILE: meta.lastFile || meta.file, COPY: fenced(cut(await cardText($, card), COPY_CHARS)) })
+  let file = meta.lastFile || meta.file
+  if (!file) {
+    file = `${await tempDir($)}/card-${card}.json`
+    const r = await $.process.run(['cp', '--', `${await versionDir($, card, meta.version)}/rows.json`, file]).catch(() => null)
+    if (r?.exitCode !== 0) file = '(none: the card drew data given in its call)'
+  }
+  return fill(await promptText($, 'artifact'), { TITLE: meta.title, FILE: file, COPY: fenced(cut(await cardText($, card), COPY_CHARS)) })
 }
 
 /** The fork, spawned while the key's or the click's own hook runs (the agent.spawn hook below holds it for the word
