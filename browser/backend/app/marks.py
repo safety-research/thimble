@@ -151,10 +151,14 @@ def session_cards(c: str) -> list[dict[str, Any]]:
 
     ws = config.workspace_dir(c)
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for _, nb in notebook._stored(ws):
         for cell in nb.get("cells") or []:
-            if not cell.get("id"):
+            # a card is read once, by the first cell of its id: a second cell of that id (the canvas's files are the
+            # workspace's, which a card's code writes) adds no versions or values under it
+            if not cell.get("id") or str(cell["id"]) in seen:
                 continue
+            seen.add(str(cell["id"]))
             card = {"id": str(cell["id"]), "title": str(cell.get("title") or "")}
             if cell.get("kind") == "label":
                 try:

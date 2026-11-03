@@ -440,3 +440,63 @@ def test_versions_lie_in_thimble_s_home_and_only_thimble_s_own_steps_keep_them(_
         concepts._runs.pop((CORPUS, other["id"]), None)
     asyncio.run(ledger.reset_workspace(CORPUS))
     assert not (where / f"{k['id']}.jsonl").exists()
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_a_card_s_code_can_neither_read_nor_write_the_versions(wrap, _fresh, monkeypatch):
+    """In the wrapped kernel a card's code finds no versions where thimble keeps them: the folder it sees there is the
+    sandbox's own, empty, so what it reads fails and what it writes there, or through a link it leaves in the workspace,
+    stays inside the sandbox. The versions stay as thimble kept them."""
+    from app import notebook
+    from test_kernel_sandbox import _wrap_works
+
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    s = await _apply("forge pr claim", 4)
+    kept = label_versions.folder(CORPUS) / f"{s['concept']}.jsonl"
+    before = kept.read_bytes()
+    code = (
+        "import os, pathlib\n"
+        f"p = pathlib.Path({str(kept)!r})\n"
+        "said = []\n"
+        "for act in (lambda: p.read_text(), lambda: p.open('a').write('{}'), lambda: p.parent.mkdir(parents=True)):\n"
+        "    try:\n"
+        "        act(); said.append('done')\n"
+        "    except OSError:\n"
+        "        said.append('refused')\n"
+        "link = pathlib.Path.cwd().parent / 'tmp' / 'versions-link'\n"
+        "try:\n"
+        "    os.symlink(p, link); link.open('a').write('{}'); said.append('done')\n"
+        "except OSError:\n"
+        "    said.append('refused')\n"
+        "print(*said)\n")
+    try:
+        cell = await notebook.run_code(CORPUS, code, "main")
+        said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
+        assert said[:2] == ["refused", "refused"] and len(said) == 4, cell["outputs"]
+        assert kept.read_bytes() == before and label_versions.read(CORPUS, s["concept"])[-1]["made"] == "run over 4 records"
+    finally:
+        await notebook.shutdown_all()
+
+
+def test_a_second_card_of_a_label_card_s_id_adds_no_other_label_s_versions_under_it(_fresh, monkeypatch):
+    """A cell written into the canvas's files with a label card's id, showing another label (a card's code can write
+    those files): the card is read once, by the first cell of its id, so the versions under it are one label's, never
+    two labels' mixed into a history neither had."""
+    from app import concepts, notebook
+
+    async def two():
+        a = await _apply("forge pr claim", 4)
+        b = await _apply("(?i)review", None, name="asks for a review")
+        return a, b
+    a, b = asyncio.run(two())
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "planted", role="exploration")
+    nb["cells"].append({**notebook.new_cell("label", "main", "planted", nb["id"], payload={"concept": b["concept"]}), "id": a["cell"]})
+    notebook.write_notebook(ws, nb)
+    mine = [x for x in marks.session_cards(CORPUS) if x["id"] == a["cell"]]
+    tables = {json.dumps(x["outputs"]) for x in mine}
+    one = [{json.dumps(marks._outputs([(0, concepts.card_table(v))])) for v in label_versions.read(CORPUS, k)}
+           for k in (a["concept"], b["concept"])]
+    assert len({x["title"] for x in mine}) == 1 and tables in one, mine
