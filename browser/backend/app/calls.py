@@ -528,7 +528,8 @@ def backfill(c: str, chat: str) -> int:
 
     meta = agents.meta_or_none(c, chat) or {}
     sid = str(meta.get("session") or "")
-    if meta.get("role") != "orient" or not sid:  # an orientation of an earlier version's
+    # an orientation of an earlier version's; a meta, which a card's code writes, that names no session's id is none
+    if meta.get("role") != "orient" or not session.SID_RE.match(sid):
         return 0
     found = session.find_transcript(sid)
     if not found:

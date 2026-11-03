@@ -218,7 +218,7 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         for fields in session.task_notices(text):
             agent_id = str(fields.get("task-id") or "").strip()
             thread = fork_calls.get(str(fields.get("tool-use-id") or "").strip()) or fork_agents.get(agent_id)
-            if thread and agent_id:
+            if thread and agent_id and session.AGENT_FILE_RE.match(f"agent-{agent_id}.jsonl"):  # names a file there alone
                 fork_agents[agent_id] = thread
                 if forks:
                     got, read = _fork_entries(subagents / f"agent-{agent_id}.jsonl", thread, fork_read.get(agent_id, 0))

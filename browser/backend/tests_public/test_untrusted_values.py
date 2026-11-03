@@ -238,3 +238,125 @@ def test_the_claude_code_session_a_card_names_in_a_state_file_is_never_resumed(r
     state.unlink()
     state.write_text(json.dumps({"session_id": "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"}))
     assert runtime_api.cc_main_session(CORPUS) == "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+
+
+SID = "e7b0a1f2-0000-4000-8000-0000000000ab"
+
+
+@pytest.fixture()
+def mirror(tmp_path, monkeypatch):
+    """The mirror (session.py) with no session attached, and Claude Code's config dir the test's own, whose projects
+    folder holds a project's folder with session SID's transcript, as Claude Code keeps it. Yields that transcript."""
+    from app import events, session
+
+    claude = tmp_path / "claude-config"
+    project = claude / "projects" / "-made-up-project"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
+    monkeypatch.setattr(config, "_served_config", None)
+    for table in (session._live, session._shim_pids, session._shim_configs, events._subs):
+        table.clear()
+    transcript = project / f"{SID}.jsonl"
+    transcript.write_text(json.dumps({"type": "user", "origin": {"kind": "human"}, "message": {"content": "hello"}}) + "\n")
+    yield transcript
+    for table in (session._live, session._shim_pids, session._shim_configs, events._subs):
+        table.clear()
+
+
+def _restored(sid: str) -> None:
+    """What a card's code can write so that the next attach of `sid` reads as the server's restart under it: main's
+    meta naming it attached."""
+    from app import agents
+
+    meta = agents.ensure_main(CORPUS)
+    meta["attached"] = {"session": sid, "cwd": str(config.corpus_dir(CORPUS)), "since": "2026-11-03T00:00:00+00:00"}
+    agents.write_meta(CORPUS, meta)
+
+
+def test_what_sessions_json_names_is_taken_only_where_the_mirror_itself_keeps_it(mirror, tmp_path_factory):
+    """sessions.json, which a card's code writes, keeps each session's transcript, working folder and pid and where the
+    tail stood; after a restart the mirror took them as they were, so a record that named a file outside had the server
+    read it into main's chat and into its agents' context, run the checker's fork of main in a folder of the card's
+    choosing, and give claude a word that starts with a dash as an option (the turn's cut, --resume-session-at)."""
+    from app import agents, context, session
+
+    outside = _outside(tmp_path_factory)
+    planted = outside / f"{SID}.jsonl"
+    planted.write_text(json.dumps({"type": "user", "origin": {"kind": "human"}, "message": {"content": "OUTSIDE-SECRET"}}) + "\n")
+    (config.workspace_dir(CORPUS) / "sessions.json").write_text(json.dumps({SID: {
+        "session": SID, "cwd": str(outside), "transcript_path": str(planted), "pid": "../made-up",
+        "since": "2026-11-03T00:00:00+00:00",
+        "cursor": {"transcript": str(planted), "offset": 0, "last_cut": "--made-up-option"},
+        "continues": {"session": "made-up", "transcript": str(outside / "made-up.jsonl"), "at": 0}}}))
+    _restored(SID)
+    lv = session.attach(CORPUS, SID, "")
+    assert lv is not None
+    session.tail_once(lv)
+    assert (lv.transcript_path, lv.cwd, lv.pid, lv.last_cut) == (str(mirror), "", None, None)
+    assert "OUTSIDE-SECRET" not in agents.paths(CORPUS, agents.MAIN_ID)[1].read_text()
+    session._live.clear()
+    assert context.transcript_path(CORPUS) == mirror
+
+
+def test_an_orientation_s_session_a_card_names_in_its_chat_backfills_no_file_outside(mirror, tmp_path_factory):
+    """An orientation's calls are stored from its session's transcripts on their first read, the session named by the
+    orientation's chat's meta, chats/<id>.meta.json, which a card's code writes; the server found the transcript by
+    that name as it was, so a name that was a path had it store the calls of any transcript-shaped file into the
+    workspace, where the card reads them."""
+    from app import agents, calls
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.jsonl").write_text("\n".join(json.dumps(r) for r in (
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_made_up", "name": "Read", "input": {"file_path": "made-up"}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_made_up", "content": "OUTSIDE-SECRET"}]}})) + "\n")
+    chat = agents.new_agent(CORPUS, "orient", "made-up orientation", announce=False)
+    agents.update_agent(CORPUS, chat["id"], session=str(outside / "made-up"))
+    assert calls.backfill(CORPUS, chat["id"]) == 0
+    assert not calls.path(CORPUS, chat["id"]).exists()
+
+
+def test_a_workflow_s_folder_a_card_names_in_its_chat_is_not_read(mirror, tmp_path_factory):
+    """A workflow's chat keeps the folder of its agents' transcripts in its meta, chats/<id>.meta.json, which a card's
+    code writes; after a restart the mirror read every agent-*.jsonl of the folder the meta named into the chat, where
+    the card reads it."""
+    from app import agents, session
+
+    outside = _outside(tmp_path_factory)
+    (outside / "agent-made0up.jsonl").write_text(json.dumps(
+        {"type": "user", "origin": {"kind": "human"}, "message": {"content": "OUTSIDE-SECRET"}}) + "\n")
+    chat = agents.new_agent(CORPUS, session.SUBAGENT_ROLE, "made-up workflow", announce=False, session=SID)
+    agents.update_agent(CORPUS, chat["id"], workflow_dir=str(outside), status="running")
+    (config.workspace_dir(CORPUS) / "sessions.json").write_text(json.dumps({SID: {
+        "session": SID, "transcript_path": str(mirror), "since": "2026-11-03T00:00:00+00:00", "subs": {}}}))
+    _restored(SID)
+    lv = session.attach(CORPUS, SID, "")
+    assert lv is not None
+    session.tail_once(lv)
+    assert "OUTSIDE-SECRET" not in agents.paths(CORPUS, chat["id"])[1].read_text()
+
+
+def test_a_fork_s_transcript_is_read_only_from_main_s_session_folder(tmp_path_factory):
+    """An agent's context renders main's conversation from main's transcript, each thread's fork's calls read from the
+    fork's transcript, subagents/agent-<id>.jsonl beside it, by the id a task notification in main's transcript names;
+    on the Messages API that transcript lies in the workspace, which a card's code writes, so an id with ../ parts had
+    the server read a file wherever they led into the agent's context."""
+    from app import context
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.jsonl").write_text(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "toolu_x", "name": "Read", "input": {"file_path": "OUTSIDE-SECRET"}}]}}) + "\n")
+    d = config.workspace_dir(CORPUS) / "runtime"
+    subagents = d / "made-up-session" / "subagents"
+    (subagents / "agent-x").mkdir(parents=True)  # what a card's code can make there
+    agent = _up_from(subagents, outside / "made-up")
+    main = d / "made-up-session.jsonl"
+    main.write_text("\n".join(json.dumps(r) for r in (
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_fork", "name": "Agent",
+             "input": {"description": "thread:made-up", "prompt": "thread:made-up"}}]}},
+        {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": (
+            f"<task-notification><task-id>{agent}</task-id><tool-use-id>toolu_fork</tool-use-id>"
+            "<status>completed</status></task-notification>")}})) + "\n")
+    assert "OUTSIDE-SECRET" not in json.dumps([e.__dict__ for e in context._entries(main)])
