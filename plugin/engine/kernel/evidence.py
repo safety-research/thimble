@@ -2054,8 +2054,8 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
 # words is a value of the condition. The sentence states each value of the condition apart from the count's own
 # numbers, a bound by its words ("at least 1" for `>=`), a yes of a column by the column's words, so the check cannot
 # count by a condition the claim does not make; a condition every row meets picks no row out, so the sentence names
-# its column too. A table the card keeps only part of, one where one thing may stand in two rows (two rows of one
-# name, or the same in every column), or with a row that sums up the others, gives no count.
+# its column too. A table the card keeps only part of, or one where one thing may stand in two rows (two rows of one
+# name, or the same in every column), gives no count; a row that sums up the others is left out of it.
 
 COUNT_OPS = {"=": operator.eq, "<": operator.lt, "<=": operator.le, ">": operator.gt, ">=": operator.ge}
 OP_WORDS = {"=": "", "<": "under ", "<=": "at most ", ">": "over ", ">=": "at least "}
@@ -2253,12 +2253,12 @@ def _twice(t: dict[str, Any]) -> str:
     return "two rows of the card's table have the same value in every column" if any(n > 1 for n in keys.values()) else ""
 
 
-def _sums_up(t: dict[str, Any], cols: list[str]) -> str | None:
-    """The name of a row that sums up the others, or None, in a table of three rows or more with a column of numbers:
+def _sums_up(t: dict[str, Any], cols: list[str]) -> int | None:
+    """The row that sums up the others, or None, in a table of three rows or more with a column of numbers:
     in every such column its value is the others' sum or their mean (as pandas' margins, `All`, and a `mean` row are),
     as the row rounds it (2.8 for 2.78) and a float's error left aside (FLOAT_NOISE). One column's value matches a sum
     or a mean by chance (3 of 1, 2, 3), so it takes two columns whose other values differ, or a row whose name says it
-    sums up (SUMMARY_NAMES). Such a row is no record of the things the table counts."""
+    sums up (SUMMARY_NAMES). Such a row is no record of the things the table counts: a count leaves it out."""
     rows = t.get("rows") or []
     if len(rows) < 3:
         return None
@@ -2288,7 +2288,7 @@ def _sums_up(t: dict[str, Any], cols: list[str]) -> str | None:
             if not ok:
                 break
         if ok and (differ > 1 or (differ and name.strip().casefold() in SUMMARY_NAMES)):
-            return name
+            return i
     return None
 
 
@@ -2363,12 +2363,13 @@ def check_count(target: str, ev: dict[str, Any], cards: list[dict[str, Any]] | N
     twice = _twice(t)
     if twice:
         return [f"{twice}, so its rows cannot be counted"], None
+    # a row that sums up the others (pandas' margins, a mean row) is no record of the things counted
     summed = _sums_up(t, cols)
-    if summed is not None:
-        return [f"the row {summed} of the card's table sums up the others, so its rows cannot be counted"], None
+    names = [str(x) for x in t.get("names") or []]
+    besides = "" if summed is None else f" besides the row {names[summed] if summed < len(names) else summed} that sums them up"
     j = {c: k for k, c in enumerate(cols)}
     value = lambda r, c: r[j[c]] if j[c] < len(r) else None  # noqa: E731
-    pool = [i for i, r in enumerate(rows) if all(_meets(value(r, c), op, v) for c, op, v in of)]
+    pool = [i for i, r in enumerate(rows) if i != summed and all(_meets(value(r, c), op, v) for c, op, v in of)]
     counted = [i for i in pool if all(_meets(value(rows[i], c), op, v) for c, op, v in conds)]
     n, m = len(counted), len(pool)
     shown = _count_shown(card, o, t, counted, conds[0][0] if conds else None, line)
@@ -2409,7 +2410,7 @@ def check_count(target: str, ev: dict[str, Any], cards: list[dict[str, Any]] | N
                 return [f"the card's table has {_rows(n)}{has}{among}, and the words give no exact number of them"], shown
             return [f"the card's table has {_rows(n)}{has}{among}, not {OP_WORDS.get(op or '=', '')}{num_value(big)}"], shown
         if not same_number(num_value(whole_m), str(m), approx):
-            return [f"the card's table has {_rows(m)}{among}, not {num_value(whole_m)}"], shown
+            return [f"the card's table has {_rows(m)}{among}{besides}, not {num_value(whole_m)}"], shown
         own += [pair.span(1), pair.span(2)] if pair else [none.span(1)]
     else:
         first = next((mt for mt, v in nums if meets(v, mt.span(1)) and not any(a <= mt.start(1) < b for a, b in date_spans(w))), None)
@@ -2418,7 +2419,7 @@ def check_count(target: str, ev: dict[str, Any], cards: list[dict[str, Any]] | N
         own.append(first.span(1))
     for mt in ALL_OF.finditer(w):
         if mt.span(1) in own and n != m:
-            return [f"the card's table has {_rows(m)}{among}, not {num_value(mt.group(1))}"], shown
+            return [f"the card's table has {_rows(m)}{among}{besides}, not {num_value(mt.group(1))}"], shown
     if of and n == m:
         # rows picked by `of` that are all the counted rows count the rows against themselves: "3 of the 3 services
         # failed every night" with `of` the services that failed every night
@@ -2464,7 +2465,7 @@ def check_count(target: str, ev: dict[str, Any], cards: list[dict[str, Any]] | N
         missing = unshown_change(was, target, f"{n} of {m}\n" + "\n".join(_card_text(v) for _, _, v in of + conds), approx)
         if missing:
             return [f"the count does not show “{short(' … '.join(missing), 60)}”"], shown
-    shown["count"] = f"{n:,} of {_rows(m)}{has}{among}"
+    shown["count"] = f"{n:,} of {_rows(m)}{has}{among}{besides}"
     return [], shown
 
 

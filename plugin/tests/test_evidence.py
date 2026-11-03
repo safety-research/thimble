@@ -1146,9 +1146,9 @@ def test_a_count_fails_when_the_rows_do_not_give_it_or_the_sentence_does_not_sta
 def test_a_table_the_card_keeps_in_part_or_whose_rows_are_not_one_thing_each_gives_no_count():
     """B20, the verifier's attacks on the table itself (made up): a table the card keeps only part of, a table whose
     rows two share a name (also a column of names with one written twice, in rows no column names), or two rows the
-    same in every column, one with a row that sums up the others (pandas' margins, a mean row), printed text the card
-    keeps no rows of, and a table the card shows only as text, give no count. A log whose rows repeat a name often still
-    counts."""
+    same in every column, printed text the card keeps no rows of, and a table the card shows only as text, give no
+    count; a row that sums up the others (pandas' margins, a mean row) is left out of the count, never counted as a
+    service. A log whose rows repeat a name often still counts."""
     def why(table: dict, words: str = "3 of the 9", cond: dict | None = None, out: dict | None = None) -> str:
         cards = [{"id": "b5d9f3a7", "title": "made up", "outputs": [{"out": 0, "corner": "service", "cells": [["runs", "auth-gateway", "40"]],
                                                                      **({"tables": [table]} if table else {}), **(out or {})}]}]
@@ -1164,9 +1164,12 @@ def test_a_table_the_card_keeps_in_part_or_whose_rows_are_not_one_thing_each_giv
     rows = [[s[0], s[1], s[2]] for s in SERVICES]
     total = {"columns": ["service", "nights_failed", "runs"], "rows": rows + [["All", sum(r[1] for r in rows), sum(r[2] for r in rows)]],
              "names": [r[0] for r in rows] + ["All"], "label": "service", "total": 10}
-    assert why(total, "3 of the 10") == "The row All of the card's table sums up the others, so its rows cannot be counted."
+    assert why(total, "3 of the 10") == "The card's table has 9 rows besides the row All that sums them up, not 10."
     mean = {**total, "rows": rows + [["mean", 2.8, 32.8]], "names": [r[0] for r in rows] + ["mean"]}
-    assert why(mean, "3 of the 10") == "The row mean of the card's table sums up the others, so its rows cannot be counted."
+    assert why(mean, "3 of the 10") == "The card's table has 9 rows besides the row mean that sums them up, not 10."
+    meant = [{"id": "b5d9f3a7", "title": "made up", "outputs": [{"out": 0, "corner": "service", "cells": [["runs", "auth-gateway", "40"]], "tables": [mean]}]}]
+    r = counted("3 of the 9", {"ref": "card:b5d9f3a7@out0", "count": {"nights_failed": 5}}, meant, "[3 of the 9] services failed on all 5 nights.")
+    assert r["status"] == "verified" and r["evidence"]["count"] == "3 of 9 rows with nights_failed 5 besides the row mean that sums them up"
     unnamed = {"columns": ["service", "nights_failed", "runs"], "names": [str(i) for i in range(9)], "label": None, "total": 9,
                "rows": [["auth-gateway", 5, 40], ["auth-gateway", 5, 41]] + [list(x[:3]) for x in SERVICES[1:8]]}
     assert why(unnamed, "4 of the 9") == "Two rows of the card's table are named auth-gateway, so its rows cannot be counted."
