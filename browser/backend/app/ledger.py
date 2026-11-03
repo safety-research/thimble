@@ -133,9 +133,8 @@ def append_jsonl(path: Path, obj: Any) -> None:
 
 # --------------------------------------------------------------------------- locks between processes
 #
-# A store that more than one process writes (in terminal mode the MCP shim, `thimble-run` in main's Bash, the hooks'
-# backend calls and `thimble act`; in browser mode the server and the hooks) is changed under locked(): an flock on a
-# lock file beside the store, then a read of the store as it is now, then an atomic replace or an append. The lock is
+# A store that more than one process writes (the server and the hooks) is changed under locked(): an flock on a lock
+# file beside the store, then a read of the store as it is now, then an atomic replace or an append. The lock is
 # re-entrant in one thread, so a store function that calls another under the same lock does not wait on itself. Never
 # await while holding it: the coroutines of one event loop share its thread. A holder that keeps the lock past `wait_s`
 # (a stuck process, or a cell that took the lock file) does not block the caller for ever: the caller waits `wait_s`,

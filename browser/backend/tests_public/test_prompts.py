@@ -25,11 +25,11 @@ def test_real_prompts_render_clean(monkeypatch):
 
 
 def test_a_plugin_text_reads_as_the_plugin_s_registry_composes_it(tmp_path, monkeypatch):
-    """`{{include:plugin:<name>}}` pastes in a text of plugin/prompts as plugin/prompts/registry.mjs composes it, in
-    either mode of the load: the texts it includes in place, each without its closing newline, the workbench's words in
-    each slot that slots.json names, its other slots left for the caller, and a brace that is no directive kept as its
-    words; `plugin:<name>` loads one alone. A slot of slots.json with no words for the workbench, a missing text and a
-    name that is no text of plugin/prompts raise."""
+    """`{{include:plugin:<name>}}` pastes in a text of plugin/prompts as plugin/prompts/registry.mjs composes it: the
+    texts it includes in place, each without its closing newline, the workbench's words in each slot that slots.json
+    names, its other slots left for the caller, and a brace that is no directive kept as its words; `plugin:<name>`
+    loads one alone. A slot of slots.json with no words for the workbench, a missing text and a name that is no text of
+    plugin/prompts raise."""
     browser, plugin = tmp_path / "browser", tmp_path / "plugin"
     browser.mkdir()
     plugin.mkdir()
@@ -43,8 +43,7 @@ def test_a_plugin_text_reads_as_the_plugin_s_registry_composes_it(tmp_path, monk
     monkeypatch.setattr(prompts, "PLUGIN_DIR", plugin)
     monkeypatch.setattr(prompts, "PLUGIN_SLOTS", plugin / "slots.json")
     shown = 'Check {{REPLY}} as the workbench does: {"a": {"b": 1}}.\nA part by the workbench.\n'
-    for mode in prompts.MODES:
-        assert prompts.load("page", mode) == f"Start {{{{brief}}}}.\n\n{shown.rstrip()}\n\nEnd.\n"
+    assert prompts.load("page") == f"Start {{{{brief}}}}.\n\n{shown.rstrip()}\n\nEnd.\n"
     assert prompts.load("plugin:checker") == shown and prompts.slots("plugin:checker") == {"REPLY"}
     assert prompts.render("page", {"brief": "now", "REPLY": "the reply"}).startswith("Start now.\n\nCheck the reply as")
     assert prompts.files("page") == ["page.md", "plugin:checker.md", "plugin:part.md"]
@@ -54,15 +53,16 @@ def test_a_plugin_text_reads_as_the_plugin_s_registry_composes_it(tmp_path, monk
             prompts.load(bad)
 
 
-def test_main_renders_with_either_ending(tmp_path, monkeypatch):
-    """Main's prompt renders with the ending of each Claude Code (terminal_tools.ENDINGS), each found on exactly one
-    line."""
-    from app import events, terminal_tools
+def test_main_ends_a_turn_with_nothing_for_the_analyst_one_way(tmp_path, monkeypatch):
+    """Main's prompt ends a turn that has nothing for the analyst with the end token, which no chat shows, on one line.
+    It had a second ending, a turn that ends on a call with no closing words, for the launcher's Claude Code when it
+    reads terminal_tools.ENV; the server's main never read it."""
+    from app import events, session
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    for terminal in (True, False):
-        out = events.render_prompts(["main"], str(tmp_path), terminal=terminal)
-        assert terminal_tools.ENDINGS[terminal] in out and terminal_tools.ENDINGS[not terminal] not in out
+    out = events.render_prompts(["main"], str(tmp_path))
+    assert [ln for ln in out.splitlines() if session.END_TOKEN in ln and "which thimble never shows" in ln]
+    assert "needs no closing words" not in out and "When a subagent or fork returns" not in out
 
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -272,10 +272,10 @@ def _examples(text: str) -> list[list[str]]:
     return blocks
 
 
-def _what_to_make(mode: str) -> tuple[str, list[list[str]]]:
+def _what_to_make() -> tuple[str, list[list[str]]]:
     """The guidance's What to make (shared.md), as main's prompt includes it: its paragraph, and its example's turns,
     each an `Analyst` line with the lines under it."""
-    section = prompts.section("main", "What to make", mode)
+    section = prompts.section("main", "What to make")
     para = next(p for p in section.split("\n\n") if p.strip() and not p.startswith("    "))
     turns: list[list[str]] = []
     for line in (ln for block in _examples(section) for ln in block):
@@ -286,8 +286,7 @@ def _what_to_make(mode: str) -> tuple[str, list[list[str]]]:
     return para, turns
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
+def test_main_takes_a_request_for_a_dashboard_as_a_view(monkeypatch):
     """The guidance says a page the analyst comes back to, such as a dashboard, is a view whatever they call it, and a
     result that answers a question is one card; propose_view's description says what a view is in the same words, so
     main does not answer it with cards. The guidance says which form fits in words: before, its example also answered
@@ -295,14 +294,13 @@ def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
     from app import tools
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    para, _ = _what_to_make(mode)
+    para, _ = _what_to_make()
     assert "dashboard" in para and "is a view, whatever they call it" in para
     assert "A result that answers the question is one card" in para
     assert "dashboard" in tools.descriptions()["propose_view"]
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
+def test_main_fits_the_reply_to_the_question(monkeypatch):
     """The guidance's example shows only replies, since in a reply the words are what the example shows: each turn is
     one chat line with its citations. A casual question is answered in a few sentences with no card, and a question
     about how something works with its steps in order, each cited, and a link to its card. The paragraph says which
@@ -312,18 +310,17 @@ def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
     sentence, and a request for a full analysis answered after its plan card's go; without that turn, and before main's
     prompt named a full analysis, most full analyses started without a plan."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    _, turns = _what_to_make(mode)
+    _, turns = _what_to_make()
     assert turns and all(len(t) == 2 and t[1].startswith("chat") and "](#)" in t[1] for t in turns), turns
     casual = next(t for t in turns if "folder" in t[0])
     assert "card:" not in casual[1] and casual[1].count(". ") <= 2
     how = next(t for t in turns if "how does" in t[0].lower())
     assert "[[card:<id>]]" in how[1] and how[1].count("](#)") >= 3 and "table" not in how[1]
-    plan = next(line for line in prompts.load("main", mode).splitlines() if "add a plan card first" in line)
+    plan = next(line for line in prompts.load("main").splitlines() if "add a plan card first" in line)
     assert "work in several steps, such as a full analysis" in plan
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_answers_at_the_length_the_question_needs(mode, monkeypatch):
+def test_main_answers_at_the_length_the_question_needs(monkeypatch):
     """The guidance sets the length of a reply by one principle, the length the question needs, with its reasons: the
     analyst reads the answer once, in the middle of other work, and asks when they want more, so a reply shaped like a
     report makes them read past what they did not ask for. It gives no fixed number of sentences: before, a casual
@@ -331,7 +328,7 @@ def test_main_answers_at_the_length_the_question_needs(mode, monkeypatch):
     that needed a longer answer had no room for it. Without the reasons, replies grew longer and added paragraphs that
     nobody asked for."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    para, _ = _what_to_make(mode)
+    para, _ = _what_to_make()
     principle = next(s for s in para.split(". ") if "length the question needs" in s)
     assert principle.startswith("Answer at the length the question needs")
     assert "reads it once" in principle and "in the middle of other work" in principle
@@ -340,8 +337,7 @@ def test_main_answers_at_the_length_the_question_needs(mode, monkeypatch):
     assert not re.search(r"\b(one|two|three|four) (?:\w+ )?sentences?\b", para), "a length is the question's, not a number"
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_answers_beside_one_card_in_a_sentence_or_two(mode, monkeypatch):
+def test_main_answers_beside_one_card_in_a_sentence_or_two(monkeypatch):
     """The guidance opens with what the chat is for, talking with the analyst, while a card shows the evidence; it says
     what the reply beside a single card holds, the answer in a sentence or two, and why, so that the analyst does not
     read what the card shows twice; and its example's one-card turn shows that reply, one sentence that links the card.
@@ -349,7 +345,7 @@ def test_main_answers_beside_one_card_in_a_sentence_or_two(mode, monkeypatch):
     list. The card itself the paragraph says in words; without this reply in the example, most answers to how a
     pipeline works came without a card."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    para, turns = _what_to_make(mode)
+    para, turns = _what_to_make()
     assert para.startswith("The chat is where you talk with the analyst")
     beside = next(s for s in para.split(". ") if "reply beside it" in s)
     assert "the answer in a sentence or two" in beside and "the same thing twice" in beside
@@ -357,16 +353,15 @@ def test_main_answers_beside_one_card_in_a_sentence_or_two(mode, monkeypatch):
     assert one[1].startswith("chat") and one[1].count(". ") == 0
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
+def test_main_draws_a_diagram_for_steps_that_branch(monkeypatch):
     """The guidance answers a question about how something works with its steps in order in the chat, and a diagram
     card when they branch, as the card kinds say a diagram is for how things branch and connect, and a straight line
     of steps reads better as a timeline; its example's reply to such a question walks through steps that branch, each
     cited, and links its card. Before, the example also drew that card, a diagram of the steps."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    kinds = prompts.section("main", "Cards", mode)
+    kinds = prompts.section("main", "Cards")
     assert "`diagram` for how things branch" in kinds and "Steps in a straight line read better as a timeline" in kinds
-    para, turns = _what_to_make(mode)
+    para, turns = _what_to_make()
     how_works = next(s for s in para.split(". ") if "how something works" in s)
     assert "order of its steps" in how_works and "in order in the chat" in how_works
     assert "a diagram card when they branch" in how_works
@@ -374,14 +369,13 @@ def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
     assert "[[card:<id>]]" in how[1] and "every other ticket" in how[1]
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
+def test_main_keeps_the_short_reply_for_a_casual_question(monkeypatch):
     """The guidance says why a casual question, such as what a folder holds, gets plain sentences in the chat, without
     a list or a card: it comes before any analysis, so that the analyst can choose what to ask next. Not a broad
     question: a broad question about the data, such as the main ways the runs fail, asks for analysis, whose work goes
     in cards."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    para, _ = _what_to_make(mode)
+    para, _ = _what_to_make()
     sentences = para.split(". ")
     i = next(i for i, s in enumerate(sentences) if "casual question" in s)
     assert "folder" in sentences[i] and "before any analysis" in sentences[i] and "what to ask next" in sentences[i]
@@ -391,22 +385,20 @@ def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
     assert "broad" not in para
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
+def test_main_takes_how_a_project_works_from_its_code(monkeypatch):
     """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
     words, since the checker finds words copied from a README in the README; and a README or a design note only for
     what its authors wrote, since it can be out of date. Main names a disagreement with the code in one sentence when it
     is on what the analyst asked about; before, it named one in almost every answer, also where it did not touch the
     question."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    section = prompts.section("main", "Citing claims in the chat", mode)
+    section = prompts.section("main", "Citing claims in the chat")
     para = next(p for p in section.split("\n\n") if "README" in p)
     assert "out of date" in para and "read its code" in para and "words copied from a README" in para
     assert "disagrees with the code on what the analyst asked about, tell them in one sentence" in para
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(mode, monkeypatch):
+def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(monkeypatch):
     """The guidance keeps the runs that lead to an answer, such as a first look at the files, in the shell, which shows
     them folded, and puts only what answers on the canvas; main's prompt no longer puts all of its analysis work in
     cards, which made a first look at the data a card on the canvas. The card that answers shows the numbers or records
@@ -414,9 +406,9 @@ def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(mode, monkeypat
     into longer replies. The paragraph says it in words, and the example shows only replies (before, its first turn
     also showed the shell's first look)."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    main = prompts.load("main", mode)
+    main = prompts.load("main")
     assert "analysis work in cards" not in main and "never sees your shell output" not in main
-    para, turns = _what_to_make(mode)
+    para, turns = _what_to_make()
     runs = next(s for s in para.split(". ") if "in the shell" in s)
     assert "first look at the files" in runs and "folded" in runs and "Only what answers goes on the canvas" in para
     assert not any(line.startswith("shell") for t in turns for line in t[1:])
@@ -434,8 +426,7 @@ def _grouped(blocks: list[list[str]]) -> list[int]:
     return counts
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_main_names_a_group_only_for_a_sequence_of_cards(mode, monkeypatch):
+def test_main_names_a_group_only_for_a_sequence_of_cards(monkeypatch):
     """The canvas has no group by default, and a card added without one stands loose on it. add_card's `group` says what
     a group is for, a sequence of cards that answer one question together, and that a single card leaves it out; main's
     examples agree: a single card with no group, and each group a sequence of cards; and What to make names a group by
@@ -445,18 +436,17 @@ def test_main_names_a_group_only_for_a_sequence_of_cards(mode, monkeypatch):
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     group = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["group"]["description"]
     assert "sequence of cards" in group and "single card" in group
-    blocks = [*_examples(prompts.section("main", "What to make", mode)),
-              *_examples(prompts.section("main", "Cards", mode)), *_examples(prompts.load("card-types", mode))]
+    blocks = [*_examples(prompts.section("main", "What to make")),
+              *_examples(prompts.section("main", "Cards")), *_examples(prompts.load("card-types"))]
     counts = _grouped(blocks)
     assert counts and min(counts) >= 2, counts
-    para, _ = _what_to_make(mode)
+    para, _ = _what_to_make()
     assert "a short sequence of cards in one group, named by the question" in para, "a group is named by its question"
     single = [b for b in blocks if any(line.startswith("question") for line in b)]
     assert single and not _grouped(single), "a card that answers a question alone has no group"
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_a_card_shows_the_evidence_chosen_for_its_answer(mode, monkeypatch):
+def test_a_card_shows_the_evidence_chosen_for_its_answer(monkeypatch):
     """The guidance's Cards section says what a card's content is: the evidence for one answer, the numbers or records
     it rests on, chosen and shaped for the question, so that the analyst sees the answer at a glance. That is only the
     records that answer, or all of them in one compact form with the ones that answer marked, also when the analyst asks
@@ -473,7 +463,7 @@ def test_a_card_shows_the_evidence_chosen_for_its_answer(mode, monkeypatch):
     from app import tools
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    cards = prompts.section("main", "Cards", mode)
+    cards = prompts.section("main", "Cards")
     paras = cards.split("\n\n")
     para = next(p for p in paras if p.startswith("The content is the evidence for one answer"))
     assert "chosen and shaped for the question" in para and "at a glance" in para
@@ -502,8 +492,7 @@ def test_main_says_which_requests_to_a_host_ask_the_analyst_by_the_way_claude_is
     would ask before it reached a host it then reached unasked. Its sentence follows the way Claude is reached, as
     Settings' row for main does (runtime.network). Settings has no web or network switch for main, so the prompt names
     none: it said "The web calls the analyst turned off in thimble's Settings are refused", and when Claude Code's
-    sandbox refused a host, main sent the analyst to that switch. The terminal's own Claude Code asks in its dialog, as
-    its branch says."""
+    sandbox refused a host, main sent the analyst to that switch."""
     from app import events, runtime
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
@@ -513,8 +502,7 @@ def test_main_says_which_requests_to_a_host_ask_the_analyst_by_the_way_claude_is
                                  "asking the analyst.", "asks them first")):
         monkeypatch.setattr(runtime, "engine", lambda e=engine: e)
         for edits in (True, False):
-            out = events.render_prompts(["main"], str(tmp_path), terminal=False, edits=edits)
+            out = events.render_prompts(["main"], str(tmp_path), edits=edits)
             part = out.split("## Permission requests", 1)[1].split("\n## ", 1)[0]
             assert says in part and never not in part, (engine, part)
             assert "web calls" not in part and "without permission requests" not in part
-    assert "has not allowed" not in prompts.load("main", "terminal")

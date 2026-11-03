@@ -1,7 +1,7 @@
 """The names of the Claude Code sessions thimble starts (config.session_name): `thimble:<role> · <workspace>`, since
 `claude agents` lists the sessions of every folder; a long name kept short and distinct, and main's name as launch-args
-prints it (cli.main_name) and the launcher passes it. The statusline and /thimble:agents name thimble's agents by what
-they do (tray.py)."""
+prints it (cli.main_name) and the launcher passes it. The statusline names thimble's agents by what they do
+(tray.py)."""
 from __future__ import annotations
 
 

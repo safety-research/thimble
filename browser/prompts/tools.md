@@ -32,7 +32,7 @@ List a group's cards, one line each with its id, kind, question and the start of
 
 ## add_card
 
-Add a card, with its question and its content in one call. {{if:browser}}thimble runs the code and returns `card:<id>` and the start of each output.{{end}}{{if:terminal}}thimble returns `card:<id>` and a command that runs the code. Run it with Bash, and it prints the start of each output.{{end}} Give its takeaway here, or with `edit_card` once you have read the output.
+Add a card, with its question and its content in one call. thimble runs the code and returns `card:<id>` and the start of each output. Give its takeaway here, or with `edit_card` once you have read the output.
 
 ```json
 {
@@ -45,7 +45,7 @@ Add a card, with its question and its content in one call. {{if:browser}}thimble
     "text": {"type": "string", "description": "The markdown a note card shows."},
     "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show: one question answered on one screen, about 690 px wide and 800 px tall in its card. The card shows its question above the page and its takeaway under it, so the page starts with its content and does not say the answer again. Its frame has thimble's card stylesheet, which gives plain HTML, such as a table, a list or a paragraph, thimble's type and the paper's colors. So write it without colors, borders or fonts of your own, and the analyst reads the data and not the page. Scripts run, the network does not. A chart in it takes thimble's chart style from CSS variables: `--viz-1` to `--viz-7` for series in order, `--viz-seq-1` to `--viz-seq-5` for an amount, `--viz-other` for the rest, `--viz-font`, `--viz-size` and `--viz-bar-radius` for the corners at a bar's end. Scripts also have thimble.colors.series, thimble.colors.seq and thimble.vegaConfig, the config of thimble's own Vega-Lite charts."},
     "libs": {"type": "array", "items": {"type": "string"}, "description": "The libraries a custom card's scripts use, loaded before its html: vega, vega-lite and vega-embed, or an npm package as name@version. If a package is not installed, the result gives the command that installs it."},
-    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan card's steps in order, each one short line of what it does and the files or results it makes. A plan covers one phase, such as building and piloting, and its question names it, as in \"Plan: build the environment and pilot it\". A plan has no takeaway."},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan card's steps in order, each one short line of what it does and the files or results it makes. A plan covers one phase, such as building and piloting, and its question names it, as in \"Plan: build the environment and pilot it\". A plan has no takeaway."},
     "follows": {"type": "string", "description": "For a plan of the next phase, card:<id> of the plan it follows."},
     "group": {"type": "string", "description": "The group of a sequence of cards that answer one question together, in order, named by the question. A new title makes a group, and a group's title or id puts the card in it. Leave it out for a single card, but give the `group` of an event that asks for a card."},
     "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, mark each claim the card shows as `[words](#)`, as in the chat, with the whole quantity inside the mark: `[31 of the 40](#) runs`. thimble checks it against the card's output. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right. The card's own id is written `card:<id>`, which thimble fills in."}
@@ -69,11 +69,11 @@ Change a card in place and run it again, rather than adding a second card. It ta
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] } },
     "text": {"type": "string"},
     "html": {"type": "string"},
-    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan's steps in order. They replace its steps, so you can change a step's status, note, runs or details at any time."},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string"}, "details": {"type": "string"} }, "required": ["text"] }, "description": "A plan's steps in order. They replace its steps, so you can change a step's status, note or details at any time."},
     "libs": {"type": "array", "items": {"type": "string"} },
     "group": {"type": "string", "description": "The group to move the card to, its title or id. A new title makes a group."},
     "after": {"type": "string", "description": "The card to place it right after, card:<id>, or first."},
-    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. In a takeaway, mark each claim the card shows as `[words](#)`, as in the chat, with the whole quantity inside the mark: `[31 of the 40](#) runs`. thimble checks it against the card's output. On an example card, link the words of each claim to the record that shows them, as in `[[posted the answer|runs/r3.jsonl#L88]]`. A rewritten takeaway keeps every link that is right."}
+    "takeaway": {"type": "string"}
   },
   "required": ["card"]
 }
@@ -204,7 +204,7 @@ Clear a scope's whole filter, so all its cards, records or sentences show again.
 
 ## set_layout
 
-{{if:browser}}Lay out the browser's main area, right of the chat, as panes that each show one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. The analyst can also drag the panes into place.{{end}}{{if:terminal}}Open thimble's panel in the terminal on surfaces, each in a pane: `files`, `canvas` for the cards, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report.{{end}}
+Lay out the browser's main area, right of the chat, as panes that each show one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. The analyst can also drag the panes into place.
 
 ```json
 {
@@ -233,7 +233,7 @@ Open a card of a card type as its view in Files, as the card's Open as view does
 
 ## propose_view
 
-Propose a view, a page of the records that the analyst keeps and comes back to, such as a dashboard, which shows them in a form their files hide; or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes.
+Propose a view, a page of the records that the analyst keeps and comes back to, such as a dashboard, which shows them in a form their files hide; or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself.
 
 ```json
 {
@@ -332,32 +332,6 @@ Post the reply the analyst reads in a thread.
 }
 ```
 
-## message_thread
-
-Send a message the analyst typed in this terminal to a thread, as that thread's own composer sends it: a side thread's follow-up, or with no message its unanswered questions asked again, whose `thread` event, with the thread's anchor, comes back in the result for you to handle at once; a follow-up for the orientation; or a change to a view for the view's build thread. thimble shows the message in that thread. Call it for /thimble:ask.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "thread": {"type": "string", "description": "The thread's name or id as the thread list shows it, such as main/why-the-spike, orient or dev/board."},
-    "message": {"type": "string", "description": "The analyst's message, word for word. Leave it out to ask a side thread's unanswered questions again."}
-  },
-  "required": ["thread"]
-}
-```
-
-## list_agents
-
-List thimble's agents, the subagents of this session that thimble started, with what each is doing and its thread. Claude Code's agent tray lists the same subagents. Call it for /thimble:agents.
-
-```json
-{
-  "type": "object",
-  "properties": {}
-}
-```
-
 ## rename_thread
 
 Rename a thread in thimble's thread list, when the analyst asks you to.
@@ -389,7 +363,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## screenshot
 
-{{if:browser}}Get a picture of what the analyst sees in the browser, such as a card as thimble draws it.{{end}}{{if:terminal}}Get a picture of a card as thimble draws it. In terminal mode it takes no other picture.{{end}} It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
+Get a picture of what the analyst sees in the browser, such as a card as thimble draws it. It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
 
 ```json
 {
@@ -405,7 +379,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## start_writing
 
-Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document.
+Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document.
 
 ```json
 {
@@ -425,7 +399,7 @@ Start a writer, as a subagent of this session, which writes or revises one docum
 
 ## run_check
 
-Run a report check over the written documents or the cards, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. Its result is the exact Agent call that starts the check as a subagent of this session, which you then make. For one note on one passage, use `add_comment`.
+Run a report check over the written documents or the cards, a question asked of every passage that leaves a comment beside each passage it applies to. A new name creates the check and a known one reruns it, and either way it is turned on. It runs again by itself after a writer saves a document, and after the analyst's own edits it shows the passages that changed until they run it. For one note on one passage, use `add_comment`.
 
 ```json
 {
@@ -442,7 +416,7 @@ Run a report check over the written documents or the cards, a question asked of 
 
 ## stop_check
 
-Turn a report check off, {{if:browser}}as the switch in the Comments pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
+Turn a report check off, as the switch in the Comments pane does, which hides its tints and comments and stops its runs. Its comments are kept, and `run_check` turns it on again.
 
 ```json
 {
@@ -487,14 +461,14 @@ Start the fix the person asks for with /thimble-fix. A copy of you changes thimb
 
 ## view_check
 
-Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get {{if:browser}}a picture of the page as it opens, whose path Read opens{{end}}{{if:terminal}}the view as it opens, drawn as text as the panel shows it{{end}}.
+Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get a picture of the page as it opens, whose path Read opens.
 
 ```json
 {
   "type": "object",
   "properties": {
     "locators": {"type": "array", "items": {"type": "string"}, "description": "Refs to check beside the sampled lines, such as `<path>#L<n>` or `view:<slug>/<key>`."},
-    "picture": {"type": "boolean", "description": "{{if:browser}}Also take a picture of the page as it opens, 1048 px wide with no label on.{{end}}{{if:terminal}}Also draw the view as text as it opens, 120 columns wide with no label on.{{end}}"}
+    "picture": {"type": "boolean", "description": "Also take a picture of the page as it opens, 1048 px wide with no label on."}
   }
 }
 ```
@@ -527,33 +501,6 @@ Take pictures of the view you review, whose paths Read opens. The first call giv
         "properties": {
           "state": {"type": "string", "enum": ["control", "labels", "filtered", "detail", "open", "narrow", "wide"]},
           "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text, such as `Color by: State`, `State` and `Approval`, which color by Approval in place of State."},
-          "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
-          "why": {"type": "string", "description": "What you want to check in it, in a few words."}
-        },
-        "required": ["state", "why"]
-      }
-    }
-  }
-}
-```
-
-## view_pictures@terminal
-
-Draw the view you review as text, as thimble's panel shows it. The first call gives the view as it opens, 120 columns wide; ask for other states in `states`, up to four more.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "states": {
-      "type": "array",
-      "maxItems": 4,
-      "description": "States to see beside the overview: `control`, the view after the keys in `controls`, pressed in turn; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `wide`, the view as it opens 200 columns wide.",
-      "items": {
-        "type": "object",
-        "properties": {
-          "state": {"type": "string", "enum": ["control", "detail", "open", "wide"]},
-          "controls": {"type": "array", "maxItems": 8, "items": {"type": "string"}, "description": "For `control`: the keys to press in turn, such as `down`, `return` or `c`, or `click:<words>` for a click on the control that shows those words."},
           "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
           "why": {"type": "string", "description": "What you want to check in it, in a few words."}
         },
@@ -602,7 +549,7 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 
 ## instructions
 
-These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows {{if:browser}}in the browser{{end}}{{if:terminal}}in the terminal{{end}}. A session that opened thimble, with /thimble or the `thimble` command, and each thimble subagent, also has thimble's full instructions. If yours has none, thimble cannot reach this session yet, so tell the analyst to type /thimble.
+These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows in the browser. A session that opened thimble, with /thimble or the `thimble` command, and each thimble subagent, also has thimble's full instructions. If yours has none, thimble cannot reach this session yet, so tell the analyst to type /thimble.
 
 ## card-errored
 
@@ -611,10 +558,6 @@ This card errored. Fix the code with `edit_card`.
 ## card-timeout
 
 The code was stopped after {limit}. Make it faster and run it again with `edit_card`.
-
-## card-run
-
-The card's code did not run yet. Run this command with Bash next: `{command}`. It runs the code and prints the card's result with the start of each output. thimble shows the card when its code has run.
 
 ## card-tall
 
@@ -740,14 +683,6 @@ The takeaway of its card card:{cid} was written for the run before; write it aga
 
 {cards} read this label before it changed. Once its counts are final, thimble runs each of them again on the label as it is now, so leave them as they are.
 
-## label-run
-
-The label's code did not run yet. Run this command with Bash next: `{command}`. It runs your function on each unit and prints the label's result with its counts.
-
-## cards-stale
-
-{cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with Bash: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.
-
 ## show_label-not-files
 
 {label} is a label over {units}, which Files does not show. To show it, filter {where} by one of its values.
@@ -840,33 +775,13 @@ The analyst laid out no frame, so the shape is yours.
 
 {what}, so screenshot cannot take it. `read_ref` on it reads what the analyst sees.
 
-## screenshot-frames
-
-The film of {ref}, {duration} s long, its lines at {windows} s.
-
-## screenshot-frames-errors
-
-The film reported: {errors}
-
-## screenshot-terminal
-
-screenshot cannot take this picture in terminal mode. There it draws only a card, and only when Chromium and thimble's built page are installed, which `thimble doctor` shows. `read_ref` on the card reads what the analyst sees.
-
 ## propose_view-proposed
 
-Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in {{if:browser}}Files{{end}}{{if:terminal}}thimble's panel in the terminal{{end}} when its checks pass.
+Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
 
 ## propose_view-unmatched
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
-
-## propose_view-cap
-
-{view} was not proposed: a workspace gets at most {n} views from the orientation, and it has had {views}, counting any the analyst deleted. To improve one, propose it again under its name.
-
-## propose_view-deleted
-
-{view} was not proposed: the analyst deleted it, so it is not proposed again.
 
 ## propose_view-near
 
@@ -894,7 +809,7 @@ Filed {label}, but it cannot run here, so it failed at once: {why} Tell the anal
 
 ## file_dev_ticket-waits
 
-Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card{{if:browser}} in the browser{{end}}. Tell the analyst in one line.
+Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card in the browser. Tell the analyst in one line.
 
 ## file_dev_ticket-start
 
@@ -923,10 +838,6 @@ thimble gave these words to the fork that is already fixing "{fix}". Tell the pe
 ## fix_thimble-failed
 
 thimble started no fix: {why} Tell the person in one short line.
-
-## ticket-terminal
-
-This call filed nothing: code tickets run only in browser mode for now, since the analyst allows each one on its card there. Tell the analyst so in one line: to file it, they quit, run `thimble mode browser`, start `thimble` again and ask again.
 
 ## view-media-unplayable
 
@@ -1010,16 +921,6 @@ The records they show:
 
 {records}
 
-## view-pictures@terminal
-
-The pictures, each the view drawn as text as the panel shows it:
-
-{paths}
-
-The records they show:
-
-{records}
-
 ## view-review-program
 
 {extension}'s program reviews views in this workspace in place of your own reading of the pictures. It read these pictures and found these problems:
@@ -1071,18 +972,6 @@ The claims expect files the corpus lacks, which the analyst sees above the view 
 ## view-choice-error
 
 {count} choices of the view's controls gave a script error when chosen: {choices}. Every choice the analyst can make must draw the view, None and Off among them: guard what the page reads of a choice that can be null (`rows.by`, `color.by`, `filter.by`), and draw the records in one group, or uncolored, for it.
-
-## view-term-error
-
-The view's program failed {where}: {what}. It must draw the view with no error, also when a fetch fails or a file is missing.
-
-## view-term-timeout
-
-The view's program did not end its draw {where} within {s} s: {what}. Draw when an answer or an event comes, and do not draw on a timer.
-
-## view-term-overflow
-
-The view's program draws past the panel {where}: {what}. The panel cuts a row at its right edge and drops the rows below its last row. Fit each row in `d.cols` and the rows in `d.left`, with `cut`, `columns` and the list.
 
 ## view-robust-reader
 
@@ -1140,22 +1029,6 @@ its text and graphics span {used} of its {width} px, so the rest of the pane is 
 
 Fields of the records the reader answered hold values that the lines they cite do not, and they are not listed as derived: {fields}. The analyst counts on that list to tell what the files say from what the reader made of them. List each of these fields in view.json's `records` with its `type` and `"derived": "cleaned"`, or `"computed"` for a value the files do not state, and give it `from` and `how`, each a short plain phrase without semicolons, or return it from the reader's derived(index).
 
-## check-unread
-
-{n} of {total} files were opened by no card and no Read call, {files}.
-
-## check-unused
-
-In {file}, no card names the field `{field}`, filled in {filled} of {sampled} sampled records.
-
-## check-unused-kind
-
-In {file}, no card names `{value}`, a value of `{field}` in {count} of {sampled} sampled records.
-
-## check-none
-
-No check found anything.
-
 ## start_job-subagent
 
 Start it now as a subagent of this session, with one Agent call whose input is exactly this:
@@ -1179,18 +1052,6 @@ thimble's agents continue only when the analyst asks. If they asked, call messag
 ## start-plan-mode
 
 Your Claude Code session is in plan mode, where thimble's agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).
-
-## start_agent-fork
-
-Filed {what}. Main is starting {agent}, and the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and main is starting {agent}.
-
-## start_agent-event
-
-The fork of {thread} filed {what}. A fork cannot start subagents, so start {agent} for it now as a subagent of this session, with one Agent call whose input is exactly this:
-
-{input}
-
-Change nothing in it, since thimble lets only this call through. The call needs no words before or after it: the analyst sees it, and the fork told them in the thread.
 
 ## ticket-from-thread
 
@@ -1224,10 +1085,6 @@ thimble refused this call, since thimble's config turns the web tools off (agent
 ## module-started-note
 
 thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
-
-## module-started-note@terminal
-
-thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. When it hands back, reply as your prompt says for a hand-back, and do nothing more about it unless the analyst asks.
 
 ## follow-up-ran-on
 
@@ -1465,10 +1322,6 @@ No cards in these turns.
 
 The session's calls above show what it read.
 
-## orient-no-request
-
-The analyst asked for nothing in particular, so cover the whole corpus.
-
 ## orient-subagent-prompt
 
 [thimble request {request_id}]
@@ -1476,96 +1329,6 @@ The analyst asked for nothing in particular, so cover the whole corpus.
 The analyst's request: {request}
 
 Start the orientation.
-
-## orient-finished
-
-The orientation has finished: {made}.
-
-## orient-stopped
-
-The orientation was stopped: {made}.
-
-## orient-failed
-
-The orientation failed: {made}. Its error: {error}
-
-## orient-made-views
-
-{views} proposed
-
-## orient-views-built
-
-{views} built
-
-## orient-views-failed
-
-{views} failed
-
-## orient-views-building
-
-{views} building
-
-## orient-views-stopped
-
-{views} stopped
-
-## orient-views-suggested
-
-{views} suggested for file types
-
-## orient-made-nothing
-
-no outputs, only its thread
-
-## orient-follow-up
-
-The analyst's side sent you this after you finished. Follow it up as `### Follow-ups` says.
-
-{messages}
-
-## orient-from-main
-
-This message is from the analyst's own session.
-
-## orient-from-analyst
-
-This message is from the analyst, typed in your thread.
-
-## orient-from-extension
-
-The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
-
-## orient-followed-up
-
-The orientation's follow-up has finished: {changed}.
-
-## orient-follow-up-stopped
-
-The orientation's follow-up was stopped: {changed}.
-
-## orient-follow-up-failed
-
-The orientation's follow-up failed: {changed}. Its error: {error}
-
-## orient-changed-added
-
-{cards} added
-
-## orient-changed-revised
-
-{cards} revised
-
-## orient-changed-deleted
-
-{cards} deleted
-
-## orient-changed-nothing
-
-nothing changed
-
-## message_orientation-started
-
-The orientation has the message, and thimble shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
 
 ## orient-subagent-message
 
@@ -1580,10 +1343,6 @@ This orientation ran in an earlier Claude Code session. To continue it, quit and
 ## orient-continue-earlier-version
 
 This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.
-
-## orient-continue-stopped-by-user
-
-This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. A message to it starts a new run in its thread that takes up its work.
 
 ## message_orientation-continues
 
@@ -1611,68 +1370,6 @@ The analyst's message:
 
 {message}
 
-## orient-continuation-none
-
-none
-
-## message_orientation-none
-
-No orientation has run in this workspace. Answer the analyst yourself, or call `start_orientation` for a new orientation.
-
-## message_orientation-gone
-
-Claude Code no longer keeps this orientation's transcript, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
-
-## message_orientation-precached
-
-This orientation ran in advance, before this workspace was installed, and its session was not kept, so it cannot continue. Answer from its cards and the report yourself, or call `start_orientation` for a new orientation that takes up the message.
-
-## precached-context
-
-This workspace was installed from a pre-cache: its orientation ran in advance on these same files ({made}), and its Claude Code session was not kept, so `message_orientation` cannot reach it. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
-
-## precached-context-kept
-
-This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), as a subagent of the exporter's Claude Code session, so `message_orientation` cannot reach it, though its thread shows every step it took. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
-
-## thimble-terminal-home
-
-thimble: this session runs in terminal mode, so thimble shows this workspace here in the terminal and starts no server. To switch to browser mode, quit, run `thimble mode browser` and start `thimble` again.
-
-## agents-none
-
-No agent of thimble's runs now.
-
-## agents-print
-
-Print the text below in a code block, as it is, and add nothing else.
-
-{text}
-
-## message_thread-event
-
-thimble shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
-
-{event}
-
-## message_thread-again
-
-The analyst asks the thread {thread} its questions again. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
-
-{event}
-
-## message_thread-queued
-
-The message is in the thread {thread}, which waits for the fork you started for it and gets the message once that fork is known, so this turn needs no words from you.
-
-## message_thread-empty
-
-{thread} takes no empty message. Pass what the analyst wrote as `message`.
-
-## message_thread-main
-
-{thread} takes no messages of its own: its composer sends them to you. Do what the message asks yourself.
-
 ## stop-subagent
 
 The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Stop it with TaskStop.
@@ -1685,38 +1382,6 @@ thimble: the analyst pressed Stop in thimble and ended your turn, and any comman
 
 thimble: the analyst pressed Stop in thimble on the side thread {thread}, which stopped its fork `{agent_id}`. Leave it stopped: do not message, continue or restart it unless the analyst asks.
 
-## message_orientation-empty
-
-The message is empty. Pass what the analyst asks the orientation as `message`.
-
-## session-unfinished
-
-Your session ended while agents or workflows you started in the background were still running, and they stopped with it. It has now been resumed. Continue each stopped agent with SendMessage, or start again what cannot be continued, then wait for all their results and use them before you finish.
-
-## session-mode-changed
-
-The analyst changed your permission mode, so your session was paused and has now been resumed with all its work. The call you were making when it paused may have been interrupted before it ran, so make it again if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-mode-stopped
-
-The agents that were running stopped with it: {agents}. Continue each with SendMessage to its id, which keeps what it has done, and run a stopped workflow again from its run with `resumeFromRunId`, then use their results as before.
-
-## session-model-fallback
-
-A safety classifier stopped {model}'s responses in your session, so it has been resumed on {fallback} with all its work. Make again any call that did not run, if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-server-stopped
-
-thimble's server stopped while this session ran, which ended it before its task was done.
-
-## session-restarted
-
-thimble's server restarted while your session ran, which stopped it, and it has now been resumed with all its work. Make again any call that did not run, if you still need it. {stopped}Carry on with your task from where you stopped.
-
-## session-not-resumed
-
-It could not be resumed: {why}
-
 ## session-scratch
 
 Your own scratch folder is {folder}. Put the files you make for your own work there, such as a script or an intermediate result, rather than in $TMPDIR or /tmp, which the session's other agents share.
@@ -1724,10 +1389,6 @@ Your own scratch folder is {folder}. Put the files you make for your own work th
 ## work-budget
 
 The session's work folder {folder} now holds {size}, more than {budget}. Delete the extracts and copies there that you no longer need, and read the corpus in place rather than copying it.
-
-## session-mode-switching
-
-This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
 
 ## session-unproven
 
@@ -1737,6 +1398,3 @@ This call did not run, because the analyst is switching your permission mode, wh
 
 This call's ref is `{ref}`.
 
-## digest-more
-
-[{total} lines in all. read_ref {ref} reads the next page.]

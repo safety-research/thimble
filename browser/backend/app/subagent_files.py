@@ -8,21 +8,7 @@ both (subagents.py has the design):
                   (`main`) and main's end (`main_end`)
   callers.jsonl   one line per thimble tool call: {tool_use_id, agent_id, agent_type, ts}, agent_id and agent_type
                   empty for main's own call, trimmed to the last CALLERS_KEEP_S
-  launch.json     what the launcher started main with (lane A writes it), with the session's mode (`mode`: browser or
-                  terminal), which every process of the session reads here (session_mode)
-
-In terminal mode (no server) two more files are in the folder, and subagents.json holds more:
-
-  roles.json      the roles the module registers ({at, digest, roles: {name: spec}}), as GET /api/module/roles serves
-                  them in browser mode (module_bridge.roles_file writes it)
-  module.json     what the module writes, and only the module: {session, version, load, beat, plan, plan_at, problem,
-                  taken, answers, ended, gone}, its times in milliseconds since the epoch (module_bridge has the
-                  design); a reader retries a read that a write cut short (read_module), since the module can only
-                  write a file whole in place
-  subagents.json  the module's requests, entries of `requests` of kind `module` ({op, args, module: pending | answered
-                  | expired, session, asked_at, expires_at}, add_module_request), main's permission mode (`main`:
-                  record_mode), the notes for a new main after /clear (`module.notes`: rekey) and the forks of threads
-                  that are starting (`forking`)
+  launch.json     what the launcher started main with (lane A writes it)
 
 The files are in the workspace's `trusted` folder (DIR). The server makes the folder and the files when it
 registers the workspace, and both kernel wrappers bind the folder read-only (kernel_wrap.TRUSTED_DIR), since a notebook
@@ -58,11 +44,6 @@ STATE = "subagents.json"
 CALLERS = "callers.jsonl"
 LAUNCH = "launch.json"
 FILES = (STATE, CALLERS, LAUNCH)  # in DIR
-ROLES_FILE = "roles.json"  # in DIR, terminal mode: the roles the module registers (module note)
-MODULE_OUT = "module.json"  # in DIR, terminal mode: what the module writes, and only the module (module note)
-BROWSER, TERMINAL = "browser", "terminal"  # the session's mode, launch.json's `mode` (session_mode)
-MODES = (BROWSER, TERMINAL)
-WS_ENV = "THIMBLE_WS"  # the workspace folder, which the launcher exports in terminal mode only
 LOCK = f"{STATE}.lock"  # the lock of subagents.json's writers, this module's and module_bridge's, in the workspace folder
 LOCK_WAIT_S = 2.0
 LOCK_POLL_S = 0.01
@@ -80,8 +61,8 @@ ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "ch
 HELPER = "orient-helper"
 PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's module made ($.agent.spawn, $.tool.call)
 # the agent type of a thread's fork, which Claude Code tells not to start subagents (its fork boilerplate: "Do NOT spawn
-# subagents with the Agent tool"), so main makes the Agent call of a fork's start_orientation, propose_view,
-# file_dev_ticket, start_writing and run_check (tools._ask_main)
+# subagents with the Agent tool"), so the server starts the agent of a fork's propose_view, file_dev_ticket,
+# start_writing and run_check (tools._fork_start)
 FORK_TYPE = "fork"
 AGENT_TOOLS = ("Agent", "Task")
 SEND_TOOL = "SendMessage"
@@ -307,21 +288,14 @@ def tree() -> Path:
     return Path(named) if named else Path(__file__).resolve().parents[2]
 
 
-def hint(name: str, *, session_mode: str | None = None, **values: Any) -> str:
-    """A hint section of prompts/tools.md with its {placeholders} filled, as app.tools.hint reads it; '' when absent.
-    In terminal mode (`session_mode`, else THIMBLE_MODE) the section `## <name>@terminal` comes first when there is one
-    (prompts.section's rule)."""
+def hint(name: str, **values: Any) -> str:
+    """A hint section of prompts/tools.md with its {placeholders} filled, as app.tools.hint reads it; '' when absent."""
     try:
         text = tree().joinpath(*TOOLS_MD).read_text("utf-8")
     except OSError:
         return ""
-    mode = session_mode or os.environ.get("THIMBLE_MODE") or ""
-    body = ""
-    for heading in ([f"{name}@{mode}"] if mode in MODES else []) + [name]:
-        m = re.search(rf"^## {re.escape(heading)}[ \t]*\n(.*?)(?=^## \S|\Z)", text, re.M | re.S)
-        if m:
-            body = m.group(1).strip()
-            break
+    m = re.search(rf"^## {re.escape(name)}[ \t]*\n(.*?)(?=^## \S|\Z)", text, re.M | re.S)
+    body = m.group(1).strip() if m else ""
     try:
         return body.format(**values) if body else ""
     except (KeyError, IndexError, ValueError):
@@ -831,10 +805,7 @@ def rekey(state: dict[str, Any], old: str, new: str) -> list[str]:
         module.get("rekeyed"), dict) else {}
     moves.pop(new, None)  # a move back (/resume to the session before) ends the chain at `new`
     moves[old] = new
-    state["module"] = {**module, "rekeyed": dict(list(moves.items())[-REKEYS_KEPT:]),
-                       # terminal mode: the lines the module appends to the new main, one per running agent, which has
-                       # no record of them (module_bridge.state_route gives the same lines in browser mode)
-                       "notes": {"session": new, "lines": started_notes(state), "at": now()}}
+    state["module"] = {**module, "rekeyed": dict(list(moves.items())[-REKEYS_KEPT:])}
     return moved
 
 
@@ -848,7 +819,6 @@ HOW = {"click": "in the browser", "follow-on": "as the next step of a run they a
 NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}, {how}
 WHAT_CHARS = 120
 WHAT_ORIENTATION = "this corpus"  # module-started-note's {what} for an agent whose key has no name (the orientation)
-RUNNING = ("running", "waiting")
 
 
 def note_what(what: Any) -> str:
@@ -862,30 +832,6 @@ def key_what(key: Any) -> str:
     check and its document), worded as the note at its start words it (`unverified on report`)."""
     key = str(key or "")
     return key.split(":", 1)[1].replace(":", " on ") if ":" in key else ""
-
-
-def started_notes(state: dict[str, Any], session_mode: str | None = None) -> list[str]:
-    """The note a new main gets for each running agent of thimble's roles (but the orientation's own children, which its
-    orientation tells of, and the helper): hint module-started-note, with the agent's id, its role, its key's name and
-    how it started."""
-    agents = registry(state)
-    out = []
-    for aid, e in agents.items():
-        if not isinstance(e, dict):
-            continue
-        state_ = str(e.get("status") or "")
-        role = role_of(e.get("type")) or (str(e.get("role") or "") if e.get("role") in ROLES else None)
-        if not role or (state_ and state_ not in RUNNING) or (not state_ and e.get("ended")):
-            continue
-        parent = str(e.get("parent") or "")
-        if parent and parent in agents:
-            continue
-        route = str(e.get("route") or ("click" if e.get("plugin_started") else "typed"))
-        line = hint(NOTE_HINT, session_mode=session_mode, role=role, agent=aid, what=note_what(key_what(e.get("key"))),
-                    how=HOW.get(route) or HOW["click"])
-        if line:
-            out.append(line)
-    return out
 
 
 # --------------------------------------------------------------------------- callers.jsonl
@@ -951,7 +897,7 @@ def find_caller(ws: Path, tool_use_id: str) -> dict[str, Any] | None:
     return None
 
 
-# --------------------------------------------------------------------------- terminal mode
+# --------------------------------------------------------------------------- launch.json
 
 
 def _json_file(path: Path) -> dict[str, Any]:
@@ -977,50 +923,6 @@ def launch(ws: Path) -> dict[str, Any]:
     if hit is None or hit[0] != key:
         hit = _launches[str(path)] = (key, _json_file(path))
     return dict(hit[1])
-
-
-def session_mode(ws: Path | None) -> str:
-    """The mode of the session launch.json names (`mode`: browser or terminal), as launch_mode.session_mode reads it;
-    browser when it names none, or for no workspace."""
-    if ws is None:
-        return BROWSER
-    mode = launch(ws).get("mode")
-    return mode if mode in MODES else BROWSER
-
-
-def terminal(ws: Path | None) -> bool:
-    """Whether the session of the workspace folder `ws` runs in terminal mode (session_mode)."""
-    return session_mode(ws) == TERMINAL
-
-
-def roles_path(ws: Path) -> Path:
-    return trusted_dir(ws) / ROLES_FILE
-
-
-def module_path(ws: Path) -> Path:
-    return trusted_dir(ws) / MODULE_OUT
-
-
-MODULE_READS = 5  # tries at module.json before a read that a write cut short counts as no file
-MODULE_READ_GAP_S = 0.01
-
-
-def read_module(ws: Path) -> dict[str, Any]:
-    """module.json of the workspace folder `ws` (module note): what the module wrote, {} when there is none. The module
-    can write a file only whole and in place, so a read that finds half a file reads again."""
-    path = module_path(ws)
-    for i in range(MODULE_READS):
-        try:
-            raw = path.read_bytes()
-        except OSError:
-            return {}
-        try:
-            d = json.loads(raw.decode("utf-8"))  # an empty file is a write that has only just begun
-            return d if isinstance(d, dict) else {}
-        except (UnicodeDecodeError, ValueError):
-            if i + 1 < MODULE_READS:
-                time.sleep(MODULE_READ_GAP_S)
-    return {}
 
 
 def moves(state: dict[str, Any]) -> dict[str, str]:
@@ -1061,118 +963,16 @@ def main_pid(ws: Path) -> int | None:
     return pid
 
 
-def record_mode(state: dict[str, Any], session: str, mode: str) -> bool:
-    """The mode hook's record in terminal mode: the permission mode Claude Code reports for main's session `session`
-    (`main.permission_mode`, `main.mode_at`), and the mode before plan mode (`main.before_plan`). True when it changed."""
-    if not mode:
-        return False
-    main = state.get("main") if isinstance(state.get("main"), dict) else {}
-    if main.get("permission_mode") == mode and main.get("mode_session") == session:
-        return False
-    was = str(main.get("permission_mode") or "")
-    out = {**main, "permission_mode": mode, "mode_session": session, "mode_at": now()}
-    if mode == PLAN_MODE and was and was != PLAN_MODE:
-        out["before_plan"] = was
-    state["main"] = out
-    return True
-
-
-def main_mode(ws: Path, state: dict[str, Any] | None = None, module: dict[str, Any] | None = None) -> str | None:
-    """Main's permission mode in terminal mode: what main's hooks reported last (record_mode), unless the module saw
-    plan mode begin or end since (module.json `plan`, `plan_at`), while main was idle; None before any report."""
-    state = read(ws) if state is None else state
-    module = read_module(ws) if module is None else module
-    main = state.get("main") if isinstance(state.get("main"), dict) else {}
-    mode = str(main.get("permission_mode") or "") or None
-    at = float(main.get("mode_at") or 0)
-    plan = module.get("plan")
-    if isinstance(plan, bool) and float(module.get("plan_at") or 0) / 1000 > at and not module.get("gone"):
-        if plan:
-            return PLAN_MODE
-        if mode == PLAN_MODE:
-            return str(main.get("before_plan") or "") or "default"
-    return mode
-
-
-MODULE_KIND = "module"  # the kind of a request entry that asks the module for an op (terminal mode)
-
-
-def add_module_request(state: dict[str, Any], op: str, args: dict[str, Any], session: str, wait_s: float | None,
-                       of: str | None = None) -> str:
-    """A request to the module in terminal mode (module note): an entry of `requests` of kind MODULE_KIND, which the
-    module takes while `module` is pending and `expires_at` (time.time()) is ahead, answering it in module.json under
-    the entry's id. `of` names the start, message or stop request it stands for. With `wait_s` None nobody waits for
-    the answer (a stop of a late spawn, a register): it expires after DONE_KEEP_S. The id."""
-    rid = f"mod_{secrets.token_hex(6)}"
-    t = now()
-    requests(state)[rid] = {"kind": MODULE_KIND, "op": op, "args": args, "module": "pending", "session": session,
-                            "asked_at": t, "expires_at": t + (DONE_KEEP_S if wait_s is None else wait_s),
-                            "state": "pending", "created": t, **({"of": of} if of else {})}
-    return rid
-
-
-def end_module_request(state: dict[str, Any], rid: str, how: str) -> None:
-    """The module request `rid` ended: answered or expired (`how`); it leaves the open states, so _prune drops it."""
-    r = requests(state).get(rid)
-    if isinstance(r, dict) and r.get("kind") == MODULE_KIND:
-        r.update(module=how, state="done" if how == "answered" else "expired", at=now())
-
-
-FORKING = "forking"  # subagents.json: the forks of threads that are starting, by the call's `thread:<name>` (fork_ref)
-FORK_DEDUPE_S = 600.0  # subagents.FORK_DEDUPE_S
 FORK_REF_RE = re.compile(r"^\s*thread:([A-Za-z0-9_-]{1,64})\s*$")  # threads.FORK_DESCRIPTION_RE
 # the refusal of a second fork of a thread, which main reads as the call's error and the analyst sees in its row
 FORK_RUNNING = "The fork of thread {thread} is running already and answers in the thread, so this turn needs nothing more."
 QUESTION_CHARS = 60  # of the first question that names a thread in FORK_RUNNING
 # subagents.json: each Agent call the agent-check hook let through as a thread's fork, by its tool_use id: {ref: its
-# `thread:<name>`, at}. Claude Code's subagent meta file holds the call's description, which thimble-term rewrites to the
-# thread's question in terminal mode, so the mirror knows the fork's thread from here (fork_call_ref), whatever main
-# passed and whichever of the file and main's tool_use it reads first
+# `thread:<name>`, at}, so the mirror knows the fork's thread from here (fork_call_ref), whatever main passed and
+# whichever of Claude Code's subagent meta file and main's tool_use it reads first
 FORK_CALLS = "fork_calls"
 FORK_CALLS_KEEP_S = 7 * 86400.0  # long enough for a --continue days later to find its forks' threads again
 FORK_CALLS_MAX = 500
-
-
-def fork_ref(tool_input: dict[str, Any]) -> str | None:
-    """threads.fork_ref: the `thread:<name>` of an Agent call for a thread's fork, its description or else its prompt
-    (thimble-term gives the call the thread's question as its description in terminal mode)."""
-    for key in ("description", "prompt"):
-        value = str(tool_input.get(key) or "")
-        if FORK_REF_RE.match(value):
-            return value.strip()
-    return None
-
-
-def thread_question(ws: Path | None, name: str) -> str:
-    """The first question of the thread whose forks run under `name` (or whose id it is) in workspace `ws`, on one line
-    and cut at a word; '' when none is found. The chats lie in the workspace, which a card's code writes: each file is
-    read as nofollow reads it (from `ws`, so no link on the way is followed and no FIFO holds the hook), and a meta's
-    id names a log only when a route would take it."""
-    from . import nofollow  # noqa: PLC0415 — standard library only, as this module is, with its root given
-
-    chats = ws / "chats" if ws is not None else None
-    if chats is None or not name:
-        return ""
-    for meta_path in sorted(chats.glob("*.meta.json")):
-        try:
-            meta = json.loads(nofollow.read_text(meta_path, root=ws))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(meta, dict) or meta.get("kind") != "thread" or name not in (meta.get("fork_name"), meta.get("id")):
-            continue
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(meta.get("id") or "")):
-            continue
-        try:
-            lines = nofollow.read_text(meta_path.with_name(f"{meta['id']}.jsonl"), root=ws).splitlines()
-        except (OSError, ValueError):
-            return ""
-        for line in lines:
-            with contextlib.suppress(ValueError):
-                r = json.loads(line)
-                if isinstance(r, dict) and r.get("type") == "user" and str(r.get("text") or "").strip():
-                    return cut_words(" ".join(str(r["text"]).split()), QUESTION_CHARS)
-        return ""
-    return ""
 
 
 def cut_words(text: str, n: int) -> str:
@@ -1212,32 +1012,6 @@ def fork_call_ref(state: dict[str, Any], tool_use_id: Any) -> str | None:
     return ref if isinstance(ref, str) and FORK_REF_RE.match(ref) else None
 
 
-def fork_check(state: dict[str, Any], tool_input: dict[str, Any], ws: Path | None = None,
-               tool_use_id: str | None = None) -> str | None:
-    """Terminal mode's dedupe of a thread's fork (subagents.fork_check in browser mode): main's Agent call that would
-    start a second fork of the thread it names (`thread:<name>`, fork_ref) while the first starts or runs: why it must
-    not run, naming the thread by its first question in workspace `ws`; else None, and the call is recorded, by its
-    `tool_use_id` too (note_fork_call)."""
-    if str(tool_input.get("subagent_type") or "") != FORK_TYPE:
-        return None
-    desc = fork_ref(tool_input)
-    if not desc:
-        return None
-    table = state.setdefault(FORKING, {})
-    if not isinstance(table, dict):
-        table = state[FORKING] = {}
-    t = now()
-    at = table.get(desc)
-    if isinstance(at, (int, float)) and t - float(at) < FORK_DEDUPE_S:
-        name = desc.removeprefix("thread:")
-        return fork_refusal(name, thread_question(ws, name))
-    table[desc] = t
-    for k in [k for k, v in table.items() if not isinstance(v, (int, float)) or t - float(v) >= FORK_DEDUPE_S]:
-        table.pop(k, None)
-    note_fork_call(state, tool_use_id, desc)
-    return None
-
-
 # --------------------------------------------------------------------------- the workspace of a hook
 
 
@@ -1252,12 +1026,8 @@ def _server_env(home: Path) -> dict[str, Any]:
 
 def use_env() -> None:
     """The data and workspaces folders a hook's process names, as cli.resolve_env picks them: THIMBLE_DATA_DIR and
-    THIMBLE_WORKSPACES_DIR, else in terminal mode the folder above THIMBLE_WS (the workspace folder the launcher
-    exports), else those the last server.json names, else the defaults. Set in this process's environment before
-    app.config is imported."""
-    ws = os.environ.get(WS_ENV) or ""
-    if ws and not os.environ.get("THIMBLE_WORKSPACES_DIR"):
-        os.environ["THIMBLE_WORKSPACES_DIR"] = str(Path(ws).expanduser().parent)
+    THIMBLE_WORKSPACES_DIR, else those the last server.json names, else the defaults. Set in this process's environment
+    before app.config is imported."""
     home = Path(os.environ.get("THIMBLE_HOME") or (Path.home() / ".thimble")).expanduser()
     env = _server_env(home)
     for var, key in (("THIMBLE_DATA_DIR", "data_dir"), ("THIMBLE_WORKSPACES_DIR", "workspaces_dir")):

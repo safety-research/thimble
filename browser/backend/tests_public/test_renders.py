@@ -1,7 +1,6 @@
 """What each mode's models read, fingerprinted: every text the terminal plugin's prompt registry gives its readers
-(plugin/prompts), and every prompt the workbench renders (browser/prompts, in each of its modes) with the plugin's texts
-it reads as the terminal does (the checker, the look and the fixer), each by the sha256 of its words, in
-fixtures/renders.json.
+(plugin/prompts), and every prompt the workbench renders (browser/prompts) with the plugin's texts it reads as the
+terminal does (the checker, the look and the fixer), each by the sha256 of its words, in fixtures/renders.json.
 
 A change to what a model reads changes a fingerprint, so the commit that makes it names the texts it changes in each
 mode; a change that only moves words, such as a text that both modes come to share, changes none. When a change to the
@@ -44,10 +43,10 @@ def _terminal() -> dict[str, str]:
 
 
 def _browser() -> dict[str, str]:
-    """Each prompt file of the workbench in each mode, includes pasted in and slots left in place, and the plugin's
-    texts as the workbench's calls send them."""
-    out = {f"{rel}@{mode}": prompts.load(rel, mode) for rel in sorted(
-        str(p.relative_to(prompts.PROMPTS_DIR)) for p in prompts.PROMPTS_DIR.rglob("*.md")) for mode in prompts.MODES}
+    """Each prompt file of the workbench, includes pasted in and slots left in place, and the plugin's texts as the
+    workbench's calls send them."""
+    out = {rel: prompts.load(rel) for rel in sorted(
+        str(p.relative_to(prompts.PROMPTS_DIR)) for p in prompts.PROMPTS_DIR.rglob("*.md"))}
     out["plugin:checker (marks.checker_prompt)"] = marks.checker_prompt(MARKS, "/made-up/shell", "/made-up/cards.tsv",
                                                                         "/made-up/corpus")
     out["plugin:fixer (fixes.first_message)"] = fixes.first_message(FIX, "the page")

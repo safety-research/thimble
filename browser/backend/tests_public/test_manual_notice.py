@@ -1,7 +1,6 @@
-"""The Manual-mode notice in browser mode (session.note_mode): while main reports Claude Code's Manual mode, the notice
-`manual-mode` (notices.py) says so in the words of modes.manual_notice, in red above the chat's composer; it goes when
-main reports another mode or a new session attaches, and the analyst's x holds for the workspace. Terminal mode's
-notice is local_hooks' mode-notice (test_local_hooks)."""
+"""The Manual-mode notice (session.note_mode): while main reports Claude Code's Manual mode, the notice `manual-mode`
+(notices.py) says so in the words of modes.manual_notice, in red above the chat's composer; it goes when main reports
+another mode or a new session attaches, and the analyst's x holds for the workspace."""
 from __future__ import annotations
 
 import json

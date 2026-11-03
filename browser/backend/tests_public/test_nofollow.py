@@ -438,12 +438,6 @@ def _case_cli_orient_status(out, monkeypatch=None):
     return lambda: cli.orient_status(CORPUS), lambda r: r == "not started"
 
 
-def _case_thread_question(out):
-    from app import subagent_files
-    _fifo(_ws() / "chats" / "made-up.meta.json")
-    return lambda: subagent_files.thread_question(_ws(), "made-up"), lambda r: r == ""
-
-
 def _case_undo_journal(out):
     from app import undo
     undo.forget()
@@ -525,7 +519,7 @@ READERS = {f.__name__.removeprefix("_case_"): f for f in (
     _case_session_cost, _case_sub_meta, _case_fork_ref, _case_began_since, _case_continued_in, _case_held_events,
     _case_citing_documents, _case_mark_interrupted, _case_migrate_scratch, _case_work_texts, _case_work_read_text,
     _case_render_theme, _case_libs_lock, _case_last_seq, _case_label_rows, _case_view_progress,
-    _case_cli_orient_status, _case_thread_question, _case_undo_journal, _case_calls_store, _case_chat_events,
+    _case_cli_orient_status, _case_undo_journal, _case_calls_store, _case_chat_events,
     _case_chat_lines, _case_chat_meta, _case_chats_listed, _case_telemetry_events, _case_type_component)}
 
 

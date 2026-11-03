@@ -19,7 +19,7 @@ import pytest
 from conftest import earlier_orientation_proposal
 from fastapi.testclient import TestClient
 
-from app import agents, config, dev, prompts, session, subagents, tools, view_review, view_tools, views
+from app import agents, config, dev, session, subagents, tools, view_review, view_tools, views
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -238,27 +238,23 @@ def test_a_viewer_for_a_file_type_keeps_its_arrangement_for_the_builder(board, m
     assert e.value.status_code == 400 and "`description`" in str(e.value.detail)
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_proposal_asks_for(board, mode):
-    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles say so in both modes, and each reaches
-    # its agent's registered prompt as the module registers it (subagents.roles)
-    with prompts.rendering(mode):
-        roles = subagents.roles(CORPUS)
+def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_proposal_asks_for(board):
+    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles say so, and each reaches its agent's
+    # registered prompt as the module registers it (subagents.roles)
+    roles = subagents.roles(CORPUS)
     builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
     ask = "When the proposal asks for a visual design"
     assert ask in builder and "build that design" in builder
     assert ask in reviewer and "keep that design" in reviewer
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_the_builder_and_the_reviewer_use_color_for_the_task_hold_back_the_detail_panel_and_mirror_the_data(board, mode):
-    # prompts/dev-view.md's "A good view", in both modes: color one encoding at a time, Color by on the task's field (or
+def test_the_builder_and_the_reviewer_use_color_for_the_task_hold_back_the_detail_panel_and_mirror_the_data(board):
+    # prompts/dev-view.md's "A good view": color one encoding at a time, Color by on the task's field (or
     # a few of its values), never categories in shades of gray; the detail panel closed, or one short line until a click
     # (the side panel's `empty`); a first screen in the chosen form, not a table of raw records; the data's structure
     # mirrored, a network among the forms; and the units the data repeats compared before their details.
     # prompts/view-review.md's clear problems keep the detail panel's rule
-    with prompts.rendering(mode):
-        roles = subagents.roles(CORPUS)
+    roles = subagents.roles(CORPUS)
     builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
     assert "one encoding at a time" in builder and "shades of gray" in builder and "take a hue" in builder
     assert "detail panel stays closed" in builder and "Click a session" in builder
@@ -996,7 +992,7 @@ async def test_a_build_s_pass_starts_its_review_as_a_follow_on_start(board, brid
 
 def test_a_view_s_builds_and_reviews_take_the_tree_s_names_which_find_each_one(board):
     """Live check L25: a view's two builds and two reviews were four threads all called dev/wiki-page-history. The
-    names the browser's tree gives them (threads.view_names) find each one, as /thimble:ask and rename_thread look."""
+    names the browser's tree gives them (threads.view_names) find each one, as rename_thread looks."""
     from app import threads
 
     made = [agents.new_agent(CORPUS, "dev", title, view="posts", **({"review": True} if title.startswith("review") else {}))

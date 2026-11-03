@@ -18,10 +18,10 @@ Manual and Bypass both run Claude Code's manual mode (FLAGS): in Bypass thimble 
 While main reports Claude Code's Manual mode (subagent_files.MANUAL_MODES), Claude Code asks before most commands of
 main's and of thimble's agents, and asks thimble's agents' prompts in the terminal alone, where each agent waits until
 the analyst answers. thimble then shows the notice `manual-mode` (manual_notice) in red, which says both: in the browser
-above the chat's composer, in terminal mode above Claude Code's prompt, until main reports another mode or the analyst
-dismisses it, which holds for the workspace (notices.py). While one of those prompts is open the browser shows the agent
-as waiting for the analyst's answer in the terminal (events.py, the terminal's prompts). In browser mode, main's
-terminal also says once per session that Claude Code is in Manual mode (manual_line, session.note_mode).
+above the chat's composer, until main reports another mode or the analyst dismisses it, which holds for the workspace
+(notices.py). While one of those prompts is open the browser shows the agent as waiting for the analyst's answer in the
+terminal (events.py, the terminal's prompts). Main's terminal also says once per session that Claude Code is in Manual
+mode (manual_line, session.note_mode).
 """
 from __future__ import annotations
 

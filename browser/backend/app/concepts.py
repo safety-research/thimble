@@ -554,9 +554,8 @@ _building_answers: dict[Path, dict] = {}  # {path: rows} the jsonl answered whil
 
 
 class _StoreLock:
-    """A labels file's lock: this process's threads wait on an RLock, then the process takes ledger.locked on the file,
-    since in terminal mode `thimble-run` (a code label's rows), `thimble act` (a verdict) and the shim (a prompt label's
-    rows) append to one labels file from three processes. Re-entrant, as the RLock it replaces."""
+    """A labels file's lock: this process's threads wait on an RLock, then the process takes ledger.locked on the file.
+    Re-entrant, as the RLock it replaces."""
 
     def __init__(self, p: Path) -> None:
         self.p = p
@@ -1915,8 +1914,8 @@ PARENT_WATCH_S = 1.0  # how often a scan worker looks whether the process that m
 
 def _watch_parent(parent: int) -> None:
     """A scan worker's initializer: the worker ends once the process that made its pool has gone. That process ends
-    its workers when it can (_pool_shutdown); the terminal mode's shim is ended by a signal as Claude Code quits, and a
-    worker it leaves waits on its queue for good (live check T9)."""
+    its workers when it can (_pool_shutdown); one ended by a signal cannot, and a worker it leaves waits on its queue
+    for good (live check T9)."""
 
     def watch() -> None:
         while True:

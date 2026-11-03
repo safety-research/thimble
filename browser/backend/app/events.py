@@ -72,12 +72,8 @@ PROMPT = "main"  # main's system-prompt append, whose events section names the k
 EVENTS_SECTION = "Events from the browser"
 SESSION_PROMPTS = (PROMPT,)
 MAIN, THREAD = "main", "thread"
-START_AGENT = "start_agent"  # asks main to start the agent of what a thread's fork filed (tools._ask_main)
 ATTR_CHARS = 120  # a payload value longer than this, or with a newline, goes into the body instead of an attribute
-# the event body's ceiling: an event stays in main's context for the rest of the session. A START_AGENT event's body is
-# never cut, since its text is the exact Agent call main makes, which a cut would break (main's own start tool's result
-# carries the same call whole)
-BODY_CHARS = 12_000
+BODY_CHARS = 12_000  # the event body's ceiling: an event stays in main's context for the rest of the session
 PING_S = 15  # the stream's keep-alive, so a proxy or the shim's read timeout never drops an idle subscription
 NOT_LISTENING = ("no Claude Code session is listening in {cwd}. Start thimble with `thimble` in that folder, or say "
                  "/thimble in a Claude Code session there.")
@@ -141,12 +137,11 @@ def kinds() -> list[str]:
     return _KIND_RE.findall(prompts.section(PROMPT, EVENTS_SECTION))
 
 
-def session_prompt(workdir: str, terminal: bool | None = None, edits: bool | None = None) -> str:
+def session_prompt(workdir: str, edits: bool | None = None) -> str:
     """Main's system-prompt append, as the launcher passes it with --append-system-prompt. Claude Code cuts MCP server
     instructions at 2 KB, so this text cannot travel as the shim's instructions, while an append reaches main and every
-    fork of it whole. `terminal` picks the ending of a turn and `edits` whether main may write the corpus
-    (render_prompts)."""
-    return render_prompts(SESSION_PROMPTS, workdir, terminal, edits)
+    fork of it whole. `edits`: whether main may write the corpus (render_prompts)."""
+    return render_prompts(SESSION_PROMPTS, workdir, edits)
 
 
 # main.md's {{corpus_writes}} in the browser: what main's sandbox lets it write, by Settings' switch (ledger.corpus_edits);
@@ -187,15 +182,12 @@ def network_words(c: str | None, edits: bool | None) -> str:
     return NETWORK[(runtime.network() if edits is not None else "ask", not userconf.main_web_off(c))]
 
 
-def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: bool | None = None,
-                   edits: bool | None = None) -> str:
+def render_prompts(names: tuple[str, ...] | list[str], workdir: str, edits: bool | None = None) -> str:
     """Prompt files for a session in `workdir`, rendered and joined by a blank line, with the corpus root and the citation
-    forms of the folder's views filled in. Main's append and the shared skill's command both come from here. Main's
-    prompt keeps one ending of a turn with nothing for the analyst (terminal_tools.main_prompt): without closing words
-    when `terminal`, or when it is None and this process's environment says so (terminal_tools.on). `edits`: whether
-    main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py). Which requests to
-    a host ask the analyst follows the way main reaches Claude (network_words)."""
-    from . import cardtypes, terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
+    forms of the folder's views filled in. Main's append and the shared skill's command both come from here. `edits`:
+    whether main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py). Which
+    requests to a host ask the analyst follows the way main reaches Claude (network_words)."""
+    from . import cardtypes, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
 
     c = config.workspace_for_cwd(workdir)
     forms = views.forms_text(c) if c else ""
@@ -205,7 +197,6 @@ def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: b
     for name in names:
         part = prompts.render(name, values).strip()
         if name == PROMPT:
-            part = terminal_tools.main_prompt(part, terminal_tools.on() if terminal is None else terminal)
             from . import roles  # noqa: PLC0415 — roles reads the extensions
 
             if added := roles.main_additions(c):
@@ -264,11 +255,10 @@ def _attr_key(key: str) -> str:
     return _KEY_RE.sub("_", str(key)).strip("_")
 
 
-def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
-               cap: int | None = BODY_CHARS) -> dict[str, Any]:
+def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any]) -> dict[str, Any]:
     """{content, meta} of one event: `kind` and `event` (its id) first, then each field as an attribute when
-    it is a short scalar, else as a `<key>: <value>` line under the text, the whole cut at `cap` (none when None). The
-    id is `event`, never `id`, so that no attribute a prompt names by its role reads as "the id"."""
+    it is a short scalar, else as a `<key>: <value>` line under the text, the whole cut at BODY_CHARS. The id is
+    `event`, never `id`, so that no attribute a prompt names by its role reads as "the id"."""
     meta: dict[str, str] = {"kind": kind, "event": event_id}
     lines: list[str] = []
     for k, v in fields.items():
@@ -284,8 +274,8 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
         else:
             lines.append(f"{key}:\n{s}" if "\n" in s else f"{key}: {s}")
     body = "\n".join([t for t in [str(text or "").strip(), *lines] if t])
-    if cap is not None and len(body) > cap:
-        body = body[:cap].rstrip() + "\n…"
+    if len(body) > BODY_CHARS:
+        body = body[:BODY_CHARS].rstrip() + "\n…"
     return {"content": body, "meta": meta}
 
 
@@ -334,9 +324,6 @@ def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
         line = f"a check of the {fields.get('doc') or 'document'} ended"
     elif kind == "citations":
         line = "the check of the last reply's citations changed some"
-    elif kind == START_AGENT:
-        asked = f" (thread {fields['from_thread']})" if fields.get("from_thread") else ""
-        line = f"start {fields.get('agent') or 'the dev agent'} for {fields.get('filed') or 'a thread'}{asked}"
     else:
         line = words
     return _cut(line, LINE_CHARS)
@@ -357,7 +344,7 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
     as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
     main's terminal shows instead of terminal_line's: at once, or, when the server runs main and main's turn runs, where
     main reads it, and as waiting until then (runtime.deliver). `event_id` is the event's id when the caller recorded it
-    first (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet
+    first (fixes.ask keeps it). 409 when no session listens, 400 for a kind main.md names no bullet
     for (when `check_kind`), or for a message with no text."""
     from . import agents, runtime, session, threads  # noqa: PLC0415
 
@@ -394,8 +381,7 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
             line = terminal_line(kind, words, {"name": threads.line_name(c, thread_id, [words])})
     else:
         words = str(payload.pop("text", "") or "").strip()
-        note = build_note(kind, event_id, words or describe(kind, payload), payload,
-                          cap=None if kind == START_AGENT else BODY_CHARS)
+        note = build_note(kind, event_id, words or describe(kind, payload), payload)
     note["terminal"] = terminal_line(kind, words, payload) if line is None else line
     if kind in QUIET_KINDS:
         _keep_held(c, [*held(c), note])
@@ -499,15 +485,6 @@ def show(c: str, line: str) -> None:
     main = _main_sid(c)
     if main and line and any(sub.session == main and sub.delivery == cc_plugin.HOOK for sub in _subs.get(c, ())):
         _lines.setdefault((c, main), []).append(("", line))
-
-
-def hand(c: str, event_id: str, text: str, fields: dict[str, Any], *, thread: str) -> str:
-    """A thread's event that main gets in a tool's result instead of on a turn of its own (the /thimble:ask command):
-    the event as rendered, with the filters. The mirror counts it as an event of main's turn (session.handed)."""
-    from . import session  # noqa: PLC0415
-
-    session.handed(c, event_id, thread)
-    return render(build_note(THREAD, event_id, text, {**fields, **_filters(c)}))
 
 
 def _ultracode(c: str) -> dict[str, Any]:

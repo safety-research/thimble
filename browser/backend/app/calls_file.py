@@ -1,15 +1,13 @@
-"""The numbering of a chat's tool calls in its calls store, shared by the backend (calls.py) and the plugin's hooks.
+"""The numbering of a chat's tool calls in its calls store (calls.py).
 
 Store: `workspaces/<c>/calls/<chat>.jsonl` (calls.py has the record shapes). A call's number is assigned once, the
-first time any process sees its tool_use_id, under an flock on `calls/<chat>.jsonl.lock`: the hook that runs on each
-tool call (`--agents`, terminal mode) and the backend's mirror (calls.Numbering) both number calls, and without the
-lock two processes could give two calls one number. The file is read again under the lock, so a number another process
-gave is found there, and a new number is one past the highest stored.
+first time any process sees its tool_use_id, under an flock on `calls/<chat>.jsonl.lock`: the call-ref hook's route
+(calls.hook_route) and the backend's mirror (calls.Numbering) both number calls, and without the lock two writers
+could give two calls one number. The file is read again under the lock, so a number another process gave is found
+there, and a new number is one past the highest stored.
 
 A card's code writes the workspace, so the store, its folder and its lock are opened from the workspace's folder as
 nofollow opens them (_ws_of), never through a link a card put there.
-
-Standard library only: the plugin's hooks import this module under `python -S` (as app/subagent_files.py).
 """
 from __future__ import annotations
 
