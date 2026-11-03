@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 HOOKS = Path(__file__).resolve().parents[1] / "hooks"
 sys.path.insert(0, str(HOOKS))
 
@@ -64,10 +66,22 @@ def test_writes_by_an_agent_and_globs_with_a_relative_pattern(tmp_path):
     assert T.verdict(ev("Glob", path=str(temp), pattern="../*"), env) is None
 
 
-def test_cards_off(tmp_path):
+@pytest.mark.parametrize("saved", ["off", "false"])
+def test_cards_off(tmp_path, saved):
+    """Cards off, as Claude Code hands the saved option to the hook: `off`, or `false` as saved before Cards had
+    modes: no answer for a read or an agent's write."""
     temp, env = setup(tmp_path)
-    env["CLAUDE_PLUGIN_OPTION_CARDS"] = "false"
+    env["CLAUDE_PLUGIN_OPTION_CARDS"] = saved
     assert T.verdict(ev("Read", file_path=f"{temp}/rows.json"), env) is None
+    assert T.verdict(ev("Write", agent="a1", file_path=f"{temp}/new.json", content="[]"), env) is None
+
+
+@pytest.mark.parametrize("saved", ["auto", "on demand", "true"])
+def test_cards_on_in_any_mode(tmp_path, saved):
+    temp, env = setup(tmp_path)
+    env["CLAUDE_PLUGIN_OPTION_CARDS"] = saved
+    assert T.verdict(ev("Read", file_path=f"{temp}/rows.json"), env) == "allow"
+    assert T.verdict(ev("Write", agent="a1", file_path=f"{temp}/new.json", content="[]"), env) == "allow"
 
 
 def test_the_command_prints_the_allow(tmp_path):
