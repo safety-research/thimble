@@ -245,7 +245,9 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     }
   }, [read, readFilter, readTypes, setSlug])
 
-  // a chip's teleport into a document: the document it names comes forward, then the element
+  // a chip's teleport into a document: the document it names comes forward, then the element; into the document shown,
+  // the element (`asked` runs the reveal again, as a switch's new document does)
+  const [asked, setAsked] = useState(0)
   useEffect(
     () =>
       bus.on('openRef', (e) => {
@@ -253,6 +255,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         if (p?.kind !== 'report') return
         pendingRef.current = e.ref
         if (p.slug && p.slug !== slugRef.current) setSlug(p.slug)
+        else setAsked((n) => n + 1)
       }),
     [setSlug],
   )
@@ -263,7 +266,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
       if (revealAnchor(ref, root.current!)) pendingRef.current = null
     })
     return () => window.cancelAnimationFrame(id)
-  }, [active, load])
+  }, [active, load, asked])
 
   const clearFilter = async () => {
     const concept = filter?.concept

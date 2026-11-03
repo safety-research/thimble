@@ -17,11 +17,12 @@
 // the passages changed since it checked them with Run, and a start that did not happen. The top bar's Comments button
 // carries the new comments' dot for the documents (TopBar.tsx). A row opens its detail: its runs on the documents, each
 // its Last run with Stop while it runs and Re-run, the definition, editable, Show in, and its open comments, each a link
-// to where it stands (a card, or the passage in the report) with Apply, which sends it to Claude in the chat, Go to it
-// and Done (CommentsList.tsx). A check's runs name their document when it has runs on several. The analyst's and
-// Claude's own notes, which no check made, are the category Notes. The categories end in "+ New check", which opens the
-// new-check card beside the sidebar (report/Checks.tsx NewCheckCard): Run adds the check, commenting on the documents,
-// and the server turns it on and runs it.
+// to where it stands (a card, or the passage in its document) with Apply, which sends it to Claude in the chat, Go to it
+// and Done (CommentsList.tsx). A check's runs name their document when it has runs on several, and the comments in the
+// documents name theirs when more than one document has comments. The analyst's and Claude's own notes, which no check
+// made, are the category Notes. The categories end in "+ New check", which opens the new-check card beside the sidebar
+// (report/Checks.tsx NewCheckCard): Run adds the check, commenting on the documents, and the server turns it on and runs
+// it.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { LabelAsks } from '../chat/LabelAsk'
@@ -620,7 +621,7 @@ function CategoryDetail({ ws, category: c, checks, runs, onDone }: { ws: string;
       <div className="lside-founds">
         {!c.items.length && <p className="lside-none">No open comments.</p>}
         {c.items.map((it) => (
-          <CommentRow key={`${it.surface}:${it.id}`} item={it} name={c.name} onDone={() => onDone(it)} />
+          <CommentRow key={`${it.surface}:${it.doc?.slug ?? ''}:${it.id}`} item={it} name={c.name} onDone={() => onDone(it)} />
         ))}
       </div>
     </div>

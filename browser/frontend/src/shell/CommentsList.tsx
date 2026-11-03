@@ -1,10 +1,12 @@
 // The comments of the shared Labels and Comments sidebar (LabelsSidebar.tsx): every open comment the checks (and
-// main's and the analyst's notes) left on the cards and in the report, and the checks' comments on Claude's answers in
-// the chat (chat/answerComments.ts). A comment's row says where it is, as a link that
-// goes there (a card, or the passage in the report), its passage, its statement and, a click away, its details. Apply
-// sends the comment to main in the chat as the analyst's message (bus openChat with `send`, the composer's own path),
-// so Claude makes the change there; Go to it opens the card or the passage; Done resolves it, as the comment's check
-// mark does where it stands.
+// main's and the analyst's notes) left on the cards and in the documents, and the checks' comments on Claude's answers in
+// the chat (chat/answerComments.ts). The documents are the written ones, whose check runs the sidebar shows too
+// (report/docTypes.ts): the report, a case file, a document of the analyst's own, a page. Once more than one document
+// has comments, each comment names its document, as the runs on several documents do. A comment's row says where it is,
+// as a link that goes there (a card, or the passage in its document), its passage, its statement and, a click away, its
+// details. Apply sends the comment to main in the chat as the analyst's message (bus openChat with `send`, the
+// composer's own path), so Claude makes the change there; Go to it opens the card or the passage; Done resolves it, as
+// the comment's check mark does where it stands.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCanvasComments } from '../canvas/CommentLayer'
 import { plainQuote, useAnswerComments } from '../chat/answerComments'
@@ -12,12 +14,12 @@ import { Button } from '../components/Button'
 import { docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { teleport } from '../lib/teleport'
-import type { WriteupComment } from '../lib/types'
+import type { AnyDoc, WriteupComment } from '../lib/types'
 import { commentsApi } from '../report/commentsApi'
+import { useDocTypes, writtenDocs } from '../report/docTypes'
+import { docLabel, SLUG } from '../report/model'
 
-const REPORT = 'report'
-
-/** One open comment, from the cards, the report or Claude's answers in the chat. */
+/** One open comment, from the cards, a document or Claude's answers in the chat. */
 export interface CommentItem {
   id: string
   surface: 'canvas' | 'report' | 'chat'
@@ -27,44 +29,63 @@ export interface CommentItem {
   details: string
   /** the card's or the passage's ref, which Go to it opens */
   ref: string
-  /** where it stands, in words: "card abc · step 2", "the report" */
+  /** where it stands, in words: "card abc · step 2", "the report", a document's name */
   where: string
-  /** the passage's words, for a comment in the report or on an answer */
+  /** the passage's words, for a comment in a document or on an answer */
   quote?: string | null
+  /** for a comment in a document: the document's slug, and its name as its tab spells it */
+  doc?: { slug: string; name: string }
 }
 
 /** The message Apply sends to main: which comment, where, and what it says. Pure. */
 export function applyText(c: CommentItem, name: string): string {
   const who = c.check != null ? `the check “${name}”` : c.author === 'claude' ? 'your own note' : 'my note'
+  const doc = c.doc && c.doc.slug !== SLUG ? `the ${c.doc.name}` : 'the report'
   const at =
-    c.surface === 'report' ? `in the report${c.quote ? ` at “${c.quote}”` : ''} (${c.ref})` : c.surface === 'chat' ? `on your answer${c.quote ? ` at “${c.quote}”` : ''}` : `on ${c.ref}`
+    c.surface === 'report' ? `in ${doc}${c.quote ? ` at “${c.quote}”` : ''} (${c.ref})` : c.surface === 'chat' ? `on your answer${c.quote ? ` at “${c.quote}”` : ''}` : `on ${c.ref}`
   const said = [c.text.trim(), c.details.trim()].filter(Boolean).join('\n\n')
   return `Apply this comment of ${who} ${at}: ${said}`
 }
 
-/** The open comments of the report, read again when the report changes. */
-function useReportComments(ws: string): { comments: WriteupComment[]; reload: () => void } {
-  const [comments, setComments] = useState<WriteupComment[]>([])
-  const reload = useCallback(() => {
-    docsApi
-      .document(ws, REPORT)
-      .then((d) => setComments(((d as { comments?: WriteupComment[] } | undefined)?.comments ?? []).filter((c) => c.status === 'open')))
-      .catch(() => setComments([]))
-  }, [ws])
+const openOf = (d: AnyDoc | undefined): WriteupComment[] => (d?.comments ?? []).filter((c) => c.status === 'open')
+
+/** The open comments of the written documents, in the type bar's order, each read again when its document changes: the
+ * report's from the first render, as before the types are known; `put` sets a document's from the document a request
+ * answered. */
+function useDocComments(ws: string) {
+  const types = useDocTypes(ws)
+  // the documents read, as one key, so that the types read again with the same documents written read none of them
+  const key = [...new Set([SLUG, ...(types ? writtenDocs(types) : [])])].join(' ')
+  const [read, setRead] = useState<{ ws: string; by: Record<string, WriteupComment[]> }>({ ws, by: {} })
+  const put = useCallback((slug: string, d: AnyDoc | undefined) => setRead((r) => ({ ws, by: { ...(r.ws === ws ? r.by : {}), [slug]: openOf(d) } })), [ws])
   useEffect(() => {
-    reload()
-    return bus.on('report', (e) => e.slug === REPORT && reload())
-  }, [reload])
-  return { comments, reload }
+    let live = true
+    const slugs = key.split(' ')
+    const load = (slug: string) =>
+      docsApi
+        .document(ws, slug)
+        .then((d) => live && put(slug, d))
+        .catch(() => live && put(slug, undefined))
+    slugs.forEach((slug) => void load(slug))
+    const off = bus.on('report', (e) => slugs.includes(e.slug) && void load(e.slug))
+    return () => {
+      live = false
+      off()
+    }
+  }, [ws, key, put])
+  const docs = useMemo(() => key.split(' ').map((slug) => ({ slug, name: docLabel(slug, types), comments: (read.ws === ws && read.by[slug]) || [] })), [key, types, read, ws])
+  return { docs, put }
 }
 
-/** Every open comment, on the cards, in the report and on Claude's answers, with what Done needs. */
+/** Every open comment, on the cards, in the documents and on Claude's answers, with what Done needs. */
 export function useCommentItems(ws: string) {
   const cards = useCanvasComments(ws)
-  const report = useReportComments(ws)
+  const docs = useDocComments(ws)
   const answers = useAnswerComments(ws)
-  const items = useMemo<CommentItem[]>(
-    () => [
+  const items = useMemo<CommentItem[]>(() => {
+    // the report's comments say "the report" while it alone has any; else each names its document
+    const named = docs.docs.filter((d) => d.comments.length).length > 1
+    return [
       ...cards.comments.map((c) => ({
         id: c.id,
         surface: 'canvas' as const,
@@ -75,17 +96,20 @@ export function useCommentItems(ws: string) {
         ref: `card:${c.card}`,
         where: `card ${c.card}${c.n != null ? ` · step ${c.n}` : ''}`,
       })),
-      ...report.comments.map((c) => ({
-        id: c.id,
-        surface: 'report' as const,
-        check: c.check ?? null,
-        author: c.author,
-        text: c.text,
-        details: String((c as { details?: string }).details ?? ''),
-        ref: `report:${REPORT}#${c.sentence_id}`,
-        where: 'the report',
-        quote: c.quote ?? null,
-      })),
+      ...docs.docs.flatMap(({ slug, name, comments }) =>
+        comments.map((c) => ({
+          id: c.id,
+          surface: 'report' as const,
+          check: c.check ?? null,
+          author: c.author,
+          text: c.text,
+          details: String(c.details ?? ''),
+          ref: `report:${slug}#${c.sentence_id}`,
+          where: slug === SLUG && !named ? 'the report' : name,
+          quote: c.quote ?? null,
+          doc: { slug, name },
+        })),
+      ),
       ...answers.comments
         .filter((c) => c.status === 'open')
         .map((c) => ({
@@ -99,15 +123,14 @@ export function useCommentItems(ws: string) {
           where: "Claude's answer",
           quote: plainQuote(c.quote) || null,
         })),
-    ],
-    [cards.comments, report.comments, answers.comments],
-  )
-  return { items, cards, report, answers }
+    ]
+  }, [cards.comments, docs.docs, answers.comments])
+  return { items, cards, docs, answers }
 }
 
-/** The open comments with Done: on a card it resolves the card's comment, in the report the passage's. */
+/** The open comments with Done: on a card it resolves the card's comment, in a document the passage's. */
 export function useComments(ws: string) {
-  const { items, cards, report, answers } = useCommentItems(ws)
+  const { items, cards, docs, answers } = useCommentItems(ws)
   const done = (c: CommentItem) => {
     if (c.surface === 'chat') {
       answers.dismiss(c.id).catch((e: Error) => bus.emit('toast', { text: `Could not resolve the comment. ${e.message}`, kind: 'error' }))
@@ -118,9 +141,10 @@ export function useComments(ws: string) {
       if (found) void cards.resolve(found)
       return
     }
+    const slug = c.doc?.slug ?? SLUG
     commentsApi
-      .resolve(ws, REPORT, c.id)
-      .then(() => report.reload())
+      .resolve(ws, slug, c.id)
+      .then((saved) => docs.put(slug, saved))
       .catch((e: Error) => bus.emit('toast', { text: `Could not resolve the comment. ${e.message}`, kind: 'error' }))
   }
   return { items, done }

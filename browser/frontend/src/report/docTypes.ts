@@ -1,8 +1,9 @@
 // The workspace's document types as the server lists them (GET …/investigations/main/types): which documents are
 // written and what each type is named, for what names a document or lists the documents outside the Report tab (a
 // document's chip in the chat, chat/SurfaceChips.tsx; the checks' runs in the top bar's Comments,
-// shell/LabelsSidebar.tsx). One read per workspace serves every reader. While a workspace has readers, each `report`
-// stream event reads it again; the first reader after none reads it again too, since no event was heard meanwhile.
+// shell/LabelsSidebar.tsx, and the documents' comments there, shell/CommentsList.tsx). One read per workspace serves
+// every reader. While a workspace has readers, each `report` stream event reads it again; the first reader after none
+// reads it again too, since no event was heard meanwhile.
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
