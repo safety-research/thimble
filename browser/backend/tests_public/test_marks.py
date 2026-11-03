@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -16,6 +17,8 @@ from app import agents, config, marks, session
 
 CORPUS = "mini"
 SID = "e7b0a1f2-0000-4000-8000-0000000000aa"
+# the reason of a citation of a file outside every folder a cited file may lie in, which names no path (B19)
+OUTSIDE = "The check cited a file outside the folder this session works in."
 
 
 @pytest.fixture(autouse=True)
@@ -921,7 +924,7 @@ def test_a_file_of_the_workspace_s_folder_is_evidence_when_main_runs_in_a_folder
     for k in (1, 2):
         assert got[k]["status"] == "verified", got[k].get("reason")
         assert got[k]["evidence"]["file"] == "prompts/worker.md", got[k]["evidence"]
-    assert got[3]["status"] == "failed" and "is outside the folder this session works in" in got[3]["reason"], got[3]
+    assert (got[3]["status"], got[3]["reason"]) == ("failed", OUTSIDE), got[3]
     # the checker's shell is main's folder, and its paths are from the corpus folder, where the cards' paths start
     assert f"\nshell: {inner}\n" in seen[0] and f"\npaths from: {corpus}\n" in seen[0], seen[0]
 
@@ -1090,7 +1093,7 @@ def test_of_the_workspace_only_its_labels_definitions_are_evidence(_fresh, monke
     items = marks.stored(CORPUS, turn)["items"]
     assert len(items) == 4
     for m in items:
-        assert m["status"] == "failed" and "is outside the folder this session works in" in m["reason"], m
+        assert (m["status"], m["reason"]) == ("failed", OUTSIDE), m
 
 
 def test_a_side_thread_s_answer_is_checked_with_its_fork_s_calls_and_main_hears_nothing_of_it(_fresh, monkeypatch,
@@ -1141,3 +1144,207 @@ def test_a_side_thread_s_answer_is_checked_with_its_fork_s_calls_and_main_hears_
     assert {r["turn"] for r in records} == {turn} and records[-1]["items"] == marks.stored(CORPUS, turn)["items"]
     assert not [r for r in _log() if r["type"] == "marks"]
     assert _fresh == [], "main was told of the thread's check"
+
+
+def test_b19_a_file_the_check_cites_outside_the_corpus_folder_fails_in_one_plain_sentence_whatever_form_its_path_takes(_fresh, monkeypatch, tmp_path):
+    """B19: the check cited main's own chat log in the workspace by its path, and the tray showed that path, cut, and
+    Repair, so the analyst read where the workspace lies on their machine and no reason. Wherever the cited path leads,
+    by its absolute path, from the home folder, as a `file:` URL, with `//` or leaving the corpus folder, a file outside
+    every folder a cited file may lie in fails as before, not confirmed, with one plain sentence that names no path: in
+    the tray, in what main hears, and in the repair request thimble sends at once. A file of the corpus folder is named by
+    its path from that folder, and the check's own words are kept as it wrote them."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    log = agents.paths(CORPUS, agents.MAIN_ID)[1]
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(json.dumps({"type": "text", "text": "In the trial, navigation, 13 of the 40, led."}) + "\n", encoding="utf-8")
+    corpus = config.corpus_dir(CORPUS)
+    home = str(log.relative_to(tmp_path))
+    forms = [str(log), f"~/{home}", f"$HOME/{home}", f"${{HOME}}/{home}", f"file://{log}", f"FILE:{log}", f"/{log}",
+             os.path.relpath(log, corpus)]
+    worker = corpus / "prompts" / "worker.md"
+    own = "The trial's count stands only in ~/notes/trial.txt, which the check cannot read."
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        out = []
+        for n in map(int, re.findall(r"^(\d+)\. \[", prompt, re.M)):
+            if n <= len(forms):
+                out.append({"mark": n, "kind": "quote", "status": "verified", "correction": None, "reason": "the chat says so",
+                            "evidence": {"file": forms[n - 1], "line": 1, "substring": "navigation, 13 of the 40"}})
+            elif n == len(forms) + 1:
+                out.append({"mark": n, "kind": "quote", "status": "verified", "correction": None, "reason": "it says so",
+                            "evidence": {"file": str(worker), "line": 1, "substring": "# Your task"}})
+            else:
+                out.append({"mark": n, "kind": "quote", "status": "unconfirmed", "correction": None, "reason": own,
+                            "evidence": {"file": "board.jsonl", "line": 1, "substring": "13 of the 40"}})
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    reply = " ".join(["In the trial, [navigation, 13 of the 40](#), led."] * len(forms)) + ' The prompt opens ["# Your task"](#). And [13 of the 40](#) again.'
+
+    async def go():
+        main = {"sid": SID, "cwd": str(corpus), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, [reply], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    # the check failed each, and so did the repair thimble started for each
+    got = {m["n"]: m for m in marks.stored(CORPUS, turn)["items"]}
+    assert len(got) == len(forms) + 2
+    for n, form in enumerate(forms, 1):
+        assert (got[n]["status"], got[n]["failedBy"], got[n]["reason"]) == ("failed", "evidence", OUTSIDE), (form, got[n])
+    inside = got[len(forms) + 1]
+    assert inside["status"] == "failed" and inside["reason"].startswith("Line 1 of prompts/worker.md reads “"), inside
+    assert got[len(forms) + 2]["reason"] == own, got[len(forms) + 2]
+    failed = [m for r in _log() if r["type"] == "marks" and r["turn"] == turn for m in r["items"] if m["status"] == "failed"]
+    assert {m["reason"] for m in failed if m["n"] <= len(forms)} == {OUTSIDE}, failed
+    told = "\n".join(t for _, t in _fresh if not t.startswith("notice"))
+    # each repair request, which follows the checker's text (it names the folders the check reads from)
+    repairs = [p.split("\n\nThe analyst pressed x to repair citation ", 1)[1] for p in seen if "pressed x to repair" in p]
+    assert len(repairs) == len(forms) + 2, repairs
+    for request in repairs:
+        mark = int(request.split(".", 1)[0])
+        assert (f'could not confirm it: "{OUTSIDE}"' in request) == (mark <= len(forms)), request
+    assert OUTSIDE in told and own in told, told
+    for text in [told, *repairs, *(m["reason"] for m in failed)]:
+        assert str(tmp_path) not in text and str(corpus) not in text, text
+
+
+def test_b19_an_error_the_check_quotes_names_no_path_of_this_machine(_fresh, monkeypatch, tmp_path):
+    """B19: a fork that could not start, citations thimble could not read and a check it could not validate say why in
+    the error's own words, and each path of this machine in them is named as a reason names a cited file: from the
+    corpus folder when it lies there, else by its name alone (the validator's error_words). The marks' reasons and the
+    notices hold no other path."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    corpus = config.corpus_dir(CORPUS)
+    main = {"sid": SID, "cwd": str(corpus), "transcript_path": None}
+
+    async def gone(c, main, cut, prompt):
+        return {"error": f"Claude Code could not start: [Errno 2] No such file or directory: '{tmp_path}/.local/bin/claude'"}
+
+    turn = marks.new_turn()
+    asyncio.run(marks.start_check(CORPUS, main, turn, ["[3](#) runs"], "cut", fork=gone))
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert (m["status"], m["reason"]) == ("unchecked", "the check ended: Claude Code could not start: [Errno 2] No such file or directory: 'claude'"), m
+    assert _fresh[-1][1] == ("notice: The check of the citations stopped (Claude Code could not start: [Errno 2] No such file or "
+                             "directory: 'claude'), so some are not checked. The next reply is checked again."), _fresh
+
+    async def unread(texts):
+        raise RuntimeError(f"Error: Cannot find module '{tmp_path}/thimble/browser/backend/app/marks_of.mjs'")
+
+    real = marks.marks_of
+    monkeypatch.setattr(marks, "marks_of", unread)
+    asyncio.run(marks.start_check(CORPUS, main, marks.new_turn(), ["[3](#) runs"], "cut", fork=gone))
+    assert _fresh[-1][1] == ("notice: thimble could not read the citations of the last reply (Error: Cannot find module "
+                             "'marks_of.mjs'), so they are not checked."), _fresh
+    monkeypatch.setattr(marks, "marks_of", real)
+
+    async def answers(c, main, cut, prompt):
+        return {"answer": _answer([{"mark": 1, "kind": "computed", "status": "verified", "evidence": {"output": "3"}}]), "calls": [], "error": None}
+
+    def broken(*a, **k):
+        raise PermissionError(13, "Permission denied", str(corpus / "agents" / "agent-01.jsonl"))
+
+    monkeypatch.setattr(marks.evidence(), "check_all", broken)
+    asyncio.run(marks.start_check(CORPUS, main, marks.new_turn(), ["[3](#) runs"], "cut", fork=answers))
+    assert _fresh[-1][1] == ("notice: thimble could not check the citations (PermissionError: [Errno 13] Permission denied: "
+                             "'agents/agent-01.jsonl'), so some are not checked."), _fresh
+    assert all(str(tmp_path) not in t and str(corpus) not in t for _, t in _fresh), _fresh
+
+
+def _label_tried(name: str, description: str, trial_rows: int, yes: int) -> tuple[str, str]:
+    """A made-up prompt label of board posts, run as a trial on its first `trial_rows` posts, `yes` of them yes, an hour
+    before now, and its card: (the label's id, the card's id)."""
+    from datetime import datetime, timedelta, timezone
+
+    from app import concepts, notebook
+
+    ws = config.workspace_dir(CORPUS)
+    k = concepts.define_concept(CORPUS, name, description, unit="record", labels=["yes", "no"], created_by="main", trial=True)
+    _label_rows(k["id"], trial_rows, yes)
+    concepts._record_application(ws, k["id"], {"status": "done", "total": trial_rows, "limit": trial_rows, "version": k["version"]})
+    k = concepts.read_concept(ws, k["id"])
+    hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(timespec="seconds")
+    k["changes"] = [{**e, "ts": hour_ago} for e in k["changes"]]
+    concepts.write_concept(ws, k)
+    nb = notebook.create_notebook(ws, name, role="exploration")
+    cell = notebook.new_cell("label", "main", name, nb["id"], payload={"concept": k["id"]})
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    return k["id"], cell["id"]
+
+
+def _label_rows(concept_id: str, n: int, yes: int) -> None:
+    from app import concepts
+
+    lf = concepts.labels_file(config.workspace_dir(CORPUS), concept_id)
+    lf.parent.mkdir(parents=True, exist_ok=True)
+    lf.write_text("".join(json.dumps({"ref": f"board.jsonl#L{i}", "label": "yes" if i <= yes else "no", "confidence": 0.9,
+                                      "source": "prompt", "ts": "t"}) + "\n" for i in range(1, n + 1)), encoding="utf-8")
+
+
+def test_b19_a_trial_citation_that_fails_after_a_redefinition_and_a_full_run_says_the_label_changed_after_the_reply(_fresh, monkeypatch):
+    """B19: main cited counts of a label's trial; after its reply the analyst redefined the label and ran it on every
+    post, which replaced the trial, and the check could not confirm the trial's count on the label card. The failure's
+    reason ends with what changed in the label after the reply, in the words of the card's stale tag (its change log),
+    which main hears with the check's own words, and so does the repair thimble starts at once, which re-cites the count
+    against the label as it is now. A citation of that card the check verified stays verified, and a failure of another
+    label's card, which did not change after the reply, keeps the check's words alone."""
+    from app import concepts
+
+    ws = config.workspace_dir(CORPUS)
+    kid, cid = _label_tried("asks for a review", "a post that asks for a review", 4, 3)
+    _, other = _label_tried("mentions a test", "a post that mentions a test", 4, 2)
+    yes, total, tests = f"card:{cid}#records/yes", f"card:{cid}#records/all", [f"card:{other}#records/yes", f"card:{other}#records/all"]
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+    found, wrong = "The label card shows 5 posts for yes now, not 3.", "The card shows 2 posts that mention a test, not 3."
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        if "pressed x to repair citation 1." in prompt:
+            out = [{"mark": 1, "kind": "card", "evidence": {"ref": [yes, total]}, "status": "corrected",
+                    "correction": {"words": "5 of the 8"}, "reason": "the card shows 5 of its 8 posts as yes"}]
+            return {"answer": _answer(out), "calls": [], "error": None}
+        if "pressed x to repair citation 3." in prompt:
+            out = [{"mark": 3, "kind": "card", "evidence": {"ref": tests}, "status": "corrected",
+                    "correction": {"words": "2 of the 4"}, "reason": "the card shows 2 of its 4 posts"}]
+            return {"answer": _answer(out), "calls": [], "error": None}
+        # while the check runs, the analyst redefines the first label and runs it on all 8 posts, in a later second than
+        # the reply's end (the change log keeps whole seconds, and a change in the reply's own second may precede it)
+        await asyncio.sleep(1.1)
+        concepts.define_concept(CORPUS, "asks for a review", "a post that asks someone to review a pull request",
+                                unit="record", labels=["yes", "no"], created_by="user")
+        _label_rows(kid, 8, 5)
+        concepts._record_application(ws, kid, {"status": "done", "total": 8, "limit": None, "version": 2})
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": yes}, "status": "unconfirmed", "correction": None, "reason": found},
+               {"mark": 2, "kind": "card", "evidence": {"ref": total}, "status": "verified", "correction": None,
+                "reason": "the card shows the trial's 4 posts"},
+               {"mark": 3, "kind": "card", "evidence": {"ref": tests[0]}, "status": "wrong", "correction": None, "reason": wrong}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    reply = "In the trial, [3 of the 4](#) posts ask for a review, of the [4](#) it read, and [3 of the 4](#) mention a test."
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, [reply], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    assert [e["text"] for e in concepts.read_concept(ws, kid)["changes"]] == ["run over 4 records", "redefined", "run over 8 records"]
+    changed = f"{found} The label changed after this reply (redefined; run over 8 records)."
+    first = [r["items"] for r in _log() if r["type"] == "marks" and r["turn"] == turn and r["items"][0]["status"] == "failed"][0]
+    assert [(m["status"], m.get("failedBy"), m["reason"]) for m in first] == [
+        ("failed", "evidence", changed), ("verified", None, "The card shows the trial's 4 posts."), ("failed", "check", wrong)], first
+    said = [t for _, t in _fresh if not t.startswith("notice")]
+    assert f'"3 of the 4" is flagged as not confirmed (the check: "{changed}")' in said[0], said
+    assert f'"3 of the 4" is flagged as wrong (the check: "{wrong}")' in said[0], said
+    (repair,) = [p for p in seen if "pressed x to repair citation 1." in p]
+    assert f'The first check could not confirm it: "{changed}"' in repair, repair
+    got = marks.stored(CORPUS, turn)["items"]
+    assert (got[0]["status"], got[0]["shown"], got[0]["was"]) == ("corrected", "5 of the 8", "3 of the 4"), got[0]
+    assert got[1]["status"] == "verified", got[1]
+    assert (got[2]["status"], got[2]["shown"]) == ("corrected", "2 of the 4"), got[2]

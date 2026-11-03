@@ -70,7 +70,9 @@ Cited lines a few lines off from the ones that hold the words, or a few lines sh
 correction is the words that replace the mark: words of the sentence the checker repeated around them go.
 
 A mark the checker verified whose evidence does not hold here fails as not confirmed, with one plain sentence that
-says why: what the records show in place of the words, or what is missing (nearest, unshown). A mark the
+says why: what the records show in place of the words, or what is missing (nearest, unshown). It names a cited file by
+its path from the folder it lies in, and one outside every folder a cited file may lie in not at all (file_named,
+OUTSIDE), never by where it lies on this machine; an error it quotes names its paths alike (error_words). A mark the
 checker found wrong stays failed, with its reason: the checker finds a mark wrong also for the words around it (a wrong
 condition), which evidence that prints the marked words does not answer; one it found wrong and gave the right words for
 is a correction. A correction whose evidence does not show its
@@ -95,6 +97,8 @@ module cannot judge, fails as a check that did not run (`failedBy` `none`), whic
                                                                      rows.json) as `cards`
   uncitable(files, cwd, root, tmp, rules)                        -> those of the files no evidence may cite: outside
                                                                      every folder a cited file may lie in
+  error_words(text, cwd, root, also)                             -> an error's text, each path of this machine in it
+                                                                     named as a reason names a cited file
   parse_answer(text)                               -> the last ```json array of the checker's answer, or None
 """
 from __future__ import annotations
@@ -208,8 +212,8 @@ def short(s: str, n: int) -> str:
 # missing, never the whole cited words again.
 
 class Named(str):
-    """A clause of a reason that opens with a name, whose case is its own: the cited file as the check named it
-    (`notes is outside …`, `peer/run.log has no line 9`). place() and look() write such clauses, so they mark them."""
+    """A clause of a reason that opens with a name, whose case is its own: the cited file as a reason names it
+    (`peer/run.log has no line 9`, `todo has no line 9`). look() writes such clauses, so it marks them."""
 
 
 def sentence(clause: str) -> str:
@@ -1313,6 +1317,136 @@ def uncitable(files: list[str], cwd: str, root: str | None = None, tmp: str | li
     return [f for f in files if outside(str(f), cwd, root, also_of("code", tmp, rules))]
 
 
+# ------------------------------------------------------------------------------------------------ a file, as a reason names it
+#
+# A reason names a cited file by its path from the folder it lies in (file_named), never by where that folder lies on
+# this machine, which tells the person nothing of the claim and, long, is all the line that shows the reason holds. A
+# file outside every folder a cited file may lie in is named not at all (OUTSIDE). Each form a path may take is read
+# where it leads (written_path), so where a file is decides how the reason names it, never how its path is written.
+# These only name a file: which files evidence is read from stays as outside() and paths_of() decide.
+
+OUTSIDE = "the check cited a file outside the folder this session works in"
+UNREAD = "the check named {} in a form thimble does not read"
+# the forms of a path that only a shell or a URL reads: from a home folder (`~/`, `~user/`), from a variable (`$HOME/`,
+# `${HOME}/`), or a `file:` URL in any case
+SHELL_FORM = re.compile(r"(?i)file:|~(?:[\w.-]*/|$)|\$\{?[A-Za-z_]\w*\}?/")
+
+
+def written_path(file: str, base: str) -> str | None:
+    """The absolute path a path leads to, in each form it may be written: an absolute one, `//` read as `/`; a `file:`
+    URL in any case (`file:/x`, `file:///x`, `file://localhost/x`, its %XX escapes read); one from a home folder (`~/`,
+    `~user/`) or from $HOME (`$HOME/`, `${HOME}/`); else one from `base`, which `../` leaves. None for one that leads
+    to no folder this machine names (the home of a user it does not have, another variable), or that no path can be."""
+    s = str(file).strip()
+    if s[:5].lower() == "file:":
+        s = unquote(s[5:])
+        if s.startswith("//"):
+            host, _, rest = s[2:].partition("/")
+            s = "/" + (rest if host.lower() in ("", "localhost") else s[2:])
+    if s.startswith("~"):
+        s = os.path.expanduser(s)
+        if s.startswith("~"):
+            return None
+    elif s.startswith("$"):
+        m = re.match(r"\$(?:HOME|\{HOME\})(?=/|$)", s)
+        if not m:
+            return None
+        s = os.path.expanduser("~") + s[m.end():]
+    if "\0" in s:
+        return None
+    full = os.path.normpath(os.path.join(base or os.sep, s))
+    return "/" + full.lstrip("/") if full.startswith("//") else full
+
+
+def file_named(path: str, folders: list[str]) -> str | None:
+    """A file by its path from the first of the folders that holds it, compared as written, then by real paths (a
+    folder named through a link holds its files too); a folder itself by its own name. None when none holds it. The
+    root of the file system holds every file, so it names none."""
+    if "\0" in str(path):
+        return None
+    full = os.path.abspath(path)
+    for real in (False, True):
+        p = os.path.realpath(full) if real else full
+        for f in folders:
+            d = os.path.realpath(f) if real else os.path.abspath(f)
+            if d == os.sep:
+                continue
+            if p == d:
+                return os.path.basename(d)
+            if p.startswith(d + os.sep):
+                return os.path.relpath(p, d)
+    return None
+
+
+def missing(file: str, cwd: str, root: str | None, also: list[str], calls: list[dict[str, Any]] = ()) -> str:
+    """Why a cited file that names no file thimble reads gives no evidence. A path only a shell or a URL reads (`~/`,
+    `$HOME/`, `file:`) is read where it leads, to name the file: a file there is not read, as such a path never was,
+    and is named from its folder; one outside every folder a cited file may lie in is named not at all. Any other path
+    names a file that is not there."""
+    folders = [f for f in (root, cwd, *also) if f]
+    if SHELL_FORM.match(str(file).strip()):
+        full = written_path(str(file), root or cwd)
+        if full is None:
+            return UNREAD.format("a file")
+        if not inside(full, folders):
+            return OUTSIDE
+        name = file_named(full, folders) or os.path.basename(full)
+        return UNREAD.format(name) if os.path.isfile(full) else f"there is no file {name} in this session's folder"
+    p = (paths_of(file, cwd, root, also, calls) or named_paths(file, cwd, root, calls))[0]
+    return f"there is no file {file_named(p, folders) or os.path.basename(p)} in this session's folder"
+
+
+# ------------------------------------------------------------------------------------------------ an error, as thimble quotes it
+#
+# An error thimble quotes in a reason, a notice or a repair request (an exception's text, a fork's error) is thimble's
+# own words, never the records' nor the check's: each path of this machine in it is read where it leads, as a cited
+# file is (written_path), and named as a reason names one (error_words). The terminal's notices name them alike
+# (core/text.js errorWords); plugin/tests/error_paths.json holds the cases both answer.
+
+# a path in an error's text: one quoted whole, which may hold spaces and colons, else one in a run of the characters a
+# path holds, not a URL, starting where the run does or right after a colon in it (`failed:/x`, `notes.md:3:/x`) and
+# ending at the next colon (`/x/run.py:12:5`, `/a/b:/c/d`), a `file:` URL's own aside
+QUOTED_PATH = re.compile(r"""(['"`])((?:file:|~[A-Za-z0-9_.-]*/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/|\.\.?/|/)[^'"`\n]*?)\1""", re.I)
+PATH_RUN = re.compile(r"""[^\s'"`()\[\]<>,;]+""")
+PATH_START = re.compile(r"file:|~[A-Za-z0-9_.-]*/|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/|\.\.?/|/", re.I)
+URL_START = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+URL_SCHEME = re.compile(r"(?:^|:)(?!file:$)[A-Za-z][A-Za-z0-9+.-]*:$", re.I)  # a URL's scheme just before its `//`
+
+
+def error_words(text: str, cwd: str, root: str | None = None, also: list[str] = ()) -> str:
+    """An error's text as thimble quotes it: each path of this machine in it named as a reason names a file, by its path
+    from the folder of the session's that holds it (file_named), else by its name alone. A path is read from the shell's
+    folder, as the process that wrote the error read it. A URL, a path relative to no folder named, and other words stay
+    as they are."""
+    folders = [f for f in (root, cwd, *also) if f]
+
+    def named(path: str) -> str:
+        try:
+            full = written_path(path, cwd or root or os.sep)
+            name = file_named(full, folders) if full else None
+        except (OSError, ValueError):
+            full, name = None, None
+        return name or os.path.basename((full or path).rstrip("/")) or path
+
+    def run(m: re.Match[str]) -> str:
+        t = m.group(0)
+        if URL_START.match(t) and t[:5].lower() != "file:":
+            return t
+        out, done = [], 0
+        for at in [0] + [i + 1 for i, ch in enumerate(t) if ch == ":"]:
+            if at < done or not PATH_START.match(t, at) or (t.startswith("//", at) and URL_SCHEME.search(t, 0, at)):
+                continue
+            end = t.find(":", at + (5 if t[at:at + 5].lower() == "file:" else 0))
+            path = t[at:len(t) if end < 0 else end].rstrip(".!?")
+            if re.search(r"/[^/]", path):
+                out += [t[done:at], named(path)]
+                done = at + len(path)
+        return "".join(out) + t[done:]
+
+    text = QUOTED_PATH.sub(lambda m: m.group(1) + named(m.group(2)) + m.group(1), str(text))
+    return PATH_RUN.sub(run, text)
+
+
 ADJACENT = re.compile(r"([\"'])\s+\1")
 
 
@@ -1333,27 +1467,31 @@ def holds(sub: str, hay: list[str]) -> bool:
     return any(loose in h or plain in h or tight in re.sub(r"\s+", "", h) for h in map(one_quote, hay))
 
 
-def place(ev: dict[str, Any], cwd: str, root: str | None, also: list[str] = (), calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None, list[str]]:
+def place(ev: dict[str, Any], cwd: str, root: str | None, also: list[str] = (), calls: list[dict[str, Any]] = ()) -> tuple[list[str], dict[str, Any] | None, list[str], str]:
     """One cited place: its problems, the place to show (`file`, `line`, the cited lines with a line around them, the
-    substring highlighted) and the texts the cited lines hold. A relative path names a file of one of the folders
-    paths_of() reads it from: the one whose lines hold the substring. A file in one of the folders `also` names counts
-    too (the temp folder, where Claude keeps its own code, or a folder of labels' rules); its path shows whole."""
+    substring highlighted), the texts the cited lines hold, and the file as a reason names it (file_named). A relative
+    path names a file of one of the folders paths_of() reads it from: the one whose lines hold the substring. A file in
+    one of the folders `also` names counts too (the temp folder, where Claude keeps its own code, or a folder of labels'
+    rules); its path shows whole."""
     file, line, sub = ev.get("file"), ev.get("line", ev.get("lines")), ev.get("substring")
     if not file or line is None or not sub:
-        return ["the check named no line of a file to look at"], None, []
+        return ["the check named no line of a file to look at"], None, [], ""
     if outside(str(file), cwd, root, also, calls):
-        return [Named(f"{file} is outside the folder this session works in")], None, []
+        return [OUTSIDE], None, [], ""
     files = [p for p in paths_of(str(file), cwd, root, also, calls) if os.path.isfile(p)]
     if not files:
-        return [f"there is no file {file} in this session's folder"], None, []
-    looks = [look(p, str(file), line, str(sub), cwd, root) for p in files]
+        return [missing(str(file), cwd, root, also, calls)], None, [], ""
+    folders = [f for f in (root, cwd, *also) if f]
+    names = [file_named(p, folders) or os.path.basename(p) for p in files]
+    looks = [(*look(p, name, line, str(sub), cwd, root), name) for p, name in zip(files, names)]
     return next((x for x in looks if not x[0]), looks[0])
 
 
 def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) -> tuple[list[str], dict[str, Any] | None, list[str]]:
-    """The cited lines of one file, as place() gives them. A line number is where to look: when the cited lines do not
-    hold the substring and lines up to SHIFT_MAX away do, the nearest such lines are cited in their place: the same
-    number of lines moved, or more lines around them (a quote that runs over three lines cited as two)."""
+    """The cited lines of one file, as place() gives them, `file` the file as a reason names it. A line number is where
+    to look: when the cited lines do not hold the substring and lines up to SHIFT_MAX away do, the nearest such lines
+    are cited in their place: the same number of lines moved, or more lines around them (a quote that runs over three
+    lines cited as two)."""
     span = line_span(line)
     if not span:
         return [f"the check cited lines {line}, which are not one line or a range of at most {MAX_RANGE} lines"], None, []
@@ -1405,18 +1543,20 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     the marked words: the cited lines also show each run of words the correction puts in."""
     problems: list[str] = []
     shown: list[dict[str, Any]] = []
+    names: list[str] = []
     hay: list[str] = []
     # the folders a cited file may lie in besides the session's: Claude's own code for code, labels' rules for both
     also = also_of(kind, tmp, rules)
     for ev in evs:
-        p, s, h = place(ev, cwd, root, also, calls)
+        p, s, h, name = place(ev, cwd, root, also, calls)
         problems += p
         hay += h
         if s:
             shown.append(s)
+            names.append(name)
     if not shown:
         return problems, None
-    where = " or ".join(f"line {s['line']} of {s['file']}" for s in shown)
+    where = " or ".join(f"line {s['line']} of {name}" for s, name in zip(shown, names))
     for frag in quote_fragments(target):
         if not any(in_text(frag, h) for h in hay) and not (kind == "code" and in_code(frag, hay)):
             problems.append(instead(where, f"“{frag}”", hay))
@@ -2198,8 +2338,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if problems and new:
         # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the
         # old words nor the new ones are confirmed (a match of the old words there, such as the 250 of a test that
-        # printed False, is no sign that they hold)
-        res.update(status="failed", shown=words, failedBy="evidence", reason=f"The check {did}, but {problems[0]}.")
+        # printed False, is no sign that they hold); a problem that opens with the check is said of it once
+        why = re.sub(r"^the check ", "it ", problems[0])
+        res.update(status="failed", shown=words, failedBy="evidence", reason=f"The check {did}, but {why}.")
         return res
     if problems:
         res.update(status="failed", failedBy="evidence", reason=sentence(problems[0]))
@@ -2254,8 +2395,9 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
         try:
             results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards, rules))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
+            said = error_words(str(e), cwd, root, also_of("code", tmp, rules))
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
-                            "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})."})
+                            "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {said[:120]})."})
     # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's. The same new
     # sentence for a second citation undoes nothing: a rewrite keeps the other citations' words, so the second
     # citation's words stand in it as written, and the first rewrite places them

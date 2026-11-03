@@ -15,7 +15,8 @@
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
    lies in the corpus folder or main's, or is a label's definition, which holds the label's rule (_rules_dir); code
    may also cite the workspace's temp folder, and the one Claude Code's sandbox gives main's commands on Claude Code
-   sign-in (_temp_dirs). Its result is what the analyst sees.
+   sign-in (_temp_dirs). Its result is what the analyst sees. A mark it failed whose check cited a label card says
+   what changed in the label after the reply was written, when its change log holds a change since (_label_changed).
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
@@ -40,7 +41,9 @@ record names in the thread's chat (answer_ended). The fork of main that checks t
 checker's text says what holds them (THREAD_ANSWER), and the Bash calls of the thread's fork are evidence where main's
 are for a reply. Main hears nothing of that check, nor of a repair of one of its marks.
 
-Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`. A reply's marks are kept in
+Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`, and an error a mark's reason
+or a notice quotes names each path of this machine in it as the validator names a file (_error_words). A reply's marks
+are kept in
 `<workspace>/marks/<turn>.json`, and each change is written to main's log, or to the thread's chat for a side thread's
 answer, as a `marks` record {turn, items}, which the page reads (the newest record of a turn wins).
 
@@ -473,7 +476,8 @@ async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str]
     try:
         found = await marks_of(list(texts) + [t for _, _, t in takeaways])
     except (OSError, RuntimeError, ValueError) as e:
-        _notice(c, f"thimble could not read the citations of the last reply ({str(e)[:120]}), so they are not checked.")
+        said = _error_words(e, check_folders(c, main))
+        _notice(c, f"thimble could not read the citations of the last reply ({said[:120]}), so they are not checked.")
         return
     if not found:
         return
@@ -572,9 +576,10 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         prompt = checker_prompt(lines, cwd, index, root, holds)
         got = await fork(c, main, cut, f"{prompt}\n\n{request}" if request else prompt)
         if got.get("error"):
-            await give_up(f"the check ended: {got['error']}")
-            _notice(c, f"The check of the citations stopped ({str(got['error'])[:100]}), so some are not checked. The "
-                       "next reply is checked again.")
+            error = _error_words(got["error"], folders)
+            await give_up(f"the check ended: {error}")
+            _notice(c, f"The check of the citations stopped ({error[:100]}), so some are not checked. The next reply is "
+                       "checked again.")
             return
         answer = str(got.get("answer") or "")
         ev = evidence()
@@ -591,6 +596,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
             return
         by_n = {int(r["n"]): r for r in result["results"]}
+        await asyncio.to_thread(_label_changed, c, turn, answer, by_n, mine)
 
         def change(r: dict[str, Any]) -> dict[str, Any]:
             def judged(m: dict[str, Any]) -> dict[str, Any]:
@@ -620,8 +626,8 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
             found = [m for m in share if _found_failed(by_n.get(m["n"]))]
     except Exception as e:  # noqa: BLE001 — a check that cannot be validated leaves its marks unchecked, and says so
         log.exception("%s: the check of the marks failed", c)
-        _notice(c, f"thimble could not check the citations ({type(e).__name__}: {str(e)[:80]}), so some are not "
-                   "checked.")
+        _notice(c, f"thimble could not check the citations ({type(e).__name__}: {_error_words(e, folders)[:80]}), so "
+                   "some are not checked.")
     finally:
         await give_up("the check ended before it judged this citation")
     # after give_up, which would leave unchecked a mark whose repair already runs
@@ -633,6 +639,72 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         # a mark that is not failed now has nothing to repair: a takeaway written again meanwhile is under its own check
         if why and why != NOT_FAILED:
             _notice(c, f"The repair of a failed citation did not start ({why[:100]}). Press Repair on it to try again.")
+
+
+def _error_words(error: Any, folders: tuple[str, str]) -> str:
+    """An error's text as a mark's reason or a notice quotes it: each path of this machine in it named as the validator
+    names a cited file, from the check's folders (`folders`, check_folders) when it lies there, else by its name alone
+    (the validator's error_words). The error is thimble's or Claude Code's own, never the records' nor the check's."""
+    cwd, root = folders
+    return evidence().error_words(str(error), cwd, root)
+
+
+# what a failed mark's reason ends with when the label of the card its check cited changed after the reply was written
+LABEL_CHANGED = "The label changed after this reply ({})."
+
+
+def _label_changed(c: str, turn: str, answer: str, results: dict[int, dict[str, Any]], marks: set[int]) -> None:
+    """Each of `marks`, a reply's or a side thread's answer's, that this check failed (wrong, or not confirmed) and whose
+    answer (`answer`, the checker's) cites a label card whose label changed after the reply was written (its record's
+    `reply_end`): its reason in `results` ends with what changed, in the words of the card's stale tag
+    (concepts.changed_after), which the analyst reads in the tray, main hears with the check's words, and a repair reads
+    in its request. The mark's status is the check's, and a citation that holds or one with no change since is as it
+    was. A takeaway's mark has no reply, so it is left out. Never raises: the reasons stay as they were."""
+    try:
+        since = ((stored(c, turn) or {}).get("times") or {}).get("reply_end")
+        if not isinstance(since, (int, float)):
+            return
+        ev = evidence()
+        items: dict[int, dict[str, Any]] = {}
+        for it in ev.parse_answer(answer) or []:
+            with contextlib.suppress(TypeError, ValueError):
+                items.setdefault(int(it.get("mark")), it)
+        changed: dict[str, str] | None = None
+        for n in sorted(marks):
+            r, it = results.get(n), items.get(n)
+            if not r or r.get("status") != "failed" or r.get("failedBy") not in ("check", "evidence"):
+                continue
+            if not it or it.get("kind") != "card":
+                continue
+            cited = [m.group(1) for ref in ev.card_refs(it.get("evidence")) for m in [ev.CARD_TD.match(ref) or ev.CARD_LINE.match(ref)] if m]
+            if not cited:
+                continue
+            if changed is None:
+                changed = label_changes(c, float(since))
+            said = list(dict.fromkeys(changed[cid] for cid in cited if cid in changed))
+            if said:
+                r["reason"] = " ".join(x for x in (str(r.get("reason") or ""), LABEL_CHANGED.format("; ".join(said))) if x)
+    except Exception:  # noqa: BLE001 — what changed in a label is a note on a failure, never a cause of one
+        log.exception("%s: what changed in the labels the check of turn %s cited was not read", c, turn)
+
+
+def label_changes(c: str, since: float) -> dict[str, str]:
+    """Each label card of the workspace whose label changed after `since` (seconds since the epoch), with what changed,
+    in the words of its stale tag (concepts.changed_after)."""
+    from . import concepts, notebook  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    out: dict[str, str] = {}
+    for _, nb in notebook._stored(ws):
+        for cell in nb.get("cells") or []:
+            payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
+            kid = str(payload.get("concept") or "")
+            if cell.get("kind") != "label" or not cell.get("id") or not concepts.ID_RE.match(kid):
+                continue
+            concept = concepts.read_concept(ws, kid)
+            if concept is not None and (said := concepts.changed_after(concept, since)):
+                out[str(cell["id"])] = said
+    return out
 
 
 def _takeaway_now(c: str, m: dict[str, Any]) -> bool:
