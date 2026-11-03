@@ -7,12 +7,14 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
-from app import concepts, config, investigation, undo
+from app import concepts, config, investigation, nofollow, notebook, undo
 
 CORPUS = "mini"
 
@@ -81,3 +83,106 @@ def test_undo_skips_a_step_a_card_appended_whose_names_lead_outside_the_workspac
         assert (outside / "made-up0.json").read_text() == json.dumps({"name": "the person's own"})
         assert concepts.read_concept(ws, "made-up0") is None and concepts.read_concept(ws, "made-up1") is not None
     assert undo.labels(CORPUS)["undo"] is None and undo.labels(CORPUS)["redo"] is None
+
+
+def _up_from(folder: Path, target: Path) -> str:
+    """`target` spelled below a made-up folder of `folder` with ../ parts, as a name a card writes into a file of its
+    workspace that the server puts in a path under `folder` (the made-up folder need not exist: the server's paths are
+    normalized before they are opened)."""
+    return "x/" + "../" * (len(folder.parts) + 1) + str(target).lstrip("/")
+
+
+def _sleeper(*argv: str) -> subprocess.Popen:
+    """A process of the test's own, in a session of its own, that sleeps; `argv` its command line's other words."""
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", *argv], start_new_session=True,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _stop(*procs: subprocess.Popen) -> None:
+    for p in procs:
+        with contextlib.suppress(OSError):
+            p.kill()
+        p.wait()
+
+
+async def test_the_kernel_a_card_names_in_its_group_s_file_names_no_file_outside_the_workspace(tmp_path_factory):
+    """A card keeps the kernel it runs on in its group's file, notebooks/<id>.json, which a card's code writes, and the
+    server took that name as it was for the kernel's files (kernels/k-<name>.json, .conn.json, .log and the rest), so a
+    name with ../ parts had the server make, write, truncate and remove files wherever they led."""
+    outside = _outside(tmp_path_factory)
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "made-up group")
+    cell = notebook.new_cell("code", "analyst", "made-up card", nb["id"], code="print(6 * 7)")
+    cell["kernel"] = _up_from(ws / notebook.KERNELS_DIR, outside / "made-up")  # what a card's code can write there
+    (ws / notebook.KERNELS_DIR / "k-x").mkdir(parents=True)  # and the folder its ../ parts start from
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    notebook.clear_cache()
+    mode = outside.stat().st_mode
+    try:
+        stored = await notebook.run_cell(CORPUS, nb["id"], cell["id"])
+    finally:
+        await notebook.shutdown_all()
+    assert sorted(os.listdir(outside)) == ["made-up-settings.json"] and outside.stat().st_mode == mode
+    assert stored["status"] == "ok" and "42" in json.dumps(stored["outputs"])
+
+
+async def test_a_kernel_s_record_names_no_process_group_the_server_signals():
+    """A kernel's record, kernels/<key>.json, which a card's code writes, names the kernel's pid and its process group;
+    the server checked that the pid is the kernel's own before it signals it, but then signalled the group the record
+    named, so a record that named another group of the person's had the server stop it."""
+    k = notebook._kernel(CORPUS, "made-up")
+    kernel, victim = _sleeper("ipykernel_launcher", "-f", str(k.conn)), _sleeper("made-up-victim")
+    try:
+        nofollow.makedirs(k.record.parent)
+        k.record.write_text(json.dumps({"pid": kernel.pid, "pgid": victim.pid, "connection_file": str(k.conn)}))
+        await notebook._kill(k)
+        assert victim.poll() is None, "the server signalled the process group the kernel's record named"
+        assert kernel.wait(5) is not None
+    finally:
+        _stop(kernel, victim)
+        notebook._exec_kernels.pop((CORPUS, "made-up"), None)
+
+
+def test_thimble_stop_signals_and_removes_only_what_is_a_kernel_s_own(tmp_path_factory):
+    """`thimble stop` ends the workspaces' kernels from their records, kernels/<key>.json, which a card's code writes:
+    it took the record's connection file for the kernel's own, so a record that named a word of another process's
+    command line had it signal that process's group, and one that named any file under the workspaces folder had it
+    remove that file."""
+    from app import cli
+
+    ws = config.workspace_dir(CORPUS)
+    other = config.WORKSPACES_DIR / "made-up-other"
+    other.mkdir()
+    (other / "settings.json").write_text('{"made": "up"}')
+    kernels = ws / notebook.KERNELS_DIR
+    kernels.mkdir(exist_ok=True)
+    kernel, victim = _sleeper("ipykernel_launcher", "-f", "/made-up/k.conn.json"), _sleeper("made-up-victim")
+    try:
+        (kernels / "k-one.json").write_text(json.dumps({"pid": kernel.pid, "pgid": victim.pid,
+                                                        "connection_file": "ipykernel_launcher"}))
+        (kernels / "k-two.json").write_text(json.dumps({"pid": 0, "connection_file": str(other / "settings.json")}))
+        cli.stop_kernels(config.WORKSPACES_DIR)
+        assert victim.poll() is None and kernel.poll() is None, "thimble stop signalled a process no record may name"
+        assert (other / "settings.json").read_text() == '{"made": "up"}'
+    finally:
+        _stop(kernel, victim)
+
+
+def test_a_kernel_s_connection_file_names_no_socket_but_the_loopback_s():
+    """The connection file a kernel's channels open, kernels/<key>.conn.json, lies where a card's code writes; the
+    server writes it with the loopback's address over TCP, and a file that names another transport or address (an ipc
+    socket's path, another host) is not one of the server's."""
+    k = notebook._kernel(CORPUS, "made-up")
+    try:
+        nofollow.makedirs(k.conn.parent)
+        for info in ({"transport": "ipc", "ip": "/made-up/socket"}, {"transport": "tcp", "ip": "203.0.113.7"}):
+            k.conn.write_text(json.dumps({**info, "shell_port": 1, "iopub_port": 2, "stdin_port": 3, "control_port": 4,
+                                          "hb_port": 5, "key": "made-up", "signature_scheme": "hmac-sha256"}))
+            kc = None
+            with pytest.raises(ValueError):
+                kc = notebook._client(k.conn)
+            if kc is not None:
+                notebook._close_client(kc)
+    finally:
+        notebook._exec_kernels.pop((CORPUS, "made-up"), None)

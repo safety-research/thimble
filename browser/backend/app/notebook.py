@@ -2203,7 +2203,10 @@ def _ws_dir(workspace: str) -> Path:
 
 
 def _kernel_paths(ws: Path, key: str) -> tuple[Path, Path, Path]:
-    """(record, connection file, log) of the kernel `key` under workspaces/<c>/kernels/."""
+    """(record, connection file, log) of the kernel `key` under workspaces/<c>/kernels/; ValueError for a key that
+    names a path rather than a file there."""
+    if not key or "/" in key or os.sep in key or "\0" in key:
+        raise ValueError(f"{key!r} is no kernel's name")
     d = ws / KERNELS_DIR
     return d / f"{key}.json", d / f"{key}.conn.json", d / f"{key}.log"
 
@@ -2453,6 +2456,16 @@ def connection_info(ip: str, key: bytes, **ports: int) -> dict[str, Any]:
             "transport": "tcp", "signature_scheme": "hmac-sha256", "kernel_name": ""}
 
 
+def _connection_of(path: Path) -> dict:
+    """A kernel's connection file as the server wrote it (_launch): channels over TCP on the loopback. The file lies in
+    kernels/, which a card's code writes, so one that names another transport or address (an ipc socket's path, another
+    host) is none of the server's (ValueError)."""
+    info = json.loads(nofollow.read_text(path))
+    if not isinstance(info, dict) or info.get("transport", "tcp") != "tcp" or info.get("ip") != "127.0.0.1":
+        raise ValueError(f"{path.name} names no kernel of this server's")
+    return info
+
+
 def _client(connection: Path | dict) -> AsyncKernelClient:
     """Channels to the kernel of `connection` (what its connection file holds, or the file, read as nofollow reads it)
     on a zmq context of their own, all but the heartbeat's: a kernel's liveness is its pid (_Kernel.alive). The
@@ -2464,7 +2477,7 @@ def _client(connection: Path | dict) -> AsyncKernelClient:
     collector takes it: its sockets are closed first, then its context. Left to themselves, the context's finalizer can
     run first, find none of its sockets (the collector clears the list it keeps of them before any finalizer runs), and
     wait on them for good, wherever the collection ran."""
-    info = connection if isinstance(connection, dict) else json.loads(nofollow.read_text(connection))
+    info = connection if isinstance(connection, dict) else _connection_of(connection)
     ctx = zmq.asyncio.Context()
     kc = AsyncKernelClient(context=ctx)
     try:
@@ -2843,8 +2856,13 @@ async def _attach(k: _Kernel) -> bool:
         log.info("kernel %s of %s: record for pid %s is stale; dropped", k.key, k.workspace, pid)
         _drop_files(k.record, k.conn)
         return False
-    k.pid, k.pgid = pid, _record_pid(rec, "pgid") or pid
-    kc = _client(k.conn)
+    k.pid = k.pgid = pid  # it leads its own process group (_launch); the record, which a card's code writes, names none
+    try:
+        kc = _client(k.conn)
+    except (OSError, ValueError) as e:
+        log.warning("kernel %s of %s (pid %s): its connection file does not read (%s); killed", k.key, k.workspace, pid, e)
+        await _kill(k)
+        return False
     try:
         await _wait_ready(k, kc, RECONNECT_TIMEOUT, control=True)
     except asyncio.CancelledError:
@@ -2895,8 +2913,7 @@ async def _kill(k: _Kernel) -> None:
     proc, k.proc = k.proc, None
     pid, pgid = k.pid, k.pgid
     if pid is None:  # not attached: the record may still name a live kernel of a previous server
-        rec = _read_record(k.record) or {}
-        pid, pgid = _record_pid(rec), _record_pid(rec, "pgid")
+        pid = pgid = _record_pid(_read_record(k.record) or {})  # which leads its own process group (_attach)
     k.pid = k.pgid = None
     if pid is not None:
         ours = proc is not None and proc.pid == pid and proc.poll() is None
@@ -3277,7 +3294,9 @@ def _kernel_for(nb: dict, kernel: str | None, cell: dict | None = None, ws: Path
     if kernel:
         return kernel
     kept = (cell or {}).get("kernel")
-    if isinstance(kept, str):  # move_cells and tools._maker_fields set it; '' is shared
+    # move_cells and tools._maker_fields set it ('' is shared); the group's file, which a card's code writes, names no
+    # other kernel than one whose name a route would take (ID_RE), since the name becomes its files' names
+    if isinstance(kept, str) and (not kept or ID_RE.match(kept)):
         return kept or None
     if nb.get("role", DEFAULT_ROLE) == "exploration" and nb.get("created_by") != TERMINAL_CREATOR \
             and (cell or {}).get("created_by") != TERMINAL_CREATOR:
