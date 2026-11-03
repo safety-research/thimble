@@ -6,6 +6,11 @@ ROWS_MAX), columns and types, the column that names each row in a ref (`label`),
 number formats). The canvas draws it (canvas/FrameTable.tsx), the model reads its text/plain and the citation check
 reads frame_cells, so all three see the same values in the same format.
 
+A DataFrame or Series a card's code prints is kept as data too, beside its text: the kernel notes each with the text
+print wrote for it (kernel_thimble._printed, PRINTED_CAPTURE in the same request), and attach_printed puts it on the
+stdout bundle that text stands in (PRINTED_KEY: the lines it stands on and its frame). The canvas shows the text; the
+citation check counts the table's rows from the frame (marks.session_cards).
+
 Row names: the index when the code set one, else the first column of distinct text, else the position. An unnamed index
 keeps pandas' name (`index`, `level_0`) and has no header over it.
 
@@ -32,6 +37,9 @@ EXPR_KEY = "thimble_frame"  # the user expression's key in the execute request (
 # by import, so it works whether or not the card imported thimble
 CAPTURE = "__import__('thimble')._frame()"
 ROWS_MAX = 500  # kernel_thimble.FRAME_ROWS: the rows a card keeps and shows
+PRINTED_EXPR_KEY = "thimble_printed"  # the user expression that reads the tables a cell printed (notebook._run_card_code)
+PRINTED_CAPTURE = "__import__('thimble')._printed()"
+PRINTED_KEY = "_tables"  # on a stdout bundle: the tables printed into it, [{lines: [first, last], frame}]
 TEXT_ROWS = 60  # the rows of a frame a tool result shows the model, then pandas' own `[n rows x m columns]` line
 TEXT_WIDTH = 30  # the widest a column is padded to in that text (cite.CHART_TEXT_WIDTH)
 TYPES = ("quantitative", "temporal", "nominal", "ordinal")
@@ -289,6 +297,64 @@ def frame_in(outputs: Any) -> dict | None:
         if f is not None:
             return f
     return None
+
+
+def read_printed(reply: Any) -> list[dict]:
+    """The tables a cell printed, from the execute reply's user expression (kernel_thimble._printed): each {text,
+    frame}, the frame in its stored form; [] when the expression failed or did not run (a cell that raised)."""
+    if not isinstance(reply, dict) or reply.get("status") != "ok":
+        return []
+    data = reply.get("data") if isinstance(reply.get("data"), dict) else {}
+    try:
+        got = json.loads(data.get("text/plain")) if isinstance(data.get("text/plain"), str) else None
+    except ValueError:
+        return []
+    out = []
+    for x in got if isinstance(got, list) else []:
+        if isinstance(x, dict) and isinstance(x.get("text"), str) and x["text"] and isinstance(x.get("frame"), dict):
+            out.append({"text": x["text"], "frame": normalize(x["frame"])})
+    return out
+
+
+_BREAKS = "\n\r\x0b\x0c\x1c\x1d\x1e\x85  "  # what str.splitlines ends a line at, as a card's lines are numbered
+
+
+def attach_printed(outputs: list[dict], printed: list[dict]) -> list[dict]:
+    """The outputs with each printed table on the stdout bundle its text stands in, in the order printed, as
+    {lines: [first, last], frame} under PRINTED_KEY: the lines of the bundle's whole text it stands on, numbered from 1
+    as a card's lines are (cite.numbered_lines). A table whose text no stdout bundle holds from where the last one
+    stood (the code printed it elsewhere) is left out. The same list when there is none."""
+    if not printed:
+        return outputs
+    out = list(outputs)
+    streams = [i for i, b in enumerate(out) if isinstance(b, dict) and b.get("_stream") == "stdout" and isinstance(b.get("text/plain"), str)]
+    at = [0, 0]  # the stream (among `streams`) and the offset in its text the next table is looked for from
+    for p in printed:
+        for k in range(at[0], len(streams)):
+            i = streams[k]
+            text = out[i]["text/plain"]
+            off = text.find(p["text"], at[1] if k == at[0] else 0)
+            if off < 0:
+                continue
+            before = text[:off]
+            first = len(before.splitlines()) + (1 if not before or before[-1] in _BREAKS else 0)
+            last = first + max(0, len(p["text"].splitlines()) - 1)
+            out[i] = {**out[i], PRINTED_KEY: [*out[i].get(PRINTED_KEY, []), {"lines": [first, last], "frame": p["frame"]}]}
+            at[:] = [k, off + len(p["text"])]
+            break
+    return out
+
+
+def printed_frames(b: Any) -> list[tuple[list[int], dict]]:
+    """The tables a stdout bundle holds as data (attach_printed): ([first, last] line, the frame) each."""
+    got = b.get(PRINTED_KEY) if isinstance(b, dict) else None
+    out = []
+    for x in got if isinstance(got, list) else []:
+        span, f = (x.get("lines"), x.get("frame")) if isinstance(x, dict) else (None, None)
+        if isinstance(span, list) and len(span) == 2 and all(isinstance(n, int) and not isinstance(n, bool) for n in span) \
+                and isinstance(f, dict) and isinstance(f.get("columns"), list) and isinstance(f.get("rows"), list):
+            out.append((list(span), f if "label" in f and "view" in f else normalize(f)))
+    return out
 
 
 def apply_run(outputs: list[dict], status: str, reply: Any, result_index: int | None) -> list[dict]:

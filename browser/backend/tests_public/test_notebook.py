@@ -280,3 +280,32 @@ async def test_a_card_a_chat_made_is_announced_with_that_chat_s_role(corpus, mon
     made = {e["cell"]: e for e in sent if e.get("op") == "created"}
     assert made[figure["id"]]["by_role"] == "writer"
     assert "by_role" not in made[plain["id"]] and "by_role" not in made[gone["id"]]
+
+
+async def test_a_table_a_card_prints_is_kept_as_data_beside_its_text(corpus):
+    """B20: a count of a table a card printed was read from its printed text, whose header, title and wrapping no reader
+    gets right, so the citation check had no rows to count. The kernel notes each DataFrame or Series the code gives
+    print(), with the text print writes for it, and the stdout output keeps each table's rows beside the lines it stands
+    on (frames.attach_printed); the printed text stays as it was. A table printed elsewhere, or in a cell that raised,
+    keeps no rows. Made-up themes."""
+    from app import frames
+
+    code = ("import sys\nimport pandas as pd\n"
+            "t = pd.DataFrame({'theme': ['sync', 'search', 'offline mode', 'price'], 'participants': [7, 7, 7, 5]}).set_index('theme')\n"
+            "print('Users who raised each theme')\nprint(t)\nprint(t['participants'].value_counts())\n"
+            "print(t, file=sys.stderr)\nprint('rows:', len(t))\n")
+    cell = await notebook.run_code(corpus, code, "user")
+    assert cell["status"] == "ok", cell["outputs"]
+    (out,) = [b for b in cell["outputs"] if b.get("_stream") == "stdout"]
+    text = out["text/plain"]
+    lines = text.splitlines()
+    assert lines[0] == "Users who raised each theme" and lines[-1] == "rows: 4"
+    (first, f1), (second, f2) = frames.printed_frames(out)
+    assert first == [2, 7] and lines[1].split() == ["participants"] and lines[2].strip() == "theme" and lines[6].split() == ["price", "5"]
+    assert f1["columns"] == ["theme", "participants"] and f1["rows"] == [["sync", 7], ["search", 7], ["offline mode", 7], ["price", 5]]
+    assert f1["label"] == "theme" and f1["total"] == 4
+    assert second[0] == 8 and lines[second[1] - 1].startswith("Name: count") and sorted(map(tuple, f2["rows"])) == [(5, 1), (7, 3)]
+    (err,) = [b for b in cell["outputs"] if b.get("_stream") == "stderr"]
+    assert frames.PRINTED_KEY not in err
+    raised = await notebook.run_code(corpus, "import pandas as pd\nprint(pd.DataFrame({'n': [1, 2]}))\nraise ValueError('stop')", "user")
+    assert raised["status"] == "error" and all(frames.PRINTED_KEY not in b for b in raised["outputs"])
