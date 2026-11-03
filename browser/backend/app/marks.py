@@ -172,7 +172,12 @@ def session_cards(c: str) -> list[dict[str, Any]]:
                 if outs:
                     out.append({**card, "outputs": outs})
     labels: dict[str, list[dict[str, Any]]] = {}
-    for concept in concepts.list_concepts(ws):
+    try:
+        listed = concepts.list_concepts(ws)
+    except Exception:  # noqa: BLE001 — labels that cannot be listed leave the cards to the check
+        log.exception("%s: the labels were not read for the check", c)
+        listed = []
+    for concept in listed:
         try:
             labels[concept["id"]] = _label_versions(c, concept)
         except Exception:  # noqa: BLE001 — a label that cannot be read is left out, not the others

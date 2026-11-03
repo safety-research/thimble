@@ -574,6 +574,18 @@ def test_a_cell_written_with_a_label_s_id_or_a_label_card_s_adds_no_other_versio
     assert not any(TABLE["text/html"] in json.dumps(x) for x in cards if x["id"] in (a["cell"], old))
 
 
+def test_labels_that_cannot_be_listed_leave_the_check_its_cards(_fresh, monkeypatch):
+    """A label's definition that cannot be read (a file a card's code wrote in the workspace before B25) leaves the
+    labels out of the check, never its cards, as one label card that could not be read left out only itself before."""
+    from app import concepts
+    from test_marks import TABLE
+
+    asyncio.run(_apply("forge pr claim", 4))
+    cid = _seed_card("", [TABLE])
+    (concepts.concepts_dir(config.workspace_dir(CORPUS)) / "broken.json").write_text(json.dumps({"version": "x"}))
+    assert [x["id"] for x in marks.session_cards(CORPUS)] == [cid]
+
+
 def test_a_count_of_a_label_s_values_reads_the_version_the_words_could_read(_fresh, monkeypatch):
     """B19 with B20: each version a label kept is also a table a count of its rows names (concepts.card_rows, its row
     `all` the total left out of the count), listed as the label was when the reply was written. A count of the trial by
