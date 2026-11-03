@@ -218,8 +218,11 @@ signin() {
   if ! grep -q -- '"--keep"' "$1/backend/app/claude_access.py" 2>/dev/null; then
     # a workbench from before 0.10.8 (an install whose fixes are on an older release), whose setup asks again: the way
     # it had stays, and while there is none, the page asks
-    if [ -f "${THIMBLE_BROWSER_HOME:-$HOME/.thimble-browser}/claude-access.json" ]; then say "  Sign-in: as it was before."
-    else say "  Sign-in: not chosen yet. The workbench asks when it starts."; fi
+    if [ -f "${THIMBLE_BROWSER_HOME:-$HOME/.thimble-browser}/claude-access.json" ]; then
+      say "  Sign-in: as it was before."
+    else
+      say "  Sign-in: not chosen yet. The workbench asks when it starts."
+    fi
     return 0
   fi
   [ -z "$sign_in" ] || args=(--how "$sign_in")
@@ -228,17 +231,18 @@ signin() {
   "$1/scripts/thimble-browser" --setup "${args[@]}" <"$tty" | sed 's/^/  /' || true
 }
 
-# the end: how to start each product, how to update, then what does not work yet
+# finish WHAT: the end: what is installed, how to try it (in the Claude Code session that runs the install, which sets
+# CLAUDECODE for its commands, or in a terminal), then what does not work yet
 finish() {
   say ""
-  if [ "$web" = 1 ] && [ "$built" = 1 ]; then say "$1."
-  elif [ "$web" = 1 ]; then say "$1 (the plugin; the note below says why the workbench is not)."
-  else say "$1 (the plugin)."; fi
-  say "  Plugin: start claude in a folder of data files, or type /reload-plugins in a session that is open."
+  say "$1."
+  say ""
+  if [ -n "${CLAUDECODE:-}" ]; then say "Try it now: type /reload-plugins in this Claude Code session."
+  else say "Try it now: run claude in a folder of data files."; fi
   if [ "$built" = 1 ]; then
-    say "  Workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link it prints."
+    say "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link" \
+      "it prints."
   fi
-  say "  Update later: $2"
   if [ -s "$notes" ]; then say ""; cat "$notes"; fi
 }
 
@@ -305,8 +309,7 @@ main() {
     fi
     say ""
     kernel install commands --folder "$code" --bin-dir "$bin_dir" $(browser "$built")
-    finish "thimble is installed from your clone $(tilde "$code")" \
-      "pull the clone (git -C $(tilde "$code") pull), then thimble update"
+    finish "thimble is installed from your clone $(tilde "$code")"
     return 0
   fi
 
@@ -373,8 +376,8 @@ main() {
   say ""
   kernel install commands --bin-dir "$bin_dir" $(browser "$built")
 
-  # 8. how to start each product, and what does not work yet
-  finish "thimble $(kernel install name) is installed" "thimble update"
+  # 8. what is installed, how to try it, and what does not work yet
+  finish "thimble $(kernel install name) is installed"
 }
 
 main "$@"

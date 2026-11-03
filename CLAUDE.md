@@ -30,7 +30,8 @@ When someone asks you to install thimble, ask what they want, run the install sc
    minutes. When it stops because something is missing, it says what and the command that fixes it: tell them, run
    that command only on their yes, then run the script again.
 
-3. Pass on the script's last lines: how to start each product, and anything that does not work yet.
+3. When it is done, reply with the script's last lines, word for word, with each command in backticks. Add only what
+   does not work yet, if anything.
 
 To work on thimble's own code, clone this repository and run `scripts/install.sh --local` in the clone. Only do this
 when they ask for it.

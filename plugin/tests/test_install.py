@@ -254,9 +254,9 @@ def test_a_fresh_install_lays_the_release_out_in_thimbles_home_and_says_so(w):
         "",
         "The command thimble is in ~/.local/bin.",
         "",
-        "thimble 0.10.8 is installed (the plugin).",
-        "  Plugin: start claude in a folder of data files, or type /reload-plugins in a session that is open.",
-        "  Update later: thimble update",
+        "thimble 0.10.8 is installed.",
+        "",
+        "Try it now: run claude in a folder of data files.",
         "",
         "Note: ~/.local/bin is not on your PATH, so a new terminal does not find thimble. Add this line to ~/.zshrc: "
         'export PATH="$HOME/.local/bin:$PATH"',
@@ -300,15 +300,25 @@ def test_both_products_build_the_workbench_in_live_and_link_its_command(w):
         "The commands thimble and thimble-browser are in ~/.local/bin.",
         "",
         "thimble 0.10.8 is installed.",
-        "  Plugin: start claude in a folder of data files, or type /reload-plugins in a session that is open.",
-        "  Workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link it prints.",
-        "  Update later: thimble update"], out
+        "",
+        "Try it now: run claude in a folder of data files.",
+        "The browser workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link "
+        "it prints."], out
     live = w.th / "fixes" / "live"
     assert (w.th / "fixes" / "browser-ready").read_text().strip() == str(live / "browser")
     launcher = (w.home / ".local" / "bin" / "thimble-browser").read_text()
     assert IN.MARKER in launcher and f"exec {live / 'browser' / 'scripts' / 'thimble-browser'} \"$@\"" in launcher
     assert (live / "browser" / "scripts" / "setup-args").read_text().split() == ["--setup", "--keep"]
     assert (w.home / ".thimble-browser").stat().st_mode & 0o777 == 0o700
+
+
+def test_run_by_claude_the_end_says_to_reload_the_plugins_in_its_session(w):
+    """Claude Code sets CLAUDECODE for the commands Claude runs: the install's end then says how to try the plugin in
+    that very session, where a terminal's says to start claude."""
+    p = w.install("--no-browser", CLAUDECODE="1")
+    assert p.returncode == 0, text_of(p)
+    assert before_notes(p.stdout)[-3:] == ["thimble 0.10.8 is installed.", "",
+                                           "Try it now: type /reload-plugins in this Claude Code session."], p.stdout
 
 
 @pytest.mark.parametrize("args, given", [
@@ -564,7 +574,7 @@ def test_ref_installs_a_branch_which_thimble_update_tells_from_a_newer_release(w
     p = w.install("--no-browser", "--ref", "try-r109")
     assert p.returncode == 0, text_of(p)
     assert "Downloading thimble try-r109 into ~/.thimble... done." in p.stdout.splitlines()
-    assert f"thimble try-r109 at {tip[:7]} is installed (the plugin)." in p.stdout.splitlines()
+    assert f"thimble try-r109 at {tip[:7]} is installed." in p.stdout.splitlines()
     assert w.release()["ref"] == "try-r109" and "tag" not in w.release()
     # the branch holds the newest release, 0.10.8: no newer release is out
     link = w.home / ".local" / "bin" / "thimble"
@@ -594,9 +604,8 @@ def test_local_installs_from_the_clone_as_the_dev_install(w):
     assert p.returncode == 0, text_of(p)
     assert "  Added to Claude Code from ~/thimble." in p.stdout.splitlines()
     assert before_notes(p.stdout)[-3:] == [
-        "thimble is installed from your clone ~/thimble (the plugin).",
-        "  Plugin: start claude in a folder of data files, or type /reload-plugins in a session that is open.",
-        "  Update later: pull the clone (git -C ~/thimble pull), then thimble update"], p.stdout
+        "thimble is installed from your clone ~/thimble.", "", "Try it now: run claude in a folder of data files."], \
+        p.stdout
     assert w.settings()["extraKnownMarketplaces"]["thimble"]["source"] == {"source": "directory", "path": str(clone)}
     assert os.readlink(w.home / ".local" / "bin" / "thimble") == str(clone / "plugin" / "bin" / "thimble")
     assert not (w.th / "fixes").exists()
