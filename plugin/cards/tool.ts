@@ -20,8 +20,7 @@
 //   6. a version that does not fit (more rows than its frame shows, or lines cut at the card's edge) is held: its frame
 //      draws `drawing…` until the card check (fit.ts) has read it, and the check's replacement draws in its place. The
 //      answer says nothing of that, and gives no note on its size; the replacement is told to the one that drew the card
-//      afterwards (core/tell.ts tellFor), with its next card call's answer or as its next turn starts. Where thimble's
-//      drawing does not show (core/host.ts), no version is held and no check runs
+//      afterwards (core/tell.ts tellFor), with its next card call's answer or as its next turn starts
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
 // card in the card's place, under the call that first drew it or under the answer v was pressed on (its view whole, or
@@ -37,7 +36,6 @@ import { sinceLast } from '../core/answers'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
 import { claudeTempDir, tempDir } from '../core/home'
-import { drawsHere } from '../core/host'
 import { paneNow } from '../core/pane'
 import { MAIN, takeFor, tellFor } from '../core/tell'
 import { mainTurn } from '../core/turn'
@@ -302,10 +300,8 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
   // once main's turn that drew it ended), main's version stands at its own call
   const stays = meta.version > 0 && (!!fork || (await canRedraw($, meta.turn)))
   const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn, inRow: meta.inRow ?? null } : { toolUseId, anchorRow, turn: fork ? meta.turn : await mainTurn($), inRow: null }
-  // a version that does not fit waits for the card check, which draws its replacement in its place (fit.ts). Where
-  // thimble's drawing does not show (core/host.ts drawsHere), no screen shows the card: nothing waits, and no check runs
-  const tall = !fits(r.lines.length, Array.isArray(r.cut) ? r.cut.length : 0)
-  const hold = tall && drawsHere()
+  // a version that does not fit waits for the card check, which draws its replacement in its place (fit.ts)
+  const hold = !fits(r.lines.length, Array.isArray(r.cut) ? r.cut.length : 0)
   const next: CardMeta = {
     ...meta, ...home, version, last: version, lastFile: file, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
     gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
@@ -353,12 +349,10 @@ async function drawCall($: Engine, e: Any): Promise<{ result: string }> {
       for (const c of a.copies as Any[]) if (!c.error) tallest = Math.max(tallest, c.lines.length)
     } else out.push('', `The actions did not run: ${a?.error ?? 'no answer'}`)
   }
-  // the size of a version that does not fit is the check's, not Claude's: the analyst sees the check's replacement (or,
-  // where no screen shows the card, nothing)
+  // the size of a version the check reads is the check's, not Claude's: the analyst sees the check's replacement
   const screen = screenRows()
-  if (tall) {
-    if (hold) void checkHeld($, { id, version, title, question: threadQuestion(input.agentId) ?? (await sinceLast($).catch(() => null))?.prompt?.text ?? '', columns: r.summary.columns, first: String(r.summary.first ?? ''), copy: copyText(r.lines, r.cut, width), width, view: view.text!, rows: `${dir}/rows.json` })
-  } else if (rowsCut(tallest)) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(tallest))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
+  if (hold) void checkHeld($, { id, version, title, question: threadQuestion(input.agentId) ?? (await sinceLast($).catch(() => null))?.prompt?.text ?? '', columns: r.summary.columns, first: String(r.summary.first ?? ''), copy: copyText(r.lines, r.cut, width), width, view: view.text!, rows: `${dir}/rows.json` })
+  else if (rowsCut(tallest)) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(tallest))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
   else if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
   void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0, ...(hold ? { held: true } : {}) })
   return { result: out.join('\n') }

@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import { ALIASES, EFFORTS, modelOf, shownName } from '../../core/models.js'
-import { DEFAULTS, DEFAULTS_FIELD, RETIRED, defaultsFrom, SWITCHES, checkerEffort, checkerModel, choiceOf, choicesIn, citationsFrom, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, atPreset, currentValues, noteChange, noteDefaults, setOptions, switchesFrom } from '../features.mjs'
+import { DEFAULTS, DEFAULTS_FIELD, RETIRED, defaultsFrom, SWITCHES, checkerEffort, checkerModel, choiceOf, choicesIn, citationsFrom, claudeCites, featureOn, lensesAfterReply, minimalOn, OLD_PRESET, PRESET, atPreset, currentValues, noteChange, noteDefaults, setDrawn, setOptions, switchesFrom } from '../features.mjs'
 
 test("the manifest's userConfig is the features, each on by default and turned off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
@@ -202,6 +202,32 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(claudeCites(), true)
     setOptions({})
   }
+})
+
+test("where thimble's drawing does not show (core/host.ts), Citations and Cards act as off, whatever the person set, Minimal's modes too; what the person set stays, and the other features act on it", () => {
+  setOptions({ citations: 'auto cite + verify', cards: 'auto', explain: 'on demand' })
+  setDrawn(false)
+  try {
+    assert.equal(choiceOf('citations'), 'off')
+    assert.equal(claudeCites(), false)
+    assert.equal(featureOn('citations'), false)
+    assert.equal(featureOn('cite'), false)
+    assert.equal(choiceOf('cards'), 'off')
+    assert.equal(featureOn('cards'), false)
+    assert.equal(choiceOf('explain'), 'on demand')
+    assert.deepEqual(currentValues(), { citations: 'auto cite + verify', cards: 'auto', explain: 'on demand' })
+    setOptions({ minimal: true, ...PRESET })
+    assert.equal(minimalOn(), true)
+    assert.deepEqual([choiceOf('citations'), choiceOf('cards')], ['off', 'off'])
+    assert.equal(atPreset(currentValues()), true)
+  } finally {
+    setDrawn(true)
+  }
+  // where it shows, the person's modes act
+  assert.deepEqual([choiceOf('citations'), choiceOf('cards')], ['auto cite', 'on demand'])
+  setOptions({})
+  assert.equal(claudeCites(), true)
+  assert.equal(featureOn('cards'), true)
 })
 
 

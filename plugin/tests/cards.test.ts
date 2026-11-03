@@ -1089,19 +1089,6 @@ test('a card taller than its frame waits for the card check: its frame draws `dr
   expect(asked).toHaveLength(1)
 })
 
-test("in a session without Claude Code's terminal interface (a host that runs it through its SDK, such as the desktop app's Code tab), no screen shows a card: one taller than its frame is not held and no card check runs, and the call says nothing of its size", async ($, on) => {
-  world(on)
-  const { asked } = checker(on, [`${VIEW}\n// failed only`])
-  await $.session.start({ cwd: DATA, surface: null, isInteractive: false } as never)
-  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
-  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_65', ...input } as never)) as Any
-  expect(String(r.result)).toContain('run 42  passed')
-  expect(String(r.result)).not.toContain('rows tall')
-  await settle()
-  expect(asked).toHaveLength(0)
-  expect(elements(await $.ui.render(callRow('toolu_made_up_65', input))).find(n => n.type === 'Client')?.props.props).toMatchObject({ tree: TALL })
-})
-
 test('a replacement that still does not fit draws its first 30 rows and `+N rows`, a click on which opens the rest, with no second check', async ($, on) => {
   world(on)
   const { asked } = checker(on, [`${VIEW}\n// ROWS 35`])

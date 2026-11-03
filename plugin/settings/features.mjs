@@ -7,6 +7,10 @@
 // `options`), so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again
 // with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
 // choiceOf(key) for a mode, when it acts.
+//
+// Where thimble's drawing does not show (core/host.ts says so as the session starts: setDrawn), the features that only
+// the drawing shows act as off (UNDRAWN), whatever the person set: featureOn, choiceOf and the others answer so, and what
+// the person set stays as it is (currentValues).
 
 import { ALIASES, EFFORTS, modelById, modelNamed, modelOf, shownName } from '../core/models.js'
 
@@ -214,9 +218,17 @@ export function settled(values) {
 
 let current = {}
 
+/** Whether thimble's drawing shows in this session: core/host.ts says it as the session starts; until then it shows. */
+let drawn = true
+
 /** The plugin's options, as register(on, options) received them. */
 export function setOptions(options) {
   current = options && typeof options === 'object' ? { ...options } : {}
+}
+
+/** Whether thimble's drawing shows in this session, which core/host.ts reads from the session's start. */
+export function setDrawn(shows) {
+  drawn = shows !== false
 }
 
 /** A feature's value as `values` holds it: a boolean, or for a feature with modes one of its choices; a field missing,
@@ -243,12 +255,18 @@ export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswe
  *  modes now (settings/term.ts settleMinimal). */
 export const OLD_PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
 
+/** The modes that stand where thimble's drawing does not show (core/host.ts drawsHere: the desktop app's Code tab,
+ *  remote Cowork, claude -p): Citations and Cards off, as if the person had set them off, since nothing there draws a
+ *  citation, its check or a card (a citation would read as a raw link, and a card would show nowhere). The person's own
+ *  modes stay as they set them (currentValues), and the terminal acts on them. */
+export const UNDRAWN = { citations: 'off', cards: 'off' }
+
 /** Whether `values` hold a preset's modes: Minimal's, or `preset`. */
 export const atPreset = (values, preset = PRESET) => Object.entries(preset).every(([k, v]) => valueIn(values, k) === v)
 
 /** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
- *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the
- *  plugin's options. */
+ *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the values
+ *  the plugin acts on (acting). */
 export function switchesFrom(values) {
   return key => {
     // c on selected words, a citation the analyst asks for, works in every mode of Citations but off
@@ -260,9 +278,14 @@ export function switchesFrom(values) {
   }
 }
 
+/** The values the features act on now: the person's (the plugin's options), with UNDRAWN's modes over them where
+ *  thimble's drawing does not show. Each answer on what acts now reads these: choiceOf, featureOn, lensesAfterReply,
+ *  minimalOn. */
+const acting = () => (drawn ? current : { ...current, ...UNDRAWN })
+
 /** A feature's mode, for a feature with `choices` (`on demand`); its value as a boolean for any other. */
 export function choiceOf(key) {
-  return valueIn(current, ALIAS[key] ?? key)
+  return valueIn(acting(), ALIAS[key] ?? key)
 }
 
 /** A change the settings pane just made through Claude Code: this activation acts on it at once, while Claude Code
@@ -289,19 +312,20 @@ export function noteSettled() {
  *  each reply runs: while a feature one of whose lenses it serves is on, and in its mode's `auto` when it has one. */
 export function featureOn(key) {
   if (key === 'observer') return SWITCHES.some(s => (s.lenses ?? []).length > 0 && lensesAfterReply(s.key))
-  return switchesFrom(current)(key)
+  return switchesFrom(acting())(key)
 }
 
 /** Whether a feature's lenses join the look after each reply: it is on, and in its `lensesIn` mode when it has one. */
 export function lensesAfterReply(key) {
   const s = BY_KEY.get(ALIAS[key] ?? key)
-  return switchesFrom(current)(key) && (!s?.lensesIn || valueIn(current, s.key) === s.lensesIn)
+  const values = acting()
+  return switchesFrom(values)(key) && (!s?.lensesIn || valueIn(values, s.key) === s.lensesIn)
 }
 
 /** Whether Minimal is on: the modes it set (PRESET) stand. */
-export const minimalOn = () => valueIn(current, 'minimal') === true
+export const minimalOn = () => valueIn(acting(), 'minimal') === true
 
-/** The values this load runs with now, the retired fields' included. */
+/** The values the person set, as this load runs with them, the retired fields' included: never UNDRAWN's modes. */
 export const currentValues = () => ({ ...current })
 
 /** Whether Claude cites its claims (Citations auto cite + verify, or auto cite): main reads the citing guidance, and
