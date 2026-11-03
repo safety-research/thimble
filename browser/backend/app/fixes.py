@@ -1063,10 +1063,10 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     request with their fixes beside it (prompts/thimble-fix.md), as the terminal's /thimble-fix gives Claude
     (plugin/prompts/fix-request.md). Main starts the fix with fix_thimble in the turn that reads it or the next one
     (words_read, main_turn_ended), which takes the words and the page as they were now. Posted as main's event, so words
-    typed while main works wait for its turn's end. A fix's number alone tries a fix that failed or no longer fits again
-    (redo), as its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a try
-    again."""
-    from . import agents, events, prompts  # noqa: PLC0415
+    typed while main works wait for its turn's end, and their line waits in main's chat with them, as a message sent
+    then waits (events.post `command`). A fix's number alone tries a fix that failed or no longer fits again (redo), as
+    its Try again does; with no words otherwise, nothing says what should change. {event}, or {fix} for a try again."""
+    from . import events, prompts  # noqa: PLC0415
 
     words = (words or "").strip()
     if not words:
@@ -1090,9 +1090,10 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     # the words count main's turns from the turn that reads them (words_read): a turn that runs now, and the turns of
     # messages posted before them, are not theirs
     _waiting.setdefault(c, {})[eid] = _Asking(words, page or "")
-    agents.mirror(c, "user", by=agents.BROWSER, text=said, event=eid)
     try:
-        out = events.post(c, events.MAIN, {"text": text}, mirror=False, line=said, event_id=eid)
+        # the line shows in main's chat as the person typed it: at once, or, while main works, waiting until main reads
+        # it at its turn's end, as a message sent while main works waits
+        out = events.post(c, events.MAIN, {"text": text}, mirror=False, line=said, command=said, event_id=eid)
     except HTTPException:
         _waiting.get(c, {}).pop(eid, None)
         raise
