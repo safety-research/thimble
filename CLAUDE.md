@@ -12,7 +12,7 @@ When someone asks you to install thimble, ask what they want, run the install sc
      them, and Claude draws cards of the data; the workbench does the same in a web page on this machine. About 1 GB.
    - **The plugin alone**: only the Claude Code part.
 
-   With the workbench, also ask how it reaches Claude:
+   When they choose the workbench, then ask how it reaches Claude:
    - **Claude Code sign-in** (recommended): it runs Claude Code in the background, on their Claude plan.
    - **API key**: it uses `ANTHROPIC_API_KEY` when that is set, and otherwise asks for a key in its Settings. Never ask
      for the key yourself.

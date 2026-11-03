@@ -27,7 +27,7 @@ Ask Claude Code:
     claude "install thimble from https://github.com/safety-research/thimble"
 
 Claude asks whether you want both products or the plugin alone, and how the workbench reaches Claude, then runs the
-script. Or run it yourself:
+script; its steps are in CLAUDE.md, "Installing thimble for a user". Or run it yourself:
 
     curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
 

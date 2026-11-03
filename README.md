@@ -26,6 +26,8 @@ Ask Claude Code:
 
     claude "install thimble from https://github.com/safety-research/thimble"
 
+Agents installing thimble: follow "Installing thimble for a user" in [CLAUDE.md](CLAUDE.md).
+
 Or install it yourself:
 
     curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash

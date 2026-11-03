@@ -692,6 +692,8 @@ def test_the_readme_and_install_md_give_the_same_command():
     command = "curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash"
     readme = flat("README.md").split("## Installation", 1)[1].split(" ## ", 1)[0]
     assert command in readme and "`thimble update`" in readme and "INSTALL.md" in readme
+    # an installing Claude reads the README first: without this pointer it never read CLAUDE.md's steps
+    assert 'Agents installing thimble: follow "Installing thimble for a user" in [CLAUDE.md](CLAUDE.md).' in readme
     install = flat("INSTALL.md")
     assert command in install
     for section in ("## What you need", "## Install", "## Where things go", "## Update", "## Uninstall",
