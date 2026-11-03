@@ -1016,3 +1016,78 @@ async def test_a_kernel_an_earlier_version_started_is_stopped_rather_than_taken_
         assert _said(cell) == ["43"], cell["outputs"]
     finally:
         await notebook.shutdown_all()
+
+
+# a card's code that makes a chain of folders deeper than Python's recursion limit in its HOME, and another in place of
+# the link of a corpus folder in its working folder (prompts/), as it may
+DEEP_CELL = """
+import os
+def deep(top, n):
+    here = os.getcwd()
+    os.mkdir(top)
+    os.chdir(top)
+    for _ in range(n):
+        os.mkdir('d')
+        os.chdir('d')
+    os.chdir(here)
+deep(os.path.join(os.environ['HOME'], 'made-up'), {n})
+os.unlink('prompts')
+deep('prompts', {n})
+print('deep')
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_a_deep_tree_a_card_leaves_stops_no_later_kernel_start(wrap, monkeypatch, workspaces_tmp):
+    """The server removes an srt kernel's HOME at each start, and in scratch/ a folder under a corpus name that an
+    earlier version's per-file mirror left. Both removals recursed, so a chain of folders deeper than Python's
+    recursion limit that a card's code made there raised RecursionError, which nothing caught: every later start of the
+    kernel failed, and with the chain in scratch/ every kernel of the workspace. Now the removal walks with a stack of
+    its own, the mirror takes a folder for one of its own only when the corpus holds each folder in it, and neither
+    removal fails a start."""
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    monkeypatch.setattr(notebook, "MIRROR_MEMO_S", 0.0)  # every start mirrors the corpus again
+    try:
+        cell = await notebook.run_code("mini", DEEP_CELL.format(n=sys.getrecursionlimit() + 500), "main")
+        assert _said(cell) == ["deep"], cell["outputs"]
+        await notebook.shutdown_all()  # the kernel ends; the next card starts it again
+        again = await notebook.run_code("mini", "print('ran')", "main")
+        other = await notebook.run_code("mini", "print('ran')", "main", kernel="made-up")
+    finally:
+        await notebook.shutdown_all()
+    assert (_said(again), _said(other)) == (["ran"], ["ran"]), (again["outputs"], other["outputs"])
+    prompts = config.workspace_dir("mini") / notebook.SCRATCH_DIR / "prompts"
+    assert prompts.is_dir() and not prompts.is_symlink()  # the card's own, left as it is
+
+
+def test_a_kernel_start_never_depends_on_removing_what_a_card_left(monkeypatch, workspaces_tmp):
+    """The mirror's pass replaces a folder of scratch/ under a corpus name by the corpus folder's link only when it is
+    one an earlier version's per-file mirror left: a link to each file, in folders the corpus holds. A folder the
+    corpus does not hold is the kernel's and stays. Whatever goes wrong in that removal, or in the removal of an srt
+    kernel's HOME, leaves what it could not remove, and the start goes on."""
+    corpus = config.corpus_dir("mini").resolve()
+    scratch = notebook.scratch_dir("mini", fresh=True)
+    (scratch / "prompts").unlink()
+    (scratch / "prompts").mkdir()
+    (scratch / "prompts" / "worker.md").symlink_to(corpus / "prompts" / "worker.md")
+    notebook.mirror_corpus(corpus, scratch)
+    assert (scratch / "prompts").is_symlink()  # an earlier version's mirror goes
+    (scratch / "prompts").unlink()
+    (scratch / "prompts" / "made-up" / "d").mkdir(parents=True)
+    notebook.mirror_corpus(corpus, scratch)
+    assert (scratch / "prompts" / "made-up" / "d").is_dir() and not (scratch / "prompts").is_symlink()
+
+    def fails(*a, **kw):
+        raise RecursionError("made up")
+
+    monkeypatch.setattr(notebook, "_unmirror", fails)
+    (scratch / "README.md").unlink()
+    notebook.mirror_corpus(corpus, scratch)
+    assert (scratch / "README.md").is_symlink() and (scratch / "prompts" / "made-up").is_dir()
+    k = notebook._Kernel("mini", "made-up")
+    (k.home / "kept").mkdir(parents=True)
+    monkeypatch.setattr(notebook.nofollow, "rmtree", fails)
+    notebook._fresh_home(k)
+    assert k.home.is_dir() and not k.home.is_symlink()

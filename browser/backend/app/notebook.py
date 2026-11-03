@@ -144,8 +144,8 @@ def _unmirror(src: Path, fd: int, name: str) -> bool:
     """Whether the real folder `name` in the mirror folder `fd` went, as one the per-file mirror of earlier versions
     left for the corpus folder `src`: a folder for it and for each folder under it, holding nothing but a link to each
     of their files. Such a folder goes, so that the corpus folder's own link can take its place; one that holds
-    anything else, such as a file a cell wrote, is the kernel's and stays as it is. False at once unless both are
-    folders, `name` one of its own and no link."""
+    anything else, such as a file a cell wrote or a folder the corpus does not hold, is the kernel's and stays as it
+    is. False at once unless both are folders, `name` one of its own and no link."""
     if not os.path.isdir(src):
         return False
     try:
@@ -162,6 +162,8 @@ def _unmirror(src: Path, fd: int, name: str) -> bool:
                         return False
                 except OSError:  # not a link: a file a cell wrote
                     return False
+            if not all(os.path.isdir(here / d) for d in dirs if d not in linked):
+                return False  # before the walk enters it, so a deep tree a cell made is never walked
     except OSError:
         return False
     finally:
@@ -175,6 +177,16 @@ def _unmirror(src: Path, fd: int, name: str) -> bool:
     except OSError:
         pass
     return False
+
+
+def _cleared(src: Path, fd: int, name: str) -> bool:
+    """_unmirror, which never fails the mirror's pass, and so no kernel's start: whatever goes wrong in what the kernel
+    left there leaves the entry as it is."""
+    try:
+        return _unmirror(src, fd, name)
+    except Exception:  # noqa: BLE001
+        log.warning("scratch mirror: %s was left as it is", name, exc_info=True)
+        return False
 
 
 def _mirror_folder(src: Path, fd: int, names: list[str], links: frozenset[str]) -> None:
@@ -191,7 +203,7 @@ def _mirror_folder(src: Path, fd: int, names: list[str], links: frozenset[str]) 
         if name in links and not os.path.exists(target):
             continue
         is_link = have.get(name)
-        if is_link is False and not _unmirror(target, fd, name):
+        if is_link is False and not _cleared(target, fd, name):
             continue  # a real entry the kernel made under a corpus name: left as it is
         if is_link:
             try:
@@ -2783,9 +2795,18 @@ def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str
 
 
 def _fresh_home(k: _Kernel) -> None:
-    """The kernel's HOME for srt (k.home), empty: what a cell left there does not reach the next start."""
-    nofollow.rmtree(k.home, ignore_errors=True)
+    """The kernel's HOME for srt (k.home), empty: what a cell left there does not reach the next start. A removal that
+    fails, whatever the cell left there, leaves what it could not remove and never fails the start."""
+    _drop_home(k)
     os.close(nofollow.own_folder(k.home))
+
+
+def _drop_home(k: _Kernel) -> None:
+    """The kernel's HOME under srt removed, as nofollow removes a tree; what could not be removed stays, logged."""
+    try:
+        nofollow.rmtree(k.home, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        log.warning("kernel %s of %s: its HOME %s was not removed", k.key, k.workspace, k.home, exc_info=True)
 
 
 LEASE_TRIES = 20  # _hold_lease: 50 ms apart, so a watchdog's own probe (lock, unlock) never costs the server the lease
@@ -2989,7 +3010,7 @@ async def _kill(k: _Kernel) -> None:
         await asyncio.to_thread(_terminate, pid, pgid or pid, k.conn, ours)
     _release_lease(k, drop=True)
     _drop_files(k.record, k.conn)
-    await asyncio.to_thread(nofollow.rmtree, k.home, ignore_errors=True)
+    await asyncio.to_thread(_drop_home, k)
 
 
 async def shutdown_kernel(workspace: str, kernel: str | None = None) -> None:

@@ -400,24 +400,37 @@ def own_folder(path: PathLike, *, root: PathLike | None = None, mode: int = 0o70
 
 def rmtree_at(fd: int, name: str) -> None:
     """The entry `name` of the folder `fd` removed: a folder with all it holds, a link as a link, without following a
-    link inside it. Nothing when it is missing."""
+    link inside it. Nothing when it is missing. The walk keeps a stack of its own steps rather than recurse, so a tree
+    of any depth goes, one deeper than Python's recursion limit too, which sandboxed code can make; it holds a
+    descriptor of each folder on the way down to the one it empties."""
+    stack: list[tuple[str, int, str]] = [("walk", fd, name)]  # (step, folder, entry), the next step last
     try:
-        sub = os.open(name, DIR_FLAGS, dir_fd=fd)
-    except FileNotFoundError:
-        return
-    except OSError as e:
-        if e.errno not in _LINKED:
-            raise
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(name, dir_fd=fd)
-        return
-    try:
-        for entry in os.listdir(sub):
-            rmtree_at(sub, entry)
+        while stack:
+            step, at, entry = stack.pop()
+            if step == "close":
+                os.close(at)
+                continue
+            if step == "rmdir":
+                with contextlib.suppress(FileNotFoundError):
+                    os.rmdir(entry, dir_fd=at)
+                continue
+            try:
+                sub = os.open(entry, DIR_FLAGS, dir_fd=at)
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                if e.errno not in _LINKED:
+                    raise
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(entry, dir_fd=at)  # a file, or a link as a link
+                continue
+            stack += [("rmdir", at, entry), ("close", sub, entry)]  # once all it holds is gone
+            stack += [("walk", sub, child) for child in os.listdir(sub)]
     finally:
-        os.close(sub)
-    with contextlib.suppress(FileNotFoundError):
-        os.rmdir(name, dir_fd=fd)
+        for step, at, _ in stack:
+            if step == "close":
+                with contextlib.suppress(OSError):
+                    os.close(at)
 
 
 def rmtree(path: PathLike, *, root: PathLike | None = None, ignore_errors: bool = False) -> None:
