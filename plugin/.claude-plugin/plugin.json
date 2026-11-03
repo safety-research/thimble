@@ -12,7 +12,7 @@
     "minimal": {
       "type": "boolean",
       "title": "Minimal",
-      "description": "Plain answers: citations, explainers and heads-ups show only while the pointer is over their paragraph, and Claude draws cards only when you ask. Rewrite, Catch-up, Claims, Labels and Coverage are off.",
+      "description": "Citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.",
       "default": false
     },
     "citations": {

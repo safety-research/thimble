@@ -1,10 +1,13 @@
 // The whole hooks module in one session: it loads, a session starts with the plugin's bin/ first on the PATH
 // (hooks/path.ts), a prompt goes through, and the line above the prompt draws, with a failure line on it, without
-// throwing. All data is made up. `claude plugin test plugin`.
+// throwing. The hooks module registers no classic hook: a plugin that Claude Code runs before thimble can send a classic
+// event on past thimble's hook, and Claude Code then tells the person that thimble's hook was skipped. All data is made
+// up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { labelsDirOf } from '../core/layout.mjs'
 import { binFirst } from '../hooks/path'
+import { register } from '../hooks/register'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,4 +66,16 @@ test('the module loads, a session starts, a prompt goes through, and the bar dra
   const line = textOf(await $.ui.render(BAND))
   expect(line).toContain('thimble')
   expect(line).toContain('× ')
+})
+
+test("the hooks module registers no classic hook of any kind (no classic.* event), so no plugin that Claude Code runs first can skip one of thimble's and make Claude Code say so", () => {
+  const events: string[] = []
+  const on: Any = (event: string) => {
+    events.push(event)
+    const reg: Any = { catch: () => reg }
+    return reg
+  }
+  register(on, {} as never)
+  expect(events.length).toBeGreaterThan(0)
+  expect(events.filter(e => e.startsWith('classic.'))).toEqual([])
 })
