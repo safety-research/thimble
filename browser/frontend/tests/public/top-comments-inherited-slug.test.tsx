@@ -28,7 +28,7 @@ beforeEach(() => {
     constructor: { exists: true, renderer: 'document', name: 'Constructor' },
   }
   const docs: Record<string, unknown> = { report: { title: 'R', sections: [], comments: [note('m1', 's1')] } }
-  docs.constructor = { title: 'C', sections: [], comments: [note('c1', 's1')] }
+  docs['constructor'] = { title: 'C', sections: [], comments: [note('c1', 's1')] }
   vi.stubGlobal('fetch', async (url: string) => {
     const u = String(url)
     if (u.endsWith('/investigations/main/types')) return json(types)
