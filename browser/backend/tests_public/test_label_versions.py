@@ -1,8 +1,10 @@
 """B19: a citation of a label's counts is checked against the label as it was when the cited words were written, from
 the versions thimble keeps of it outside the workspace (label_versions), never as the label is now; and no change of the
 label's files, store or rows in the workspace, which a card's code can write, nor a version named by the check, makes a
-false count verify. The fork is replaced here; the labels, the marks, the validator and the records are real, on the
-suite's made-up mini corpus (board.jsonl: 8 posts, "forge pr claim" in 3 of them). The tests named after an attack
+false count verify. A label makes no card: the check lists each label of the workspace as the terminal lists its labels,
+`card:label-<label id>` (marks.session_cards), and a label card an older thimble made reads the same versions under its
+own id. The fork is replaced here; main's apply_label, the labels, the marks, the validator and the records are real, on
+the suite's made-up mini corpus (board.jsonl: 8 posts, "forge pr claim" in 3 of them). The tests named after an attack
 (P…, S…) are the attacks that broke the earlier designs (r108-labelcite rounds 1 and 2)."""
 from __future__ import annotations
 
@@ -15,18 +17,34 @@ from test_marks import CORPUS, SID, _answer, _fresh, _log, _main_at, _seed_card,
 
 from app import cite, config, label_versions, marks
 
-KW = dict(scope="files", values=["yes", "no"], paths=["board.jsonl"], comment=False, filter=False, created_by="main",
-          chat=None, group=None, question="Which posts claim a PR?")
 NAME = "claims a PR"
+TITLE = f"label {NAME}"  # the label's heading in the checker's file, as the terminal titles its labels
 
 
 async def _apply(text: str, limit: int | None, name: str = NAME) -> dict:
-    """A regex label of the board's posts, run as the server runs it (a trial with a limit), and its run waited for."""
-    from app import concepts
+    """A regex label of the board's posts, applied as main applies it (apply_label, a trial with a limit), which makes
+    no card, and its run waited for: {concept, cell}, the label's id and the id the check cites it by."""
+    from app import concepts, tools
 
-    s = await concepts.apply_scoped(CORPUS, name=name, kind="regex", text=text, limit=limit, **KW)
-    await concepts.wait_apply(CORPUS, s["concept"], 60)
-    return s
+    args = {"scope": "files", "name": name, "predicate": {"kind": "regex", "text": text}, "values": ["yes", "no"],
+            "paths": ["board.jsonl"], **({"limit": limit} if limit else {})}
+    r = await tools.call(CORPUS, "apply_label", args)
+    assert not r.is_error and "card:" not in r.text, r.text
+    kid = concepts.find_concept(config.workspace_dir(CORPUS), name)["id"]
+    await concepts.wait_apply(CORPUS, kid, 60)
+    return {"concept": kid, "cell": marks.LABEL_PLACE + kid}
+
+
+def _older_card(kid: str, title: str = "Which posts claim a PR?") -> str:
+    """A label card of label `kid`, as an older thimble made one when it applied the label; its id."""
+    from app import notebook
+
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "older", role="exploration")
+    cell = notebook.new_cell("label", "main", title, nb["id"], payload={"concept": kid})
+    nb["cells"].append(cell)
+    notebook.write_notebook(ws, nb)
+    return cell["id"]
 
 
 def _newest(kid: str) -> dict:
@@ -67,7 +85,7 @@ async def _check(texts: list[str], answer, during=None, calls=(), seen: list[str
 
 def _trial_then_redefined():
     """The case of the report: a trial over 4 posts, then main redefines the label in its own turn, which drops the
-    trial's rows, before it writes its reply. (label id, card id, the trial's version)."""
+    trial's rows, before it writes its reply. (label id, the id the check cites the label by, the trial's version)."""
     async def go():
         from app import concepts
 
@@ -103,9 +121,10 @@ def test_a_trial_s_counts_hold_against_the_trial_after_main_redefined_the_label_
     # the label as it was when the reply was written had no trial count
     assert (m2["status"], m2["failedBy"]) == ("failed", "evidence"), m2
     index = listed[0]
-    assert (f"# card:{cid} Which posts claim a PR? (as it was when the cited words were written; made by: redefined)\n"
+    assert cid == f"label-{kid}"
+    assert (f"# card:{cid} {TITLE} (as it was when the cited words were written; made by: redefined)\n"
             f"card:{cid}@out0\ta table of 3 rows: value, records, share\n{_place(cid, 'yes')}\t0\n") in index, index
-    assert (f"# card:{cid}@v{trial['v']} Which posts claim a PR? (an earlier version; made by: run over 4 records; it changed "
+    assert (f"# card:{cid}@v{trial['v']} {TITLE} (an earlier version; made by: run over 4 records; it changed "
             f"after: redefined)\ncard:{cid}@v{trial['v']}@out0\ta table of 3 rows: value, records, share\n"
             f"{_place(cid, 'yes', trial['v'])}\t{yes}\n") in index, index
     assert "run over 8" not in index
@@ -267,9 +286,9 @@ def test_p2_s8_a_trial_s_count_beside_a_later_total_confirms_nothing(_fresh, mon
     assert (m["status"], m["failedBy"]) == ("failed", "evidence"), m
 
 
-def test_p3_s4_s5_a_deleted_label_s_card_is_no_card_and_its_undo_brings_its_versions_back(_fresh, monkeypatch):
-    """P3: a label deleted after the reply is no evidence: its card is gone, and the failure says so plainly, never that
-    the label only changed. S4: a label of the same name made again is another label, with a card of its own. S5: Undo
+def test_p3_s4_s5_a_deleted_label_is_no_place_and_its_undo_brings_its_versions_back(_fresh, monkeypatch):
+    """P3: a label deleted after the reply is no evidence: its place is gone, and the failure says so plainly, never that
+    the label only changed. S4: a label of the same name made again is another label, with a place of its own. S5: Undo
     of the delete brings the label back with the versions thimble kept, so the trial's citation verifies again."""
     from app import concepts, undo
 
@@ -289,9 +308,9 @@ def test_p3_s4_s5_a_deleted_label_s_card_is_no_card_and_its_undo_brings_its_vers
     assert any("is flagged as not confirmed" in t for t in told) and not any("changed since" in t for t in told), told
     again = asyncio.run(_apply("(?i)claim", 4))
     assert again["concept"] != kid and again["cell"] != cid
-    undo.undo(CORPUS)  # the trial of the second label
-    undo.undo(CORPUS)
-    if concepts.read_concept(config.workspace_dir(CORPUS), kid) is None:
+    for _ in range(3):  # the steps of the second label, if any, then the delete
+        if concepts.read_concept(config.workspace_dir(CORPUS), kid) is not None:
+            break
         undo.undo(CORPUS)
     assert concepts.read_concept(config.workspace_dir(CORPUS), kid) is not None, "Undo brought the label back"
     (m,), _ = asyncio.run(_check(text, [_item(refs)]))
@@ -363,25 +382,30 @@ def test_p8_a_version_of_a_card_that_keeps_none_names_no_place_and_the_checker_s
     assert (m["status"], m["reason"]) == ("failed", "The card has no version 1."), m
 
 
-def test_a_takeaway_on_a_label_card_is_read_at_its_check_and_its_repair_at_that_same_time(_fresh, monkeypatch):
+@pytest.mark.parametrize("older", [False, True])
+def test_a_takeaway_citing_a_label_is_read_at_its_check_and_its_repair_at_that_same_time(_fresh, monkeypatch, older):
     """A card's takeaway is checked as its write lands, against the label as it was then; a repair of it later reads
-    the label at that same time, whatever ran since."""
+    the label at that same time, whatever ran since. The takeaway is a card's that cites the label's places, or, from
+    an older thimble, the takeaway of the label's own card, which cites that card's places."""
     from app import notebook
+    from test_marks import TABLE
 
     s = asyncio.run(_apply("forge pr claim", 4))
-    kid, cid = s["concept"], s["cell"]
+    kid = s["concept"]
     trial = _newest(kid)
     yes, n = trial["counts"].get("yes", 0), trial["n"]
-    notebook.edit_cell(CORPUS, cid, takeaway=f"[{yes} of the {n}](#) posts in the trial claim a PR.")
+    card = _older_card(kid) if older else _seed_card("", [TABLE])
+    cited = card if older else s["cell"]
+    notebook.edit_cell(CORPUS, card, takeaway=f"[{yes} of the {n}](#) posts in the trial claim a PR.")
     _main_at(monkeypatch, "cut-1")
-    refs = [_place(cid, "yes"), _place(cid, "all")]
+    refs = [_place(cited, "yes"), _place(cited, "all")]
 
     async def first():
         main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
 
         async def fork(c, main, cut, prompt):
             return {"answer": _answer([_item(refs, "unconfirmed", reason="not sure")]), "calls": [], "error": None}
-        await marks.start_check(CORPUS, main, marks.new_turn(), [], "cut-1", fork=fork, cards={cid})
+        await marks.start_check(CORPUS, main, marks.new_turn(), [], "cut-1", fork=fork, cards={card})
         await _wait_all()
     repair_now = marks.repair
     monkeypatch.setattr(marks, "repair", _no_repair)
@@ -398,11 +422,49 @@ def test_a_takeaway_on_a_label_card_is_read_at_its_check_and_its_repair_at_that_
     async def repair():
         async def fork(c, main, cut, prompt):
             return {"answer": _answer([_item(refs, "verified")]), "calls": [], "error": None}
-        assert await marks.repair(CORPUS, card=cid, k=0, fork=fork) == ""
+        assert await marks.repair(CORPUS, card=card, k=0, fork=fork) == ""
         await _wait_all()
     asyncio.run(repair())
-    (m,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
-    assert m["status"] == "verified" and m["evidence"]["version"] == trial["v"], m
+    (m,) = notebook.get_cell(CORPUS, card)["takeaway_marks"]["items"]
+    assert m["status"] == "verified" and (m["evidence"]["card"], m["evidence"]["version"]) == (cited, trial["v"]), m
+
+
+def test_an_older_thimble_s_label_card_reads_its_label_s_versions_and_the_check_lists_the_label_once(_fresh, monkeypatch):
+    """A label card an older thimble made keeps working: a citation of its places reads its label's versions, as the
+    label was when the words were written or an earlier one by `@v<n>`, judged as the label's own places are, so a
+    false count by the card fails, and so does the card's trial beside the label as it is now. The checker's file lists
+    the label once, by its own id, and not the card: the card adds no second set of versions."""
+    async def go():
+        s = await _apply("forge pr claim", 4)
+        trial = _newest(s["concept"])
+        await _apply("(?i)claim", None)
+        return s, trial
+    s, trial = asyncio.run(go())
+    kid, place = s["concept"], s["cell"]
+    old = _older_card(kid)
+    full = _newest(kid)
+    _main_at(monkeypatch, None)  # no repair: what the first check found stands
+    yes, n = trial["counts"]["yes"], trial["n"]
+    assert full["n"] != n and full["counts"]["yes"] != yes
+    trial_refs = [_place(old, "yes", trial["v"]), _place(old, "all", trial["v"])]
+    listed: list[str] = []
+    reply = [f"In the trial, [{yes} of the {n}](#) posts claimed a PR.", f"By another count, [{yes + 1} of the {n}](#) did.",
+             f"Of all the posts, [{yes} of the {full['n']}](#) did."]
+    answer = [_item(trial_refs), _item(trial_refs, mark=2), _item([_place(old, "yes", trial["v"]), _place(place, "all")], mark=3)]
+    (m1, m2, m3), _ = asyncio.run(_check(reply, answer, listed=listed))
+    assert m1["status"] == "verified" and (m1["evidence"]["card"], m1["evidence"]["version"]) == (old, trial["v"]), m1
+    assert (m2["status"], m2["failedBy"]) == ("failed", "evidence"), m2
+    assert (m3["status"], m3["failedBy"], m3["reason"]) == (
+        "failed", "evidence", "The cited cards never showed these values at one time."), m3
+    index = listed[0]
+    assert f"# card:{place} {TITLE} (as it was when the cited words were written; " in index and old not in index, index
+    assert index.count(f"@v{trial['v']}@out0\t") == 1, index
+    # the card's entries are its label's, under the card's own id, and the file leaves them out
+    cards = marks.session_cards(CORPUS)
+    mine = [{k: v for k, v in x.items() if k not in ("id", "title", "listed")} for x in cards if x["id"] == old]
+    its = [{k: v for k, v in x.items() if k not in ("id", "title")} for x in cards if x["id"] == place]
+    assert mine == its and len(its) == len(label_versions.read(CORPUS, kid))
+    assert all(x.get("listed") is False for x in cards if x["id"] == old) and not any("listed" in x for x in cards if x["id"] == place)
 
 
 async def _no_repair(*a, **k):
@@ -481,26 +543,35 @@ async def test_a_card_s_code_can_neither_read_nor_write_the_versions(wrap, _fres
         await notebook.shutdown_all()
 
 
-def test_a_second_card_of_a_label_card_s_id_adds_no_other_label_s_versions_under_it(_fresh, monkeypatch):
-    """A cell written into the canvas's files with a label card's id, showing another label (a card's code can write
-    those files): the card is read once, by the first cell of its id, so the versions under it are one label's, never
-    two labels' mixed into a history neither had."""
+def test_a_cell_written_with_a_label_s_id_or_a_label_card_s_adds_no_other_versions_under_it(_fresh, monkeypatch):
+    """Cells written into the canvas's files (a card's code can write those files) with a label's id in the check, a
+    table that claims other counts and a label card of another label, add nothing under the label: no card's id is a
+    label's. One written with the id of a label card an older thimble made, showing another label, leaves that card
+    read once, by the first cell of its id, so the versions under it are one label's, never two labels' mixed into a
+    history neither had."""
     from app import notebook
+    from test_marks import TABLE
 
     async def two():
         a = await _apply("forge pr claim", 4)
         b = await _apply("(?i)review", None, name="asks for a review")
         return a, b
     a, b = asyncio.run(two())
+    old = _older_card(a["concept"])
     ws = config.workspace_dir(CORPUS)
     nb = notebook.create_notebook(ws, "planted", role="exploration")
-    nb["cells"].append({**notebook.new_cell("label", "main", "planted", nb["id"], payload={"concept": b["concept"]}), "id": a["cell"]})
+    table = {**notebook.new_cell("code", "run", "planted", nb["id"], code="print()"), "id": a["cell"], "status": "ok",
+             "outputs": [TABLE]}
+    other = {**notebook.new_cell("label", "main", "planted", nb["id"], payload={"concept": b["concept"]})}
+    nb["cells"] += [table, {**other, "id": a["cell"]}, {**other, "id": old}]
     notebook.write_notebook(ws, nb)
-    mine = [x for x in marks.session_cards(CORPUS) if x["id"] == a["cell"]]
-    tables = {json.dumps(x["outputs"]) for x in mine}
-    one = [{json.dumps(marks._version_outputs(v)) for v in label_versions.read(CORPUS, k)}
-           for k in (a["concept"], b["concept"])]
-    assert len({x["title"] for x in mine}) == 1 and tables in one, mine
+    cards = marks.session_cards(CORPUS)
+    one = [[json.dumps(marks._version_outputs(v)) for v in label_versions.read(CORPUS, k)] for k in (a["concept"], b["concept"])]
+    label = [x for x in cards if x["id"] == a["cell"]]
+    assert [json.dumps(x["outputs"]) for x in label] == one[0] and {x["title"] for x in label} == {TITLE}, label
+    card = [x for x in cards if x["id"] == old]
+    assert len({x["title"] for x in card}) == 1 and [json.dumps(x["outputs"]) for x in card] in one, card
+    assert not any(TABLE["text/html"] in json.dumps(x) for x in cards if x["id"] in (a["cell"], old))
 
 
 def test_a_count_of_a_label_s_values_reads_the_version_the_words_could_read(_fresh, monkeypatch):

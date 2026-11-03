@@ -1,6 +1,7 @@
-"""Label versions (B19): what each label's card showed after each change of the label, with when thimble kept it, so a
-citation of a label is checked against the label as it was when the cited words were written, never as it is now
-(marks.session_cards gives the validator every version, and evidence.check_card reads them at that time).
+"""Label versions (B19): what each label showed (its counts, as concepts.card_values reads them) after each change of
+the label, with when thimble kept it, so a citation of a label is checked against the label as it was when the cited
+words were written, never as it is now (marks.session_cards gives the validator every version, as the place
+`card:label-<label id>`, and evidence.check_card reads them at that time).
 
     <home>/label-versions/<workspace>/<label id>.jsonl   one label's versions, oldest first, one per line:
                                                           {v, at, made, values, counts, n, unit}
@@ -13,11 +14,11 @@ neither can add, change or remove a version or a time. The label's own files (it
 the workspace, which a card's code writes (kernel_wrap): a change to them changes no version kept before it, and the
 check reads a label only through its versions.
 
-When. A version is kept (keep) of what the label's card shows (concepts.card_values) by the step of thimble's that
+When. A version is kept (keep) of what the label shows (concepts.card_values) by the step of thimble's that
 changed the label's rows, right after it: a run's end, a redefinition, a correction, its Undo. Never from
 what the label's files show when no such step changed them: those files are the workspace's, which a card's code can
 write. A label from before thimble kept versions gets its first one as it stands, before main's next turn (keep_first).
-A version is kept only when what the card shows differs from the newest one. When the card shows other counts than its
+A version is kept only when what the label shows differs from the newest one. When the label shows other counts than its
 newest version and no step kept them (shows_other), the check reads that version as no longer shown, but keeps none.
 
 What a version is evidence of. It shows its values from when it was made until the next one was. The validator takes
@@ -50,7 +51,7 @@ ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")  # a label's id (concepts.ID_RE)
 # what made a version that no change of the label made: a label from before thimble kept versions, kept as it stood
 FIRST = "the label as thimble first kept it"
 RESTORED = "brought back by Undo"  # a deleted label's Undo (concepts.restore_concept)
-# what changed after a label's newest version when its card shows other counts and no step of thimble's kept them
+# what changed after a label's newest version when it shows other counts and no step of thimble's kept them
 CHANGED = "its counts changed"
 CORRECTED = re.compile(r"^(\d+) values? corrected$")
 _lock = threading.Lock()
@@ -107,7 +108,7 @@ def _shows(v: dict[str, Any]) -> tuple:
 
 
 def keep(c: str, concept: dict[str, Any], made: str, shown: dict[str, Any] | None = None) -> dict[str, Any] | None:
-    """Keep what label `concept`'s card shows now (concepts.card_values, or `shown`) as its next version, made by
+    """Keep what label `concept` shows now (concepts.card_values, or `shown`) as its next version, made by
     `made` (what changed, in the words of the label's stale tag), unless its newest version shows the same. The newest
     version, or None when the label's counts cannot be read now. Never raises: a version not kept leaves the label's
     citations as not confirmed, never as confirmed."""
@@ -152,8 +153,8 @@ def keep_first(c: str) -> None:
 
 
 def shows_other(c: str, concept: dict[str, Any], newest: dict[str, Any]) -> bool:
-    """Whether the label's card shows other counts now than its newest version, with no step of thimble's having kept
-    them: then that version is shown no longer, though no version holds what the card shows. Never raises."""
+    """Whether the label shows other counts now than its newest version, with no step of thimble's having kept them:
+    then that version is shown no longer, though no version holds what the label shows. Never raises."""
     from . import concepts  # noqa: PLC0415
 
     try:

@@ -21,12 +21,12 @@ The same predicate again: re-applying a label with the same definition (same_def
 and runs only over what its rows do not cover (covered).
 Within: a label over records may run only over the records another label gave one value (`within {label, value}`, kept
 on the concept), such as a prompt label over the few records a regex or code label kept in a large corpus.
-The analyst's labels: a label run from the browser gets a card and main hears of it (`labeled`, tell_main) once per
-version. A label that ran before without a card (such as the orientation's) keeps having none.
+The analyst's labels: main hears of a label run from the browser (`labeled`, tell_main) once per version. A label makes
+no card; a workspace keeps the label cards an older thimble made (_label_cards).
 Revisions: `rev` counts changes to a label's rows (redefinition, correction, a finished run; note_change). A card that
 read an older revision than the label's is stale (stale_in). Each such change, and the Undo of a delete, keeps what the
-label's card shows as a version outside the workspace (card_values, label_versions.keep), which the citation check reads
-a label through, as it was when the cited words were written (marks.session_cards). When a run of a label ends, not stopped, or a moment after
+label shows as a version outside the workspace (card_values, label_versions.keep), which the citation check reads a
+label through, as it was when the cited words were written (marks.session_cards). When a run of a label ends, not stopped, or a moment after
 the analyst's last correction of it (rerun_after_verdicts), thimble runs every card that read it again (rerun_readers),
 and main hears which of them it should write a takeaway for again
 (`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
