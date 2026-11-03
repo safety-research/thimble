@@ -402,8 +402,9 @@ def _reads_around(reads: list[str], writes: list[Path], denied: set[str]) -> lis
     """`reads` with each folder that holds a write root given as its entries off the way to it, level by level. On
     Linux srt binds a hidden folder's write roots back before its allowed reads, so a read root that holds a write root
     (the workspace, under a hidden /home or /mnt) went back read-only over it, and Bash could write none of the agent's
-    folders. The write roots are read roots of their own; an entry denied by name stays out. A folder on the way is
-    srt's empty stand-in, so what a command writes there never reaches the disk."""
+    folders. The write roots are read roots of their own; an entry denied by name stays out, and so does one whose
+    real path leaves its folder (_entries_around). A folder on the way is srt's empty stand-in, so what a command
+    writes there never reaches the disk."""
     out: list[str] = []
     for r in reads:
         inside = [w for w in writes if Path(r) in w.parents]
@@ -412,12 +413,19 @@ def _reads_around(reads: list[str], writes: list[Path], denied: set[str]) -> lis
 
 
 def _entries_around(folder: Path, writes: list[Path], denied: set[str]) -> list[str]:
+    """_reads_around's entries of `folder`. An entry whose real path is not its own place in `folder`, a link such as
+    one a card's code or a command left in the workspace, is none, nor are the entries below it: srt binds a link by
+    its target, so the rule would let Bash read the folder it points to outside, or put a folder of the workspace back
+    read-only over a write root. A link to a folder of the workspace loses nothing: that folder has its own rule."""
     try:
         entries = sorted(folder.iterdir())
     except OSError:
         return []
+    real = os.path.realpath(folder)
     out: list[str] = []
     for e in entries:
+        if os.path.realpath(e) != os.path.join(real, e.name):
+            continue
         below = [w for w in writes if e == w or e in w.parents]
         if not below:
             out += [] if str(e) in denied else [str(e)]

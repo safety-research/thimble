@@ -137,3 +137,28 @@ async def test_main_s_tools_never_go_through_a_link_a_card_swaps_in_while_they_r
     assert not landed and not seen, (landed[:5], seen[:3])
     assert (outside / "secret.txt").read_text() == "OUTSIDE-SECRET"
 
+
+async def test_main_s_bash_reads_no_folder_a_link_a_card_left_in_the_workspace_leads_to(workspaces_tmp,
+                                                                                       tmp_path_factory):
+    """On Linux main's Bash on the Messages API reads the workspace through a read rule for each of its entries off the
+    way to its write folders (runtime_tools._reads_around), links among them, and srt binds a link by its target: a
+    link a card's code left in the workspace let main's Bash read the folder it points to. Now an entry whose real path
+    is not its own place in its folder gets no rule, so neither does a link to a folder of the workspace, which would
+    have put a write folder back read-only."""
+    if runtime_tools.sandbox_reason():
+        pytest.skip("srt can't sandbox a process here")
+    ws, corpus, temp = config.workspace_dir("mini"), config.corpus_dir("mini"), config.temp_dir("mini")
+    (ws / "card-libs").mkdir(exist_ok=True)
+    outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
+    (outside / "secret.txt").write_text("OUTSIDE-SECRET\n")
+    (ws / "made-up-planted").symlink_to(outside, target_is_directory=True)
+    (ws / "made-up-self").symlink_to(ws, target_is_directory=True)
+    (ws / "made-up-inside").symlink_to(ws / "card-libs", target_is_directory=True)
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[ws / "card-libs", temp],
+                            temp=temp)
+    reads = runtime_tools._rules(box)["filesystem"]["allowRead"]
+    if sys.platform != "darwin":
+        assert not {str(ws / n) for n in ("made-up-planted", "made-up-self", "made-up-inside")} & set(reads)
+    out = await runtime_tools.call(box, "Bash", {"command": f"cat {ws}/made-up-planted/secret.txt 2>&1; "
+                                                            f"echo w > {ws}/card-libs/own.txt && cat {ws}/card-libs/own.txt"})
+    assert "OUTSIDE-SECRET" not in out.text and out.text.splitlines()[-1] == "w", out.text
