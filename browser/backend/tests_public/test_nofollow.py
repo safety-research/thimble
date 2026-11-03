@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -163,3 +164,70 @@ def test_main_s_conversation_state_is_read_through_no_link_left_in_its_place(tmp
     state.parent.mkdir(parents=True)
     state.symlink_to(outside / "made-up.json")
     assert runtime_api._load(state) == []
+
+
+def _writer_after(fifo: Path, wait_s: float, seen: dict) -> None:
+    """The test's own way out of a read held on `fifo`: after `wait_s`, a writer opens it, so the read sees its end, and
+    `seen` notes that it had to."""
+    def run() -> None:
+        time.sleep(wait_s)
+        try:
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:  # no reader held on it
+            return
+        seen["released"] = True
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+async def test_a_fifo_a_card_puts_at_the_event_log_holds_no_emit(tmp_path_factory):
+    """investigation.emit runs on the server's one event loop, and to number the next event it read the tail of
+    investigations/main/events.jsonl by its path, after the server's first emit for the workspace: a FIFO a card's code
+    put there held the loop, and every workspace, request and session with it, until a writer came."""
+    from app import investigation
+
+    investigation.emit(CORPUS, investigation.MAIN, {"type": "made-up"})
+    log = investigation.inv_dir(CORPUS, investigation.MAIN) / "events.jsonl"
+    log.unlink()
+    os.mkfifo(log)
+    seen: dict = {}
+    _writer_after(log, 3.0, seen)
+    investigation.emit(CORPUS, investigation.MAIN, {"type": "made-up"})
+    assert not seen, "the emit waited on the card's FIFO until a writer came"
+
+
+def test_the_event_log_s_readers_read_no_fifo_and_no_link_a_card_left_as_the_log(tmp_path_factory):
+    """The event stream reads the log whole on a reopen, its tail every few seconds for another process's events, and
+    the log's id from investigation.json, each by its path: a FIFO a card's code put there held the reader, and a link
+    had the server stream the file it points to as the workspace's events."""
+    from app import investigation
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.jsonl").write_text(json.dumps({"seq": 7, "type": "OUTSIDE-SECRET"}) + "\n")
+    (outside / "made-up.json").write_text(json.dumps({"created": "OUTSIDE-SECRET"}))
+    d = investigation.ensure_main(CORPUS)
+    log, meta = d / "events.jsonl", d / "investigation.json"
+    meta.unlink()
+    for path, target in ((log, outside / "made-up.jsonl"), (meta, outside / "made-up.json")):
+        path.symlink_to(target)
+    assert investigation._read_jsonl(log) == []
+    assert investigation._read_jsonl_after(log, 0) == ([], 0)
+    assert investigation._last_stored_seq(log) == -1
+    assert investigation.log_id(CORPUS) == ""
+    for path in (log, meta):
+        path.unlink()
+        os.mkfifo(path)
+    got: dict = {}
+    readers = {"whole": lambda: investigation._read_jsonl(log), "after": lambda: investigation._read_jsonl_after(log, 0),
+               "tail": lambda: investigation._last_stored_seq(log), "id": lambda: investigation.log_id(CORPUS)}
+    threads = [threading.Thread(target=lambda k=k, f=f: got.__setitem__(k, f()), daemon=True) for k, f in readers.items()]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(3.0)
+    for path in (log, meta):  # a reader still held on a FIFO sees its end and goes
+        try:
+            os.close(os.open(path, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+    assert got == {"whole": [], "after": ([], 0), "tail": -1, "id": ""}
