@@ -1083,8 +1083,9 @@ def test_a_count_of_a_card_s_rows_names_its_table_and_condition_and_thimble_coun
 def test_a_count_fails_when_the_rows_do_not_give_it_or_the_sentence_does_not_state_its_condition():
     """B20, the verifier's attacks in the new form (made-up nightly runs): a count the rows do not give, a condition
     the sentence does not state (a bound, a value that only the count's own number shows, a value of another column), a
-    number of the words that is neither the count nor the condition's, an average of 4.6 or a share of 0.6 that rounds
-    to the words, `of` that picks the counted rows themselves, and evidence thimble cannot read each fail, with why."""
+    number of the words that is neither the count nor the condition's, a count the words put under a bound it does not
+    meet, an average of 4.6 or a share of 0.6 that rounds to the words, `of` that picks the counted rows themselves, a
+    column every row meets that the sentence does not name, and evidence thimble cannot read each fail, with why."""
     def why(words: str, cond: dict, sentence: str | None = None, **more) -> str:
         r = counted(words, {"ref": "card:e8d2b6f4@out0", "count": cond, **more}, NIGHTLY, sentence)
         assert (r["status"], r["failedBy"]) == ("failed", "evidence"), (words, cond, r)
@@ -1107,6 +1108,19 @@ def test_a_count_fails_when_the_rows_do_not_give_it_or_the_sentence_does_not_sta
     assert why("5 of the 9 services failed on more than 3 nights", {"nights_failed": {">=": 3}}) == (
         "The check counts the rows with nights_failed at least 3, which the sentence does not say.")
     assert why("3 of the 9 services failed on all 5 nights in 2026", five) == "The words' 2026 is neither the count nor a value of its condition."
+    assert why("more than 3 of the 9 services failed on all 5 nights", five) == "The card's table has 3 rows with nights_failed 5, not over 3."
+    assert why("almost 4 of the 9 services failed on all 5 nights", five) == (
+        "The card's table has 3 rows with nights_failed 5, and the words give no exact number of them.")
+    assert why("-3 of the 9 services failed on all 5 nights", five) == "The card's table has 3 rows with nights_failed 5, which the words do not state."
+    assert counted("at least 3 of the 9 services failed on all 5 nights", {"ref": "card:e8d2b6f4@out0", "count": five}, NIGHTLY)["status"] == "verified"
+    # a condition every row meets picks no row out: the sentence names its column
+    run = [{"id": "c2e6a0d4", "title": "Nights each service ran and failed", "outputs": [{"out": 0, "corner": "service", "cells": [
+        [c, s[0], str(v)] for s in SERVICES for c, v in (("nights_run", 5), ("nights_failed", s[1]))], "tables": [{
+        "columns": ["service", "nights_run", "nights_failed"], "rows": [[s[0], 5, s[1]] for s in SERVICES], "names": [s[0] for s in SERVICES],
+        "label": "service", "total": 9}]}]}]
+    every = counted("all 9 services failed on all 5 nights", {"ref": "card:c2e6a0d4@out0", "count": {"nights_run": 5}}, run)
+    assert every["reason"] == "Every row of the card's table has nights_run 5, and the sentence does not name nights_run."
+    assert counted("all 9 services were run on all 5 nights", {"ref": "card:c2e6a0d4@out0", "count": {"nights_run": 5}}, run)["status"] == "verified"
     assert why("5 of the 9 services failed on 100% of nights", {"share_failed": 1}) == "The card's table has 3 rows with share_failed 1, not 5."
     assert why("3 of the 3 services failed on all 5 nights", {}, of=five) == "The check counts 3 of the 3 rows with nights_failed 5, which are the same rows."
     assert why("2 of the 9 services failed on all 6 nights", {"nights_failed": 6}) == "The card's table has 0 rows with nights_failed 6, not 2."
@@ -1125,8 +1139,10 @@ def test_a_count_fails_when_the_rows_do_not_give_it_or_the_sentence_does_not_sta
 
 def test_a_table_the_card_keeps_in_part_or_whose_rows_are_not_one_thing_each_gives_no_count():
     """B20, the verifier's attacks on the table itself (made up): a table the card keeps only part of, a table whose
-    rows two share a name, one with a row that sums up the others (pandas' margins, a mean row), a chart split over its
-    layers or printed text the card keeps no rows of, and a table the card shows only as text, give no count."""
+    rows two share a name (also a column of names with one written twice, in rows no column names), or two rows the
+    same in every column, one with a row that sums up the others (pandas' margins, a mean row), printed text the card
+    keeps no rows of, and a table the card shows only as text, give no count. A log whose rows repeat a name often still
+    counts."""
     def why(table: dict, words: str = "3 of the 9", cond: dict | None = None, out: dict | None = None) -> str:
         cards = [{"id": "b5d9f3a7", "title": "made up", "outputs": [{"out": 0, "corner": "service", "cells": [["runs", "auth-gateway", "40"]],
                                                                      **({"tables": [table]} if table else {}), **(out or {})}]}]
@@ -1145,6 +1161,15 @@ def test_a_table_the_card_keeps_in_part_or_whose_rows_are_not_one_thing_each_giv
     assert why(total, "3 of the 10") == "The row All of the card's table sums up the others, so its rows cannot be counted."
     mean = {**total, "rows": rows + [["mean", 2.8, 32.8]], "names": [r[0] for r in rows] + ["mean"]}
     assert why(mean, "3 of the 10") == "The row mean of the card's table sums up the others, so its rows cannot be counted."
+    unnamed = {"columns": ["service", "nights_failed", "runs"], "names": [str(i) for i in range(9)], "label": None, "total": 9,
+               "rows": [["auth-gateway", 5, 40], ["auth-gateway", 5, 41]] + [list(x[:3]) for x in SERVICES[1:8]]}
+    assert why(unnamed, "4 of the 9") == "Two rows of the card's table are named auth-gateway, so its rows cannot be counted."
+    same = {**unnamed, "columns": ["nights_failed", "runs"], "rows": [[5, 40], [5, 40]] + [list(x[1:3]) for x in SERVICES[1:8]]}
+    assert why(same, "4 of the 9") == "Two rows of the card's table have the same value in every column, so its rows cannot be counted."
+    log = {"columns": ["agent", "pr", "merged"], "names": [str(i) for i in range(6)], "label": None, "total": 6,
+           "rows": [["a1", 1, True], ["a1", 2, False], ["a2", 3, True], ["a3", 4, True], ["a2", 5, False], ["a1", 6, True]]}
+    cards = [{"id": "d8f2b6c0", "title": "made up", "outputs": [{"out": 0, "lines": [[1, "a log"]], "tables": [{**log, "lines": [1, 1]}]}]}]
+    assert counted("4 of the 6 pull requests were merged", {"ref": "card:d8f2b6c0@out0", "count": {"merged": True}}, cards)["status"] == "verified"
     assert why({}) == "The card keeps that table only as the text it shows, so its rows cannot be counted."
     printed = [{"id": "c6e0a4b8", "title": "made up", "outputs": [{"out": 0, "lines": [[n, t] for n, t in enumerate(NIGHTS_TEXT, 1)]}]}]
     r = counted("3 of the 9", {"ref": "card:c6e0a4b8@out0#L4", "count": {"nights_failed": 5}}, printed, "[3 of the 9] failed on all 5 nights.")

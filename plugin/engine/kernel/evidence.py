@@ -1949,8 +1949,9 @@ def framed(target: str, places: list[dict[str, Any]], approx: bool = False) -> b
     return shows(target, names, approx)
 
 
-# "N of the M" and "N out of M" in words whose number words are digits (wordnums)
-COUNT_OF = re.compile(r"(?<![\w.,])(\d+(?:,\d{3})*)(?![.,]?\d)\s+(?:out\s+)?of\s+(?:all\s+)?(?:the\s+|these\s+|those\s+)?(\d+(?:,\d{3})*)(?![.,]?\d)", re.I)
+# "N of the M" and "N out of M" in words whose number words are digits (wordnums); a sign or a range's dash before N
+# makes it no count
+COUNT_OF = re.compile(r"(?<![\w.,\-−])(\d+(?:,\d{3})*)(?![.,]?\d)\s+(?:out\s+)?of\s+(?:all\s+)?(?:the\s+|these\s+|those\s+)?(\d+(?:,\d{3})*)(?![.,]?\d)", re.I)
 
 
 def count_pair(words: str) -> tuple[str, str] | None:
@@ -2048,11 +2049,13 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
 # and the condition each counted row meets, `{"ref": "card:<id>@out<i>", "count": {"nights_failed": 5}}` (and `of`
 # for the rows "of the M" counts, when not all), and this module counts the rows. It reads the card's own rows, the
 # records the host gives with an output (`tables`: [{columns, rows, names, label, total, lines?}]), never printed
-# text: a value compares as the value it is (4.6 is no 5, 0.6 no 100%). The words must state the count, and "of the
-# M" the rows of the table (or of `of`), and every other number of the words is a value of the condition. The sentence
-# states each value of the condition apart from the count's own numbers, a bound by its words ("at least 1" for `>=`),
-# a yes of a column by the column's words, so the check cannot count by a condition the claim does not make. A table
-# the card keeps only part of, whose rows two share a name, or with a row that totals the others, gives no count.
+# text: a value compares as the value it is (4.6 is no 5, 0.6 no 100%). The words must state the count (or a bound it
+# meets: "at least 3 of the 9"), and "of the M" the rows of the table (or of `of`), and every other number of the
+# words is a value of the condition. The sentence states each value of the condition apart from the count's own
+# numbers, a bound by its words ("at least 1" for `>=`), a yes of a column by the column's words, so the check cannot
+# count by a condition the claim does not make; a condition every row meets picks no row out, so the sentence names
+# its column too. A table the card keeps only part of, one where one thing may stand in two rows (two rows of one
+# name, or the same in every column), or with a row that sums up the others, gives no count.
 
 COUNT_OPS = {"=": operator.eq, "<": operator.lt, "<=": operator.le, ">": operator.gt, ">=": operator.ge}
 OP_WORDS = {"=": "", "<": "under ", "<=": "at most ", ">": "over ", ">=": "at least "}
@@ -2068,6 +2071,8 @@ CARD_OUT = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)@out(\d+)$")
 FLOAT_NOISE = Decimal("1e-9")  # the share of a value a float sum or mean may be off by (_sums_up)
 SUMMARY_NAMES = frozenset({"all", "total", "totals", "sum", "mean", "average", "avg", "overall"})  # rows that sum up (_sums_up)
 YES, NO = frozenset({"yes", "true"}), frozenset({"no", "false"})
+# words of a column's name that name no thing a sentence must say (_says_column)
+NAME_WORDS = frozenset({"num", "count", "counts", "number", "total", "value", "values", "per", "the", "and"})
 
 
 def _decimal(v: Any) -> Decimal | None:
@@ -2132,14 +2137,21 @@ def _rows(n: int) -> str:
     return f"{n:,} row" + ("" if n == 1 else "s")
 
 
-def _column_words(col: str) -> list[str]:
-    return [w for w in re.split(r"[^a-z0-9]+", col.lower()) if len(w) > 1]
+def _same_word(a: str, b: str) -> bool:
+    """Two words are one word of a name: the same, one the other with a plural s, or one the other's start of four
+    letters or more, a few letters short of it (fail and failed, night and nightly)."""
+    if a == b or b in (a + "s", a + "es") or a in (b + "s", b + "es"):
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 4 and long_.startswith(short) and len(long_) - len(short) <= 3
 
 
-def _says_word(w: str, text: str) -> bool:
-    """A word of a column's name stands in the text, as itself or with or without a plural s."""
-    forms = {w, w + "s", w + "es", w[:-1] if w.endswith("s") else w}
-    return any(re.search(r"(?<![a-z0-9])" + re.escape(f) + r"(?![a-z0-9])", text) for f in forms if f)
+def _says_column(col: str, text: str) -> bool:
+    """The text names a column of a card's table: each word of the column's name of three letters or more (`nights`
+    and `run` of `nights_run`; words such as `count` or `num` that name no thing aside) stands in it as a word."""
+    words = [w for w in re.split(r"[^a-z0-9]+", col.lower()) if len(w) > 2 and w not in NAME_WORDS]
+    said = re.findall(r"[a-z0-9]+", text.lower())
+    return bool(words) and all(any(_same_word(w, t) for t in said) for w in words)
 
 
 def _stated(col: str, op: str, want: Any, text: str) -> bool:
@@ -2167,8 +2179,7 @@ def _stated(col: str, op: str, want: Any, text: str) -> bool:
         return False
     truth = _truth(want)
     if truth is not None:
-        low = text.lower()
-        return truth and bool(_column_words(col)) and all(_says_word(w, low) for w in _column_words(col))
+        return truth and _says_column(col, text)
     s = norm_ws(str(want))
     if calendar_days(s):
         return days_shown(s, text)
@@ -2216,16 +2227,26 @@ def _count_table(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, tup
     return "", (card, o, tables[0], line)
 
 
-def _name_twice(t: dict[str, Any]) -> str | None:
-    """A name two rows of the table share, when a column names its rows: the same thing may stand in both."""
-    if not t.get("label"):
-        return None
-    seen: set[str] = set()
-    for name in t.get("names") or []:
-        if name in seen:
-            return str(name)
-        seen.add(name)
-    return None
+def _twice(t: dict[str, Any]) -> str:
+    """Why one thing may stand in two rows of the table, or "": two rows share a name, when a column names the rows, or
+    when no column does, the first column of text in every row repeats in a tenth of its rows at most (a service twice
+    among 9: a column of names with one written twice); or two rows have the same value in every column."""
+    names = [str(x) for x in t.get("names") or []]
+    if t.get("label"):
+        seen_at = Counter(names)
+        twice = next((x for x in names if seen_at[x] > 1), None)
+        return f"two rows of the card's table are named {twice}" if twice is not None else ""
+    rows = t.get("rows") or []
+    for j in range(len(t.get("columns") or [])):
+        col = [r[j] if j < len(r) else None for r in rows]
+        if col and all(isinstance(x, str) and x.strip() for x in col):
+            seen_at = Counter(col)
+            twice = next((x for x in col if seen_at[x] > 1), None)
+            if twice is not None and len(col) - len(seen_at) <= max(1, len(col) // 10):
+                return f"two rows of the card's table are named {twice}"
+            break
+    keys = Counter(json.dumps(r, sort_keys=True, default=str) for r in rows)
+    return "two rows of the card's table have the same value in every column" if any(n > 1 for n in keys.values()) else ""
 
 
 def _sums_up(t: dict[str, Any], cols: list[str]) -> str | None:
@@ -2335,9 +2356,9 @@ def check_count(target: str, ev: dict[str, Any], cards: list[dict[str, Any]] | N
             return [f"the card's table has no column {col}"], None
     if total > len(rows):
         return [f"the card keeps {len(rows):,} of the table's {total:,} rows, so they cannot be counted"], None
-    twice = _name_twice(t)
-    if twice is not None:
-        return [f"two rows of the card's table are named {twice}, so its rows cannot be counted"], None
+    twice = _twice(t)
+    if twice:
+        return [f"{twice}, so its rows cannot be counted"], None
     summed = _sums_up(t, cols)
     if summed is not None:
         return [f"the row {summed} of the card's table sums up the others, so its rows cannot be counted"], None
@@ -2363,6 +2384,8 @@ def check_count(target: str, ev: dict[str, Any], cards: list[dict[str, Any]] | N
         return next((op for rx, op in BOUND_WORDS if rx.search(before)), None) or next((op for rx, op in BOUND_AFTER_WORDS if rx.match(after)), None)
 
     def meets(v: str, span: tuple[int, int]) -> bool:
+        if w[max(0, span[0] - 1):span[0]] in ("-", "−"):
+            return False  # a count has no sign
         op = bound_of(span)
         if op is None:
             return same_number(v, str(n), approx)
@@ -2411,6 +2434,12 @@ def check_count(target: str, ev: dict[str, Any], cards: list[dict[str, Any]] | N
     for col, op, v in of + conds:
         if not _stated(col, op, v, text):
             return [f"the check counts the rows with {_condition_words([(col, op, v)])}, which the sentence does not say"], shown
+    if conds and n == m:
+        # a condition every row meets picks no row out, so only what its column means makes the count: "all 9 services
+        # failed on all 5 nights" by nights_run 5, which every service has. The sentence names that column
+        for col, op, v in conds:
+            if not _says_column(col, text):
+                return [f"every row of the card's table has {_condition_words([(col, op, v)])}, and the sentence does not name {col}"], shown
     values = [_decimal(v) for _, op, v in of + conds if _decimal(v) is not None]
     texts = [str(v) for _, _, v in of + conds if isinstance(v, str)]
     for mt, v in nums:
