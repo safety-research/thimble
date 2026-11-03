@@ -22,18 +22,21 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 
 ## Installation
 
-Ask Claude Code:
+### With Claude (recommended)
 
-    claude "install thimble from https://github.com/safety-research/thimble"
+```
+claude "install thimble from https://github.com/safety-research/thimble"
+```
 
-Agents installing thimble: follow "Installing thimble for a user" in [CLAUDE.md](CLAUDE.md).
+Claude asks whether you want both the terminal plugin and the browser workbench (the default) or the plugin alone, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
 
-Or install it yourself:
+### Manual installation
 
-    curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
+```
+curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
+```
 
-It installs the newest release into ~/.thimble: the plugin for Claude Code and the browser workbench (about 1 GB). Add
-`-s -- --no-browser` after `bash` for the plugin alone. To update later: `thimble update`. [INSTALL.md](INSTALL.md) has the details.
+It installs thimble in `~/.thimble`, where the browser workbench takes about 1 GB. Adding `-s -- --no-browser` after `bash` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
 
 ## Usage
 
