@@ -27,11 +27,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import config, nofollow
+from . import config, kernel_wrap, nofollow
 
 log = logging.getLogger("thimble.view_indexes")
 
-INDEXES_SUBDIR = "view-indexes"
+INDEXES_SUBDIR = kernel_wrap.INDEXES_DIR  # one of the kernel's own folders, which it writes
 PICKLE = ".index.pickle"
 READS = ".reads.json"
 BUILT = ".built"

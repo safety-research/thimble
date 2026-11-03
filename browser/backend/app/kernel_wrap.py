@@ -6,18 +6,20 @@ runs inside one of two wrappers, and `config.resolve_kernel_wrap` says which:
   bwrap  bubblewrap run directly (`kernel_wrap_argv`): the fallback on Linux where srt is missing or does not work.
 
 Both draw the same boundary:
-  read     the system, the backend venv and its interpreter, the corpus, the page's fonts, matplotlibrc and the
-           `thimble` module's source (kernel_thimble.py)
-  write    the workspace directory, except settings.json and config.json (thimble's config for the workspace), which
-           the kernel can neither read nor write, and telemetry.jsonl, viewed.jsonl (the view log, which the telemetry
-           export merges), the registry folder (REGISTRY_DIR), the views' state (VIEWS_DIR), the workspace's local
-           extension (LOCAL_DIR) and the folder of the files thimble's agents' hooks trust (TRUSTED_DIR), which it can
-           read only, and the lock of subagents.json's writers (LOCK_FILES), which it can neither read nor write.
+  read     the system, the backend venv and its interpreter, the corpus, the workspace directory, the page's fonts,
+           matplotlibrc and the `thimble` module's source (kernel_thimble.py)
+  write    the kernel's own folders of the workspace (KERNEL_DIRS: scratch/, its working folder, where a card's code
+           writes its files; tmp/; view-indexes/, where the view readers keep their indexes) and nothing else of it:
+           the server keeps its own state in the rest of the workspace (the undo journal, the chats, the sessions, the
+           groups, the labels and the rest), which the kernel reads but can neither change, move nor remove, nor put a
+           link or a file in place of. settings.json and config.json (thimble's config for the workspace) and the lock
+           of subagents.json's writers (LOCK_FILES) the kernel can neither read nor write.
            HOME is fresh at each start: a folder on a private /tmp under bwrap, the kernel's kernels/<key>.home folder
-           under srt. TMPDIR is main's Bash's (runtime.shell_temp): the workspace's temp folder (TEMP_DIR) on the
-           Messages API, and on Claude Code sign-in the temp folder Claude Code's sandbox gives main's commands, outside
-           the workspace, which the kernel may write too (`write`; bwrap binds it by the descriptor of the folder the
-           server checked, `write_fds`, since main's Bash may put a link in its place)
+           under srt (`write`). TMPDIR is main's Bash's (runtime.shell_temp): the workspace's temp folder (TEMP_DIR) on
+           the Messages API, and on Claude Code sign-in the temp folder Claude Code's sandbox gives main's commands,
+           outside the workspace, which the kernel may write too (`write`; bwrap binds it by the descriptor of the
+           folder the server checked, `write_fds`, since main's Bash may put a link in its place, and under srt the
+           server checks that the kernel got that folder, notebook._sandbox_problem)
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
@@ -28,6 +30,7 @@ shell, which may write the corpus.
 srt reads everything it is not told to hide, so srt_rules hides where user data lives on each system (SRT_HIDDEN) and
 shows the kernel's paths inside it again; bwrap shows only what kernel_wrap_argv binds. On Linux srt's bubblewrap also
 blocks the creation of Unix sockets (seccomp), and each hidden directory is an empty tmpfs inside, so /tmp is private.
+On Linux each folder the kernel writes is a mount point of its own, which it cannot move or remove, under both.
 
 The direct bwrap wrapper: `--unshare-all` gives a private pid namespace and /proc, and `--unshare-user
 --disable-userns` keeps a cell from creating user namespaces. `--die-with-parent` is left out because kernels outlive a
@@ -67,34 +70,30 @@ NO_SIDE_WRITES = {"PYTHONDONTWRITEBYTECODE": "1", "GIT_OPTIONAL_LOCKS": "0"}
 # nor write it
 HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
-# read-only over the writable workspace (the server writes them from outside)
-READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")
-# the lock subagents.json's writers take (subagent_files.LOCK), hidden as HIDDEN_FILES are rather than read-only: a
-# read-only file can still be opened and flocked, and a cell that held the lock would make every hook and the server
-# wait for it and then write without it, so that two writers no longer exclude each other; a cell that swapped it for a
-# file of its own would do the same. The server makes it before a kernel starts, and nothing renames it
+# the lock subagents.json's writers take (subagent_files.LOCK), hidden as HIDDEN_FILES are: a file the kernel may read
+# it may also open and flock, and a cell that held the lock would make every hook and the server wait for it and then
+# write without it, so that two writers no longer exclude each other. The server makes it before a kernel starts, and
+# nothing renames it
 LOCK_FILES = ("subagents.json.lock",)
-# the workspace's folders that main's and the orientation's prompts are made from, which a card's code reads, and the
-# folder of the files thimble's hooks trust: read-only, each as a folder so that what the server writes later (its
-# atomic rewrites among it) shows inside. A file bound by itself would not hold: Linux takes the bind off a file that
-# the server renames a new file over, and the cell could then write it. The server creates them before the kernel starts
+# the kernel's own folders of the workspace, the only ones it writes, each made by the server before the kernel starts
+SCRATCH_DIR = "scratch"  # its working folder: a link per corpus entry (notebook.mirror_corpus) and what cells write
+# the workspace's temp folder (config.temp_dir): on the Messages API every kernel's TMPDIR, and that of main's and its
+# thread forks' shell commands (runtime.shell_temp), so a card's code reads what such a command wrote in $TMPDIR; also
+# where the server gives a run in a kernel its files and takes its results (the export hook's, a code label's rows)
+TEMP_DIR = "tmp"
+INDEXES_DIR = "view-indexes"  # the view readers' indexes, which the views kernel and the cards' kernels build
+KERNEL_DIRS = (SCRATCH_DIR, TEMP_DIR, INDEXES_DIR)
+# the workspace's files and folders that no agent's command writes either, beside HIDDEN_FILES and LOCK_FILES, where
+# one of the agent's write folders holds the workspace (runtime.protected):
+READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")  # the telemetry log and the view log, which its export merges
 REGISTRY_DIR = "registry"  # the card types and extensions as the server found them (cardtypes.py, extensions.py)
 VIEWS_DIR = "views"  # thimble's state of the views (views.state_dir): proposals, versions, reviews
 LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), whose views the dev agent's builds write
 # what the plugin's --agent-check hook and the gate tools trust (subagent_files.DIR): the pending requests and the agent
-# registry, the callers of thimble's tools and what main was launched with. A cell that could write them could make a
+# registry, the callers of thimble's tools and what main was launched with. Code that could write them could make a
 # request a plugin start claims, or credit its call to an agent
 TRUSTED_DIR = "trusted"
 READ_ONLY_DIRS = (REGISTRY_DIR, VIEWS_DIR, LOCAL_DIR, TRUSTED_DIR)
-# the workspace's temp folder (config.temp_dir): on the Messages API every kernel's TMPDIR, and that of main's and its
-# thread forks' shell commands (runtime.shell_temp), so a card's code reads what such a command wrote in $TMPDIR
-TEMP_DIR = "tmp"
-# the workspace's folders that main's Bash on the Messages API writes by their paths (runtime.spec_of's write roots of
-# fixed names): on Linux each is bound as a folder of its own, writable, over the workspace's bind, so a card's code can
-# neither move nor remove one (a mount point cannot be) to put a link in its place in the moment srt binds main's write
-# roots by their paths, after its own check that none is a link. The server makes them before the kernel starts. macOS
-# has no mounts, and srt there follows the rules of its own Seatbelt profile
-PINNED_DIRS = (TEMP_DIR, "card-libs")
 SIGINT_PREFIX = ("/bin/sh", "-c", 'trap "" INT; exec "$@"', "thimble-kernel-wrap")  # shell prefix that ignores SIGINT in bwrap (module docstring)
 
 SRT_LAUNCHER = Path(__file__).with_name("kernel_srt.mjs")
@@ -203,29 +202,33 @@ def interpreter_dirs(python: str | Path) -> list[Path]:
 
 def srt_rules(*, corpus_dir: str | Path, workspace_dir: str | Path, venv: str | Path | None, python: str | Path,
               srt_dir: str | Path, read: Sequence[str | Path] = (), write: Sequence[str | Path] = (),
-              hide: Sequence[str | Path] = (), home: str | Path, platform: str) -> dict:
+              hide: Sequence[str | Path] = (), home: str | Path, platform: str,
+              own: Sequence[str] = KERNEL_DIRS) -> dict:
     """srt's filesystem rules for the kernel (module docstring). `python` is the interpreter the kernel runs (a venv's
     bin/python); `read` more paths it reads (the fonts, matplotlibrc, kernel_thimble.py); `write` more folders it reads
-    and writes (its TMPDIR outside the workspace); `hide` thimble's folders and Claude Code's config, hidden besides
-    `home` and SRT_HIDDEN[platform] (sys.platform: linux or darwin)."""
+    and writes (its HOME, its TMPDIR outside the workspace); `hide` thimble's folders and Claude Code's config, hidden
+    besides `home` and SRT_HIDDEN[platform] (sys.platform: linux or darwin); `own` the folders of the workspace it
+    writes (none for an agent's command, whose caller names its write folders, runtime_tools._rules)."""
     ws = Path(workspace_dir)
     system = "darwin" if platform == "darwin" else "linux"
     hidden = [str(ws / name) for name in (*HIDDEN_FILES, *LOCK_FILES)]
+    writes = [*(str(ws / name) for name in own), *map(str, write)]
     deny_read = [str(home), *SRT_HIDDEN[system], *map(str, hide), *hidden]
     allow_read = [str(corpus_dir), str(ws), *map(str, interpreter_dirs(python)), *map(str, read), *map(str, write)]
     if venv is not None:
         allow_read += [str(venv), os.path.realpath(venv)]  # a venv install.sh --python linked: also where it lies
     if system == "linux":
         allow_read.append(str(Path(srt_dir).joinpath(*SRT_HELPERS)))
+        # srt binds a hidden folder's write paths back before its read paths, so a read path that holds a write path
+        # (the workspace, which holds the kernel's folders) went back read-only over it; a write path hidden by a rule
+        # of its own too is bound back writable after the read path that holds it
+        deny_read += [w for w in writes if any(Path(w) != Path(r) and _under(Path(w), Path(r)) for r in allow_read)]
         deny_read = _outermost(deny_read, allow_read)
-    read_only = [str(ws / name) for name in (*READ_ONLY_FILES, *READ_ONLY_DIRS)]
-    # on Linux srt binds each allowWrite path by itself, so each of PINNED_DIRS is a mount point of its own there
-    pinned = [str(ws / name) for name in PINNED_DIRS] if system == "linux" else []
     return {"filesystem": {
         "denyRead": list(dict.fromkeys(deny_read)),
         "allowRead": list(dict.fromkeys(allow_read)),
-        "allowWrite": [str(ws), *pinned, *map(str, write)],
-        "denyWrite": [*hidden, *read_only, *SRT_NO_WRITE[system]],
+        "allowWrite": list(dict.fromkeys(writes)),
+        "denyWrite": [*hidden, *SRT_NO_WRITE[system]],
     }}
 
 
@@ -274,9 +277,8 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
     `read` names more paths bound read-only, `write` more folders bound writable (its TMPDIR outside the workspace, on
     the private /tmp too), and `write_fds` folders bound writable by a descriptor the caller opened, at their paths
     (`--bind-fd`: the folder opened, whatever is at its path by then; the process that runs this argv must inherit
-    them). `--ro-bind-try` and `--bind-try` skip what does not exist. The kernel's files, in kernels/ of the workspace,
-    need no bind of their own. Each of HIDDEN_FILES must exist, or bwrap creates it empty in the real workspace, and
-    each of READ_ONLY_DIRS, or bwrap fails."""
+    them). `--ro-bind-try` and `--bind-try` skip what does not exist. The workspace is bound read-only, and each of
+    KERNEL_DIRS writable over it; each of those and of HIDDEN_FILES and LOCK_FILES must exist, or bwrap fails."""
     corpus, ws = Path(corpus_dir), Path(workspace_dir)
     out: list[str] = [*SIGINT_PREFIX, bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns",  # --unshare-user spelled out: --disable-userns checks for it by name (bwrap 0.9.0)
                       "--ro-bind", "/usr", "/usr"]
@@ -297,18 +299,14 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
         out += ["--ro-bind", str(venv), str(venv)]
     for p in read:
         out += ["--ro-bind-try", str(p), str(p)]
-    for p in write:
+    out += ["--ro-bind", str(corpus), str(corpus), "--ro-bind", str(ws), str(ws)]
+    for name in KERNEL_DIRS:  # each a mount point of its own, which a card's code can neither move nor remove
+        out += ["--bind", str(ws / name), str(ws / name)]
+    for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
+        out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
+    for p in write:  # after the workspace and the corpus, which would cover a write folder inside them
         out += ["--bind-try", str(p), str(p)]
     for fd, p in write_fds:
         out += ["--bind-fd", str(fd), str(p)]
-    out += ["--ro-bind", str(corpus), str(corpus), "--bind", str(ws), str(ws)]
-    for name in PINNED_DIRS:  # each a mount point of its own, which a card's code can neither move nor remove
-        out += ["--bind-try", str(ws / name), str(ws / name)]
-    for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
-        out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
-    for name in READ_ONLY_FILES:  # read-only over the workspace bind (the server writes from outside)
-        out += ["--ro-bind-try", str(ws / name), str(ws / name)]
-    for name in READ_ONLY_DIRS:
-        out += ["--ro-bind", str(ws / name), str(ws / name)]
     out += ["--", *argv]
     return out

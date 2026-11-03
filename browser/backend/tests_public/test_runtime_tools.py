@@ -99,7 +99,7 @@ async def test_main_s_tools_never_go_through_a_link_a_card_swaps_in_while_they_r
     with a link to an outside folder, some of main's Writes there landed in that folder and some Reads returned its
     file. Now each tool opens the real path Box checked one part at a time without following a link (nofollow): a call
     the swap catches fails, and none reaches the folder. (The kernel's sandbox binds tmp/ itself as a folder of its own,
-    kernel_wrap.PINNED_DIRS, which a card cannot move, so the swap here is of another folder the tools write.)"""
+    which a card cannot move, and the rest of the workspace read-only, so the swap here is of a folder inside tmp/.)"""
     from app import kernel_wrap, notebook, runtime, srt
 
     works = kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)) if wrap == "srt" else (
@@ -111,7 +111,7 @@ async def test_main_s_tools_never_go_through_a_link_a_card_swaps_in_while_they_r
     outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
     (outside / "secret.txt").write_text("OUTSIDE-SECRET")
     ws, corpus = config.workspace_dir("mini"), config.corpus_dir("mini")
-    temp = ws / "made-up-folder"
+    temp = config.temp_dir("mini") / "made-up-folder"
     temp.mkdir()
     (temp / "secret.txt").write_text("the workspace's own\n")
     box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[ws / "card-libs", temp],
@@ -229,3 +229,71 @@ async def test_the_tools_work_below_a_folder_the_person_may_enter_but_not_list_o
     finally:
         corpus.chmod(0o755)
     assert glob.is_error and grep.is_error and "Permission denied" in glob.text and "Permission denied" in grep.text
+
+
+# a card's code that keeps trying to swap each folder of PAIRS with a link to its outside folder, from a thread of its
+# own, and counts what it managed (`said`, which a later cell of its kernel prints)
+TRY_FLIPS_CELL = """
+import os, threading, time
+PAIRS = {pairs!r}
+said = {{"flips": 0, "refused": 0}}
+def loop():
+    end = time.monotonic() + 300
+    while time.monotonic() < end:
+        for T, O in PAIRS:
+            try:
+                os.rename(T, T + '.real')
+                os.symlink(O, T)
+                time.sleep(0.002)
+                os.unlink(T)
+                os.rename(T + '.real', T)
+                said["flips"] += 1
+            except OSError:
+                said["refused"] += 1
+        time.sleep(0.002)
+threading.Thread(target=loop, daemon=True, name="made-up-flipper").start()
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_main_s_bash_neither_writes_nor_reads_outside_while_a_card_tries_to_swap_its_folders(
+        wrap, monkeypatch, workspaces_tmp, tmp_path_factory):
+    """On the Messages API main's Bash runs in srt, which binds its write folders (the workspace's tmp/ among them) and
+    the workspace's entries it reads by their paths, after checks of its own. A card's code that kept swapping such a
+    folder with a link to an outside folder had some of main's commands write to that folder and read its files (2
+    writes and 6 reads in 60 commands in the 0.10.8 checks). Now a card's code writes none of the workspace but its own
+    folders, each a folder of its own that it can neither move nor remove, so every swap it tries is refused and no
+    command of main's reaches the outside folder."""
+    from app import kernel_wrap, notebook, runtime
+
+    if why := runtime_tools.sandbox_reason():
+        pytest.skip(why)
+    if wrap == "bwrap" and not (sys.platform.startswith("linux") and kernel_wrap.works()):
+        pytest.skip("bwrap can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    monkeypatch.setattr(runtime, "engine", lambda: "api")
+    outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
+    (outside / "secret.txt").write_text("OUTSIDE-SECRET")
+    ws, corpus = config.workspace_dir("mini").resolve(), config.corpus_dir("mini")
+    temp, entry = config.temp_dir("mini").resolve(), ws / "made-up-entry"
+    entry.mkdir()
+    (ws / "card-libs").mkdir()
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[ws / "card-libs", temp],
+                            home=ws / "runtime" / "tmp" / "main-made-up", temp=temp)
+    leaks: list[str] = []
+    try:
+        await notebook.run_code("mini", TRY_FLIPS_CELL.format(pairs=[(str(temp), str(outside)),
+                                                                      (str(entry), str(outside))]), "main", kernel="k1")
+        for i in range(30):
+            cmd = (f"echo by-main > {temp}/main-{i}.txt 2>/dev/null; echo T:$(cat {temp}/secret.txt 2>/dev/null); "
+                   f"echo E:$(cat {entry}/secret.txt 2>/dev/null); true")
+            got = await runtime_tools.call(box, "Bash", {"command": cmd})
+            if "OUTSIDE-SECRET" in got.text:
+                leaks.append(got.text)
+        counts = await notebook.run_code("mini", "import json; print(json.dumps(said))", "main", kernel="k1")
+    finally:
+        await notebook.shutdown_all()
+    said = json.loads("".join(b.get("text/plain", "") for b in counts["outputs"]))
+    assert said["flips"] == 0 and said["refused"] > 0, said
+    assert not leaks and sorted(os.listdir(outside)) == ["secret.txt"], leaks[:3]
+    assert len(list(temp.glob("main-*.txt"))) == 30

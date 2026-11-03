@@ -420,7 +420,7 @@ def _rules(box: Box) -> dict[str, Any]:
     venv = Path(sys.prefix)
     rules = kernel_wrap.srt_rules(corpus_dir=box.cwd, workspace_dir=box.workspace, venv=venv, python=sys.executable,
                                   srt_dir=pkg or config.REPO_ROOT, read=[*box.read_roots, *box.write_roots],
-                                  hide=[str(p) for p in box.private], home=Path.home(), platform=sys.platform)
+                                  hide=[str(p) for p in box.private], home=Path.home(), platform=sys.platform, own=())
     fs = rules["filesystem"]
     fs["allowWrite"] = [str(p) for p in box.write_roots]
     deny = dict.fromkeys([*fs.get("denyWrite", []), *map(str, box.private), *map(str, box.no_write)])

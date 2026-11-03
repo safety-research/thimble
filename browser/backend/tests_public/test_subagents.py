@@ -4,6 +4,7 @@ runs and their one end, main's quit and moves, the caller of a thimble tool, and
 cookie."""
 from __future__ import annotations
 
+from pathlib import Path
 
 import pytest
 
@@ -42,9 +43,10 @@ def test_the_work_folders_main_s_bash_may_write():
 # --------------------------------------------------------------------------- the files the hooks trust
 
 
-def test_a_new_workspace_has_the_trusted_files_and_the_kernel_binds_their_folder_read_only(tmp_path):
-    """The kernel binds the trusted folder, not each file: the writers replace a file whole, and Linux takes the bind
-    off a file another namespace renames a new file over (test_kernel_sandbox has the kernel's own test)."""
+def test_a_new_workspace_has_the_trusted_files_and_the_kernel_reads_them_only(tmp_path):
+    """The kernel binds the workspace read-only as a whole, the trusted folder in it, and never a file of it: the
+    writers replace a file whole, and Linux takes the bind off a file another namespace renames a new file over. No
+    folder the kernel writes holds the trusted folder (test_kernel_sandbox has the kernel's own test)."""
     ws = config.workspace_dir(CORPUS)
     trusted = ws / kernel_wrap.TRUSTED_DIR
     assert trusted == sf.trusted_dir(ws) and kernel_wrap.TRUSTED_DIR in kernel_wrap.READ_ONLY_DIRS
@@ -52,12 +54,14 @@ def test_a_new_workspace_has_the_trusted_files_and_the_kernel_binds_their_folder
         assert (trusted / name).is_file(), name
     argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None,
                                         python="/usr/bin/python3")
-    i = argv.index(str(trusted))
-    assert argv[i - 1] == "--ro-bind" and argv[i + 1] == str(trusted)
+    i = argv.index(str(ws))
+    assert argv[i - 1] == "--ro-bind" and argv[i + 1] == str(ws)
+    writable = [Path(argv[j + 2]) for j, a in enumerate(argv) if a in ("--bind", "--bind-try", "--bind-fd")]
+    assert not [w for w in writable if w == trusted or w in trusted.parents], writable
     assert not any(str(trusted / name) in argv for name in sf.FILES), "no bind of a file the writers replace"
     rules = kernel_wrap.srt_rules(corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None, python="/usr/bin/python3",
                                   srt_dir=tmp_path, home=tmp_path / "h", platform="linux")
-    assert str(trusted) in rules["filesystem"]["denyWrite"]
+    assert not [w for w in map(Path, rules["filesystem"]["allowWrite"]) if w == trusted or w in trusted.parents]
 
 
 def test_the_kernel_can_neither_hold_nor_swap_the_lock_of_subagents_json(tmp_path):

@@ -140,12 +140,10 @@ def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corp
     assert views.migrate_workspaces() == {}
     assert not (other / "extension").exists(), "a link left by an older kernel goes at the start"
 
-    from app import notebook
-
     shutil.rmtree(ws / "extension")
     (ws / "extension").write_text("")
-    notebook._guarded_files(CORPUS)
-    assert (ws / "extension").is_dir(), "a kernel starts with the folder read-only, not with a file in its place"
+    views.ensure_local(ws)
+    assert (ws / "extension" / "views").is_dir(), "a file an older kernel left there goes, and the folder is made"
 
 
 def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_analyst_s_browser_only(

@@ -3174,13 +3174,14 @@ def _collect_code_rows(outputs: list[dict], rows_file: Path | None, out: Path, p
 
 async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Unit] | None, limit: int | None, out: Path) -> tuple[int, int, str | None]:
     """The code kind in the labels kernel (notebook.execute_on, no cell stored): the wrapper writes its rows to a temp
-    file under labels/, read and removed here. With `units` None the wrapper reads the file units of the matched files of
-    lines itself, and the units of the other files (records.py) go to it in a file of their own, as given units (cards,
+    file in the workspace's temp folder, which is one of the kernel's own folders (labels/ the kernel only reads), read
+    and removed here. With `units` None the wrapper reads the file units of the matched files of lines itself, and the
+    units of the other files (records.py) go to it in a file of their own under labels/, as given units (cards,
     sentences, or a trial's sampled records) do."""
     from . import notebook
 
     stamp = secrets.token_hex(4)
-    rows_file = out.with_name(f".{concept['id']}.{stamp}.rows.tmp")
+    rows_file = await asyncio.to_thread(lambda: config.temp_dir(c) / f".{concept['id']}.{stamp}.rows.tmp")
     units_file: Path | None = None
     parts_file: Path | None = None
     groups: list[dict] = []

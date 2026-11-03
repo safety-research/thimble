@@ -225,6 +225,40 @@ def _find(name: str, ws=None) -> dict:
     raise KeyError(f"thimble.labels: no label named {name!r}; the labels are: {names}")
 
 
+def _file_sig(p: Path):
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    return st.st_ino, st.st_size, st.st_mtime_ns
+
+
+def _store_open(db: Path):
+    """(a read-only connection to the label store `db`, a check to call once its reads are done, which raises
+    sqlite3.OperationalError when they may have seen the store change). The kernel reads the workspace's labels/ but
+    writes none of it, and SQLite opens a store, which is in WAL mode, read-only only while the store's -wal and -shm
+    files are there, which it cannot make there. Where they are not, no connection of the server's has the store open:
+    the store is then read as immutable, whole as it lies on disk, and the check tells whether the server wrote it
+    meanwhile."""
+    wal = f"{db}-wal"
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    try:
+        conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
+        return conn, lambda: None
+    except sqlite3.OperationalError:
+        conn.close()
+        if os.path.lexists(wal):
+            raise
+    seen = _file_sig(db)
+    conn = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True, timeout=5.0)
+
+    def check():
+        if _file_sig(db) != seen or os.path.lexists(wal):
+            raise sqlite3.OperationalError(f"{db.name} changed while it was read")
+
+    return conn, check
+
+
 def _store_fresh(jsonl: Path, db: Path) -> bool:
     """Whether the store reflects the labels file (labels_store.Store.state's `fresh`). A store keying cards by `cell:`
     refs is not, so the labels file is read instead."""
@@ -235,14 +269,16 @@ def _store_fresh(jsonl: Path, db: Path) -> bool:
     if not db.exists():
         return False
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+        conn, check = _store_open(db)
         try:
             meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
-            if conn.execute("SELECT 1 FROM current WHERE ref >= 'cell:' AND ref < 'cell;' LIMIT 1").fetchone():
-                return False
+            cells = conn.execute("SELECT 1 FROM current WHERE ref >= 'cell:' AND ref < 'cell;' LIMIT 1").fetchone()
         finally:
             conn.close()
+        check()
     except sqlite3.Error:
+        return False
+    if cells:
         return False
     try:
         return int(meta.get("size", -1)) == st.st_size and int(meta.get("mtime_ns", -1)) == st.st_mtime_ns
@@ -293,7 +329,7 @@ def _with_covers(rows: list, covers: list, negatives: bool) -> list:
 def _store_parts(db: Path):
     """(rows, covers) of the store: rows (path, line, label, source, verdict, confidence, ref), covers (path, first,
     last, value, source)."""
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    conn, check = _store_open(db)
     try:
         rows = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
                             "WHERE label IS NOT NULL OR analyst IS NOT NULL ORDER BY rowid").fetchall()
@@ -303,12 +339,14 @@ def _store_parts(db: Path):
             covers = []
     finally:
         conn.close()
+    check()
     return rows, covers
 
 
 def _store_rows(db: Path):
-    """_store_parts with the rows as an iterator over the query, so a large label is never held as a list of rows."""
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    """_store_parts with the rows as an iterator over the query, so a large label is never held as a list of rows; it
+    raises sqlite3.OperationalError at its end when the store may have changed while it was read (_store_open)."""
+    conn, check = _store_open(db)
     try:
         try:
             covers = conn.execute("SELECT path, first, last, value, source FROM covers ORDER BY rowid").fetchall()
@@ -326,6 +364,7 @@ def _store_rows(db: Path):
                 yield from batch
         finally:
             conn.close()
+        check()
 
     return rows(), covers
 
@@ -458,7 +497,14 @@ def labels(name=None, negatives=False):
         _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
     jsonl = _ws() / "labels" / f"{k['id']}.jsonl"
     db = jsonl.with_suffix(".sqlite")
-    rows = _rows_from_store(db, negatives) if _store_fresh(jsonl, db) else _rows_from_jsonl(jsonl, negatives)
+    rows = None
+    if _store_fresh(jsonl, db):
+        try:
+            rows = _rows_from_store(db, negatives)
+        except sqlite3.Error:  # the store changed while it was read (_store_open): the labels file holds every row
+            pass
+    if rows is None:
+        rows = _rows_from_jsonl(jsonl, negatives)
     positive = k["values"][0] if k["values"] else None
     out = []
     for path, line, label, source, verdict, confidence, ref in rows:
@@ -483,7 +529,7 @@ def _set_by_analyst(concept_id: str) -> int:
         if _store_fresh(jsonl, db):
             # the analyst's rows alone, each with the value the label gave it: its own, or its cover's (a range of
             # records the label gave one value)
-            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+            conn, check = _store_open(db)
             try:
                 rows = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
                                     "WHERE analyst IS NOT NULL").fetchall()
@@ -493,6 +539,7 @@ def _set_by_analyst(concept_id: str) -> int:
                     covers = []
             finally:
                 conn.close()
+            check()
             rows = _with_covers(rows, covers, False)
         else:
             rows = _rows_from_jsonl(jsonl)
@@ -706,7 +753,15 @@ def _members(jsonl) -> tuple:
 
 
 def _read_members(jsonl: Path, db: Path) -> tuple:
-    rows, covers = _store_rows(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
+    if _store_fresh(jsonl, db):
+        try:
+            return _members_of(*_store_rows(db))
+        except sqlite3.Error:  # the store changed while it was read (_store_open): the labels file holds every row
+            pass
+    return _members_of(*_jsonl_parts(jsonl))
+
+
+def _members_of(rows, covers) -> tuple:
     values = _Values()
     paths = set()
     starts = []  # a record of a CSV or a JSON document by the line it starts on, as a view that reads its lines names it
