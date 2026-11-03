@@ -3956,6 +3956,20 @@ def changed_since(concept: dict, rev: int) -> str:
     return "; ".join(parts)
 
 
+def changed_after(concept: dict, since: float) -> str:
+    """What changed in the label after the time `since` (seconds since the epoch), by its change log, in the words a
+    stale card's tag uses (changed_since): every change from the first one after it on. The log keeps whole seconds, so
+    a change in the second `since` falls in counts as after it. '' when no change is after it."""
+    for e in concept.get("changes") or []:
+        try:
+            at = datetime.fromisoformat(str(e.get("ts") or ""))
+        except ValueError:
+            continue
+        if (at if at.tzinfo else at.replace(tzinfo=timezone.utc)).timestamp() >= int(since):
+            return changed_since(concept, int(e.get("first") or e.get("rev") or 0) - 1)
+    return ""
+
+
 def stale_in(cell: dict, concepts_by_id: dict[str, dict]) -> dict[str, str]:
     """The labels `cell` read at an older revision than theirs, by id, each with what changed since. Only a card whose run
     noted the revisions it read (`label_revs`) can be stale."""
