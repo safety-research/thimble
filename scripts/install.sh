@@ -1,73 +1,53 @@
 #!/usr/bin/env bash
-# install.sh: installs thimble's terminal plugin into Claude Code and its browser workbench from this checkout. Run
-# `scripts/install.sh --help` for what it does. It can run again at any time: it installs again what it installed,
-# and updates what changed.
+# install.sh: installs thimble in ~/.thimble: its plugin for Claude Code and its browser workbench.
+#
+#   curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash -s -- OPTIONS
+#
+# It downloads the newest release with git into ~/.thimble/fixes/live (a git copy, so that /thimble-fix can keep your
+# fixes as commits), with the plain release beside it in ~/.thimble/fixes/release, adds the plugin to Claude Code from
+# there, builds the workbench there, and puts the commands thimble and thimble-browser in ~/.local/bin. thimble update
+# moves both products to a newer release later. Run from a downloaded release or a clone, it does the same; only
+# --local, in a clone, installs from that clone. The steps that change ~/.thimble and Claude Code are thimble's own
+# code, in the release it downloads (plugin/engine/kernel/install.py).
 set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install.sh [--no-browser] [--no-plugin] [--local] [--bin-dir DIR] [--no-setup] [--remove-0.9]
+Usage: install.sh [--no-browser] [--sign-in claude-code|api-key|wif] [--wif-file PATH] [--bin-dir DIR] [--ref REF]
+                  [--local] [--remove-0.9]
 
-Installs thimble's two products. It checks Node, Python and uv first, and says what is missing, one line each. Before
-it installs the plugin, it looks for thimble 0.9, and stops while 0.9 is here: it says what it found, how to keep 0.9's
-workspaces (0.10 cannot open them), and the commands that remove 0.9.
-  The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble, then
-    the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt), and draws a
-    test card in it on the node a new terminal finds; a sandbox whose files are missing or broken it installs again.
-    On Linux it says which system packages the sandbox lacks, with the one command that installs them (it never runs
-    sudo).
-    Without the claude command, it prints the two commands to run.
-    It also links the thimble command into ~/.local/bin, for a shell: thimble update moves both products to the
-    newest release, thimble fixes lists your changes to thimble, and thimble --help lists the rest.
-  The browser workbench (thimble 0.8's browser mode), from this checkout: the server (uv sync in browser/backend,
-    with its test extras), the page and the sandbox runtime (npm ci in browser/frontend, then a build), and a
-    thimble-browser launcher in ~/.local/bin. It says how much disk space this takes, about 1 GB. Then it asks how
-    the workbench reaches Claude: 1 your Claude Code sign-in (the default, and recommended; it launches headless
-    Claude Code sessions, so it asks you to confirm), 2 an Anthropic API key, 3 Workload Identity Federation (a config
-    file), checks the choice and saves it in ~/.thimble-browser. The page asks the same when this step was skipped.
-Running it again is safe, and updates both.
+Installs thimble in ~/.thimble: the newest release, its plugin for Claude Code, and its browser workbench (about 1 GB).
+It checks first what thimble needs, and installs nothing while something is missing. Run it again at any time: an
+install in ~/.thimble stays as it is, with your fixes, and thimble update moves it to a newer release.
 
-  --no-browser   install the terminal plugin only
-  --no-plugin    install the browser workbench only
-  --local        for working on thimble's own code or trying a branch: the plugin comes from this checkout in place
-                 of GitHub, and thimble update follows the checkout, which you pull yourself. Leave it out for a
-                 normal install, which updates from GitHub
-  --bin-dir DIR  put the thimble command and the thimble-browser launcher in DIR
-  --no-setup     do not ask how the browser workbench reaches Claude (the page asks at its first start)
-  --remove-0.9   when thimble 0.9 is here, remove it, then install: it shows the steps and runs them only after you
-                 answer y, in a terminal (without one, it removes nothing)
+  --no-browser       the plugin alone, without the workbench
+  --sign-in HOW      how the workbench reaches Claude: claude-code (your Claude Code sign-in), api-key
+                     (ANTHROPIC_API_KEY when it is set, else a key you paste in the workbench's Settings) or wif
+                     (Workload Identity Federation, with --wif-file). Without it, the install asks in a terminal;
+                     elsewhere the workbench asks when it starts
+  --wif-file PATH    your WIF config file, for --sign-in wif
+  --bin-dir DIR      put the commands thimble and thimble-browser in DIR, not in ~/.local/bin
+  --ref REF          install this branch or tag of thimble, not the newest release (to try a branch before its
+                     release); --version X.Y.Z is the same as --ref vX.Y.Z
+  --local            in a clone of thimble: install from the clone (the dev install, for work on thimble's own code).
+                     thimble update then follows the clone, which you pull yourself
+  --remove-0.9       when thimble 0.9 is here, remove it first: the install shows the steps, and runs them after you
+                     answer y, in a terminal
 EOF
 }
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-browser="$root/browser"
-plugin=1 web=1 local=0 setup=1 remove09=0
-bin_dir="$HOME/.local/bin"
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -h | --help) usage; exit 0 ;;
-    --no-browser) web=0 ;;
-    --no-plugin) plugin=0 ;;
-    --local) local=1 ;;
-    --no-setup) setup=0 ;;
-    --remove-0.9) remove09=1 ;;
-    --bin-dir)
-      [ $# -ge 2 ] || { echo "install.sh: --bin-dir needs a folder" >&2; exit 2; }
-      bin_dir="$2"; shift ;;
-    *) echo "install.sh: unknown option $1 (see --help)" >&2; exit 2 ;;
-  esac
-  shift
-done
-[ "$plugin" = 1 ] || [ "$web" = 1 ] || { echo "install.sh: --no-browser and --no-plugin leave nothing to install" >&2; exit 2; }
-
 say() { printf '%s\n' "$*"; }
-# quietly CMD...: runs CMD, and shows what it printed only when it fails
-quietly() {
-  local log
-  log="$(mktemp)"
-  if "$@" >"$log" 2>&1; then rm -f "$log"; else cat "$log" >&2; rm -f "$log"; return 1; fi
-}
-step() { printf '\n== %s\n' "$*"; }
+# stop TEXT: an option that cannot work, said before anything is installed
+stop() { printf 'install.sh: %s\n' "$*" >&2; exit 2; }
+# tilde PATH: a path as the person reads it, with ~ for their home
+tilde() { case "$1" in "$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;; *) printf '%s' "$1" ;; esac; }
+# terminal: whether a person can answer here; through a pipe (curl ... | bash) the script asks on /dev/tty
+terminal() { [ -t 1 ] && (exec </dev/tty) 2>/dev/null; }
+# kernel ARGS...: thimble's own code, from the release in $code (engine/kernel/install.py holds the install's steps)
+kernel() { "$py" -B "$code/plugin/engine/thimble.py" "$@" --notes "$notes" --state "$state"; }
+# browser 1: the kernel's option for a step that has the workbench to install, or installed
+browser() { if [ "$1" = 1 ]; then echo --browser; fi; }
 
 # ver_ge HAVE WANT: whether the version HAVE is WANT or later, comparing up to three dotted numbers
 ver_ge() {
@@ -84,13 +64,38 @@ ver_ge() {
   return 0
 }
 
-# claude_update: how to update Claude Code, by where its claude lives. A build that a package manager installed (the
-# system's, as an AUR, deb or rpm package; Homebrew; npm) is updated by it: in such a build, `claude update` may only
-# say to use the package manager, or that updates are disabled by your administrator.
+# fix NAME: the command that installs NAME here
+fix() {
+  if [ "$(uname -s)" = Darwin ]; then
+    case "$1" in
+      node | npm) say "brew install node" ;;
+      python) say "brew install python" ;;
+      git) say "xcode-select --install" ;;
+      uv) say "brew install uv" ;;
+    esac
+    return 0
+  fi
+  case "$1" in
+    node) say "install Node.js 22 or later from https://nodejs.org/en/download" ;;
+    uv) say "curl -LsSf https://astral.sh/uv/install.sh | sh" ;;
+    *)
+      local name="$1" m
+      [ "$name" = python ] && name=python3
+      for m in "apt-get:sudo apt-get install" "dnf:sudo dnf install" "yum:sudo yum install" "pacman:sudo pacman -S" \
+               "zypper:sudo zypper install" "apk:sudo apk add"; do
+        command -v "${m%%:*}" >/dev/null 2>&1 && { say "${m#*:} $name"; return 0; }
+      done
+      say "install $name with your system's package manager" ;;
+  esac
+}
+
+# claude_update: how to update Claude Code, by where its claude lives: a build that a package manager installed (the
+# system's, Homebrew, npm) is updated by it, since its own claude update may say that updates are disabled
 claude_update() {
   local at
   at="$(command -v claude)"
-  at="$(cd / && "$py" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$at" 2>/dev/null)" || at="$(command -v claude)"
+  at="$(cd / && "$py" -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$at" 2>/dev/null)" ||
+    at="$(command -v claude)"
   if { pacman -Qo "$at" || dpkg -S "$at" || rpm -qf "$at"; } >/dev/null 2>&1; then
     say "update it with the package manager that installed $at"
     return 0
@@ -103,591 +108,273 @@ claude_update() {
   esac
 }
 
-# ---- what it needs
-
-macos=0
-[ "$(uname -s)" = Darwin ] && macos=1
-missing=()
-notes=()
-if [ "$macos" = 1 ]; then node_fix="brew install node"; uv_fix="brew install uv"
-else node_fix="from your system's packages or https://nodejs.org"; uv_fix="curl -LsSf https://astral.sh/uv/install.sh | sh"; fi
-
-node_min=22.12.0
-[ "$plugin" = 1 ] && node_min=22.18.0
-if ! command -v node >/dev/null 2>&1; then
-  missing+=("Node.js ${node_min%.0} or later is not installed: $node_fix")
-else
-  have="$(node --version 2>/dev/null | sed 's/^v//')"
-  ver_ge "$have" "$node_min" || missing+=("Node.js is $have, and thimble needs ${node_min%.0} or later: $node_fix")
-fi
-
-if [ "$plugin" = 1 ]; then
-  py="${THIMBLE_PYTHON:-python3}"
-  # run from / so that no file in the current folder stands in for a module
-  pyv="$(cd / && "$py" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
-  if [ -z "$pyv" ]; then
-    missing+=("Python 3.10 or later is not installed ($py), which the terminal plugin runs on: install python3")
-  elif ! ver_ge "$pyv" 3.10; then
-    missing+=("Python is $pyv ($py), and the terminal plugin needs 3.10 or later: install a newer python3, or set THIMBLE_PYTHON")
+# needs: what thimble needs, checked before anything is installed: Node.js, Python and git, Claude Code for the plugin,
+# uv and npm for the workbench. It says each version, or what is missing with its fix, and then installs nothing
+needs() {
+  say "Checking what thimble needs..."
+  local have=() missing=() v
+  if v=$(node --version 2>/dev/null) && v=${v#v} && ver_ge "$v" 22.18; then have+=("Node.js $v")
+  else missing+=("Node.js 22.18 or later${v:+ (the one here is $v)}: $(fix node)"); fi
+  if v=$(cd / && "$py" -I -c 'import platform; print(platform.python_version())' 2>/dev/null) && ver_ge "$v" 3.10; then
+    have+=("Python $v")
+  else missing+=("Python 3.10 or later${v:+ (the one here is $v)}: $(fix python)"); fi
+  if v=$(git --version 2>/dev/null | awk '{print $3}') && [ -n "$v" ]; then have+=("git $v")
+  else missing+=("git: $(fix git)"); fi
+  v=$(claude --version 2>/dev/null | awk '{print $1}') || v=""
+  if [ -n "$v" ] && ver_ge "$v" 2.1.307; then have+=("Claude Code $v")
+  elif [ -n "$v" ]; then missing+=("Claude Code 2.1.307 or later (the one here is $v): $(claude_update)")
+  else missing+=("Claude Code 2.1.307 or later: curl -fsSL https://claude.ai/install.sh | bash"); fi
+  if [ "$web" = 1 ]; then
+    v=$(uv --version 2>/dev/null | awk '{print $2}') || v=""
+    if [ -n "$v" ] && ver_ge "$v" 0.8; then have+=("uv $v")
+    elif [ -n "$v" ]; then missing+=("uv 0.8 or later (the one here is $v): uv self update")
+    else missing+=("uv: $(fix uv)"); fi
+    if v=$(npm --version 2>/dev/null) && [ -n "$v" ]; then have+=("npm $v"); else missing+=("npm: $(fix npm)"); fi
   fi
-  if command -v claude >/dev/null 2>&1; then
-    have="$(claude --version 2>/dev/null | awk '{print $1}')"
-    ver_ge "$have" 2.1.307 || missing+=("Claude Code is $have, and the terminal plugin needs 2.1.307 or later: $(claude_update)")
+  if [ ${#missing[@]} -gt 0 ]; then
+    say "thimble needs these first:"
+    for v in "${missing[@]}"; do say "  - $v"; done
+    say "Run the install again after that. Nothing was installed."
+    exit 1
   fi
-fi
+  v=$(printf '%s, ' "${have[@]}")
+  say "  ${v%, }: all here."
+}
 
-if [ "$web" = 1 ]; then
-  command -v node >/dev/null 2>&1 && ! command -v npm >/dev/null 2>&1 && missing+=("npm is not installed, and the browser workbench needs it to build: install it with Node.js")
-  if ! command -v uv >/dev/null 2>&1; then
-    missing+=("uv is not installed, and the browser workbench's server needs it: $uv_fix")
-  else
-    have="$(uv --version 2>/dev/null | awk '{print $2}')"
-    ver_ge "$have" 0.8.0 || missing+=("uv is $have, and the browser workbench needs 0.8 or later: uv self update")
+# why_git: what git said in $work/err, in one line: its first error (fatal: ...), else its last line
+why_git() {
+  local why
+  why="$(sed -n 's/^fatal: //p' "$work/err" | head -n 1)"
+  [ -n "$why" ] || why="$(sed '/^ *$/d' "$work/err" | tail -n 1)"
+  printf '%s' "${why%.}"
+}
+
+# download REF DIR: thimble's branch or tag REF from its repository, one commit deep, into DIR; on a failure, what git
+# said and what to do, and the install stops
+download() {
+  if ! git -c advice.detachedHead=false clone -q --depth 1 --branch "$1" "$url" "$2" </dev/null 2>"$work/err"; then
+    say " failed: $(why_git)."
+    if [ -n "$asked" ]; then say "Check the network and the name $1, then run the install again. Nothing was installed."
+    else say "Check the network, then run the install again. Nothing was installed."; fi
+    exit 1
   fi
-  if [ "$macos" = 0 ] && ! command -v bwrap >/dev/null 2>&1; then
-    notes+=("bubblewrap is not installed, so the browser workbench cannot run card code until you install it: sudo apt install bubblewrap, or your system's package")
+}
+
+# no09 DIR: stops while thimble 0.9 is here, with what it found and the commands that remove it (DIR's
+# scripts/thimble09.py); with --remove-0.9, in a terminal, it runs them after the person's y
+no09() {
+  local found noun answer workspaces keep shown run restart
+  old09() { (cd / && "$py" -I "$1/scripts/thimble09.py" "${@:2}"); }
+  found="$(old09 "$1" report)"
+  [ -n "$found" ] || return 0
+  if [ "$open" = 1 ]; then say ""; fi  # the line that says the download, left open
+  say ""
+  say "$found"
+  if [ "$remove09" = 0 ]; then
+    say ""
+    say "Remove it with the commands above, then run the install again. Nothing was installed."
+    exit 1
   fi
-fi
-
-if [ ${#missing[@]} -gt 0 ]; then
-  say "thimble needs these first:"
-  for m in "${missing[@]}"; do say "  - $m"; done
-  say "Then run scripts/install.sh again. Nothing was installed."
-  exit 1
-fi
-
-# ---- thimble 0.9, which must go first (scripts/thimble09.py says why and how)
-
-if [ "$plugin" = 1 ]; then
-  old09() { (cd / && "$py" -I "$root/scripts/thimble09.py" "$@"); }
-  found="$(old09 report)"
-  if [ -n "$found" ]; then
-    say "$found"
-    if [ "$remove09" = 0 ]; then
-      say "Or run scripts/install.sh --remove-0.9 in a terminal: it shows these steps, runs them after you answer y,"
-      say "then installs 0.10."
+  say ""
+  if ! terminal; then
+    say "--remove-0.9 asks you before it deletes anything, so it runs only in a terminal. Run the commands above, or"
+    say "run the install in your own terminal. Nothing was installed."
+    exit 1
+  fi
+  workspaces="$(old09 "$1" workspaces)"
+  if [ -n "$workspaces" ]; then
+    keep="$HOME/thimble-0.9-workspaces"
+    [ -e "$keep" ] && keep="$keep-$(date +%Y%m%d-%H%M%S)"
+    printf "Move 0.9's workspaces to %s first, to keep them? [Y/n]: " "$(tilde "$keep")"
+    read -r answer </dev/tty || answer=n
+    case "$answer" in
+      n | N | no | No) say "They stay where they are, and removing 0.9 deletes them." ;;
+      *) mv "$workspaces" "$keep" || { say "They could not be moved, so nothing was removed."; exit 1; }
+         say "Moved: $(tilde "$keep")" ;;
+    esac
+  fi
+  # what it removes, by its name: thimble 0.9, or the link to a thimble folder that is gone, which names no version
+  noun="$(old09 "$1" noun)"
+  printf 'Remove %s now, with the commands above? This cannot be undone. [y/N]: ' "$noun"
+  read -r answer </dev/tty || answer=""
+  case "$answer" in y | Y | yes | Yes) ;; *) say "Nothing was removed or installed."; exit 1 ;; esac
+  while IFS=$'\t' read -r -u 3 shown run; do
+    say "+ $shown"
+    if ! eval "$run" </dev/null; then
+      say "That step failed, so the install stopped. Do it by hand, then run the install again."
       exit 1
     fi
-    if [ ! -t 0 ] || [ ! -t 1 ]; then
+  done 3< <(old09 "$1" commands)
+  if [ -n "$(old09 "$1" report)" ]; then say "$noun is still here."; exit 1; fi
+  say "$noun is removed."
+  restart="Note: restart the claude sessions that were open, or type /reload-plugins in them: until then they say"
+  say "$restart \"Plugin directory does not exist\" after each tool call." >>"$notes"
+}
+
+# signin BROWSER: how the workbench in BROWSER reaches Claude, set by its own setup (thimble-browser --setup): the way
+# --sign-in names, else one chosen before, else asked in a terminal; its lines go under The workbench
+signin() {
+  local args=(--keep) tty=/dev/null
+  if ! grep -q -- '"--keep"' "$1/backend/app/claude_access.py" 2>/dev/null; then
+    # a workbench from before 0.10.8 (an install whose fixes are on an older release), whose setup asks again: the way
+    # it had stays, and while there is none, the page asks
+    if [ -f "${THIMBLE_BROWSER_HOME:-$HOME/.thimble-browser}/claude-access.json" ]; then say "  Sign-in: as it was before."
+    else say "  Sign-in: not chosen yet. The workbench asks when it starts."; fi
+    return 0
+  fi
+  [ -z "$sign_in" ] || args=(--how "$sign_in")
+  [ -z "$wif_file" ] || args+=(--wif-file "$wif_file")
+  terminal && tty=/dev/tty
+  "$1/scripts/thimble-browser" --setup "${args[@]}" <"$tty" | sed 's/^/  /' || true
+}
+
+# the end: how to start each product, how to update, then what does not work yet
+finish() {
+  say ""
+  if [ "$web" = 1 ] && [ "$built" = 1 ]; then say "$1."
+  elif [ "$web" = 1 ]; then say "$1 (the plugin; the note below says why the workbench is not)."
+  else say "$1 (the plugin)."; fi
+  say "  Plugin: start claude in a folder of data files, or type /reload-plugins in a session that is open."
+  if [ "$built" = 1 ]; then
+    say "  Workbench: run thimble-browser in a folder of files, in a terminal of its own, and open the link it prints."
+  fi
+  say "  Update later: $2"
+  if [ -s "$notes" ]; then say ""; cat "$notes"; fi
+}
+
+main() {
+  # the options
+  web=1 local=0 remove09=0 sign_in="" wif_file="" asked="" bin_dir="$HOME/.local/bin"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -h | --help) usage; exit 0 ;;
+      --no-browser) web=0 ;;
+      --sign-in | --wif-file | --bin-dir | --ref | --version)
+        [ $# -ge 2 ] || stop "$1 needs a value (see --help)"
+        case "$1" in
+          --sign-in) sign_in="$2" ;;
+          --wif-file) wif_file="$2" ;;
+          --bin-dir) bin_dir="$2" ;;
+          --ref) asked="$2" ;;
+          --version) asked="v${2#v}" ;;
+        esac
+        shift ;;
+      --local) local=1 ;;
+      --remove-0.9) remove09=1 ;;
+      --no-setup) ;;  # an earlier install's option: the workbench asks when it starts, as it does now with no terminal
+      *) stop "unknown option $1 (see --help)" ;;
+    esac
+    shift
+  done
+  case "$sign_in" in "" | claude-code | api-key | wif) ;; *) stop "--sign-in is claude-code, api-key or wif" ;; esac
+  [ -z "$wif_file" ] || [ -n "$sign_in" ] || sign_in=wif
+  [ "$sign_in" != wif ] || [ -n "$wif_file" ] || terminal ||
+    stop "--sign-in wif needs --wif-file PATH, the path of your WIF config file"
+  [ "$web" = 1 ] || [ -z "$sign_in" ] || stop "--sign-in sets up the workbench, which --no-browser leaves out"
+  py="${THIMBLE_PYTHON:-python3}"
+  url="${THIMBLE_UPDATE_URL:-https://github.com/safety-research/thimble.git}"
+  home="${THIMBLE_HOME:-$HOME/.thimble}"
+  fixes="$home/fixes"
+  work="$(mktemp -d)"
+  trap 'rm -rf "$work"' EXIT
+  notes="$work/notes" state="$work/state.json" built=0 open=0
+  : >"$notes"
+  # the plugin hands a command that cannot write ~/.thimble to Claude Code; the install's own steps run here
+  unset THIMBLE_HANDOFF
+
+  say "Installing thimble."
+  say ""
+  # 1. what thimble needs, checked before anything is installed
+  needs
+
+  if [ "$local" = 1 ]; then
+    # the dev install: the plugin and the workbench from this clone, which thimble update then follows
+    code="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/.." 2>/dev/null && pwd)" || code=""
+    [ -f "${BASH_SOURCE[0]:-}" ] && [ "$(git -C "$code" rev-parse --show-toplevel 2>/dev/null)" = "$code" ] ||
+      stop "--local installs from a clone of thimble: git clone https://github.com/safety-research/thimble, then" \
+        "run scripts/install.sh --local in it"
+    no09 "$code"
+    say ""
+    say "The plugin"
+    kernel install plugin --folder "$code" || { say "After you fix that, run the install again."; exit 1; }
+    kernel install sandbox --folder "$code"
+    if [ "$web" = 1 ]; then
       say ""
-      say "--remove-0.9 asks you before it deletes anything, so it runs only in a terminal. Run it in your own terminal,"
-      say "or run the commands above. Nothing was removed."
-      exit 1
+      say "The workbench"
+      if kernel install browser --folder "$code"; then built=1; signin "$code/browser"; fi
     fi
     say ""
-    workspaces="$(old09 workspaces)"
-    if [ -n "$workspaces" ]; then
-      keep="$HOME/thimble-0.9-workspaces"
-      [ -e "$keep" ] && keep="$keep-$(date +%Y%m%d-%H%M%S)"
-      printf "Move 0.9's workspaces to %s first, to keep them? [Y/n]: " "$keep"
-      read -r answer || { say ""; say "Nothing was removed."; exit 1; }
-      case "$answer" in
-        n | N | no | No) say "They stay where they are, and removing 0.9 deletes them." ;;
-        *) mv "$workspaces" "$keep" || { say "They could not be moved, so nothing was removed."; exit 1; }
-           say "Moved: $keep" ;;
-      esac
-    fi
-    # what it removes, by its name: thimble 0.9, or the link to a thimble folder that is gone, which names no version
-    noun="$(old09 noun)"
-    say "Removing $noun runs:"
-    while IFS=$'\t' read -r shown _; do say "  $shown"; done < <(old09 commands)
-    printf 'Remove %s now? This cannot be undone. [y/N]: ' "$noun"
-    read -r answer || answer=""
-    case "$answer" in
-      y | Y | yes | Yes) ;;
-      *) say "Nothing was removed or installed."; exit 1 ;;
-    esac
-    while IFS=$'\t' read -r -u 3 shown run; do
-      say "+ $shown"
-      eval "$run" </dev/null || { say "That step failed, so the install stopped. Do it by hand, then run scripts/install.sh again."; exit 1; }
-    done 3< <(old09 commands)
-    if [ -n "$(old09 report)" ]; then
-      say "$noun is still here:"
-      old09 report
+    kernel install commands --folder "$code" --bin-dir "$bin_dir" $(browser "$built")
+    finish "thimble is installed from your clone $(tilde "$code")" \
+      "pull the clone (git -C $(tilde "$code") pull), then thimble update"
+    return 0
+  fi
+
+  # 2. the release: the newest, or the branch or tag that --ref names
+  if [ -n "$asked" ]; then
+    ref="$asked"
+  else
+    ref="$(git ls-remote --tags --refs "$url" 'refs/tags/v*' 2>"$work/err" |
+      sed -n 's|.*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' |
+      sort -t. -k1.2,1n -k2,2n -k3,3n | tail -n 1)" || ref=""
+    if [ -z "$ref" ]; then
+      printf 'Downloading thimble into %s...' "$(tilde "$home")"
+      why="$(why_git)"
+      say " failed: ${why:-$url has no release}."
+      say "Check the network, then run the install again. Nothing was installed."
       exit 1
     fi
-    say "$noun is removed."
-    notes+=("restart the claude sessions that were open during the upgrade, or run /reload-plugins in them: until then they report \"Plugin directory does not exist\" after each tool call")
   fi
-fi
-say "thimble: what the install needs is here."
+  name="$ref"
+  case "$name" in v[0-9]*.[0-9]*.[0-9]*) name="${name#v}" ;; esac
 
-# launcher NAME TEXT: writes the launcher NAME in bin_dir, unless another program has that name
-launcher() {
-  local to="$bin_dir/$1"
-  mkdir -p "$bin_dir"
-  if [ -e "$to" ] && ! grep -q 'written by thimble scripts/install.sh' "$to" 2>/dev/null; then
-    say "$to is another program, so the launcher was not written. Pass --bin-dir to put it elsewhere."
-    return 0
-  fi
-  printf '%s' "$2" > "$to.tmp"
-  chmod +x "$to.tmp"
-  mv -f "$to.tmp" "$to"
-  say "The launcher: $to"
-  case ":$PATH:" in
-    *":$bin_dir:"*) ;;
-    *) notes+=("$bin_dir is not on your PATH: add it, or run $to by its full path") ;;
-  esac
-}
-# link_cli TARGET: bin_dir/thimble, a link to TARGET (the installed plugin's bin/thimble), so that thimble is a command
-# in a shell once bin_dir is on PATH. Once Claude Code loads thimble from ~/.thimble/fixes/live, thimble points the link
-# at the command of ~/.thimble/fixes/release, the release no fix changes; cli-link in thimble's home names the link for
-# it. Another program of that name is left alone.
-link_cli() {
-  local to="$bin_dir/thimble" home="${THIMBLE_HOME:-$HOME/.thimble}"
-  mkdir -p "$bin_dir"
-  if [ -L "$to" ]; then
-    case "$(readlink "$to")" in
-      */plugin/bin/thimble) ;;
-      *) say "$to is another program, so the thimble command was not linked. Pass --bin-dir to put it elsewhere."; return 0 ;;
-    esac
-  elif [ -e "$to" ] && ! grep -q 'written by thimble scripts/install.sh' "$to" 2>/dev/null; then
-    say "$to is another program, so the thimble command was not linked. Pass --bin-dir to put it elsewhere."
-    return 0
-  fi
-  rm -f "$to.tmp"
-  ln -s "$1" "$to.tmp" && mv -f "$to.tmp" "$to"
-  mkdir -p "$home" && printf '%s\n' "$to" > "$home/cli-link"
-  say "The thimble command: $to → $1"
-  case ":$PATH:" in
-    *":$bin_dir:"*) ;;
-    *) notes+=("$bin_dir is not on your PATH, so a new terminal does not find thimble. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"$bin_dir:\$PATH\"") ;;
-  esac
-}
-# sq TEXT: TEXT in single quotes, for a launcher
-sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-# fresh_path: the PATH a new terminal starts with, where the claude the person starts finds the node the plugin's cards
-# run on: their login shell ($SHELL), started as a terminal starts it (a login shell, interactive, so it reads their
-# startup files) with no input, prints its environment; '' when it cannot say within 20 s. The shell runs in a session
-# of its own, with no terminal: an interactive shell makes the terminal it finds its own and does not give it back, so
-# the install's next question would stop it ("suspended (tty input)"), and a startup file that reads the terminal would
-# wait there unseen. At 20 s the shell and what it started get SIGKILL (an interactive shell ignores SIGTERM). In the
-# install's Python, as macOS has no setsid command; -I, so no file of the current folder stands in for a module
-fresh_path() {
-  local sh="${SHELL:-}"
-  [ -n "$sh" ] && [ -x "$sh" ] || return 0
-  "$py" -I -c '
-import os, signal, subprocess, sys, tempfile
-sh = sys.argv[1]
-e = os.environ
-env = {"HOME": e.get("HOME", ""), "USER": e.get("USER", ""), "LOGNAME": e.get("LOGNAME") or e.get("USER", ""), "SHELL": sh,
-       "TERM": e.get("TERM") or "xterm-256color", "LANG": e.get("LANG") or "C.UTF-8"}
-# its output in a file, read once the shell ends: a program its startup files leave running may keep a pipe open
-with tempfile.TemporaryFile() as out:
-    p = subprocess.Popen([sh, "-lic", "env"], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.DEVNULL, env=env,
-                         start_new_session=True)
-    try:
-        p.wait(timeout=20)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(p.pid, signal.SIGKILL)
-        except OSError:
-            pass
-        p.wait()
-        sys.exit(0)
-    out.seek(0)
-    paths = [line[5:] for line in out.read().decode(errors="replace").splitlines() if line.startswith("PATH=")]
-print(paths[-1] if paths else "")
-' "$sh" 2>/dev/null || true
-}
-# stamp_version: the plugin.json that Claude Code installs (the marketplace's) carries the version of the release it
-# holds, so that Claude Code records that version and names its copy by it, where it would name it by its commit, or
-# "unknown" in a folder with no git. A release names its version by its tag alone: vX.Y.Z at the marketplace folder's
-# commit, or, in a folder with no git, X.Y.Z in the folder's name, as GitHub names a release's archive (thimble-X.Y.Z).
-# A plugin.json that has a version keeps it. The version stays where Claude Code reads it again, so that it never takes
-# its copy for an older one: in its own clone of the marketplace (a GitHub install), and in a folder with no git. Only
-# the person's own checkout (--local) gets plugin.json back as it was once Claude Code has its copy (unstamp_version),
-# so that git sees no change there; until then the file as it was keeps a second name in the checkout's git folder. The
-# new plugin.json is written beside the old one and then takes its name, so that a write that fails changes nothing; a
-# plugin.json the install cannot write keeps no version, and a note says how to change that.
-stamped="" stamped_was=""
-stamp_version() {
-  local out kind a b
-  out="$(cd / && "$py" -I -c '
-import json, os, re, shlex, subprocess, sys, tempfile
-plugins = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "plugins")
-try:
-    known = json.load(open(os.path.join(plugins, "known_marketplaces.json")))["thimble"]
-    market = os.path.realpath(known["installLocation"])
-    entry = next(p for p in json.load(open(os.path.join(market, ".claude-plugin", "marketplace.json")))["plugins"]
-                 if p.get("name") == "thimble")
-    at = os.path.normpath(os.path.join(market, entry["source"], ".claude-plugin", "plugin.json"))
-except (OSError, ValueError, KeyError, TypeError, AttributeError, StopIteration):
-    sys.exit(0)
-
-def git(*args):
-    try:
-        p = subprocess.run(["git", "-C", market, *args], capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return p.stdout.strip() if p.returncode == 0 else ""
-
-def load(p):
-    try:
-        with open(p, "rb") as f:
-            return json.loads(f.read())
-    except (OSError, ValueError):
-        return None
-
-top = git("rev-parse", "--show-toplevel")
-checkout = bool(top) and os.path.realpath(top) == market
-src = known.get("source")
-# the checkout of the person (--local): a marketplace folder that is a checkout and not the clone Claude Code made of
-# a GitHub or git marketplace
-mine = checkout and not (isinstance(src, dict) and src.get("source") in ("github", "git"))
-gitdir = git("rev-parse", "--absolute-git-dir") if mine else ""
-keep = os.path.join(gitdir, "thimble-plugin.json") if gitdir else ""
-if keep and os.path.lexists(keep):
-    # left by an install that stopped before it put plugin.json back: plugin.json as it was, put back while plugin.json
-    # is still its stamp
-    try:
-        was, now = load(keep), load(at)
-        if os.path.exists(at) and os.path.samefile(keep, at):
-            os.unlink(keep)
-        elif (isinstance(was, dict) and isinstance(now, dict) and "version" not in was
-              and {k: v for k, v in now.items() if k != "version"} == was):
-            os.replace(keep, at)
-        else:
-            os.unlink(keep)
-    except OSError:
-        pass
-manifest = load(at)
-if not isinstance(manifest, dict) or manifest.get("version") or (mine and not keep):
-    sys.exit(0)
-if checkout:
-    names = [t[1:] for t in git("tag", "--points-at", "HEAD").split() if t.startswith("v")]
-else:
-    name = os.path.basename(market)
-    names = [name[len("thimble-"):]] if name.startswith("thimble-") else []
-found = [tuple(int(x) for x in m.groups()) for m in (re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", n) for n in names) if m]
-if not found:
-    sys.exit(0)
-version = ".".join(str(x) for x in max(found))
-d = {}
-for k, v in manifest.items():
-    d[k] = v
-    if k == "name":
-        d["version"] = version
-d.setdefault("version", version)
-folder = os.path.dirname(at)
-shown = "Claude Code shows the version of thimble as " + ("its commit" if checkout else "\"unknown\"")
-locked = [p for p, ok in ((folder, os.access(folder, os.W_OK | os.X_OK)), (at, os.access(at, os.W_OK))) if not ok]
-if locked:
-    print("note\t%s: the install could not write the version, %s, in %s, which is read-only. To have it shown, run this, "
-          "then scripts/install.sh again: chmod u+w %s" % (shown, version, at, " ".join(shlex.quote(p) for p in locked)))
-    sys.exit(0)
-if keep:
-    # plugin.json as it was, by a second name, until unstamp_version gives it its own name back; said before the write,
-    # so that the install puts it back whatever happens next
-    try:
-        os.link(at, keep)
-    except OSError:
-        sys.exit(0)  # no second name for it there: the checkout stays as it is, and Claude Code names it by its commit
-    print("stamped\t%s\t%s" % (at, keep), flush=True)
-tmp = ""
-try:
-    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".plugin.json.")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
-    os.chmod(tmp, os.stat(at).st_mode & 0o7777)
-    os.replace(tmp, at)
-    tmp = ""
-except OSError as e:
-    if keep:
-        try:
-            os.unlink(keep)  # plugin.json is as it was
-        except OSError:
-            pass
-    print("note\t%s: the install could not write the version, %s, in %s (%s). Fix that, then run scripts/install.sh "
-          "again" % (shown, version, at, e.strerror or e))
-finally:
-    if tmp:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-' || true)"
-  while IFS=$'\t' read -r kind a b; do
-    case "$kind" in
-      stamped) stamped="$a" stamped_was="$b"; trap unstamp_version EXIT ;;
-      note) notes+=("$a") ;;
-    esac
-  done <<< "$out"
-}
-unstamp_version() {
-  [ -n "$stamped" ] || return 0
-  local at="$stamped" keep="$stamped_was"
-  stamped="" stamped_was=""
-  (cd / && "$py" -I -c '
-import os, shlex, sys
-at, keep = sys.argv[1:3]
-try:
-    if os.path.lexists(keep):
-        if os.path.exists(at) and os.path.samefile(keep, at):
-            os.unlink(keep)
-        else:
-            os.replace(keep, at)
-except OSError as e:
-    sys.exit("install.sh: %s keeps the version the install wrote in it (%s). This puts it back as it was: mv %s %s"
-             % (at, e.strerror or e, shlex.quote(keep), shlex.quote(at)))
-' "$at" "$keep") || true
-}
-# unsettle [FOLDER]: takes the marketplace thimble out of Claude Code's user settings (extraKnownMarketplaces) when they
-# name it at a folder: FOLDER or a folder in it, else any folder. Nothing else in the file changes: it is written to a
-# new file, which then replaces settings.json, with its mode. With FOLDER, it says so
-unsettle() {
-  (cd / && "$py" -c '
-import json, os, sys, tempfile
-gone = sys.argv[1]
-at = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "settings.json")
-real = os.path.realpath(at)  # when settings.json is a link, the file it links to changes
-try:
-    with open(real, encoding="utf-8") as f:
-        d = json.load(f)
-    src = d["extraKnownMarketplaces"]["thimble"]["source"]
-    p = os.path.realpath(src["path"]) if src.get("source") == "directory" else ""
-except (OSError, ValueError, KeyError, TypeError, AttributeError):
-    p = ""
-if not p or (gone and p != gone and not p.startswith(gone + os.sep)):
-    sys.exit(0)  # the settings do not name thimble at that folder: the add says what is wrong, if anything is
-del d["extraKnownMarketplaces"]["thimble"]
-try:
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(real), prefix=".settings.json.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(d, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-        os.chmod(tmp, os.stat(real).st_mode & 0o7777)
-        os.replace(tmp, real)
-    except BaseException:
-        os.unlink(tmp)
-        raise
-except OSError as e:
-    sys.exit("install.sh: could not remove the marketplace thimble from %s (%s), and Claude Code adds it again only "
-             "after that. Remove extraKnownMarketplaces.thimble from that file, then run scripts/install.sh again."
-             % (at, e.strerror or e))
-if gone:
-    print("Removed the marketplace thimble from %s: its folder %s is gone." % (at, gone))
-' "${1:-}")
-}
-
-# ---- the terminal plugin
-
-if [ "$plugin" = 1 ]; then
-  step "The terminal plugin"
-  source="safety-research/thimble"
-  [ "$local" = 1 ] && source="$root"
-  # once a fix went on, Claude Code loads thimble from the fixes' live folder, and refuses another source for its
-  # marketplace: thimble update moves that folder to the new release and keeps the fixes. Its source is such a folder
-  # when it is a fixes/live checkout with release.json beside it, in this shell's THIMBLE_HOME or any other. A source
-  # that names a fixes/live folder that is gone (its thimble home was deleted) is removed, and the plugin installs as
-  # usual
-  found="$(cd / && "$py" -c '
-import json, os
-cc = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-home = os.path.realpath(os.path.join(os.environ.get("THIMBLE_HOME") or os.path.expanduser("~/.thimble"), "fixes", "live"))
-named = []
-for at, keys in ((("plugins", "known_marketplaces.json"), ("thimble", "source")),
-                 (("settings.json",), ("extraKnownMarketplaces", "thimble", "source"))):
-    try:
-        d = json.load(open(os.path.join(cc, *at)))
-        for k in keys:
-            d = d[k]
-        p = os.path.realpath(d["path"]) if d.get("source") == "directory" else ""
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        p = ""
-    live = home if p and (p + os.sep).startswith(home + os.sep) else p
-    if live and os.path.basename(live) == "live" and os.path.basename(os.path.dirname(live)) == "fixes":
-        named.append(live)
-real = [p for p in named if os.path.exists(os.path.join(p, ".git"))
-        and os.path.isfile(os.path.join(os.path.dirname(p), "release.json"))]
-if real:
-    print("live " + real[0])
-elif named:
-    print("gone " + named[0])
-' || true)"
-  fixes_live="" gone=""
-  case "$found" in
-    "live "*) fixes_live="${found#live }" ;;
-    "gone "*) gone="${found#gone }" ;;
-  esac
-  if [ -n "$fixes_live" ]; then
-    say "Claude Code loads thimble from your fixes ($fixes_live), so the plugin is left as it is: run thimble update, which updates both products and keeps your fixes."
-  elif command -v claude >/dev/null 2>&1; then
-    if [ -n "$gone" ]; then
-      # when only Claude Code's settings name that folder, its list has no marketplace thimble: remove says that it is
-      # not found and changes nothing, and Claude Code refuses the add below while its settings name thimble from
-      # another source. Then the install removes thimble from the settings itself, only when they name it at that folder
-      # or in it
-      if removed="$(claude plugin marketplace remove thimble 2>&1)"; then
-        say "$removed"
-      else
-        case "$removed" in
-          *"not found"*) unsettle "$gone" ;;
-          *) say "$removed" >&2; exit 1 ;;
-        esac
-      fi
+  say ""
+  if [ -e "$fixes/live/.git" ] && [ -f "$fixes/release.json" ]; then
+    # 3. an install in ~/.thimble stays, with its fixes; it runs its own code, unless it is older than this install
+    code="$fixes/release"
+    if [ ! -f "$code/plugin/engine/kernel/install.py" ]; then
+      code="$work/thimble"
+      printf 'Downloading thimble %s for its install steps...' "$name"
+      download "$ref" "$code"
+      say " done."
     fi
-    # Claude Code takes a folder in place of any source for the marketplace, but refuses GitHub's while its settings
-    # name thimble at a folder, as an install with --local leaves them (from a clone, or a release's zip). Out of the
-    # settings, the add moves the marketplace to GitHub and writes it there again, and the plugin stays, with its options
-    [ "$local" = 1 ] || unsettle
-    claude plugin marketplace add "$source"
-    installed=0
-    if claude plugin list --json 2>/dev/null | grep -q '"thimble@thimble"'; then
-      installed=1
-      claude plugin marketplace update thimble
-    fi
-    stamp_version
-    if [ "$installed" = 1 ]; then
-      claude plugin update thimble@thimble
-    else
-      # each feature's default, from the userConfig of the plugin this installs (the marketplace just added: GitHub's,
-      # or this checkout with --local), so a fresh install has no option left unset and none its version lacks
-      config=()
-      while IFS= read -r kv; do [ -n "$kv" ] && config+=(--config "$kv"); done < <(cd / && "$py" -c '
-import json, os, sys
-plugins = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "plugins")
-try:
-    at = json.load(open(os.path.join(plugins, "known_marketplaces.json")))["thimble"]["installLocation"]
-    entry = next(p for p in json.load(open(os.path.join(at, ".claude-plugin", "marketplace.json")))["plugins"]
-                 if p.get("name") == "thimble")
-    manifest = json.load(open(os.path.join(at, entry["source"], ".claude-plugin", "plugin.json")))
-except (OSError, ValueError, KeyError, TypeError, StopIteration):
-    sys.exit(0)  # no defaults to give: Claude Code installs the plugin with its own
-for k, v in (manifest.get("userConfig") or {}).items():
-    d = v.get("default")
-    # --config takes the value as typed: a string bare (quotes would be kept as part of it), a boolean as true or
-    # false; it refuses an empty value, and one refused value drops them all, so an empty default stays unset
-    if isinstance(d, bool):
-        print(k + "=" + json.dumps(d))
-    elif d not in (None, ""):
-        print(k + "=" + str(d))
-')
-      claude plugin install thimble@thimble ${config[@]+"${config[@]}"}
-    fi
-    unstamp_version
-    # the sandbox the plugin's cards run in: Anthropic's sandbox runtime, at the version the installed plugin pins, in
-    # thimble's home (the plugin's sandbox/setup.mjs, which the plugin also runs at each session start)
-    at="$(cd / && "$py" -c '
-import json, os
-plugins = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "plugins")
-try:
-    at = json.load(open(os.path.join(plugins, "known_marketplaces.json")))["thimble"]["installLocation"]
-    entry = next(p for p in json.load(open(os.path.join(at, ".claude-plugin", "marketplace.json")))["plugins"]
-                 if p.get("name") == "thimble")
-    print(os.path.normpath(os.path.join(at, entry["source"])))
-except (OSError, ValueError, KeyError, TypeError, StopIteration):
-    pass
-' || true)"
-    if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
-      say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
-      # the test draws a card as a session does: on the node and PATH of a new terminal (fresh_path), else on this
-      # shell's, which a line says when the login shell could not be started (tcsh takes -l only as its one flag); a
-      # failure it can repair (srt's files missing or broken) it repairs (--repair)
-      probe_path="$(fresh_path)"
-      probe_node=""
-      if [ -n "$probe_path" ]; then
-        probe_node="$(PATH="$probe_path"; hash -r; command -v node 2>/dev/null || true)"
-        [ -n "$probe_node" ] || notes+=("a new terminal finds no node, and the plugin's cards run on the node a new terminal finds. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"$(dirname "$(command -v node)"):\$PATH\"")
-      fi
-      if [ -z "$probe_node" ]; then
-        [ -n "$probe_path" ] || say "Your login shell${SHELL:+ ($SHELL)} could not be started as a new terminal starts it, so the test card runs on this shell's node: $(command -v node)"
-        probe_node="$(command -v node)"; probe_path="$PATH"
-      fi
-      # its line (npm's progress goes to stderr, and shows as it comes); when the sandbox does not work yet, the line's
-      # why and fix again in the notes, at the end. The fix, on the line after the why, often ends in a command: it
-      # keeps a line of its own, so that no words follow the command
-      if sandbox="$(PATH="$probe_path" "$probe_node" "$at/sandbox/setup.mjs" --probe --repair)"; then
-        say "$sandbox"
-      else
-        say "$sandbox"
-        why="${sandbox%%$'\n'*}"
-        fix="${sandbox#"$why"}"
-        why="${why#thimble: }"
-        notes+=("${why:-cards cannot run yet: the sandbox check failed, as it said above.} The next card tries again${fix:+ after this:$fix}")
-      fi
-    fi
-    # thimble in a shell (thimble update, thimble fixes): a link to the plugin's own command, as 0.9 had it
-    if [ -n "$at" ] && [ -x "$at/bin/thimble" ]; then
-      link_cli "$at/bin/thimble"
-    fi
-    say "To use the plugin, start claude in a folder of data files you trust, or type /reload-plugins in an open session."
-    say "After a change to Node, start claude in a new terminal."
+    no09 "$code"
+    kernel install release ${asked:+--ref "$asked"} --bin-dir "$bin_dir" $(browser "$web") || {
+      [ $? = 3 ] && return 0  # every part is in place
+      exit 1
+    }
   else
-    say "Claude Code (the claude command) is not installed. Install it, then run:"
-    if [ -n "$gone" ]; then
-      say "  claude plugin marketplace remove thimble"
-    fi
-    say "  claude plugin marketplace add $source"
-    say "  claude plugin install thimble@thimble"
-  fi
-fi
-
-# ---- the browser workbench
-
-if [ "$web" = 1 ]; then
-  step "The browser workbench"
-  say "The server's Python packages (uv sync in browser/backend)..."
-  export NPM_CONFIG_UPDATE_NOTIFIER=false
-  # with the test extras, so that thimble's dev agent can run the backend's tests in a checkout
-  quietly uv sync --project "$browser/backend" --frozen --no-dev --no-install-project --extra dev
-  say "The page and the sandbox runtime (npm ci in browser/frontend, then a build)..."
-  quietly npm --prefix "$browser/frontend" ci --no-audit --no-fund
-  quietly npm --prefix "$browser/frontend" run build
-
-  launcher thimble-browser "#!/bin/sh
-# thimble-browser, written by thimble scripts/install.sh: starts the browser workbench of this checkout.
-exec $(sq "$browser/scripts/thimble-browser") \"\$@\"
-"
-
-  # how the workbench reaches Claude: asked here once, kept in its home (backend app/claude_access.py)
-  browser_home="${THIMBLE_BROWSER_HOME:-$HOME/.thimble-browser}"
-  mkdir -p "$browser_home" && chmod 700 "$browser_home"
-  # thimble update links this checkout's packages into ~/.thimble/fixes/live while their lock files are the same
-  printf '%s\n' "$browser" > "$browser_home/checkout"
-  access() { (cd "$browser/backend" && THIMBLE_HOME="$browser_home" .venv/bin/python -m app.claude_access "$@"); }
-  if [ "$setup" = 1 ] && [ -t 0 ]; then
-    step "How the browser workbench reaches Claude"
-    mkdir -p "$browser_home" && chmod 700 "$browser_home"
-    ask=1
-    if access status >/dev/null 2>&1; then
-      access status
-      printf 'Keep it? [Y/n]: '
-      read -r keep || keep=""
-      case "$keep" in n | N | no | No) ask=1 ;; *) ask=0 ;; esac
-    fi
-    if [ "$ask" = 1 ]; then
-      access setup || notes+=("Claude access is not set up yet: the page asks at its first start, or run thimble-browser --setup")
-    fi
-  elif ! access status >/dev/null 2>&1; then
-    # no terminal to ask in (an agent runs this script, or --no-setup): whoever runs it asks the person
-    notes+=("Claude access is not set up yet. Ask the person which way the workbench reaches Claude, then set it with thimble-browser --setup, which checks that Claude answers. Their Claude Code sign-in (recommended), only after they accept \"This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.\": --how claude-code --yes. An Anthropic API key: --key-file FILE, a file they write themselves from the clipboard (never take a key in a chat, and never read that file). Workload Identity Federation: --how wif --wif-file FILE (--find-wif lists the config files it finds). Skipped, the page asks at its first start")
+    # 3. the release, downloaded with git into a folder of its own, then made ~/.thimble/fixes/live
+    code="$work/thimble"
+    printf 'Downloading thimble %s into %s...' "$name" "$(tilde "$home")"
+    open=1
+    download "$ref" "$code"
+    no09 "$code"
+    if out="$(kernel install release --from "$code" ${asked:+--ref "$asked"} 2>&1)"; then say " done."
+    else say " failed: $out"; exit 1; fi
+    open=0
   fi
 
-  kb() { du -sk "$1" 2>/dev/null | awk '{print $1}' || echo 0; }
-  page=$(kb "$browser/frontend/node_modules"); built=$(kb "$browser/frontend/dist"); venv=$(kb "$browser/backend/.venv")
-  mb() { echo $((($1 + 512) / 1024)); }
-  say "The browser workbench takes $(mb $((page + built + venv))) MB in this checkout: the page's packages and the sandbox" \
-    "runtime $(mb "$page") MB (browser/frontend/node_modules), the server's Python packages $(mb "$venv") MB" \
-    "(browser/backend/.venv) and the built page $(mb "$built") MB."
-fi
+  # 4. the plugin: Claude Code loads it from ~/.thimble/fixes/live, with its settings as they were
+  say ""
+  say "The plugin"
+  kernel install plugin || { say "After you fix that, run the install again."; exit 1; }
+  # 5. the sandbox that cards run in: it draws a test card
+  kernel install sandbox
 
-if [ "$plugin" = 1 ] && [ "$web" = 1 ]; then
+  # 6. the workbench: its packages and its page, built in ~/.thimble/fixes/live/browser, then how it reaches Claude
+  if [ "$web" = 1 ]; then
+    say ""
+    say "The workbench"
+    if kernel install browser; then built=1; signin "$fixes/live/browser"; fi
+  fi
+
+  # 7. the commands thimble and thimble-browser, and the folders of an earlier install that nothing uses now
   say ""
-  say "Use the terminal plugin when you work in Claude Code, and the browser workbench to work in a web page."
-fi
-if [ "$web" = 1 ]; then
-  say ""
-  say "To start the browser workbench, run this in a folder of files:"
-  say ""
-  say "  thimble-browser"
-  say ""
-  say "It starts the server on 127.0.0.1 (port 8300, or the next free one) and prints the page's sign-in link"
-  say "(or: thimble-browser FOLDER). browser/README.md says more."
-fi
-# what does not work yet or is left to do, last
-if [ ${#notes[@]} -gt 0 ]; then
-  say ""
-  for n in "${notes[@]}"; do say "Note: $n"; done
-fi
+  kernel install commands --bin-dir "$bin_dir" $(browser "$built")
+
+  # 8. how to start each product, and what does not work yet
+  finish "thimble $(kernel install name) is installed" "thimble update"
+}
+
+main "$@"

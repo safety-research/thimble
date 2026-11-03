@@ -1,223 +1,116 @@
 # Installing thimble
 
-thimble has two products: the terminal plugin for Claude Code, and the browser workbench, a web page that runs on your
-machine. `scripts/install.sh` installs one or both.
+thimble has two products: the plugin for Claude Code, and the browser workbench, a web page that runs on your machine.
+One script installs both, or the plugin alone, in `~/.thimble`.
 
 ## What you need
 
-For both:
-
-- **macOS or Linux.**
-- **Node.js** on your `PATH`: 22.18 or later for the plugin, 22.12 or later for the browser workbench. Check with
-  `node --version`.
-
-- **bubblewrap, socat and ripgrep**, on Linux, for Anthropic's [sandbox
-  runtime](https://github.com/anthropics/sandbox-runtime), which the code Claude writes for a card runs in (on Ubuntu:
-  `sudo apt-get install bubblewrap socat ripgrep`). The install says which are missing, with the one command for your
-  system. macOS has its own sandbox.
-
-For the terminal plugin:
-
-- **Claude Code** 2.1.307 or later. Check with `claude --version`. `claude update` updates it, unless a package manager
+- **macOS or Linux**, with **git**.
+- **Node.js 22.18 or later** (the workbench alone runs on 22.12 or later) and **Python 3.10 or later** (`python3`, or
+  the Python that `THIMBLE_PYTHON` names). Check with `node --version` and `python3 --version`.
+- **Claude Code 2.1.307 or later**. Check with `claude --version`. `claude update` updates it, unless a package manager
   installed it: then that package manager does (`brew upgrade claude-code`,
-  `npm install -g @anthropic-ai/claude-code@latest`, or your system's), and the install names the one for yours. A
-  `claude` session that was open keeps its version: start a new one.
-- **Python 3.10 or later**, on `python3` (or the Python that `THIMBLE_PYTHON` names). thimble's kernel needs nothing
-  beyond the standard library.
-- **npm**, which comes with Node.js: the plugin installs the sandbox runtime with it, about 10 MB, in `~/.thimble/srt`.
+  `npm install -g @anthropic-ai/claude-code@latest`, or your system's), and the install names the one for yours.
+- For the workbench: **[uv](https://docs.astral.sh/uv/) 0.8 or later**, **npm** (it comes with Node.js), and about
+  1 GB of disk.
+- On Linux, **bubblewrap, socat and ripgrep**, for Anthropic's [sandbox
+  runtime](https://github.com/anthropics/sandbox-runtime), which the code Claude writes for a card runs in (on Ubuntu:
+  `sudo apt-get install bubblewrap socat ripgrep`). macOS has its own sandbox.
 
-For the browser workbench:
-
-- **[uv](https://docs.astral.sh/uv/)** 0.8 or later, which installs the server's Python packages, and a Python 3.11
-  or later when you have none.
-- **A way to reach Claude**: an Anthropic API key, Workload Identity Federation, or your Claude Code sign-in, which it
-  uses only after you confirm (it then launches headless Claude Code sessions in the background). The install asks;
-  see [browser/README.md](browser/README.md).
-- **About 1 GB of disk** in the folder you install from: the page's packages, the server's Python packages, the sandbox
-  runtime and the built page.
-
-## If you tried an earlier 0.10 build
-
-thimble 0.10 no longer runs Claude's queries itself, so it needs no pandas: you can delete the Python an earlier build
-made in `~/.thimble/python`, and `~/.thimble/lean`. thimble no longer writes in your data folders: you can delete the
-`thimble/` folder an earlier build made in each. It keeps its labels in `~/.thimble`.
-
-## If you used thimble 0.9
-
-thimble 0.10 replaces 0.9. Remove 0.9 before you install 0.10: while 0.9's plugin is installed, Claude Code loads it
-and skips 0.10's, without an error. `scripts/install.sh` stops when it finds 0.9, and prints the commands for your
-install. `thimble update` does not reach 0.10; don't use it.
-
-0.10 does not open 0.9's workspaces (its cards, notebooks, labels and reports). To keep them as an archive, move them
-first: `mv ~/.thimble/app/workspaces ~/thimble-0.9-workspaces` (with a 0.9 clone, they are in its `workspaces/`
-folder, which uninstalling leaves alone). Then:
-
-```
-thimble uninstall
-```
-
-It removes 0.9's plugin, `~/.local/bin/thimble` and all of `~/.thimble`, workspaces included. If `thimble` is not
-found, or it fails with `can't open file ... engine/thimble.py` (a 0.9 clone you pulled), remove 0.9 by hand:
-
-```
-claude plugin uninstall thimble@thimble-local; claude plugin marketplace remove thimble-local   # 0.9 from a release
-claude plugin uninstall thimble@thimble; claude plugin marketplace remove thimble               # 0.9 from a clone
-rm -f ~/.local/bin/thimble; rm -rf ~/.thimble
-```
-
-`scripts/install.sh --remove-0.9` does the same in a terminal: it shows the steps, offers to move the workspaces, and
-runs the steps only after you answer y.
-
-Restart the `claude` sessions that were open, or run `/reload-plugins` in them: until then they report "Plugin
-directory does not exist" after each tool call. 0.9 also left a headless Chromium in `~/.cache/ms-playwright` (about
-650 MB): delete it if nothing else uses it. In 0.10, `thimble-browser` replaces `/thimble browser`, and 0.10's own
-`thimble update`, in a shell, updates both products (see "Update and uninstall").
+The install checks these first. When something is missing, it says what, with the command that installs it, and
+installs nothing until it is there.
 
 ## Install
 
-The simplest way is to ask Claude Code:
+Ask Claude Code:
 
-```
-claude "install thimble from https://github.com/safety-research/thimble"
-```
+    claude "install thimble from https://github.com/safety-research/thimble"
 
-Claude asks whether you want both products (the default) or the terminal plugin alone, runs the script below, helps
-you fix what is missing, and says how to use what it installed. To do it yourself, download the newest release; it
-needs no clone. Its tag is on https://github.com/safety-research/thimble/releases/latest (such as `v0.10.8`), and its
-archive unpacks into a folder of its own in your home folder (`~/thimble-0.10.8` for that tag), where it stays: the
-browser workbench builds about 1 GB in it, and runs from it.
+Claude asks whether you want both products or the plugin alone, and how the workbench reaches Claude, then runs the
+script. Or run it yourself:
 
-```
-curl -fsSL https://github.com/safety-research/thimble/archive/refs/tags/<tag>.tar.gz | tar -xz -C ~
-cd ~/thimble-<version>
-scripts/install.sh
-```
+    curl -fsSL https://raw.githubusercontent.com/safety-research/thimble/main/scripts/install.sh | bash
 
-To work on thimble's own code or try a branch, clone the repository instead
-(`git clone https://github.com/safety-research/thimble ~/thimble`), and run `scripts/install.sh --local` in the clone.
+Options go after `bash -s --`:
 
-The script first checks what the products need and says what is missing, one line each; then it installs nothing
-until you fix it and run it again. Then it:
+- `--no-browser`: the plugin alone.
+- `--sign-in claude-code`, `--sign-in api-key`, or `--sign-in wif --wif-file PATH`: how the workbench reaches Claude.
+  - Your Claude Code sign-in: the workbench runs Claude Code in the background, on your Claude plan, with the
+    environment as it is, so that Claude Code signs in as it does in your terminal.
+  - An API key: `ANTHROPIC_API_KEY` when it is set where the workbench runs, otherwise a key you paste in the
+    workbench's Settings.
+  - Workload Identity Federation: the path of your WIF config file (`browser/backend/app/wif.py` lists its keys).
 
-1. adds the marketplace `safety-research/thimble` to Claude Code and installs the plugin `thimble@thimble` from it.
-   Without the `claude` command, it prints the two commands to run once Claude Code is installed. Then it installs
-   the sandbox the plugin's cards run in: the version of Anthropic's sandbox runtime the plugin pins, with `npm ci`, in
-   `~/.thimble/srt`. It starts the card runner in it once, and says whether it works; on Linux, when bubblewrap, socat
-   or ripgrep is missing, it prints the one command that installs them (it never runs `sudo` itself).
-2. installs the browser workbench (thimble 0.8's browser mode) in its folder: the server's Python packages (`uv sync`
-   in `browser/backend`), and the page with the sandbox runtime (`npm ci` and a build in `browser/frontend`).
-3. writes a `thimble-browser` launcher in `~/.local/bin` (`--bin-dir DIR` puts it elsewhere), and says when that folder
-   is not on your `PATH`.
-4. asks how the browser workbench reaches Claude: 1 your Claude Code sign-in (the default, and recommended; it shows
-   that this launches headless Claude Code sessions in the background and asks you to confirm), 2 an Anthropic API key
-   (you paste it, and it is kept in `~/.thimble-browser` readable by you alone), or 3 Workload Identity Federation (the
-   path of its config file). It checks the choice with one small call.
-5. says how much disk space the browser workbench takes, and, last, what does not work yet or is left to do, such as a
-   card sandbox that cannot start here, with its fix.
+  Without `--sign-in`, the script asks in a terminal, and otherwise the workbench asks when it starts. The script
+  checks the choice with one small call. `thimble-browser --setup` changes it later.
+- `--bin-dir DIR`: the commands go in `DIR`, not in `~/.local/bin`.
+- `--ref REF`: a branch or tag of thimble in place of the newest release, to try a branch before its release. Put the
+  same name in place of `main` in the address.
+- `--remove-0.9`: see [thimble 0.9](#thimble-09).
 
-Options:
+You can run it again at any time: an install in `~/.thimble` stays as it is, with your fixes, and the script puts in
+place any part that is missing. It does the same when you run it from a downloaded release or a clone.
 
-- `--no-browser`: the terminal plugin only.
-- `--no-plugin`: the browser workbench only.
-- `--no-setup`: do not ask how the browser workbench reaches Claude; the page asks at its first start, and
-  `thimble-browser --setup` asks again. `thimble-browser --setup --key-file FILE` takes an API key from a file you
-  wrote (so that Claude, when it installs thimble for you, never sees the key), and `--setup --find-wif` lists the
-  Workload Identity Federation config files in `~/.anthropic`, `~/.config/anthropic` and `~/.thimble-browser`.
-- `--local`: for working on thimble's own code or trying a branch. Claude Code loads the plugin from this checkout's
-  `plugin/` folder in place of GitHub, and `thimble update` then follows the checkout, which you pull yourself (it says
-  when the checkout is behind, and never pulls it). Leave it out for a normal install, which updates from GitHub.
-- `--remove-0.9`: remove thimble 0.9 first, after you answer y, in a terminal (see "If you used thimble 0.9").
+## Where things go
 
-You can run it again at any time. It installs again what it installed, and updates the plugin and the browser
-workbench to what its folder and the marketplace hold now. From the first fix you use, or the first update by
-`thimble update`, Claude Code loads the plugin from your fixes, and the script leaves the plugin to `thimble update`.
+- `~/.thimble/fixes/live`: the release, as a git copy of its tag (about 8 MB), where `/thimble-fix` keeps your fixes as
+  commits. Claude Code loads the plugin from here (`claude plugin marketplace add` with this folder, then
+  `claude plugin install thimble@thimble`), and keeps a copy in its own folder of plugins. The plugin's settings
+  (`/thimble-settings`) stay in Claude Code's settings (`pluginConfigs`).
+- `~/.thimble/fixes/release`: the plain release, which no fix changes. `thimble fix off` and the rest of the way back
+  from your fixes run from here.
+- `~/.thimble/fixes/live/browser`: the workbench, with its packages and its page (about 1 GB).
+- `~/.thimble`: also the plugin's records (labels, coverage) and the sandbox runtime (`~/.thimble/srt`).
+  `THIMBLE_HOME` sets another folder.
+- `~/.thimble-browser`: the workbench's workspaces and how it reaches Claude. `THIMBLE_BROWSER_HOME` sets another
+  folder.
+- `~/.local/bin/thimble` and `~/.local/bin/thimble-browser`: the commands, which run the code in `~/.thimble`.
 
-### The plugin with Claude Code's own commands
+An install from before 0.10.8 (from a clone such as `~/thimble`, or from `~/thimble-0.10.8`) moves into `~/.thimble`
+when you run the script: Claude Code loads the plugin from there, with its settings as they were, your fixes stay, and
+the script says which old folder is no longer used.
 
-```
-claude plugin marketplace add safety-research/thimble
-claude plugin install thimble@thimble
-```
+## Update
 
-You can do the same inside Claude Code: run `/plugin`, add the marketplace `safety-research/thimble`, and install
-thimble from it. The plugin installs its sandbox runtime at the first session start, in the background; when the
-sandbox cannot work here, the line above the prompt says why and the command that fixes it. After an install from a
-folder (a clone, thimble 0.9, or `--local`), these commands leave Claude Code loading the plugin from that folder: it
-does not add the marketplace from GitHub while its settings name the folder, and the plugin counts as installed.
-`scripts/install.sh` moves it to GitHub.
+    thimble update
 
-### Python
+Run it in a shell, not inside Claude Code. It moves both products to the newest release and keeps your fixes: each one
+that still fits the release stays on, once thimble's checks pass with it there; one that does not is off, kept in
+`thimble fixes`, until `thimble reapply` has Claude fit it. Then type `/reload-plugins` in Claude Code, and start
+`thimble-browser` again. Claude Code sessions say when a newer release is out.
 
-The plugin runs `python3`. To use another Python 3.10 or later, set `THIMBLE_PYTHON` before you start Claude Code, for
-example `export THIMBLE_PYTHON="$HOME/venvs/data/bin/python"`, or add it under `"env"` in `~/.claude/settings.json`.
-thimble installs nothing into any Python. The code Claude writes to read your data runs with the Python it chooses, as
-in any Claude Code session.
+## Uninstall
 
-## Check that it works
+    claude plugin uninstall thimble@thimble
+    claude plugin marketplace remove thimble
+    rm -f ~/.local/bin/thimble ~/.local/bin/thimble-browser
+    rm -rf ~/.thimble ~/.thimble-browser
 
-The terminal plugin:
+The last line also deletes your fixes, the workbench's workspaces and the plugin's labels. Your data folders stay as
+they are (delete a `thimble/` folder that a build before 0.10.0 made in a data folder).
 
-1. Go to a folder with a CSV or JSONL file and run `claude`. The first time, Claude Code asks whether you trust the
-   folder. thimble works only in folders you trust.
-2. Ask: "How many rows does this file have per value of its first column? Show it as a card."
-3. Claude answers with a card, and the numbers in its answer are underlined in purple, each with a spinner until the
-   checker is done. The line above the prompt starts with `thimble` and says how much of the folder Claude has read.
+## The dev install
 
-`examples/sample/runs.csv` in the folder you installed from holds 40 made-up nightly test runs to try it on. Run
-`claude` in `examples/sample`, and ask: "Did the failures start after the config change? Show it as a card."
+To work on thimble's own code, clone the repository and run the script with `--local` in the clone:
 
-The browser workbench:
+    git clone https://github.com/safety-research/thimble ~/thimble
+    ~/thimble/scripts/install.sh --local
 
-1. Run `thimble-browser` in a folder of files. It starts the server on 127.0.0.1, port 8300 or the next free one, and
-   prints the page's sign-in link. The installer asked how it reaches Claude (an API key, Workload Identity
-   Federation, or your Claude Code sign-in); when it did not, the page asks at its first start.
-   Each start is a new session, as empty as the first: no chat, cards, report or labels. `thimble-browser
-   --continue` (`-c`) brings back the latest session whole, and `--resume` (`-r`) lists the earlier ones to pick.
-2. Open the link, and ask in the page's chat: "How many runs failed, and why?" Claude answers with a card whose claims
-   cite the files.
+Claude Code then loads the plugin from the clone, and the workbench is built in it. `thimble update` follows the
+clone: pull it, then run `thimble update`, which moves thimble and your fixes onto the commit you checked out (it never
+pulls, and says when the clone is behind what it pulls from). Your fixes also live in the clone, as the branch `mine`
+and the refs under `refs/thimble/`. The script stops when the release is installed in `~/.thimble`, and says how to
+move it aside. To try a branch without working on it, use `--ref`.
 
-## Settings
+## thimble 0.9
 
-- **The plugin's features.** Citations, Cards (`v`), Rewrite (`s`), Catch-up (`b`), Explainers, Heads-ups, Claims
-  (`w`), Labels (`l`) and Coverage (`r`) can each be turned off, and Citations, Cards, Explainers, Heads-ups and
-  Claims can come with each answer or only when you ask. Minimal gives plain answers in fullscreen, whose citations,
-  explainers and heads-ups show only while the pointer is over their paragraph; Claude draws cards only when you ask,
-  and Rewrite, Catch-up, Claims, Labels and Coverage are off. Click `thimble` at the left of the bar or run
-  `/thimble-settings`.
-  Claude Code keeps the values in its settings (`pluginConfigs`). With Citations off, the checker makes no model call.
-- **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
-  command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
-- **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).
-- **The browser workbench's Settings**, in the page: the credentials, the model, the effort, and each feature on or
-  off. `THIMBLE_BROWSER_HOME` sets where it keeps its workspaces (default `~/.thimble-browser`).
-
-## Update and uninstall
-
-To update both products, run `thimble update` in a shell (not inside Claude Code). It moves the plugin and the browser
-workbench to the newest release, keeps your fixes (each one that still fits the release stays on, once thimble's checks
-pass with it there; one that does not is off, kept in `thimble fixes`, until `thimble reapply` has Claude fit it), and
-says what to do next; after an install with `scripts/install.sh --local` in a git clone, it moves them to the commit
-your checkout has, so pull it first. A plugin installed with Claude Code's own commands updates with
-`claude plugin update thimble@thimble` until you use its first fix: from then on, Claude Code loads it from your fixes,
-and only `thimble update` moves it to a new release. With Claude Code's own commands, your shell does not find
-`thimble`: run `~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of
-`~/.thimble`). To uninstall the plugin:
-
-```
-claude plugin uninstall thimble@thimble
-```
-
-To remove the browser workbench, delete `~/.local/bin/thimble-browser` and the folder you installed it from.
-Uninstalling leaves your data alone. To remove what thimble wrote, delete `~/.thimble` and `~/.thimble-browser` (and a
-`thimble/` folder that a build before 0.10.0 made in a data folder). With `--local` in a git clone, your fixes also live
-in the checkout, as the branch `mine` and the refs under `refs/thimble/`. After a new install, the first fix you ask
-for, or a `thimble update` that moves to a new commit of your checkout, sets them aside by itself, under
-`refs/thimble-old/`, when `mine` is one that thimble left: no worktree or other thimble home uses it, it tracks no
-upstream, and thimble made or recorded every commit that only `mine` has. Otherwise it asks you to rename `mine`. To
-remove them, after you delete `~/.thimble`, run
-`git worktree prune`, `git branch -D mine`
-and `git for-each-ref --format='delete %(refname)' refs/thimble refs/thimble-old | git update-ref --stdin` in the
-checkout.
+thimble 0.10 replaces 0.9: while 0.9's plugin is installed, Claude Code loads it and skips 0.10's, with no error. The
+script stops when it finds 0.9, says what it found and prints the commands that remove it: run them, then the script
+again. In a terminal, `--remove-0.9` runs them after you answer y, and first offers to move 0.9's workspaces (its
+cards, notebooks, labels and reports, which 0.10 cannot open) to `~/thimble-0.9-workspaces`. Restart the `claude`
+sessions that were open, or type `/reload-plugins` in them: until then they say "Plugin directory does not exist" after
+each tool call. 0.9 also left a headless Chromium in `~/.cache/ms-playwright` (about 650 MB): delete it if nothing else
+uses it.
 
 ## When something does not work
 
@@ -230,14 +123,17 @@ The install:
   install names the command for yours. On a machine that an organization manages, whoever manages it updates Claude
   Code. Then start a new `claude` session: one that was open keeps its version.
 - **Claude Code's own sandbox is on** (`"sandbox": {"enabled": true}` in its settings, so Claude's commands run in it).
-  When Claude installs thimble, the install writes outside the folder (the release's folder, such as `~/thimble-0.10.8`,
-  and `~/.claude/plugins`, `~/.thimble`, `~/.thimble-browser`, `~/.local/bin`) and downloads packages, which that
-  sandbox may refuse; Claude then asks to run those commands outside it, or you run `scripts/install.sh` in your own
-  terminal. The install's check of the card sandbox may fail inside Claude Code's sandbox for that reason alone. The
-  check that counts is a card drawn in a new `claude` session: a card that cannot draw says why in the line above the
-  prompt.
+  When Claude installs thimble, the install writes outside the folder Claude works in (`~/.thimble`,
+  `~/.thimble-browser`, `~/.claude/plugins`, `~/.local/bin`) and downloads packages, which that sandbox may refuse;
+  Claude then asks to run the script outside it, or you run it in your own terminal. The install's check of the card
+  sandbox may fail inside Claude Code's sandbox for that reason alone. The check that counts is a card drawn in a new
+  `claude` session: a card that cannot draw says why in the line above the prompt.
+- **The download failed.** The script says git's last line. Check the network, then run the script again: nothing was
+  installed.
+- **`~/.local/bin` is not on your `PATH`.** A note at the end of the install gives the line to add to your shell's
+  startup file. Until then, start the commands by their full paths.
 
-The terminal plugin:
+The plugin:
 
 - **No line above the prompt, and no citations.** The plugin is not loaded in this session. Check that the folder is
   trusted and that thimble is enabled in `/plugin`. Managed settings that set `disableAllHooks` turn thimble off.
@@ -253,9 +149,8 @@ The terminal plugin:
   without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
   ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, the command that allows it; when npm
   cannot reach its registry to install the sandbox, `npm ping` shows why. The next card tries again, with no new
-  session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, which draws a test card in it
-  (add `--repair` to install the sandbox again when that fixes it, as the install does), where `<plugin>` is the
-  installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
+  session. To test the sandbox by hand, run `node ~/.thimble/fixes/live/plugin/sandbox/setup.mjs --probe`, which draws
+  a test card in it (add `--repair` to install the sandbox again when that fixes it, as the install does).
 - **The line above the prompt says your Node is too old, though a newer one is installed.** The plugin runs on the
   `node` that the terminal you start `claude` from finds first. A Node manager (nvm, fnm, asdf) that your shell's
   startup file does not load is not used, even when the install loaded it in its own commands, as Claude may when it
@@ -263,10 +158,14 @@ The terminal plugin:
   lines to `~/.zshrc` or `~/.bashrc` (or put the newer Node first on your `PATH`), open a new terminal, and start
   `claude` there: `/reload-plugins` keeps the session's old `PATH`.
 
-The browser workbench:
+The workbench:
 
 - **`thimble-browser: command not found`.** `~/.local/bin` is not on your `PATH`. Add it, or run the launcher by its
   full path.
+- **The install's sign-in line says that the check failed.** It says why, and the command to run after you fix that,
+  such as `thimble-browser --setup --how wif --wif-file ~/wif.toml`. With your Claude Code sign-in, the line names the
+  login Claude Code uses: an `ANTHROPIC_API_KEY` in the environment, or an `apiKeyHelper` in Claude Code's settings,
+  takes the place of your Claude plan, as it does in your terminal.
 - **Cards say that code does not run.** The sandbox does not work here, and the card says why. On Linux, install
   bubblewrap; on a Linux whose AppArmor keeps bubblewrap from making namespaces, the card says how to allow it.
   After the fix, run the card again.

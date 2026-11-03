@@ -108,16 +108,22 @@ def sandbox(node_bin: str, plugin: Path) -> list[Row]:
 
 
 def browser() -> Row:
-    """The browser workbench's launcher: in the checkout scripts/install.sh installed it in, in this thimble's own
-    checkout when its packages are installed, or on PATH."""
-    for b in (FX._browser_seed(), FX.PLUGIN.parent / "browser"):
+    """The browser workbench's launcher: in live, where scripts/install.sh and thimble update build it (browser-ready),
+    in the clone an install with --local built it in, in this thimble's own checkout when its packages are installed,
+    or on PATH."""
+    try:
+        ready = Path((FX.home() / "browser-ready").read_text().strip())
+    except OSError:
+        ready = None
+    for b in (ready, FX._browser_seed(), FX.PLUGIN.parent / "browser"):
         if b and (b / "scripts" / "thimble-browser").is_file() and (b / "backend" / ".venv").is_dir():
             return True, f"the browser workbench: {FX._tilde(str(b / 'scripts' / 'thimble-browser'))}", ""
     found = shutil.which("thimble-browser")
     if found:
         return True, f"the browser workbench: {FX._tilde(found)}", ""
     # a terminal-only install (scripts/install.sh --no-browser) is a choice, not a problem
-    return None, "the browser workbench is not installed", "To add it, from a thimble checkout: scripts/install.sh"
+    return (None, "the browser workbench is not installed",
+            "To add it, run the install again without --no-browser (INSTALL.md)")
 
 
 def on_path() -> Row:
@@ -133,7 +139,8 @@ def on_path() -> Row:
         return (False, f"the thimble command ({FX._tilde(str(link))}) is not on PATH",
                 "Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): "
                 f"export PATH=\"{link.parent}:$PATH\"")
-    return False, "the thimble command is not on PATH", "Link it from a thimble checkout: scripts/install.sh"
+    return (False, "the thimble command is not on PATH",
+            "Run the install again, which puts it in ~/.local/bin (INSTALL.md)")
 
 
 def your_fixes() -> list[Row]:
