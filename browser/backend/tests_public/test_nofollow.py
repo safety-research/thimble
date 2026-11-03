@@ -133,3 +133,19 @@ def test_a_chat_s_log_is_appended_to_through_no_link_left_in_its_place(tmp_path_
     agents.append(log, {"type": "user", "text": "made-up words"})
     assert (outside / "made-up-dotfile").read_text() == "# the person's own\n"
     assert not log.is_symlink() and "made-up words" in log.read_text()
+
+
+def test_a_group_s_file_is_read_through_no_link_left_in_its_place(tmp_path_factory):
+    """A group's file, notebooks/<id>.json, was read by its path, so a link a card's code put in its place had the server
+    read the file it points to as the group, its title and cards shown to main and the analyst."""
+    from app import notebook
+
+    outside = _outside(tmp_path_factory)
+    (outside / "made-up.json").write_text(json.dumps({"title": "OUTSIDE-TITLE", "cells": []}))
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "made-up group")
+    path = notebook._nb_file(ws, nb["id"])
+    path.unlink()
+    path.symlink_to(outside / "made-up.json")
+    notebook.clear_cache()
+    assert notebook.read_notebook(ws, nb["id"]) is None

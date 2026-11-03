@@ -1037,20 +1037,21 @@ def read_notebook(ws: Path, nb_id: str) -> dict | None:
     """
     p = _nb_file(ws, nb_id)
     caching = _caching()
-    try:
-        st: os.stat_result | None = p.stat()
+    try:  # the file itself, never through a link a card's code left in the workspace (nofollow)
+        f = os.fdopen(nofollow.open(p, os.O_RDONLY), "rb")
     except OSError:
-        st = None
-    if st is None or not stat.S_ISREG(st.st_mode):
+        f = None
+    if f is None:
         if caching:
             _cache.pop(p, None)
         return _normalize(MAIN, {}) if nb_id == MAIN else None
-    sig = _sig(st)
-    if caching:
-        hit = _cache.get(p)
-        if hit is not None and hit[0] == sig:
-            return hit[1]
-    nb = _normalize(nb_id, json.loads(p.read_text("utf-8")))
+    with f:
+        sig = _sig(os.fstat(f.fileno()))
+        if caching:
+            hit = _cache.get(p)
+            if hit is not None and hit[0] == sig:
+                return hit[1]
+        nb = _normalize(nb_id, json.loads(f.read().decode("utf-8")))
     if caching:
         if _bound_cells(ws, nb):
             log.info("bounded oversized stream outputs in %s", p)
