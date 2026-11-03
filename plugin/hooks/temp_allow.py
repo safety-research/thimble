@@ -8,8 +8,8 @@ stop it until the person answers, and it writes its rows with the Write tool. Th
 each tool check again without the plugins a person installs, and a module's allow there would be skipped with a notice.
 
 The hook only says "allow"; a deny or ask rule of the person's still decides. A Glob's absolute pattern names its own
-folder, so only a relative one is let through. With the Cards switch off (the plugin option `cards`), it says nothing.
-Any failure: it says nothing, and Claude Code decides as it would.
+folder, so only a relative one is let through. With Cards off (the plugin option `cards`: `off`, or `false` as saved
+before Cards had modes), it says nothing. Any failure: it says nothing, and Claude Code decides as it would.
 """
 import json
 import os
@@ -63,7 +63,7 @@ def verdict(e, env):
     if tool not in TOOLS:
         return None
     opt = env.get("CLAUDE_PLUGIN_OPTION_CARDS", env.get("CLAUDE_PLUGIN_OPTION_cards", "true"))
-    if str(opt).strip().lower() == "false":
+    if str(opt).strip().lower() in ("off", "false"):
         return None
     # main writes its rows with its own code; only an agent's Write (v's fork) is let through
     if tool == "Write" and not e.get("agent_id"):

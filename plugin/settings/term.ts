@@ -3,6 +3,8 @@
 // settings.json and hands them to register(on, options); every module asks featureOn(key) when it acts.
 //
 //   heldValues($)          each feature's value as Claude Code holds it now (a change made a moment ago included)
+//   shownValues($)         the same as the settings show them: Minimal's as it was pressed, while turning it on or off
+//                          still changes its rows
 //   settingsAction($, a)   turn a feature on or off (`toggle`; a feature with modes goes to its next mode), or set its
 //                          mode (`set`), through Claude Code ($.config.set), which keeps the value and loads the plugin
 //                          again with the new options; a refusal is one line with its fix. Minimal is a preset: on, it
@@ -65,12 +67,21 @@ export async function heldValues($: Engine): Promise<Record<string, boolean | st
   return { ...Object.fromEntries(SWITCHES.map(s => [s.key, valueIn(values, s.key) as boolean | string])), ...at }
 }
 
+/** Each feature's value as the settings show it: as Claude Code holds it (heldValues), but Minimal's while turning it
+ *  on or off still changes its rows (DOING), one per load of the plugin: the value it was pressed to, which Claude Code
+ *  holds only once the change is done (Minimal is set last on, first off). A press on Minimal is read against this. */
+export async function shownValues($: Engine): Promise<Record<string, boolean | string>> {
+  const held = await heldValues($)
+  const doing = await doingNow($)
+  return doing === 'on' || doing === 'off' ? { ...held, minimal: doing === 'on' } : held
+}
+
 /** Turn a feature on or off, or set a feature's mode. A refusal is said in one line with its fix; nothing changes then. */
 export async function settingsAction($: Engine, a: Record<string, unknown>): Promise<string | boolean | void> {
   if ((a.do !== 'toggle' && a.do !== 'set') || typeof a.key !== 'string') return false
   const s = switchOf(a.key)
   if (!s) return `× thimble has no feature "${a.key}".`
-  const now = (await heldValues($))[s.key]
+  const now = (await shownValues($))[s.key]
   const to = a.do === 'set' ? a.value : s.choices ? s.choices[(s.choices.indexOf(now as string) + 1) % s.choices.length] : !now
   if (s.choices ? !s.choices.includes(to as string) : typeof to !== 'boolean') return `× ${s.title} has no setting "${String(to)}".`
   if (to === now) return
@@ -120,9 +131,14 @@ async function setRow($: Engine, key: string, to: boolean | string): Promise<str
 }
 
 /** Minimal on: the modes of its rows now are kept, over them the earlier modes it kept of the rows it set before
- *  0.10.8 (`kept`); then its modes are set (PRESET), then Minimal, one change at a time (minimalStep). */
+ *  0.10.8 (`kept`); then its modes are set (PRESET), then Minimal, one change at a time (minimalStep). Pressed while
+ *  turning Minimal off still puts its rows back, a row that still holds Minimal's mode keeps the mode kept before, as
+ *  it was not put back yet, and any other row its mode now (put back, or set by the person since). */
 async function minimalOn($: Engine, held: Record<string, boolean | string>, kept: Record<string, boolean | string> = {}): Promise<string | void> {
-  if (!atPreset(held)) await $.store.set(BEFORE, { ...Object.fromEntries(Object.keys(PRESET).map(k => [k, held[k]])), ...kept })
+  const preset = PRESET as Record<string, boolean | string>
+  const earlier = (await doingNow($)) == null ? {} : (((await $.store.get(BEFORE)) ?? {}) as Record<string, boolean | string>)
+  const keep = (k: string) => (held[k] === preset[k] && k in earlier ? earlier[k] : held[k])
+  if (!atPreset(held)) await $.store.set(BEFORE, { ...Object.fromEntries(Object.keys(PRESET).map(k => [k, keep(k)])), ...kept })
   await $.store.set(DOING, 'on')
   return minimalStep($)
 }

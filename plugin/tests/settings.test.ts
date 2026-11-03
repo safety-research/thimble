@@ -89,9 +89,10 @@ test('Citations has four modes: a press on one sets it, the line under the row s
 })
 
 /** What a press on Minimal starts, done: each change of it loads the plugin again, whose session start makes the next
- *  (settings/term.ts settleMinimal), as many times as it takes. `$`: a test's engine, or one settleEngine made. */
-async function settleAll($: Any): Promise<void> {
-  for (let i = 0; i < 24; i++) await ($.session?.start ? $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true }) : settleMinimal($))
+ *  (settings/term.ts settleMinimal), as many times as it takes, or `loads` times. `$`: a test's engine, or one
+ *  settleEngine made. */
+async function settleAll($: Any, loads = 24): Promise<void> {
+  for (let i = 0; i < loads; i++) await ($.session?.start ? $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true }) : settleMinimal($))
 }
 
 /** A settings pane over made-up rows that Claude Code keeps: config.set changes them, and the plugin's options follow. */
@@ -132,7 +133,7 @@ test('Minimal is a preset: on, it sets Citations auto cite, Cards on demand, Exp
   const pane = await $.ui.mount(PANE)
   // first, its name and what it does in plain words
   expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^\s*MINIMAL MODE\s+on · off/)
-  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('Citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.')
+  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.')
   for (const w of [/^ rewrite$/, /^ claims$/, /^ coverage$/]) expect(await pane.find({ type: 'Text', text: w })).toBeDefined()
   await pane.press({ key: 'mode-minimal-on' })
   // one change per hook, as each loads the plugin again; the new load's session start makes the next
@@ -191,6 +192,83 @@ test("a row of Minimal's changed away from its mode turns Minimal off and keeps 
   await pane.press({ key: 'mode-cards-off' })
   await settleAll($)
   expect(rows).toMatchObject({ minimal: false, citations: 'auto cite', cards: 'off', squeezeAnswers: true, coverage: true })
+  await pane.unmount()
+  setOptions({})
+})
+
+/** The rows of Minimal and the features it sets, as a person had them before turning it on. */
+const OWN = { minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'auto', claimsMode: 'auto', labels: true, coverage: true }
+
+/** The choice the pane draws as set on a row (bold and green), as drawn now. */
+async function setOn($: Any, key: string): Promise<string | undefined> {
+  const walk = (n: Any, out: Any[] = []): Any[] => {
+    if (!n || typeof n !== 'object') return out
+    if (Array.isArray(n)) { n.forEach(x => walk(x, out)); return out }
+    out.push(n)
+    walk(n.props?.children, out)
+    walk(n.children, out)
+    return out
+  }
+  const set = walk(await $.ui.render(PANE)).find(x => x.type === 'Button' && String(x.props?.key).startsWith(`mode-${key}-`) && walk(x).some(t => t.type === 'Text' && t.props?.bold && t.props?.color === 'success'))
+  return set ? String(set.props.key).slice(`mode-${key}-`.length) : undefined
+}
+
+test("Minimal pressed off while its modes are still being set, one change per load of the plugin, by a click or by the ring: it turns off, and every row comes back to what it held; while the change runs, its row shows the choice pressed", async ($, on) => {
+  const rows: Record<string, boolean | string> = { ...OWN, defaultsAt: DEFAULTS.at }
+  settingsWorld(on, rows)
+  on('ui.focus', () => ({}) as never)
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($, 2)
+  // Minimal itself is set last: Claude Code still holds it off, and the row shows on, as pressed
+  expect(rows.minimal).toBe(false)
+  expect(await setOn($, 'minimal')).toBe('on')
+  await pane.press({ key: 'mode-minimal-off' })
+  expect(await setOn($, 'minimal')).toBe('off')
+  await settleAll($)
+  expect(rows).toEqual({ ...OWN, defaultsAt: DEFAULTS.at })
+  // the ring moved onto off three loads into the change (panes/settings.tsx settingsFocus, the pane's ui.focus hook)
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($, 3)
+  await $.ui.focus({ component: 'Pane', requestId: 'thimble', element: 'mode-minimal-off', origin: { kind: 'person' } } as never)
+  expect(await setOn($, 'minimal')).toBe('off')
+  await settleAll($)
+  expect(rows).toEqual({ ...OWN, defaultsAt: DEFAULTS.at })
+  await pane.unmount()
+  setOptions({})
+})
+
+test("Minimal pressed on again while it is still being turned off: it turns on, and off again every row comes back to what it held before the first press, or to what the person set it to while Minimal turned off", async ($, on) => {
+  const rows: Record<string, boolean | string> = { ...OWN, defaultsAt: DEFAULTS.at }
+  settingsWorld(on, rows)
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET })
+  // off, and three loads in: Catch-up, Claims, Labels and Coverage still hold Minimal's modes
+  await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($, 3)
+  expect(rows).toMatchObject({ minimal: false, catchUp: false, claimsMode: 'off', labels: false, coverage: false })
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET })
+  await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($)
+  expect(rows).toEqual({ ...OWN, defaultsAt: DEFAULTS.at })
+  // a row the person sets while Minimal turns off keeps their mode through Minimal on and off again
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
+  await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($, 2)
+  await pane.press({ key: 'mode-claimsMode-on demand' })
+  await pane.press({ key: 'mode-minimal-on' })
+  await settleAll($)
+  expect(rows).toMatchObject({ minimal: true, ...PRESET })
+  await pane.press({ key: 'mode-minimal-off' })
+  await settleAll($)
+  expect(rows).toEqual({ ...OWN, claimsMode: 'on demand', defaultsAt: DEFAULTS.at })
   await pane.unmount()
   setOptions({})
 })

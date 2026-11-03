@@ -15,7 +15,7 @@
 import { ALIASES, EFFORTS, modelById, modelNamed, modelOf, shownName } from '../core/models.js'
 
 /** What Minimal does, as the settings pane says it under its row. */
-const MINIMAL_SAYS = 'Citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.'
+const MINIMAL_SAYS = 'In fullscreen, citations, explainers and heads-ups show only while the pointer is over their paragraph. Visualizations are shown only when requested. Rewrite, Catch-up, Claims, Labels and Coverage are off.'
 
 /** Words in a list: `a, b or c`. */
 const listed = (ws) => (ws.length > 1 ? `${ws.slice(0, -1).join(', ')} or ${ws.at(-1)}` : ws.join(''))
@@ -244,9 +244,10 @@ export function valueIn(values, key) {
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
 
-/** Minimal: the modes it sets. Its answers are plain: Claude still cites, each citation verified when it is opened
- *  (auto cite), and the look after each answer still writes explainers and heads-ups, but they show only for the
- *  paragraph under the pointer (marks/register.ts, view.ts `plain`); Claude draws a card only when asked; Rewrite,
+/** Minimal: the modes it sets. Claude still cites, each citation verified when it is opened (auto cite), and the look
+ *  after each answer still writes explainers and heads-ups; where Claude Code reports the pointer (its fullscreen
+ *  layout, with its mouse reports on) its answers are plain, these showing only for the paragraph under the pointer
+ *  (marks/register.ts, view.ts `plain`), and elsewhere they stand at rest; Claude draws a card only when asked; Rewrite,
  *  Catch-up and the session-wide panes (Claims, Labels, Coverage) are off. Turning it on saves them (settings/term.ts),
  *  and the rows show them; a row changed away from them turns it off. */
 export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false }
@@ -256,10 +257,11 @@ export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswe
 export const OLD_PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
 
 /** The modes that stand where thimble's drawing does not show (core/host.ts drawsHere: the desktop app's Code tab,
- *  remote Cowork, claude -p): Citations and Cards off, as if the person had set them off, since nothing there draws a
- *  citation, its check or a card (a citation would read as a raw link, and a card would show nowhere). The person's own
- *  modes stay as they set them (currentValues), and the terminal acts on them. */
-export const UNDRAWN = { citations: 'off', cards: 'off' }
+ *  remote Cowork, claude -p): Citations, Cards, Explainers and Heads-ups off, as if the person had set them off, since
+ *  nothing there draws a citation, its check, a card, an explainer or a heads-up (a citation would read as a raw link,
+ *  and a card would show nowhere), and no key asks for one (every key types there). The person's own modes stay as they
+ *  set them (currentValues), and the terminal acts on them. */
+export const UNDRAWN = { citations: 'off', cards: 'off', explain: 'off', details: 'off' }
 
 /** Whether `values` hold a preset's modes: Minimal's, or `preset`. */
 export const atPreset = (values, preset = PRESET) => Object.entries(preset).every(([k, v]) => valueIn(values, k) === v)
