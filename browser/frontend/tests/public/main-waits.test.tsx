@@ -3,7 +3,9 @@
 // shows (taskStrip), and the composer keeps main's Stop while the analyst writes (src/components/Composer.tsx). A message
 // sent meanwhile waits until main reads it (backend runtime.unread, main's meta `unread`, src/chat/useChat.ts): the
 // analyst's tile a step quieter, after the turn's rows, so the rest of the turn does not read as its answer, with no
-// spinner of its own, since the strip says main works; once main reads it, the log holds it where main read it.
+// spinner of its own, since the strip says main works; once main reads it, the log holds it where main read it. While
+// a command of main's own waits for the analyst (an ask about a host, backend host_asks; a request its session relays),
+// the strip shows the wait dot in place of the spinner, as an agent's strip does; another session's wait does not.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
@@ -15,12 +17,15 @@ const T = '2026-10-15T10:00:00+00:00'
 const ATTACHED = { session: 's1', cwd: '/corpus', at: T, model: 'claude-opus-5-5' }
 const FIRST = 'Count the runs per agent.'
 const SECOND = 'And how many files are there?'
+const ASK = { id: 'h1', host: 'data.example-lab.test', since: '2026-10-15T10:00:05Z', call: { tool: 'Bash', input: { command: 'curl -sS https://data.example-lab.test/api/runs', description: 'Download the runs' } } }
 let main: ChatMeta
+let others: ChatMeta[]
 let events: ChatRecord[]
 let posted: string[]
 
 beforeEach(() => {
   posted = []
+  others = []
   main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED, module: true, unread: [] } as unknown as ChatMeta
   events = [
     { type: 'user', text: FIRST, by: 'browser' },
@@ -30,14 +35,17 @@ beforeEach(() => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const u = String(url)
     if (init?.method && init.method !== 'GET' && !u.includes('/telemetry')) posted.push(`${init.method} ${u}`)
-    const body = u.endsWith('/events')
+    const other = others.find((m) => u.endsWith(`/chats/${m.id}`))
+    const body = other
+      ? { meta: other, events: [] }
+      : u.endsWith('/events')
       ? { id: 'e2', kind: 'main', delivered: 1 }
       : u.endsWith('/interrupt')
         ? { stopped: true }
         : u.endsWith('/chats/main')
         ? { meta: main, events }
         : /\/chats(\?|$)/.test(u)
-          ? [main]
+          ? [main, ...others]
           : /\/(proposals|notices|views)(\?|$)/.test(u)
             ? []
             : {}
@@ -55,6 +63,11 @@ async function reread() {
   await act(async () => new Promise((r) => setTimeout(r, 200)))
 }
 
+/** The strip behind the composer: its title, and whether it shows the wait dot or the spinner. */
+const strip = (el: HTMLElement) => {
+  const s = el.querySelector('.chat-strip')
+  return s && { title: s.querySelector('.chat-strip-title')?.textContent, dot: !!s.querySelector('.chat-strip-wait-dot'), spinner: !!s.querySelector('.spinner') }
+}
 const flowTail = (el: HTMLElement) => el.querySelector('.chat-flow')!.lastElementChild as HTMLElement
 const loggedLines = (el: HTMLElement) => [...el.querySelectorAll('.chat-user:not(.chat-pending) .chat-message')].map((m) => m.textContent)
 const squares = (el: HTMLElement) => [...el.querySelectorAll<HTMLButtonElement>('.chat-composer button.composer-send')].map((b) => b.getAttribute('aria-label'))
@@ -124,5 +137,31 @@ describe("main's chat while main works", () => {
     expect(stop.getAttribute('aria-busy')).not.toBe('true')
     expect(loggedLines(el)).toEqual([FIRST, SECOND])
     expect(el.querySelector('.chat-pending')).toBeNull()
+  })
+
+  test('shows the wait dot in place of the spinner while a command of its own waits for the analyst, and the spinner once answered', async () => {
+    // main's Bash asks about a host no setting allows: the ask waits on main's meta and under the command
+    main = { ...main, hosts: [ASK] }
+    const el = await mount(<ChatPanel ws="mini" />)
+    await settle()
+    expect(el.querySelector('.chat-host-ask')).not.toBeNull()
+    expect(strip(el)).toEqual({ title: 'Working', dot: true, spinner: false })
+    main = { ...main, hosts: [] }
+    await reread()
+    expect(strip(el)).toEqual({ title: 'Working', dot: false, spinner: true })
+    // a request main's session relays for itself names no chat; one it relays for a thread names the thread's
+    main = { ...main, permissions: [{ id: 'p1', tool: 'Bash', what: 'Run a command', since: T }] }
+    await reread()
+    expect(strip(el)).toEqual({ title: 'Working', dot: true, spinner: false })
+    main = { ...main, permissions: [{ id: 'p2', tool: 'Bash', what: 'Run a command', since: T, chat: 'th1' }] }
+    await reread()
+    expect(strip(el)).toEqual({ title: 'Working', dot: false, spinner: true })
+  })
+
+  test("keeps the spinner while another session waits: a writer's ask about a host is the writer's", async () => {
+    others = [{ id: 'w1', kind: 'agent', role: 'writer', title: 'Writer', created_at: T, parent: 'main', status: 'running', running: true, route: 'subagent', hosts: [ASK] } as unknown as ChatMeta]
+    const el = await mount(<ChatPanel ws="mini" />)
+    await settle()
+    expect(strip(el)).toEqual({ title: 'Working', dot: false, spinner: true })
   })
 })

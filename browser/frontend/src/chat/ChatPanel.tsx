@@ -56,7 +56,7 @@ import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
-import { hostAsks, pendingAsks, waitingAt, waitingChats } from './waiting'
+import { hostAsks, pendingAsks, waitingAt, waitingChats, waitsItself } from './waiting'
 import { HostAsks } from './HostAsk'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
@@ -605,10 +605,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const stripMeta = orienting ?? (kind === 'orient' ? curMeta : null)
   const stripSession = orienting ?? (kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'step' || kind === 'dev' ? curMeta : null)
   // the session the strip follows is waiting for the analyst while one of its permission prompts, or its critique's, is
-  // open (chat/waiting.ts)
+  // open (chat/waiting.ts); main's turn and a thread's fork while an ask of their own is (waitsItself)
   const stripped = !!strip
   const waitingFor = useMemo(() => (stripped && stripSession ? waitingAt(stripSession.id, metaMap.values()) : null), [stripped, stripSession, metaMap])
-  const waiting = !!waitingFor
+  const waiting = !!waitingFor || (stripped && !stripSession && (kind === 'main' || kind === 'thread') && waitsItself(curMeta, main.meta))
   // every request of every session that waits for the analyst, on the one card above the composer
   const asks = useMemo(() => pendingRequests(main.meta, metaMap.values()), [main.meta, metaMap])
   // the latest orientation, which the orientation's composer and main's message_orientation reach
