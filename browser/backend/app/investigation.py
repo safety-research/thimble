@@ -21,7 +21,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import config
+from . import config, nofollow
 from .ledger import write_json_once
 
 log = logging.getLogger("thimble.investigation")
@@ -73,7 +73,7 @@ def ensure_main(c: str) -> Path:
     workspace."""
     d = inv_dir(c, MAIN)
     if not d.is_dir():
-        d.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(d)
     if not (d / "investigation.json").is_file():
         # several first-touch requests get here together: each writes a temp of its own and the first to land is kept
         write_json_once(d / "investigation.json", {"id": MAIN, "title": "", "created": _created()})
@@ -202,13 +202,10 @@ def _append_line(path: Path, obj: dict) -> int:
     """The record appended as append_jsonl writes it, after a newline when the file ends in a torn line (a crash
     mid-append), so it is not glued onto that fragment. Returns the offset just after the record: the file's size unless
     another process appended after it."""
-    try:
-        with open(path, "rb") as f:
-            f.seek(-1, 2)
-            torn = f.read(1) != b"\n"
-    except OSError:  # no file yet, or an empty one (seek(-1) past the start): nothing to heal
-        torn = False
-    with open(path, "ab") as f:
+    # in the workspace, which a card's code writes: opened as nofollow opens it, never through a link put there
+    with os.fdopen(nofollow.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT), "r+b") as f:
+        size = os.fstat(f.fileno()).st_size
+        torn = size > 0 and os.pread(f.fileno(), 1, size - 1) != b"\n"
         f.write((b"\n" if torn else b"") + (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
         f.flush()
         return os.lseek(f.fileno(), 0, os.SEEK_CUR)

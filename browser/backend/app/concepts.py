@@ -39,6 +39,7 @@ under `label:<id>` as skipped; a run with no failure and none blocked clears it 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fnmatch
 import html
 import itertools
@@ -68,7 +69,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import capture, cite, concept_scan, config, corpus, label_asks, labels_store, ledger, records, refs
+from . import capture, cite, concept_scan, config, corpus, label_asks, labels_store, ledger, nofollow, records, refs
 from .kernel_thimble import LABEL_ORDER, palette_from
 from .ledger import append_jsonl, append_jsonl_many, atomic_write_text, read_json
 
@@ -97,7 +98,7 @@ def _emit(c: str, event: dict) -> None:
         try:
             from . import investigation
 
-            (config.WORKSPACES_DIR / c / "investigations" / "main").mkdir(parents=True, exist_ok=True)
+            nofollow.makedirs(config.WORKSPACES_DIR / c / "investigations" / "main")
             investigation.emit(c, "main", event)
         except Exception:  # noqa: BLE001
             log.debug("could not emit %s for %s", event.get("type"), c, exc_info=True)
@@ -699,7 +700,7 @@ def _store_ready(ws: Path, concept_id: str, *, wait: bool = True) -> labels_stor
                 if state == "fresh":
                     return st
                 if state == "none":
-                    p.parent.mkdir(parents=True, exist_ok=True)
+                    nofollow.makedirs(p.parent)
                     st.connect(write=True).close()
                     return st
                 if _sync_tail(p, state, m) <= labels_store.SYNC_INLINE_BYTES or started >= 2:
@@ -911,7 +912,7 @@ class _LabelsWriter:
                     with lock:
                         if f is None:
                             labels_store.mend_tail(self.out)
-                            f = self.out.open("ab")
+                            f = os.fdopen(nofollow.open(self.out, os.O_WRONLY | os.O_APPEND | os.O_CREAT), "ab")
                         f.write(data)
                         f.flush()
                         st = os.fstat(f.fileno())
@@ -3109,7 +3110,8 @@ def _code_row_batches(rows_file: Path | None, size: int) -> Iterator[tuple[list[
     it."""
     if rows_file is None or not rows_file.is_file():
         return
-    with open(rows_file, "r", encoding="utf-8") as f:
+    # the kernel writes it in the workspace: never read through a link a card's code put in its place (nofollow)
+    with os.fdopen(nofollow.open(rows_file, os.O_RDONLY), "r", encoding="utf-8") as f:
         while lines := list(itertools.islice(f, size)):
             yield _parse_code_rows(lines)
 
@@ -3209,10 +3211,10 @@ async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Un
         outputs, _n, _status = await notebook.execute_on(c, CODE_KERNEL, code)
         labeled, errors, message, matches = await asyncio.to_thread(_collect_code_rows, outputs, rows_file, out, concept["labels"][0])
     finally:
-        rows_file.unlink(missing_ok=True)
-        for f in (units_file, parts_file):
+        for f in (rows_file, units_file, parts_file):
             if f is not None:
-                f.unlink(missing_ok=True)
+                with contextlib.suppress(OSError):
+                    nofollow.unlink(f)
     _progress(c, concept["id"], matches=matches)
     return labeled, errors, message
 
@@ -3257,7 +3259,7 @@ def _write_parts(parts_file: Path, corpus_dir: Path, sources: list[dict]) -> Non
     """The file the code kind's wrapper reads the records of the files it does not read as lines from (a JSON document's,
     a CSV file's rows, a database's rows, a PDF's pages), for the units of whole files and runs: one JSON line per file,
     {path, records}, none for a binary file no reader reads. Blocking."""
-    with open(parts_file, "w", encoding="utf-8") as f:
+    with os.fdopen(nofollow.open(parts_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC), "w", encoding="utf-8") as f:
         for s in sources:
             try:
                 recs = [r["record"] for r in _iter_records(corpus_dir, s)]
@@ -3268,7 +3270,7 @@ def _write_parts(parts_file: Path, corpus_dir: Path, sources: list[dict]) -> Non
 
 def _write_units(units_file: Path, units: Iterable[Unit]) -> None:
     """The units file the code kind's wrapper reads: one JSON line per unit, {ref, unit, line?}. Blocking."""
-    with open(units_file, "w", encoding="utf-8") as f:
+    with os.fdopen(nofollow.open(units_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC), "w", encoding="utf-8") as f:
         for u in units:
             item: dict[str, Any] = {"ref": u.ref, "unit": u.record}
             if u.line:
@@ -3359,7 +3361,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
         cancel = _cancel_event(c, concept_id)
         cancel.clear()
         out = labels_file(ws, concept_id)
-        out.parent.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(out.parent)
         run_id = run_id or _new_id()
         started = started or _now()
         _run_record(c, concept_id, run_id, started, created_by, patterns, sources)
@@ -3710,7 +3712,7 @@ def record_verdict(ws: Path, concept: dict, ref: str, label: str, note: str | No
         raise HTTPException(400, "ref and label are required")
     row = _row(ref, label, 1.0, "analyst", (note or "").strip() or None, line=_record_line(ws.name, ref))
     out = labels_file(ws, concept["id"])
-    out.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(out.parent)
     stored = concept.get("label_stats")
     with _store_lock(out):
         st = _store_ready(ws, concept["id"], wait=False)
@@ -4354,8 +4356,7 @@ def define_concept(c: str, name: str, description: str = "", kind: str = "prompt
         note_change(concept, "redefined", redefined_text(prior["labels"], concept["labels"]))
         _stop_apply((c, prior["id"]))
         lf = labels_file(ws, prior["id"])
-        if lf.exists():
-            lf.unlink()
+        nofollow.unlink(lf)  # the entry itself, never through a link a card's code left on its way
         labels_store.remove(lf)
         write_concept(ws, coloured(ws, concept))
         _notify(c, concept["id"], "redefined")
@@ -4980,12 +4981,12 @@ def _label_cards_placed(ws: Path, concept_id: str) -> list[dict]:
 
 def _forget_concept(c: str, ws: Path, concept_id: str, trash: Path | None) -> None:
     """The concept's files gone (into `trash` when given), its run state forgotten and its filters cleared."""
-    for path in (_concept_file(ws, concept_id), labels_file(ws, concept_id)):
+    for path in (_concept_file(ws, concept_id), labels_file(ws, concept_id)):  # moved and removed as nofollow does
         if trash is not None and path.is_file():
-            trash.mkdir(parents=True, exist_ok=True)
-            os.replace(path, trash / path.name)
+            nofollow.makedirs(trash)
+            nofollow.rename(path, trash / path.name)
         else:
-            path.unlink(missing_ok=True)
+            nofollow.unlink(path)
     labels_store.remove(labels_file(ws, concept_id))
     _runs.pop((c, concept_id), None)
     _cancels.pop((c, concept_id), None)
@@ -5017,15 +5018,13 @@ def restore_concept(c: str, concept_id: str, trash: Path, cards: list[dict], fil
     if not kept.is_file():
         raise HTTPException(409, "the deleted label's files are gone, so it cannot be restored")
     rows = labels_file(ws, concept_id)
-    rows.parent.mkdir(parents=True, exist_ok=True)
-    concepts_dir(ws).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(rows.parent)
+    nofollow.makedirs(concepts_dir(ws))
     if (trash / rows.name).is_file():
-        os.replace(trash / rows.name, rows)
-    os.replace(kept, _concept_file(ws, concept_id))
-    try:
-        trash.rmdir()
-    except OSError:
-        pass
+        nofollow.rename(trash / rows.name, rows)
+    nofollow.rename(kept, _concept_file(ws, concept_id))
+    with contextlib.suppress(OSError):
+        nofollow.rmdir(trash)
     for placed in cards:
         if isinstance(placed, dict) and isinstance(placed.get("card"), dict):
             try:

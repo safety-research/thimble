@@ -86,7 +86,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import answer_comments, canvas_comments, config, investigation, prompts, read_parts, tools, userconf, work_files
+from . import (answer_comments, canvas_comments, config, investigation, nofollow, prompts, read_parts, tools,
+               userconf, work_files)
 from .kernel_thimble import LABEL_ORDER
 from .ledger import read_json, write_json
 
@@ -365,7 +366,7 @@ def by_name(c: str, name: str) -> dict[str, Any] | None:
 
 
 def save(c: str, check: dict[str, Any]) -> dict[str, Any]:
-    _dir(c).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(_dir(c))
     write_json(_path(c, str(check["id"])), check)
     return check
 

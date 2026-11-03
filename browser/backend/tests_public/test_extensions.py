@@ -29,7 +29,9 @@ CORPUS = "tallies"
 
 
 @pytest.fixture()
-def corpus(workspaces_tmp, tmp_path, monkeypatch) -> Path:
+def corpus(tmp_path, monkeypatch) -> Path:
+    """The made-up corpus, its workspaces in tmp_path/workspaces (the suite's own), apart from thimble's home, where an
+    extension used in place is a link that thimble reads through."""
     d = tmp_path / "data" / CORPUS
     (d / "tally").mkdir(parents=True)
     rows = [{"who": w, "what": f"task {i}"} for i, w in enumerate(["ana", "bo", "ana", "cy"])]

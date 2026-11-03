@@ -34,11 +34,11 @@ view as it was built. A new change to the view stops its review; a view replaced
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import re
-import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,7 +46,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from . import config, headless, subagents, views
+from . import config, headless, nofollow, subagents, views
 
 log = logging.getLogger("thimble.view_review")
 
@@ -248,7 +248,7 @@ async def begin(c: str, slug: str, *, again: bool = False, route: str = subagent
     if not _reviewed_dir(c, slug).is_dir():
         await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug))
     await asyncio.to_thread(_copy_view, d, _reviewed_dir(c, slug, last=True))
-    work_dir(c, slug).mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(work_dir(c, slug))
     _set(c, slug, state="running", round=0, revised=revised, left=[], note="", undo=False, shots=0, agent_id=None,
          chat=None, finished=None, digest=views.digest(d), pictured=None, extra_left=None, refused=None)
     _again[(c, slug)] = again
@@ -405,31 +405,34 @@ def _reviewed_dir(c: str, slug: str, last: bool = False) -> Path:
 
 
 def _copy_view(src: Path, dst: Path) -> None:
-    """The view's files at `src`'s top level copied to `dst`, which is emptied first; the cache stays behind."""
-    shutil.rmtree(dst, ignore_errors=True)
-    dst.mkdir(parents=True, exist_ok=True)
+    """The view's files at `src`'s top level copied to `dst`, which is emptied first; the cache stays behind. `src` is
+    a view's folder its builder writes, so each file is read as nofollow reads it: a link there is no file of the view's
+    and is left behind."""
+    nofollow.rmtree(dst, ignore_errors=True)
+    nofollow.makedirs(dst)
     for p in src.iterdir() if src.is_dir() else []:
         if p.is_file():
-            shutil.copy2(p, dst / p.name)
+            with contextlib.suppress(nofollow.Linked):
+                nofollow.copy_file(p, dst / p.name)
 
 
 def _drop_copies(c: str, slug: str) -> None:
-    shutil.rmtree(_reviewed_dir(c, slug), ignore_errors=True)
-    shutil.rmtree(_reviewed_dir(c, slug, last=True), ignore_errors=True)
+    nofollow.rmtree(_reviewed_dir(c, slug), ignore_errors=True)
+    nofollow.rmtree(_reviewed_dir(c, slug, last=True), ignore_errors=True)
 
 
 def _restore(c: str, slug: str, src: Path) -> bool:
     """Put the view's files back from the copy `src` (its cache kept) and drop its memo; False without a copy."""
     if not src.is_dir():
         return False
-    d = views.views_dir(c) / slug
+    d = views.views_dir(c) / slug  # the view's folder, which its builder writes: as nofollow writes it
     for p in d.iterdir() if d.is_dir() else []:
         if p.is_file():
-            p.unlink(missing_ok=True)
-    d.mkdir(parents=True, exist_ok=True)
+            nofollow.unlink(p)
+    nofollow.makedirs(d)
     for p in src.iterdir():
         if p.is_file():
-            shutil.copy2(p, d / p.name)
+            nofollow.copy_file(p, d / p.name)
     views._forget(c, slug)
     return True
 
@@ -457,7 +460,7 @@ async def shoot(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
     """Pictures of the states `wanted`, each {state, ref?, controls?, why?}, into the folder `out`: `overview` with no
     label, as the Views bar opens the view in its pane, or one of EXTRA_STATES in its pane. Each result carries its
     state, ref, controls, why and the pane's size; `first` numbers the first picture."""
-    out.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(out)  # the reviewer's folder, which its commands write
     overview = {"ref": None, "path": files[0][0]} if files else {"ref": None}
     stem = f"picture-{int(time.time())}"
     states: list[dict[str, Any]] = []

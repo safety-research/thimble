@@ -13,7 +13,6 @@ import os
 import re
 import secrets
 import shutil
-import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -22,7 +21,7 @@ from typing import Any, Iterable, Iterator
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from . import config
+from . import config, nofollow
 
 log = logging.getLogger("thimble.ledger")
 router = APIRouter()
@@ -56,29 +55,20 @@ def ws_dir(name: str) -> Path:
 
 
 def read_json(path: Path, default: Any) -> Any:
-    if not path.is_file():
+    """The JSON file at `path`, `default` when there is none: missing, or no regular file, such as a link a card's code
+    left in a workspace, which is never followed there (nofollow)."""
+    try:
+        text = nofollow.read_text(path)
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError, nofollow.Linked):
         return default
-    return json.loads(path.read_text("utf-8"))
-
-
-def _own_tmp(path: Path) -> Path:
-    """A temp file of this writer's own beside `path`, so two concurrent writers never share a temp name. The `.tmp`
-    suffix keeps the file under the export's ignore patterns."""
-    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
-    os.close(fd)
-    return Path(tmp)
+    return json.loads(text)
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Write-to-temp + os.replace: a reader sees the old file or the new one, never a torn one; concurrent writers both
-    land whole and the later wins; a failed write leaves no temp. A symlink at `path` is replaced, not followed."""
-    tmp = _own_tmp(path)
-    try:
-        tmp.write_bytes(data)
-        os.replace(tmp, path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    """Write-to-temp + rename, in the folder as opened (nofollow.replace): a reader sees the old file or the new one,
+    never a torn one; concurrent writers both land whole and the later wins, each with a temp of its own; a failed write
+    leaves no temp. A symlink at `path` is replaced, not followed, and in a workspace neither is one on the way to it."""
+    nofollow.replace(path, data)
 
 
 def atomic_write_text(path: Path, text: str) -> None:
@@ -101,14 +91,13 @@ def unlinked(base: Path, path: Path) -> Path:
 
 
 def write_under(base: Path, path: Path, text: str) -> None:
-    """`text` written to `path` under `base` by the server: its folders made, none of them a symlink (unlinked), and a
-    symlink at `path` itself replaced rather than followed (atomic_write_text). For a file thimble writes into a folder
-    that its agents' Bash or a kernel can write (a check's task file, a writer's context file, the critic's brief and
-    digest), where a planted link would have the server, which no sandbox holds, write outside it. OSError for a link."""
+    """`text` written to `path` under `base` by the server: its folders made, each opened from `base` without following
+    a link, and a symlink at `path` itself replaced rather than followed (nofollow.replace). For a file thimble writes
+    into a folder that its agents' Bash or a kernel can write (a check's task file, a writer's context file, the
+    critic's brief and digest), where a planted link would have the server, which no sandbox holds, write outside it.
+    OSError for a link (nofollow.Linked) or a path outside `base`."""
     try:
-        unlinked(base, path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(unlinked(base, path), text)
+        nofollow.replace(path, text.encode("utf-8"), root=base, make=True)
     except ValueError as e:
         raise OSError(str(e)) from None
 
@@ -118,22 +107,28 @@ def write_json(path: Path, obj: Any) -> None:
 
 
 def write_json_once(path: Path, obj: Any) -> bool:
-    """write_json for a file created once and never rewritten: if `path` exists by the time this writer would replace
-    it, the other writer's file is kept and this temp removed. True when this call wrote the file."""
-    tmp = _own_tmp(path)
-    try:
-        tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False), "utf-8")
-        if path.exists():
-            return False
-        os.replace(tmp, path)
-        return True
-    finally:
-        tmp.unlink(missing_ok=True)
+    """write_json for a file created once and never rewritten: if anything is at `path` by the time this writer would
+    replace it, the other writer's file is kept and this temp removed. True when this call wrote the file. Its folder is
+    opened as nofollow opens it."""
+    with nofollow.folder(path.parent) as fd:
+        tmp = nofollow.temp_at(fd, path.name, json.dumps(obj, indent=2, ensure_ascii=False).encode("utf-8"))
+        try:
+            try:
+                os.stat(path.name, dir_fd=fd, follow_symlinks=False)
+                return False
+            except FileNotFoundError:
+                pass
+            os.rename(tmp, path.name, src_dir_fd=fd, dst_dir_fd=fd)
+            return True
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmp, dir_fd=fd)
 
 
 def append_jsonl(path: Path, obj: Any) -> None:
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    """`obj` as one line at the end of the log at `path`, made when missing; in a workspace never through a link a card's
+    code left there (nofollow.append_bytes), which a file of the log's own replaces."""
+    nofollow.append_bytes(path, (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
 # --------------------------------------------------------------------------- locks between processes
@@ -172,14 +167,12 @@ def _guard(key: str) -> threading.Lock:
 def _open_lock(lf: Path) -> int | None:
     """An fd on the lock file `lf`, made when missing; read-only where this process may not write its folder (a lock
     file the launcher made beside a store main's sandbox reads); None when it cannot be opened."""
-    cloexec = getattr(os, "O_CLOEXEC", 0)
     for flags in (os.O_RDWR | os.O_CREAT, os.O_RDONLY):
         try:
-            return os.open(lf, flags | cloexec, 0o600)
+            return nofollow.open(lf, flags, 0o600)
         except FileNotFoundError:
             try:
-                lf.parent.mkdir(parents=True, exist_ok=True)
-                return os.open(lf, flags | cloexec, 0o600)
+                return nofollow.open(lf, flags, 0o600, make=True)
             except OSError:
                 continue
         except OSError:
@@ -252,7 +245,7 @@ def update_json(path: Path, change: Any, default: Any = None, *, indent: int = 2
     the file holds afterwards."""
     with locked(path):
         try:
-            data = json.loads(path.read_text("utf-8")) if path.is_file() else default
+            data = json.loads(nofollow.read_text(path))
         except (OSError, ValueError):
             data = default
         new = change(data)
@@ -283,8 +276,8 @@ def append_jsonl_many(path: Path, objs: Iterable[Any], *, sync: bool = False) ->
     f = None
     try:
         for o in objs:
-            if f is None:
-                f = open(path, "a", encoding="utf-8")
+            if f is None:  # as append_jsonl opens it
+                f = os.fdopen(nofollow.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT), "a", encoding="utf-8")
             buf.append(json.dumps(o, ensure_ascii=False) + "\n")
             n += 1
             if len(buf) >= APPEND_CHUNK:
@@ -305,14 +298,18 @@ def heal_tail(path: Path) -> bool:
     """Terminate a torn last line so the next append does not glue onto the fragment; readers skip the fragment itself.
     True when a newline was added; nothing for a missing or empty file."""
     try:
-        with open(path, "rb") as f:
-            f.seek(-1, 2)
-            torn = f.read(1) != b"\n"
+        fd = nofollow.open(path, os.O_RDWR | os.O_APPEND)  # as append_jsonl opens it, but never made
     except OSError:
         return False
-    if torn:
-        with open(path, "ab") as f:
-            f.write(b"\n")
+    try:
+        size = os.fstat(fd).st_size
+        torn = size > 0 and os.pread(fd, 1, size - 1) != b"\n"
+        if torn:
+            os.write(fd, b"\n")
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
     return torn
 
 

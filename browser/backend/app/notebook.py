@@ -28,6 +28,7 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -46,11 +47,10 @@ import zmq.asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 from jupyter_client import AsyncKernelClient
-from jupyter_client.connect import write_connection_file
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import cite, config, frames, kernel_wrap, ledger, page_fonts, procs, srt, view_calls
+from . import cite, config, frames, kernel_wrap, ledger, nofollow, page_fonts, procs, srt, view_calls
 from .ledger import atomic_write_text, read_json, write_json
 
 log = logging.getLogger("thimble.notebook")
@@ -123,38 +123,67 @@ SCRATCH_DIR = "scratch"  # workspace-relative: the kernels' cwd, a link per entr
 VCS_DIR = ".git"  # left out of the mirror (mirror_corpus)
 
 
-def _drop_dangling(p: Path) -> None:
-    if os.path.islink(p) and not os.path.exists(p):
+# The mirror folder is the kernels' cwd, which they write: the server works in it by the descriptor of the folder as
+# nofollow opened it (own_folder), each entry by its name there, so a link a cell put in place of the folder or of one
+# of its folders leads none of its links, removals or listings outside.
+
+
+def _drop_dangling(fd: int, name: str) -> None:
+    """The link `name` in the folder `fd` removed when its target is gone."""
+    try:
+        os.stat(name, dir_fd=fd)  # through the link: whether its target is there
+    except FileNotFoundError:
         with contextlib.suppress(OSError):
-            p.unlink()
+            if stat.S_ISLNK(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode):
+                os.unlink(name, dir_fd=fd)
+    except OSError:
+        pass
 
 
-def _unmirror(src: Path, dest: Path) -> bool:
-    """Whether the real folder `dest` went, as one the per-file mirror of earlier versions left for the corpus folder
-    `src`: a folder for it and for each folder under it, holding nothing but a link to each of their files. Such a
-    folder goes, so that the corpus folder's own link can take its place; one that holds anything else, such as a file
-    a cell wrote, is the kernel's and stays as it is. False at once unless both are folders."""
-    if os.path.islink(dest) or not (os.path.isdir(src) and os.path.isdir(dest)):
+def _unmirror(src: Path, fd: int, name: str) -> bool:
+    """Whether the real folder `name` in the mirror folder `fd` went, as one the per-file mirror of earlier versions
+    left for the corpus folder `src`: a folder for it and for each folder under it, holding nothing but a link to each
+    of their files. Such a folder goes, so that the corpus folder's own link can take its place; one that holds
+    anything else, such as a file a cell wrote, is the kernel's and stays as it is. False at once unless both are
+    folders, `name` one of its own and no link."""
+    if not os.path.isdir(src):
         return False
-    for root, dirs, files in os.walk(dest):  # the walk enters the real folders, not a link to one
-        here = src / os.path.relpath(root, dest)
-        for name in [*files, *(d for d in dirs if os.path.islink(os.path.join(root, d)))]:
-            try:
-                if os.readlink(os.path.join(root, name)) != str(here / name):
+    try:
+        top = os.open(name, nofollow.DIR_FLAGS, dir_fd=fd)
+    except OSError:
+        return False
+    try:
+        for root, dirs, files, at in os.fwalk(".", dir_fd=top):  # the walk enters the real folders, not a link to one
+            here = src / os.path.relpath(root, ".")
+            linked = [d for d in dirs if stat.S_ISLNK(os.stat(d, dir_fd=at, follow_symlinks=False).st_mode)]
+            for entry in [*files, *linked]:
+                try:
+                    if os.readlink(entry, dir_fd=at) != str(here / entry):
+                        return False
+                except OSError:  # not a link: a file a cell wrote
                     return False
-            except OSError:  # not a link: a file a cell wrote
-                return False
-    shutil.rmtree(dest, ignore_errors=True)
-    return not os.path.lexists(dest)
+    except OSError:
+        return False
+    finally:
+        os.close(top)
+    with contextlib.suppress(OSError):
+        nofollow.rmtree_at(fd, name)
+    try:
+        os.stat(name, dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        pass
+    return False
 
 
-def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str]) -> None:
-    """The mirror's links: a link in `dest` to each of `names` in `src` (`links`, the names that are links in the
-    corpus, only while their target exists), re-pointed when it points elsewhere, and the links in `dest` whose target
-    is gone removed. A real entry under a corpus name is the kernel's and stays, unless it is a folder an earlier
+def _mirror_folder(src: Path, fd: int, names: list[str], links: frozenset[str]) -> None:
+    """The mirror's links: a link in the mirror folder `fd` to each of `names` in `src` (`links`, the names that are
+    links in the corpus, only while their target exists), re-pointed when it points elsewhere, and the links there whose
+    target is gone removed. A real entry under a corpus name is the kernel's and stays, unless it is a folder an earlier
     version's mirror left there (_unmirror)."""
-    have: dict[str, bool] = {}  # name in dest -> whether it is a link
-    with contextlib.suppress(OSError), os.scandir(dest) as it:
+    have: dict[str, bool] = {}  # name in the mirror -> whether it is a link
+    with contextlib.suppress(OSError), os.scandir(fd) as it:
         for e in it:
             have[e.name] = e.is_symlink()
     for name in names:
@@ -162,24 +191,23 @@ def _mirror_folder(src: Path, dest: Path, names: list[str], links: frozenset[str
         if name in links and not os.path.exists(target):
             continue
         is_link = have.get(name)
-        link = dest / name
-        if is_link is False and not _unmirror(target, link):
+        if is_link is False and not _unmirror(target, fd, name):
             continue  # a real entry the kernel made under a corpus name: left as it is
         if is_link:
             try:
-                if os.readlink(link) == str(target):
+                if os.readlink(name, dir_fd=fd) == str(target):
                     continue
-                link.unlink()
+                os.unlink(name, dir_fd=fd)
             except OSError:
                 continue
         try:
-            os.symlink(target, link)
+            os.symlink(target, name, dir_fd=fd)
         except OSError:
-            log.exception("scratch mirror: could not link %s", link)
+            log.exception("scratch mirror: could not link %s", name)
     wanted = set(names) - links
     for name, is_link in have.items():
         if is_link and name not in wanted:
-            _drop_dangling(dest / name)
+            _drop_dangling(fd, name)
 
 
 def mirror_corpus(corpus: Path, scratch: Path) -> None:
@@ -193,7 +221,6 @@ def mirror_corpus(corpus: Path, scratch: Path) -> None:
     dangling links removed, links that point elsewhere re-pointed, and a folder the per-file mirror of earlier versions
     left becomes its link (_unmirror). Blocking."""
     corpus = corpus.resolve()
-    scratch.mkdir(parents=True, exist_ok=True)
     names: list[str] = []
     links: set[str] = set()
     with contextlib.suppress(OSError), os.scandir(corpus) as it:
@@ -203,12 +230,24 @@ def mirror_corpus(corpus: Path, scratch: Path) -> None:
             names.append(e.name)
             if e.is_symlink():
                 links.add(e.name)
-    _mirror_folder(corpus, scratch, sorted(names), frozenset(links))
+    fd = nofollow.own_folder(scratch, mode=0o777)  # never a link a cell left in its place, which goes
+    try:
+        _mirror_folder(corpus, fd, sorted(names), frozenset(links))
+    finally:
+        os.close(fd)
 
 
 MIRROR_MEMO_S = 30.0  # a mirror this recent serves the next kernel's start too
 _mirrored: dict[Path, float] = {}  # scratch dir -> when its mirror last ran (monotonic)
 _mirror_lock = threading.Lock()  # kernels that start together wait for one pass
+
+
+def _plain_folder(p: Path) -> bool:
+    """Whether `p` is a folder and no link (as nofollow sees it)."""
+    try:
+        return stat.S_ISDIR(nofollow.lstat(p).st_mode)
+    except OSError:
+        return False
 
 
 def scratch_dir(workspace: str, corpus: Path | None = None, *, fresh: bool = False) -> Path:
@@ -217,7 +256,7 @@ def scratch_dir(workspace: str, corpus: Path | None = None, *, fresh: bool = Fal
     scratch = config.workspace_dir(workspace) / SCRATCH_DIR
     with _mirror_lock:
         last = _mirrored.get(scratch)
-        if fresh or last is None or time.monotonic() - last >= MIRROR_MEMO_S or not scratch.is_dir():
+        if fresh or last is None or time.monotonic() - last >= MIRROR_MEMO_S or not _plain_folder(scratch):
             mirror_corpus(corpus if corpus is not None else config.corpus_dir(workspace), scratch)
             _mirrored[scratch] = time.monotonic()
     return scratch
@@ -300,9 +339,9 @@ def notebooks_dir(ws: Path) -> Path:
         else:
             bad = False
         cells = data.get("cells") if isinstance(data, dict) else None
-        d.mkdir(exist_ok=True)
+        nofollow.makedirs(d)
         write_json(d / f"{MAIN}.json", _normalize(MAIN, {"title": ANALYST_NOTEBOOK_TITLE, "cells": cells or []}))
-        old.replace(old.with_suffix(".json.bad")) if bad else old.unlink()
+        nofollow.rename(old, old.with_suffix(".json.bad")) if bad else nofollow.unlink(old)
         log.info("migrated %s -> notebooks/%s.json", old, MAIN)
     return d
 
@@ -677,8 +716,8 @@ def _side_file(ws: Path, rel: Any) -> Path | None:
 
 
 def _read_side(side: Path) -> str:
-    with side.open("r", encoding="utf-8", errors="surrogatepass", newline="") as f:  # byte-exact: no newline translation
-        return f.read()
+    # byte-exact (no newline translation), and never through a link a card's code left in the workspace (nofollow)
+    return nofollow.read_bytes(side).decode("utf-8", "surrogatepass")
 
 
 def _bound_stream(ws: Path, cell_id: str, i: int, bundle: dict) -> dict:
@@ -692,9 +731,8 @@ def _bound_stream(ws: Path, cell_id: str, i: int, bundle: dict) -> dict:
     if omitted < 1:
         return bundle
     side = ws / OUTPUTS_DIR / f"{cell_id}-{i}.txt"
-    side.parent.mkdir(parents=True, exist_ok=True)
-    with side.open("w", encoding="utf-8", errors="surrogatepass", newline="") as f:
-        f.write(text)
+    # byte-exact, in the workspace a card's code writes: never through a link it left there (nofollow)
+    nofollow.write_bytes(side, text.encode("utf-8", "surrogatepass"), make=True)
     kept = "".join(lines[:head]) + _marker(omitted) + "\n" + "".join(lines[len(lines) - tail:])
     return {**bundle, "text/plain": kept,
             "truncated": {"total_lines": len(lines), "kept_head": head, "kept_tail": tail,
@@ -706,7 +744,7 @@ def _drop_side_files(ws: Path, cell_id: str) -> None:
     if d.is_dir() and ID_RE.match(cell_id or ""):
         for p in d.glob(f"{cell_id}-*.txt"):
             try:
-                p.unlink()
+                nofollow.unlink(p)
             except OSError:
                 pass
 
@@ -913,7 +951,7 @@ def editing(ws: Path):
     inside it, so `thimble-run`, which may write only that folder in main's sandbox, can take it. Held from the read of
     a change to its write; never across an await."""
     d = ws / "notebooks"
-    d.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(d)
     return ledger.locked(d)
 
 
@@ -999,20 +1037,21 @@ def read_notebook(ws: Path, nb_id: str) -> dict | None:
     """
     p = _nb_file(ws, nb_id)
     caching = _caching()
-    try:
-        st: os.stat_result | None = p.stat()
+    try:  # the file itself, never through a link a card's code left in the workspace (nofollow)
+        f = os.fdopen(nofollow.open(p, os.O_RDONLY), "rb")
     except OSError:
-        st = None
-    if st is None or not stat.S_ISREG(st.st_mode):
+        f = None
+    if f is None:
         if caching:
             _cache.pop(p, None)
         return _normalize(MAIN, {}) if nb_id == MAIN else None
-    sig = _sig(st)
-    if caching:
-        hit = _cache.get(p)
-        if hit is not None and hit[0] == sig:
-            return hit[1]
-    nb = _normalize(nb_id, json.loads(p.read_text("utf-8")))
+    with f:
+        sig = _sig(os.fstat(f.fileno()))
+        if caching:
+            hit = _cache.get(p)
+            if hit is not None and hit[0] == sig:
+                return hit[1]
+        nb = _normalize(nb_id, json.loads(f.read().decode("utf-8")))
     if caching:
         if _bound_cells(ws, nb):
             log.info("bounded oversized stream outputs in %s", p)
@@ -1028,7 +1067,7 @@ def write_notebook(ws: Path, nb: dict) -> None:
     """Replace the group's file whole, under the store's lock (editing), which a caller that read the group holds
     already."""
     p = _nb_file(ws, nb["id"])
-    p.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(p.parent)
     with editing(ws):
         atomic_write_text(p, json.dumps(nb, indent=1))  # a temp of the writer's own: a route and a kernel thread never share one
         if _caching():
@@ -1583,7 +1622,7 @@ def _keep_record(ws: Path, cell_id: str, rec: dict) -> bool:
     if path is None:
         return False
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(path.parent)
         atomic_write_text(path, json.dumps(rec, ensure_ascii=False, default=str))
     except (OSError, TypeError, ValueError):
         log.exception("card %s: the record of edit %s was not kept", cell_id, rec.get("id"))
@@ -2340,25 +2379,30 @@ def _kernel_processes(root: Path) -> list[tuple[int, Path, str]]:
 # --- records ---
 
 
+# A kernel's files lie in kernels/ of its workspace, which its kernels and every other kernel of the workspace may write:
+# the server reads, writes and removes each of them as nofollow does, never through a link a card left in place of the
+# folder or of a file in it (it stays where it is, or a file of the server's own takes its place).
+
+
 def _read_record(path: Path) -> dict | None:
     try:
-        rec = json.loads(path.read_text("utf-8"))
+        rec = json.loads(nofollow.read_text(path))
     except (OSError, ValueError):
         return None
     return rec if isinstance(rec, dict) else None
 
 
 def _write_record(k: _Kernel, rec: dict) -> None:
-    k.record.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(k.record.parent)
     write_json(k.record, rec)  # tmp + replace: the kernel's watchdog reads it
 
 
 def _drop_files(*paths: Path) -> None:
     for p in paths:
         try:
-            p.unlink()
-        except FileNotFoundError:
-            pass
+            nofollow.unlink(p)
+        except nofollow.Linked:  # its folder is a link a card left: none of the server's files is there
+            log.warning("did not remove %s: a folder on its way is not one thimble made", p)
         except OSError:
             log.exception("could not remove %s", p)
 
@@ -2368,35 +2412,63 @@ def _record_pid(rec: dict, field: str = "pid") -> int | None:
     return v if isinstance(v, int) and v > 0 else None
 
 
+def _records_in(d: Path) -> list[Path]:
+    """The kernel records in the kernels folder `d` (<key>.json), none when it is missing or a link (nofollow)."""
+    try:
+        with nofollow.folder(d) as fd:
+            names = os.listdir(fd)
+    except OSError:
+        return []
+    return [d / n for n in sorted(names) if n.endswith(".json") and not n.endswith(".conn.json")]
+
+
 def recorded_kernels(workspace: str) -> list[str | None]:
     """Names (None = the shared kernel) of the kernels recorded under workspaces/<c>/kernels/, attached or not."""
-    d = _ws_dir(workspace) / KERNELS_DIR
-    if not d.is_dir():
-        return []
-    return [_name_from_key(p.stem) for p in sorted(d.glob("*.json")) if not p.name.endswith(".conn.json")]
+    return [_name_from_key(p.stem) for p in _records_in(_ws_dir(workspace) / KERNELS_DIR)]
 
 
 # --- start, attach, detach, kill ---
 
 
 CHANNELS = ("_shell_channel", "_iopub_channel", "_stdin_channel", "_control_channel")  # the AsyncKernelClient's we open
+PORTS = ("shell_port", "iopub_port", "stdin_port", "control_port", "hb_port")  # in jupyter_client's order
 
 
-def _client(connection_file: Path) -> AsyncKernelClient:
-    """Channels to the kernel of `connection_file` on a zmq context of their own, all but the heartbeat's: a kernel's
-    liveness is its pid (_Kernel.alive). The heartbeat's channel is a thread of its own, whose stop joins it on the
-    event loop; stopped before the thread had begun (a failed start on a busy machine), the thread ran on and the join
-    never returned. A start that fails part way (a server out of file descriptors fails in zmq) closes what it opened
+def connection_info(ip: str, key: bytes, **ports: int) -> dict[str, Any]:
+    """What a kernel's connection file holds, as jupyter_client's write_connection_file makes it, without its file and
+    its change of the file's folder (_launch_process writes it as nofollow writes): a free port for each channel
+    `ports` does not name, found by binding it on `ip` and let go (PORT_TAKEN), the address, the key and the scheme."""
+    socks: list[socket.socket] = []
+    try:
+        for _ in [p for p in PORTS if not ports.get(p)]:
+            sock = socket.socket()
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\0" * 8)
+            sock.bind((ip, 0))
+            socks.append(sock)
+        free = [sock.getsockname()[1] for sock in socks]
+    finally:
+        for sock in socks:
+            sock.close()
+    return {**{p: int(ports.get(p) or 0) or free.pop(0) for p in PORTS}, "ip": ip, "key": key.decode(),
+            "transport": "tcp", "signature_scheme": "hmac-sha256", "kernel_name": ""}
+
+
+def _client(connection: Path | dict) -> AsyncKernelClient:
+    """Channels to the kernel of `connection` (what its connection file holds, or the file, read as nofollow reads it)
+    on a zmq context of their own, all but the heartbeat's: a kernel's liveness is its pid (_Kernel.alive). The
+    heartbeat's channel is a thread of its own, whose stop joins it on the event loop; stopped before the thread had
+    begun (a failed start on a busy machine), the thread ran on and the join never returned. A start that fails part way (a server out of file descriptors fails in zmq) closes what it opened
     before it raises.
 
     A client is closed by _close_client, or, left unclosed (a start whose task the loop dropped), when the garbage
     collector takes it: its sockets are closed first, then its context. Left to themselves, the context's finalizer can
     run first, find none of its sockets (the collector clears the list it keeps of them before any finalizer runs), and
     wait on them for good, wherever the collection ran."""
+    info = connection if isinstance(connection, dict) else json.loads(nofollow.read_text(connection))
     ctx = zmq.asyncio.Context()
     kc = AsyncKernelClient(context=ctx)
     try:
-        kc.load_connection_file(str(connection_file))
+        kc.load_connection_info(info)
         kc.start_channels(hb=False)
     except BaseException:
         _close_client(kc)
@@ -2456,16 +2528,16 @@ KERNEL_LOG_TAIL = 4096  # bytes of a kernel's log read for the line that says wh
 def _log_lines(k: _Kernel) -> list[str]:
     """The last lines of the kernel's log (its stdout and stderr, and its wrapper's), up to KERNEL_LOG_TAIL bytes."""
     try:
-        with k.log.open("rb") as f:
+        with os.fdopen(nofollow.open(k.log, os.O_RDONLY), "rb") as f:
             f.seek(max(0, f.seek(0, os.SEEK_END) - KERNEL_LOG_TAIL))
             return [ln.strip() for ln in f.read().decode("utf-8", "replace").splitlines() if ln.strip()]
     except OSError:
         return []
 
 
-# What a kernel's log says when a port of its connection file was taken before it bound it: write_connection_file
-# finds free ports and lets them go, and a process that binds one before the kernel starts (another kernel, or a server)
-# keeps it. The kernel ends at once; started again on new ports, it starts.
+# What a kernel's log says when a port of its connection file was taken before it bound it: connection_info finds free
+# ports and lets them go, and a process that binds one before the kernel starts (another kernel, or a server) keeps it.
+# The kernel ends at once; started again on new ports, it starts.
 PORT_TAKEN = "Address already in use"
 LAUNCH_TRIES = 3
 
@@ -2563,23 +2635,42 @@ def _guarded_files(workspace: str) -> None:
             with open(p, "x", encoding="utf-8") as f:
                 f.write(text)
         with contextlib.suppress(OSError):
-            if not p.is_symlink() and p.stat().st_size == 0 and not os.access(p, os.W_OK):
-                p.chmod(0o600)  # srt's placeholder from a kernel that did not end cleanly
+            fd = nofollow.open(p, os.O_RDONLY)  # the file itself, never a link in its place
+            try:
+                st = os.fstat(fd)
+                if st.st_size == 0 and not st.st_mode & stat.S_IWUSR:
+                    os.fchmod(fd, 0o600)  # srt's placeholder from a kernel that did not end cleanly
+            finally:
+                os.close(fd)
 
 
 def _temp_writes(workspace: str, temp: Path | None) -> list[Path]:
     """The kernel's TMPDIR (`temp`, _launch) when it lies outside the workspace, which a wrapper then lets it write too:
     Claude Code's temp folder of main's sessions on Claude Code sign-in (runtime_cc.shell_tmp, a folder of this user's
-    own and no link, in a folder the kernel cannot write). The workspace's own temp folder is none: the wrappers let
-    the kernel write it as part of the workspace, by its path there."""
+    own and no link, in a folder the kernel cannot write, though main's Bash can). The workspace's own temp folder is
+    none: the wrappers let the kernel write it as part of the workspace, by its path there."""
     ws = _ws_dir(workspace).resolve()
     return [] if temp is None or temp == ws or ws in temp.parents else [temp]
 
 
-def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_file: Path, source: str = "settings",
-                 temp: Path | None = None) -> list[str]:
-    """`argv` inside bubblewrap (kernel_wrap.kernel_wrap_argv), `temp` its TMPDIR. RuntimeError when bwrap is not on
-    PATH: a workspace set to bwrap never runs unwrapped."""
+def _temp_fd(temp: Path) -> int:
+    """A descriptor of the TMPDIR `temp` outside the workspace (_temp_writes), its real path opened from / one part at
+    a time without following a link (nofollow), and checked to be a folder of this user's own: what bwrap binds
+    (`--bind-fd`), so a link main's Bash puts in its place after the check binds nothing else. OSError otherwise."""
+    fd = nofollow.walk(temp, root="/")
+    st = os.fstat(fd)
+    if st.st_uid != os.getuid():
+        os.close(fd)
+        raise OSError(f"{temp} is not a folder of this user's own")
+    return fd
+
+
+def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings",
+                 temp: Path | None = None) -> tuple[list[str], list[int]]:
+    """`argv` inside bubblewrap (kernel_wrap.kernel_wrap_argv), `temp` its TMPDIR, and the descriptors the process must
+    inherit, which the caller closes once it started: a TMPDIR outside the workspace is bound by the descriptor of the
+    folder _temp_fd opened, where bwrap can (kernel_wrap.bind_fd_works), else by its path. RuntimeError when bwrap is
+    not on PATH: a workspace set to bwrap never runs unwrapped."""
     bwrap = shutil.which("bwrap")
     if bwrap is None:
         log.error("kernel for %s: %s is bwrap (%s) but bwrap is not on PATH; the kernel is not started — %s",
@@ -2587,9 +2678,20 @@ def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, connection_fi
 
         raise RuntimeError("the kernel wrap is bwrap but bubblewrap (bwrap) is not installed, so the kernel did not start")
     _guarded_files(workspace)
-    return kernel_wrap.kernel_wrap_argv(argv, corpus_dir=Path(corpus).resolve(), workspace_dir=_ws_dir(workspace).resolve(),
-                                        connection_dir=connection_file.parent.resolve(), venv=_venv(), python=PYTHON,
-                                        read=_kernel_reads(), write=_temp_writes(workspace, temp), bwrap=bwrap)
+    writes, fds = _temp_writes(workspace, temp), []
+    try:
+        if writes and kernel_wrap.bind_fd_works(bwrap):
+            for w in writes:
+                fds.append(_temp_fd(w))
+        out = kernel_wrap.kernel_wrap_argv(argv, corpus_dir=Path(corpus).resolve(),
+                                           workspace_dir=_ws_dir(workspace).resolve(), venv=_venv(), python=PYTHON,
+                                           read=_kernel_reads(), write=[] if fds else writes,
+                                           write_fds=list(zip(fds, writes)), bwrap=bwrap)
+    except BaseException:
+        for fd in fds:
+            os.close(fd)
+        raise
+    return out, fds
 
 
 def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings",
@@ -2613,8 +2715,8 @@ def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str
 
 def _fresh_home(k: _Kernel) -> None:
     """The kernel's HOME for srt (k.home), empty: what a cell left there does not reach the next start."""
-    shutil.rmtree(k.home, ignore_errors=True)
-    k.home.mkdir(parents=True, exist_ok=True)
+    nofollow.rmtree(k.home, ignore_errors=True)
+    os.close(nofollow.own_folder(k.home))
 
 
 LEASE_TRIES = 20  # _hold_lease: 50 ms apart, so a watchdog's own probe (lock, unlock) never costs the server the lease
@@ -2625,7 +2727,7 @@ def _hold_lease(k: _Kernel) -> None:
     process keeps is logged and left; the next attach takes it back."""
     if k.lease_fd is not None:
         return
-    fd = os.open(k.lease, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+    fd = nofollow.open(k.lease, os.O_RDWR | os.O_CREAT, 0o600)
     for _ in range(LEASE_TRIES):
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -2651,7 +2753,8 @@ async def _launch(k: _Kernel, workspace: str) -> None:
     """A fresh kernel process in the workspace's scratch mirror, recorded and connected. Call with k.lock held."""
     corpus = config.corpus_dir(workspace)
     cwd = await asyncio.to_thread(scratch_dir, workspace, corpus)  # the scratch mirror (module docstring)
-    # kernels/, where the kernel's files go and a folder bwrap binds writable by its path: never a link a card left there
+    # kernels/, where the kernel's files go: never a link a card left there, which goes first (nofollow.own_folder); the
+    # files after it are opened as nofollow opens them, so a link a card puts there later fails them and leads nowhere
     config.private_dir(k.record.parent, no_link=True)
     _drop_files(k.record, k.conn)
     wrap, source = await asyncio.to_thread(config.resolve_kernel_wrap, _ws_settings(workspace))
@@ -2664,29 +2767,37 @@ async def _launch(k: _Kernel, workspace: str) -> None:
     # their real paths, and the folder by its own name, never as the folder a link a card left in its place points to
     temp = await asyncio.to_thread(runtime.shell_temp, workspace)
     tmp = Path(os.path.realpath(temp.parent)) / temp.name
-    # paths only so far: a missing wrapper fails here, before any file is written
-    if wrap == config.KERNEL_WRAP_BWRAP:
-        argv = wrapped_argv(argv, workspace=workspace, corpus=corpus, connection_file=k.conn, source=source, temp=tmp)
-    elif wrap == config.KERNEL_WRAP_SRT:
-        argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp)
-    for tries_left in range(LAUNCH_TRIES - 1, -1, -1):
-        try:
-            k.kc = await _launch_process(k, workspace, cwd, corpus, argv, wrap, source, tmp)
-            return
-        except RuntimeError as e:
-            if PORT_TAKEN not in str(e) or not tries_left:
-                raise
-            log.warning("kernel %s of %s ended at its start: a port of its connection file was taken (%s); starting "
-                        "it again on new ports", k.key, workspace, e)
+    # paths only so far (and under bwrap the descriptor of a TMPDIR outside the workspace, `keep`): a missing wrapper
+    # fails here, before any file is written
+    keep: list[int] = []
+    try:
+        if wrap == config.KERNEL_WRAP_BWRAP:
+            argv, keep = wrapped_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp)
+        elif wrap == config.KERNEL_WRAP_SRT:
+            argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp)
+        for tries_left in range(LAUNCH_TRIES - 1, -1, -1):
+            try:
+                k.kc = await _launch_process(k, workspace, cwd, corpus, argv, wrap, source, tmp, tuple(keep))
+                return
+            except RuntimeError as e:
+                if PORT_TAKEN not in str(e) or not tries_left:
+                    raise
+                log.warning("kernel %s of %s ended at its start: a port of its connection file was taken (%s); "
+                            "starting it again on new ports", k.key, workspace, e)
+    finally:
+        for fd in keep:
+            os.close(fd)
 
 
 async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, argv: list[str], wrap: str,
-                          source: str, tmp: Path) -> AsyncKernelClient:
-    """_launch's kernel process on new ports, with `tmp` its TMPDIR, and its client once it answers."""
+                          source: str, tmp: Path, keep: tuple[int, ...] = ()) -> AsyncKernelClient:
+    """_launch's kernel process on new ports, with `tmp` its TMPDIR and `keep` the descriptors its wrapper inherits,
+    and its client once it answers."""
     wrapped = wrap in config.KERNEL_WRAPPED
     kc: AsyncKernelClient | None = None
     try:  # from the first file written: a failure anywhere leaves no process, channels, lease or file behind (_kill)
-        await asyncio.to_thread(write_connection_file, str(k.conn), ip="127.0.0.1", key=secrets.token_hex(16).encode())
+        info = await asyncio.to_thread(connection_info, ip="127.0.0.1", key=secrets.token_hex(16).encode())
+        await asyncio.to_thread(nofollow.replace, k.conn, json.dumps(info, indent=2).encode("utf-8"))  # 0600
         env = kernel_env()
         env.pop("JPY_PARENT_PID", None)  # no parent poller: the kernel outlives this server
         env.setdefault("MATPLOTLIBRC", str(MATPLOTLIBRC))  # thimble's figure defaults, unless the environment names its own
@@ -2699,16 +2810,19 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
             await asyncio.to_thread(_hold_lease, k)  # before the process exists: its watchdog never sees a free lease
         log.info("starting kernel %s for %s in %s (a mirror of %s)%s", k.key, workspace, cwd, corpus,
                  f"; wrapped in {wrap} ({source})" if wrapped else "")
-        with k.log.open("wb") as out:
-            proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
-                                    stdout=out, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+        out = nofollow.open(k.log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL, stdout=out,
+                                    stderr=subprocess.STDOUT, start_new_session=True, close_fds=True, pass_fds=keep)
+        finally:
+            os.close(out)
         k.proc = proc
         k.pid = k.pgid = proc.pid
         k.wrap = wrap
         _write_record(k, {"name": k.name, "workspace": workspace, "pid": proc.pid, "pgid": proc.pid,
                           "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
                           "home": str(_home()), "attached": _now(), "wrap": wrap})
-        kc = _client(k.conn)
+        kc = _client(info)
         await _wait_ready(k, kc, STARTUP_TIMEOUT, control=False)
     except BaseException:
         if kc is not None:
@@ -2789,7 +2903,7 @@ async def _kill(k: _Kernel) -> None:
         await asyncio.to_thread(_terminate, pid, pgid or pid, k.conn, ours)
     _release_lease(k, drop=True)
     _drop_files(k.record, k.conn)
-    await asyncio.to_thread(shutil.rmtree, k.home, True)
+    await asyncio.to_thread(nofollow.rmtree, k.home, ignore_errors=True)
 
 
 async def shutdown_kernel(workspace: str, kernel: str | None = None) -> None:
@@ -2905,10 +3019,8 @@ async def reconnect_all() -> dict[str, list[str]]:
     root = config.WORKSPACES_DIR
     handed = cli.kernel_handoff()  # the restarted server whose kernels this one takes back (kernels section comment)
     home = str(_home())
-    records = sorted(root.glob(f"*/{KERNELS_DIR}/*.json")) if root.is_dir() else []
+    records = [r for ws in (sorted(root.iterdir()) if root.is_dir() else []) for r in _records_in(ws / KERNELS_DIR)]
     for record in records:
-        if record.name.endswith(".conn.json"):
-            continue
         rec = _read_record(record) or {}
         owner = _record_pid(rec, "server_pid")
         if rec.get("home") not in (None, home) or (owner not in (None, os.getpid(), handed) and _server_alive(owner)):
@@ -4052,8 +4164,8 @@ def trash_notebook(ws: Path, nb_id: str) -> bool:
     if not p.is_file():
         return False
     trash = ws / TRASH_DIR
-    trash.mkdir(parents=True, exist_ok=True)
-    p.replace(trash / p.name)
+    nofollow.makedirs(trash)
+    nofollow.rename(p, trash / p.name)
     _cache.pop(p, None)
     return True
 

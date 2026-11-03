@@ -900,21 +900,19 @@ def workspace_path(name: str) -> Path:
 def private_dir(p: Path, *, no_link: bool = False) -> Path:
     """`p`, made if missing, readable by its owner alone (0700), since it holds what thimble read and wrote; the folders
     above it are made as usual. `no_link` for a folder of a workspace, where a card's code can put a link or a file in
-    its place (the kernels write the workspace): that is removed first, and the mode is set on the folder itself, never
-    through a link, so nothing thimble does with `p` reaches the folder a link points to."""
+    its place (the kernels write the workspace): that is removed first, and the folder and those above it in the
+    workspace are opened and their mode set as nofollow does (own_folder), never through a link, so nothing thimble does
+    with `p` reaches the folder a link points to. thimble's later opens there go through nofollow too, so a link put
+    there after this fails them rather than lead anywhere."""
+    if no_link:
+        from . import nofollow  # noqa: PLC0415
+
+        os.close(nofollow.own_folder(p))
+        return p
     p.parent.mkdir(parents=True, exist_ok=True)
-    if no_link and (p.is_symlink() or (p.exists() and not p.is_dir())):
-        p.unlink()
     p.mkdir(mode=0o700, exist_ok=True)
     try:
-        if no_link:  # the mode set on the folder opened as such, which fails on a link put in its place since
-            fd = os.open(p, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-            try:
-                if os.fstat(fd).st_mode & 0o077:
-                    os.fchmod(fd, 0o700)
-            finally:
-                os.close(fd)
-        elif p.stat().st_mode & 0o077:
+        if p.stat().st_mode & 0o077:
             os.chmod(p, 0o700)
     except OSError:  # a folder of another owner keeps its mode
         pass

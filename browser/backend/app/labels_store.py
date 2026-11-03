@@ -27,10 +27,13 @@ import json
 import logging
 import os
 import sqlite3
+import stat
 import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+
+from . import nofollow
 
 log = logging.getLogger("thimble.labels_store")
 
@@ -115,16 +118,39 @@ def side_files(jsonl: Path) -> list[Path]:
 
 
 def remove(jsonl: Path) -> None:
-    """Delete the store (not the jsonl)."""
+    """Delete the store (not the jsonl): each file itself, never through a link a card's code left on its way."""
     for p in side_files(jsonl):
-        p.unlink(missing_ok=True)
+        _unlink(p)
+
+
+def _unlink(p: Path) -> None:
+    try:
+        nofollow.unlink(p)
+    except OSError:
+        pass
+
+
+def _plain(*paths: Path) -> None:
+    """sqlite3.OperationalError unless each of `paths` that is there is a regular file in folders that are no links,
+    as nofollow sees them: SQLite opens a store and its side files by their paths, and a card's code writes the
+    workspace, so a link it left there would lead SQLite's write elsewhere. A check before SQLite's open, not the open
+    itself: Python's sqlite3 cannot ask SQLite not to follow a link."""
+    for p in paths:
+        try:
+            st = nofollow.lstat(p)
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            raise sqlite3.OperationalError(f"{p}: {e}") from None
+        if not stat.S_ISREG(st.st_mode):
+            raise sqlite3.OperationalError(f"{p} is a link or not a file, so thimble left it alone")
 
 
 def mend_tail(jsonl: Path) -> bool:
     """Give a labels file whose last byte is not a newline one, so the next row lands on its own line. Returns
     whether a newline was added; a missing or empty file is left alone."""
     try:
-        with open(jsonl, "r+b") as f:
+        with os.fdopen(nofollow.open(jsonl, os.O_RDWR), "r+b") as f:  # never through a link a card's code left
             if f.seek(0, os.SEEK_END) == 0:
                 return False
             f.seek(-1, os.SEEK_END)
@@ -322,6 +348,7 @@ class Store:
         p = path or self.db
         if not write and not p.exists():
             raise sqlite3.OperationalError(f"no store at {p}")
+        _plain(p, p.with_name(p.name + "-wal"), p.with_name(p.name + "-shm"))
         conn = sqlite3.connect(str(p), timeout=BUSY_TIMEOUT_S, isolation_level=None, check_same_thread=False)
         try:
             if write:
@@ -514,7 +541,7 @@ class Store:
         replaced by a smaller one while the build ran leaves no store behind. Returns the rows taken."""
         tmp = self.db.with_name(self.db.name + ".building")
         for p in (tmp, tmp.with_name(tmp.name + "-wal"), tmp.with_name(tmp.name + "-shm")):
-            p.unlink(missing_ok=True)
+            _unlink(p)
         key = file_key(self.jsonl)
         conn = self.connect(tmp, write=True)
         n = 0
@@ -525,16 +552,16 @@ class Store:
         finally:
             conn.close()
         for p in (tmp.with_name(tmp.name + "-wal"), tmp.with_name(tmp.name + "-shm")):
-            p.unlink(missing_ok=True)
+            _unlink(p)
         self._compact(tmp)
         now = file_key(self.jsonl)
         if now is None or (key is not None and now[0] < key[0]):
-            tmp.unlink(missing_ok=True)
+            _unlink(tmp)
             log.info("labels store %s: the labels file went away while the store was built; the build is discarded", self.db.name)
             return n
         for p in (self.db.with_name(self.db.name + "-wal"), self.db.with_name(self.db.name + "-shm")):
-            p.unlink(missing_ok=True)
-        os.replace(tmp, self.db)
+            _unlink(p)
+        nofollow.rename(tmp, self.db)
         return n
 
     @staticmethod
@@ -547,16 +574,17 @@ class Store:
         except OSError:
             return
         out = db.with_name(db.name + ".compact")
-        out.unlink(missing_ok=True)
+        _unlink(out)
         try:
+            _plain(db, out)
             conn = sqlite3.connect(str(db), timeout=BUSY_TIMEOUT_S, isolation_level=None)
             try:
                 conn.execute("VACUUM INTO ?", (str(out),))
             finally:
                 conn.close()
-            os.replace(out, db)
+            nofollow.rename(out, db)
         except (sqlite3.Error, OSError) as e:
-            out.unlink(missing_ok=True)
+            _unlink(out)
             log.info("labels store %s: not compacted (%s)", db.name, e)
 
     # ----------------------------------------------------------------------- reads

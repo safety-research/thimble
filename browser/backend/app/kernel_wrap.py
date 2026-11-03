@@ -16,7 +16,8 @@ Both draw the same boundary:
            HOME is fresh at each start: a folder on a private /tmp under bwrap, the kernel's kernels/<key>.home folder
            under srt. TMPDIR is main's Bash's (runtime.shell_temp): the workspace's temp folder (TEMP_DIR) on the
            Messages API, and on Claude Code sign-in the temp folder Claude Code's sandbox gives main's commands, outside
-           the workspace, which the kernel may write too (`write`)
+           the workspace, which the kernel may write too (`write`; bwrap binds it by the descriptor of the folder the
+           server checked, `write_fds`, since main's Bash may put a link in its place)
   hidden   the home folder, thimble's own folders (THIMBLE_HOME, the workspaces, the install tree), Claude Code's config
            and every other workspace
   network  the host's: the server connects to the kernel's ZMQ ports on 127.0.0.1
@@ -106,6 +107,7 @@ PROBE_S = 10.0
 SRT_PROBE_S = 30.0
 SAID_CHARS = 2000  # the end of what the probe's sandbox said that srt_problem keeps
 _works: dict[str, bool] = {}  # works' answer, probed once per process
+_bind_fd: dict[str, bool] = {}  # bind_fd_works' answers, by bwrap, probed once per process
 _srt_works: dict[tuple[str, str], bool] = {}  # srt_works' answers, probed once per process; srt_problem only turns one True
 # what keeps the sandbox from starting where the kernel restricts unprivileged user namespaces (Ubuntu 23.10 and later,
 # through AppArmor): bubblewrap's words when it cannot make its own namespaces, as the terminal plugin reads them
@@ -244,15 +246,30 @@ def _under(p: Path, root: Path) -> bool:
     return p == root or root in p.parents
 
 
+def bind_fd_works(bwrap: str) -> bool:
+    """Whether this bwrap binds a folder by an open descriptor (`--bind-fd`, bubblewrap 0.8 and later), probed once."""
+    if bwrap not in _bind_fd:
+        try:
+            said = subprocess.run([bwrap, "--help"], capture_output=True, text=True, timeout=PROBE_S, check=False)
+            _bind_fd[bwrap] = "--bind-fd" in said.stdout + said.stderr
+        except (OSError, subprocess.SubprocessError):
+            _bind_fd[bwrap] = False
+    return _bind_fd[bwrap]
+
+
 def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_dir: str | Path,
-                     connection_dir: str | Path, venv: str | Path | None, python: str | Path,
-                     read: Sequence[str | Path] = (), write: Sequence[str | Path] = (), bwrap: str = "bwrap") -> list[str]:
+                     venv: str | Path | None, python: str | Path, read: Sequence[str | Path] = (),
+                     write: Sequence[str | Path] = (), write_fds: Sequence[tuple[int, str | Path]] = (),
+                     bwrap: str = "bwrap") -> list[str]:
     """The kernel's argv wrapped in bubblewrap. `python` is the interpreter the kernel runs; each of its installation
     folders (interpreter_dirs) is bound read-only when it lies outside the system folders; `venv` None binds no venv;
     `read` names more paths bound read-only, `write` more folders bound writable (its TMPDIR outside the workspace, on
-    the private /tmp too). `--ro-bind-try` and `--bind-try` skip what does not exist. Each of HIDDEN_FILES must exist,
-    or bwrap creates it empty in the real workspace, and each of READ_ONLY_DIRS, or bwrap fails."""
-    corpus, ws, conn = Path(corpus_dir), Path(workspace_dir), Path(connection_dir)
+    the private /tmp too), and `write_fds` folders bound writable by a descriptor the caller opened, at their paths
+    (`--bind-fd`: the folder opened, whatever is at its path by then; the process that runs this argv must inherit
+    them). `--ro-bind-try` and `--bind-try` skip what does not exist. The kernel's files, in kernels/ of the workspace,
+    need no bind of their own. Each of HIDDEN_FILES must exist, or bwrap creates it empty in the real workspace, and
+    each of READ_ONLY_DIRS, or bwrap fails."""
+    corpus, ws = Path(corpus_dir), Path(workspace_dir)
     out: list[str] = [*SIGINT_PREFIX, bwrap, "--unshare-all", "--share-net", "--unshare-user", "--disable-userns",  # --unshare-user spelled out: --disable-userns checks for it by name (bwrap 0.9.0)
                       "--ro-bind", "/usr", "/usr"]
     for d in SYSTEM_RO[1:]:
@@ -274,7 +291,9 @@ def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_d
         out += ["--ro-bind-try", str(p), str(p)]
     for p in write:
         out += ["--bind-try", str(p), str(p)]
-    out += ["--ro-bind", str(corpus), str(corpus), "--bind", str(ws), str(ws), "--bind", str(conn), str(conn)]
+    for fd, p in write_fds:
+        out += ["--bind-fd", str(fd), str(p)]
+    out += ["--ro-bind", str(corpus), str(corpus), "--bind", str(ws), str(ws)]
     for name in (*HIDDEN_FILES, *LOCK_FILES):  # LOCK_FILES: a flock the cell takes is on EMPTY_FILE, never the lock
         out += ["--ro-bind", EMPTY_FILE, str(ws / name)]
     for name in READ_ONLY_FILES:  # read-only over the workspace bind (the server writes from outside)

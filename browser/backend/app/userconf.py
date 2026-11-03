@@ -1042,6 +1042,15 @@ def _spellings(*paths: Path | str) -> list[str]:
     return out
 
 
+def main_web_off(c: str | None) -> bool:
+    """Whether Settings has main's web off: the orientation's `web` in thimble's config, which is main's fence's (module
+    note, one fence), as Settings' row for main shows it (ledger.agent_rows). Then the hooks module refuses WebFetch and
+    WebSearch to the analyst's own session (module_rules), the server's runtime gives its main neither
+    (runtime.Runtime.spec_of), and main's prompt names neither (events.network_words). A config with an error gives the
+    defaults'."""
+    return agent_conf(load_or_defaults(c)[0], "orientation").get("web") == "off"
+
+
 def module_rules(c: str) -> dict[str, Any]:
     """What the hooks module refuses the file tools and the web tools of main and its agents in workspace `c`
     (plugin/hooks/thimble.ts, `refusal`), which GET /api/module/roles and roles.json carry:

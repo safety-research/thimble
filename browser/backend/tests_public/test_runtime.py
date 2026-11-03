@@ -1217,3 +1217,36 @@ async def test_on_claude_code_sign_in_a_reply_claude_code_moved_to_another_model
     await main_turn("What happened?")
     said = [(n["text"], n["chat"]) for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
     assert said == [("Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8.", agents.MAIN_ID)]
+
+
+async def test_r2_the_server_writes_no_file_through_a_link_and_waits_on_no_fifo_main_s_bash_leaves_in_its_short_folder(
+        on, tmp_path):
+    """On Claude Code sign-in main's Bash may write its session's TMPDIR, the workspace's short folder, where the
+    server keeps the workspace's folder in a file (runtime_cc.TMP_OWNER) and reads and rewrites it. A link put in its
+    place had the server overwrite the file it points to with the workspace's path, and a FIFO held the read, so
+    /thimble fresh never returned. Now the file is read and written as nofollow opens it: a link or a FIFO is never
+    opened through, and the server writes a file of its own in its place."""
+    import os
+    import threading
+
+    folder = str(config.workspace_dir(CORPUS).resolve())
+    short = runtime_cc.workspace_tmp(CORPUS)
+    owner = short / runtime_cc.TMP_OWNER
+    dotfile = tmp_path / "made-up-dotfile"
+    dotfile.write_text("export KEEP=1\n")
+    owner.unlink()
+    owner.symlink_to(dotfile)
+    assert runtime_cc.workspace_tmp(CORPUS) == short
+    assert dotfile.read_text() == "export KEEP=1\n"
+    assert not owner.is_symlink() and owner.read_text() == folder
+    owner.unlink()
+    os.mkfifo(owner)
+    done: list = []
+    reader = threading.Thread(target=lambda: done.append(runtime_cc._owner(short)), daemon=True)
+    reader.start()
+    reader.join(5)
+    assert done == [None], "the read of a FIFO held the server"
+    dropping = threading.Thread(target=runtime_cc.drop_workspace_tmp, args=(Path(folder),), daemon=True)
+    dropping.start()
+    dropping.join(5)
+    assert not dropping.is_alive() and not short.exists()

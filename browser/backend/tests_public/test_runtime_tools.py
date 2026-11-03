@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 
 import pytest
 
@@ -64,3 +65,100 @@ def test_a_link_a_card_left_in_the_workspace_leads_neither_thimble_nor_main_s_to
             box.path(str(path), write=write)
     assert box.path(str(ws / "card-libs" / "lib.py"), write=True) == ws.resolve() / "card-libs" / "lib.py"
     assert sorted(os.listdir(outside)) == ["secret.txt"]
+
+
+# a card's code that keeps swapping the folder `tmp` with a link to `target` from a thread of its own
+FLIP_CELL = """
+import os, threading, time
+T, O = {tmp!r}, {target!r}
+said = {{"flips": 0}}
+def loop():
+    end = time.monotonic() + 60
+    while time.monotonic() < end:
+        try:
+            os.rename(T, T + '.real')
+            os.symlink(O, T)
+            time.sleep(0.0003)
+            os.unlink(T)
+            os.rename(T + '.real', T)
+            said["flips"] += 1
+            time.sleep(0.0003)
+        except OSError:
+            time.sleep(0.001)
+threading.Thread(target=loop, daemon=True, name="made-up-flipper").start()
+time.sleep(0.3)
+print(said["flips"] > 0)
+"""
+
+
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_main_s_tools_never_go_through_a_link_a_card_swaps_in_while_they_run(wrap, monkeypatch, workspaces_tmp,
+                                                                                   tmp_path_factory):
+    """Box checks a path by its real path, and the tools then opened it again by that path, so a link a card's code put
+    in place of a folder on the way between the two led the open outside: with a card swapping the workspace's tmp/
+    with a link to an outside folder, some of main's Writes there landed in that folder and some Reads returned its
+    file. Now each tool opens the real path Box checked one part at a time without following a link (nofollow): a call
+    the swap catches fails, and none reaches the folder."""
+    from app import kernel_wrap, notebook, runtime, srt
+
+    works = kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)) if wrap == "srt" else (
+        sys.platform.startswith("linux") and kernel_wrap.works())
+    if not works:
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    monkeypatch.setattr(runtime, "engine", lambda: "api")
+    outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
+    (outside / "secret.txt").write_text("OUTSIDE-SECRET")
+    ws, temp, corpus = config.workspace_dir("mini"), config.temp_dir("mini"), config.corpus_dir("mini")
+    (temp / "secret.txt").write_text("the workspace's own\n")
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[ws / "card-libs", temp],
+                            temp=temp)
+    wrote = read = 0
+    seen: list[str] = []
+    try:
+        flipping = await notebook.run_code("mini", FLIP_CELL.format(tmp=str(temp.resolve()), target=str(outside)), "main",
+                                           kernel="k1")
+        assert "True" in str(flipping["outputs"]), flipping["outputs"]
+        for i in range(600):
+            got = await runtime_tools.call(box, "Write", {"file_path": str(temp / f"main-{i}.txt"), "content": "by main"})
+            wrote += not got.is_error
+            for tool, args in (("Read", {"file_path": str(temp / "secret.txt")}),
+                               ("Grep", {"pattern": "SECRET|own", "path": str(temp)}),
+                               ("Edit", {"file_path": str(temp / "secret.txt"), "old_string": "own",
+                                         "new_string": "own"})):
+                r = await runtime_tools.call(box, tool, args)
+                read += not r.is_error
+                if "OUTSIDE-SECRET" in r.text:
+                    seen.append(f"{tool}: {r.text[:80]}")
+    finally:
+        await notebook.shutdown_all()
+    landed = sorted(p for p in os.listdir(outside) if p != "secret.txt")
+    assert wrote and read, "the swap left no call to land"
+    assert not landed and not seen, (landed[:5], seen[:3])
+    assert (outside / "secret.txt").read_text() == "OUTSIDE-SECRET"
+
+
+async def test_main_s_bash_reads_no_folder_a_link_a_card_left_in_the_workspace_leads_to(workspaces_tmp,
+                                                                                       tmp_path_factory):
+    """On Linux main's Bash on the Messages API reads the workspace through a read rule for each of its entries off the
+    way to its write folders (runtime_tools._reads_around), links among them, and srt binds a link by its target: a
+    link a card's code left in the workspace let main's Bash read the folder it points to. Now an entry whose real path
+    is not its own place in its folder gets no rule, so neither does a link to a folder of the workspace, which would
+    have put a write folder back read-only."""
+    if runtime_tools.sandbox_reason():
+        pytest.skip("srt can't sandbox a process here")
+    ws, corpus, temp = config.workspace_dir("mini"), config.corpus_dir("mini"), config.temp_dir("mini")
+    (ws / "card-libs").mkdir(exist_ok=True)
+    outside = tmp_path_factory.mktemp("outside-the-workspace").resolve()
+    (outside / "secret.txt").write_text("OUTSIDE-SECRET\n")
+    (ws / "made-up-planted").symlink_to(outside, target_is_directory=True)
+    (ws / "made-up-self").symlink_to(ws, target_is_directory=True)
+    (ws / "made-up-inside").symlink_to(ws / "card-libs", target_is_directory=True)
+    box = runtime_tools.Box(cwd=corpus, workspace=ws, read_roots=[corpus, ws], write_roots=[ws / "card-libs", temp],
+                            temp=temp)
+    reads = runtime_tools._rules(box)["filesystem"]["allowRead"]
+    if sys.platform != "darwin":
+        assert not {str(ws / n) for n in ("made-up-planted", "made-up-self", "made-up-inside")} & set(reads)
+    out = await runtime_tools.call(box, "Bash", {"command": f"cat {ws}/made-up-planted/secret.txt 2>&1; "
+                                                            f"echo w > {ws}/card-libs/own.txt && cat {ws}/card-libs/own.txt"})
+    assert "OUTSIDE-SECRET" not in out.text and out.text.splitlines()[-1] == "w", out.text

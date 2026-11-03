@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import config, headless
+from . import config, headless, nofollow
 from .http_guard import APP_CSP
 
 log = logging.getLogger("thimble.render")
@@ -649,7 +649,7 @@ async def put_theme(c: str, body: ThemeBody) -> dict[str, str]:
         p = config.workspace_dir(c) / THEMES_FILE
     except ValueError as e:
         raise HTTPException(404, str(e))
-    p.write_text(json.dumps({"paper": body.paper, "accent": body.accent}), "utf-8")
+    nofollow.write_text(p, json.dumps({"paper": body.paper, "accent": body.accent}))  # never through a card's link
     return {"paper": body.paper, "accent": body.accent}
 
 

@@ -65,7 +65,7 @@ from typing import Any, Callable, Iterator
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from . import agents, config, subagent_files as files, tools
+from . import agents, config, nofollow, subagent_files as files, tools
 
 log = logging.getLogger("thimble.subagents")
 
@@ -817,7 +817,7 @@ def make_work(c: str, work: Path) -> None:
         if root not in work.resolve().parents:
             log.warning("%s: the work folder %s is outside the workspace; not made", c, work)
             return
-        work.mkdir(parents=True, exist_ok=True)
+        nofollow.makedirs(work)
     except OSError as e:
         log.warning("%s: the work folder %s was not made: %s", c, work, e)
 

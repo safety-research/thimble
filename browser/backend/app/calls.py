@@ -31,7 +31,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import calls_file, config, ledger, read_parts
+from . import calls_file, config, ledger, nofollow, read_parts
 
 log = logging.getLogger("thimble.calls")
 router = APIRouter()
@@ -140,11 +140,10 @@ def _replay(idx: _Index, rec: Any) -> None:
 def _append(c: str, chat: str, rec: dict[str, Any]) -> None:
     """Append one line under the store's lock (the caller holds it, or it is taken here)."""
     p = path(c, chat)
-    p.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(p.parent)
     with ledger.locked(p):
         ledger.heal_tail(p)
-        with p.open("a", encoding="utf-8") as f:
-            f.write(calls_file.line(rec))
+        nofollow.append_bytes(p, calls_file.line(rec).encode("utf-8"))
 
 
 def forget(c: str | None = None) -> None:

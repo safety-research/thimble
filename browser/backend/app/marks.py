@@ -70,7 +70,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agents, config, ledger, sdk
+from . import agents, config, ledger, nofollow, sdk
 
 log = logging.getLogger("thimble.marks")
 router = APIRouter()
@@ -179,9 +179,9 @@ def cards_index(c: str, cards: list[dict[str, Any]]) -> str:
     workspace's temp folder; its path. Each check has its own: a card rewritten while a check runs starts another
     check, whose index must not take the place of the one this check's validator reads `cards` as."""
     folder = _temp_dir(c) / f"check-{secrets.token_hex(4)}"
-    folder.mkdir()
     p = folder / "cards-index.tsv"
-    p.write_text(evidence().card_index(cards), encoding="utf-8")
+    # in the temp folder a card's code writes: made and written as nofollow does, never through a link put there
+    nofollow.write_text(p, evidence().card_index(cards), make=True)
     return str(p)
 
 
@@ -189,8 +189,8 @@ def _drop_index(index: str) -> None:
     """A check's index, gone with its folder once the check ended."""
     if index:
         with contextlib.suppress(OSError):
-            Path(index).unlink()
-            Path(index).parent.rmdir()
+            nofollow.unlink(index)
+            nofollow.rmdir(Path(index).parent)
 
 
 def evidence() -> ModuleType:
@@ -224,7 +224,7 @@ def stored(c: str, turn: str) -> dict[str, Any] | None:
 
 def _save(c: str, reply: dict[str, Any]) -> None:
     p = _path(c, reply["turn"])
-    p.parent.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(p.parent)
     ledger.write_json(p, reply)
     thread = (reply.get("thread") or {}).get("chat")
     if thread:  # a side thread's answer, which its chat draws

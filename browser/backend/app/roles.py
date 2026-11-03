@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import config
+from . import config, nofollow
 
 log = logging.getLogger("thimble.roles")
 
@@ -321,10 +321,14 @@ def prompt_file(c: str | None, role: str) -> Path | None:
     if text is None or not c:
         return None
     folder = config.workspace_dir(c) / PROMPTS_DIR
-    folder.mkdir(parents=True, exist_ok=True)
+    nofollow.makedirs(folder)  # in the workspace, which a card's code writes: as nofollow writes
     p = folder / f"{PROMPT_FILES[role]}.md"
-    if not p.is_file() or p.read_text("utf-8") != text:
-        p.write_text(text, "utf-8")
+    try:
+        same = nofollow.read_text(p) == text
+    except OSError:
+        same = False
+    if not same:
+        nofollow.write_text(p, text)
     return p
 
 
