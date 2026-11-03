@@ -9,7 +9,7 @@
    --fork-session`, as the view proposer forks it), up to MAX_FORKS at once, each with a share of the marks, read the
    terminal's checker.md (CHECKER, with the few changes CHECKER_CHANGES lists) and give one JSON item per mark:
    verified, corrected, wrong or unconfirmed, with its evidence. A fork reads with Read, Grep and Glob, and runs code
-   only as Python (Bash `python3 …`).
+   only as Python (Bash `python3 …`), on Claude Code sign-in in Claude Code's sandbox where it can run (run_fork).
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py), checks that evidence with no model call and no
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
@@ -975,9 +975,16 @@ def _model(c: str, main: dict[str, Any], prompt: str) -> tuple[str, str]:
     return m, str(main.get("effort") or conf["effort"])
 
 
-def fork_argv(main: dict[str, Any], cut: str | None, model_id: str, effort: str) -> list[str]:
+def fork_argv(main: dict[str, Any], cut: str | None, model_id: str, effort: str, sandbox: bool = False) -> list[str]:
+    """The fork's `claude -p`; with `sandbox` its python runs only in Claude Code's sandbox
+    (cc_settings.offline_sandbox, required), with no network and none of the ANTHROPIC_* variables Claude Code signs
+    in with."""
+    from . import cc_settings  # noqa: PLC0415
+
     sent = effort if config.has_effort(model_id) else None
     settings = {**json.loads(sdk.cli_settings(model_id, sent, None)), "advisorModel": "off"}
+    if sandbox:
+        settings["sandbox"] = cc_settings.offline_sandbox(required=True)
     at = ["--resume-session-at", cut] if cut else []
     return [str(config.CLI_PATH or config.CLAUDE_BIN), "-p", "--resume", str(main["sid"]), *at,
             "--fork-session", "--no-session-persistence", "--model", model_id, *(["--effort", sent] if sent else []),
@@ -1037,9 +1044,10 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
     way to reach Claude chose (runtime.py): the Messages API in this process for an API key or WIF (no `claude`
     process), their Claude Code session's fork for a Claude Code sign-in; 0.8's `claude -p` fork when the runtime is
     off."""
-    from . import runtime, runtime_api  # noqa: PLC0415
+    from . import cc_settings, runtime, runtime_api, runtime_cc  # noqa: PLC0415
 
     model_id, effort = _model(c, main, prompt)
+    box = False
     if runtime.enabled():
         kind = runtime.engine()
         if kind == "api":
@@ -1057,10 +1065,29 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
         if not sid:
             return {"error": "thimble cannot reach Claude yet" if not kind else "main has no Claude Code session yet"}
         main, cut = {**main, "sid": sid, "config_known": False}, None
-    argv = fork_argv(main, cut, model_id, effort)
+        # the fork's python runs in Claude Code's sandbox where it can, as main's Bash does on Claude Code sign-in (in a
+        # short TMPDIR of its own), so it never reads the ANTHROPIC_* variables Claude Code signs in with; the sandbox's
+        # .claude/.cc-writes/ in the corpus goes when the last session there ends (runtime_cc._tidy)
+        box = cc_settings.sandbox_ok()
+    cwd = Path(main.get("cwd") or config.corpus_dir(c))
+    tmp = runtime_cc.short_tmp() if box else None
+    env = {**_env(main), **({"TMPDIR": str(tmp), "CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}
+    if box:
+        runtime_cc._enter(cwd)
+    try:
+        return await _claude_fork(fork_argv(main, cut, model_id, effort, sandbox=box), cwd, env, prompt)
+    finally:
+        if tmp is not None:
+            nofollow.rmtree(tmp, root=tmp.parent, ignore_errors=True)  # the fork's python wrote it: no link followed
+        if box:
+            runtime_cc._tidy(cwd)
+
+
+async def _claude_fork(argv: list[str], cwd: Path, env: dict[str, str], prompt: str) -> dict[str, Any]:
+    """Run the fork `argv` in `cwd` with the prompt on stdin: {answer, calls, error}."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            *argv, cwd=str(main.get("cwd") or config.corpus_dir(c)), env=_env(main), stdin=asyncio.subprocess.PIPE,
+            *argv, cwd=str(cwd), env=env, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
     except OSError as e:
         return {"error": f"Claude Code could not start: {e}"}

@@ -35,8 +35,9 @@ def answers(monkeypatch, check: dict) -> None:
 
 @pytest.fixture(autouse=True)
 def no_key(monkeypatch):
-    """No ANTHROPIC_API_KEY where the test runs, unless the test sets one."""
+    """No ANTHROPIC_API_KEY or ANTHROPIC_BASE_URL where the test runs, unless the test sets one."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
 
 
 def wif_file(folder: Path) -> Path:
@@ -106,6 +107,25 @@ def test_a_failed_check_says_why_and_the_command_after_the_fix(capsys, monkeypat
     assert FAKE_KEY not in out
 
 
+def test_only_anthropic_api_key_goes_to_anthropic_base_url(capsys, monkeypatch):
+    """ANTHROPIC_BASE_URL goes with ANTHROPIC_API_KEY, which the same shell sets, as Claude Code sends them; a key
+    pasted in Settings goes to Anthropic's API whatever the shell sets. The line names a host other than
+    api.anthropic.com, and nothing else of its address."""
+    from app import llm
+
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://someone:secret@gw.example.invalid/llm")
+    claude_access.save(claude_access.API_KEY, key=FAKE_KEY)
+    assert llm.client().base_url.host == "api.anthropic.com"
+    assert claude_access.describe() == "an API key, the one saved in Settings"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "-".join(("sk", "ant", "env", "made", "up")))
+    assert llm.client().base_url.host == "gw.example.invalid"
+    answers(monkeypatch, {"ok": True})
+    rc, out = run_setup(capsys, "--how", "api-key")
+    assert rc == 0 and out == ("Sign-in: an API key, from ANTHROPIC_API_KEY, sent to gw.example.invalid "
+                               "(ANTHROPIC_BASE_URL). Checked: Claude answers.\n")
+    assert "secret" not in out and "/llm" not in out
+
+
 # --------------------------------------------------------------------------- Workload Identity Federation
 
 
@@ -140,6 +160,72 @@ def test_a_wif_file_that_cannot_be_used_is_not_saved(tmp_path, capsys):
         f"Sign-in: Workload Identity Federation, with {gone}. It was not saved: there is no file {gone}.",
         f"  After you fix that: thimble-browser --setup --how wif --wif-file {shlex.quote(str(gone))}"]
     assert claude_access.how() == ""
+
+
+class StandInApi:
+    """Anthropic's API on 127.0.0.1, made up: it exchanges any identity token and answers any message, and keeps the
+    path of each request."""
+
+    def __init__(self) -> None:
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        paths = self.paths = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):  # noqa: N802
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                paths.append(self.path.split("?")[0])
+                body = ({"access_token": "made-up-access", "token_type": "bearer", "expires_in": 3600}
+                        if self.path.startswith("/v1/oauth/token") else
+                        {"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-haiku-5-5",
+                         "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                         "stop_sequence": None, "usage": {"input_tokens": 1, "output_tokens": 1}})
+                data = json.dumps(body).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+def test_wif_goes_to_anthropic_s_api_or_to_the_host_its_config_names(tmp_path, monkeypatch):
+    """The identity token never goes to an ANTHROPIC_BASE_URL the shell sets: the token exchange and the calls go to
+    Anthropic's API, or to the base_url the config file names (ANTHROPIC_BASE_URL in the file is that key too), which
+    the line names; a base_url that is not https, other than to this machine, is refused."""
+    import asyncio
+
+    from app import llm, wif
+
+    shell, named = StandInApi(), StandInApi()
+    try:
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", shell.url)
+        p = wif_file(tmp_path)
+        claude_access.save(claude_access.WIF, wif_file=str(p))
+        assert llm.client().base_url.host == "api.anthropic.com"
+        assert claude_access.describe() == f"Workload Identity Federation, with {p}"
+        p.write_text(p.read_text() + f'base_url = "{named.url}"\n')
+        asyncio.run(llm.client().messages.create(model="claude-haiku-5-5", max_tokens=1,
+                                                 messages=[{"role": "user", "content": "ok"}]))
+        assert named.paths == ["/v1/oauth/token", "/v1/messages"] and shell.paths == []
+        assert claude_access.describe() == f"Workload Identity Federation, with {p}, sent to 127.0.0.1"
+        p.write_text(p.read_text().replace("base_url", "ANTHROPIC_BASE_URL"))
+        assert wif.load(str(p)).base_url == named.url
+        for other in ("http://gw.example.invalid", "http://localhost.example.invalid"):
+            p.write_text(p.read_text().replace(named.url, other))
+            with pytest.raises(wif.WifError, match="base_url is an https address"):
+                wif.load(str(p))
+            p.write_text(p.read_text().replace(other, named.url))
+    finally:
+        shell.server.shutdown()
+        named.server.shutdown()
 
 
 # --------------------------------------------------------------------------- the install's run: --keep, no terminal
