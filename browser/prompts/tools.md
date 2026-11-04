@@ -95,7 +95,7 @@ Remove a copy of a card, or an attempt another card replaced. Fix a wrong card w
 
 ## apply_label
 
-Define a category, apply it to every unit of a scope, and get the counts per value. In files, a unit is a record, a whole file or a run directory (`unit`). A prompt label over many files takes minutes.
+Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. In files, a unit is a record, a whole file or a run directory (`unit`). A prompt label over many files takes minutes.
 
 ```json
 {
@@ -103,6 +103,7 @@ Define a category, apply it to every unit of a scope, and get the counts per val
   "properties": {
     "scope": {"type": "string", "enum": ["files", "canvas", "report"], "description": "Records of files, cards, or report sentences."},
     "name": {"type": "string"},
+    "question": {"type": "string", "description": "The one question its card answers."},
     "predicate": {
       "type": "object",
       "properties": {
@@ -126,7 +127,8 @@ Define a category, apply it to every unit of a scope, and get the counts per val
     },
     "comment": {"type": "boolean", "description": "A one-line reason per unit."},
     "show": {"type": "boolean", "description": "For files: turn it on in Files and the views as it runs, as show_label does."},
-    "filter": {"type": "boolean", "description": "Make it the scope's filter."}
+    "filter": {"type": "boolean", "description": "Make it the scope's filter."},
+    "group": {"type": "string"}
   },
   "required": ["scope", "name", "predicate"]
 }
@@ -151,7 +153,7 @@ Turn a label over files on or off in Files and the views, where it marks the rec
 
 ## delete_label
 
-Delete a label, with its marks and any filter that uses it. A run of the label stops first. Use it only when the analyst asks for it.
+Delete a label, with its marks, its card and any filter that uses it. A run of the label stops first. Use it only when the analyst asks for it.
 
 ```json
 {
@@ -672,6 +674,10 @@ The label already held these values from the same predicate over the same units,
 ## apply_label-other-scope
 
 {label} [[{ref}]] is already a label over {scope}. A label over {new} needs a name of its own.
+
+## apply_label-takeaway-stale
+
+The takeaway of its card card:{cid} was written for the run before; write it again with `edit_card` from these counts.
 
 ## apply_label-stale
 

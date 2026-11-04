@@ -1,14 +1,13 @@
-"""A label's delete (concepts.delete_concept_route): its files and the filters that name it go, with the card an older
-thimble made of it, and the top bar's Undo brings all of them back (undo.label_deleted, concepts.restore_concept), Redo
-deletes it again. Main's `delete_label` tool deletes the same way. The regex kind runs for real over the synthetic corpus
-`mini`."""
+"""A label's delete (concepts.delete_concept_route): its files, its card and the filters that name it go, and the top
+bar's Undo brings all of them back (undo.label_deleted, concepts.restore_concept), Redo deletes it again. Main's
+`delete_label` tool deletes the same way. The regex kind runs for real over the synthetic corpus `mini`."""
 from __future__ import annotations
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
-from app import concepts, config, labels_store, notebook, tools, undo
+from app import concepts, config, labels_store, tools, undo
 
 CORPUS = "mini"
 PATTERN = r"(?i)forge pr claim"  # 3 of the 8 board posts match
@@ -35,22 +34,14 @@ async def api():
 
 
 async def _label(api) -> dict:
-    """A regex label over the board, applied, which makes no card, with the Files filter on its `yes`."""
+    """A regex label over the board, applied (which gives it its card), with the Files filter on its `yes`."""
     r = await api.post(f"/api/ws/{CORPUS}/concepts", json={"name": "claims a PR", "kind": "regex", "spec": PATTERN})
     assert r.status_code == 200, r.text
     k = r.json()
     r = await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"paths": ["board.jsonl"], "wait": True})
     assert r.status_code == 200, r.text
-    assert concepts._label_cards(config.workspace_dir(CORPUS), k["id"]) == []
     concepts.set_filter(CORPUS, "files", k["id"], "yes")
     return k
-
-
-def _older_card(k: dict) -> str:
-    """The card an older thimble made of a label it applied: kind `label`, payload {concept}, loose on the canvas."""
-    ws = config.workspace_dir(CORPUS)
-    cell = notebook.new_cell("label", "user", k["name"], payload={"concept": k["id"]})
-    return notebook.insert_cell(CORPUS, notebook.loose_group(ws), cell)["id"]
 
 
 def _state(cid: str) -> dict:
@@ -62,10 +53,9 @@ def _state(cid: str) -> dict:
             "filter": concepts.read_filters(ws).get("files")}
 
 
-async def test_delete_takes_the_label_its_filter_and_an_older_card_of_it_and_undo_brings_them_back(api):
+async def test_delete_takes_the_label_its_card_and_its_filter_and_undo_brings_them_back(api):
     k = await _label(api)
     cid = k["id"]
-    _older_card(k)
     before = _state(cid)
     assert before["concept"] and before["rows"] and len(before["cards"]) == 1
     assert before["filter"] == {"concept": cid, "value": "yes"}
@@ -121,7 +111,7 @@ async def test_main_s_delete_label_deletes_by_name_and_names_the_labels_for_one_
     assert res.is_error and "no label 'nope'" in res.text and "'claims a PR'" in res.text
     res = await tools.call(CORPUS, "delete_label", {"name": "Claims a  PR"}, actor="analyst")
     assert not res.is_error, res.text
-    assert "is deleted, with its marks and any filter that used it" in res.text
+    assert "is deleted, with its marks, its card and any filter that used it" in res.text
     assert _state(k["id"]) == {"concept": False, "rows": False, "cards": [], "filter": None}
     assert undo.labels(CORPUS)["undo"] == "delete label claims a PR"
 

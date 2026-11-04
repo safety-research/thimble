@@ -353,7 +353,7 @@ async def _scoped_prompt_label(monkeypatch, *, in_flight: int, wait_s: float, pa
     monkeypatch.setattr(concepts, "classify_structured", call)
     s = await concepts.apply_scoped(CORPUS, scope="files", name="claims a PR", kind="prompt", text="The post claims a PR.",
                                     values=None, paths=["board.jsonl"], limit=None, comment=False, filter=False,
-                                    created_by="test", chat=None)
+                                    created_by="test", chat=None, group=None, card=False)
     return s, loop.time() - started[0]
 
 
@@ -533,7 +533,7 @@ async def test_a_prompt_label_within_another_reads_only_the_records_it_kept(work
     run `within` it sends the model those posts alone; its rows and counts cover them, its concept keeps the narrowing
     for a run from the browser, and `show` turns it on in Files and the views."""
     kw = dict(scope="files", values=None, paths=["board.jsonl"], limit=None, comment=False, filter=False,
-              created_by="test", chat=None)
+              created_by="test", chat=None, group=None, card=False)
     await concepts.apply_scoped(CORPUS, name="claims a PR", kind="regex", text=PATTERN, **kw)
     await concepts.wait_apply(CORPUS, concepts.find_concept(workspaces_tmp / CORPUS, "claims a PR")["id"], 60)
     kept = {ref for ref, v in _board_expected().items() if v == "yes"}

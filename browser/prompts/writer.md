@@ -33,7 +33,7 @@ The guidance under Communicating applies to a document too, with a different wei
               - diagram: how the files link, from a ticket to its order, product and batch
               - example card: a typical ticket reads "my charger stopped working after two days" [[tickets/march.jsonl#L88]]
               ## Refunds were the only request type that grew
-              - the "request type" label sorts the tickets into refunds, late deliveries, billing and other [[concept:<id>]]
+              - the "request type" label sorts the tickets into refunds, late deliveries, billing and other [[card:<id>]]
               - plot: tickets per month by request type, refunds the only type that grew, from 118 in February to 212 in March and 198 in April
               ## The extra refunds were for the X200
               - plot: refund requests by product, the X200 far above every other product

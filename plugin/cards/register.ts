@@ -1,11 +1,8 @@
-// register.ts: cards. Claude calls the `card` tool with a ready kind's data (a table's rows, a timeline's events, the
-// records an example cites, …), or with a JSON file of rows and a short view; the plugin runs the view (for a ready
-// kind, thimble's own) in its runner, draws the card under the call (or under the answer v was pressed on), and gives
+// register.ts: cards. Claude writes rows as a JSON file and calls the `card` tool with the file and a short view; the
+// plugin runs the view in its runner, draws the card under the call (or under the answer v was pressed on), and gives
 // Claude a text copy of what it drew. The cards' keys at an empty prompt reach them through hooks/keys.ts.
 //
 //   tool.ts      the card tool: one call draws a card, or a new version of one, and answers its text copy
-//   ready.ts     a ready kind's data from a call: the call's fields over the last call's, an example's records read
-//   kinds.js     the ready kinds' renderers, which the runner gives every card's context
 //   fit.ts       a version that does not fit on the screen: held until the card check, whose replacement draws
 //   runner.mjs   the runner, one Node process per session in Anthropic's sandbox runtime: each card's view in a context
 //                of its own, its state and handlers
@@ -29,7 +26,6 @@ import { noteCode, sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
 import { cardOfKey, cardPost, clientFault, firstWaits, frame, framesUnder, noteRun, noteShown, noteViewport, runFolded } from './draw'
 import { cardRef } from '../marks/message.js'
 import { registerCardCopy } from './copy'
-import { CONTENT, FIELDS } from './ready'
 import { callOf, cardIdOf, metaOf, restoreCards, saveMeta } from './store'
 import { cardCall, registerCardTool } from './tool'
 
@@ -179,24 +175,18 @@ export function callLine(input: Any, meta: Any, toolUseId: string, running: bool
   const title = named ? `“${cut(named, 60)}”` : ''
   // a call without an id draws a new card
   const first = !input?.id
-  const moving = !!input?.id && !CONTENT.some(k => String(input?.[k] ?? '').trim() !== '') && !(Array.isArray(input?.edits) && input.edits.length)
+  const moving = !!input?.id && !['title', 'data', 'view'].some(k => String(input?.[k] ?? '').trim() !== '') && !(Array.isArray(input?.edits) && input.edits.length)
   if (running || !call) return `● ${first ? 'Drawing' : moving ? 'Moving' : 'Changing'} ${title ? `card ${title}` : 'a card'}…`
   if (call.error) return `● ${title ? `Card ${title}` : 'The card'} did not draw: ${call.down ? call.error : cut(call.error, 160)} · Claude got the error`
   const changes: string[] = []
   const edits = Array.isArray(input?.edits) ? input.edits.length : 0
-  const said = (k: string) => String(input?.[k] ?? '').trim() !== ''
   if (!first && input?.title) changes.push('new title')
-  if (!first && said('kind')) changes.push(`now a ${String(input.kind).trim()}`)
-  if (!first && said('answer')) changes.push('new answer')
-  if (!first && (input?.data || said('rows'))) changes.push('new rows')
-  if (!first && FIELDS.some(k => k !== 'answer' && k !== 'rows' && said(k))) changes.push('new data')
+  if (!first && input?.data) changes.push('new rows')
   if (!first && input?.view) changes.push('new view')
   if (edits) changes.push(`${edits} ${edits === 1 ? 'edit' : 'edits'} to its view`)
   const did = first ? `Drew card ${title}` : moving ? `Moved card ${title} here` : `Changed card ${title} to version ${call.version}${changes.length ? ` (${changes.join(', ')})` : ''}`
   const away = meta.anchorRow || meta.inRow || meta.toolUseId !== toolUseId
-  // what it read: rows from a file, or a ready kind's data in words (`a table of 12 rows`)
-  const read = meta.read && meta.file ? ` · ${meta.read} from ${String(meta.file).split('/').pop()}` : meta.read && meta.kind ? ` · ${meta.read}` : ''
-  if (!away) return `● ${did}${read}`
+  if (!away) return `● ${did}${meta.read && meta.file ? ` · ${meta.read} from ${String(meta.file).split('/').pop()}` : ''}`
   const order = Object.keys(meta.calls)
   const below = !meta.anchorRow && order.indexOf(meta.toolUseId) > order.indexOf(toolUseId)
   const now = call.version < meta.version ? `, now version ${meta.version}` : ''

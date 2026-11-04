@@ -53,7 +53,7 @@ def kernel(workspaces_tmp, tmp_path, monkeypatch) -> SimpleNamespace:
 async def _label(name: str, pattern: str) -> str:
     s = await concepts.apply_scoped(CORPUS, scope="files", name=name, kind="regex", text=pattern, values=["yes", "no"],
                                     paths=["log.jsonl"], limit=None, comment=False, filter=False, created_by="test",
-                                    chat=None)
+                                    chat=None, group=None, card=False)
     await concepts.wait_apply(CORPUS, s["concept"], 60)
     return s["concept"]
 

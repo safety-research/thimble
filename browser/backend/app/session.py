@@ -64,9 +64,8 @@ UNREADABLE_TEXT = "intermediate text unavailable"
 SUMMARY_LIMIT = agents.SUMMARY_LIMIT
 RESULT_LIMIT = 400  # chars of an agent's result kept on its meta
 CELL_TOOLS = ("add_card", "edit_card", "add_cell", "edit_cell")  # the card tools, by their names and aliases
-# an older thimble's apply_label result named the label's card as a citation, and its record carries that card's id as
+# apply_label's result names the label's card, when it has one, as a citation; its record carries that card's id as
 # `label_card` (not `cell_id`) so the browser counts the card once. The cards the result names as stale are not it.
-# A label makes no card now, so only the transcripts of older sessions hold the line.
 LABEL_TOOL = "apply_label"
 LABEL_CARD_RE = re.compile(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]")
 AGENT_TOOLS = ("Agent", "Task")  # the CLI's subagent tool, by either of its names
