@@ -16,12 +16,13 @@ export interface ChatCommand {
  * (plugin/fix/command.mjs). */
 export const FIX_COMMAND = '/thimble-fix'
 
-/** Main back to before the analyst's latest message there, asked first under the message (rewind.ts). */
+/** Main back to before one of the analyst's messages there, which they pick from the list it opens (rewind.ts,
+ * RewindPicker). */
 export const REWIND_COMMAND = '/rewind'
 
 export const COMMANDS: readonly ChatCommand[] = [
   { name: FIX_COMMAND, about: FIX_DESCRIPTION },
-  { name: REWIND_COMMAND, about: 'Take main back to before your latest message' },
+  { name: REWIND_COMMAND, about: 'Take main back to before one of your messages' },
 ]
 
 /** The command a message is, space before it aside, and the words after it, trimmed; null for a message that starts

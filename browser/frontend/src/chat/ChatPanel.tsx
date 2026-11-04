@@ -29,7 +29,6 @@ import { bus } from '../lib/bus'
 import { fetchCall } from '../lib/calls'
 import { newest, STALE } from '../lib/newest'
 import { callRef, parseRef } from '../lib/refs'
-import { revealAnchor } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import { useTouring } from '../lib/touring'
@@ -52,7 +51,8 @@ import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
 import { offerDraft, replayHeld } from './pending'
-import { chatStart, isRewindCommand, lastRewindable, NOTHING_TO_REWIND, notePutBack, wordsOnLine, wordsPutBack } from './rewind'
+import { chatStart, isRewindCommand, NOTHING_TO_REWIND, notePutBack, rewindChoices, wordsOnLine, wordsPutBack } from './rewind'
+import { RewindPicker } from './RewindPicker'
 import { ThreadRows } from './ThreadRows'
 import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
@@ -712,11 +712,20 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   )
 
   // Rewind (chat/rewind.ts): the ↶ on one of the analyst's messages in main's current chat asks under it, and its Rewind
-  // takes main back to before the message; the words it takes back come back in main's composer, from its reply, or from
-  // its line when this page never got the reply (it loaded while the rewind waited, or the request failed on its way)
+  // takes main back to before the message; `/rewind` lists those messages above the composer (RewindPicker), and the one
+  // the analyst picks there is rewound to the same way. The words a rewind takes back come back in main's composer, from
+  // its reply, or from its line when this page never got the reply (it loaded while the rewind waited, or the request
+  // failed on its way)
   const [rewindAsked, setRewindAsked] = useState<string | null>(null)
   const [rewinding, setRewinding] = useState(false)
   const rewindFrom = useMemo(() => chatStart(main.records), [main.records])
+  const rewindable = useMemo(() => rewindChoices(main.records, mainSkip), [main.records, mainSkip])
+  const [picking, setPicking] = useState(false)
+  const closePicker = useCallback(() => setPicking(false), [])
+  // the list is main's: it closes when another thread opens, and when main's chat has no message of the analyst's left
+  useEffect(() => {
+    if (picking && (current !== 'main' || !rewindable.length)) setPicking(false)
+  }, [picking, current, rewindable.length])
   const asking = useRef(new Set<string>()) // the rewinds this page asked for and has no reply to yet, by event
   const putBack = useRef(new Set<string>()) // the rewinds whose words this page put back, by event
   const [rewindsEnded, setRewindsEnded] = useState(0)
@@ -737,6 +746,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         .rewindMain(ws, event)
         .then((r) => {
           setRewindAsked(null)
+          setPicking(false)
           if (r.text) giveBack(event, r.text)
           void reloadMain()
         })
@@ -762,15 +772,14 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
-    // `/rewind`: the question of Rewind on the latest of the analyst's messages in main's current chat, as Claude Code's
-    // /rewind asks which message to go back to
+    // `/rewind`: the analyst's messages in main's current chat, newest first, to pick how far back to go, as Claude
+    // Code's /rewind lists the prompts of its session
     if (isRewindCommand(text)) {
-      const last = lastRewindable(main.records, mainSkip)
       if (current !== 'main') setCurrent('main')
-      if (!last) bus.emit('toast', { text: NOTHING_TO_REWIND })
+      if (!rewindable.length) bus.emit('toast', { text: NOTHING_TO_REWIND })
       else {
-        setRewindAsked(last.event)
-        window.setTimeout(() => revealAnchor(`chat:main#${last.index}`), 0)
+        setRewindAsked(null)
+        setPicking(true)
       }
       return Promise.resolve(true)
     }
@@ -973,6 +982,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               disabled={chat.loading || !!chat.error}
               stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
               thread={current}
+              picker={picking && current === 'main' && rewindable.length > 0 ? <RewindPicker ws={ws} choices={rewindable} busy={rewinding} onPick={rewindTo} onClose={closePicker} /> : undefined}
             />
           )}
         </div>
