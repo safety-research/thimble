@@ -64,26 +64,29 @@ def _start(tmp: Path, lines: list[str], *flags: str) -> tuple[subprocess.Complet
 
 
 def test_the_launcher_starts_claude_with_what_launch_args_says_when_its_lines_hold_nothing(tmp_path):
-    # no plugin folder, no flags, and a notes line of a tab alone, which reads as no fields: claude starts with the
-    # settings, effort, name, session and prompt alone
+    # terminal mode with no plugin folder, no flags, and a notes line and an exports line of a tab alone, which read
+    # as no fields: claude starts with the settings, effort, name, session and prompt alone
     p, args, _ = _start(tmp_path, ["", "high", '{"statusLine": {}}', "", "thimble:main · work",
                                    "11111111-2222-3333-4444-555555555555", "CLAUDE_CODE_DISABLE_AGENT_VIEW=1", "", "\t",
-                                   "", "main's made-up prompt"])
+                                   "terminal", "\t", "main's made-up prompt"])
     assert p.returncode == 0, p.stderr
     assert args == ["--settings", '{"statusLine": {}}', "--effort", "high", "--name", "thimble:main · work",
                     "--session-id", "11111111-2222-3333-4444-555555555555", "--append-system-prompt",
-                    "main's made-up prompt", "--", "/thimble"]
+                    "main's made-up prompt"]
     assert "Resume with thimble --continue instead" in p.stderr
 
 
 def test_the_launcher_passes_on_every_line_of_launch_args_and_the_analyst_s_own_flags(tmp_path):
     p, args, mode = _start(tmp_path, ["/made-up/plugin", "", "{}", "", "thimble:main · work", "", "", "",
-                                      "a made-up note\tanother made-up note", "/made-up/launch.json",
-                                      "made-up-last-session", "the prompt"], "-c", "--model", "opus")
+                                      "a made-up note\tanother made-up note",
+                                      "terminal\t/made-up/renderer\t/made-up/launch.json",
+                                      "THIMBLE_MODE=terminal\tTHIMBLE_WS=/made-up/ws", "made-up-last-session",
+                                      "the prompt"], "-c", "--model", "opus")
     assert p.returncode == 0, p.stderr
-    assert args == ["--plugin-dir", "/made-up/plugin", "--settings", "{}", "--name", "thimble:main · work",
-                    "--resume", "made-up-last-session", "--append-system-prompt", "the prompt", "--model", "opus",
-                    "--", "/thimble"]
+    assert args == ["--plugin-dir", "/made-up/plugin", "--plugin-dir", "/made-up/renderer", "--settings", "{}",
+                    "--name", "thimble:main · work", "--resume", "made-up-last-session", "--append-system-prompt",
+                    "the prompt", "--model", "opus"]
+    assert mode == "terminal"
     assert "a made-up note\nanother made-up note\n" in p.stderr
     assert "continuing the last thimble session in this folder" in p.stderr
 
