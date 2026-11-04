@@ -17,6 +17,8 @@ In a shell:
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix remove N           fix N leaves your list (off first, when it is on)
     thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
+    thimble fix show|diff|apply|off|on|remove|export N...
+                                   several fixes at once: thimble fix remove 3 4 5
     thimble doctor                 a checklist of what works, with the fix for each problem
     thimble --version              the version of the thimble that runs (its commit, between releases)
 
@@ -572,6 +574,8 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
     thimble fix remove N             fix N leaves your list (off first, when it is on)
     thimble fix export N [--to DIR]  save fix N as files: its patch (git am applies it) and its record
+    thimble fix show|diff|apply|off|on|remove|export N...
+                                     several fixes at once: thimble fix remove 3 4 5
 
 Fixes act across your sessions, so they are listed and managed here, in a shell. Ask for a fix in Claude Code or the
 browser: /thimble-fix <what should work differently>. A fix goes on only by your key: y on the fix's line in thimble,

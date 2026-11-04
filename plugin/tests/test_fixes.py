@@ -1328,6 +1328,45 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
 
 
+def test_the_persons_verbs_take_several_numbers_check_them_all_first_and_go_on_past_a_fix_that_fails(world, capsys, monkeypatch):
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    a, b, c = three_fixes(world)
+    # a number that names no fix: nothing done, not even to the fixes before it
+    assert cli.main(["fix", "remove", str(a), "9", "x"]) == 1
+    err = capsys.readouterr().err
+    assert "there is no fix 9" in err and "x is not the number of a fix" in err and "nothing done" in err
+    assert FX.get(a)["state"] == "on"
+    assert cli.main(["fix", "show", str(a), str(b)]) == 0
+    out = capsys.readouterr().out
+    assert out.index("Bar says read · fix") < out.index("\n\nA note · fix")
+    assert cli.main(["fix", "show", str(a), f"#{b}", str(a), "--json"]) == 0
+    assert [r["id"] for r in json.loads(capsys.readouterr().out)] == [a, b]
+    # off: each fix's line, and the reload line once
+    assert cli.main(["fix", "off", str(a), str(b)]) == 0
+    out = capsys.readouterr().out
+    assert f"Fix {a} is off" in out and f"Fix {b} is off" in out and out.count(FX.RELOAD) == 1
+    assert FX.get(a)["state"] == FX.get(b)["state"] == "off" and FX.get(c)["state"] == "on"
+    # remove: a fix that fails is named, the others still go, and the command fails
+    real = FX.remove
+
+    def remove(fid):
+        if int(fid) == b:
+            raise FX.FixError("made-up failure")
+        return real(fid)
+
+    monkeypatch.setattr(FX, "remove", remove)
+    assert cli.main(["fix", "remove", str(a), str(b), str(c)]) == 1
+    got = capsys.readouterr()
+    assert f"Removed fix {a}, “Bar says read”." in got.out and f"Removed fix {c}, “Legend counts untouched”." in got.out
+    assert f"thimble fix remove {b}: made-up failure" in got.err and f"1 of 3 failed (fix {b})" in got.err
+    assert FX.get(a)["state"] == FX.get(c)["state"] == "removed" and FX.get(b)["state"] == "off"
+    # one number, off a terminal: the record as JSON, as the plugin's keys read it
+    monkeypatch.setattr(FX, "remove", real)
+    assert cli.main(["fix", "remove", str(b)]) == 0 and json.loads(capsys.readouterr().out)["id"] == b
+
+
 def test_what_next_names_thimble_file_issue_for_a_fix_claude_still_works_on(world, capsys, monkeypatch):
     """R1: while Claude still works on the only fix, thimble fix and thimble fixes name `thimble file issue` for it, and
     the command gives the link, whose text says that Claude is still working on it; once another fix is ready, the line
