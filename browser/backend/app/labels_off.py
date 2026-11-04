@@ -8,7 +8,8 @@ Each text keeps its words while Labels is on. While it is off, the parts of a te
 prompt file that holds them, in order): words exactly as the file has them, or a run of the text from its first words
 up to the words that follow it, as (from, up to). Each part must stand exactly once in the text the parts before it
 left, so a part reworded in its file fails loudly (PromptError names it) rather than reach a model; the parts take out
-words only, and add none.
+words only, and add none. The parts stand in each text as both launch modes render it (prompts.MODES): a part whose
+words differ by mode, such as main.md's `label_done` bullet, is a run.
 shared.md's Labels section goes but for its last paragraph, on how a card decides an outcome, which stays without its
 words on labels. The card types' text, a way to answer with labels, is left out whole (events.render_prompts), with the
 event that brings a new one and what the card tool says of them."""
@@ -31,15 +32,9 @@ CUTS: dict[str, tuple[str | tuple[str, str], ...]] = {
         "about it.\n",
         "- `card_types` says which card types this corpus has that the list under Cards above does not, with each one's "
         "use and arguments as the text.\n",
-        "- `label_done` says a label you ran finished after your turn moved on, with its counts as the text. thimble then "
-        "ran the cards that read it again, and the text ends with each of them whose takeaway the new output left "
-        "behind, or that failed, with that output. Write each of those takeaways again with `edit_card` from its "
-        "output, fix each card that failed, and write the label card's takeaway again from the final counts, in the "
-        "same turn before any other call. Say something in the chat only when the final counts change your answer.\n",
-        "- `rerun` says thimble ran cards again because a label they read changed, with each card whose takeaway the new "
-        "output left behind, or that failed, and that output as the text. Write each of those takeaways again with "
-        "`edit_card` from its output and fix each card that failed, in the same turn before any other call. Say "
-        "something in the chat only when a new output changes your answer.\n",
+        # the `label_done` and `rerun` bullets, whose words differ by launch mode, each up to what follows it
+        ("- `label_done` says a label you ran finished after your turn moved on", "- `citations` says "),
+        ("- `rerun` says ", "\n`written`, "),
         "`labeled`, `label_ask`, ",
         ", `card_types`",
         " `apply_label` on the report fits only a question each sentence's own words answer, since its model reads each "
