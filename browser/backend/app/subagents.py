@@ -9,15 +9,16 @@ answer ends the request ({agentId}, a deny of thimble's own --agent-check, Claud
 module). A follow-on start (a run's own next step, such as a view build's review) goes the same way. A typed
 request goes through main: the start tool records the pending request and returns the exact Agent call, which main
 makes; the plugin's --agent-check hook lets only that call through, and the mirror watches for a start that does not
-happen (R1–R3, session.py). The typed start of a thread's fork's propose_view, file_dev_ticket, start_writing or
-run_check, whose Agent call Claude Code does not let a fork make, the server starts with the fork's call
-(tools._fork_start), with no step of the analyst's. Every click route takes the analyst's browser cookie
-(hook_auth.analyst), never the server's token alone, since a start through the module is not judged by auto mode. There
-is no second route: without the module thimble's agents cannot start (start-refused-no-module). Each agent takes up the
-start its own Agent call claimed. The SubagentStart hook does not name that call, so when two or more starts of the
-agent's type wait (main started several in one turn), the agent is unsettled until a sign names its call: the call's
-result in main's transcript (session._settle), its PostToolUse hook, the agent's meta.json at its first thimble call
-(caller), or the module's answer to a click (bind); or until every other start it could have is taken or refused
+happen (R1–R3, session.py). The typed start of a thread's fork's start_orientation, propose_view, file_dev_ticket,
+start_writing or run_check, whose Agent call Claude Code does not let a fork make, main makes on a `start_agent` event
+that carries the exact call (ask_main, tools._ask_main), with no step of the analyst's; a turn that missed the event
+gets it once more (ask_again). Every click route takes the analyst's browser cookie (hook_auth.analyst), never the
+server's token alone, since a start through the module is not judged by auto mode. There is no second route: without
+the module thimble's agents cannot start (start-refused-no-module). Each agent takes up the start its own Agent call
+claimed. The SubagentStart hook does not name that call, so when two or more starts of the agent's type wait (main
+started several in one turn), the agent is unsettled until a sign names its call: the call's result in main's
+transcript (session._settle), its PostToolUse hook, the agent's meta.json at its first thimble call (caller), or the
+module's answer to a click (bind); or until every other start it could have is taken or refused
 (subagent_files.settle and eliminate).
 
 Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for). A click registers
@@ -40,6 +41,11 @@ its own failures there, since a run's status is not its outcome (a build that en
 
 Attribution. A PreToolUse hook on thimble's tools records which agent makes each call (callers.jsonl); caller() names
 the agent, and its key is the session the call runs as (tools.call_route), a descendant's that of its thimble ancestor.
+
+Terminal mode. No server runs: the starts, follow-ups and stops above reach the module through the trusted folder
+(module_bridge's file transport), main's permission mode and plan mode come from the files (session.main_mode), and the
+hooks' records are followed by their backend calls (local_hooks.py), which run the same bodies as the routes below
+(hook_started, hook_stopped, hook_denied, hook_end, hook_rekey). Plan mode stops no running agent there either.
 """
 from __future__ import annotations
 
@@ -715,6 +721,46 @@ async def fork_thread(c: str, call: str | None, *, wait: bool = True) -> dict[st
             _unfollowed.add(key)
     meta = agents.meta_or_none(c, chat) if chat else None
     return meta if meta is not None and meta.get("kind") == agents.KIND_THREAD else None
+
+
+def ask_main(c: str, rid: str, event_id: str, **fields: Any) -> list[str]:
+    """The typed start `rid` that a thread's fork asked for, which main makes on the event `event_id` (tools._ask_main),
+    since a fork may not start subagents: the request keeps the event as its `call`, so that the turn of main's that got
+    the event and ended without the Agent call refuses it (R3, session._no_call) once the event was posted again
+    (ask_again), and is marked `via_main`. A start of
+    the same agent that an earlier event asked for and main has not made yet is replaced by this one: no Agent call
+    claims it from now on, and its role's refusal handler does not run, since this start takes up its work. `fields`
+    hold what the event names (`ask`, which ask_again posts again) and the thread. The ids of the requests it
+    replaced."""
+    replaced: list[str] = []
+    with update(c) as state:
+        reqs = files.requests(state)
+        r = reqs.get(rid)
+        if not isinstance(r, dict):
+            return replaced
+        r.update(call=event_id, via_main=True, **fields)
+        for other, o in reqs.items():
+            if (other != rid and isinstance(o, dict) and o.get("kind") == "start" and o.get("key") == r.get("key")
+                    and o.get("state") == "pending" and o.get("via_main")):
+                o.update(state="replaced", replaced_by=rid, at=files.now())
+                replaced.append(other)
+    if replaced:
+        log.info("%s: the start %s main is asked for replaces %s", c, rid, ", ".join(replaced))
+    return replaced
+
+
+def ask_again(c: str, rid: str, call: str, event_id: str) -> dict[str, Any] | None:
+    """The start `rid` main was asked for on the event `call`, which main's turn missed (R3, tools.ask_main_again),
+    asked for once more on the event `event_id`: the request keeps the new event as its `call` and is marked
+    `asked_again`, so a turn that misses this event too refuses it. The request, or None when it is no longer
+    pending on `call` (claimed, replaced, or asked for again already)."""
+    with update(c) as state:
+        r = files.requests(state).get(rid)
+        if (not isinstance(r, dict) or r.get("state") != "pending" or r.get("call") != call or not r.get("via_main")
+                or r.get("asked_again")):
+            return None
+        r.update(call=event_id, asked_again=True)
+        return dict(r)
 
 
 async def start_job(c: str, role: str, key: str, task: str, values: dict[str, Any], route: str, *,
@@ -1676,7 +1722,8 @@ def _workspace(body: HookBody) -> str:
     return c
 
 
-# Each hook's body below is what its route does once the hook wrote its record.
+# Each hook's body below is what its route does once the hook wrote its record: the server's route in browser mode, and
+# in terminal mode the hook's backend call (local_hooks.py), with no HTTP.
 
 
 def hook_started(c: str, hook: dict[str, Any]) -> dict[str, Any]:
@@ -1821,8 +1868,19 @@ def fork_check(c: str, tool_input: dict[str, Any], tool_use_id: str | None = Non
 
 
 def fork_ended(c: str, thread_id: str) -> None:
-    """A thread's fork stopped, so a new Agent call may fork it again (fork_check)."""
+    """A thread's fork stopped, so a new Agent call may fork it again (fork_check); in terminal mode, where the
+    --agent-check hook keeps the forks starting in subagents.json by their description (subagent_files.fork_check),
+    each description that names the thread goes."""
+    from . import session  # noqa: PLC0415
+
     _forking.pop((c, thread_id), None)
+    if not files.terminal(config.workspace_path(c)):
+        return
+    with update(c) as state:
+        table = state.get(files.FORKING)
+        if isinstance(table, dict):
+            for desc in [d for d in table if session.thread_for(c, d) == thread_id]:
+                table.pop(desc, None)
 
 
 class AgentCheckBody(BaseModel):

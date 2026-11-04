@@ -225,17 +225,20 @@ def test_a_paste_that_quotes_a_command_s_record_stays_the_analyst_s_message(tmp_
 
 def test_a_fork_that_ends_with_its_session_may_be_forked_again_at_once(cwd, monkeypatch):
     """--continue resumes main under the same session id: the fork the ended session ran is gone, so a new Agent call
-    for the thread is not refused as a second fork (subagents.fork_ended lets the thread go)."""
+    for the thread is not refused as a second fork (subagents.json `forking` loses the thread)."""
+    from app import subagent_files as files
     from app import subagents
 
+    monkeypatch.setattr(files, "terminal", lambda ws: True)
     thread = agents.new_thread(CORPUS, None, None, "Days")
     tid = thread["id"]
     agents.update_agent(CORPUS, tid, **{threads.FORK_NAME_KEY: "which-days"})
-    call = {"subagent_type": "fork", "description": "thread:which-days", "prompt": "thread:which-days"}
-    assert subagents.fork_check(CORPUS, call) is None
+    with subagents.update(CORPUS) as state:
+        assert files.fork_check(state, {"subagent_type": "fork", "description": "thread:which-days", "prompt": "thread:which-days"}) is None
     threads.fork_started(CORPUS, tid, agent_id="a1", tool_use_id="toolu_f1", session=SID)
     threads.session_ended(CORPUS, SID)
-    assert subagents.fork_check(CORPUS, call) is None
+    with subagents.update(CORPUS) as state:
+        assert files.fork_check(state, {"subagent_type": "fork", "description": "thread:which-days", "prompt": "thread:which-days"}) is None
 
 
 # ----------------------------------------------------------------------------- a thread's fork linked to its thread
@@ -245,9 +248,9 @@ QUESTION = "On which days did the page change?"
 
 
 def _fork_files(project: Path, agent: str, tool_use_id: str, name: str | None, call: dict | None) -> Path:
-    """A thread's fork's transcript and meta json as Claude Code writes them when the call's description is the thread's
-    question (live check term-fix5, new quirk 1, where thimble-term gave it), with `name` only when main passed one; the
-    file holds its copy of the call (`call`) when one is given."""
+    """A thread's fork's transcript and meta json as Claude Code writes them in terminal mode: the meta's description is
+    the thread's question, which thimble-term gave the call (live check term-fix5, new quirk 1), with `name` only when
+    main passed one; the file holds its copy of the call (`call`) when one is given."""
     d = project / SID / "subagents"
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"agent-{agent}.jsonl"
@@ -284,6 +287,7 @@ def test_a_thread_s_fork_joins_its_thread_whatever_main_passes_and_whichever_com
     agent-check hook's record of the call (`hook`), by the call the fork's own file holds (`file-call`), or, with
     neither, by main's tool_use, which turns a plain agent chat made first into the thread's (`tool_use`). The fork's
     steps and answer show in the thread, no agent chat is left in main, and its end finishes the thread."""
+    from app import subagent_files as files
     from app import subagents
 
     p = project / f"{SID}.jsonl"
@@ -297,8 +301,10 @@ def test_a_thread_s_fork_joins_its_thread_whatever_main_passes_and_whichever_com
     name = agents.read_meta(CORPUS, tid)[threads.FORK_NAME_KEY]
     call = {"subagent_type": "fork", "description": f"thread:{name}", "prompt": f"thread:{name}",
             **({"name": name} if named else {})}
-    if known_by == "hook":  # what the agent-check hook asked the server: the question as the description, main's prompt
-        assert subagents.fork_check(CORPUS, {**call, "description": f"thread: {QUESTION}"}, "toolu_f1") is None
+    if known_by == "hook":  # what the agent-check hook saw: thimble-term's description, the prompt main wrote
+        with subagents.update(CORPUS) as state:
+            assert files.fork_check(state, {**call, "description": f"thread: {QUESTION}"}, None,
+                                    "toolu_f1") is None
     file_call = call if known_by == "file-call" else None
     named_meta = name if named else None
     tool_use = [_human("Look into the thread"), _assistant(_use("toolu_f1", "Agent", call)),

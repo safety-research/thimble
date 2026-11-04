@@ -423,8 +423,11 @@ async def test_nothing_is_held_where_no_card_can_be_drawn(_harness, monkeypatch)
 
 def test_a_card_is_held_only_where_the_card_check_reads_cards_by_itself(monkeypatch):
     """A held card shows when its check ends: where the workspace does not check cards by itself, none would end."""
+    from app import launch_mode
+
     monkeypatch.setattr(render, "enabled", lambda: True)
     monkeypatch.setattr(render, "down", lambda: False)
+    monkeypatch.setattr(launch_mode, "current", lambda: launch_mode.BROWSER)
     monkeypatch.setattr(card_check, "enabled", lambda: True)
     monkeypatch.setattr(card_check, "auto", lambda c: c == "checked")
     assert HOLDS_HERE("checked") and not HOLDS_HERE("unchecked")

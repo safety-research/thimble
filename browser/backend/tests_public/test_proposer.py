@@ -179,15 +179,15 @@ async def test_an_analyst_s_turn_end_runs_one_fork_at_its_cut_and_shows_the_card
 
 
 async def test_turns_that_did_not_answer_the_analyst_run_nothing(cwd, tmp_path, cards, forks):
-    """A task notification's turn, a Monitor's re-arm and a rerun event's turn are no analyst's turn."""
+    """A task notification's turn, a Monitor's re-arm and a start_agent event's turn are no analyst's turn."""
     lv, p = _attach(cwd, tmp_path)
     note = ("<task-notification>\n<task-id>x1</task-id>\n<status>completed</status>\n<result>done</result>\n"
             "</task-notification>")
     _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
                     _assistant(_say("The agent is done.")), _end("cut-n")])
-    event = '<thimble-event kind="rerun" event="ev1">thimble ran a card again.</thimble-event>'
+    event = '<thimble-event kind="start_agent" event="ev1">Start the writer.</thimble-event>'
     _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": event}},
-                    _assistant(_say("Its takeaway holds.")), _end("cut-s")])
+                    _assistant(_say("Starting it.")), _end("cut-s")])
     await _settle()
     assert forks == [] and proposer.pending(CORPUS) is None
 
@@ -505,7 +505,7 @@ def test_the_turn_s_cut_and_who_opened_it_are_kept_and_survive_a_pass(cwd, tmp_p
         "role": "assistant", "model": "claude-opus-5-5", "usage": usage, "content": [_say("A and B.")]}}])
     assert lv.turn_analyst and lv.context_tokens == 42_003
     kept = session._turn_state(lv)
-    other = session.Live(CORPUS, SID, cwd, str(p), None)  # the next pass of the mirror
+    other = session.Live(CORPUS, SID, cwd, str(p), None)  # the next pass of the mirror in terminal mode
     session._take_turn(other, kept)
     assert other.turn_analyst and other.context_tokens == 42_003
     _append(p, lv, [_end("cut-9")])

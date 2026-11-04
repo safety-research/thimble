@@ -22,8 +22,9 @@ wide). No model takes part in the measure. A body past card_size.BODY_MAX, or co
    as a thread's fork (`agent`); neither for main's own call. Every held card shows when the server starts again
    (notebook.mark_interrupted_cells).
 
-Where no card can be drawn (render.down, or the harness failed on this card), or where the workspace does not check
-cards by itself (card_check.auto), nothing is held. Each step is one line of workspaces/<c>/card-fit.jsonl.
+Where no card can be drawn (render.down, or the harness failed on this card), outside browser mode, where no server
+hears main's turn end, or where the workspace does not check cards by itself (card_check.auto), nothing is held. Each
+step is one line of workspaces/<c>/card-fit.jsonl.
 """
 from __future__ import annotations
 
@@ -99,11 +100,12 @@ def too_large(cell: dict[str, Any] | None) -> bool:
 
 
 def holds_here(c: str) -> bool:
-    """Whether a card can be held in workspace `c`: the harness can draw it, and the card check reads a card by itself
-    (card_check.auto)."""
-    from . import card_check  # noqa: PLC0415
+    """Whether a card can be held in workspace `c`: the harness can draw it, this is the server, which hears main's turn
+    end (launch_mode: the server runs in browser mode), and the card check reads a card by itself (card_check.auto)."""
+    from . import card_check, launch_mode  # noqa: PLC0415
 
-    return render.enabled() and not render.down() and card_check.enabled() and card_check.auto(c)
+    return (render.enabled() and not render.down() and launch_mode.current() == launch_mode.BROWSER
+            and card_check.enabled() and card_check.auto(c))
 
 
 def holder(c: str, name: str, session: str | None, tool_use_id: str | None) -> dict[str, str]:

@@ -316,7 +316,7 @@ def _record(c: str, cell: dict[str, Any], what: str | None) -> tuple[tuple | Non
         h = _digest(parts)
         line = {"ts": _now(), "op": op, "card": cid, "group": cell.get("notebook"), "by": by,
                 "changed": changed, "h": h, "state": state}
-        ledger.append_jsonl_locked(path, line)
+        ledger.append_jsonl_locked(path, line)  # the shim and the hooks' backend calls write it in terminal mode
         if op == "deleted":
             _last.pop(key, None)
         else:

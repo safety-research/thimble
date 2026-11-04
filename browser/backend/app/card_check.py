@@ -16,9 +16,10 @@ new change to the card cancels a running check and starts the next. At most READ
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
    and kept only when the code runs clean and the card draws, as one undo step with actor `check`. A card that fails no
    criterion stays as it is, unless its links check found a value its code types in and the replacement's code
-   changes (_problems). New code runs on the card's kernel. A replacement that left all the card shows as it was
-   (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`; any other kept
-   replacement is told to the card's author (card_size.tell_replaced).
+   changes (_problems). New code runs on the card's kernel, and in terminal mode, where the check runs in the shim,
+   through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial). A replacement that left all the
+   card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`;
+   any other kept replacement is told to the card's author (card_size.tell_replaced).
 A card that does not fit on the analyst's screen is held until its check ends (card_fit): the reading assesses it
 against one more criterion, with the card guidance and the toolkit its author works from (prompts/card-check.md
 `## too-large`), its size is not told to its author, and the card shows when the check ends (card_fit.checked), as the
@@ -64,8 +65,8 @@ CHECK_TOOLS = ("add_card", "edit_card")
 CRITERIA = 5
 # How long a check's own work may run (its reading and its revision's draft), by the effort it reads the card at
 # (read_effort). A check past its time ends `error` with no mark. Its clock stands while the card draws and while a
-# revision's code runs, which keep their own limits (render.RENDER_TIMEOUT_S, the card's timeout_s): a big corpus would
-# use the check's time otherwise.
+# revision's code runs, which keep their own limits (render.RENDER_TIMEOUT_S, the card's timeout_s): a big corpus, or
+# terminal mode's fresh `thimble-run trial` process, would use the check's time otherwise.
 CHECK_TIMEOUT_S = {"low": 90.0, "medium": 120.0, "high": 180.0, "xhigh": 300.0, "max": 420.0}
 # How many readings run at once; a check waiting for one is `queued`, its clock stopped (_slot). The drawing and the
 # revision run outside the slots.

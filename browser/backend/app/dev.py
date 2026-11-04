@@ -8,9 +8,9 @@ The ticket's agent. A code ticket is worked by a `thimble:dev-ticket`, a subagen
 (subagents.py), on Settings' dev row's model and effort. A ticket filed in the browser, Retry and Start are clicks: the
 server prepares the ticket, then starts its agent through thimble's plugin module. Main's file_dev_ticket prepares it
 and answers the exact Agent call, which main makes and auto mode judges (start_typed); a thread's fork's file_dev_ticket
-is prepared the same way, and the server starts its agent with the fork's call (tools._fork_start). While another
-ticket runs, main's ticket waits for the analyst's Start (`held`), since no ticket starts without a click or main's
-call. Preparing cuts a git worktree off the live branch (worktree_path, under worktrees_dir,
+is prepared the same way, and main gets the call in a `start_agent` event (tools._ask_main), since a fork may not start
+subagents. While another ticket runs, main's ticket waits for the analyst's Start (`held`), since no ticket starts
+without a click or main's call. Preparing cuts a git worktree off the live branch (worktree_path, under worktrees_dir,
 in thimble's home), takes the before shot, and
 opens the ticket's thread, which the agent's chat takes over (subagents.ensure_chat, `adopt`). The agent edits the
 worktree, checks its change with the `ticket_checks` tool as often as it wants, and calls `finish_ticket`, where the
@@ -39,8 +39,8 @@ session (subagents.py), at most VIEW_POOL at once (queue_view); the others wait 
 at its subagent limit goes back to the queue. A build is part of the start that asked for it: Build, Retry and a change
 asked for in the browser are clicks, and a repair, or the build of a proposal an orientation from before 0.8.0 left, is
 a follow-on start, each started through thimble's plugin module; main's propose_view gives main the exact Agent call
-(start_build), and a thread's fork's propose_view or file_dev_ticket on a view the server starts with the fork's call
-(tools._fork_start). The builder writes the view's three files in the view's folder, checks its draft with the
+(start_build), and a thread's fork's propose_view or file_dev_ticket on a view gives it to main in a `start_agent` event
+(tools._ask_main). The builder writes the view's three files in the view's folder, checks its draft with the
 `view_check` tool as often as it wants, and calls `finish_view`, where the server runs the gates of record and counts
 its attempts (view_tools.py). Its end (build_ended, _settle) is the backstop: a builder that ended without a pass gets
 the gate once; a proposal the analyst did not ask for, such as an orientation's from before 0.8.0, that still fails gets
@@ -608,7 +608,7 @@ def dev_session_name(workspace: str | None) -> str:
 
 
 def view_session_name(c: str, slug: str) -> str:
-    """The name a build an extension's program runs goes by for the analyst, as `claude agents` lists it:
+    """The name a build an extension's program runs goes by for the analyst, as /thimble:agents lists it:
     thimble:view-<slug> · <c>."""
     return config.session_name(f"view-{slug}", c)
 

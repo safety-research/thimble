@@ -3,8 +3,8 @@ looking, with an easy fix.
 
 A notice is one short line in a warning style, an optional action button, and x to dismiss it. It shows in the
 foreground: in the browser in a strip above the composer of whichever chat the analyst has open, until they dismiss it
-or the failure is fixed. A notice of an agent with a chat of its own (a thread, an agent chat; `chat`) is also written
-into that chat as a row, for its history.
+or the failure is fixed; in terminal mode in the band above the prompt. A notice of an agent with a chat of its own (a
+thread, an agent chat; `chat`) is also written into that chat as a row, for its history.
 
 The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, agent, chat, action, ts}:
 `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command, such as /login
@@ -33,8 +33,9 @@ chat alone, since it tells of that chat's own replies), `thread:<chat>` and
 
 Kinds that tell of the setup rather than a failure:
 
-  manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode),
-               shown in red; it goes when main reports another mode
+  manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode in
+               browser mode, local_hooks' mode-notice in terminal mode), shown in red; it goes when main reports
+               another mode
   sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py); key
                `cc-sandbox`: Claude Code's Bash sandbox could not start in a session of the Claude Code sign-in, so
                its Bash calls were refused (runtime_cc.py), cleared by a later Bash call that ran; key `view-sandbox`:
@@ -136,7 +137,7 @@ def _actions(action: Any) -> dict[str, str] | list[dict[str, str]] | None:
 
 def _emit(c: str, event: dict[str, Any]) -> None:
     """The event on the workspace stream, from the loop or scheduled onto the server's loop from a worker thread; off
-    any loop the notices file alone tells."""
+    any loop (terminal mode's passes) the notices file alone tells."""
 
     def send() -> None:
         try:

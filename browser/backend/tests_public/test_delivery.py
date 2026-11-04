@@ -505,9 +505,9 @@ def _gated(tmp_path: Path, args: tuple[str, ...] = (), **env: str) -> bool:
 def test_the_watcher_starts_python_only_in_a_folder_thimble_opened(tmp_path):
     """The plugin's hooks run in every Claude Code session: in a folder with no marker in <thimble home>/active (the
     path with each / made %, cli.mark_active) the watcher exits in its shell line, before Python starts. The marker lets
-    it through, and so do a session that names no folder and a path over 200 characters, which gets no marker;
-    --stream, --scratch and --work-budget are never gated. THIMBLE_WS, which the launch of terminal mode set, no longer
-    lets a hook through. A session thimble starts itself exits there as before."""
+    it through, and so do terminal mode (THIMBLE_WS), a session that names no folder and a path over 200 characters,
+    which gets no marker; --stream, --scratch and --work-budget are never gated. A session thimble starts itself
+    exits there as before."""
     folder = "/data/some project/mini"
     assert not _gated(tmp_path, CLAUDE_PROJECT_DIR=folder)
     assert not _gated(tmp_path, ("--mode",), CLAUDE_PROJECT_DIR=folder)
@@ -517,7 +517,7 @@ def test_the_watcher_starts_python_only_in_a_folder_thimble_opened(tmp_path):
     assert _gated(tmp_path, CLAUDE_PROJECT_DIR=folder)
     assert _gated(tmp_path, ("--mode",), CLAUDE_PROJECT_DIR=folder)
     assert not _gated(tmp_path, CLAUDE_PROJECT_DIR=folder + "/sub"), "a marker is for its folder alone"
-    assert not _gated(tmp_path, CLAUDE_PROJECT_DIR="/elsewhere", THIMBLE_WS="/w")
+    assert _gated(tmp_path, CLAUDE_PROJECT_DIR="/elsewhere", THIMBLE_WS="/w")
     assert _gated(tmp_path)
     assert _gated(tmp_path, CLAUDE_PROJECT_DIR="/" + "x" * 200)
     for flag in ("--stream", "--scratch", "--work-budget"):

@@ -35,7 +35,7 @@ canvas's and the Comments pane beside the slides, the story and a page, in any t
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
-exact Agent call (tool_run_check), and a thread's fork's run the server starts with the fork's call (tools._fork_start).
+exact Agent call (tool_run_check), and a thread's fork's gives it to main in a `start_agent` event (tools._ask_main).
 The analyst's own edits start nothing: each shown check's run records how many passages changed since it checked them
 (`stale`, mark_stale), and Run is one click.
 
@@ -644,9 +644,47 @@ def running(c: str, cid: str, doc: str) -> bool:
     return _current(c, cid, doc) is not None
 
 
+def _terminal(c: str) -> bool:
+    from . import subagent_files  # noqa: PLC0415
+
+    try:
+        return subagent_files.terminal(config.workspace_dir(c))
+    except (OSError, ValueError):
+        return False
+
+
 def _current(c: str, cid: str, doc: str) -> _Active | None:
-    """The run of check `cid` on `doc` that goes: the server holds every run (_active)."""
-    return _active.get((c, cid, doc))
+    """The run of check `cid` on `doc` that goes. In browser mode the server holds every run (_active). In terminal mode
+    the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on) is not the
+    one that hears its agent start and end (a hook's process) or takes its comments (the shim), so the check's file
+    decides: a run it records `running` that this process does not hold is taken up from the record, as recover takes
+    up a previous server's, and a run this process holds that the file records ended, or replaced, is let go."""
+    act = _active.get((c, cid, doc))
+    if not _terminal(c):
+        return act
+    rec = ((read(c, cid) or {}).get("runs") or {}).get(doc)
+    live = isinstance(rec, dict) and rec.get("status") == "running" and bool(rec.get("run"))
+    if act is not None and not act.ended and (not live or rec.get("run") != act.run):
+        under_way = act.task is not None and not act.task.done()  # a start this process has under way
+        unsaved = not act.agent and not act.request and act.task is None  # one start_run makes before its record
+        if not under_way and not unsaved:
+            _active.pop((c, cid, doc), None)
+            if act in _queue:
+                _queue.remove(act)
+            act = None
+    if act is None and live:
+        act = _Active(c, cid, doc, str(rec["run"]), bool(rec.get("notify")), list(rec.get("covered") or []),
+                      list(rec.get("fps") or []), agent=str(rec.get("agent_id") or "") or None,
+                      comments=int(rec.get("comments") or 0))
+        _active[(c, cid, doc)] = act
+    return act
+
+
+def _prune(c: str | None = None) -> None:
+    """In terminal mode, let go of the runs this process holds that another process ended (_current)."""
+    for (cc, cid, doc) in list(_active):
+        if c is None or cc == c:
+            _current(cc, cid, doc)
 
 
 def recover(root: Path | None = None) -> list[str]:
@@ -927,7 +965,8 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
 
 
 def _places() -> int:
-    """The runs holding a place: started, or starting."""
+    """The runs holding a place: started, or starting; in terminal mode not one another process ended (_prune)."""
+    _prune()
     return sum(1 for a in _active.values() if not a.ended and a not in _queue
                and (a.agent or a.request or (a.task is not None and not a.task.done()) or a.program))
 
@@ -1264,7 +1303,8 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         doc = _doc(c, act.doc)
         canvas = act.doc == CANVAS
         answers = act.doc == ANSWERS
-        # the run's comments as the document (or the cards' store) holds them
+        # the run's comments as the document (or the cards' store) holds them: in terminal mode the shim takes them, in
+        # another process
         act.comments = max(act.comments, canvas_comments.count(c, act.check, act.run) if canvas else
                            answer_comments.count(c, act.check, act.run) if answers else
                            sum(1 for cm in (doc or {}).get("comments") or []
@@ -1558,7 +1598,8 @@ def _plural(k: int, noun: str) -> str:
 async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
     """The `run_check` tool, main's: the check made or changed and turned on, and for each written document a run whose
     agent main starts with the exact Agent call the result gives (`## start_job-subagent`), as a typed start. A thread's
-    fork's call starts each run when the server starts it with the fork's call (tools._fork_start)."""
+    fork's call starts each run the same way, by main's Agent call on a `start_agent` event of its own
+    (tools._ask_main), since the fork may not make it."""
     import json  # noqa: PLC0415
 
     from . import subagents  # noqa: PLC0415
@@ -1602,7 +1643,7 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(before.reason or f"run_check: {before.kind}")
     lines, refused = [], []
     for doc in targets:
-        # a fork's run keeps no call of the fork's: the server starts it (tools._fork_start)
+        # a fork's run keeps no call of the fork's: main's Agent call claims it (tools._ask_main)
         rec = await start_run(ctx.c, check["id"], doc, passages_=docs.get(doc) if docs else None, force=True, notify=True,
                               route=TYPED, call=None if fork is not None else ctx.tool_use_id)
         if rec is None:
@@ -1612,8 +1653,8 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
             refused.append(getattr(ans, "reason", "") or str(rec.get("summary") or "") or "it did not start")
             continue
         if fork is not None:
-            res = await tools._fork_start(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
-                                          agent="the check")
+            res = await tools._ask_main(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
+                                        thread=fork, agent="the check")
             (refused if res.is_error else lines).append(res.text)
             continue
         lines.append(tools.hint("run_check-started", check=check["name"], how=how, doc=target_name(doc),

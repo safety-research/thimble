@@ -587,7 +587,7 @@ class Space:
             # main and its thread forks write the corpus, as Claude Code does in its folder, unless the analyst turned
             # "Claude can edit files in this folder" off in Settings (ledger.corpus_edits)
             edits: bool | None = ledger.corpus_edits(self.c)
-            system = events.session_prompt(str(self.corpus), edits=edits)
+            system = events.session_prompt(str(self.corpus), terminal=False, edits=edits)
             names = [s.name for s in tools.REGISTRY.values()
                      if tools.ANALYST in s.roles and (not s.sessions or None in s.sessions)
                      and (labels or s.name not in labels_off.TOOLS)]

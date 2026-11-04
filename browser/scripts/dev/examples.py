@@ -25,8 +25,10 @@ MARK = ".thimble-example"  # in each copy, so a later run knows the folder is on
 
 def save_view(name: str, src: Path) -> None:
     raw = json.loads((src / "view.json").read_text("utf-8"))
+    term = src / "view.term.js"
     v = views.write_view(name, name, reader=(src / "reader.py").read_text("utf-8"),
-                         html=(src / "view.html").read_text("utf-8"), **{k: raw.get(k) for k in VIEW_KEYS})
+                         html=(src / "view.html").read_text("utf-8"), **{k: raw.get(k) for k in VIEW_KEYS},
+                         term=term.read_text("utf-8") if term.is_file() else None)
     print(f"{name}: view {v['slug']} built={v['built']} ok={v['ok']}")
 
 

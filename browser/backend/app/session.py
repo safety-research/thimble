@@ -31,8 +31,9 @@ ancestor. The ends of their runs come from their hand-back (the SubagentHandback
 hand-back in main's), a task notification, or the hooks' and the module's turn ends (subagents.run_ended, stopped,
 ended); a message from main or the analyst to one that finished starts its next run (subagents.run_again). For a typed
 start or follow-up the mirror watches main's call (R2: its result) and main's turn (R3: the turn in which main called
-the start tool ends without the call), and refuses the request when it did not happen. A Workflow call is one agent chat
-whose members are the run's agent transcripts.
+the start tool, or got the `start_agent` event that carries a thread's fork's start, ends without the call), and refuses
+the request when it did not happen; a start_agent event a turn missed is posted once more first (_ask_again). A Workflow
+call is one agent chat whose members are the run's agent transcripts.
 
 Main ends a turn with nothing for the analyst without text, or with END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat
 shows END_TOKEN, nor a line that opens with TERMINAL_ONLY."""
@@ -284,13 +285,14 @@ class Live:
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
         # the open turn answers the analyst: opened by a line they typed or their message from the browser, not by a
-        # thread question from the browser (the thread's fork answers it), a task notification or a Monitor's re-arm
-        # (proposer.turn_ended)
+        # thread question from the browser or the terminal's /thimble:ask (the thread's fork answers it), a task
+        # notification, a Monitor's re-arm or a start_agent event (proposer.turn_ended)
         self.turn_analyst = False
         self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
         self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
         self.api_failed = False  # a request of the open turn ended in Claude Code's API error line (_main_api_error)
         self.turn_threads: list[str] = []  # the threads whose events reached the turn (_release_threads)
+        self.handed: list[str] = []  # the threads whose events main got in a tool's result (handed)
         self.forked: set[str] = set()  # the threads the turn forked or sent a follow-up to
         self.sends: dict[str, str] = {}  # tool_use id of main's SendMessage to a thread's fork -> the thread
         self.wrote = False  # the turn wrote something to main
@@ -302,7 +304,7 @@ class Live:
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
         # ran, since a hook (thimble's --agent-check) or auto mode may refuse it
         self.relays: dict[str, tuple] = {}
-        # relays an earlier pass of the mirror handed on as [agent id, input], until their Subs are known
+        # relays a pass of the mirror in terminal mode handed on as [agent id, input], until their Subs are known
         self.pending_relays: dict[str, list] = {}
         self.after_start = False  # main's last call was a start of thimble's or its tool: a bare `Bash true` next is hidden
         self.last_tool: str | None = None  # the name of main's last tool call (_nudged)
@@ -538,7 +540,7 @@ def _turn_state(lv: Live) -> dict:
             "seen": [k for k in lv.seen if k.split(":", 1)[-1] in names],
             "watch_calls": [i for i in lv.watch_calls if i in names], "sends": lv.sends,
             "turn_threads": lv.turn_threads, "forked": sorted(lv.forked),
-            # R2 and R3 (module note), which a pass of the mirror hands to the next
+            # R2 and R3 (module note), which a pass of the mirror in terminal mode hands to the next
             "thimble_calls": lv.thimble_calls, "turn_calls": sorted(lv.turn_calls)[-CURSOR_CALLS:],
             "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "turn_texts": lv.turn_texts, "after_start": lv.after_start, "last_tool": lv.last_tool,
             "last_failed": lv.last_failed,
@@ -892,8 +894,8 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             lv.subs.append(sub)
         elif (meta.get("kind") == agents.KIND_THREAD and fork.get("tool_use_id") and fork.get("session") == lv.sid
               and not fork.get("ended") and not threads.settled(lv.c, str(meta["id"]))):
-            # its Agent call was read and its file not yet found: the file, which names the thread by its question
-            # only, joins the thread by the call's tool_use id
+            # its Agent call was read and its file not yet found (terminal mode reads each in its own process): the
+            # file, which names the thread by its question only, joins the thread by the call's tool_use id
             lv.subs.append(Sub(lv.c, str(meta["id"]), fork.get("tool_use_id"), None, thread=True))
         # a chat of one of thimble's agents (route subagent), its role's or a descendant's step, is followed to its end
         # as any other subagent is, its runs ended through subagents.run_ended
@@ -1268,6 +1270,16 @@ def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
         lv.wake.set()
 
 
+def handed(c: str, event_id: str, thread: str) -> None:
+    """A thread's event main got in a tool's result (events.hand): main's turn counts it as an event that reached it
+    (_browser_event), and until the turn ends a turn the tail opens late keeps it."""
+    _event_threads[event_id] = thread
+    lv = _live.get(c)
+    if lv is not None:
+        lv.turn_threads.append(thread)
+        lv.handed.append(thread)
+
+
 def push_event(c: str, kind: str, text: str, **meta: Any) -> bool:
     """Server code's way to send the session an event (a built view's `view`, dev.register_pass): events.post with `text`
     as the body and `meta` as its attributes; False when no session listens."""
@@ -1335,7 +1347,7 @@ def _open_turn(lv: Live) -> None:
     """A record that starts main's turn: the analyst's line, an event, a task notification. Several before the first
     assistant record open the same turn."""
     if not lv.turn_open or not lv.fresh:
-        lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, [], set()
+        lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since, lv.turn_texts = set(), "", _now(), []
         lv.turn_analyst = lv.api_failed = False
@@ -1349,14 +1361,14 @@ def _release_threads(lv: Live) -> None:
     for tid in dict.fromkeys(lv.turn_threads):
         if tid not in lv.forked:
             threads.released(lv.c, tid)
-    lv.turn_threads, lv.forked = [], set()
+    lv.turn_threads, lv.forked, lv.handed = [], set(), []
 
 
 def _end_turn(lv: Live, cut: str | None = None) -> None:
     """Main's turn ended: at its turn_duration record, whose uuid is `cut`, or (no cut) when a later record shows that a
     turn never got one."""
     _release_threads(lv)
-    _no_call(lv)
+    again = _no_call(lv)
     _asked(lv, False)  # a relayed prompt the terminal answered before the tail saw the wait
     if lv.flagged and not lv.answered:
         _stopped(lv, SAFETY_STOP_TEXT)
@@ -1368,6 +1380,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     was_open = lv.turn_open
     lv.turn_open = lv.fresh = lv.wrote = False
     agents.set_running(lv.c, agents.MAIN_ID, False)
+    _ask_again(lv, again)
     if was_open:
         _fixes_turn(lv)
         _cards_shown(lv)
@@ -1462,22 +1475,43 @@ def _proposer_turn(lv: Live, cut: str | None) -> None:
         log.exception("%s: the view proposer did not hear of main's turn end", lv.c)
 
 
-def _no_call(lv: Live) -> None:
-    """R3 (module note): the turn in which main called a start tool, or message_orientation, ended, and the request that
-    call stands for was never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's
-    last text in the turn (its first two lines) as the reason."""
+def _no_call(lv: Live) -> list[tuple[str, str, str]]:
+    """R3 (module note): the turn in which main called a start tool, or message_orientation, or got the `start_agent`
+    event of a thread's fork's start (subagents.ask_main), ended, and the request that call or event stands for was
+    never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's last text in the turn
+    (its first two lines) as the reason. A start_agent event's start is refused only when it was asked for again once
+    already, or the turn was stopped; otherwise it is left pending and returned as (request, event, reason), for
+    _ask_again once the turn has ended."""
     if not lv.turn_calls:
-        return
+        return []
     from . import subagents  # noqa: PLC0415
 
     try:
         reqs = subagents.read(lv.c).get("requests") or {}
     except Exception:  # noqa: BLE001 — a workspace whose files cannot be read refuses nothing
-        return
+        return []
     said = "\n".join([ln for ln in lv.turn_text.strip().splitlines() if ln.strip()][:2])
+    again: list[tuple[str, str, str]] = []
     for rid, r in list(reqs.items()):
         if (isinstance(r, dict) and r.get("route") == subagents.TYPED and r.get("state") == "pending"
                 and r.get("call") in lv.turn_calls and not r.get("caller_role") and not r.get("caller_agent")):
+            if r.get("via_main") and r.get("ask") and not r.get("asked_again") and not lv.stop_noted:
+                again.append((rid, str(r["call"]), said))
+                continue
+            subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
+    return again
+
+
+def _ask_again(lv: Live, again: list[tuple[str, str, str]]) -> None:
+    """The starts _no_call left for a second event: each start_agent event main's turn missed is posted once more
+    (tools.ask_main_again), since the event may have come in the same turn as the end-the-turn note of an earlier start
+    (`## agent-launched`). A start whose event could not be posted is refused as _no_call refuses."""
+    if not again:
+        return
+    from . import subagents, tools  # noqa: PLC0415
+
+    for rid, call, said in again:
+        if not tools.ask_main_again(lv.c, rid, call):
             subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
 
 
@@ -1553,7 +1587,8 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
         lv.turn_analyst = True
     if kind == "thread" and thread:
         lv.turn_threads.append(thread)
-    if event_id:
+    if event_id:  # a start_agent event's start is refused when this turn ends without its Agent call (R3, _no_call)
+        lv.turn_calls.add(event_id)
         _fixes_read(lv, event_id)
     if event_id and event_id in _expected:
         _expected.discard(event_id)
@@ -1846,7 +1881,7 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         lv.forked.discard(tid)
         threads.fork_lost(lv.c, tid)
     relay = lv.relays.pop(tool_use_id, None)
-    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read
+    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read (terminal mode)
         agent_id, inp = lv.pending_relays.pop(tool_use_id)
         held = _sub_by(lv, agent_id=str(agent_id or ""))
         relay = (held, inp if isinstance(inp, dict) else {}) if held is not None else None
@@ -1987,7 +2022,7 @@ def _request_of(lv: Live, tool_use_id: str, name: str, inp: dict) -> str | None:
         return hit
     want = str(inp.get(key) or "")
     # never one another call claimed: a later call with the same text may have claimed it before this pass read the
-    # denied call's result
+    # denied call's result (terminal mode reads in passes)
     found = [rid for rid, r in reqs.items() if isinstance(r, dict) and r.get("kind") == kind and r.get("route") == subagents.TYPED
              and r.get("state") in ("pending", "claimed") and not r.get("claimed_by")
              and str((r.get("input") or {}).get(key) or "") == want]
@@ -2664,9 +2699,9 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
         lv.sub_paths.add(key)
         use = str(meta.get("toolUseId") or "") or None
         followed = _sub_by(lv, tool_use_id=use) or _sub_by(lv, agent_id=agent_id)
-        # a fork's file names its thread by its description; when its description is the thread's question
-        # (threads.fork_ref), by the agent-check hook's record of the call, the call as the fork's file holds it, or the
-        # name main gave it
+        # a fork's file names its thread by its description; when thimble-term gave the call the thread's question as
+        # its description (threads.fork_ref), by the agent-check hook's record of the call, the call as the fork's file
+        # holds it, or the name main gave it
         title = str(meta.get("description") or "")
         if not thread_for(lv.c, title):
             fork = meta.get("isFork") or meta.get("agentType") == sfiles.FORK_TYPE
