@@ -21,8 +21,8 @@ The same predicate again: re-applying a label with the same definition (same_def
 and runs only over what its rows do not cover (covered).
 Within: a label over records may run only over the records another label gave one value (`within {label, value}`, kept
 on the concept), such as a prompt label over the few records a regex or code label kept in a large corpus.
-The analyst's labels: main hears of a label run from the browser (`labeled`, tell_main) once per version. A label makes
-no card; a workspace keeps the label cards an older thimble made (_label_cards).
+The analyst's labels: a label run from the browser gets a card and main hears of it (`labeled`, tell_main) once per
+version. A label that ran before without a card (such as the orientation's) keeps having none.
 Revisions: `rev` counts changes to a label's rows (redefinition, correction, a finished run; note_change). A card that
 read an older revision than the label's is stale (stale_in). Each such change, and the Undo of a delete, keeps what the
 label shows as a version outside the workspace (card_values, label_versions.keep), which the citation check reads a

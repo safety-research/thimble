@@ -33,8 +33,8 @@ workspace, as the terminal lists its labels: `card:label-<label id>`, a place fo
 the versions the label kept (label_versions): the label as it was when the cited words were written, then its earlier
 versions (`card:label-<id>@v<n>#…`), never a version made after the words. So a trial's counts cited before the run on
 everything replaced them hold against the trial, and no later change of the label (a run, a correction, a write to its
-files by a card's code) confirms words written before it. A label card an older thimble made reads the same versions
-under its own id, which the file leaves out, so the checker finds each label once.
+files by a card's code) confirms words written before it. A label's card, which apply_label makes, reads the same
+versions under its own id, which the file leaves out, so the checker finds each label once.
 
 A card's takeaway is checked the same way: its marks, `[words](#)`, are checked as soon as the card's write lands
 (card_written: after the add_card or edit_card call that wrote it, after the card check that may rewrite it, after the
@@ -145,15 +145,15 @@ def session_cards(c: str) -> list[dict[str, Any]]:
     (label_versions), its table as the label showed it then (concepts.card_table) and as data, which names the row that
     totals its values (`totals`), with when that version was made, what made it and what changed after it. The
     validator reads a label as it was when the cited words were written, never from its files in the workspace, which a
-    card's code can write. A label card an older thimble made (kind `label`) gives its label's entries again under its
-    own id, so a citation of it reads the same versions, `listed` False: the checker's file lists each label once
+    card's code can write. A label's card (kind `label`, which apply_label makes) gives its label's entries again under
+    its own id, so a citation of it reads the same versions, `listed` False: the checker's file lists each label once
     (cards_index)."""
     from . import cite, concepts, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    older: list[tuple[dict[str, Any], str]] = []  # an older thimble's label cards: (the card, its label's id)
+    label_cards: list[tuple[dict[str, Any], str]] = []  # the labels' cards: (the card, its label's id)
     for _, nb in notebook._stored(ws):
         for cell in nb.get("cells") or []:
             cid = str(cell.get("id") or "")
@@ -166,7 +166,7 @@ def session_cards(c: str) -> list[dict[str, Any]]:
             card = {"id": cid, "title": str(cell.get("title") or "")}
             if cell.get("kind") == "label":
                 payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
-                older.append((card, str(payload.get("concept") or "")))
+                label_cards.append((card, str(payload.get("concept") or "")))
             elif notebook.runnable(cell) and cell.get("outputs"):
                 outs = _outputs(list(cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"]))))
                 if outs:
@@ -183,7 +183,7 @@ def session_cards(c: str) -> list[dict[str, Any]]:
         except Exception:  # noqa: BLE001 — a label that cannot be read is left out, not the others
             log.exception("%s: the versions of label %s were not read", c, concept["id"])
         out += labels.get(concept["id"]) or []
-    for card, kid in older:
+    for card, kid in label_cards:
         out += [{**v, **card, "listed": False} for v in labels.get(kid) or []]
     return out
 
@@ -286,8 +286,7 @@ def card_tables(b: dict[str, Any]) -> list[dict[str, Any]]:
 def cards_index(c: str, cards: list[dict[str, Any]], at: float | None = None) -> str:
     """The file the checker greps for a value a card or a label shows (the validator's card_index), the labels as they
     were at `at`, when the cited words were written, in a folder of its own in the workspace's temp folder; its path.
-    The entries of an older thimble's label card are left out (`listed` False, session_cards): its label is listed by
-    its own id. Each check has its own: a card rewritten while a check runs starts another check, whose index must not
+    The entries of a label's card are left out (`listed` False, session_cards): its label is listed by its own id. Each check has its own: a card rewritten while a check runs starts another check, whose index must not
     take the place of the one this check's validator reads `cards` as."""
     folder = _temp_dir(c) / f"check-{secrets.token_hex(4)}"
     p = folder / "cards-index.tsv"

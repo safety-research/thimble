@@ -319,7 +319,7 @@ test("a label's version the check read shows as the label was then, under what c
   }
 })
 
-test("a label's own place shows the version the check read, and its chip opens the label, which has no card", async () => {
+test("a label's own place shows the version the check read, and its chip opens the label", async () => {
   const { api } = await import('../../src/lib/api.ts')
   const table = { corner: 'value', cols: ['records', 'share'], rows: [{ label: 'navigation', values: ['13', '33%'] }, { label: 'all', values: ['40', ''] }], at: { r: 0, c: 0 } }
   const ev = { kind: 'card' as const, card: 'label-k3f9a1', title: 'label theme', ref: 'card:label-k3f9a1@v1#records/navigation', value: '13', table, version: 1, at: 1780000000, made: 'run over 40 records', after: 'run over 423 records' }

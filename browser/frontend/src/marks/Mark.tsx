@@ -18,7 +18,7 @@
 //              place is gone and shows what the check read. A label the check read, as it was when the cited words
 //              were written or an earlier version of it, shows as it was then, under what changed in the label after it
 //              (plugin/tray/tray.mjs versionNote): its own place (`card:label-<id>…`, labelOfPlace), whose chip opens
-//              the label, or the place of a label card an older thimble made.
+//              the label, or the place of the label's card.
 //
 // Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked, under `output ·
 // table`. The lines wrap; a long one shows only the words around its highlighted ones, cut at words (lineWindow). The
@@ -423,8 +423,8 @@ export const CHANGED_NOW = 'The card changed after the check. It shows this now:
 export const CHANGED_READ = 'The card changed after the check. The check read this:'
 
 /** The label a place of the check names, `card:label-<label id>…` (backend marks.session_cards, which names the labels as
- * the terminal does), or null for a card's place: a label makes no card, so the check's copy of its version is all
- * there is to show, and its chip opens the label. */
+ * the terminal does), or null for a card's place: a label's place is no card, so the check's copy of its version is
+ * all there is to show, and its chip opens the label (its card, where it has one). */
 export function labelOfPlace(card: string): string | null {
   return /^label-([A-Za-z0-9_-]+)$/.exec(card)?.[1] ?? null
 }

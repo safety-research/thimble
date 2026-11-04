@@ -1,9 +1,9 @@
 """B19: a citation of a label's counts is checked against the label as it was when the cited words were written, from
 the versions thimble keeps of it outside the workspace (label_versions), never as the label is now; and no change of the
 label's files, store or rows in the workspace, which a card's code can write, nor a version named by the check, makes a
-false count verify. A label makes no card: the check lists each label of the workspace as the terminal lists its labels,
-`card:label-<label id>` (marks.session_cards), and a label card an older thimble made reads the same versions under its
-own id. The fork is replaced here; main's apply_label, the labels, the marks, the validator and the records are real, on
+false count verify. The check lists each label of the workspace as the terminal lists its labels, `card:label-<label
+id>` (marks.session_cards), and the label's card, which apply_label makes, reads the same versions under its own id.
+The fork is replaced here; main's apply_label, the labels, the marks, the validator and the records are real, on
 the suite's made-up mini corpus (board.jsonl: 8 posts, "forge pr claim" in 3 of them). The tests named after an attack
 (P…, S…) are the attacks that broke the earlier designs (r108-labelcite rounds 1 and 2)."""
 from __future__ import annotations
@@ -23,28 +23,20 @@ TITLE = f"label {NAME}"  # the label's heading in the checker's file, as the ter
 
 async def _apply(text: str, limit: int | None, name: str = NAME) -> dict:
     """A regex label of the board's posts, applied as main applies it (apply_label, a trial with a limit), which makes
-    no card, and its run waited for: {concept, cell}, the label's id and the id the check cites it by."""
+    the label's card, and its run waited for: {concept, cell, card}, the label's id, the id the check cites it by and
+    the id of the label's card, which the result names."""
     from app import concepts, tools
 
     args = {"scope": "files", "name": name, "predicate": {"kind": "regex", "text": text}, "values": ["yes", "no"],
             "paths": ["board.jsonl"], **({"limit": limit} if limit else {})}
     r = await tools.call(CORPUS, "apply_label", args)
-    assert not r.is_error and "card:" not in r.text, r.text
-    kid = concepts.find_concept(config.workspace_dir(CORPUS), name)["id"]
-    await concepts.wait_apply(CORPUS, kid, 60)
-    return {"concept": kid, "cell": marks.LABEL_PLACE + kid}
-
-
-def _older_card(kid: str, title: str = "Which posts claim a PR?") -> str:
-    """A label card of label `kid`, as an older thimble made one when it applied the label; its id."""
-    from app import notebook
-
+    assert not r.is_error, r.text
     ws = config.workspace_dir(CORPUS)
-    nb = notebook.create_notebook(ws, "older", role="exploration")
-    cell = notebook.new_cell("label", "main", title, nb["id"], payload={"concept": kid})
-    nb["cells"].append(cell)
-    notebook.write_notebook(ws, nb)
-    return cell["id"]
+    kid = concepts.find_concept(ws, name)["id"]
+    ((_, card),) = concepts._label_cards(ws, kid)
+    assert f"The label's card is [[card:{card['id']}]]" in r.text, r.text
+    await concepts.wait_apply(CORPUS, kid, 60)
+    return {"concept": kid, "cell": marks.LABEL_PLACE + kid, "card": card["id"]}
 
 
 def _newest(kid: str) -> dict:
@@ -382,11 +374,11 @@ def test_p8_a_version_of_a_card_that_keeps_none_names_no_place_and_the_checker_s
     assert (m["status"], m["reason"]) == ("failed", "The card has no version 1."), m
 
 
-@pytest.mark.parametrize("older", [False, True])
-def test_a_takeaway_citing_a_label_is_read_at_its_check_and_its_repair_at_that_same_time(_fresh, monkeypatch, older):
+@pytest.mark.parametrize("own", [False, True])
+def test_a_takeaway_citing_a_label_is_read_at_its_check_and_its_repair_at_that_same_time(_fresh, monkeypatch, own):
     """A card's takeaway is checked as its write lands, against the label as it was then; a repair of it later reads
-    the label at that same time, whatever ran since. The takeaway is a card's that cites the label's places, or, from
-    an older thimble, the takeaway of the label's own card, which cites that card's places."""
+    the label at that same time, whatever ran since. The takeaway is a card's that cites the label's places, or the
+    takeaway of the label's own card, which cites that card's places."""
     from app import notebook
     from test_marks import TABLE
 
@@ -394,8 +386,8 @@ def test_a_takeaway_citing_a_label_is_read_at_its_check_and_its_repair_at_that_s
     kid = s["concept"]
     trial = _newest(kid)
     yes, n = trial["counts"].get("yes", 0), trial["n"]
-    card = _older_card(kid) if older else _seed_card("", [TABLE])
-    cited = card if older else s["cell"]
+    card = s["card"] if own else _seed_card("", [TABLE])
+    cited = card if own else s["cell"]
     notebook.edit_cell(CORPUS, card, takeaway=f"[{yes} of the {n}](#) posts in the trial claim a PR.")
     _main_at(monkeypatch, "cut-1")
     refs = [_place(cited, "yes"), _place(cited, "all")]
@@ -429,19 +421,18 @@ def test_a_takeaway_citing_a_label_is_read_at_its_check_and_its_repair_at_that_s
     assert m["status"] == "verified" and (m["evidence"]["card"], m["evidence"]["version"]) == (cited, trial["v"]), m
 
 
-def test_an_older_thimble_s_label_card_reads_its_label_s_versions_and_the_check_lists_the_label_once(_fresh, monkeypatch):
-    """A label card an older thimble made keeps working: a citation of its places reads its label's versions, as the
-    label was when the words were written or an earlier one by `@v<n>`, judged as the label's own places are, so a
-    false count by the card fails, and so does the card's trial beside the label as it is now. The checker's file lists
-    the label once, by its own id, and not the card: the card adds no second set of versions."""
+def test_the_label_s_card_reads_its_label_s_versions_and_the_check_lists_the_label_once(_fresh, monkeypatch):
+    """The label's card, which apply_label made: a citation of its places reads its label's versions, as the label was
+    when the words were written or an earlier one by `@v<n>`, judged as the label's own places are, so a false count by
+    the card fails, and so does the card's trial beside the label as it is now. The checker's file lists the label
+    once, by its own id, and not the card: the card adds no second set of versions."""
     async def go():
         s = await _apply("forge pr claim", 4)
         trial = _newest(s["concept"])
         await _apply("(?i)claim", None)
         return s, trial
     s, trial = asyncio.run(go())
-    kid, place = s["concept"], s["cell"]
-    old = _older_card(kid)
+    kid, place, old = s["concept"], s["cell"], s["card"]
     full = _newest(kid)
     _main_at(monkeypatch, None)  # no repair: what the first check found stands
     yes, n = trial["counts"]["yes"], trial["n"]
@@ -546,9 +537,9 @@ async def test_a_card_s_code_can_neither_read_nor_write_the_versions(wrap, _fres
 def test_a_cell_written_with_a_label_s_id_or_a_label_card_s_adds_no_other_versions_under_it(_fresh, monkeypatch):
     """Cells written into the canvas's files (a card's code can write those files) with a label's id in the check, a
     table that claims other counts and a label card of another label, add nothing under the label: no card's id is a
-    label's. One written with the id of a label card an older thimble made, showing another label, leaves that card
-    read once, by the first cell of its id, so the versions under it are one label's, never two labels' mixed into a
-    history neither had."""
+    label's. One written with the id of the label's card, showing another label, leaves that card read once, by the
+    first cell of its id, so the versions under it are one label's, never two labels' mixed into a history neither
+    had."""
     from app import notebook
     from test_marks import TABLE
 
@@ -557,7 +548,7 @@ def test_a_cell_written_with_a_label_s_id_or_a_label_card_s_adds_no_other_versio
         b = await _apply("(?i)review", None, name="asks for a review")
         return a, b
     a, b = asyncio.run(two())
-    old = _older_card(a["concept"])
+    old = a["card"]
     ws = config.workspace_dir(CORPUS)
     nb = notebook.create_notebook(ws, "planted", role="exploration")
     table = {**notebook.new_cell("code", "run", "planted", nb["id"], code="print()"), "id": a["cell"], "status": "ok",
