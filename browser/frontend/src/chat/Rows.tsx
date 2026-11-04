@@ -8,7 +8,7 @@
 // chat a check's comments on an answer tint their passages; a click on one, or Go to it on `answer:<turn>#s<n>`, opens
 // the comment as the canvas's comment card in a popover beside the passage (chat/answerComments.ts, AnswerComment.tsx).
 // Each of the analyst's messages in main's current chat has Rewind in its left margin, which asks first under the message
-// (chat/rewind.ts).
+// (chat/rewind.ts); `/rewind` lists the same messages to pick from (RewindPicker).
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -39,6 +39,7 @@ import { AgentCard, OrientLanding, openLabel } from './AgentCard'
 import { ApiErrorCard } from './ApiError'
 import { HandedBack } from './HandBack'
 import { NoticeRow } from './Notice'
+import { REWIND_EFFECT } from './rewind'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { autoModeRefusal } from './permissions'
@@ -168,7 +169,7 @@ function RewindAsk({ event, rewind }: { event: string; rewind: RewindHooks }) {
   }
   return (
     <div className="chat-rewind-ask" role="group" aria-label="Rewind to here">
-      <span className="chat-rewind-ask-text">Rewind to before this message? Claude forgets it and everything after it, and your words go back in the box. Files and cards stay as they are.</span>
+      <span className="chat-rewind-ask-text">Rewind to before this message? {REWIND_EFFECT}</span>
       <span className="chat-rewind-ask-actions">
         <Button variant="secondary" size="sm" onClick={() => rewind.ask(null)}>
           Cancel

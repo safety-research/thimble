@@ -1712,6 +1712,89 @@ button.chat-strip-head:hover {
   overflow: hidden;
   color: var(--text-tertiary);
 }
+/* the messages `/rewind` lists (chat/RewindPicker.tsx), in the list of commands' place over the composer: the line that
+   says what a rewind does, a hairline, then one row per message, newest first, its first words on one line and its time
+   at the right; the rows scroll under the line. Square corners, 2 px at most */
+.chat-rewind-pick {
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  bottom: calc(100% + 6px);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  max-height: min(320px, 50vh);
+  padding: 4px;
+  border-radius: 2px;
+  background: var(--overlay-bg);
+  border: var(--overlay-edge);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  animation: dialog-in var(--dur-base) var(--ease-out);
+}
+.chat-rewind-pick-head {
+  flex: none;
+  margin: 0 0 4px;
+  padding: 5px 8px 8px;
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--text-tertiary);
+}
+.chat-rewind-pick-question {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+/* the list has the keys' focus while it is open, and its active row shows where they are, so it draws no focus edge */
+.chat-rewind-pick-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.chat-rewind-pick-list:focus-visible {
+  box-shadow: none;
+}
+.chat-rewind-choice {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: var(--h-row);
+  padding: 0 8px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+/* the active row is the selected one; the newer messages above it, which a rewind to it takes back too, take a lighter
+   step of the same ink, so the rows from the top down to it read as one band */
+.chat-rewind-choice.active {
+  background: var(--surface-selected);
+}
+.chat-rewind-choice[data-after] {
+  border-radius: 0;
+  background: var(--surface-tonal);
+}
+.chat-rewind-pick-list[aria-busy='true'] .chat-rewind-choice {
+  cursor: default;
+}
+.chat-rewind-choice-words {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* a chip in a message's words is part of its row, which takes the pointer */
+.chat-rewind-choice-words * {
+  pointer-events: none;
+}
+.chat-rewind-choice > .time,
+.chat-rewind-choice > .spinner {
+  flex: none;
+}
 
 /* a wide chat keeps a reading measure */
 @container (min-width: 720px) {
