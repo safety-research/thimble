@@ -1295,11 +1295,20 @@ def find_loose(sub: str, text: str) -> list[int] | None:
     return [m.start(), m.end()] if m else None
 
 
+def _real(path: str) -> str | None:
+    """The real path of `path`, or None when a link on its way went away while it was read: Python 3.12's realpath
+    raises then, and code a card runs may swap links in the temp folder while a check runs."""
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return None
+
+
 def inside(path: str, folders: list[str]) -> bool:
     """The absolute path lies inside one of the folders, compared by real paths: a link inside a folder to a file
-    outside it is outside."""
-    real = os.path.realpath(path)
-    return any(real == r or real.startswith(r + os.sep) for r in map(os.path.realpath, folders))
+    outside it is outside, and so is a path whose real path cannot be read now (_real)."""
+    real = _real(path)
+    return real is not None and any(real == r or real.startswith(r + os.sep) for r in map(_real, folders) if r)
 
 
 def open_inside(path: str, folders: list[str]) -> int | None:
@@ -1312,9 +1321,9 @@ def open_inside(path: str, folders: list[str]) -> int | None:
 
     # a folder on the way is opened only to go through it (O_PATH where there is one), as an open by path needs
     passing = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
-    real = os.path.realpath(path)
-    for top in map(os.path.realpath, folders):
-        if not real.startswith(top + os.sep):
+    real = _real(path)
+    for top in map(_real, folders):
+        if real is None or top is None or not real.startswith(top + os.sep):
             continue
         *parts, name = real[len(top) + 1:].split(os.sep)
         at = got = -1
@@ -1434,10 +1443,10 @@ def file_named(path: str, folders: list[str]) -> str | None:
         return None
     full = os.path.abspath(path)
     for real in (False, True):
-        p = os.path.realpath(full) if real else full
+        p = _real(full) if real else full
         for f in folders:
-            d = os.path.realpath(f) if real else os.path.abspath(f)
-            if d == os.sep:
+            d = _real(f) if real else os.path.abspath(f)
+            if p is None or d is None or d == os.sep:
                 continue
             if p == d:
                 return os.path.basename(d)
