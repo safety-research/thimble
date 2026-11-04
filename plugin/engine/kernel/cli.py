@@ -20,6 +20,7 @@ In a shell:
     thimble doctor                 a checklist of what works, with the fix for each problem
     thimble --version              the version of the thimble that runs (its commit, between releases)
 
+A thimble fix command with N takes several numbers too: thimble fix remove 3 4 5.
 In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
 
 Claude runs these in a session:
@@ -572,6 +573,9 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
     thimble fix remove N             fix N leaves your list (off first, when it is on)
     thimble fix export N [--to DIR]  save fix N as files: its patch (git am applies it) and its record
+
+A verb with N takes several numbers too: thimble fix remove 3 4 5. A number that names no fix stops it before it does
+anything; then it goes on past a fix that fails, and names each one that did.
 
 Fixes act across your sessions, so they are listed and managed here, in a shell. Ask for a fix in Claude Code or the
 browser: /thimble-fix <what should work differently>. A fix goes on only by your key: y on the fix's line in thimble,

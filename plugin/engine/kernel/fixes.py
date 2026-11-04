@@ -93,10 +93,12 @@ pushed, with {login} and {name}).
 """
 from __future__ import annotations
 
+import argparse
 import contextlib
 import fnmatch
 import getpass
 import hashlib
+import io
 import json
 import os
 import platform
@@ -4643,11 +4645,71 @@ def send(fid: int | str, answer: str, secret: str | None) -> dict[str, Any]:
 # ------------------------------------------------------------------ the kernel's command
 
 
+# the person's verbs that take several fixes: thimble fix remove 3 4 5
+MANY = ("show", "diff", "export", "off", "on", "apply", "remove")
+
+
+def _each(a, ids: list[str]) -> int:
+    """thimble fix VERB N N...: every number checked first, so a typo changes nothing; then VERB on each fix in turn,
+    going on past one that fails, and 1 when any failed."""
+    from .cli import out_json  # noqa: PLC0415
+
+    bad = []
+    for i in ids:
+        try:
+            get(i)
+        except FixError as e:
+            bad.append(str(e))
+    if bad:
+        for e in bad:
+            print(f"thimble fix {a.verb}: {e}", file=sys.stderr)
+        print(f"thimble fix {a.verb}: nothing done", file=sys.stderr)
+        return 1
+    failed, reloads, out = [], [], []
+    as_json = a.json and a.verb in ("show", "remove")  # the verbs whose --json is a record: one JSON list of them
+    todo = list(dict.fromkeys(get(i)["id"] for i in ids))
+    for n, fid in enumerate(todo):
+        one = argparse.Namespace(**{**vars(a), "id": str(fid), "hit": None, "more": [], "reloads": reloads})
+        if n and a.verb == "show" and not as_json:
+            print()
+        if as_json:
+            with contextlib.redirect_stdout(io.StringIO()) as buf:
+                rc = cmd(one)
+            if not rc:
+                out.append(json.loads(buf.getvalue()))
+        else:
+            rc = cmd(one)
+        if rc:
+            failed.append(str(fid))
+    if as_json:
+        out_json(out)
+    if reloads:
+        print(RELOAD)
+    if failed:
+        print(f"thimble fix {a.verb}: {len(failed)} of {len(todo)} failed (fix{'es' if len(failed) > 1 else ''} "
+              f"{_and(failed)})", file=sys.stderr)
+    return 1 if failed else 0
+
+
+def _reload(a, r: dict[str, Any]) -> None:
+    """The line that says to reload, once for several fixes (_each)."""
+    if not r.get("reload"):
+        return
+    if getattr(a, "reloads", None) is None:
+        print(RELOAD)
+    else:
+        a.reloads.append(True)
+
+
 def cmd(a) -> int:
     """thimble fix VERB: see cli.py FIX_HELP."""
     from .cli import out_json, stdin_text  # noqa: PLC0415
 
     verb = a.verb
+    ids = [x for x in (a.id, a.hit, *(a.more or [])) if x]
+    if verb in MANY and len(ids) > 1:
+        return _each(a, ids)
+    many = getattr(a, "reloads", None) is not None
     try:
         if verb == "list":
             if a.json:
@@ -4667,8 +4729,7 @@ def cmd(a) -> int:
         elif verb == "off":
             r = one_off(a.id) if a.id else all_off()
             print(r.get("said", ""))
-            if r.get("reload"):
-                print(RELOAD)
+            _reload(a, r)
         elif verb == "update":
             return cmd_update(a)
         elif verb == "carry":
@@ -4681,8 +4742,7 @@ def cmd(a) -> int:
         elif verb == "on":
             r = one_on(a.id) if a.id else all_on()
             print(r.get("said", ""))
-            if r.get("reload"):
-                print(RELOAD)
+            _reload(a, r)
         elif verb == "new":
             out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.session, a.asked))
         elif verb == "round":
@@ -4705,7 +4765,6 @@ def cmd(a) -> int:
                 print(f"✓ {r['title']} is on. In Claude Code, type /reload-plugins; restart thimble-browser." if r
                       else "Not applied; thimble fix apply asks again whenever you want.")
         elif verb == "merge":
-            ids = [x for x in (a.id, a.hit, *(a.more or [])) if x]
             if a.ask == "-":
                 out_json(merge(ids, stdin_text()))
             else:
@@ -4719,16 +4778,15 @@ def cmd(a) -> int:
             out_json(redo(a.id, stdin_text() or a.words or "", a.session))
         elif verb in ("undo", "remove"):
             r = undo(a.id) if verb == "undo" else remove(a.id)
-            # the plugin's keys read JSON; a person in a terminal reads a sentence
-            if a.json or not sys.stdout.isatty():
+            # the plugin's keys read JSON (one fix); a person in a terminal reads a sentence
+            if a.json or not (many or sys.stdout.isatty()):
                 out_json(r)
             else:
                 f = get(a.id) if verb == "undo" else None
                 print(f"Removed fix {r['id']}, “{r['title']}”." if verb == "remove" else
                       f"Fix {r['id']}, “{r['title']}”, is back to its version before." if f and f.get("state") == "on" else
                       f"Fix {r['id']}, “{r['title']}”, is off; thimble fix on {r['id']} turns it back on.")
-                if r.get("reload"):
-                    print(RELOAD)
+                _reload(a, r)
         elif verb == "sandbox":
             # the fixer's own shell: it may reach the package registries; the tests it runs reach nothing
             out_json(sandbox_argv(int(a.id), net=True))
@@ -4744,7 +4802,7 @@ def cmd(a) -> int:
         else:
             raise FixError(f"no verb {verb}")
     except FixError as e:
-        print(f"thimble fix {verb}: {e}", file=sys.stderr)
+        print(f"thimble fix {verb}{f' {a.id}' if many else ''}: {e}", file=sys.stderr)
         return 1
     return 0
 
