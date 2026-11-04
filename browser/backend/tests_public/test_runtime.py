@@ -333,6 +333,120 @@ async def test_a_headless_session_s_bash_sandbox_gets_a_short_tmpdir_and_fails_c
     assert Path(opts.cwd).is_relative_to(data_tmp), "the test's own copy of the corpus"
 
 
+class BackgroundCLI:
+    """A headless `claude` whose first turn runs a Bash command in the background: a real process, which lives until the
+    session closes, as Claude Code kills its background commands as it exits. `ends` makes the command end between the
+    turns, which Claude Code answers with a turn of its own before it echoes the next prompt."""
+
+    def __init__(self, options: Any, made: list["BackgroundCLI"], ends: bool) -> None:
+        self.options, self.ends, self.jobs, self.closed = options, ends, [], False
+        self.prompts: asyncio.Queue = asyncio.Queue()
+        self.stream: Any = None
+        made.append(self)
+
+    async def __aenter__(self) -> "BackgroundCLI":
+        return self
+
+    async def __aexit__(self, *a: Any) -> None:
+        self.closed = True
+        for p in self.jobs:
+            p.kill()
+            p.wait()
+
+    async def query(self, prompt: Any) -> None:
+        if isinstance(prompt, str):
+            await self.prompts.put({"message": {"content": prompt}})
+            return
+        async for m in prompt:
+            await self.prompts.put(m)
+
+    async def play(self):  # noqa: ANN201
+        import subprocess
+
+        from claude_agent_sdk import (AssistantMessage, ResultMessage, SystemMessage, TextBlock, ToolResultBlock,
+                                      ToolUseBlock, UserMessage)
+
+        def done() -> ResultMessage:
+            return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                                 session_id="sess-bg")
+
+        await self.prompts.get()
+        yield SystemMessage(subtype="init", data={"session_id": "sess-bg"})
+        yield AssistantMessage(content=[ToolUseBlock(id="toolu_bg", name="Bash", input={
+            "command": "sleep 600", "run_in_background": True})], model="claude-opus-5-5")
+        self.jobs.append(subprocess.Popen(["sleep", "600"], start_new_session=True))
+        yield SystemMessage(subtype="background_tasks_changed",
+                            data={"tasks": [{"task_id": "b1", "task_type": "local_bash"}]})
+        yield UserMessage(content=[ToolResultBlock(tool_use_id="toolu_bg", content="Command running in background")])
+        yield AssistantMessage(content=[TextBlock(text="The job runs.")], model="claude-opus-5-5")
+        yield done()
+        while True:
+            sent = await self.prompts.get()
+            if self.ends:  # the command ended while no turn ran: Claude Code's own turn, before it reads the prompt
+                self.jobs.pop().kill()
+                yield SystemMessage(subtype="background_tasks_changed", data={"tasks": []})
+                yield AssistantMessage(content=[TextBlock(text="The job ended.")], model="claude-opus-5-5")
+                yield done()
+                self.ends = False
+            yield UserMessage(content=sent["message"]["content"], uuid=sent.get("uuid"))  # replay-user-messages
+            yield AssistantMessage(content=[TextBlock(text="Still here.")], model="claude-opus-5-5")
+            yield done()
+
+    async def receive_response(self):  # noqa: ANN201
+        from claude_agent_sdk import ResultMessage
+
+        self.stream = self.stream or self.play()
+        async for m in self.stream:
+            yield m
+            if isinstance(m, ResultMessage):
+                return
+
+
+def background_cli(monkeypatch, ends: bool = False) -> list[BackgroundCLI]:
+    import claude_agent_sdk as sdk_mod
+
+    made: list[BackgroundCLI] = []
+    fake_sdk(monkeypatch, [], {})
+    monkeypatch.setattr(sdk_mod, "ClaudeSDKClient", lambda options: BackgroundCLI(options, made, ends))
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    return made
+
+
+@pytest.mark.parametrize("how", ["a new session", "a new chat", "the server's stop"])
+async def test_a_command_main_s_bash_runs_in_the_background_outlives_the_turn_until_main_s_session_ends(on, monkeypatch,
+                                                                                                       how):
+    """Claude Code kills the commands Bash ran in the background (`run_in_background`) as it exits, so main's session
+    stays open past the turn while one runs, and main's next turn goes on in it; once main's session truly ends (the
+    workspace moved aside for a new session, a new chat, the server's stop) it closes, and the command ends with it."""
+    made = background_cli(monkeypatch)
+    await main_turn("Start the long job.")
+    job = made[0].jobs[0]
+    assert job.poll() is None and not made[0].closed, "the background command outlives main's turn"
+    await main_turn("Is it still running?")
+    assert len(made) == 1 and job.poll() is None, "main's next turn goes on in the same session"
+    assert [t for k, t in shape(main_records()) if k == "text"][-1] == "Still here."
+    if how == "a new session":
+        await runtime.forget(CORPUS)
+    elif how == "a new chat":
+        await runtime._spaces[CORPUS].switch(None)
+    else:
+        await runtime.stop_all()
+    assert made[0].closed and job.poll() is not None, f"{how} ends main's session and its background command"
+
+
+async def test_main_s_next_turn_reads_the_turn_claude_code_ran_when_its_background_command_ended_first(on, monkeypatch):
+    """A background command that ends between main's turns gets a turn of Claude Code's own: main's next turn shows it,
+    goes on to its own reply (after the session echoed its prompt), and with no command left running the session
+    closes when the turn ends."""
+    made = background_cli(monkeypatch, ends=True)
+    await main_turn("Start a short job.")
+    assert runtime._spaces[CORPUS].main.cc is not None
+    await main_turn("Did it finish?")
+    texts = [t for k, t in shape(main_records()) if k == "text"]
+    assert texts[-2:] == ["The job ended.", "Still here."]
+    assert made[0].closed and runtime._spaces[CORPUS].main.cc is None, "no command runs, so the session closed"
+
+
 # bubblewrap on a host that lets it make its own namespaces but refuses the user namespace the sandbox's seccomp helper
 # makes inside them (as Ubuntu's AppArmor profile for bwrap can): bwrap's --disable-userns refuses it the same way
 NESTED_USERNS_REFUSED = """#!/bin/sh

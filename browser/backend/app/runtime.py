@@ -232,6 +232,7 @@ class Conv:
     last_text: str = ""
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
     switched: str | None = None  # the model Claude's safeguards answer this conversation on instead (switches)
+    cc: Any = None  # its Claude Code session, open past its turn while a background command runs (runtime_cc.Held)
 
     @property
     def c(self) -> str:
@@ -438,10 +439,13 @@ class Space:
         if sid == self.sid or (sid is None and not _chat_of(self.main_path)["turns"]):
             self.attach()
             return False
+        from . import runtime_cc  # noqa: PLC0415
+
         self.drop_waiting()
         self.carried.clear()  # a rewind goes back only within main's chat now (rewind_main)
         if self.main.running:
             await _cancel(self.main.task)
+        await runtime_cc.close(self.main)
         self.sid = sid or str(uuid.uuid4())
         nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         self.main = self._main_conv()
@@ -808,6 +812,8 @@ async def forget(c: str) -> None:
     (Space.drop_waiting), its conversations' running turns stop, awaited, so none writes into the folder that takes its
     place, and its runtime is dropped, so the next ensure reads that folder (a new session's empty one, or a session
     brought back)."""
+    from . import runtime_cc  # noqa: PLC0415
+
     sp = _spaces.pop(c, None)
     if sp is None:
         return
@@ -816,6 +822,7 @@ async def forget(c: str) -> None:
         if conv.running:
             conv.queue.clear()
             await _cancel(conv.task)
+        await runtime_cc.close(conv)
 
 
 def ensure_soon(c: str) -> None:
@@ -849,12 +856,13 @@ async def _engine_turn(conv: Conv, text: str) -> TurnEnd:
     notes = conv.take_notes()
     if notes:
         text = "\n".join([NOTES_HEAD, *notes, "", text])
+    from . import runtime_cc  # noqa: PLC0415
+
     if kind == "api":
         from . import runtime_api  # noqa: PLC0415
 
+        await runtime_cc.close(conv)  # the Claude Code session kept open for it, if any, ends
         return await runtime_api.turn(conv, text)
-    from . import runtime_cc  # noqa: PLC0415
-
     return await runtime_cc.turn(conv, text)
 
 
@@ -1226,7 +1234,7 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
     cannot be changed, the turn stays stopped, as after a Stop. A request cancelled while main's turn stops does no
     more than a Stop. Once the cut is made, a step after it that fails is logged, and the words come back all the
     same."""
-    from . import agents, fixes, session  # noqa: PLC0415
+    from . import agents, fixes, runtime_cc, session  # noqa: PLC0415
 
     sp = ensure(c)
     records = agents.read_events(agents.paths(c, agents.MAIN_ID)[1])
@@ -1254,6 +1262,7 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
         except RewindRefused:
             after_stop(c)  # the turn stopped all the same: what waited for it is main's next turn, as after a Stop
             raise
+    await runtime_cc.close(sp.main)  # a session kept open goes too, so main's next turn resumes at the cut
     try:
         for path, held, save in plan:
             if held is None:
@@ -1484,6 +1493,10 @@ async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
         if late:
             log.warning("%d agent(s) did not stop within %g s", len(late), wait_s)
         log.info("the server stops: stopped %s", ", ".join(i for i, _ in stopping))
+    from . import runtime_cc  # noqa: PLC0415
+
+    # the sessions kept open for a background command close, and the commands with them
+    await asyncio.gather(*(runtime_cc.close(conv) for sp in _spaces.values() for conv in [sp.main, *sp.convs.values()]))
     for c in mains:  # main's turn ends with a note, as the Stop button ends it (agents.interrupt_route)
         with contextlib.suppress(Exception):
             session.turn_stopped(c, stopped=True, text=session.QUIT_TEXT)

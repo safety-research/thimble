@@ -43,6 +43,14 @@ The agent's own files stay in the workspace (Spec.home), as before.
 Claude Code's sandbox makes an empty .claude/.cc-writes/ folder in the session's working folder (the corpus) when it
 starts, and no setting moves it, so the last session of a corpus to end removes that folder, and .claude/ when the
 sandbox made it, when they are still empty (_tidy).
+
+Background commands. A command Bash runs in the background (`run_in_background`) lives as long as its session's
+`claude`, which kills it as it exits. So main's session stays open after a turn while such a command runs
+(background_tasks_changed), and main's next turn goes on in it, as the next prompt in a terminal would (Held); it closes
+when a turn ends with none running, when main's settings for a turn change, and when main's session truly ends: a Stop
+or a failure, a new chat, a rewind, the workspace's folder going, another way to reach Claude, the server's stop
+(close). Claude Code runs a turn of its own when such a command ends; main's next turn reads that turn first, and ends
+only at the result after Claude Code echoed its own prompt.
 """
 from __future__ import annotations
 
@@ -57,6 +65,7 @@ import secrets
 import tempfile
 import uuid
 import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -93,6 +102,35 @@ REFUSED = ("Permission to use {tool} has been denied because Claude Code is runn
            "you were trying to do and why you need this permission. Let the user decide how to proceed.")
 _open: dict[str, int] = {}  # the sessions running in each working folder (_enter, _tidy)
 _had_claude: dict[str, bool] = {}  # whether .claude/ was in that folder when its first session started
+
+
+@dataclass
+class Held:
+    """Main's session, open past its turn while a command it ran in the background runs (module note)."""
+    spec: Any  # the turn's Spec: a turn with another opens a new session
+    client: Any
+    stack: contextlib.AsyncExitStack
+    tasks: list[Any] = field(default_factory=list)  # its background tasks that run (background_tasks_changed)
+    ended: Any = None  # what goes once it closes: its TMPDIR, and the sandbox's folder in the corpus (turn)
+
+    async def close(self) -> None:
+        try:
+            await self.stack.aclose()  # the SDK's close: `claude` exits, and its background commands with it
+        finally:
+            if self.ended is not None:
+                self.ended()
+
+
+async def close(conv: Any) -> None:
+    """`conv`'s session that stayed open after its turn (Held) closes; nothing when none did. Never raises."""
+    held = getattr(conv, "cc", None)
+    if held is None:
+        return
+    conv.cc = None
+    try:
+        await held.close()
+    except Exception:  # noqa: BLE001
+        log.warning("%s: %s's Claude Code session did not close cleanly", conv.c, conv.id, exc_info=True)
 
 
 def _load(path: Any) -> dict[str, Any]:
@@ -461,18 +499,30 @@ async def turn(conv: Any, text: str) -> Any:
     """One turn of `conv` on `text` in a session with a short TMPDIR (module note): the workspace's own for main and its
     thread forks (Spec.temp), which stays; any other agent's own, removed when the turn ends."""
     spec = conv.spec()
+    held = getattr(conv, "cc", None)
+    if held is not None and held.spec == spec:
+        return await _session(conv, spec, text, None)  # the session open since its last turn (module note)
+    await close(conv)
     pending: dict[str, list[str]] = {}
     kept = workspace_tmp(conv.c) if spec.temp is not None else None
     tmp = kept or short_tmp()
     if tmp is None:
         log.warning("%s: no short TMPDIR for %s's session; its sandbox may not start", conv.c, conv.id)
     _enter(spec.cwd)
-    try:
-        return await _session(conv, spec, text, options(conv, spec, pending, tmp))
-    finally:
+
+    def ended() -> None:
         if tmp is not None and tmp != kept:
             nofollow.rmtree(tmp, root=tmp.parent, ignore_errors=True)  # the session's Bash wrote it: no link followed
         _tidy(spec.cwd)
+
+    try:
+        return await _session(conv, spec, text, options(conv, spec, pending, tmp))
+    finally:
+        held = getattr(conv, "cc", None)
+        if held is None:
+            ended()
+        else:
+            held.ended = ended  # once it closes
 
 
 def _box_failure(results: list[dict[str, Any]]) -> str:
@@ -530,6 +580,7 @@ async def _message(text: str, uid: str) -> Any:
 
 
 async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
+    """One turn in a new session on `opts`, or, with none, in `conv`'s session open since its last turn (Held)."""
     from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage, SystemMessage, UserMessage  # noqa: PLC0415
 
     from . import runtime  # noqa: PLC0415
@@ -539,6 +590,9 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     bash_ids: set[str] = set()
     handed: dict[str, str] = {}  # by uuid, main's messages handed to the session (_hand) that it has not read yet
     closing = asyncio.Event()
+    # in a session kept open, this turn's prompt, by its uuid, until the session echoes it: a result before that ends a
+    # turn Claude Code ran of its own (module note)
+    prompt: str | None = None
 
     def results(rs: list[dict[str, Any]]) -> None:
         nonlocal box, ran
@@ -547,18 +601,30 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
         box = box or _box_failure(mine)
         ran = ran or any(not _box_failure([r]) for r in mine)
 
-    async with ClaudeSDKClient(opts) as client:
-        await client.query(text)
+    held, conv.cc = getattr(conv, "cc", None), None
+    if held is None:
+        stack = contextlib.AsyncExitStack()
+        held = Held(spec, await stack.enter_async_context(ClaudeSDKClient(opts)), stack)
+    keep = False
+    try:
+        client = held.client
+        if held.tasks:
+            prompt = str(uuid.uuid4())
+            await client.query(_message(text, prompt))
+        else:
+            await client.query(text)
         hand = asyncio.create_task(_hand(conv, client, handed, closing)) if conv.kind == "main" else None
         try:
             # the session's reply; then, while a message handed to it is not read yet, its next turn, which reads it
             while True:
-                ended = False
+                ended = own = False
                 async for msg in client.receive_response():
                     if isinstance(msg, SystemMessage) and msg.subtype == "init":
                         sid = (msg.data or {}).get("session_id")
                         if sid:
                             _save(path, {"session_id": sid})
+                    elif isinstance(msg, SystemMessage) and msg.subtype == "background_tasks_changed":
+                        held.tasks = list((msg.data or {}).get("tasks") or [])
                     elif isinstance(msg, AssistantMessage):
                         if getattr(msg, "parent_tool_use_id", None):
                             continue
@@ -569,9 +635,12 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                         results([r for r in (_result(x) for x in msg.content) if r is not None])
                         said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
                         reply = said or reply
-                        if msg.error:
+                        if msg.error and prompt is None:
                             failed = str(msg.error)
                     elif isinstance(msg, UserMessage):
+                        if prompt is not None and getattr(msg, "uuid", None) == prompt:
+                            prompt = None
+                            continue
                         if getattr(msg, "uuid", None) in handed:  # the session read a message handed to it
                             conv.heard(handed.pop(str(msg.uuid)))
                             continue
@@ -579,11 +648,16 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                             continue
                         results([r for r in (_result(x) for x in msg.content) if r is not None])
                     elif isinstance(msg, ResultMessage):
-                        ended = True
                         if msg.session_id:
                             _save(path, {"session_id": msg.session_id})
+                        if prompt is not None:  # a turn of Claude Code's own: this one's comes after it
+                            own = True
+                            continue
+                        ended = True
                         if msg.is_error and not failed:
                             failed = str(msg.result or msg.subtype or "the Claude Code session failed")
+                if own:
+                    continue
                 if not ended or failed:
                     break
                 if not handed and hand is not None:  # nothing more is handed on: what comes waits for main's next turn
@@ -599,6 +673,12 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                 hand.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await hand
+        keep = ended and not failed and bool(held.tasks) and conv.kind == "main"
+    finally:
+        if keep:
+            conv.cc = held
+        else:
+            await held.close()
     if box or ran:
         _tell_box(conv, box)
     if failed:
