@@ -30,6 +30,21 @@
     ["request to https://api.example.com/v1/messages failed", "request to https://api.example.com/v1/messages failed"],
     ["no such file: sessions/session-P09.jsonl", "no such file: sessions/session-P09.jsonl"],
     ["and/or 1/2 TCP/IP node:internal/modules/cjs/loader:1228", "and/or 1/2 TCP/IP node:internal/modules/cjs/loader:1228"],
-    ["the command ran past its time limit", "the command ran past its time limit"]
+    ["the command ran past its time limit", "the command ran past its time limit"],
+    ["Command 'claude --settings={home}/.claude/settings.json' returned non-zero exit status 1.", "Command 'claude --settings=settings.json' returned non-zero exit status 1."],
+    ["hook refused: file={home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl", "hook refused: file=f00dcafe.jsonl"],
+    ["cc -I{home}/include -L{home}/lib x.c", "cc -Iinclude -Llib x.c"],
+    ["x|{home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl", "x|f00dcafe.jsonl"],
+    ["a&{home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl", "a&f00dcafe.jsonl"],
+    ["{{home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl}", "{f00dcafe.jsonl}"],
+    ["{\"cwd\":\"{home}\\/.thimble-browser\\/workspaces\\/quillbook\\/chats\\/f00dcafe.jsonl\"}", "{\"cwd\":\"f00dcafe.jsonl\"}"],
+    ["error\\n{home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl", "error\\nf00dcafe.jsonl"],
+    ["cannot read ‘{home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl’", "cannot read ‘f00dcafe.jsonl’"],
+    ["cannot read “{home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl”", "cannot read “f00dcafe.jsonl”"],
+    ["cannot read «{home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl»", "cannot read «f00dcafe.jsonl»"],
+    ["open \u202e{home}/.thimble-browser/workspaces/quillbook/chats/f00dcafe.jsonl", "open \u202ef00dcafe.jsonl"],
+    ["open vscode://file{root}/notes.md", "open notes.md"],
+    ["open {home}", "open ~"],
+    ["open ${HOME}/.thimble/runs/run.log: no such file", "open run.log: no such file"]
   ]
 }

@@ -31,13 +31,13 @@ and a caller line it wrote would credit its call to an agent. The folder is boun
 file whole, and Linux takes a bind off a file that another mount namespace renames a new file over, so a read-only bind
 of the file itself held only until the server's first write, after which the cell could write the file.
 
-A write takes an exclusive flock on subagents.json.lock (LOCK, in the workspace folder itself), the lock module_bridge
-takes too before it writes the module's record, then one on subagents.json as it is, checks that the path still names
-the file it locked, and replaces the file whole (a temporary file renamed over it), so a reader never sees half a file
-and needs no lock. A lock that does not come within LOCK_WAIT_S (a process that holds it and never lets go) is given
-up, and the write goes on without it. LOCK is made with the other files and hidden from kernels
-(kernel_wrap.LOCK_FILES), so a cell can neither hold it nor replace it with a file of its own and take writers'
-exclusion away; nothing renames it, so its bind holds.
+A write takes an exclusive flock on subagents.json.lock (LOCK, in the workspace's locks folder, LOCKS), the lock
+module_bridge takes too before it writes the module's record, and replaces the file whole (a temporary file renamed
+over it), so a reader never sees half a file and needs no lock. A lock that does not come within LOCK_WAIT_S (a process
+that holds it and never lets go) is given up, and the write goes on without it. The locks folder is made with the
+other files and hidden from kernels (kernel_wrap.LOCKS_DIR), so a cell can neither hold LOCK nor replace it with a file
+of its own and take writers' exclusion away; a write takes no lock on subagents.json itself, which a kernel may read and
+so flock.
 
 Standard library only: the plugin's hooks (plugin/bin/.thimble-watch) import this module under `python -S`.
 """
@@ -63,7 +63,8 @@ MODULE_OUT = "module.json"  # in DIR, terminal mode: what the module writes, and
 BROWSER, TERMINAL = "browser", "terminal"  # the session's mode, launch.json's `mode` (session_mode)
 MODES = (BROWSER, TERMINAL)
 WS_ENV = "THIMBLE_WS"  # the workspace folder, which the launcher exports in terminal mode only
-LOCK = f"{STATE}.lock"  # the lock of subagents.json's writers, this module's and module_bridge's, in the workspace folder
+LOCKS = "locks"  # kernel_wrap.LOCKS_DIR: the workspace's folder of its lock files, which no kernel sees
+LOCK = f"{STATE}.lock"  # the lock of subagents.json's writers, this module's and module_bridge's, in LOCKS
 LOCK_WAIT_S = 2.0
 LOCK_POLL_S = 0.01
 CALLERS_KEEP_S = 3600.0
@@ -146,19 +147,20 @@ def launch_path(ws: Path) -> Path:
 
 
 def lock_path(ws: Path) -> Path:
-    return Path(ws) / LOCK
+    return Path(ws) / LOCKS / LOCK
 
 
 def ensure(ws: Path) -> None:
-    """The trusted folder (DIR), each of FILES in it and LOCK made, empty, in the workspace folder `ws` when missing
-    (module note); a link or a file in the folder's place goes first, since a kernel wrapper would bind a link's
-    target."""
+    """The trusted folder (DIR) with each of FILES in it, and the locks folder (LOCKS) with LOCK in it, made, empty, in
+    the workspace folder `ws` when missing (module note); a link or a file in a folder's place goes first, since a
+    kernel wrapper would bind a link's target."""
     d = trusted_dir(ws)
-    with contextlib.suppress(OSError):
-        if d.is_symlink() or (d.exists() and not d.is_dir()):
-            d.unlink()
-    with contextlib.suppress(OSError):
-        d.mkdir(mode=0o700, exist_ok=True)
+    for folder in (d, lock_path(ws).parent):
+        with contextlib.suppress(OSError):
+            if folder.is_symlink() or (folder.exists() and not folder.is_dir()):
+                folder.unlink()
+        with contextlib.suppress(OSError):
+            folder.mkdir(mode=0o700, exist_ok=True)
     for p in [*(d / name for name in FILES), lock_path(ws)]:
         if p.is_symlink():
             with contextlib.suppress(OSError):
@@ -216,25 +218,14 @@ def update(ws: Path, wait_s: float = LOCK_WAIT_S) -> Iterator[dict[str, Any]]:
     without an exception (module note)."""
     path = state_path(ws)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    end = time.monotonic() + wait_s
+    lock = lock_path(ws)
+    with contextlib.suppress(OSError):
+        lock.parent.mkdir(mode=0o700, exist_ok=True)
     try:
-        outer = os.open(lock_path(ws), os.O_RDONLY | os.O_CREAT, 0o600)
+        fd = os.open(lock, os.O_RDONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     except OSError:
-        outer = -1
-    if outer >= 0 and not _flock(outer, wait_s):
-        os.close(outer)
-        outer = -1
-    wait_s = max(0.0, end - time.monotonic())
-    fd = -1
-    for _ in range(8):  # the file a writer locked was replaced meanwhile: lock the new one
-        fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o600)
-        locked = _flock(fd, wait_s)
-        try:
-            same = os.fstat(fd).st_ino == os.stat(path).st_ino
-        except OSError:
-            same = False
-        if same or not locked:
-            break
+        fd = -1
+    if fd >= 0 and not _flock(fd, wait_s):
         os.close(fd)
         fd = -1
     try:
@@ -247,8 +238,6 @@ def update(ws: Path, wait_s: float = LOCK_WAIT_S) -> Iterator[dict[str, Any]]:
     finally:
         if fd >= 0:
             os.close(fd)
-        if outer >= 0:
-            os.close(outer)
 
 
 def _prune(state: dict[str, Any]) -> None:

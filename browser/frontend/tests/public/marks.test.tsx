@@ -10,7 +10,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { MarksFooter } from '../../src/marks/MarksFooter.tsx'
-import type { MarkItem } from '../../src/marks/marks.ts'
+import type { Evidence, MarkItem } from '../../src/marks/marks.ts'
 import { withMarkHrefs } from '../../src/marks/marks.ts'
 import { lineWindow, outOfView } from '../../src/marks/Mark.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -294,6 +294,56 @@ test('words with two values cite two cells: one table, both cells marked', async
   await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
   await settle()
   expect([...document.querySelectorAll('.mark-pop .cite-cell')].map((c) => c.textContent)).toEqual(['243', '104'])
+})
+
+test("a label's version the check read shows as the label was then, under what changed after it, whatever the card shows now", async () => {
+  const { api } = await import('../../src/lib/api.ts')
+  const table = { corner: 'value', cols: ['records', 'share'], rows: [{ label: 'navigation', values: ['13', '33%'] }, { label: 'all', values: ['40', ''] }], at: { r: 0, c: 0 } }
+  const trial = { kind: 'card' as const, card: 'q7r2t5', title: 'Which theme?', ref: 'card:q7r2t5@v1#records/navigation', value: '13', table, version: 1, at: 1780000000, made: 'run over 40 records', after: 'redefined; run over 423 records' }
+  const was = api.resolveRef
+  // the label card now: the full run's counts
+  api.resolveRef = (async () => ({ excerpt: '', meta: { title: 'Which theme?', table_html: '<table><thead><tr><th>value</th><th>records</th></tr></thead><tbody><tr><th>navigation</th><td>118</td></tr></tbody></table>' } })) as unknown as typeof api.resolveRef
+  const open = async (ev: Evidence) => {
+    unmountAll()
+    const el = await mount(<ChatMarkdown text="[13](#) were about navigation" checks={[item(0, '13', { evidence: ev })]} />)
+    await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await settle()
+    return { note: document.querySelector('.mark-pop .mark-ev-changed')?.textContent ?? '', cell: document.querySelector('.mark-pop .cite-cell')?.textContent }
+  }
+  try {
+    expect(await open(trial)).toEqual({ note: 'The label changed after this version (run over 40 records): redefined; run over 423 records.', cell: '13' })
+    // the label as it was when the words were written, unchanged since the check: its copy, no note
+    expect(await open({ ...trial, ref: 'card:q7r2t5#records/navigation', after: undefined })).toEqual({ note: '', cell: '13' })
+  } finally {
+    api.resolveRef = was
+  }
+})
+
+test("a label's own place shows the version the check read, and its chip opens the label", async () => {
+  const { api } = await import('../../src/lib/api.ts')
+  const table = { corner: 'value', cols: ['records', 'share'], rows: [{ label: 'navigation', values: ['13', '33%'] }, { label: 'all', values: ['40', ''] }], at: { r: 0, c: 0 } }
+  const ev = { kind: 'card' as const, card: 'label-k3f9a1', title: 'label theme', ref: 'card:label-k3f9a1@v1#records/navigation', value: '13', table, version: 1, at: 1780000000, made: 'run over 40 records', after: 'run over 423 records' }
+  const was = api.resolveRef
+  const read = vi.fn(async () => {
+    throw new Error('no card label-k3f9a1')
+  })
+  api.resolveRef = read as unknown as typeof api.resolveRef
+  const opened: unknown[] = []
+  const off = bus.on('openRef', (e) => opened.push(e))
+  try {
+    const el = await mount(<ChatMarkdown text="[13](#) were about navigation" checks={[item(0, '13', { evidence: ev })]} />)
+    await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await settle()
+    const chip = document.querySelector<HTMLElement>('.mark-pop .refchip-pop-chip')
+    const note = document.querySelector('.mark-pop .mark-ev-changed')?.textContent
+    expect([chip?.textContent, document.querySelector('.mark-pop .cite-cell')?.textContent, note]).toEqual(['label theme', '13', 'The label changed after this version (run over 40 records): run over 423 records.'])
+    expect(read).not.toHaveBeenCalled()
+    await act(async () => chip!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(opened).toEqual([{ ref: 'concept:k3f9a1' }])
+  } finally {
+    off()
+    api.resolveRef = was
+  }
 })
 
 test("a card's evidence shows the card as it is now when it changed after the check, or says the place is gone", async () => {

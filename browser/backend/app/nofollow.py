@@ -74,6 +74,24 @@ def split(path: PathLike, root: PathLike | None = None) -> tuple[str, tuple[str,
     return None
 
 
+LOCK_SUFFIX = ".lock"
+
+
+def lock_file(path: PathLike) -> Path:
+    """The lock file of the store at `path`, the one every process that writes the store flocks (ledger.locked,
+    calls_file). For a store in a workspace, <workspace>/locks/<the store's path in the workspace>.lock: every lock of
+    a workspace lies in its locks folder (kernel_wrap.LOCKS_DIR), which no kernel can see, so no card's code can hold
+    one. A store elsewhere keeps its lock beside it: `<path>.lock` beside a file, `<path>/.lock` inside a folder."""
+    p = Path(path)
+    sp = split(p)
+    if sp is not None and len(sp[1]) > 1:
+        from .kernel_wrap import LOCKS_DIR  # noqa: PLC0415
+
+        base, (workspace, *inside, name) = sp
+        return Path(base, workspace, LOCKS_DIR, *inside, name + LOCK_SUFFIX)
+    return p / LOCK_SUFFIX if p.is_dir() else p.with_name(p.name + LOCK_SUFFIX)
+
+
 def _down(fd: int, name: str, make: bool, mode: int, flags: int = DIR_FLAGS) -> int:
     """The folder `name` in the folder `fd`, opened with `flags` without following a link, made first when missing and
     `make`."""
@@ -211,6 +229,26 @@ def write_bytes(path: PathLike, data: bytes, *, root: PathLike | None = None, ma
 def write_text(path: PathLike, text: str, encoding: str = "utf-8", *, root: PathLike | None = None,
                make: bool = False) -> None:
     write_bytes(path, text.encode(encoding), root=root, make=make)
+
+
+def rewrite(path: PathLike, data: bytes, *, root: PathLike | None = None, mode: int = 0o600) -> None:
+    """`data` as the whole file at `path`, written into the file that is there (made with `mode` when missing, never
+    through a link: open_at), never as a new file renamed over it, so a mount on the file stays on it: a kernel wrapper
+    hides settings.json and config.json each by a mount on it, which a rename over the file takes off inside the running
+    kernel. One write of `data` padded with spaces to the file's old length, then the file cut to `data`, so a reader
+    finds the old text, or the new one with white space after it, which JSON reads alike. The caller keeps other writers
+    out (ledger.rewrite_text)."""
+    fd = open(path, os.O_RDWR | os.O_CREAT, mode, root=root)
+    try:
+        st = os.fstat(fd)
+        if st.st_mode & 0o777 & ~mode:
+            os.fchmod(fd, mode)
+        buf, at = data + b" " * max(0, st.st_size - len(data)), 0
+        while at < len(buf):
+            at += os.pwrite(fd, buf[at:], at)
+        os.ftruncate(fd, len(data))
+    finally:
+        os.close(fd)
 
 
 def append_bytes(path: PathLike, data: bytes, *, root: PathLike | None = None, make: bool = False,
@@ -400,24 +438,37 @@ def own_folder(path: PathLike, *, root: PathLike | None = None, mode: int = 0o70
 
 def rmtree_at(fd: int, name: str) -> None:
     """The entry `name` of the folder `fd` removed: a folder with all it holds, a link as a link, without following a
-    link inside it. Nothing when it is missing."""
+    link inside it. Nothing when it is missing. The walk keeps a stack of its own steps rather than recurse, so a tree
+    of any depth goes, one deeper than Python's recursion limit too, which sandboxed code can make; it holds a
+    descriptor of each folder on the way down to the one it empties."""
+    stack: list[tuple[str, int, str]] = [("walk", fd, name)]  # (step, folder, entry), the next step last
     try:
-        sub = os.open(name, DIR_FLAGS, dir_fd=fd)
-    except FileNotFoundError:
-        return
-    except OSError as e:
-        if e.errno not in _LINKED:
-            raise
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(name, dir_fd=fd)
-        return
-    try:
-        for entry in os.listdir(sub):
-            rmtree_at(sub, entry)
+        while stack:
+            step, at, entry = stack.pop()
+            if step == "close":
+                os.close(at)
+                continue
+            if step == "rmdir":
+                with contextlib.suppress(FileNotFoundError):
+                    os.rmdir(entry, dir_fd=at)
+                continue
+            try:
+                sub = os.open(entry, DIR_FLAGS, dir_fd=at)
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                if e.errno not in _LINKED:
+                    raise
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(entry, dir_fd=at)  # a file, or a link as a link
+                continue
+            stack += [("rmdir", at, entry), ("close", sub, entry)]  # once all it holds is gone
+            stack += [("walk", sub, child) for child in os.listdir(sub)]
     finally:
-        os.close(sub)
-    with contextlib.suppress(FileNotFoundError):
-        os.rmdir(name, dir_fd=fd)
+        for step, at, _ in stack:
+            if step == "close":
+                with contextlib.suppress(OSError):
+                    os.close(at)
 
 
 def rmtree(path: PathLike, *, root: PathLike | None = None, ignore_errors: bool = False) -> None:

@@ -119,7 +119,7 @@ def kernel_env_of(env: Any) -> dict[str, str]:
     return {k: v for k, v in env.items() if not k.startswith(_SECRET_ENV_PREFIXES) and not _SECRET_ENV_RE.search(k)}
 
 
-SCRATCH_DIR = "scratch"  # workspace-relative: the kernels' cwd, a link per entry of the corpus plus what cells write
+SCRATCH_DIR = kernel_wrap.SCRATCH_DIR  # workspace-relative: the kernels' cwd, the corpus mirror and what cells write
 VCS_DIR = ".git"  # left out of the mirror (mirror_corpus)
 
 
@@ -144,8 +144,8 @@ def _unmirror(src: Path, fd: int, name: str) -> bool:
     """Whether the real folder `name` in the mirror folder `fd` went, as one the per-file mirror of earlier versions
     left for the corpus folder `src`: a folder for it and for each folder under it, holding nothing but a link to each
     of their files. Such a folder goes, so that the corpus folder's own link can take its place; one that holds
-    anything else, such as a file a cell wrote, is the kernel's and stays as it is. False at once unless both are
-    folders, `name` one of its own and no link."""
+    anything else, such as a file a cell wrote or a folder the corpus does not hold, is the kernel's and stays as it
+    is. False at once unless both are folders, `name` one of its own and no link."""
     if not os.path.isdir(src):
         return False
     try:
@@ -162,6 +162,8 @@ def _unmirror(src: Path, fd: int, name: str) -> bool:
                         return False
                 except OSError:  # not a link: a file a cell wrote
                     return False
+            if not all(os.path.isdir(here / d) for d in dirs if d not in linked):
+                return False  # before the walk enters it, so a deep tree a cell made is never walked
     except OSError:
         return False
     finally:
@@ -175,6 +177,16 @@ def _unmirror(src: Path, fd: int, name: str) -> bool:
     except OSError:
         pass
     return False
+
+
+def _cleared(src: Path, fd: int, name: str) -> bool:
+    """_unmirror, which never fails the mirror's pass, and so no kernel's start: whatever goes wrong in what the kernel
+    left there leaves the entry as it is."""
+    try:
+        return _unmirror(src, fd, name)
+    except Exception:  # noqa: BLE001
+        log.warning("scratch mirror: %s was left as it is", name, exc_info=True)
+        return False
 
 
 def _mirror_folder(src: Path, fd: int, names: list[str], links: frozenset[str]) -> None:
@@ -191,7 +203,7 @@ def _mirror_folder(src: Path, fd: int, names: list[str], links: frozenset[str]) 
         if name in links and not os.path.exists(target):
             continue
         is_link = have.get(name)
-        if is_link is False and not _unmirror(target, fd, name):
+        if is_link is False and not _cleared(target, fd, name):
             continue  # a real entry the kernel made under a corpus name: left as it is
         if is_link:
             try:
@@ -2077,13 +2089,19 @@ def kernel_argv(connection_file: Path, record: Path, ttl: float | None = None, p
                 roots: tuple[str, ...] | None = None, lease: Path | None = None, workspace: Path | None = None) -> list[str]:
     """The kernel's command line: backend/.venv's python -m ipykernel_launcher on our connection file, rendering config,
     the watchdog, with `roots` the cell-reads audit hook, and with `workspace` the `thimble` module (kernel_thimble.py).
-    `lease` makes the watchdog read the server's presence off that file's flock instead of the recorded pid."""
+    `lease` makes the watchdog read the server's presence off that file's flock instead of the recorded pid.
+
+    The working folder, scratch/, which a card's code writes and where the corpus's entries are linked, is not on
+    sys.path while the kernel starts (`-P`, and IPython's ignore_cwd): a file named like a module it imports there
+    (ipykernel_launcher.py, altair.py) would run in the kernel's place. The last start line puts it at the end of
+    sys.path, after the installed packages, for the modules a card's code writes there (startup_lines)."""
     watchdog = {"RECORD": str(record), "TTL": KERNEL_TTL_S if ttl is None else ttl, "POLL": WATCHDOG_POLL_S if poll is None else poll,
                 "LEASE": str(lease) if lease is not None else None}
     lines = startup_lines(roots, workspace)
     first = len(SHELL_LINES) + 2  # the shell's own lines, the figure formatter and the page's faces; the watchdog next
     return [
-        PYTHON, "-m", "ipykernel_launcher", "-f", str(connection_file),
+        PYTHON, "-P", "-m", "ipykernel_launcher", "-f", str(connection_file),
+        "--IPKernelApp.ignore_cwd=True",
         # no ~/.ipython history.sqlite: cell code (which may quote corpus text) stays in workspaces/<c>/
         "--HistoryManager.enabled=False",
         # crisp fonts: matplotlib inline figures as SVG
@@ -2106,8 +2124,8 @@ SHELL_LINES = (
 
 def startup_lines(roots: tuple[str, ...] | None = None, workspace: Path | None = None) -> list[str]:
     """The lines a card's shell runs at its start (SHELL_LINES, then the figure formatter and the page's faces, then
-    with `roots` the cell-reads audit hook and with `workspace` the `thimble` module): kernel_argv passes them as
-    exec_lines."""
+    with `roots` the cell-reads audit hook and with `workspace` the `thimble` module, and last the working folder at the
+    end of sys.path, CWD_LAST): kernel_argv passes them as exec_lines."""
     lines = [
         *SHELL_LINES,
         # a matplotlib figure ending a cell is drawn whatever the backend: with `matplotlib.use("Agg")` IPython has no
@@ -2121,7 +2139,13 @@ def startup_lines(roots: tuple[str, ...] | None = None, workspace: Path | None =
         lines.append(f"exec({_READS_SRC!r}, {{'ROOTS': {tuple(str(r) for r in roots)!r}, 'CAP': {READS_CAP!r}, 'MIME': {READS_MIME!r}}})")
     if workspace is not None:
         lines.append(f"exec({_THIMBLE_INSTALL!r}, {{'PATH': {str(THIMBLE_MODULE)!r}, 'WS': {str(workspace)!r}}})")
+    lines.append(CWD_LAST)
     return lines
+
+
+# the last start line (kernel_argv): the working folder ('') at the end of sys.path, so a card imports a module it wrote
+# there, while every module of the standard library and the installed packages stays the one installed
+CWD_LAST = "import sys as _s; _s.path.append(''); del _s"
 
 
 # The figure formatter kernel_argv registers: by type name, so nothing imports matplotlib at start; the inline backend,
@@ -2634,17 +2658,15 @@ def _kernel_hides() -> list[Path]:
 
 
 def _guarded_files(workspace: str) -> None:
-    """Each of kernel_wrap.HIDDEN_FILES (`{}`), READ_ONLY_FILES and LOCK_FILES (empty) made in the
-    workspace when missing: a wrapper
-    guards a file that exists, where for a missing one bwrap would guard nothing and srt would leave an empty read-only
-    file in its place while the kernel runs, which the server could not write. Each of READ_ONLY_DIRS and PINNED_DIRS is
-    made too, since bwrap fails on a missing one and srt binds none, in place of a link or a file a kernel left there:
+    """Each of kernel_wrap.HIDDEN_FILES (`{}`) made in the workspace when missing, since a wrapper hides a file that
+    exists (bwrap fails on a missing one, and srt would leave an empty read-only file in its place while the kernel
+    runs, which the server could not write). Each of the kernel's own folders (kernel_wrap.KERNEL_DIRS), the only ones
+    it writes, and the locks folder (kernel_wrap.LOCKS_DIR), which it cannot see, is made too, since bwrap fails on a
+    missing one and srt leaves it as it finds it, in place of a link or a file an earlier version's kernel left there:
     the wrapper would show it a link's target, and a file stops the folder from being made."""
-    for name in (*kernel_wrap.READ_ONLY_DIRS, *kernel_wrap.PINNED_DIRS):
+    for name in (*kernel_wrap.KERNEL_DIRS, kernel_wrap.LOCKS_DIR):
         config.private_dir(_ws_dir(workspace) / name, no_link=True)
-    files = [*((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES),
-             *((n, "") for n in (*kernel_wrap.READ_ONLY_FILES, *kernel_wrap.LOCK_FILES))]
-    for name, text in files:
+    for name, text in ((n, "{}\n") for n in kernel_wrap.HIDDEN_FILES):
         p = _ws_dir(workspace) / name
         with contextlib.suppress(FileExistsError):
             with open(p, "x", encoding="utf-8") as f:
@@ -2663,7 +2685,8 @@ def _temp_writes(workspace: str, temp: Path | None) -> list[Path]:
     """The kernel's TMPDIR (`temp`, _launch) when it lies outside the workspace, which a wrapper then lets it write too:
     Claude Code's temp folder of main's sessions on Claude Code sign-in (runtime_cc.shell_tmp, a folder of this user's
     own and no link, in a folder the kernel cannot write, though main's Bash can). The workspace's own temp folder is
-    none: the wrappers let the kernel write it as part of the workspace, by its path there."""
+    none: it is one of the kernel's own folders (kernel_wrap.KERNEL_DIRS), which the wrappers let it write by its
+    path."""
     ws = _ws_dir(workspace).resolve()
     return [] if temp is None or temp == ws or ws in temp.parents else [temp]
 
@@ -2678,6 +2701,102 @@ def _temp_fd(temp: Path) -> int:
         os.close(fd)
         raise OSError(f"{temp} is not a folder of this user's own")
     return fd
+
+
+def _identity(fd: int) -> tuple[int, int]:
+    st = os.fstat(fd)
+    return st.st_dev, st.st_ino
+
+
+def _kernel_folders(k: _Kernel, workspace: str, wrap: str, temp: Path,
+                    keep: tuple[int, ...]) -> dict[str, tuple[int, int]]:
+    """The folders a wrapped kernel writes, each with the identity (device, inode) of the folder the server made or
+    checked there before the start: its own folders of the workspace (kernel_wrap.KERNEL_DIRS), its HOME under srt and
+    its TMPDIR outside the workspace, by the descriptor bwrap binds (`keep`) or as _temp_fd opens it. What
+    _sandbox_problem compares the kernel's view with; none where no /proc shows that view (macOS, where Seatbelt checks
+    each access by the path it reaches)."""
+    if not procs.HAVE_PROC:
+        return {}
+    ws = _ws_dir(workspace).resolve()
+    out: dict[str, tuple[int, int]] = {}
+    home = [ws / KERNELS_DIR / k.home.name] if wrap == config.KERNEL_WRAP_SRT else []
+    for p in [*(ws / name for name in kernel_wrap.KERNEL_DIRS), *home]:
+        with nofollow.folder(p) as fd:
+            out[str(p)] = _identity(fd)
+    for i, t in enumerate(_temp_writes(workspace, temp)):
+        if i < len(keep):
+            out[str(t)] = _identity(keep[i])
+            continue
+        fd = _temp_fd(t)
+        try:
+            out[str(t)] = _identity(fd)
+        finally:
+            os.close(fd)
+    return out
+
+
+def _gated(wrap: str) -> bool:
+    """Whether a kernel in the wrapper `wrap` starts behind the gate (kernel_wrap.GATE): a wrapped one, where /proc
+    shows the server what its sandbox shows it (_kernel_folders)."""
+    return wrap in config.KERNEL_WRAPPED and procs.HAVE_PROC
+
+
+def _gate_of(pid: int, conn: Path) -> int | None:
+    """The gate of the wrapped kernel started as `pid` (kernel_wrap.GATE): the process below it, inside the sandbox,
+    whose command line is the gate's on the kernel's connection file `conn`, while it waits to run the kernel's Python;
+    None while there is none yet."""
+    gate = list(kernel_wrap.GATE)
+    for p in procs.descendants(pid):
+        argv = procs.argv(p)
+        if argv[:len(gate)] == gate and str(conn) in argv:
+            return p
+    return None
+
+
+def _sandbox_problem(pid: int, wanted: dict[str, tuple[int, int]]) -> str:
+    """'' when the process `pid` inside a wrapped kernel's sandbox (its gate, before any of the kernel's Python runs
+    there) sees at each path of `wanted` the folder the server made or checked there (_kernel_folders), else what is
+    wrong. srt binds those folders by their paths after its own checks, so a link put at one in between, as main's Bash
+    on Claude Code sign-in can put one at the kernel's TMPDIR, gave the kernel the folder it points to. The sandbox's
+    view is read through /proc/<pid>/root."""
+    for path, want in wanted.items():
+        try:
+            st = os.stat(f"/proc/{pid}/root{path}")
+        except OSError as e:
+            return (f"thimble could not check the folder {path} in the kernel's sandbox ({e.strerror}), so it "
+                    "stopped the kernel")
+        if (st.st_dev, st.st_ino) != want:
+            return (f"the kernel's sandbox gave it another folder at {path} than the one thimble made there, so "
+                    "thimble stopped the kernel; run the card again")
+    return ""
+
+
+GATE_POLL_S = 0.05  # how often _open_gate looks for the gate while the sandbox starts
+
+
+async def _open_gate(k: _Kernel, proc: subprocess.Popen, wanted: dict[str, tuple[int, int]]) -> None:
+    """Let the wrapped kernel `proc` run its Python once its sandbox shows it, at each path of `wanted`, the folder the
+    server made or checked there: find its gate (_gate_of), check what the sandbox shows through the gate's /proc entry
+    (_sandbox_problem), and only then write the line the gate waits for on its stdin. So no Python code, neither a card's
+    nor one a card left in a folder the kernel reads at its start, runs in a sandbox the server has not checked. A
+    RuntimeError when the gate does not come within STARTUP_TIMEOUT or the check fails; the gate then reads the end of
+    its stdin and runs nothing."""
+    try:
+        deadline = time.monotonic() + STARTUP_TIMEOUT
+        while (gate := await asyncio.to_thread(_gate_of, proc.pid, k.conn)) is None:
+            if proc.poll() is not None:
+                why = (_log_lines(k) or [""])[-1][:300]
+                raise RuntimeError("the kernel's sandbox ended before thimble could check it" + (f": {why}" if why else ""))
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"thimble found no process of the kernel in its sandbox to check within "
+                                   f"{STARTUP_TIMEOUT:g} s, so it stopped the kernel")
+            await asyncio.sleep(GATE_POLL_S)
+        if problem := await asyncio.to_thread(_sandbox_problem, gate, wanted):
+            raise RuntimeError(problem)
+        proc.stdin.write(b"\n")  # the kernel's Python starts
+    finally:
+        with contextlib.suppress(OSError):
+            proc.stdin.close()
 
 
 def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings",
@@ -2710,9 +2829,10 @@ def wrapped_argv(argv: list[str], *, workspace: str, corpus: Path, source: str =
 
 
 def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str = "settings",
-                   temp: Path | None = None) -> list[str]:
-    """`argv` inside Anthropic's sandbox runtime (kernel_wrap.srt_argv with kernel_wrap.srt_rules), `temp` its TMPDIR.
-    RuntimeError when node or the runtime's package is missing: a workspace set to srt never runs unwrapped."""
+                   temp: Path | None = None, home: Path | None = None) -> list[str]:
+    """`argv` inside Anthropic's sandbox runtime (kernel_wrap.srt_argv with kernel_wrap.srt_rules), `temp` its TMPDIR,
+    `home` its HOME (a folder of the kernels/ folder, which it writes too). RuntimeError when node or the runtime's
+    package is missing: a workspace set to srt never runs unwrapped."""
     node, srt_dir = srt.node(), srt.package(config.REPO_ROOT)
     if node is None or srt_dir is None:
         missing = ("node is not on PATH" if node is None else
@@ -2723,15 +2843,24 @@ def sandboxed_argv(argv: list[str], *, workspace: str, corpus: Path, source: str
     _guarded_files(workspace)
     rules = kernel_wrap.srt_rules(corpus_dir=Path(corpus).resolve(), workspace_dir=_ws_dir(workspace).resolve(),
                                   venv=_venv(), python=PYTHON, srt_dir=srt_dir, read=_kernel_reads(),
-                                  write=_temp_writes(workspace, temp), hide=_kernel_hides(),
-                                  home=Path(os.path.realpath(Path.home())), platform=sys.platform)
+                                  write=[*([home] if home is not None else []), *_temp_writes(workspace, temp)],
+                                  hide=_kernel_hides(), home=Path(os.path.realpath(Path.home())), platform=sys.platform)
     return kernel_wrap.srt_argv(argv, node=node, srt_dir=srt_dir, rules=rules)
 
 
 def _fresh_home(k: _Kernel) -> None:
-    """The kernel's HOME for srt (k.home), empty: what a cell left there does not reach the next start."""
-    nofollow.rmtree(k.home, ignore_errors=True)
+    """The kernel's HOME for srt (k.home), empty: what a cell left there does not reach the next start. A removal that
+    fails, whatever the cell left there, leaves what it could not remove and never fails the start."""
+    _drop_home(k)
     os.close(nofollow.own_folder(k.home))
+
+
+def _drop_home(k: _Kernel) -> None:
+    """The kernel's HOME under srt removed, as nofollow removes a tree; what could not be removed stays, logged."""
+    try:
+        nofollow.rmtree(k.home, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        log.warning("kernel %s of %s: its HOME %s was not removed", k.key, k.workspace, k.home, exc_info=True)
 
 
 LEASE_TRIES = 20  # _hold_lease: 50 ms apart, so a watchdog's own probe (lock, unlock) never costs the server the lease
@@ -2776,6 +2905,8 @@ async def _launch(k: _Kernel, workspace: str) -> None:
     wrapped = wrap in config.KERNEL_WRAPPED
     argv = kernel_argv(k.conn, k.record, roots=(str(cwd), str(Path(corpus).resolve())), lease=k.lease if wrapped else None,
                        workspace=_ws_dir(workspace).resolve())
+    if _gated(wrap):  # its Python starts once the server has checked its sandbox (_open_gate)
+        argv = [*kernel_wrap.GATE, *argv]
     from . import runtime  # noqa: PLC0415
 
     # its TMPDIR: main's shell commands' (runtime.shell_temp), by the path the wrappers bind: the folders above it by
@@ -2789,7 +2920,7 @@ async def _launch(k: _Kernel, workspace: str) -> None:
         if wrap == config.KERNEL_WRAP_BWRAP:
             argv, keep = wrapped_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp)
         elif wrap == config.KERNEL_WRAP_SRT:
-            argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp)
+            argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source, temp=tmp, home=k.home)
         for tries_left in range(LAUNCH_TRIES - 1, -1, -1):
             try:
                 k.kc = await _launch_process(k, workspace, cwd, corpus, argv, wrap, source, tmp, tuple(keep))
@@ -2821,13 +2952,16 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
         if wrap == config.KERNEL_WRAP_SRT:
             env = kernel_wrap.srt_env(env, home=k.home)
             await asyncio.to_thread(_fresh_home, k)
+        wanted: dict[str, tuple[int, int]] = {}
         if wrapped:
             await asyncio.to_thread(_hold_lease, k)  # before the process exists: its watchdog never sees a free lease
+            wanted = await asyncio.to_thread(_kernel_folders, k, workspace, wrap, tmp, keep)
         log.info("starting kernel %s for %s in %s (a mirror of %s)%s", k.key, workspace, cwd, corpus,
                  f"; wrapped in {wrap} ({source})" if wrapped else "")
         out = nofollow.open(k.log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL, stdout=out,
+        try:  # a gated kernel's stdin is the pipe its gate waits on (_open_gate)
+            proc = subprocess.Popen(argv, cwd=str(cwd), env=env,
+                                    stdin=subprocess.PIPE if _gated(wrap) else subprocess.DEVNULL, stdout=out,
                                     stderr=subprocess.STDOUT, start_new_session=True, close_fds=True, pass_fds=keep)
         finally:
             os.close(out)
@@ -2837,19 +2971,55 @@ async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, a
         _write_record(k, {"name": k.name, "workspace": workspace, "pid": proc.pid, "pgid": proc.pid,
                           "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
                           "home": str(_home()), "attached": _now(), "wrap": wrap})
+        if proc.stdin is not None:
+            await _open_gate(k, proc, wanted)
         kc = _client(info)
         await _wait_ready(k, kc, STARTUP_TIMEOUT, control=False)
     except BaseException:
         if kc is not None:
             _close_client(kc)
+        if k.proc is not None and k.proc.stdin is not None:
+            with contextlib.suppress(OSError):
+                k.proc.stdin.close()  # a gate not opened yet runs nothing
         await _kill(k)
         raise
     return kc
 
 
+def _wrap_of(k: _Kernel, pid: int) -> str | None:
+    """The wrapper the recorded kernel process `pid` runs in, when it is a kernel this server may take back. Read from
+    the process's command line (kernel_wrap.sandbox_of), which no code in its sandbox can change, never from its record,
+    which an earlier version's kernel could write (its sandbox let it write kernels/). A wrapped kernel's sandbox must
+    let it write, of its workspace, only its own folders (kernel_wrap.KERNEL_DIRS) and under srt its HOME, and hide the
+    workspace's locks folder, as this version's does, and bwrap must bind the workspace read-only; a kernel in no
+    wrapper is taken back only where the workspace's kernels run in none now. None for any other: an earlier version's
+    sandbox, which let it write the whole workspace or showed it the locks, or a process of a sandbox named in the
+    record in its wrapper's place."""
+    box = kernel_wrap.sandbox_of(procs.argv(pid))
+    if box is None:
+        wrap, _ = config.resolve_kernel_wrap(_ws_settings(k.workspace))
+        return config.KERNEL_WRAP_NONE if wrap not in config.KERNEL_WRAPPED else None
+
+    def real(paths: list[str]) -> set[Path]:
+        return {Path(os.path.realpath(p)) for p in paths}
+
+    ws = Path(os.path.realpath(_ws_dir(k.workspace)))
+    own = {ws / name for name in kernel_wrap.KERNEL_DIRS}
+    if box.wrap == config.KERNEL_WRAP_SRT:
+        own.add(Path(os.path.realpath(k.home)))
+    if any(w not in own and (w == ws or ws in w.parents or w in ws.parents) for w in real(box.writes)):
+        return None
+    if ws / kernel_wrap.LOCKS_DIR not in real(box.hides):
+        return None
+    if box.wrap == config.KERNEL_WRAP_BWRAP and ws not in real(box.reads):
+        return None
+    return box.wrap
+
+
 async def _attach(k: _Kernel) -> bool:
     """Reconnect to the kernel its record describes. True when it answers; otherwise the record, and a silent live
-    kernel, are gone afterwards. Call with k.lock held."""
+    kernel or one whose sandbox lets it write more than its own folders (an earlier version's, _wrap_of), are gone
+    afterwards. Call with k.lock held."""
     rec = _read_record(k.record)
     if rec is None:
         return False
@@ -2858,7 +3028,14 @@ async def _attach(k: _Kernel) -> bool:
         log.info("kernel %s of %s: record for pid %s is stale; dropped", k.key, k.workspace, pid)
         _drop_files(k.record, k.conn)
         return False
-    k.pid = k.pgid = pid  # it leads its own process group (_launch); the record, which a card's code writes, names none
+    k.pid = k.pgid = pid  # it leads its own process group (_launch); the record, an older kernel's to write, names none
+    wrap = await asyncio.to_thread(_wrap_of, k, pid)
+    if wrap is None:
+        log.warning("kernel %s of %s (pid %s): an earlier version of thimble started it in a sandbox that lets it "
+                    "write more of the workspace than its own folders; stopped, and the next card starts a new one",
+                    k.key, k.workspace, pid)
+        await _kill(k)
+        return False
     try:
         kc = _client(k.conn)
     except (OSError, ValueError) as e:
@@ -2877,11 +3054,12 @@ async def _attach(k: _Kernel) -> bool:
         await _kill(k)
         return False
     k.kc = kc
-    k.wrap = rec.get("wrap")
+    k.wrap = wrap
     _refresh_thimble(k)
     if k.wrap in config.KERNEL_WRAPPED:
         await asyncio.to_thread(_hold_lease, k)  # a wrapped kernel's watchdog reads this server's presence off it
-    _write_record(k, {**rec, "server_pid": os.getpid(), "attached": _now()})
+    _write_record(k, {**{f: v for f, v in rec.items() if f != "writes"}, "wrap": wrap, "server_pid": os.getpid(),
+                      "attached": _now()})
     log.info("reconnected kernel %s of %s (pid %s)", k.key, k.workspace, pid)
     return True
 
@@ -2923,7 +3101,7 @@ async def _kill(k: _Kernel) -> None:
         await asyncio.to_thread(_terminate, pid, pgid or pid, k.conn, ours)
     _release_lease(k, drop=True)
     _drop_files(k.record, k.conn)
-    await asyncio.to_thread(nofollow.rmtree, k.home, ignore_errors=True)
+    await asyncio.to_thread(_drop_home, k)
 
 
 async def shutdown_kernel(workspace: str, kernel: str | None = None) -> None:
@@ -3407,19 +3585,25 @@ def labels_read(reply: Any) -> dict[str, int | None]:
 async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: float | None,
                          extra_exprs: dict[str, str] | None = None) -> tuple[list[dict], int | None, str]:
     """_execute for a card's code, with the caller holding the kernel's lock: a table card's DataFrame is read in the
-    same request and kept in place of pandas' display, and the labels the code read land on k.last_labels and
-    k.last_label_revs. `extra_exprs` are more user expressions for the same request."""
+    same request and kept in place of pandas' display, each table the code printed is kept as data beside its text
+    (frames.attach_printed), and the labels the code read land on k.last_labels and k.last_label_revs. `extra_exprs`
+    are more user expressions for the same request."""
     from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
 
     if cardtypes.CARD_CALL in code:
         await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
+    exprs[frames.PRINTED_EXPR_KEY] = frames.PRINTED_CAPTURE
     exprs.update(extra_exprs or {})
     outputs, exec_count, status = await _execute(k, code, timeout_s, exprs)
     read = labels_read((k.last_expr or {}).get(LABELS_EXPR_KEY))
     k.last_labels = list(read)
     k.last_label_revs = {cid: rev for cid, rev in read.items() if rev is not None}
+    try:
+        outputs = frames.attach_printed(outputs, frames.read_printed((k.last_expr or {}).get(frames.PRINTED_EXPR_KEY)))
+    except Exception:  # noqa: BLE001 — a printed table that cannot be kept as data leaves its text as it is
+        log.exception("the tables a card printed were not kept as data")
     if frames.EXPR_KEY in exprs:
         try:
             outputs = frames.apply_run(outputs, status, (k.last_expr or {}).get(frames.EXPR_KEY), k.last_result)

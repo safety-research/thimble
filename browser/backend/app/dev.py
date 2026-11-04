@@ -2959,10 +2959,13 @@ def view_key(slug: str) -> str:
     return _key(slug)
 
 
+VIEWS_WORK = "views-work"  # in the workspace: the folder of the views' builders' own folders (view_work_dir)
+
+
 def view_work_dir(c: str, slug: str) -> Path:
     """The builder's own folder, beside the view's folder, which holds only the view: where it keeps its scratch files
     and installs the packages the view's page loads (view_libs)."""
-    return config.workspace_dir(c) / "views-work" / slug
+    return config.workspace_dir(c) / VIEWS_WORK / slug
 
 
 def _soon(make: Callable[[], Awaitable[Any]], name: str) -> None:

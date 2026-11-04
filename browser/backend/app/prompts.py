@@ -12,11 +12,19 @@ Modes. thimble runs in browser mode or in terminal mode (app/launch_mode.py), an
   mode (`@browser` the other way round). With no `## <name>` in the file, it is `## <name>` in its own mode only.
 The mode is the call's `mode`, else the one a `rendering` block sets, else the session's (launch_mode.current(), from
 the session's launch record), else browser. A file with no block and no such section never asks for the mode.
+
+The terminal plugin's texts. Both products read the texts of plugin/prompts the same way (plugin/prompts/registry.mjs,
+compose). `plugin:<name>`, loaded here or included as `{{include:plugin:<name>}}`, is plugin/prompts/<name>.md with
+each `{{include:<name>}}` in it pasted in, and each slot that plugin/prompts/slots.json names filled with the
+workbench's words for it (its `browser` value, in either mode above). Its other `{{NAME}}` slots are its caller's,
+filled as render fills a slot. Such a text has no mode block or mode section, and a brace in it that is no directive
+is its own words.
 """
 from __future__ import annotations
 
 import contextlib
 import contextvars
+import json
 import os
 import re
 from collections.abc import Iterable, Iterator
@@ -59,12 +67,23 @@ TYPE_FILES = {"document": "report-markdown", "custom": "report-custom"}
 DEV_PROMPT = "dev"
 DEV_FILES = ("dev-ticket", "dev-fix", "dev-view")
 
-# The whole directive grammar: {{include:<relpath>}} or {{<slot>}} with slot = [a-z_][a-z0-9_]*. Anything else inside
-# {{...}}, such as a mistyped slot or stray spaces, fails loudly instead of reaching a model half-filled.
+# The whole directive grammar: {{include:<relpath>}} (a plugin text's {{include:plugin:<name>}}) or {{<slot>}} with
+# slot = [a-z_][a-z0-9_]*. Anything else inside {{...}}, such as a mistyped slot or stray spaces, fails loudly instead
+# of reaching a model half-filled.
 _DIRECTIVE_RE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 _SLOT_RE = re.compile(r"[a-z_][a-z0-9_]*\Z")
 _INCLUDE_PREFIX = "include:"
 _PART_RE = re.compile(r"^## (.+?)[ \t]*$", re.M)
+
+# The terminal plugin's texts (module note): where they are, the file of each slot's words in each product, the key of
+# the workbench's words there, and the grammar of a plugin text, which is registry.mjs's.
+PLUGIN_DIR = REPO_ROOT.parent / "plugin" / "prompts"
+PLUGIN_SLOTS = PLUGIN_DIR / "slots.json"
+PLUGIN_PREFIX = "plugin:"
+SLOTS_KEY = "browser"
+_PLUGIN_NAME_RE = re.compile(r"[a-z0-9-]+")
+_PLUGIN_INCLUDE_RE = re.compile(r"\{\{include:([a-z0-9-]+)\}\}")
+_PLUGIN_SLOT_RE = re.compile(r"\{\{([A-Z_]+)\}\}")
 
 # The modes a prompt renders in (module note), and the one that holds when nothing names a mode.
 MODES = ("browser", "terminal")
@@ -212,8 +231,13 @@ def _dir() -> Path:
 
 
 def _norm(name: str) -> str:
-    """A prompt name or include path as a file path relative to the prompts directory, with '.md' added when absent."""
+    """A prompt name or include path as a file path relative to the prompts directory, with '.md' added when absent; a
+    plugin text's as `plugin:<name>.md`."""
     rel = name if name.endswith(".md") else name + ".md"
+    if rel.startswith(PLUGIN_PREFIX):
+        if not _PLUGIN_NAME_RE.fullmatch(rel[len(PLUGIN_PREFIX) : -len(".md")]):
+            raise PromptError(f"plugin text {name!r} must be the name of a text in plugin/prompts")
+        return rel
     parts = Path(rel).parts
     if Path(rel).is_absolute() or ".." in parts or not parts:
         raise PromptError(f"prompt path {name!r} must be relative to the prompts directory and stay inside it")
@@ -244,11 +268,12 @@ def _path(rel: str, stack: tuple[str, ...]) -> Path:
         return found
     if rel in stack:
         raise PromptError(f"{stack[-1]}: include cycle {' -> '.join((*stack, rel))}")
-    path = _dir() / rel
+    root = PLUGIN_DIR if rel.startswith(PLUGIN_PREFIX) else _dir()
+    path = root / rel.removeprefix(PLUGIN_PREFIX)
     if not path.is_file():
         if stack:
-            raise PromptError(f"{stack[-1]}: include {rel!r} not found under {_dir()}")
-        raise PromptError(f"no prompt file {rel!r} under {_dir()}")
+            raise PromptError(f"{stack[-1]}: include {rel!r} not found under {root}")
+        raise PromptError(f"no prompt file {rel!r} under {root}")
     return path
 
 
@@ -275,9 +300,35 @@ def _directive(body: str, rel: str) -> str | None:
                       f"an include is {{{{include:<relpath>}}}})")
 
 
+def _plugin_read(rel: str, stack: tuple[str, ...]) -> str:
+    """A plugin text as the workbench reads it (module note): the texts it includes pasted in, each without its closing
+    newline, and the workbench's words in each slot that slots.json names. `stack` is the chain being expanded."""
+    text = _path(rel, stack).read_text("utf-8")
+    inner = (*stack, rel)
+    text = _PLUGIN_INCLUDE_RE.sub(lambda m: _plugin_read(_norm(PLUGIN_PREFIX + m.group(1)), inner).rstrip("\n"), text)
+    if not _PLUGIN_SLOT_RE.search(text):
+        return text
+    try:
+        values = json.loads(PLUGIN_SLOTS.read_text("utf-8"))
+    except (OSError, ValueError) as e:
+        raise PromptError(f"{rel}: its slots' words cannot be read from {PLUGIN_SLOTS} ({e})") from e
+
+    def words(m: re.Match[str]) -> str:
+        if m.group(1) not in values:
+            return m.group(0)
+        said = values[m.group(1)]
+        if not isinstance(said, dict) or not isinstance(said.get(SLOTS_KEY), str):
+            raise PromptError(f"{rel}: slot {m.group(0)} has no {SLOTS_KEY} words in {PLUGIN_SLOTS.name}")
+        return said[SLOTS_KEY]
+
+    return _PLUGIN_SLOT_RE.sub(words, text)
+
+
 def _read(rel: str, stack: tuple[str, ...], mode: _Mode) -> str:
     """One file with its mode blocks resolved, its includes pasted in and its slots left in place. `stack` is the chain
     being expanded."""
+    if rel.startswith(PLUGIN_PREFIX):
+        return _plugin_read(rel, stack)
     text = _modes_out(_path(rel, stack).read_text("utf-8"), rel, mode)
     stack = (*stack, rel)
     out: list[str] = []
@@ -305,8 +356,9 @@ def _assemble(name: str, mode: str | None) -> str:
 
 def load(name: str, mode: str | None = None) -> str:
     """The prompt file with every include pasted in, read fresh from disk, slots left in place, in `mode` (the current
-    mode when None, module note). `name` is relative to the prompts directory, with or without '.md'. Under
-    THIMBLE_PROMPT_CAPTURE the files read are noted for the next capture (capture.prompt_used)."""
+    mode when None, module note). `name` is relative to the prompts directory, with or without '.md', or `plugin:<name>`
+    for a text of the terminal plugin (module note). Under THIMBLE_PROMPT_CAPTURE the files read are noted for the next
+    capture (capture.prompt_used)."""
     text = _assemble(name, mode)
     if capture.enabled():
         capture.prompt_used(_norm(name), files(name, mode))
@@ -348,11 +400,14 @@ def files(name: str, mode: str | None = None) -> list[str]:
     of = _Mode(mode)
 
     def walk(rel: str, stack: tuple[str, ...]) -> None:
-        text = _modes_out(_path(rel, stack).read_text("utf-8"), rel, of)
+        text = _path(rel, stack).read_text("utf-8")
         if rel not in out:
             out.append(rel)
-        for m in _DIRECTIVE_RE.finditer(text):
-            inc = _directive(m.group(1), rel)
+        if rel.startswith(PLUGIN_PREFIX):
+            incs = [_norm(PLUGIN_PREFIX + m.group(1)) for m in _PLUGIN_INCLUDE_RE.finditer(text)]
+        else:
+            incs = [_directive(m.group(1), rel) for m in _DIRECTIVE_RE.finditer(_modes_out(text, rel, of))]
+        for inc in incs:
             if inc is not None:
                 walk(inc, (*stack, rel))
 

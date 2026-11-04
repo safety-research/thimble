@@ -7,11 +7,12 @@
 // that event past the plugins a person installs, and prompt.submit's context reaches Claude on every machine.
 //
 // The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a switched-off
-// feature is left out; while Claude does not cite (Citations manual or off), the citations in the other sections'
-// examples read as plain words. A mode that changes what Claude or the analyst does adds a sentence at the end
-// (modesNow): Cards on demand, and the modes in which citations, explainers or heads-ups come only when the analyst
-// asks. A switch changed later makes a different text, which the next prompt carries beside the copy the conversation
-// holds.
+// feature is left out (SECTIONS). With Labels off, that is the Labels section, the one part that names labels or
+// `thimble label`, so Claude does not know of them, and `thimble label` refuses its commands (hooks/path.ts). While
+// Claude does not cite (Citations manual or off), the citations in the other sections' examples read as plain words. A
+// mode that changes what Claude or the analyst does adds a sentence at the end (modesNow): Cards on demand, and the
+// modes in which citations, explainers or heads-ups come only when the analyst asks. A switch changed later makes a
+// different text, which the next prompt carries beside the copy the conversation holds.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
@@ -23,7 +24,7 @@ type Engine = EngineInterface
 
 /** The `## ` section of guidance.md that teaches each feature a person can switch off; `cites`: Claude cites its
  *  claims (Citations auto cite + verify, or auto cite). */
-const SECTIONS: Record<string, string> = { cites: 'Citing claims', cards: 'Cards' }
+const SECTIONS: Record<string, string> = { cites: 'Citing claims', cards: 'Cards', labels: 'Labels' }
 
 /** Whether a feature of SECTIONS is on now. */
 const sectionOn = (feature: string) => (feature === 'cites' ? claudeCites() : featureOn(feature))

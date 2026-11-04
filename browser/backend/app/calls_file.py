@@ -1,10 +1,11 @@
 """The numbering of a chat's tool calls in its calls store, shared by the backend (calls.py) and the plugin's hooks.
 
 Store: `workspaces/<c>/calls/<chat>.jsonl` (calls.py has the record shapes). A call's number is assigned once, the
-first time any process sees its tool_use_id, under an flock on `calls/<chat>.jsonl.lock`: the hook that runs on each
-tool call (`--agents`, terminal mode) and the backend's mirror (calls.Numbering) both number calls, and without the
-lock two processes could give two calls one number. The file is read again under the lock, so a number another process
-gave is found there, and a new number is one past the highest stored.
+first time any process sees its tool_use_id, under an flock on its lock (nofollow.lock_file, in the workspace's locks
+folder, where no kernel reaches it, as ledger.locked takes it): the hook that runs on each tool call (`--agents`,
+terminal mode) and the backend's mirror (calls.Numbering) both number calls, and without the lock two processes could
+give two calls one number. The file is read again under the lock, so a number another process gave is found there, and
+a new number is one past the highest stored.
 
 A card's code writes the workspace, so the store, its folder and its lock are opened from the workspace's folder as
 nofollow opens them (_ws_of), never through a link a card put there.
@@ -26,7 +27,6 @@ from . import nofollow
 
 CALLS_DIR = "calls"  # calls.CALLS_DIR
 CHAT_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")  # calls.CHAT_RE
-LOCK_SUFFIX = ".lock"  # ledger.LOCK_SUFFIX: the lock file is <store>.lock beside it, the lock ledger.locked takes
 LOCK_WAIT_S = 2.0  # ledger.LOCK_WAIT_S
 # a call's first line, as _record writes it: {"n": <n>, "id": "<tool_use_id>", ...}; result and chat lines have no id
 _ID_LINE = re.compile(rb'^\{"n": (\d+), "id": ')
@@ -54,17 +54,18 @@ def line(rec: dict[str, Any]) -> str:
 
 
 class _Lock:
-    """An flock on `<store>.lock` for the length of a `with`, waited for up to LOCK_WAIT_S; past that the caller goes on
-    without it (ledger.locked's rule). The backend takes the same lock through ledger.locked, which also keeps the
-    threads of one process apart."""
+    """An flock on the store's lock file (nofollow.lock_file) for the length of a `with`, waited for up to LOCK_WAIT_S;
+    past that the caller goes on without it (ledger.locked's rule). The backend takes the same lock through
+    ledger.locked, which also keeps the threads of one process apart."""
 
     def __init__(self, store: Path) -> None:
-        self.lf = store.with_name(store.name + LOCK_SUFFIX)
+        self.lf = nofollow.lock_file(store)
+        self.root = _ws_of(store)
         self.fd: int | None = None
 
     def __enter__(self) -> "_Lock":
         try:
-            self.fd = nofollow.open(self.lf, os.O_RDWR | os.O_CREAT, 0o600, root=_ws_of(self.lf), make=True)
+            self.fd = nofollow.open(self.lf, os.O_RDWR | os.O_CREAT, 0o600, root=self.root, make=True)
         except OSError:
             return self
         deadline = time.monotonic() + LOCK_WAIT_S

@@ -451,3 +451,105 @@ def test_the_folders_labels_of_thimble_0_10_stay_on_disk_and_only_the_conversati
     (own / "mine.json").write_text(json.dumps({**lab, "name": "mine", "sessions": ["conv-own"]}))
     assert in_conversation(root, "conv-new2", "label", "--json").stdout.strip() == "[]"
     assert [x["name"] for x in json.loads(in_conversation(root, "conv-own", "label", "--json").stdout)] == ["mine"]
+
+
+def test_a_label_keeps_a_version_of_its_counts_after_each_change_and_a_citation_reads_them_as_they_were(root: Path):
+    """B19: what `thimble label NAME` counts is kept as a version after each change once no record waits for the model:
+    a trial, the run on every record, the person's check, a new definition (which keeps the versions before it). The
+    citation check reads a label's counts as they were when the cited words were written (validate.py `at`), so the
+    trial's counts hold against the trial after the full run, and the full run's against the full run."""
+    from kernel.evidence import terminal_label_cards
+
+    st = Store(root)
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog", "--limit", "4", "--seed", "3")
+    trial = LB.load(st, "sorry")["versions"][-1]
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    full = LB.load(st, "sorry")["versions"][-1]
+    run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")
+    vs = LB.load(st, "sorry")["versions"]
+    assert [v["made"] for v in vs] == ["a trial over 4 records", "run over 6 records", "run over 6 records; the analyst checked 1"]
+    assert full["rows"] == [["yes", ["2"]], ["no", ["4"]], ["all", ["6"]]] and vs[-1]["rows"][0] == ["yes", ["3"]]
+    # the same counts again keep no version
+    run(root, "label", "sorry", "--check", "chat/room.jsonl#L1", "yes")
+    assert len(LB.load(st, "sorry")["versions"]) == 3
+    # a new definition keeps the versions before it
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry")
+    vs = LB.load(st, "sorry")["versions"]
+    assert len(vs) == 4 and vs[-1]["made"].startswith("redefined; run over 6 records"), vs[-1]
+    # a prompt label keeps none while its records wait, and one once the model read them all
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    assert LB.load(st, "apology")["versions"] == []
+    refs = [u["ref"] for u in json.loads(run(root, "label", "apology", "--waiting").stdout)["units"]]
+    run(root, "label", "apology", "--answers", "-", "--json", stdin=json.dumps({"values": {refs[0]: {"value": "yes"}}}))
+    assert LB.load(st, "apology")["versions"] == []
+    run(root, "label", "apology", "--answers", "-", "--json", stdin=json.dumps({"values": {r: {"value": "no"} for r in refs[1:]}}))
+    assert [v["rows"] for v in LB.load(st, "apology")["versions"]] == [[["yes", ["1"]], ["no", ["5"]], ["all", ["6"]]]]
+    # the check reads the label as it was when the words were written
+    cards = terminal_label_cards(str(st.dir / "labels"))
+    assert {c["id"] for c in cards} == {"label-sorry", "label-apology"}
+    yes, n = trial["rows"][0][1][0], trial["rows"][-1][1][0]
+    words = {"n": 1, "words": f"{yes} of the {n}", "sentence": f"In the trial, [{yes} of the {n}] messages apologize."}
+    answer = "```json\n" + json.dumps([{"mark": 1, "kind": "card", "status": "verified", "reason": "the label counts it",
+                                        "evidence": {"ref": ["card:label-sorry#records/yes", "card:label-sorry#records/all"]}}]) + "\n```"
+    req = {"marks": [words], "answer": answer, "calls": [], "cwd": str(root), "labels_dir": str(st.dir / "labels")}
+    validate = Path(__file__).resolve().parents[1] / "engine" / "validate.py"
+    for at, status in ((trial["at"] + 0.001, "verified"), (vs[-1]["at"] + 1, "failed")):
+        got = subprocess.run([sys.executable, str(validate)], input=json.dumps({**req, "at": at}), capture_output=True, text=True, check=True)
+        assert json.loads(got.stdout)["results"][0]["status"] == status, (at, got.stdout)
+
+
+# ------------------------------------------------------------------ Labels off (hooks/path.ts, cli.labels_off)
+
+LABELS_OFF_LINE = (Path(__file__).resolve().parents[1] / "prompts" / "labels-off.md").read_text().strip()
+
+
+def off(root: Path, *args: str, session: str = "s-test") -> subprocess.CompletedProcess:
+    """A `thimble` command of a session whose Labels is off: the plugin gives its commands the line of
+    prompts/labels-off.md as THIMBLE_LABELS_OFF."""
+    env = {**os.environ, "THIMBLE_ROOT": str(root), "THIMBLE_PYTHON": sys.executable, "THIMBLE_SESSION": session,
+           "THIMBLE_LABELS_OFF": LABELS_OFF_LINE}
+    return subprocess.run([str(THIMBLE), *args], capture_output=True, text=True, env=env, cwd=root, timeout=120)
+
+
+def test_with_labels_off_every_thimble_label_of_claude_s_answers_with_the_one_line_and_changes_nothing(root: Path):
+    assert LABELS_OFF_LINE == "Labels are off in thimble's settings, so thimble made no label."
+    (root / "rule.py").write_text("def label(u):\n    return 'yes' if 'sorry' in u['_text'].lower() else 'no'\n")
+    asks = [("label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog"),
+            ("label", "kind", "--in", "chat/*.jsonl", "--code", "rule.py"),
+            ("label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes."),
+            ("label", "sorry", "--set", "chat/room.jsonl#L1=yes"),
+            ("label",), ("label", "sorry"), ("label", "sorry", "--csv"), ("label", "--help"), ("label", "sorry", "--wait", "1")]
+    for args in asks:
+        r = off(root, *args)
+        assert (r.returncode, r.stdout, r.stderr) == (1, LABELS_OFF_LINE + "\n", ""), args
+    # no label, no record of one, and nothing for the plugin to start
+    assert LB.names(Store(root)) == [] and feed(root) == []
+    assert not (Path(os.environ["THIMBLE_HOME"]) / "conversations").exists() or not list(
+        (Path(os.environ["THIMBLE_HOME"]) / "conversations").rglob("*.json"))
+
+
+def test_with_labels_off_the_person_s_own_commands_still_run_and_with_labels_on_claude_s_do(root: Path):
+    # the plugin's own reads and the person's keys run as `person-…` (core/env.ts runThimble)
+    r = off(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog", session="person-s-test")
+    assert r.returncode == 0 and "sorry: yes 2 · no 4 of 6 records" in r.stdout, r.stdout + r.stderr
+    # Labels on: no THIMBLE_LABELS_OFF, and Claude's command makes its label as before
+    r = run(root, "label", "sorry2", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    assert r.returncode == 0 and "sorry2: yes 2 · no 4 of 6 records" in r.stdout, r.stdout + r.stderr
+
+
+def test_with_labels_off_the_command_s_help_and_coverage_name_no_label(root: Path):
+    on_help = run(root, "--help").stdout
+    off_help = off(root, "--help").stdout
+    assert "thimble label" in on_help and "Claude runs it to label records and to see what it read" in on_help
+    assert "label" not in off_help.lower(), off_help
+    # the rest of the help stays as it was: only the label lines go
+    kept = [x for x in on_help.splitlines() if x in off_help.splitlines()]
+    assert "    thimble coverage [--all]                   what entered Claude's context, what was only computed over, and what" in kept
+    assert "Add --json to coverage for the whole record." in off_help and "Claude runs it to see what it read." in off_help
+    # an unknown command's usage names no label command either
+    assert "label" not in off(root, "nope").stderr
+    # what code computed over is said with no rule label
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    cov = off(root, "coverage").stdout
+    assert "Computed over by a program, none of it read: 6 of 6 records (100%)." in cov and "label" not in cov.lower(), cov
+    assert "Computed over by a program or a rule label" in run(root, "coverage").stdout

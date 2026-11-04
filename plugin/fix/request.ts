@@ -15,6 +15,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { cut } from '../core/text.js'
+import { CHANGEABLE } from './changeable.mjs'
 import { liveFixer, screenNow, startFixer } from './fixer'
 import { type Fix, fixingWord, fixLineNow, fixName, fixOf, formHead, isChange, jsonOf, kernelFix, ownWords, refreshFixes, setFixLine } from './fixes'
 
@@ -25,10 +26,7 @@ type Engine = EngineInterface
  *  worked (live). */
 export type Requested = { text: string; fix: Fix | null; failed: boolean; round: boolean; live?: boolean }
 
-/** The fixes the words may change: any the person has in the list, at work or not. */
-const CHANGEABLE = ['on', 'off', 'ready', 'working', 'failed', 'redo']
-
-/** Whether fix N is one the person has that words may change. */
+/** Whether fix N is one the person has that words may change (changeable.mjs). */
 const changeable = (fixes: Fix[]) => (n: number) => fixes.some(f => f.id === n && CHANGEABLE.includes(f.state))
 
 /** The explicit forms: `N <words>` for fix N, when N is a fix the person has, and `new <words>`, each with a mark after

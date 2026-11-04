@@ -4,7 +4,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { resetPrompts } from '../prompts/prompts'
-import { PRESET } from '../settings/features.mjs'
+import { PRESET, SWITCHES } from '../settings/features.mjs'
 import { test } from './kit'
 import { tempRun } from './stubs'
 
@@ -35,12 +35,13 @@ const GUIDANCE = [
 /** The conversation as its next request holds it, which the test's core answers `session.messages` with. */
 type World = { messages: Any[]; context: string[][] }
 
-function world(on: Any, guidance = GUIDANCE): World {
+/** The test's world; `files` are the plugin's prompts/ files that fs.read answers, by name. */
+function world(on: Any, files: Record<string, string> = { 'guidance.md': GUIDANCE }): World {
   resetPrompts()
   const w: World = { messages: [], context: [] }
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp' })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 1, stdout: '', stderr: 'made-up: no such command' }), isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/prompts/guidance.md') ? guidance : '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: Object.entries(files).find(([name]) => e.path.endsWith(`/prompts/${name}`))?.[1] ?? '' }))
   on('session.messages', () => ({ value: w.messages }))
   // the engine: the prompt enters with its context, which the next request holds as a reminder after the prompt
   on('prompt.submit', (_$: unknown, e: Any) => {
@@ -100,12 +101,28 @@ test('with Citations manual, the guidance ends with one sentence that says what 
   expect(text.endsWith('These come only when the analyst asks: citations (they select words and press c).')).toBe(true)
 })
 
-test('with Minimal on, the guidance keeps the Citing claims and Cards sections and ends with the one sentence that says to draw a card only when the analyst asks', { options: { minimal: true, ...PRESET } }, async ($, on) => {
+test('with Minimal on, the guidance keeps the Citing claims and Cards sections, leaves out the Labels section, since Minimal turns Labels off, and ends with the one sentence that says to draw a card only when the analyst asks', { options: { minimal: true, ...PRESET } }, async ($, on) => {
   const text = await thimbleText($, world(on))
   expect(text).toContain('## Citing claims')
   expect(text).toContain('## Cards\n\nDraw a card with the `card` tool.')
+  expect(text).not.toMatch(/label/i)
   expect(text.endsWith('Draw a card only when the analyst asks for one.')).toBe(true)
   expect(text).not.toContain('These come only')
+})
+
+test('with Labels off, the guidance is guidance.md without its Labels section, and no sentence of it names a label; the Labels setting says that Claude then makes no labels', { options: { labels: false, citations: 'auto cite' } }, async ($, on) => {
+  const text = await thimbleText($, world(on))
+  expect(text).toBe(GUIDANCE.slice(0, GUIDANCE.indexOf('## Labels')).trim())
+  expect(text).not.toMatch(/label/i)
+  const labels = SWITCHES.find(s => s.key === 'labels')!
+  expect(labels.says.off).toBe('No Labels pane, and Claude makes no labels.')
+  expect(labels.does.endsWith('off: no Labels pane, and Claude makes no labels.')).toBe(true)
+})
+
+test('with Labels on, the guidance keeps its Labels section as guidance.md has it, and adds no sentence about labels', { options: { labels: true, citations: 'auto cite' } }, async ($, on) => {
+  const text = await thimbleText($, world(on))
+  expect(text).toBe(GUIDANCE.trim())
+  expect(text.endsWith('Sort records with a label: [7 of 30](#) tickets.')).toBe(true)
 })
 
 test('with every mode after each reply, the guidance adds no sentence of modes', { options: { citations: 'auto cite' } }, async ($, on) => {
@@ -127,4 +144,10 @@ test('with Cards off, the Cards section is left out, and no sentence says when t
   expect(text).not.toContain('## Cards')
   expect(text).not.toContain('Draw a card only')
   expect(text).toContain('## Labels')
+})
+
+test("the guidance reads as the terminal reads a text: what it includes stands in its place, and a slot of prompts/slots.json takes the terminal's words", { options: { citations: 'auto cite' } }, async ($, on) => {
+  const slots = { SURFACE: { terminal: 'a made-up plugin', browser: 'a made-up workbench' } }
+  const w = world(on, { 'guidance.md': 'thimble is {{SURFACE}}.\n\n{{include:labels-part}}\n', 'labels-part.md': '## Labels\n\nSort records with a label.\n\n', 'slots.json': JSON.stringify(slots) })
+  expect(await thimbleText($, w)).toBe('thimble is a made-up plugin.\n\n## Labels\n\nSort records with a label.')
 })

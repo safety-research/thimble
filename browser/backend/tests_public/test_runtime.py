@@ -1250,3 +1250,156 @@ async def test_r2_the_server_writes_no_file_through_a_link_and_waits_on_no_fifo_
     dropping.start()
     dropping.join(5)
     assert not dropping.is_alive() and not short.exists()
+
+
+# --------------------------------------------------------------------------- rewind
+
+
+def analyst_messages() -> list[tuple[int, str, str]]:
+    """(place, words, event id) of each message the analyst sent main from the page that the chat still shows."""
+    recs = main_records()
+    hidden = runtime.rewound(recs)
+    return [(i, r["text"], r["event"]) for i, r in enumerate(recs)
+            if i not in hidden and r["type"] == "user" and r.get("by") == agents.BROWSER]
+
+
+async def test_a_rewind_cuts_main_s_conversation_before_the_message_and_hides_it_and_what_came_after(on, monkeypatch):
+    client = api_key(monkeypatch, [text("Two incidents."), text("The second was worse."), text("Yes."),
+                                   text("Three incidents, counting the outage.")])
+    for words in ("What happened?", "Which was worse?", "Sure?"):
+        await main_turn(words)
+    second = analyst_messages()[1]
+    got = await runtime.rewind_main(CORPUS, second[2])
+    assert got == {"text": "Which was worse?", "event": second[2]}  # the words go back in the composer
+    recs = main_records()
+    assert recs[-1]["type"] == "chip" and recs[-1]["kind"] == runtime.REWIND_CHIP and recs[-1]["event"] == second[2]
+    # the page shows the first turn alone, then the rewind's line
+    assert runtime.rewound(recs) == set(range(second[0], len(recs) - 1))
+    assert [w for _, w, _ in analyst_messages()] == ["What happened?"]
+    await main_turn("Count the outage too?")
+    sent = asked(client, 3)
+    assert "What happened?" in sent and "Two incidents." in sent
+    assert "Which was worse?" not in sent and "Sure?" not in sent and "worse." not in sent
+    assert [w for _, w, _ in analyst_messages()] == ["What happened?", "Count the outage too?"]
+    # a message a rewind hid is no place to rewind to
+    with pytest.raises(runtime.RewindRefused):
+        await runtime.rewind_main(CORPUS, second[2])
+
+
+async def test_a_rewind_to_a_message_that_never_reached_claude_keeps_main_s_conversation(on, monkeypatch):
+    """A message whose turn never ran (Claude could not be reached) is in no engine's state: the conversation is cut
+    before the first later message that is, and kept whole when none is."""
+    client = api_key(monkeypatch, [text("Two incidents."), text("Still two.")])
+    await main_turn("What happened?")
+    unreachable = {"what": "no key", "fix": ""}
+    real = claude_access.problem
+    monkeypatch.setattr(claude_access, "problem", lambda: unreachable or real())
+    await main_turn("Which was worse?")
+    assert len(client.bodies) == 1  # that turn never reached Claude
+    unreachable = {}
+    await runtime.rewind_main(CORPUS, analyst_messages()[1][2])
+    await main_turn("And now?")
+    assert "What happened?" in asked(client, 1) and "Two incidents." in asked(client, 1)
+
+
+@pytest.fixture()
+def claude_config(tmp_path, monkeypatch) -> Path:
+    """Claude Code's config folder the test's own (CLAUDE_CONFIG_DIR), where cc_transcript keeps a session's
+    transcript."""
+    d = tmp_path / "claude-config"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(d))
+    return d
+
+
+def cc_record(kind: str, uuid: str, body: Any) -> dict[str, Any]:
+    """A record of a Claude Code transcript as Claude Code writes it: a user entry (a prompt, or a tool's results), an
+    assistant entry, or the queued_command attachment of a message the session read mid-turn, whose `prompt` is
+    `body`."""
+    if kind == "attachment":
+        return {"type": "attachment", "uuid": uuid,
+                "attachment": {"type": "queued_command", "prompt": body, "commandMode": "prompt"}}
+    return {"type": kind, "uuid": uuid, "message": {"role": kind, "content": body}}
+
+
+def cc_transcript(sid: str, records: list[dict[str, Any]]) -> Path:
+    """Session `sid`'s transcript where Claude Code keeps it, in the test's own config folder (claude_config): one
+    record per line, each after the one before it (parentUuid)."""
+    import os
+
+    project = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-made-up-corpus"
+    project.mkdir(parents=True, exist_ok=True)
+    path = project / f"{sid}.jsonl"
+    lines, parent = [], None
+    for r in records:
+        lines.append(json.dumps({**r, "parentUuid": parent, "sessionId": sid, "isSidechain": False}) + "\n")
+        parent = r["uuid"]
+    path.write_text("".join(lines))
+    return path
+
+
+async def test_on_claude_code_sign_in_a_rewind_resumes_the_session_before_the_message_as_a_fork(on, monkeypatch,
+                                                                                                 claude_config):
+    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock
+
+    def script(sid: str) -> list[Any]:
+        return [SystemMessage(subtype="init", data={"session_id": sid}),
+                AssistantMessage(content=[TextBlock(text="ok")], model="claude-opus-5-5"),
+                ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                              session_id=sid)]
+
+    # Claude Code's transcript of the session: each turn's prompt, then its reply
+    held: list[dict[str, Any]] = []
+    seen: dict[str, Any] = {}
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    for n, words in enumerate(("What happened?", "Which was worse?")):
+        fake_sdk(monkeypatch, script("sess-1"), seen)
+        await main_turn(words)
+        held += [cc_record("user", f"u{n}", seen["prompt"]), cc_record("assistant", f"a{n}", [{"type": "text",
+                                                                                                "text": "ok"}])]
+    cc_transcript("sess-1", held)
+    cc_transcript("sess-other", [cc_record("user", "x0", held[2]["message"]["content"])])  # another session's
+    sp = runtime._spaces[CORPUS]
+    await runtime.rewind_main(CORPUS, analyst_messages()[1][2])
+    assert json.loads(sp.main.state_path("cc").read_text()) == {"session_id": "sess-1", "resume_at": "a0"}
+    assert runtime_api_cut() == "a0"  # the checker's and the proposer's forks take main where the rewind left it
+    fake_sdk(monkeypatch, script("sess-2"), seen)
+    await main_turn("Count the outage too?")
+    opts = seen["options"]
+    assert (opts.resume, opts.resume_session_at, opts.fork_session) == ("sess-1", "a0", True)
+    assert json.loads(sp.main.state_path("cc").read_text()) == {"session_id": "sess-2"}  # the fork is main's now
+
+    # back to the first message: the fork's transcript holds the conversation it resumed, then its own turn, and the
+    # first message's prompt is its first entry, so nothing is left to resume: the next turn starts a session of its own
+    cc_transcript("sess-2", [*held[:2], cc_record("user", "u2", seen["prompt"]), cc_record("assistant", "a2", "ok")])
+    await runtime.rewind_main(CORPUS, analyst_messages()[0][2])
+    assert not sp.main.state_path("cc").exists()
+    fake_sdk(monkeypatch, script("sess-3"), seen)
+    await main_turn("Start over")
+    assert seen["options"].resume is None and seen["options"].resume_session_at is None
+
+    # a session thimble cannot read (no transcript of sess-3) is not rewound blind
+    before = len(main_records())
+    with pytest.raises(runtime.RewindRefused):
+        await runtime.rewind_main(CORPUS, analyst_messages()[-1][2])
+    assert json.loads(sp.main.state_path("cc").read_text()) == {"session_id": "sess-3"}
+    assert len(main_records()) == before
+
+
+def runtime_api_cut() -> str | None:
+    from app import runtime_api
+
+    return runtime_api.cc_main_cut(CORPUS)
+
+
+async def test_the_rewind_route_is_the_analyst_s_and_says_why_it_cannot(on, monkeypatch, analyst):
+    from fastapi import HTTPException
+
+    api_key(monkeypatch, [text("Two incidents.")])
+    await main_turn("What happened?")
+    event = analyst_messages()[0][2]
+    with pytest.raises(HTTPException) as e:
+        await agents.rewind_route(CORPUS, agents.RewindBody(event="nope"), analyst)
+    assert e.value.status_code == 409
+    got = await agents.rewind_route(CORPUS, agents.RewindBody(event=event), analyst)
+    assert got["text"] == "What happened?"
+    assert analyst_messages() == []

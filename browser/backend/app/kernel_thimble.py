@@ -57,7 +57,7 @@ its "color".
 
 Server-only helpers: `_frame()` returns a table card's final DataFrame as JSON (frames.CAPTURE); `_trial_begin/_end/
 _undo/_drop` let the card check run a fix's code and put names back if it is refused; `_labels_read()` reports the
-labels (with revisions) the last cell read.
+labels (with revisions) the last cell read; `_printed()` the texts pandas wrote of its tables, each with the rows.
 
 Rows come from labels/<id>.sqlite when it reflects the labels file, else from labels/<id>.jsonl (last row per ref wins).
 A cover over a range of records supplies their negative value. Only the standard library at import; pandas is imported
@@ -225,6 +225,40 @@ def _find(name: str, ws=None) -> dict:
     raise KeyError(f"thimble.labels: no label named {name!r}; the labels are: {names}")
 
 
+def _file_sig(p: Path):
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    return st.st_ino, st.st_size, st.st_mtime_ns
+
+
+def _store_open(db: Path):
+    """(a read-only connection to the label store `db`, a check to call once its reads are done, which raises
+    sqlite3.OperationalError when they may have seen the store change). The kernel reads the workspace's labels/ but
+    writes none of it, and SQLite opens a store, which is in WAL mode, read-only only while the store's -wal and -shm
+    files are there, which it cannot make there. Where they are not, no connection of the server's has the store open:
+    the store is then read as immutable, whole as it lies on disk, and the check tells whether the server wrote it
+    meanwhile."""
+    wal = f"{db}-wal"
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    try:
+        conn.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchall()
+        return conn, lambda: None
+    except sqlite3.OperationalError:
+        conn.close()
+        if os.path.lexists(wal):
+            raise
+    seen = _file_sig(db)
+    conn = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True, timeout=5.0)
+
+    def check():
+        if _file_sig(db) != seen or os.path.lexists(wal):
+            raise sqlite3.OperationalError(f"{db.name} changed while it was read")
+
+    return conn, check
+
+
 def _store_fresh(jsonl: Path, db: Path) -> bool:
     """Whether the store reflects the labels file (labels_store.Store.state's `fresh`). A store keying cards by `cell:`
     refs is not, so the labels file is read instead."""
@@ -235,14 +269,16 @@ def _store_fresh(jsonl: Path, db: Path) -> bool:
     if not db.exists():
         return False
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+        conn, check = _store_open(db)
         try:
             meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
-            if conn.execute("SELECT 1 FROM current WHERE ref >= 'cell:' AND ref < 'cell;' LIMIT 1").fetchone():
-                return False
+            cells = conn.execute("SELECT 1 FROM current WHERE ref >= 'cell:' AND ref < 'cell;' LIMIT 1").fetchone()
         finally:
             conn.close()
+        check()
     except sqlite3.Error:
+        return False
+    if cells:
         return False
     try:
         return int(meta.get("size", -1)) == st.st_size and int(meta.get("mtime_ns", -1)) == st.st_mtime_ns
@@ -293,7 +329,7 @@ def _with_covers(rows: list, covers: list, negatives: bool) -> list:
 def _store_parts(db: Path):
     """(rows, covers) of the store: rows (path, line, label, source, verdict, confidence, ref), covers (path, first,
     last, value, source)."""
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    conn, check = _store_open(db)
     try:
         rows = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
                             "WHERE label IS NOT NULL OR analyst IS NOT NULL ORDER BY rowid").fetchall()
@@ -303,12 +339,14 @@ def _store_parts(db: Path):
             covers = []
     finally:
         conn.close()
+    check()
     return rows, covers
 
 
 def _store_rows(db: Path):
-    """_store_parts with the rows as an iterator over the query, so a large label is never held as a list of rows."""
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+    """_store_parts with the rows as an iterator over the query, so a large label is never held as a list of rows; it
+    raises sqlite3.OperationalError at its end when the store may have changed while it was read (_store_open)."""
+    conn, check = _store_open(db)
     try:
         try:
             covers = conn.execute("SELECT path, first, last, value, source FROM covers ORDER BY rowid").fetchall()
@@ -326,6 +364,7 @@ def _store_rows(db: Path):
                 yield from batch
         finally:
             conn.close()
+        check()
 
     return rows(), covers
 
@@ -458,7 +497,14 @@ def labels(name=None, negatives=False):
         _LABELS_READ.append({"id": k["id"], "rev": k["rev"]})
     jsonl = _ws() / "labels" / f"{k['id']}.jsonl"
     db = jsonl.with_suffix(".sqlite")
-    rows = _rows_from_store(db, negatives) if _store_fresh(jsonl, db) else _rows_from_jsonl(jsonl, negatives)
+    rows = None
+    if _store_fresh(jsonl, db):
+        try:
+            rows = _rows_from_store(db, negatives)
+        except sqlite3.Error:  # the store changed while it was read (_store_open): the labels file holds every row
+            pass
+    if rows is None:
+        rows = _rows_from_jsonl(jsonl, negatives)
     positive = k["values"][0] if k["values"] else None
     out = []
     for path, line, label, source, verdict, confidence, ref in rows:
@@ -483,7 +529,7 @@ def _set_by_analyst(concept_id: str) -> int:
         if _store_fresh(jsonl, db):
             # the analyst's rows alone, each with the value the label gave it: its own, or its cover's (a range of
             # records the label gave one value)
-            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+            conn, check = _store_open(db)
             try:
                 rows = conn.execute("SELECT path, line, label, source, analyst, confidence, ref FROM current "
                                     "WHERE analyst IS NOT NULL").fetchall()
@@ -493,6 +539,7 @@ def _set_by_analyst(concept_id: str) -> int:
                     covers = []
             finally:
                 conn.close()
+            check()
             rows = _with_covers(rows, covers, False)
         else:
             rows = _rows_from_jsonl(jsonl)
@@ -706,7 +753,15 @@ def _members(jsonl) -> tuple:
 
 
 def _read_members(jsonl: Path, db: Path) -> tuple:
-    rows, covers = _store_rows(db) if _store_fresh(jsonl, db) else _jsonl_parts(jsonl)
+    if _store_fresh(jsonl, db):
+        try:
+            return _members_of(*_store_rows(db))
+        except sqlite3.Error:  # the store changed while it was read (_store_open): the labels file holds every row
+            pass
+    return _members_of(*_jsonl_parts(jsonl))
+
+
+def _members_of(rows, covers) -> tuple:
     values = _Values()
     paths = set()
     starts = []  # a record of a CSV or a JSON document by the line it starts on, as a view that reads its lines names it
@@ -2957,3 +3012,101 @@ def _watch_cells():
 
 
 _watch_cells()
+
+
+# The tables a cell prints. pandas writes a DataFrame or a Series as text with its to_string(), which print(df), an
+# f-string and the code's own df.to_string() all call, so each text it returns is noted with the table's rows as data
+# (_frame_json): the citation check counts a printed table's rows from the rows themselves, never from their printed
+# text (marks.session_cards, the validator's check_count). _printed hands them to the server after the cell
+# (notebook.PRINTED_EXPR), which keeps those whose text the cell's printed output holds (frames.attach_printed); a text
+# that was not printed, such as the one IPython shows for a table a cell ends in, is left there. to_string() is wrapped
+# once per kernel (pandas is imported as the kernel starts, else as a card first imports it), and the wrapper and the
+# pre_run_cell handler that empties the list look up this module's names when they run, so a re-run of this source
+# keeps them working, also in a kernel an older server started.
+_PRINTED = []
+_PRINTED_MAX = 20  # the tables of one cell noted at most
+
+
+def _printed():
+    return _Json(json.dumps(list(_PRINTED), default=str))
+
+
+def _note_printed(table, text):
+    """A table's text, as its to_string() returned it, noted with the table's rows."""
+    if isinstance(text, str) and text and len(_PRINTED) < _PRINTED_MAX:
+        try:
+            _PRINTED.append({"text": text, "frame": _frame_json(_as_frame(table))})
+        except Exception:  # noqa: BLE001 — a table whose rows cannot be read is printed all the same, and not noted
+            pass
+
+
+def _clear_printed():
+    del _PRINTED[:]
+
+
+def _wrap_to_string(pd):
+    """DataFrame.to_string and Series.to_string, each wrapped to note the text it returns (once per class)."""
+    import functools
+
+    module = globals()
+    for cls in (pd.DataFrame, pd.Series):
+        real = cls.to_string
+        if getattr(real, "_thimble_noted", False):
+            continue
+
+        def to_string(self, *args, _real=real, **kwargs):
+            text = _real(self, *args, **kwargs)
+            try:
+                module["_note_printed"](self, text)
+            except Exception:  # noqa: BLE001 — the text stands whether or not it was noted
+                pass
+            return text
+
+        functools.update_wrapper(to_string, real)
+        to_string._thimble_noted = True
+        cls.to_string = to_string
+
+
+def _watch_prints():
+    import sys
+
+    try:
+        from IPython import get_ipython
+    except ImportError:
+        return
+    ip = get_ipython()
+    if ip is None or globals().get("_PRINTS_WATCHED"):
+        return
+    module = globals()
+    if "pandas" in sys.modules:
+        _wrap_to_string(sys.modules["pandas"])
+    else:
+        # as page_fonts' hook: pandas' loader runs, then its classes are wrapped
+        class _ThimbleTables:
+            def find_spec(self, name, path=None, target=None):
+                if name != "pandas":
+                    return None
+                sys.meta_path.remove(self)
+                import importlib.util
+
+                spec = importlib.util.find_spec(name)
+                if spec is None or spec.loader is None:
+                    return spec
+                run = spec.loader.exec_module
+
+                def exec_module(m, run=run):
+                    run(m)
+                    try:
+                        module["_wrap_to_string"](m)
+                    except Exception:  # noqa: BLE001 — pandas works the same without it
+                        pass
+
+                spec.loader.exec_module = exec_module
+                return spec
+
+        sys.meta_path.insert(0, _ThimbleTables())
+    ip.events.register("pre_run_cell", lambda *_a, **_k: module["_clear_printed"]())
+    module["_PRINTS_WATCHED"] = True
+
+
+_watch_prints()

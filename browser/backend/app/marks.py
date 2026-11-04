@@ -7,16 +7,18 @@
    each with a spinner.
 2. The checker: forks of main's session at the turn's end (`claude -p --resume <main> --resume-session-at <cut>
    --fork-session`, as the view proposer forks it), up to MAX_FORKS at once, each with a share of the marks, read the
-   terminal's checker.md (CHECKER, with the few changes CHECKER_CHANGES lists) and give one JSON item per mark:
-   verified, corrected, wrong or unconfirmed, with its evidence. A fork reads with Read, Grep and Glob, and runs code
-   only as Python (Bash `python3 …`), on Claude Code sign-in in Claude Code's sandbox where it can run (run_fork).
+   terminal's checker.md as the workbench reads it (CHECKER, prompts.py: with the workbench's words in its slots of a
+   mode's own words) and give one JSON item per mark: verified, corrected, wrong or unconfirmed, with its evidence. A
+   fork reads with Read, Grep and Glob, and runs code only as Python (Bash `python3 …`), on Claude Code sign-in in
+   Claude Code's sandbox where it can run (run_fork).
 3. The validator, the terminal's own (plugin/engine/kernel/evidence.py), checks that evidence with no model call and no
    code run: a quote must stand in the file's line, and computed evidence names one of the conversation's real Bash
    calls (the fork's or main's) by a part of its output, and that call's real output must show the words. A cited file
    lies in the corpus folder or main's, or is a label's definition, which holds the label's rule (_rules_dir); code
    may also cite the workspace's temp folder, and the one Claude Code's sandbox gives main's commands on Claude Code
-   sign-in (_temp_dirs). Its result is what the analyst sees. A mark it failed whose check cited a label card says
-   what changed in the label after the reply was written, when its change log holds a change since (_label_changed).
+   sign-in (_temp_dirs). Its result is what the analyst sees. A label is read as it was when the reply was written
+   (`at`, the time thimble keeps for the check's words, label_versions.keep_time), from the versions thimble kept of
+   it, never from the label's files in the workspace (session_cards).
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
@@ -25,8 +27,14 @@
    autoRepair); a repair's own end starts none, so a mark that fails again waits for Repair.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
-a chart's data row, a label card's count or share, a line of printed output) is written to a file the checker greps
-first (session_cards, the validator's card_index), and the validator confirms a card's place by reading it (check_card).
+a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
+validator's card_index), and the validator confirms a card's place by reading it (check_card). So is every label of the
+workspace, as the terminal lists its labels: `card:label-<label id>`, a place for each value's count and share, from
+the versions the label kept (label_versions): the label as it was when the cited words were written, then its earlier
+versions (`card:label-<id>@v<n>#…`), never a version made after the words. So a trial's counts cited before the run on
+everything replaced them hold against the trial, and no later change of the label (a run, a correction, a write to its
+files by a card's code) confirms words written before it. A label's card, which apply_label makes, reads the same
+versions under its own id, which the file leaves out, so the checker finds each label once.
 
 A card's takeaway is checked the same way: its marks, `[words](#)`, are checked as soon as the card's write lands
 (card_written: after the add_card or edit_card call that wrote it, after the card check that may rewrite it, after the
@@ -53,6 +61,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import importlib.util
 import json
 import logging
@@ -70,22 +79,16 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import agents, config, ledger, nofollow, sdk
+from . import agents, config, ledger, nofollow, prompts, sdk
 
 log = logging.getLogger("thimble.marks")
 router = APIRouter()
 
 HERE = Path(__file__).resolve().parent
 MARKS_OF = HERE / "marks_of.mjs"
-PLUGIN = HERE.parents[2] / "plugin"  # the terminal plugin, whose checker prompt and validator this module runs
-CHECKER = PLUGIN / "prompts" / "checker.md"
+PLUGIN = HERE.parents[2] / "plugin"  # the terminal plugin, whose validator this module runs
+CHECKER = "plugin:checker"  # the terminal's checker.md (prompts.py reads a text of the plugin by this name)
 EVIDENCE = PLUGIN / "engine" / "kernel" / "evidence.py"
-# The terminal's checker.md as the browser's fork reads it: exact strings, each of which must stand in the terminal's
-# text (tests/test_marks.py), so an edit there that touches one stops the test until someone looks at it.
-CHECKER_CHANGES: tuple[tuple[str, str], ...] = (
-    (" Label values come from `thimble label NAME --csv`.", ""),
-    ("its `--code` file or `--regex` command.", "the code or regex its apply_label call gave."),
-)
 # A reply with many marks is split between forks, each with about PER_FORK marks (at most MAX_FORKS forks), which run at
 # once, so the reply settles when its slowest share does (the terminal's checker.ts).
 PER_FORK = 4
@@ -100,6 +103,9 @@ TELL_KIND = "citations"
 LAST_REPLY = "your last reply"
 THREAD_ANSWER = ("an answer that a side thread of this session gave the analyst about {about}. That thread's work is "
                  "not in your conversation, so find the evidence in the files")
+# the id a label is cited by in the check, `card:label-<label id>`, as the terminal names its labels
+# (evidence.LABEL_CARD): session_cards
+LABEL_PLACE = "label-"
 
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 # (workspace, card, takeaway) of the takeaways a check has taken until their marks are on the card, so a check that
@@ -113,12 +119,7 @@ _procs: set[asyncio.subprocess.Process] = set()
 def checker_prompt(marks: str, cwd: str, cards: str = "", root: str | None = None, reply: str = LAST_REPLY) -> str:
     """The checker's text for `marks`, which `reply` holds (LAST_REPLY, or a side thread's THREAD_ANSWER): its shell in
     `cwd`, its paths from `root` (check_folders; `cwd` when None)."""
-    text = CHECKER.read_text(encoding="utf-8")
-    for old, new in CHECKER_CHANGES:
-        text = text.replace(old, new)
-    for slot, value in (("MARKS", marks), ("CWD", cwd), ("ROOT", root or cwd), ("CARDS", cards), ("REPLY", reply)):
-        text = text.replace("{{" + slot + "}}", value)
-    return text
+    return prompts.render(CHECKER, {"MARKS": marks, "CWD": cwd, "ROOT": root or cwd, "CARDS": cards, "REPLY": reply})
 
 
 def check_folders(c: str, main: dict[str, Any]) -> tuple[str, str]:
@@ -135,53 +136,162 @@ def check_folders(c: str, main: dict[str, Any]) -> tuple[str, str]:
 
 
 def session_cards(c: str) -> list[dict[str, Any]]:
-    """The workspace's cards as the validator reads them (evidence.check_card): each card that ran with outputs and each
-    label card, its title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html
-    table, a label card's values, concepts.card_output) or the lines of its printed text, as the card's citations name
-    them (cite.bundle_cells, cite.numbered_lines)."""
+    """The workspace's cards and labels as the validator reads them (evidence.check_card): each card that ran with
+    outputs, its title, and per output the cells of its table (a frame's shown values, a chart's data rows, an html
+    table) or the lines of its printed text, as the card's citations name them (cite.bundle_cells,
+    cite.numbered_lines), with the tables the output holds as data (card_tables), whose rows a count counts
+    (evidence.check_count). Then each label of the workspace, as the terminal gives its labels
+    (evidence.terminal_label_cards): `label-<label id>`, titled `label <name>`, an entry for each version the label kept
+    (label_versions), its table as the label showed it then (concepts.card_table) and as data, which names the row that
+    totals its values (`totals`), with when that version was made, what made it and what changed after it. The
+    validator reads a label as it was when the cited words were written, never from its files in the workspace, which a
+    card's code can write. A label's card (kind `label`, which apply_label makes) gives its label's entries again under
+    its own id, so a citation of it reads the same versions, `listed` False: the checker's file lists each label once
+    (cards_index)."""
     from . import cite, concepts, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
     out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    label_cards: list[tuple[dict[str, Any], str]] = []  # the labels' cards: (the card, its label's id)
     for _, nb in notebook._stored(ws):
         for cell in nb.get("cells") or []:
-            if not cell.get("id"):
+            cid = str(cell.get("id") or "")
+            # a card is read once, by the first cell of its id: a second cell of that id (the canvas's files are the
+            # workspace's, which a card's code writes) adds no versions or values under it; nor does a cell whose id is
+            # a label's (no card's id starts so: notebook._new_id)
+            if not cid or cid in seen or cid.startswith(LABEL_PLACE):
                 continue
+            seen.add(cid)
+            card = {"id": cid, "title": str(cell.get("title") or "")}
             if cell.get("kind") == "label":
-                try:
-                    label = concepts.card_output(ws, cell)
-                except Exception:  # noqa: BLE001 — a label that cannot be read leaves its card out, not the others
-                    log.exception("%s: the values of label card %s were not read", c, cell["id"])
-                    label = None
-                bundles = [(0, label)] if label else []
+                payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
+                label_cards.append((card, str(payload.get("concept") or "")))
             elif notebook.runnable(cell) and cell.get("outputs"):
-                bundles = list(cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"])))
-            else:
-                continue
-            outs: list[dict[str, Any]] = []
-            for i, b in bundles:
-                if notebook.ERROR_MIME in b:
-                    continue
-                cells = cite.bundle_cells(b)
-                if cells:
-                    outs.append({"out": i, "corner": cite._row_names(b)[0], "cells": [list(x) for x in cells]})
-                elif cite.chart_spec(b) is None and not any(k.startswith("image/") for k in b):
-                    lines = [[n, t] for n, t in cite.numbered_lines(b) if t.strip()]
-                    if lines:
-                        outs.append({"out": i, "lines": lines})
-            if outs:
-                out.append({"id": str(cell["id"]), "title": str(cell.get("title") or ""), "outputs": outs})
+                outs = _outputs(list(cite.iter_outputs(notebook.hydrate_outputs(ws, cell["outputs"]))))
+                if outs:
+                    out.append({**card, "outputs": outs})
+    labels: dict[str, list[dict[str, Any]]] = {}
+    try:
+        listed = concepts.list_concepts(ws)
+    except Exception:  # noqa: BLE001 — labels that cannot be listed leave the cards to the check
+        log.exception("%s: the labels were not read for the check", c)
+        listed = []
+    for concept in listed:
+        try:
+            labels[concept["id"]] = _label_versions(c, concept)
+        except Exception:  # noqa: BLE001 — a label that cannot be read is left out, not the others
+            log.exception("%s: the versions of label %s were not read", c, concept["id"])
+        out += labels.get(concept["id"]) or []
+    for card, kid in label_cards:
+        out += [{**v, **card, "listed": False} for v in labels.get(kid) or []]
     return out
 
 
-def cards_index(c: str, cards: list[dict[str, Any]]) -> str:
-    """The file the checker greps for a value a card shows (the validator's card_index), in a folder of its own in the
-    workspace's temp folder; its path. Each check has its own: a card rewritten while a check runs starts another
-    check, whose index must not take the place of the one this check's validator reads `cards` as."""
+def _label_versions(c: str, concept: dict[str, Any]) -> list[dict[str, Any]]:
+    """A label as the validator reads it (session_cards): an entry for each version it kept, oldest first."""
+    from . import label_versions  # noqa: PLC0415
+
+    kept = label_versions.read(c, concept["id"])
+    # a label that shows other counts now than its newest version, which no step of thimble's kept (a write to its
+    # files): that version is shown no longer, and nothing is evidence of what the label shows
+    since = time.time() if kept and label_versions.shows_other(c, concept, kept[-1]) else None
+    card = {"id": f"{LABEL_PLACE}{concept['id']}", "title": f"label {concept['name']}"}
+    out = []
+    for i, v in enumerate(kept):
+        newest = since is not None and i == len(kept) - 1
+        out.append({**card, "version": v["v"], "from": v["at"], "made": v["made"],
+                    "after": label_versions.CHANGED if newest else label_versions.after_text(kept, i),
+                    **({"to": since} if newest else {}), "outputs": _version_outputs(v)})
+    return out
+
+
+def _version_outputs(v: dict[str, Any]) -> list[dict[str, Any]]:
+    """A label version's output as the validator reads it (session_cards): the cells of its table as the card showed it
+    (concepts.card_table), and the same rows as data (concepts.card_rows), which a count of the label's values counts,
+    with the row that totals them (`totals`)."""
+    from . import concepts  # noqa: PLC0415
+
+    t = concepts.card_rows(v)
+    totals = t.pop("totals")
+    return [{**o, "tables": [t], **({"totals": totals} if totals else {})}
+            for o in _outputs([(0, concepts.card_table(v))])]
+
+
+def _outputs(bundles: list[tuple[int, dict[str, Any]]]) -> list[dict[str, Any]]:
+    """A card's output bundles as the validator reads them (session_cards): each table's cells, else the lines of each
+    printed text, each with the tables it holds as data (card_tables)."""
+    from . import cite, notebook  # noqa: PLC0415
+
+    outs: list[dict[str, Any]] = []
+    for i, b in bundles:
+        if notebook.ERROR_MIME in b:
+            continue
+        cells = cite.bundle_cells(b)
+        tables = card_tables(b)
+        if cells:
+            outs.append({"out": i, "corner": cite._row_names(b)[0], "cells": [list(x) for x in cells],
+                         **({"tables": tables} if tables else {})})
+        elif cite.chart_spec(b) is None and not any(k.startswith("image/") for k in b):
+            lines = [[n, t] for n, t in cite.numbered_lines(b) if t.strip()]
+            if lines:
+                outs.append({"out": i, "lines": lines, **({"tables": tables} if tables else {})})
+    return outs
+
+
+def card_tables(b: dict[str, Any]) -> list[dict[str, Any]]:
+    """The tables an output holds as data, which a count of a card's rows counts (evidence.check_count), each {columns,
+    rows, names, label, total, lines?}: a table card's DataFrame (frames.py), the rows of a chart's main part (none when
+    another part draws rows of the same columns, so the chart's rows are split), a diagram's edges and a timeline's
+    events (on the lines of their listing after its first), and each table the card's code printed (on its lines). The
+    rows are the values themselves, never their text; names are the rows' names as the output's citations write them."""
+    from . import cite, frames  # noqa: PLC0415
+    from .kernel_thimble import DIAGRAM_MIME, TIMELINE_MIME  # noqa: PLC0415
+
+    def frame_table(f: dict[str, Any], lines: list[int] | None = None) -> dict[str, Any]:
+        t = {"columns": [str(x) for x in f["columns"]], "rows": f["rows"], "names": frames.row_labels(f), "label": f.get("label"),
+             "total": int(f.get("total") or len(f["rows"]))}
+        return {**t, "lines": lines} if lines else t
+
+    f = frames.frame_of(b)
+    if f is not None:
+        return [frame_table(f)]
+    spec = cite.chart_spec(b)
+    if spec is not None:
+        main = cite._main_part(spec)
+        table = cite.chart_table(b)
+        if main is None or table is None:
+            return []
+        part, raw = main
+        rows = [r for r in raw[:cite.CHART_ROWS_MAX] if isinstance(r, dict)]
+        cols = list(dict.fromkeys(str(k) for r in rows for k in r))
+        # another part with other rows of the columns draws the rest of them (a layer each for some services, one with a
+        # column more); a part that draws the same rows again (a layer of labels over its bars) splits nothing
+        if any(p is not part and got is not raw and got != raw and {str(k) for r in got if isinstance(r, dict) for k in r} >= set(cols)
+               for p, got in cite._row_parts(spec)):
+            return []
+        return [{"columns": cols, "rows": [[r.get(k) for k in cols] for r in rows], "names": table.labels, "label": table.label,
+                 "total": len(raw)}]
+    drawn = b.get(DIAGRAM_MIME) if isinstance(b.get(DIAGRAM_MIME), dict) else b.get(TIMELINE_MIME) if isinstance(b.get(TIMELINE_MIME), dict) else None
+    if drawn is not None:
+        edges = DIAGRAM_MIME in b
+        items = [x for x in drawn.get("edges" if edges else "events") or [] if isinstance(x, dict)]
+        cols = ["source", "target", "label"] if edges else ["time", "label", "lane", "end"]
+        names = [f"{x.get('source')} -> {x.get('target')}" if edges else str(x.get("time") or "") for x in items]
+        return [{"columns": cols, "rows": [[x.get(k) for k in cols] for x in items], "names": names, "label": None,
+                 "total": len(items), "lines": [2, 1 + len(items)]}] if items else []
+    return [frame_table(f, span) for span, f in frames.printed_frames(b)]
+
+
+def cards_index(c: str, cards: list[dict[str, Any]], at: float | None = None) -> str:
+    """The file the checker greps for a value a card or a label shows (the validator's card_index), the labels as they
+    were at `at`, when the cited words were written, in a folder of its own in the workspace's temp folder; its path.
+    The entries of a label's card are left out (`listed` False, session_cards): its label is listed by its own id. Each check has its own: a card rewritten while a check runs starts another check, whose index must not
+    take the place of the one this check's validator reads `cards` as."""
     folder = _temp_dir(c) / f"check-{secrets.token_hex(4)}"
     p = folder / "cards-index.tsv"
     # in the temp folder a card's code writes: made and written as nofollow does, never through a link put there
-    nofollow.write_text(p, evidence().card_index(cards), make=True)
+    nofollow.write_text(p, evidence().card_index([x for x in cards if x.get("listed", True)], at), make=True)
     return str(p)
 
 
@@ -488,31 +598,62 @@ async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str]
         if m["piece"] >= len(texts):
             cid, title, text = takeaways[m["piece"] - len(texts)]
             takes.append({**m, "card": cid, "title": title, "takeaway": text})
+    # when the words were written, as thimble keeps it where no card's code writes (label_versions), for this check
+    # and a later repair of one of its marks: a label is read as it was then
+    at = time.time()
     if chat or (takes and saved):
-        reply = {"turn": turn, "items": chat, "times": {"reply_end": time.time()}}
+        reply = {"turn": turn, "items": chat, "times": {"reply_end": at}}
         _save(c, {**reply, "thread": thread} if thread else reply)
+    keys = [_time_key(turn=turn)] if chat else []
+    keys += [_time_key(card=cid, text=text) for cid, text in dict.fromkeys((m["card"], m["takeaway"]) for m in takes)]
     for cid, text in dict.fromkeys((m["card"], m["takeaway"]) for m in takes):
         mine = [_takeaway_item(m) for m in takes if m["card"] == cid]
         notebook.set_takeaway_marks(c, cid, text, lambda _old, mine=mine: mine)
     _claimed.difference_update(claims)  # their marks are on their cards: takeaways_to_check passes them by now
+    for key in keys:
+        await asyncio.to_thread(_keep_time, c, key, at)
     if cut is None:
         await _give_up(c, turn, {m["n"] for m in chat}, "the reply was stopped before its citations were checked")
         return
     folders = check_folders(c, main)
-    cards, index = await _cards_and_index(c)
+    cards, index = await _cards_and_index(c, at)
     try:
-        await asyncio.gather(*(_check_share(c, main, turn, cut, share, folders, fork or run_fork, cards, index)
+        await asyncio.gather(*(_check_share(c, main, turn, cut, share, folders, fork or run_fork, cards, index, at=at)
                                for share in split_marks(chat + takes)))
     finally:
         _drop_index(index)
 
 
-async def _cards_and_index(c: str) -> tuple[list[dict[str, Any]], str]:
-    """The workspace's cards as the validator reads them, and the index the checker greps; none when they cannot be
-    read (the check runs without the cards)."""
+def _time_key(turn: str | None = None, card: str | None = None, text: str = "") -> str:
+    """The key under which thimble keeps when a check's words were written (label_versions.keep_time): a reply's or a
+    side thread's answer's turn, or a card's takeaway as its text then read."""
+    if card:
+        return f"takeaway:{card}:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:32]}"
+    return f"turn:{turn}"
+
+
+def _keep_time(c: str, key: str, at: float) -> None:
+    from . import label_versions  # noqa: PLC0415
+
+    label_versions.keep_time(c, key, at)
+
+
+def _time_of(c: str, key: str) -> float | None:
+    from . import label_versions  # noqa: PLC0415
+
+    return label_versions.time_of(c, key)
+
+
+async def _cards_and_index(c: str, at: float | None) -> tuple[list[dict[str, Any]], str]:
+    """The workspace's cards as the validator reads them, and the index the checker greps, the labels as they were at
+    `at`; none when they cannot be read (the check runs without the cards). A label from before thimble kept versions
+    first gets one (label_versions.keep_first), made after the words, so its card says it has none from before them."""
+    from . import label_versions  # noqa: PLC0415
+
     try:
+        await asyncio.to_thread(label_versions.keep_first, c)
         cards = await asyncio.to_thread(session_cards, c)
-        return cards, cards_index(c, cards)
+        return cards, cards_index(c, cards, at)
     except Exception:  # noqa: BLE001 — the check runs without the cards
         log.exception("%s: the cards' index was not written", c)
         return [], ""
@@ -555,11 +696,12 @@ async def _takeaways_change(c: str, takes: list[dict[str, Any]], judged: Callabl
 async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share: list[dict[str, Any]],
                        folders: tuple[str, str], fork: Callable[..., Awaitable[dict[str, Any]]],
                        cards: list[dict[str, Any]] | None = None, index: str = "", request: str = "",
-                       auto: bool = False) -> None:
+                       auto: bool = False, at: float | None = None) -> None:
     """One fork's check of a share of the marks. `request`: what follows the checker's text for a repair (Repair in a
     mark's label, the terminal's x, or one this check's end started, `auto`), whose end tells main how its one mark
     ended, unless the mark is a side thread's. A check that is no repair repairs each mark it found wrong or could not
-    confirm, as soon as it ends. `folders`: the check's (cwd, root), check_folders."""
+    confirm, as soon as it ends. `folders`: the check's (cwd, root), check_folders; `at`: when the marks' words were
+    written, the time the validator reads a label at (None: now)."""
     takes = [m for m in share if m.get("card")]
     mine = {m["n"] for m in share if not m.get("card")}
     lines = "\n".join(_line(m) for m in share)
@@ -590,13 +732,12 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
                  if any(ev.printed(o, k["output"]) is not None for o in cited)]
         calls = list(got.get("calls") or []) + mains
         result = await asyncio.to_thread(ev.check_all, [{k: m[k] for k in ("n", "words", "sentence")} for m in share],
-                                         answer, calls, cwd, root, _temp_dirs(c), cards or [], str(_rules_dir(c)))
+                                         answer, calls, cwd, root, _temp_dirs(c), cards or [], str(_rules_dir(c)), at)
         if not result["parsed"]:
             await give_up("the check gave no answer thimble could read")
             _notice(c, "The check of the citations gave no answer thimble could read, so some are not checked.")
             return
         by_n = {int(r["n"]): r for r in result["results"]}
-        await asyncio.to_thread(_label_changed, c, turn, answer, by_n, mine)
 
         def change(r: dict[str, Any]) -> dict[str, Any]:
             def judged(m: dict[str, Any]) -> dict[str, Any]:
@@ -647,64 +788,6 @@ def _error_words(error: Any, folders: tuple[str, str]) -> str:
     (the validator's error_words). The error is thimble's or Claude Code's own, never the records' nor the check's."""
     cwd, root = folders
     return evidence().error_words(str(error), cwd, root)
-
-
-# what a failed mark's reason ends with when the label of the card its check cited changed after the reply was written
-LABEL_CHANGED = "The label changed after this reply ({})."
-
-
-def _label_changed(c: str, turn: str, answer: str, results: dict[int, dict[str, Any]], marks: set[int]) -> None:
-    """Each of `marks`, a reply's or a side thread's answer's, that this check failed (wrong, or not confirmed) and whose
-    answer (`answer`, the checker's) cites a label card whose label changed after the reply was written (its record's
-    `reply_end`): its reason in `results` ends with what changed, in the words of the card's stale tag
-    (concepts.changed_after), which the analyst reads in the tray, main hears with the check's words, and a repair reads
-    in its request. The mark's status is the check's, and a citation that holds or one with no change since is as it
-    was. A takeaway's mark has no reply, so it is left out. Never raises: the reasons stay as they were."""
-    try:
-        since = ((stored(c, turn) or {}).get("times") or {}).get("reply_end")
-        if not isinstance(since, (int, float)):
-            return
-        ev = evidence()
-        items: dict[int, dict[str, Any]] = {}
-        for it in ev.parse_answer(answer) or []:
-            with contextlib.suppress(TypeError, ValueError):
-                items.setdefault(int(it.get("mark")), it)
-        changed: dict[str, str] | None = None
-        for n in sorted(marks):
-            r, it = results.get(n), items.get(n)
-            if not r or r.get("status") != "failed" or r.get("failedBy") not in ("check", "evidence"):
-                continue
-            if not it or it.get("kind") != "card":
-                continue
-            cited = [m.group(1) for ref in ev.card_refs(it.get("evidence")) for m in [ev.CARD_TD.match(ref) or ev.CARD_LINE.match(ref)] if m]
-            if not cited:
-                continue
-            if changed is None:
-                changed = label_changes(c, float(since))
-            said = list(dict.fromkeys(changed[cid] for cid in cited if cid in changed))
-            if said:
-                r["reason"] = " ".join(x for x in (str(r.get("reason") or ""), LABEL_CHANGED.format("; ".join(said))) if x)
-    except Exception:  # noqa: BLE001 — what changed in a label is a note on a failure, never a cause of one
-        log.exception("%s: what changed in the labels the check of turn %s cited was not read", c, turn)
-
-
-def label_changes(c: str, since: float) -> dict[str, str]:
-    """Each label card of the workspace whose label changed after `since` (seconds since the epoch), with what changed,
-    in the words of its stale tag (concepts.changed_after)."""
-    from . import concepts, notebook  # noqa: PLC0415
-
-    ws = config.workspace_dir(c)
-    out: dict[str, str] = {}
-    for _, nb in notebook._stored(ws):
-        for cell in nb.get("cells") or []:
-            payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
-            kid = str(payload.get("concept") or "")
-            if cell.get("kind") != "label" or not cell.get("id") or not concepts.ID_RE.match(kid):
-                continue
-            concept = concepts.read_concept(ws, kid)
-            if concept is not None and (said := concepts.changed_after(concept, since)):
-                out[str(cell["id"])] = said
-    return out
 
 
 def _takeaway_now(c: str, m: dict[str, Any]) -> bool:
@@ -933,11 +1016,16 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
 
         await _edit(c, str(turn), change_reply, tell=False)
 
+    # the time its words were written, which the first check kept: a label is read as it was then, never as a later
+    # change made it (a mark checked before thimble kept the time is read as its labels are now)
+    key = _time_key(card=card, text=str(share.get("takeaway") or "")) if card else _time_key(turn=turn)
+
     async def run() -> None:
-        cards, index = await _cards_and_index(c)
+        at = await asyncio.to_thread(_time_of, c, key)
+        cards, index = await _cards_and_index(c, at)
         try:
             await _check_share(c, main, str(turn), cut, [share], check_folders(c, main), fork or run_fork, cards, index,
-                               request, auto)
+                               request, auto, at)
         finally:
             _drop_index(index)
 
@@ -1064,7 +1152,7 @@ async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -
         sid = runtime_api.cc_main_session(c) if kind == "cc" else None
         if not sid:
             return {"error": "thimble cannot reach Claude yet" if not kind else "main has no Claude Code session yet"}
-        main, cut = {**main, "sid": sid, "config_known": False}, None
+        main, cut = {**main, "sid": sid, "config_known": False}, runtime_api.cc_main_cut(c)
         # the fork's python runs in Claude Code's sandbox where it can, as main's Bash does on Claude Code sign-in (in a
         # short TMPDIR of its own), so it never reads the ANTHROPIC_* variables Claude Code signs in with; the sandbox's
         # .claude/.cc-writes/ in the corpus goes when the last session there ends (runtime_cc._tidy)

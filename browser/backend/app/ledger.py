@@ -106,6 +106,15 @@ def write_json(path: Path, obj: Any) -> None:
     atomic_write_text(path, json.dumps(obj, indent=2, ensure_ascii=False))
 
 
+def rewrite_text(path: Path, text: str) -> None:
+    """`text` as the whole file at `path`, written into the file that is there under the file's lock (locked,
+    nofollow.rewrite), not renamed over it: for a file a kernel wrapper hides by a mount on the file itself
+    (kernel_wrap.HIDDEN_FILES: the workspace's settings.json and config.json), which a rename over it would take off
+    inside a running kernel, which could then read the file."""
+    with locked(path):
+        nofollow.rewrite(path, text.encode("utf-8"))
+
+
 def write_json_once(path: Path, obj: Any) -> bool:
     """write_json for a file created once and never rewritten: if anything is at `path` by the time this writer would
     replace it, the other writer's file is kept and this temp removed. True when this call wrote the file. Its folder is
@@ -134,15 +143,14 @@ def append_jsonl(path: Path, obj: Any) -> None:
 # --------------------------------------------------------------------------- locks between processes
 #
 # A store that more than one process writes (in terminal mode the MCP shim, `thimble-run` in main's Bash, the hooks'
-# backend calls and `thimble act`; in browser mode the server and the hooks) is changed under locked(): an flock on a
-# lock file beside the store, then a read of the store as it is now, then an atomic replace or an append. The lock is
-# re-entrant in one thread, so a store function that calls another under the same lock does not wait on itself. Never
-# await while holding it: the coroutines of one event loop share its thread. A holder that keeps the lock past `wait_s`
-# (a stuck process, or a cell that took the lock file) does not block the caller for ever: the caller waits `wait_s`,
-# logs, and goes on without the lock, as subagents.json's lock does.
+# backend calls and `thimble act`; in browser mode the server and the hooks) is changed under locked(): an flock on the
+# store's lock file (lock_file: a workspace's in its locks folder, which no kernel sees, so no card's code can hold
+# one), then a read of the store as it is now, then an atomic replace or an append. The lock is re-entrant in one
+# thread, so a store function that calls another under the same lock does not wait on itself. Never await while holding
+# it: the coroutines of one event loop share its thread. A holder that keeps the lock past `wait_s` (a stuck process)
+# does not block the caller for ever: the caller waits `wait_s`, logs, and goes on without the lock, as subagents.json's
+# lock does.
 
-LOCK_SUFFIX = ".lock"  # a file store's lock file is <file>.lock beside it
-DIR_LOCK = ".lock"  # a folder store's lock file is <folder>/.lock inside it
 LOCK_WAIT_S = 2.0
 _LOCK_POLL_S = (0.002, 0.005, 0.01, 0.02, 0.05)  # the waits between flock tries, the last repeated until wait_s
 _held = threading.local()  # .depth: {lock file: how many times this thread holds it}
@@ -151,9 +159,8 @@ _guards_lock = threading.Lock()
 
 
 def lock_file(path: Path) -> Path:
-    """The lock file of the store at `path`: `<path>.lock` beside a file, `<path>/.lock` inside a folder."""
-    path = Path(path)
-    return path / DIR_LOCK if path.is_dir() else path.with_name(path.name + LOCK_SUFFIX)
+    """The lock file of the store at `path` (nofollow.lock_file): in a workspace, in its locks folder."""
+    return nofollow.lock_file(path)
 
 
 def _guard(key: str) -> threading.Lock:
@@ -377,6 +384,19 @@ def corpus_edits(c: str | None) -> bool:
         return True
 
 
+def labels_on(c: str | None) -> bool:
+    """Whether Claude makes labels in workspace `c` (LABELS_KEY, Settings' Labels switch, as the terminal's Labels
+    setting): on unless the workspace's settings.json sets it false, and on for no workspace or a settings file that
+    cannot be read. Off, main's prompt and the tools' texts say nothing of labels, and no agent is offered a label tool
+    (labels_off.py)."""
+    if not c:
+        return True
+    try:
+        return stored_settings(c).get(LABELS_KEY) is not False
+    except Exception:  # noqa: BLE001 — an unknown workspace or a broken file reads as the default
+        return True
+
+
 def stored_settings(c: str) -> dict[str, Any]:
     """What workspaces/<c>/settings.json holds, no defaults layered; {} for a missing or empty file. 404 for an unknown
     workspace; a broken file raises as read_json does."""
@@ -392,7 +412,7 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
     (userconf.ignored); `agents`, agent_rows; `tasks`, task_rows; `card_wait`, the minutes a code ticket's question on its
     card waits (userconf.card_wait_s); PROPOSE_KEY, whether thimble shows view proposals (userconf.propose_views);
     ASK_KEY, the key held with a click to ask in the browser (userconf.ask_key); EDITS_KEY, whether main may write the
-    corpus (corpus_edits)."""
+    corpus (corpus_edits); LABELS_KEY, whether Claude makes labels (labels_on)."""
     from . import extensions, modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
@@ -401,7 +421,7 @@ def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any
             "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c),
             "config_ignored": userconf.ignored(c), "agents": agent_rows(c), "tasks": task_rows(c),
             "card_wait": round(userconf.card_wait_s() / 60, 2), PROPOSE_KEY: userconf.propose_views(c),
-            ASK_KEY: userconf.ask_key(), EDITS_KEY: corpus_edits(c)}
+            ASK_KEY: userconf.ask_key(), EDITS_KEY: corpus_edits(c), LABELS_KEY: labels_on(c)}
 
 
 def agent_rows(c: str | None) -> dict[str, Any]:
@@ -490,8 +510,11 @@ ASK_KEY = "ask_key"
 # corpus folder (corpus_edits); null takes the key out, which is on. Settings' "Claude can edit files in this folder"
 # switch changes it, from the analyst's browser alone, so an agent cannot turn its own edits on
 EDITS_KEY = "corpus_edits"
+# true, false or null: the workspace's settings.json `labels`, whether Claude makes labels there (labels_on); null takes
+# the key out, which is on. Settings' Labels switch changes it, from the analyst's browser alone
+LABELS_KEY = "labels"
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", WEB_KEY, PROPOSE_KEY, ASK_KEY,
-                      EDITS_KEY, *RETIRED_KEYS})
+                      EDITS_KEY, LABELS_KEY, *RETIRED_KEYS})
 
 
 def web_patch(rows: Any) -> dict[str, Any]:
@@ -540,11 +563,12 @@ def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body
             raise HTTPException(403, hook_auth.ANALYST_ONLY)
         if not isinstance(settings[PROPOSE_KEY], (bool, type(None))):
             raise HTTPException(400, f"{PROPOSE_KEY} takes true, false or null")
-    if EDITS_KEY in settings:
-        if not hook_auth.analyst(request):
-            raise HTTPException(403, hook_auth.ANALYST_ONLY)
-        if not isinstance(settings[EDITS_KEY], (bool, type(None))):
-            raise HTTPException(400, f"{EDITS_KEY} takes true, false or null")
+    for key in (EDITS_KEY, LABELS_KEY):
+        if key in settings:
+            if not hook_auth.analyst(request):
+                raise HTTPException(403, hook_auth.ANALYST_ONLY)
+            if not isinstance(settings[key], (bool, type(None))):
+                raise HTTPException(400, f"{key} takes true, false or null")
     if ASK_KEY in settings:
         if not hook_auth.analyst(request):
             raise HTTPException(403, hook_auth.ANALYST_ONLY)
@@ -591,8 +615,9 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     stored = read_json(path, {})
     stored = stored if isinstance(stored, dict) else {}
     merged = {k: v for k, v in {**stored, **settings}.items() if k not in RETIRED_KEYS}
-    if merged.get(EDITS_KEY, False) is None:  # null puts the switch back on its default, on
-        merged.pop(EDITS_KEY)
+    for key in (EDITS_KEY, LABELS_KEY):
+        if merged.get(key, False) is None:  # null puts the switch back on its default, on
+            merged.pop(key)
     # main's model settings merge within main, so a PUT of its effort keeps its fast mode
     if isinstance(settings.get(config.MODELS_KEY), dict):
         held = stored.get(config.MODELS_KEY) if isinstance(stored.get(config.MODELS_KEY), dict) else {}
@@ -600,7 +625,7 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
             role: {**held[role], **conf} if isinstance(conf, dict) and isinstance(held.get(role), dict) else conf
             for role, conf in settings[config.MODELS_KEY].items()}}
     if merged != stored or not path.exists() and settings:
-        write_json(path, merged)
+        rewrite_text(path, json.dumps(merged, indent=2, ensure_ascii=False))  # in place: kernels' hide of it holds
     return with_features(merged, c)
 
 
@@ -675,9 +700,12 @@ async def reset_workspace(c: str, idle: bool = False) -> dict[str, bool]:
                                      f"{'them' if n > 1 else 'it'} first")
     await _stop_sessions(c, "deleted")
     await _end_work(c)
+    # the versions thimble kept of the workspace's labels, in its home, go with them (label_versions)
+    labels = [p.stem for p in (path / "concepts").glob("*.json")] if (path / "concepts").is_dir() else []
     shutil.rmtree(path, ignore_errors=True)
-    from . import runtime_cc  # noqa: PLC0415 — lazy, as in _end_work
+    from . import label_versions, runtime_cc  # noqa: PLC0415 — lazy, as in _end_work
 
+    label_versions.drop(c, labels)
     runtime_cc.drop_workspace_tmp(path)
     return {"ok": True}
 

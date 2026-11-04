@@ -49,6 +49,13 @@ export interface Evidence {
   /** card: the places of words that hold several values; places of another card or output, and a quote's other places */
   refs?: string[]
   more?: Evidence[]
+  /** card: a label's card as the label was when the cited words were written, or an earlier version of it (backend
+   * label_versions): the version, when it was made (seconds since the epoch), what made it, and what changed after it
+   * by the check */
+  version?: number
+  at?: number
+  made?: string
+  after?: string
 }
 
 /** A mark as the server keeps it: its place in the turn (its text `piece`, its order `k` among that text's marks), its

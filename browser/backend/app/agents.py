@@ -1043,6 +1043,29 @@ async def ask_again_route(c: str, chat_id: str) -> dict:
     return threads.ask_again(c, chat_id)
 
 
+class RewindBody(BaseModel):
+    event: str  # the event id of the analyst's message main goes back to before (its `user` record's `event`)
+
+
+REWIND_OFF = "Rewind needs the server to run main (the runtime is off)."
+
+
+@router.post("/ws/{c}/chats/main/rewind")
+async def rewind_route(c: str, body: RewindBody, request: Request) -> dict:
+    """Rewind main to before one of the analyst's messages (runtime.rewind_main), a click, so the analyst's cookie (403
+    without it): {text, event}, the words for the composer, the message's and those of each message after it that main
+    had not read, which the rewind took back too. 409 with the reason when it cannot."""
+    from . import runtime, subagents  # noqa: PLC0415 — both import this module
+
+    subagents.analyst_only(request)
+    if not runtime.enabled():
+        raise HTTPException(409, REWIND_OFF)
+    try:
+        return await runtime.rewind_main(c, body.event)
+    except runtime.RewindRefused as e:
+        raise HTTPException(409, str(e)) from None
+
+
 @router.post("/ws/{c}/chats/{chat_id}/interrupt")
 async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
     """Stop: one of thimble's agents, any role's chat (route subagent), through the module (subagents.stop, TaskStop),

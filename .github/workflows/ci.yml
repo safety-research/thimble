@@ -6,7 +6,8 @@
 #   plugin          the terminal plugin, on Node 22.18 (the plugin's minimum), 24 and 26 (the newest): its validation,
 #                   hooks tests, Node tests (the card runner in its sandbox under that Node's permission model, with
 #                   bubblewrap, socat and ripgrep) and Python tests
-#   parity          the browser's shared prompts still apply to the plugin's texts (browser/prompts/shared.json)
+#   parity          the texts both modes read: each mode reads one the same and no other text copies it; what each
+#                   mode's models read is as its fingerprints say; and the browser's prompts render
 #   browser-server  the browser workbench's server tests, with bubblewrap and the sandbox runtime
 #   browser-page    the browser workbench's page: type check, unit tests and build
 #

@@ -45,12 +45,14 @@ import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
 import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
-import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
+import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry, type RewindHooks } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
 import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
-import { replayHeld } from './pending'
+import { offerDraft, replayHeld } from './pending'
+import { chatStart, isRewindCommand, NOTHING_TO_REWIND, notePutBack, rewindChoices, wordsOnLine, wordsPutBack } from './rewind'
+import { RewindPicker } from './RewindPicker'
 import { ThreadRows } from './ThreadRows'
 import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
@@ -709,8 +711,78 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     [chats],
   )
 
+  // Rewind (chat/rewind.ts): the ↶ on one of the analyst's messages in main's current chat asks under it, and its Rewind
+  // takes main back to before the message; `/rewind` lists those messages above the composer (RewindPicker), and the one
+  // the analyst picks there is rewound to the same way. The words a rewind takes back come back in main's composer, from
+  // its reply, or from its line when this page never got the reply (it loaded while the rewind waited, or the request
+  // failed on its way)
+  const [rewindAsked, setRewindAsked] = useState<string | null>(null)
+  const [rewinding, setRewinding] = useState(false)
+  const rewindFrom = useMemo(() => chatStart(main.records), [main.records])
+  const rewindable = useMemo(() => rewindChoices(main.records, mainSkip), [main.records, mainSkip])
+  const [picking, setPicking] = useState(false)
+  const closePicker = useCallback(() => setPicking(false), [])
+  // the list is main's: it closes when another thread opens, and when main's chat has no message of the analyst's left
+  useEffect(() => {
+    if (picking && (current !== 'main' || !rewindable.length)) setPicking(false)
+  }, [picking, current, rewindable.length])
+  const asking = useRef(new Set<string>()) // the rewinds this page asked for and has no reply to yet, by event
+  const putBack = useRef(new Set<string>()) // the rewinds whose words this page put back, by event
+  const [rewindsEnded, setRewindsEnded] = useState(0)
+  const giveBack = useCallback(
+    (event: string, words: string) => {
+      putBack.current.add(event)
+      notePutBack(ws, event)
+      offerDraft('main', words)
+    },
+    [ws],
+  )
+  const rewindTo = useCallback(
+    (event: string) => {
+      track('ui-click', { target: 'chat:rewind' })
+      setRewinding(true)
+      asking.current.add(event)
+      api
+        .rewindMain(ws, event)
+        .then((r) => {
+          setRewindAsked(null)
+          setPicking(false)
+          if (r.text) giveBack(event, r.text)
+          void reloadMain()
+        })
+        .catch((e: Error) => bus.emit('toast', { text: `Could not rewind: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }))
+        .finally(() => {
+          asking.current.delete(event)
+          setRewinding(false)
+          setRewindsEnded((n) => n + 1)
+        })
+    },
+    [ws, reloadMain, giveBack],
+  )
+  useEffect(() => {
+    if (main.loading) return
+    const back = wordsOnLine(main.records)
+    if (!back || asking.current.has(back.event) || putBack.current.has(back.event) || wordsPutBack(ws) === back.event) return
+    giveBack(back.event, back.words)
+  }, [ws, main.loading, main.records, rewindsEnded, giveBack])
+  const rewind = useMemo<RewindHooks>(
+    () => ({ asked: rewindAsked, ask: setRewindAsked, go: rewindTo, busy: rewinding, from: rewindFrom }),
+    [rewindAsked, rewindTo, rewinding, rewindFrom],
+  )
+
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
+    // `/rewind`: the analyst's messages in main's current chat, newest first, to pick how far back to go, as Claude
+    // Code's /rewind lists the prompts of its session
+    if (isRewindCommand(text)) {
+      if (current !== 'main') setCurrent('main')
+      if (!rewindable.length) bus.emit('toast', { text: NOTHING_TO_REWIND })
+      else {
+        setRewindAsked(null)
+        setPicking(true)
+      }
+      return Promise.resolve(true)
+    }
     // `/thimble-fix <words>`: a change to the person's own thimble, made by a fork of main with what the page shows now
     const fixing = fixWords(text)
     if (fixing === '') {
@@ -858,7 +930,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {chat.error && <div className="chat-error">{chat.error}</div>}
             {!chat.loading && !chat.error && kind === 'main' && (
               <>
-                <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming || main.writing} retry={mainRetry} />
+                <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming || main.writing} retry={mainRetry} rewind={rewind} />
                 {/* what the analyst sent while main works, until main reads it, after the turn's rows */}
                 {main.unread.map((m) => (
                   <PendingMessage key={m.key} text={m.text} ws={ws} held={false} />
@@ -910,6 +982,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               disabled={chat.loading || !!chat.error}
               stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
               thread={current}
+              picker={picking && current === 'main' && rewindable.length > 0 ? <RewindPicker ws={ws} choices={rewindable} busy={rewinding} onPick={rewindTo} onClose={closePicker} /> : undefined}
             />
           )}
         </div>

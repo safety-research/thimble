@@ -55,11 +55,24 @@ from . import coverage as CV
 from . import estimate as EST
 from . import labels as LB
 from . import sources as S
-from .store import Store
+from .store import Store, session_id
 
 
 # how long a command waits on stdin for input it cannot go on without (stdin_text, stdin_wait)
 NEEDS_S = 5.0
+# while the Labels setting is off, the plugin gives the session's commands the line of plugin/prompts/labels-off.md
+# under this name (hooks/path.ts), and Claude's `thimble label` answers with it (labels_off)
+LABELS_OFF_ENV = "THIMBLE_LABELS_OFF"
+
+
+def labels_off() -> str:
+    """The line Claude's `thimble label` answers with while Labels is off in thimble's settings, making no label and
+    changing nothing; '' while it is on. A command of the person's own, which the plugin runs as `person-…`
+    (core/env.ts runThimble), gets ''. While it is off, the command's help and `thimble coverage` name no label
+    either."""
+    if session_id().startswith("person-"):
+        return ""
+    return os.environ.get(LABELS_OFF_ENV, "").strip()
 
 
 def stdin_text(wait: float = 1.0) -> str:
@@ -198,7 +211,7 @@ def cmd_coverage(a: argparse.Namespace) -> int:
         cov["untouched"] = {k: [v[i] for i in named] for k, v in quiet.items()}
         print(json.dumps(cov, ensure_ascii=False, separators=(",", ":"), default=str))
         return 0
-    print(CV.coverage_text(cov))
+    print(CV.coverage_text(cov, labels=not labels_off()))
     return 0
 
 
@@ -656,18 +669,36 @@ def _no_share(text: str) -> str:
     return text if FX.can_share() else "\n".join(x for x in text.splitlines() if not _shares(x))
 
 
+def _no_labels(text: str) -> str:
+    """The help without labels, while Labels is off (labels_off): without each `thimble label` entry (its first line and
+    the lines that go on from it), and without the label in what Claude runs the command for and what takes --json."""
+    out, label = [], False
+    for x in text.splitlines():
+        if x.startswith("    thimble "):
+            label = x.startswith("    thimble label")
+        elif not x.startswith("     "):
+            label = False
+        if not label:
+            out.append(x)
+    return ("\n".join(out).replace("runs it to label records and to see", "runs it to see")
+            .replace("Add --json to label or coverage", "Add --json to coverage"))
+
+
 def _help() -> str:
-    """thimble --help: this file's text, without the file lines while this thimble has no thimble file."""
+    """thimble --help: this file's text, without the file lines while this thimble has no thimble file, and without the
+    label lines while Labels is off (_no_labels)."""
     from . import fixes as FX  # noqa: PLC0415
 
     lines = __doc__.strip().splitlines()
-    return "\n".join(x for x in lines if FX.can_share() or not _shares(x))
+    text = "\n".join(x for x in lines if FX.can_share() or not _shares(x))
+    return _no_labels(text) if labels_off() else text
 
 
 def _parser() -> tuple[argparse.ArgumentParser, Any]:
     """The command's parser, and its commands'."""
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,doctor,label,coverage}")
+    named = "update,reapply,fixes,fix,file,doctor," + ("" if labels_off() else "label,") + "coverage"
+    sub = ap.add_subparsers(dest="cmd", metavar="{" + named + "}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -819,6 +850,10 @@ def main(argv: list[str] | None = None) -> int:
         v = FX.version_name()
         print(f"thimble {v}" if v else "thimble (version unknown)")
         return 0
+    if args and args[0] == "label" and (off := labels_off()):
+        # Labels is off in thimble's settings: Claude makes no label, and nothing changes
+        print(off)
+        return 1
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
         print(_help())

@@ -24,7 +24,9 @@ on the concept), such as a prompt label over the few records a regex or code lab
 The analyst's labels: a label run from the browser gets a card and main hears of it (`labeled`, tell_main) once per
 version. A label that ran before without a card (such as the orientation's) keeps having none.
 Revisions: `rev` counts changes to a label's rows (redefinition, correction, a finished run; note_change). A card that
-read an older revision than the label's is stale (stale_in). When a run of a label ends, not stopped, or a moment after
+read an older revision than the label's is stale (stale_in). Each such change, and the Undo of a delete, keeps what the
+label shows as a version outside the workspace (card_values, label_versions.keep), which the citation check reads a
+label through, as it was when the cited words were written (marks.session_cards). When a run of a label ends, not stopped, or a moment after
 the analyst's last correction of it (rerun_after_verdicts), thimble runs every card that read it again (rerun_readers),
 and main hears which of them it should write a takeaway for again
 (`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
@@ -69,7 +71,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
-from . import capture, cite, concept_scan, config, corpus, label_asks, labels_store, ledger, nofollow, records, refs
+from . import capture, cite, concept_scan, config, corpus, label_asks, label_versions, labels_store, ledger, nofollow, records, refs
 from .kernel_thimble import LABEL_ORDER, palette_from
 from .ledger import append_jsonl, append_jsonl_many, atomic_write_text, read_json
 
@@ -3174,13 +3176,14 @@ def _collect_code_rows(outputs: list[dict], rows_file: Path | None, out: Path, p
 
 async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Unit] | None, limit: int | None, out: Path) -> tuple[int, int, str | None]:
     """The code kind in the labels kernel (notebook.execute_on, no cell stored): the wrapper writes its rows to a temp
-    file under labels/, read and removed here. With `units` None the wrapper reads the file units of the matched files of
-    lines itself, and the units of the other files (records.py) go to it in a file of their own, as given units (cards,
+    file in the workspace's temp folder, which is one of the kernel's own folders (labels/ the kernel only reads), read
+    and removed here. With `units` None the wrapper reads the file units of the matched files of lines itself, and the
+    units of the other files (records.py) go to it in a file of their own under labels/, as given units (cards,
     sentences, or a trial's sampled records) do."""
     from . import notebook
 
     stamp = secrets.token_hex(4)
-    rows_file = out.with_name(f".{concept['id']}.{stamp}.rows.tmp")
+    rows_file = await asyncio.to_thread(lambda: config.temp_dir(c) / f".{concept['id']}.{stamp}.rows.tmp")
     units_file: Path | None = None
     parts_file: Path | None = None
     groups: list[dict] = []
@@ -3304,6 +3307,8 @@ def _record_application(ws: Path, concept_id: str, app: dict, calibration: dict 
     if label_stats is not None:
         concept["label_stats"] = label_stats
     write_concept(ws, concept)
+    if app.get("status") == "done":
+        label_versions.keep(ws.name, concept, ran_text(concept["unit"], app.get("total")))
     return concept
 
 
@@ -3736,6 +3741,7 @@ def record_verdict(ws: Path, concept: dict, ref: str, label: str, note: str | No
         stats = st.stats()
     concept["label_stats"] = _stored_stats(_file_key(out), stats)
     write_concept(ws, concept)
+    label_versions.keep(ws.name, concept, "1 value corrected")
     return row, concept
 
 
@@ -3960,21 +3966,6 @@ def changed_since(concept: dict, rev: int) -> str:
         else:
             parts.append(e["text"] or e["what"])
     return "; ".join(parts)
-
-
-def changed_after(concept: dict, since: float) -> str:
-    """What changed in the label after the time `since` (seconds since the epoch), by its change log, in the words a
-    stale card's tag uses (changed_since): every change from the first one after it on. The log keeps whole seconds, so
-    only a change in a later second than `since` counts as after it: a change in the same second may have come before
-    it. '' when no change is after it."""
-    for e in concept.get("changes") or []:
-        try:
-            at = datetime.fromisoformat(str(e.get("ts") or ""))
-        except ValueError:
-            continue
-        if (at if at.tzinfo else at.replace(tzinfo=timezone.utc)).timestamp() > int(since):
-            return changed_since(concept, int(e.get("first") or e.get("rev") or 0) - 1)
-    return ""
 
 
 def stale_in(cell: dict, concepts_by_id: dict[str, dict]) -> dict[str, str]:
@@ -4204,13 +4195,12 @@ def card_shares(values: list[str], counts: dict[str, int], total: int) -> dict[s
 
 
 def card_output(ws: Path, cell: dict) -> dict | None:
-    """What a label card shows, as a card's html table output, so a citation of it reads as one of a table card's does
-    (the citation check's cards, marks.session_cards; a place's ref, refs._resolve_cell): under the card's headers
-    (value, the unit's word, share) each value the card lists (the frontend's canvas/details shownValues: those with
-    units, or every value while the label runs or before any has one) with its count and share (card_shares), then the
-    row CARD_ALL_ROW with the units the label labeled, which the card's label row states. The counts are those a
-    `concept:<id>/<value>` ref reads, the analyst's verdicts counted (card_stats). None for another card, or a label
-    that is gone."""
+    """What a label card shows now, as a card's html table output (card_table), so a citation of it reads as one of a
+    table card's does (a place's ref, refs._resolve_cell): each value the card lists (the frontend's canvas/details
+    shownValues: those with units, or every value while the label runs or before any has one) with its count and
+    share. The counts are those a `concept:<id>/<value>` ref reads, the analyst's verdicts counted (card_stats). None
+    for another card, or a label that is gone. The citation check reads the label's kept versions instead
+    (label_versions, marks.session_cards)."""
     payload = cell.get("payload") if cell.get("kind") == "label" else None
     concept_id = str(payload.get("concept") or "") if isinstance(payload, dict) else ""
     concept = read_concept(ws, concept_id) if ID_RE.match(concept_id) else None
@@ -4218,20 +4208,59 @@ def card_output(ws: Path, cell: dict) -> dict | None:
         return None
     card = card_stats(ws, concept)
     counts = {str(k): int(v or 0) for k, v in (card.get("counts") or {}).items()}
-    total = int(card.get("n_labeled") or 0)
     values = list(dict.fromkeys(str(v) for v in concept.get("labels") or [] if v))
     values += sorted((v for v in counts if v and v not in values), key=lambda v: (-counts[v], v))
     some = [v for v in values if counts.get(v, 0) > 0]
     if some and not _applying(ws.name, concept["id"]):
         values = some
+    return card_table({"values": values, "counts": counts, "n": int(card.get("n_labeled") or 0), "unit": concept["unit"]})
+
+
+def card_rows(shown: dict) -> dict:
+    """A label card's table of what it shows ({values, counts, n, unit}: card_output's, or a version's, card_values),
+    as rows: under the card's headers (value, the unit's word, share) each value with its count and share
+    (card_shares), as the card writes them, then the row CARD_ALL_ROW with the units the label labeled, which the
+    card's label row states. In the form a count of a card's rows reads (marks.card_tables: {columns, rows, names,
+    label, total}), with `totals`, the name of the row that totals the values (None when a value takes that name, and
+    the card shows no such row)."""
+    values, counts, total = list(shown["values"]), dict(shown["counts"]), int(shown["n"])
     shares = card_shares(values, counts, total)
-    rows = [(v, f"{counts.get(v, 0):,}", shares[v]) for v in values]
-    if CARD_ALL_ROW not in values:
-        rows.append((CARD_ALL_ROW, f"{total:,}", ""))
-    unit = CARD_UNIT_WORDS.get(concept["unit"], f"{concept['unit']}s")
-    body = "".join(f"<tr><th>{html.escape(v)}</th><td>{n}</td><td>{s}</td></tr>" for v, n, s in rows)
+    rows = [[v, f"{int(counts.get(v, 0)):,}", shares[v]] for v in values]
+    totals = CARD_ALL_ROW if CARD_ALL_ROW not in values else None
+    if totals:
+        rows.append([CARD_ALL_ROW, f"{total:,}", ""])
+    unit = CARD_UNIT_WORDS.get(shown["unit"], f"{shown['unit']}s")
+    return {"columns": ["value", unit, "share"], "rows": rows, "names": [r[0] for r in rows], "label": "value",
+            "total": len(rows), "totals": totals}
+
+
+def card_table(shown: dict) -> dict:
+    """A label card's table of what it shows (card_rows) as a card's html table output."""
+    t = card_rows(shown)
+    unit = t["columns"][1]
+    body = "".join(f"<tr><th>{html.escape(v)}</th><td>{n}</td><td>{s}</td></tr>" for v, n, s in t["rows"])
     return {"text/html": f"<table><thead><tr><th>value</th><th>{html.escape(unit)}</th><th>share</th></tr></thead>"
                          f"<tbody>{body}</tbody></table>"}
+
+
+def card_values(ws: Path, concept: dict) -> dict | None:
+    """What the label's card shows of it when no run is under way, as a version keeps it (label_versions): {values,
+    counts, n, unit}, the values with units in its order (every value when none has one) with their counts, the
+    analyst's verdicts counted (card_stats), and the units the label labeled. None while its counts cannot be read (its
+    store is being built), so that no version keeps a label's counts as none."""
+    stored = concept.get("label_stats")
+    key = _file_key(labels_file(ws, concept["id"]))
+    if key is not None and not _applying(ws.name, concept["id"]) and not (stored is not None and tuple(stored["key"]) == key):
+        st, building = _store(ws, concept["id"])
+        if st is None and building:
+            return None
+    card = card_stats(ws, concept)
+    counts = {str(k): int(v or 0) for k, v in (card.get("counts") or {}).items()}
+    values = list(dict.fromkeys(str(v) for v in concept.get("labels") or [] if v))
+    values += sorted((v for v in counts if v and v not in values), key=lambda v: (-counts[v], v))
+    values = [v for v in values if counts.get(v, 0) > 0] or values
+    return {"values": values, "counts": {v: counts.get(v, 0) for v in values}, "n": int(card.get("n_labeled") or 0),
+            "unit": concept["unit"]}
 
 
 # --------------------------------------------------------------------------- refs hook
@@ -4363,6 +4392,7 @@ def define_concept(c: str, name: str, description: str = "", kind: str = "prompt
         nofollow.unlink(lf)  # the entry itself, never through a link a card's code left on its way
         labels_store.remove(lf)
         write_concept(ws, coloured(ws, concept))
+        label_versions.keep(c, concept, concept["changes"][-1]["text"])
         _notify(c, concept["id"], "redefined")
         return concept
     write_concept(ws, coloured(ws, concept))
@@ -4939,6 +4969,8 @@ def update_concept_route(c: str, concept_id: str, body: ConceptPatch) -> dict:
         # card reads
         note_change(concept, "redefined", redefined_text(before["labels"], concept["labels"]))
     write_concept(ws, coloured(ws, concept))
+    if any(concept[k] != before[k] for k in DEFINITION if k != "marks") or concept["unit"] != before["unit"]:
+        label_versions.keep(c, concept, concept["changes"][-1]["text"])
     if body.shown is False:
         f = read_filters(ws).get("files")
         if f and f["concept"] == concept_id:
@@ -5045,6 +5077,8 @@ def restore_concept(c: str, concept_id: str, trash: Path, cards: list[dict], fil
             _write_filters(ws, now)
     for scope in back:
         _emit(c, _filter_event(scope, now[scope]))
+    if (back_now := read_concept(ws, concept_id)) is not None:
+        label_versions.keep(c, back_now, label_versions.RESTORED)
     _notify(c, concept_id, "defined")
 
 

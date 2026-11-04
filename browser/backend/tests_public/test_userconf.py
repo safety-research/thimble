@@ -238,16 +238,19 @@ def test_the_card_wait_is_ten_minutes_unless_the_file_in_thimble_s_home_sets_it_
 
 def test_a_wrapped_kernel_can_neither_read_nor_write_the_workspace_s_config(tmp_path):
     """...and reads the card types and extensions the server found, in the registry folder, and the workspace's views,
-    which main's prompt is made from, without writing them."""
+    which main's prompt is made from, without writing them: bwrap binds the workspace read-only, and over it the
+    kernel's own folders alone writable."""
     from app import kernel_wrap
 
-    argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=tmp_path / "w", venv=None,
+    ws = tmp_path / "w"
+    argv = kernel_wrap.kernel_wrap_argv(["python"], corpus_dir=tmp_path / "c", workspace_dir=ws, venv=None,
                                         python="/usr/bin/python3")
     binds = {argv[i + 2]: argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"}
-    assert binds[str(tmp_path / "w" / "config.json")] == binds[str(tmp_path / "w" / "settings.json")] == "/dev/null"
-    for name in (kernel_wrap.REGISTRY_DIR, "views"):
-        d = str(tmp_path / "w" / name)
-        assert binds[d] == d and argv.index(d) > argv.index(str(tmp_path / "w")), f"{name} over the workspace"
+    assert binds[str(ws / "config.json")] == binds[str(ws / "settings.json")] == "/dev/null"
+    assert binds[str(ws)] == str(ws)
+    writable = [argv[i + 2] for i, a in enumerate(argv) if a in ("--bind", "--bind-try", "--bind-fd")]
+    assert writable == [str(ws / name) for name in kernel_wrap.KERNEL_DIRS]
+    assert all(argv.index(w) > argv.index(str(ws)) for w in writable), "over the workspace"
 
 
 def test_the_kernel_runs_in_srt_where_it_works_else_in_bubblewrap_on_linux_else_unwrapped(monkeypatch):

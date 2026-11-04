@@ -720,13 +720,15 @@ for a in "$@"; do case "$a" in -n | --name | --name=*) name="";; esac; done
 [ -z "$session_id" ] || tools+=(--session-id "$session_id")
 for kv in $switches; do export "$kv"; done
 for v in $unset_vars; do unset "$v"; done
+# a line of tabs alone reads as no fields, and macOS's bash 3.2 stops on an empty array under set -u, so each expansion
+# of an array that can be empty is guarded (${a[@]+"${a[@]}"})
 if [ -n "$exports" ]; then
   IFS=$'\t' read -r -a export_pairs <<<"$exports"
-  for kv in "${export_pairs[@]}"; do export "$kv"; done
+  for kv in ${export_pairs[@]+"${export_pairs[@]}"}; do export "$kv"; done
 fi
 if [ -n "$notes" ]; then
   IFS=$'\t' read -r -a note_lines <<<"$notes"
-  for n in "${note_lines[@]}"; do printf '%s\n' "$n" >&2; done
+  for n in ${note_lines[@]+"${note_lines[@]}"}; do printf '%s\n' "$n" >&2; done
 fi
 resume=()
 if [ -n "$last" ]; then

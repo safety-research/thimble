@@ -129,7 +129,7 @@ async def _until(cond: Any, what: str) -> None:
 
 async def _ended(fid: int = 1) -> None:
     """Fix `fid`'s fixer ended, and so did the kernel's checks after it (fixes.settle, which runs in the fixer's task):
-    no fixer of it runs and its phase is neither fixing nor testing."""
+    no fixer of it runs and its phase is neither fixing nor testing, which settle ends as it writes the fix's notice."""
     end = time.monotonic() + WAIT_S
     while True:
         conv = fixes._fixers.get(fid)
@@ -409,6 +409,23 @@ def test_main_reads_each_fix_the_words_may_change_by_its_number_name_and_state()
     assert fixes.fixes_context(recs[2:]) == "(none yet)"
 
 
+async def test_words_for_a_fix_whose_round_ended_as_a_request_are_its_next_round_and_main_reads_it_among_the_fixes(
+        fixing, monkeypatch):
+    # a round of fix 1 ended as a request with no code (its fixer's question back to the person): the person's
+    # `/thimble-fix 1 <words>` in main's chat is the fix's next round, which the kernel starts in a new copy, never a new
+    # fix, and main reads the fix beside their words; the list of such fixes is the terminal's (plugin/fix/changeable.mjs)
+    fixing.recs[1] = {"id": 1, "title": "Views install their files", "state": "request", "updated": 1.0, "work": None,
+                      "words": ["views should install their files"], "summary": "Which of two ways do you want?"}
+    assert fixes.fixes_context(list(fixing.recs.values())) == (
+        '1  "Views install their files" (request): Which of two ways do you want?')
+    api_key(monkeypatch, [text("Title: Views install their files\nWhat it does: A build writes its view's own folder.")])
+    fixes._asked[CORPUS] = fixes._Asking("1 the first way", "", fixes.ASKED_TURNS)
+    got = await fixes.from_tool(CORPUS, "1")
+    assert got["kind"] == "round" and _fix_calls(fixing) == [("round", "1")]
+    assert fixing.recs[1]["words"] == ["views should install their files", "the first way"]
+    await _ended()
+
+
 async def test_words_in_the_fix_s_thread_go_to_its_fixer_while_it_works(fixing, monkeypatch, analyst):
     client = api_key(monkeypatch, [text("Working on it."), text("Title: Card counts rows\nWhat it does: Rows and columns.")])
     # the fixer's first answer comes once the words are in, so they come while it works
@@ -453,6 +470,32 @@ async def test_a_fix_that_fails_its_checks_says_why_and_offers_redo(fixing, monk
     row = fixes.status()["fixes"][0]
     assert row["kind"] == "failed"
     assert row["said"] == "“Bar counts rows” did not pass: its tests failed in the sandbox"
+
+
+async def test_a_fix_s_row_goes_from_its_checks_to_its_notice_with_no_moment_between(fixing, monkeypatch):
+    # the look at the page the checks built takes a while, as on a busy machine: until the notice is there, the row
+    # still shows the checks, so the page never lists the fix without a row, and a wait for the phase's end (_ended)
+    # finds the notice in main's chat
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows.")])
+    monkeypatch.setattr(fixes, "_recovered", True)
+    built = fixes.built_tree
+
+    def slow(fid: int, commit: str) -> str:
+        time.sleep(0.5)
+        return built(fid, commit)
+
+    monkeypatch.setattr(fixes, "built_tree", slow)
+    await fixes.request(CORPUS, "count the rows", "")
+    rows: list[tuple[str | None, str | None] | None] = []
+    end = time.monotonic() + WAIT_S
+    while not rows or rows[-1] is None or rows[-1][1] != "ready":
+        assert time.monotonic() < end, f"the fix's notice did not come within {WAIT_S:g} s: {rows[-5:]}"
+        row = next((r for r in fixes.status()["fixes"] if r["id"] == 1), None)
+        rows.append(None if row is None else (row["phase"], row["kind"]))
+        await asyncio.sleep(0.01)
+    assert None not in rows, "the page listed no row of the fix between its checks and its notice"
+    chips = [(r["status"], r["ref"]) for r in _log(CORPUS) if r["type"] == "chip" and r.get("kind") == "fix"]
+    assert chips == [("ready", "fix:1")]
 
 
 async def test_later_leaves_the_fix_ready_in_your_fixes_and_use_it_there_puts_it_on(fixing, monkeypatch, analyst):

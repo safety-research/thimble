@@ -112,8 +112,9 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 | side thread | `prompts/thread.md` | `threads/thread.ts` | the prompt of the fork that answers a side thread |
 
 To change a text, edit its file; git keeps the earlier wording, so compare with `git diff` or `git log -p`.
-`plugin/prompts/registry.mjs` names each text, its reader and what it is for, and `thimble dev prompts` lists them. A
-fork (the checker, the designer) is a copy of the conversation, so it reads the guidance too.
+`plugin/prompts/registry.mjs` names each text, the module that reads it in each mode and what it is for, and
+`thimble dev prompts` lists them. A fork (the checker, the designer) is a copy of the conversation, so it reads the
+guidance too.
 
 When the model does something you do not want, change the cause, not the symptom:
 
@@ -126,9 +127,18 @@ When the model does something you do not want, change the cause, not the symptom
    status) is fixed in code.
 5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
-The browser workbench (`browser/`, thimble 0.8's browser mode) keeps its own texts in `browser/prompts/`, and reads
-of these only the ones it runs as the terminal does: the citation checker's and the look's (`checker.md`,
-`observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`).
+The browser workbench (`browser/`, thimble 0.8's browser mode) keeps its own texts in `browser/prompts/`. Of these it
+reads the texts of what it runs as the terminal does, the citation checker, the look and the fixer (`checker.md`,
+`observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`, `fixer.md`), and `fix-draft.md`. Both modes read
+a text the same way: it may hold another text, `{{include:NAME}}`, and where the modes need different words it names
+them with a slot, `{{NAME}}`, whose words for each mode stand in `plugin/prompts/slots.json`: a name or a clause of at
+most one sentence. Its reader fills its other slots at each call (the registry's `fills`). A text of the workbench holds
+one as `{{include:plugin:NAME}}`, and `thimble dev prompts NAME browser` shows one as the workbench reads it.
+
+`scripts/check.sh parity` fails when the two modes read a text that both read differently, when another text a model
+reads copies 20 or more of its words in a row, when a slot lacks a mode's words or stands in no such text, or when a
+mode stops loading one. It also fails when what a model reads changes in either mode: when you meant the change, write
+the new fingerprints as `browser/backend/tests_public/test_renders.py` says.
 
 ## Pull requests
 

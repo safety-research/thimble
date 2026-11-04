@@ -15,7 +15,10 @@
 //              computed output does, its chip naming the line as the citation's chip does (lib/refs cardPartLabel),
 //              a click on which shows the line in the card's output. The card is read when the label opens: when it
 //              changed after the check (the card check rewrote it, say), the label shows it as it is now, or says the
-//              place is gone and shows what the check read.
+//              place is gone and shows what the check read. A label the check read, as it was when the cited words
+//              were written or an earlier version of it, shows as it was then, under what changed in the label after it
+//              (plugin/tray/tray.mjs versionNote): its own place (`card:label-<id>…`, labelOfPlace), whose chip opens
+//              the label, or the place of the label's card.
 //
 // Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked, under `output ·
 // table`. The lines wrap; a long one shows only the words around its highlighted ones, cut at words (lineWindow). The
@@ -58,7 +61,7 @@ import { CITED, citedLines, type At, type Grid } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { workspaceFromUrl } from '../lib/workspace'
 import { printIndex } from '../../../../plugin/tray/printed.mjs'
-import { cutWords, evidenceLine, partLabel, placeLabel, TABLE_LABEL } from '../../../../plugin/tray/tray.mjs'
+import { cutWords, evidenceLine, partLabel, placeLabel, TABLE_LABEL, versionNote } from '../../../../plugin/tray/tray.mjs'
 import { canRepair, failedWhy, LOOK_WORD, lookOf, wasLine, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
@@ -419,6 +422,13 @@ export function sameAsChecked(snap: { grid: Grid; at: At } | null, output: strin
 export const CHANGED_NOW = 'The card changed after the check. It shows this now:'
 export const CHANGED_READ = 'The card changed after the check. The check read this:'
 
+/** The label a place of the check names, `card:label-<label id>…` (backend marks.session_cards, which names the labels as
+ * the terminal does), or null for a card's place: a label's place is no card, so the check's copy of its version is
+ * all there is to show, and its chip opens the label (its card, where it has one). */
+export function labelOfPlace(card: string): string | null {
+  return /^label-([A-Za-z0-9_-]+)$/.exec(card)?.[1] ?? null
+}
+
 /** A value a card shows: the card's chip, by the card's title now, over the table around the cited cell, or the
  * printed lines around the cited one, as the card shows them now (api.resolveRef, as RefChip reads them). A line of the
  * printed output is named as the citation's chip names it (lib/refs cardPartLabel): `card output line 8` in the card,
@@ -432,7 +442,14 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
   const [got, setGot] = useState<Resolved>({ state: 'loading' })
   const [now, setNow] = useState('')
   const ref = ev.ref ?? `card:${ev.card}`
+  const card = ev.card ?? (parseRef(ref) as { cellId?: string } | null)?.cellId ?? ''
+  const label = labelOfPlace(card)
   useEffect(() => {
+    // a label's place is no card to read: the check's copy of the version is the evidence
+    if (label) {
+      setGot({ state: 'failed' })
+      return
+    }
     const p = parseRef(ref)
     const ws = workspaceFromUrl() ?? ''
     let live = true
@@ -455,16 +472,18 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
     return () => {
       live = false
     }
-  }, [ref])
-  const card = ev.card ?? (parseRef(ref) as { cellId?: string } | null)?.cellId ?? ''
-  const name = useRefLabel(`card:${card}`)
+  }, [ref, label])
+  const name = useRefLabel(label ? `concept:${label}` : `card:${card}`)
   const copy = !!own || ev.output != null
+  // a label's version the check read (the label as it was when the cited words were written, or an earlier one): its
+  // copy is the evidence, whatever the card shows now, under what changed in the label after it
+  const kept = copy && ev.version != null
   // the check's copy while the card is read, and after when the card still shows the same; else the card now
   // (a card that could not be read leaves the copy as it is, with no note)
-  const checked = copy && (got.state === 'loading' || got.state === 'failed' || got.state === 'gone' || sameAsChecked(own, ev.output, ev.highlight, got))
+  const checked = kept || (copy && (got.state === 'loading' || got.state === 'failed' || got.state === 'gone' || sameAsChecked(own, ev.output, ev.highlight, got)))
   // a line of the output that reads otherwise now is no longer the place the check read: its copy shows
   const reread = copy && !checked && got.state === 'lines'
-  const changed = reread || (copy && got.state === 'gone') ? CHANGED_READ : copy && !checked ? CHANGED_NOW : ''
+  const changed = kept ? versionNote(ev) : reread || (copy && got.state === 'gone') ? CHANGED_READ : copy && !checked ? CHANGED_NOW : ''
   const title = now || ev.title || name || 'card'
   const at = parseRef(ref)
   const head = (at?.kind === 'cell' && at.out != null && at.line != null && cardPartLabel(at, title, home === at.cellId)) || title
@@ -472,7 +491,7 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
   return (
     <div className="mark-ev">
       <div className="refchip-pop-head">
-        <Chip kind="ref" tone="evidence" icon="cell" face="sans" className="refchip-pop-chip" onClick={() => open(ref)}>
+        <Chip kind="ref" tone="evidence" icon="cell" face="sans" className="refchip-pop-chip" onClick={() => open(label ? `concept:${label}` : ref)}>
           {head}
         </Chip>
         {!table ? <span className="refchip-pop-value">{value}</span> : null}

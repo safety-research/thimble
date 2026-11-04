@@ -104,7 +104,7 @@ def _api_content(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def tool_entries(spec: Any) -> list[dict[str, Any]]:
     from . import tools  # noqa: PLC0415
 
-    secs = tools.tool_sections(spec.thimble)
+    secs = tools.tool_sections(spec.thimble, getattr(spec, "labels", True))
     out = [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in spec.thimble if n in secs]
     out += runtime_tools.definitions(spec.builtins, getattr(spec, "corpus_edits", None))
     if out:
@@ -241,6 +241,16 @@ def cc_main_session(c: str) -> str | None:
     from . import runtime, runtime_cc  # noqa: PLC0415
 
     return runtime_cc.session_id(runtime_cc._load(runtime.ensure(c).main.state_path("cc")))
+
+
+def cc_main_cut(c: str) -> str | None:
+    """Where a fork of main's Claude Code session resumes it up to (`--resume-session-at`): the entry a rewind left
+    main at until main's next turn (runtime.rewind_main), else None, its whole conversation. Read as cc_main_session
+    reads it, and checked (runtime_cc.resume_at)."""
+    from . import runtime, runtime_cc  # noqa: PLC0415
+
+    state = runtime_cc._load(runtime.ensure(c).main.state_path("cc"))
+    return runtime_cc.resume_at(state) if runtime_cc.session_id(state) else None
 
 
 async def turn(conv: Any, text: str) -> Any:

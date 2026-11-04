@@ -10,7 +10,8 @@
 // and what it does, as Claude Code lists its own; the list follows what is typed. ↑ and ↓ move in it; Enter, Tab or a
 // click puts the command in the text with a space after it, ready for its words, except that Enter on a command typed
 // in full sends it at once, as without the list; Esc closes it. It closes too when the text is no longer a "/" and part
-// of a name, and when the text loses the focus.
+// of a name, and when the text loses the focus. A list a command opens (`picker`: the messages `/rewind` lists,
+// RewindPicker) takes its place while it is open.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { ComposerFrame, type ComposerFrameProps } from '../components/Composer'
 import type { MainEffort } from '../lib/types'
@@ -48,6 +49,9 @@ export interface ComposerProps {
   thread?: string
   /** the commands a "/" lists: the ones the composer handles (COMMANDS), unless a test gives others */
   commands?: readonly ChatCommand[]
+  /** a list a command opened, above the sheet in the place of the list of commands while it is open: the messages
+   * `/rewind` lists (RewindPicker), which takes the keys */
+  picker?: ReactNode
 }
 
 /** `drafts` with `thread`'s draft set to `text`, an empty draft dropped. Pure. */
@@ -64,7 +68,7 @@ export function withOffers(drafts: Readonly<Record<string, string>>, offers: rea
   return offers.reduce((d, o) => withDraft(d, o.thread, d[o.thread] ? `${d[o.thread]}\n${o.text}` : o.text), drafts)
 }
 
-export function Composer({ model, models, onModel, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, stop, thread = 'main', commands = COMMANDS }: ComposerProps) {
+export function Composer({ model, models, onModel, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, stop, thread = 'main', commands = COMMANDS, picker }: ComposerProps) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({})
   const input = drafts[thread] ?? ''
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -73,7 +77,7 @@ export function Composer({ model, models, onModel, effort, onEffort, fast = null
   const [focused, setFocused] = useState(false)
   const [shut, setShut] = useState(false)
   const [at, setAt] = useState(0)
-  const found = focused && !shut && !disabled ? commandsFor(input, commands) : []
+  const found = focused && !shut && !disabled && !picker ? commandsFor(input, commands) : []
   const active = Math.min(at, found.length - 1)
   const listId = useId()
   const optionId = (i: number) => `${listId}-${i}`
@@ -167,7 +171,7 @@ export function Composer({ model, models, onModel, effort, onEffort, fast = null
         setShut(false)
       }}
       onSubmit={send}
-      above={list}
+      above={picker ?? list}
       onKeyDown={onKey}
       textProps={{
         onFocus: () => {
