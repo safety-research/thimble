@@ -34,8 +34,8 @@ CUTS: dict[str, tuple[str | tuple[str, str], ...]] = {
         "- `label_done` says a label you ran finished after your turn moved on, with its counts as the text. thimble then "
         "ran the cards that read it again, and the text ends with each of them whose takeaway the new output left "
         "behind, or that failed, with that output. Write each of those takeaways again with `edit_card` from its "
-        "output and fix each card that failed, in the same turn before any other call. Say something in the chat only "
-        "when the final counts change your answer.\n",
+        "output, fix each card that failed, and write the label card's takeaway again from the final counts, in the "
+        "same turn before any other call. Say something in the chat only when the final counts change your answer.\n",
         "- `rerun` says thimble ran cards again because a label they read changed, with each card whose takeaway the new "
         "output left behind, or that failed, and that output as the text. Write each of those takeaways again with "
         "`edit_card` from its output and fix each card that failed, in the same turn before any other call. Say "
@@ -52,12 +52,11 @@ CUTS: dict[str, tuple[str | tuple[str, str], ...]] = {
         ", another label",
         "label or a ",
         " or a label",
-        ' I defined the "product named" label [[concept:<id>]] to classify which product each request is about.',
+        ' I defined the "product named" label [[card:<id>]] to classify which product each request is about.',
         ", says nothing about how the requests were sorted,",
         ', from the model label "outage cause"',
         ', by the model label "outage cause"',
-        "    a label                                     concept:<id>\n"
-        "    a value's count by a label                  concept:<id>/<value>\n",
+        "    a value's count on a label card             concept:<id>/<value>\n",
     ),
     "tools.md": (
         ", and label=<label> draws a label's values in its colors",
