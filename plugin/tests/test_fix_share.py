@@ -291,3 +291,26 @@ def test_the_scan_of_a_large_folders_names_finds_the_same_details_in_a_moment():
     few, _ = P.scan({"issue": text}, {"file": ["run-000042.jsonl"], "name": ["dana-made-up"]}, None, use_gitleaks=False)
     assert many == few and {h["found"] for h in many} == {"run-000042.jsonl", "dana-made-up"}
     assert took < 15, took
+
+
+def test_in_wsl_links_open_with_wslview_unless_thimble_open_names_another(monkeypatch, tmp_path):
+    """In WSL (WSL_DISTRO_NAME), wslview opens a link in Windows' browser, ahead of xdg-open, which would look for a Linux
+    one; THIMBLE_OPEN still comes first. Without wslview, or outside WSL, it is as on any Linux."""
+    for name in ("wslview", "xdg-open"):
+        (tmp_path / name).write_text("#!/bin/sh\n")
+        (tmp_path / name).chmod(0o755)
+    monkeypatch.setattr(SH.sys, "platform", "linux")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.delenv("THIMBLE_OPEN", raising=False)
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Made-Up")
+    assert SH.opener() == ["wslview"]
+    monkeypatch.setenv("THIMBLE_OPEN", "none")
+    assert SH.opener() is None
+    monkeypatch.delenv("THIMBLE_OPEN")
+    (tmp_path / "wslview").unlink()
+    assert SH.opener() == ["xdg-open"]
+    (tmp_path / "wslview").write_text("#!/bin/sh\n")
+    (tmp_path / "wslview").chmod(0o755)
+    monkeypatch.delenv("WSL_DISTRO_NAME")
+    assert SH.opener() == ["xdg-open"]
