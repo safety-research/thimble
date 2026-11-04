@@ -84,6 +84,8 @@ export interface Notice {
   key?: string | null
   kind?: string
   text: string
+  /** the whole text when `text` was shortened to fit its line (backend notices.post), shown on Show more */
+  details?: string | null
   agent?: string | null
   chat?: string | null
   action?: NoticeAction | NoticeAction[] | null
