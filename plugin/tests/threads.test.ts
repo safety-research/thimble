@@ -638,10 +638,50 @@ test("a running thread under a tall heads-up shows its question and the steps it
   const shown = textOf(tree)
   expect(shown).toContain('how many were retried?')
   expect(shown).not.toContain('earlier turn')
-  expect(shown).toContain('● 2 steps · ls runs')
+  // the fork works on: its steps row turns with the bar's glyph
+  expect(shown).toContain('⠋ 2 steps · ls runs')
   // each point wraps after its gutter, so the pane, which scrolls to the conversation's end, counts it at that width
   const part = nodes(tree).find(n => n.props?.key === 'subject-m0')
   expect(treeRows(part, 50)).toBe(treeRows(els.Text({ wrap: 'wrap', children: `· ${point}` }), 48))
+})
+
+// I96: while a thread's fork runs one long command, nothing in the pane changed, and beside the pane the bar is too narrow
+// for the step's words: the pane looked stopped. The steps row of the answer on its way turns with the bar's glyph
+test("a thread whose fork runs one long command shows its steps row turning with the bar's glyph until it answers; before its first step the glyph stands alone", async () => {
+  const s = setup()
+  let poll: (() => void) | null = null
+  s.$.clock.every = (_ms: number, f: () => void) => { poll = f; return () => undefined }
+  const asked = askHere(s.$, SCOPE, 'count the events in every trace')
+  await settle()
+  s.go()
+  await asked
+  const draw = async () => drawThreads(s.$, { props: { bodyColumns: 60, scroll: { bodyRows: 30 } } }, 'thread', { key: KEY }, els)
+  const steps = (tree: Any) => nodes(tree).filter(n => /-steps$/.test(String(n.props?.key ?? ''))).map(n => ({ text: textOf(n), dim: !!n.props.dimColor }))
+  // the fork has not written yet: the glyph alone, where its steps will stand
+  expect(steps(await draw())).toEqual([{ text: '⠋', dim: true }])
+  // its one command runs on
+  s.$.session.messages = async () => [
+    { role: 'user', content: [{ type: 'text', text: `<fork-boilerplate>b</fork-boilerplate>\nYour directive: ${s.spawns[0].prompt}` }] },
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: "python3 - <<'EOF'\nimport gzip\nEOF" } }] },
+  ]
+  poll!()
+  await settle()
+  expect(threadOf(KEY)!.status).toBe('running')
+  expect(steps(await draw())).toEqual([{ text: "⠋ 1 step · python3 - <<'EOF'", dim: true }])
+  // the bar's glyph turns, and the row with it
+  await s.$.state.set({ plugin: 'thimble', key: 'busy' }, { frame: 4, n: 1 })
+  expect(steps(await draw())).toEqual([{ text: "⠼ 1 step · python3 - <<'EOF'", dim: true }])
+  // answered: the steps it took, done
+  s.$.session.messages = async () => [
+    { role: 'user', content: [{ type: 'text', text: `<fork-boilerplate>b</fork-boilerplate>\nYour directive: ${s.spawns[0].prompt}` }] },
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: "python3 - <<'EOF'\nimport gzip\nEOF" } }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'The traces hold 6,120 events.' }] },
+  ]
+  s.ended.add('agent-1')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  expect(threadOf(KEY)!.status).toBe('done')
+  expect(threadOf(KEY)!.turns.at(-1)!.text).toBe('The traces hold 6,120 events.')
+  expect(steps(await draw())).toEqual([{ text: "● 1 step · python3 - <<'EOF'", dim: true }])
 })
 
 // The pane reads a running thread's turns every few seconds. A read that started before the fork ended, and ends after
