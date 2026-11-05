@@ -6,6 +6,7 @@ listed by name (ls, find, a folder named in code) is not touched. The count read
 beside them. Run: python3 -m pytest plugin/tests"""
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import sqlite3
@@ -192,6 +193,78 @@ def test_a_database_code_opens_by_a_path_it_fills_in_or_a_query_inside_quotes_is
     got = SH.shows('cd runs; for d in */; do echo "$d | $(sqlite3 $d/forge.db "select count(*) from prs" | tr \'\\n\' \' \')"; done',
                    files, "/data", "/data", lambda f: 10)
     assert sorted((f, how, by) for f, how, _, by in got) == [("runs/a/forge.db", "computed", "sqlite3"), ("runs/b/forge.db", "computed", "sqlite3")]
+
+
+def test_a_compressed_file_zcat_prints_is_read_and_one_decompressed_into_a_file_or_code_is_computed() -> None:
+    from kernel import shellcmd as SH
+
+    files = ["runs/a.jsonl.gz", "runs/b.jsonl.gz", "runs/c.json.gz", "runs/d.json.gz", "logs/e.log.xz", "f.csv"]
+    shows = lambda cmd: SH.shows(cmd, files, "/data", "/data", lambda f: 10)  # noqa: E731
+    # zcat, gzip -dc and xz -dc print the file's own lines, as cat does
+    assert shows("zcat runs/a.jsonl.gz | head -5") == [("runs/a.jsonl.gz", "read", (1, 5), "zcat")]
+    assert shows("gzip -dc runs/b.jsonl.gz") == [("runs/b.jsonl.gz", "read", (1, 10), "gzip")]
+    assert shows("xz -T0 -d -c logs/e.log.xz") == [("logs/e.log.xz", "read", (1, 10), "xz")]
+    # into code, into a file, or compressed: gone over, none of its lines reached Claude
+    assert shows("gunzip -c runs/c.json.gz | jq .") == [("runs/c.json.gz", "computed", None, "jq")]
+    assert shows("zcat runs/d.json.gz > $TMPDIR/d.json") == [("runs/d.json.gz", "computed", None, "zcat > a file")]
+    assert shows("gzip -k f.csv") == [("f.csv", "computed", None, "gzip")]
+
+
+def test_the_commands_of_a_loop_send_their_output_where_its_done_sends_it() -> None:
+    from kernel import shellcmd as SH
+
+    files = ["runs/a.jsonl.gz", "runs/b.jsonl.gz", "notes.md"]
+
+    def hows(cmd: str) -> list[tuple[str, str, str]]:
+        return sorted({(f, how, by) for f, how, _, by in SH.shows(cmd, files, "/data", "/data", lambda f: 10) if by != "for"})
+
+    both = lambda how, by: [("runs/a.jsonl.gz", how, by), ("runs/b.jsonl.gz", how, by)]  # noqa: E731
+    # the loop's lines went to a file (`done >`), or each command's own did (`>>`): gone over, not read
+    assert hows('for f in runs/*.gz; do zcat "$f"; done > $TMPDIR/all.jsonl') == both("computed", "zcat > a file")
+    assert hows('for f in runs/*.gz; do zcat "$f" >> "$TMPDIR/all.jsonl"; done') == both("computed", "zcat > a file")
+    # into a count after the loop, and into a file after a brace group or an if
+    assert hows('for f in runs/*.gz; do zcat "$f"; done | wc -l') == both("computed", "wc")
+    assert hows("{ zcat runs/a.jsonl.gz; zcat runs/b.jsonl.gz; } > both.jsonl") == both("computed", "zcat > a file")
+    assert hows("if true; then zcat runs/a.jsonl.gz; else zcat runs/b.jsonl.gz; fi > one.jsonl") == both("computed", "zcat > a file")
+    # a loop whose lines reach Claude read them
+    assert hows('for f in runs/*.gz\ndo\n  zcat "$f" | head -3\ndone') == both("read", "zcat")
+
+
+def test_a_session_folder_that_is_a_link_counts_what_its_commands_read_by_either_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # the session started in ~/traces, a link to a folder on another disk, whose real path is the root; Claude's
+    # commands name its files from the link, from ~, from $HOME or from the real path: zcat in loops over globs into
+    # the temp folder, then code over the combined file there, and a Read by the link's path
+    real = tmp_path / "disk" / "traces"
+    for day in ("d1", "d2"):
+        (real / day).mkdir(parents=True)
+        for i in range(3):
+            with gzip.open(real / day / f"run-{i}.json.gz", "wt") as f:
+                f.write(json.dumps({"run": i}))
+            with gzip.open(real / day / f"events-{i}.ndjson.gz", "wt") as f:
+                f.write(json.dumps({"run": i, "event": 0}) + "\n")
+    (real / "notes.md").write_text("# Notes\n\nA line.\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    link = home / "traces"
+    link.symlink_to(real)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    saw(tmp_path, link, [
+        bash('for f in */run-*.json.gz; do zcat "$f"; done > $TMPDIR/runs.ndjson', 0),
+        {**bash('for f in ~/traces/d1/events-*.ndjson.gz; do zcat "$f" >> "$TMPDIR/events.ndjson"; done', 0), "cwd": str(real)},
+        {**bash('for f in $HOME/traces/d2/events-*.ndjson.gz; do zcat "$f"; done | wc -l', 1), "cwd": "/"},
+        bash(f"python3 - <<'PY'\nprint(sum(1 for _ in open('{tmp_path}/th/tmp/runs.ndjson')))\nPY", 1),
+        {"tool": "Read", "file": str(link / "notes.md"), "from": 1, "to": 3},
+    ])
+    st = Store(link)
+    assert st.root == real.resolve()
+    cov = CV.coverage(st)
+    status = {o["path"]: o["status"] for o in cov["files"]}
+    assert status == {**{f"{d}/{k}-{i}.{e}.gz": "computed" for d in ("d1", "d2") for i in range(3)
+                         for k, e in (("run", "json"), ("events", "ndjson"))}, "notes.md": "seen"}
+    assert cov["total"]["touched_files"] == 13
 
 
 def made_up_village(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

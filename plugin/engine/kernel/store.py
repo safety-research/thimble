@@ -27,6 +27,7 @@ only for a resumed conversation's own labels. Nothing here writes into a source 
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -37,6 +38,12 @@ from pathlib import Path
 from typing import Any
 
 DIR = "thimble"
+
+
+@functools.lru_cache(maxsize=4096)
+def _real(path: str) -> str:
+    """A path with each link on its way followed (a session's calls name the same paths again and again)."""
+    return os.path.realpath(path)
 
 
 def thimble_home() -> Path:
@@ -233,7 +240,8 @@ class Store:
 
     def seen(self, session: str | None = "") -> list[dict[str, Any]]:
         """The Read, Grep and Bash calls the hooks module kept for this session (or `session`, or every session when
-        None) whose working folder is under the root, with absolute paths. A long session's record is in parts
+        None) whose working folder is under the root, with absolute paths, also by a link that leads there (a session
+        started in ~/traces, a link to the root on another disk). A long session's record is in parts
         (`<session>.jsonl`, then `<session>.2.jsonl` and on: hooks/watch.ts starts a part at 3.5M characters), read in
         their order."""
         d = thimble_home() / "seen"
@@ -247,6 +255,7 @@ class Store:
                 files.append(more)
         out = []
         root = str(self.root)
+        under = lambda p: p == root or p.startswith(root + os.sep) or root.startswith(p.rstrip("/") + os.sep)  # noqa: E731
         for f in files:
             try:
                 lines = f.read_text().splitlines()
@@ -258,12 +267,13 @@ class Store:
                 except ValueError:
                     continue
                 cwd = str(r.get("cwd") or "")
-                if cwd == root or cwd.startswith(root + os.sep) or root.startswith(cwd.rstrip("/") + os.sep):
+                if under(cwd) or (cwd.startswith("/") and under(_real(cwd))):
                     out.append(r)
         return out
 
     def rel(self, path: str) -> str | None:
-        """A path relative to the root, or None when it is outside the root."""
+        """A path relative to the root, or None when it is outside the root. A path that leads into the root through a
+        link (a session folder `~/traces` that links to the root on another disk) is inside it."""
         root = str(self.root)
         if isinstance(path, str) and path.startswith(root + "/"):
             # a path in the root with no `.`, `..` or empty part is its own end (a long session's calls name thousands)
@@ -275,6 +285,8 @@ class Store:
             if not p.is_absolute():
                 p = self.root / p
             r = os.path.relpath(os.path.normpath(p), self.root)
+            if r.startswith(".."):
+                r = os.path.relpath(_real(str(p)), self.root)
         except ValueError:
             return None
         return None if r.startswith("..") else r
