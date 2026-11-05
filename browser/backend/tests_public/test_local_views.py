@@ -13,8 +13,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
-from starlette.requests import Request
 
 from app import config, extensions, views
 
@@ -146,81 +144,39 @@ def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corp
     assert (ws / "extension" / "views").is_dir(), "a file an older kernel left there goes, and the folder is made"
 
 
-def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_analyst_s_browser_only(
-        corpora, analyst, tmp_path, monkeypatch):
-    """Off, a view built for the workspace leaves the views list, and so the views bar, the File browser and the
-    prompts, with its files and its proposal kept; on, it is back. Only the analyst's browser turns the switch, and only
-    for a view built for the workspace."""
+def _hidden_before(c: str, *slugs: str) -> None:
+    """views/off.json as an earlier version wrote it for the views the analyst hid from the views bar."""
+    views.state_dir(c).mkdir(parents=True, exist_ok=True)
+    (views.state_dir(c) / "off.json").write_text(json.dumps(list(slugs)))
+
+
+def test_a_view_hidden_before_shows_like_any_other_and_nothing_hides_one(corpora):
+    """No view is hidden: a view an earlier version hid (views/off.json, which is not read) is in the views list, and so
+    in the views bar, the File browser and the prompts; its proposal is listed without `off`, and a view proposal under
+    a slug it names is offered. The routes that listed the hidden views and hid or showed one are gone, and `local` is
+    a slug like any other."""
     _propose(CORPUS)
     _write(CORPUS, accepts=[{"form": "L<n>", "means": "one post"}])
-    assert "one post" in views.forms_text(CORPUS)
-    stranger = Request({"type": "http", "headers": []})
-    with pytest.raises(HTTPException) as e:
-        asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), stranger))
-    assert e.value.status_code == 403 and views.views_off(CORPUS) == set()
-
-    got = asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
-    assert got["views"] == [{"slug": "posts", "name": "Posts", "description": "each post", "file_viewer": False,
-                             "on": False}]
-    assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == []
-    assert views.views_for(CORPUS, "board.jsonl") == [] and "one post" not in views.forms_text(CORPUS)
-    assert views.read_built(CORPUS, "posts") is not None and views.list_proposals(CORPUS)[0]["status"] == "built"
-    assert asyncio.run(views.list_proposals_route(CORPUS))[0]["off"] is True, "the views bar leaves it out"
-    assert "off" not in views.list_proposals(CORPUS)[0]
-    assert views.read_built(OTHER, "posts") is None and views.views_off(OTHER) == set()
-
-    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=True), analyst))
+    views._save_proposals(CORPUS, [*views.list_proposals(CORPUS),
+                                   {"slug": "timeline", "name": "Timeline", "why": "", "claims": ["board.jsonl"],
+                                    "arrangement": "", "proposed_by": "proposer", "status": "suggested",
+                                    "orientation": False, "ts": "t", "offered": {"at": "t", "after": "main", "why": ""}}])
+    _hidden_before(CORPUS, "posts", "timeline")
     assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == ["posts"]
-    assert "one post" in views.forms_text(CORPUS) and "off" not in asyncio.run(views.list_proposals_route(CORPUS))[0]
-    shipped = tmp_path / "viewers" / "board"
-    shipped.mkdir(parents=True)
-    (shipped / "view.json").write_text(json.dumps({"name": "Board", "claims": ["*.jsonl"]}))
-    (shipped / "reader.py").write_text(READER)
-    (shipped / "view.html").write_text("<p>board</p>")
-    monkeypatch.setattr(views, "VIEWERS_DIR", shipped.parent)
-    monkeypatch.setattr(views, "BUILTIN_VIEWERS", ("board",))
-    assert views.read_builtin("board") is not None
-    with pytest.raises(HTTPException) as e:
-        asyncio.run(views.view_on_route(CORPUS, "board", views.OnBody(on=False), analyst))
-    assert e.value.status_code == 404
+    assert [v["slug"] for v in views.views_for(CORPUS, "board.jsonl")] == ["posts"]
+    assert "one post" in views.forms_text(CORPUS)
+    assert [p for p in asyncio.run(views.list_proposals_route(CORPUS)) if "off" in p] == []
+    assert views.open_offer(CORPUS)["slug"] == "timeline"
+    assert views.local_extension(CORPUS)["views"] == [{"slug": "posts", "name": "Posts", "description": "each post",
+                                                       "file_viewer": False, "on": True}]
+    paths = {getattr(r, "path", "") for r in views.router.routes}
+    assert "/ws/{c}/views/{slug}" in paths, "the views' own routes"
+    assert "/ws/{c}/views/{slug}/on" not in paths and "/ws/{c}/views/local" not in paths
+    assert views._check_slug("local") == "local"
 
 
-def test_the_views_bar_menu_lists_the_views_built_here_the_hidden_ones_too(corpora, analyst, monkeypatch):
-    """GET /ws/{c}/views/local lists the views built for the workspace with whether each shows, a hidden one too, for
-    the views bar's ⋯ menu, without finding the extensions again. Its path is no view's: `local` is a slug no view
-    gets, and the route answers before a view's own route would."""
-    from fastapi.testclient import TestClient
-
-    from app.main import app
-
-    _propose(CORPUS)
-    _write(CORPUS)
-    found: list[str] = []
-
-    async def refresh(c, *_a, **_k):
-        found.append(c)
-        return extensions.read_state(c)
-
-    monkeypatch.setattr(extensions, "refresh", refresh)
-    client = TestClient(app)
-    row = {"slug": "posts", "name": "Posts", "description": "each post", "file_viewer": False, "on": True}
-    got = client.get(f"/api/ws/{CORPUS}/views/local")
-    assert got.status_code == 200 and got.json() == {"name": CORPUS, "views": [row]}
-    assert found == [], "a look at the views finds no extension again"
-
-    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
-    assert client.get(f"/api/ws/{CORPUS}/views/local").json()["views"] == [{**row, "on": False}]
-    assert client.get(f"/api/ws/{OTHER}/views/local").json()["views"] == []
-
-    with pytest.raises(HTTPException) as e:
-        views._check_slug("local")
-    assert e.value.status_code == 400
-    assert views._unique_slug(CORPUS, "Local") == "local-2"
-
-
-def test_a_view_switched_off_takes_its_card_type_with_it_and_a_deleted_one_leaves_no_switch_behind(corpora, analyst):
-    """A workspace view that makes a card type leaves the card types while it is off and is back when it is on. A view
-    deleted while off leaves nothing off behind, so a new view built under its slug is on."""
+def test_a_view_hidden_before_makes_its_card_type(corpora):
+    """A workspace view that makes a card type makes it whether or not an earlier version hid the view."""
     from app import cardtypes
 
     _propose(CORPUS)
@@ -229,19 +185,9 @@ def test_a_view_switched_off_takes_its_card_type_with_it_and_a_deleted_one_leave
     (d / "card.py").write_text("def card(index, args):\n    return index\n")
     (d / "view.json").write_text(json.dumps({**json.loads((d / "view.json").read_text()), "card": {"use": "a post"}}))
     views.mark_built(CORPUS, "posts")
+    _hidden_before(CORPUS, "posts")
     assert "posts" in asyncio.run(cardtypes.refresh(CORPUS, warm=False))
-
-    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
-    assert "posts" not in cardtypes.read_registry(CORPUS)
-    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=True), analyst))
     assert "posts" in cardtypes.read_registry(CORPUS)
-
-    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
-    views.delete_proposal(CORPUS, "posts")
-    assert views.views_off(CORPUS) == set()
-    _propose(CORPUS)
-    _write(CORPUS)
-    assert [v["slug"] for v in views.list_views(CORPUS) if v["origin"] == "workspace"] == ["posts"]
 
 
 def test_a_file_viewer_s_extension_glob_names_the_files_at_the_corpus_root_too(corpora):

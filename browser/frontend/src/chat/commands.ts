@@ -20,26 +20,22 @@ export const FIX_COMMAND = '/thimble-fix'
  * RewindPicker). */
 export const REWIND_COMMAND = '/rewind'
 
-/** The step that chooses how the workbench reaches Claude (shell/ClaudeAccess), as Claude Code's /login is its sign-in. */
-export const LOGIN_COMMAND = '/login'
-
 /** The product tour again, from its first step (shell/TourHost). */
 export const TOUR_COMMAND = '/tour'
 
 export const COMMANDS: readonly ChatCommand[] = [
   { name: FIX_COMMAND, about: FIX_DESCRIPTION },
   { name: REWIND_COMMAND, about: 'Take main back to before one of your messages' },
-  { name: LOGIN_COMMAND, about: 'Choose how the workbench reaches Claude' },
   { name: TOUR_COMMAND, about: 'Take the tour' },
 ]
 
-/** What the page itself does for a message that is one of its commands alone, as the bus names it (lib/bus): /login
- * opens the step that chooses how the workbench reaches Claude (`claudeAccess`), /tour runs the tour (`tour`); null for
- * any other text, a command with words after it among them, which goes to Claude as it is. Pure. */
-export function pageCommand(text: string): 'claudeAccess' | 'tour' | null {
+/** What the page itself does for a message that is one of its commands alone, as the bus names it (lib/bus): /tour runs
+ * the tour (`tour`); null for any other text, a command with words after it among them, which goes to Claude as it is.
+ * Pure. */
+export function pageCommand(text: string): 'tour' | null {
   const typed = commandIn(text)
   if (!typed || typed.words) return null
-  return typed.name === LOGIN_COMMAND ? 'claudeAccess' : typed.name === TOUR_COMMAND ? 'tour' : null
+  return typed.name === TOUR_COMMAND ? 'tour' : null
 }
 
 /** The command a message is, space before it aside, and the words after it, trimmed; null for a message that starts

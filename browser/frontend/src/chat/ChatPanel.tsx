@@ -745,8 +745,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
-    // `/login` and `/tour`, from any thread: the step that chooses how the workbench reaches Claude, as Claude Code's
-    // /login, and the tour from its first step (commands.ts pageCommand)
+    // `/tour`, from any thread: the tour from its first step (commands.ts pageCommand)
     const page = pageCommand(text)
     if (page) {
       bus.emit(page, {})

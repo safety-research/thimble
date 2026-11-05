@@ -90,7 +90,7 @@ ROWS = {"dev": "dev"}
 UNASKED_ROLES = ("critic", "writer", "dev")
 STOP_WAIT_S = 5.0
 NO_CC_SESSIONS = ("thimble reaches Claude with an API key or Workload Identity Federation here, so it starts no Claude "
-                  "Code session for an extension's program. Choose Claude Code sign-in with /login in the chat to "
+                  "Code session for an extension's program. Choose Claude Code sign-in in Settings, Claude access, to "
                   "run it.")
 NO_BOX = ("The role's sandbox could not run here, so its program runs without one and can read what you can, "
           "thimble's token among it.")

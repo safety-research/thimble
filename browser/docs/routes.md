@@ -25,7 +25,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-283 routes, 166 of them writes: 35 token, 1 code, 1 agent token, 135 cookie, 108 cookie or token, 1 media key, 2 none.
+281 routes, 165 of them writes: 35 token, 1 code, 1 agent token, 134 cookie, 107 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -283,7 +283,6 @@ knows the key.
 | GET | `/api/ws/{c}/undo` | undo | cookie or token |
 | POST | `/api/ws/{c}/undo` | undo | cookie |
 | GET | `/api/ws/{c}/views` | views | cookie or token |
-| GET | `/api/ws/{c}/views/local` | views | cookie or token |
 | GET | `/api/ws/{c}/views/proposals` | views | cookie or token |
 | DELETE | `/api/ws/{c}/views/proposals/{slug}` | views | cookie |
 | POST | `/api/ws/{c}/views/proposals/{slug}/accept` | views | cookie |
@@ -303,7 +302,6 @@ knows the key.
 | POST | `/api/ws/{c}/views/{slug}/marks` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/media` | views | cookie or token |
 | GET | `/api/ws/{c}/views/{slug}/media/{key}` | views | media key |
-| PUT | `/api/ws/{c}/views/{slug}/on` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/problems` | views | cookie or token |
 | POST | `/api/ws/{c}/views/{slug}/records` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/resolve` | views | cookie or token |

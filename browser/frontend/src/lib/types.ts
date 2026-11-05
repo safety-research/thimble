@@ -499,8 +499,6 @@ export interface Proposal {
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
-  /** its view is hidden (backend views.views_off): the views bar leaves it out */
-  off?: boolean
   status: ProposalStatus
   ts: string
   error?: string
@@ -1266,9 +1264,9 @@ export interface Settings {
   /** "Claude can edit files in this folder": whether main and its thread forks may write the corpus folder (the
    * workspace's settings.json `corpus_edits`, on by default) */
   corpus_edits?: boolean
-  /** Labels: whether Claude makes labels in this workspace, as the terminal's Labels setting (the workspace's
-   * settings.json `labels`, on by default); off, main's prompt and the tools' texts say nothing of labels, and no agent
-   * has a label tool */
+  /** The Labels sidebar's Label tool: whether Claude makes labels in this workspace, as the terminal's Labels setting
+   * (the workspace's settings.json `labels`, on by default); off, main's prompt and the tools' texts say nothing of
+   * labels, and no agent has a label tool */
   labels?: boolean
   [k: string]: unknown
 }
@@ -1388,7 +1386,7 @@ export interface LocalViewRow {
   description?: string
   /** a file viewer, which opens in the File browser */
   file_viewer: boolean
-  /** shown: its check in the views bar's ⋯ menu; hidden, it leaves the views bar and the File browser */
+  /** true: every view built here shows (backend views.local_extension) */
   on: boolean
 }
 

@@ -65,11 +65,11 @@ def test_the_api_key_from_the_environment_is_used_and_never_printed(capsys, monk
 
 def test_without_anthropic_api_key_the_workbench_asks_for_a_key_when_it_starts(capsys):
     """--sign-in api-key with no ANTHROPIC_API_KEY: the choice is saved, nothing is read from the terminal or a file,
-    and the line says to paste a key with /login in the workbench's chat, which opens that step."""
+    and the line says to paste a key in the workbench's Settings, Claude access, where the row takes one."""
     rc, out = run_setup(capsys, "--how", "api-key")
     assert rc == 0
-    assert out == ("Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so paste a key in the workbench with "
-                   "/login in its chat.\n")
+    assert out == ("Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so paste a key in the workbench's "
+                   "Settings, Claude access.\n")
     assert claude_access.how() == claude_access.API_KEY
     assert claude_access.problem()["what"] == "No API key: ANTHROPIC_API_KEY is not set, and no key is saved."
 
@@ -329,9 +329,32 @@ def test_a_claude_code_that_is_not_signed_in_is_said(tmp_path, capsys, monkeypat
                                    "Run claude in a terminal and sign in.")
 
 
+def test_what_keeps_claude_from_being_reached_says_to_change_it_in_settings_claude_access(tmp_path):
+    """The workbench signs no one in, so it has no /login: the words for the server's start line and the chat's card
+    (problem), an extension's program that needs Claude Code (harness) and the Bash sandbox that could not start
+    (runtime_cc) send the person to Settings' first row, Claude access, or to thimble-browser --setup."""
+    from app import harness, runtime_cc
+
+    claude_access.save(claude_access.API_KEY)
+    assert claude_access.problem() == {
+        "what": "No API key: ANTHROPIC_API_KEY is not set, and no key is saved.",
+        "fix": "Paste one in Settings, Claude access, or set ANTHROPIC_API_KEY and start thimble-browser again."}
+    p = wif_file(tmp_path)
+    claude_access.save(claude_access.WIF, wif_file=str(p))
+    p.unlink()
+    assert claude_access.problem()["fix"] == ("Open Claude access in Settings, or run thimble-browser --setup in a "
+                                              "terminal.")
+    assert claude_access.problem_line().endswith("Open Claude access in Settings, or run thimble-browser --setup in "
+                                                 "a terminal.")
+    for said in (harness.NO_CC_SESSIONS, runtime_cc.SANDBOX_NOTICE, claude_access.HINTS[claude_access.API_KEY]):
+        assert "/login" not in said and "Settings" in said, said
+    assert "Choose Claude Code sign-in in Settings, Claude access, to run it." in harness.NO_CC_SESSIONS
+    assert "Settings, Claude access, can switch to an API key instead." in runtime_cc.SANDBOX_NOTICE
+
+
 def test_a_refused_key_says_where_to_check_it(monkeypatch):
-    """A 401 names the way and where the key comes from: ANTHROPIC_API_KEY where the workbench runs, which /login
-    cannot change, or the key pasted with /login."""
+    """A 401 names the way and where the key comes from: ANTHROPIC_API_KEY where the workbench runs, which Settings
+    cannot change, or the key pasted in Settings, Claude access."""
     import anthropic
     import httpx
 
@@ -345,6 +368,6 @@ def test_a_refused_key_says_where_to_check_it(monkeypatch):
     assert "for an API key, from ANTHROPIC_API_KEY. Check ANTHROPIC_API_KEY where the workbench runs." in said
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     claude_access.save(claude_access.API_KEY, key=FAKE_KEY)
-    assert llm.failure(refused).endswith("for an API key, the one saved in the workbench. Check them with /login in "
-                                         "the chat.")
+    assert llm.failure(refused).endswith("for an API key, the one saved in the workbench. Check them in Settings, "
+                                         "Claude access.")
     assert FAKE_KEY not in said

@@ -1,8 +1,8 @@
-"""Labels off in the workbench: Settings' Labels switch for the workspace (ledger.labels_on), as the terminal's Labels
-setting. While it is off, main's prompt, the shared text thimble's agents read and the tools' texts say nothing of
-labels (labels_off.py), no agent is offered a label tool, a label tool's call is refused with the line both modes read
-(plugin/prompts/labels-off.md) and changes nothing, and main is told of no label event. While it is on, every text is as
-before. All data is made up (the `mini` corpus)."""
+"""Labels off in the workbench: the Labels sidebar's Label tool switch for the workspace (ledger.labels_on), as the
+terminal's Labels setting. While it is off, main's prompt, the shared text thimble's agents read and the tools' texts
+say nothing of labels (labels_off.py), no agent is offered a label tool, a label tool's call is refused with the line
+both modes read (plugin/prompts/labels-off.md) and changes nothing, and main is told of no label event. While it is on,
+every text is as before. All data is made up (the `mini` corpus)."""
 from __future__ import annotations
 
 import re

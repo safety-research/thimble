@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
-// "Claude makes labels" at the head of the Labels sidebar (src/shell/LabelsSidebar.tsx MakesLabels): whether Claude makes
-// labels in this workspace, the workspace's `labels` setting that Settings' Labels switch turned before. A turn of the
-// switch, or a click on its words, applies at once (PUT /ws/{c}/settings, false to turn it off and null to put back
-// the default, on), shows the new state while it saves and after, and a save that fails says so and shows what the
-// server holds. It stands on the labels' list only: not on a label's detail, and not on the comments.
+// The Label tool switch, on or off, at the head of the Labels sidebar (src/shell/LabelsSidebar.tsx LabelTool): whether
+// Claude makes labels in this workspace, the workspace's `labels` setting. A turn of the switch, or a click on its
+// words, applies at once (PUT /ws/{c}/settings, false to turn it off and null to put back the default, on), shows the
+// new state while it saves and after, and a save that fails says so and shows what the server holds. It stands on the
+// labels' list only: not on a label's detail, and not on the comments.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { bus } from '../../src/lib/bus.ts'
-import { LabelsSidebar, MAKES_LABELS } from '../../src/shell/LabelsSidebar.tsx'
+import { LABEL_TOOL, LabelsSidebar } from '../../src/shell/LabelsSidebar.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -44,17 +44,18 @@ afterEach(() => {
 })
 
 const head = (el: HTMLElement) => el.querySelector<HTMLElement>('.lside-head')!
-const makes = (el: HTMLElement) => head(el).querySelector<HTMLElement>('.lside-makes')
-const switchOf = (el: HTMLElement) => makes(el)!.querySelector<HTMLButtonElement>('button[role="switch"]')!
+const tool = (el: HTMLElement) => head(el).querySelector<HTMLElement>('.lside-tool')
+const switchOf = (el: HTMLElement) => tool(el)!.querySelector<HTMLButtonElement>('button[role="switch"]')!
 
-test("the labels' head says whether Claude makes labels, beside the heading, and a turn applies at once", async () => {
+test("the labels' head holds the Label tool, on or off, beside the heading, and a turn applies at once", async () => {
   const el = await mount(<LabelsSidebar ws="w1" section="labels" onClose={() => undefined} />)
   await settle()
   expect(el.querySelector('.lside-heading')?.textContent).toBe('Labels 1')
-  expect(makes(el)?.textContent).toBe(MAKES_LABELS)
+  expect(LABEL_TOOL).toBe('Label tool')
+  expect(tool(el)?.textContent).toBe(LABEL_TOOL)
   expect(switchOf(el).getAttribute('aria-checked')).toBe('true')
   // the switch's words name it
-  expect(makes(el)?.tagName).toBe('LABEL')
+  expect(tool(el)?.tagName).toBe('LABEL')
   // each label keeps its own switch
   expect(el.querySelector('[data-label="k1"] button[role="switch"]')).not.toBeNull()
 
@@ -66,7 +67,7 @@ test("the labels' head says whether Claude makes labels, beside the heading, and
   expect(switchOf(el).getAttribute('aria-checked')).toBe('false')
 
   // a click on its words turns it too; on puts the default back
-  await act(async () => makes(el)!.click())
+  await act(async () => tool(el)!.click())
   await settle()
   expect(puts).toEqual([{ labels: false }, { labels: null }])
   expect(stored.labels).toBeUndefined()
@@ -85,7 +86,7 @@ test('a workspace whose labels are off shows the switch off, and a save that fai
     await act(async () => switchOf(el).click())
     await settle()
     expect(puts).toEqual([{ labels: null }])
-    expect(toasts).toEqual(['Could not turn labels on. the settings file cannot be written'])
+    expect(toasts).toEqual(['Could not turn the label tool on. the settings file cannot be written'])
     expect(switchOf(el).getAttribute('aria-checked')).toBe('false')
   } finally {
     off()
@@ -95,13 +96,13 @@ test('a workspace whose labels are off shows the switch off, and a save that fai
 test("it stands on the labels' list only: not on a label's detail, not on the comments", async () => {
   const el = await mount(<LabelsSidebar ws="w3" section="labels" onClose={() => undefined} />)
   await settle()
-  expect(makes(el)).not.toBeNull()
+  expect(tool(el)).not.toBeNull()
   await act(async () => el.querySelector<HTMLButtonElement>('[data-label="k1"] .lside-name')!.click())
   await settle()
   expect(el.querySelector('.lside-detail')).not.toBeNull()
-  expect(makes(el)).toBeNull()
+  expect(tool(el)).toBeNull()
   unmountAll()
   const comments = await mount(<LabelsSidebar ws="w3" section="comments" onClose={() => undefined} />)
   await settle()
-  expect(comments.querySelector('.lside-makes')).toBeNull()
+  expect(comments.querySelector('.lside-tool')).toBeNull()
 })

@@ -385,10 +385,10 @@ def corpus_edits(c: str | None) -> bool:
 
 
 def labels_on(c: str | None) -> bool:
-    """Whether Claude makes labels in workspace `c` (LABELS_KEY, Settings' Labels switch, as the terminal's Labels
-    setting): on unless the workspace's settings.json sets it false, and on for no workspace or a settings file that
-    cannot be read. Off, main's prompt and the tools' texts say nothing of labels, and no agent is offered a label tool
-    (labels_off.py)."""
+    """Whether Claude makes labels in workspace `c` (LABELS_KEY, the Labels sidebar's Label tool switch, as the
+    terminal's Labels setting): on unless the workspace's settings.json sets it false, and on for no workspace or a
+    settings file that cannot be read. Off, main's prompt and the tools' texts say nothing of labels, and no agent is
+    offered a label tool (labels_off.py)."""
     if not c:
         return True
     try:
@@ -511,7 +511,7 @@ ASK_KEY = "ask_key"
 # switch changes it, from the analyst's browser alone, so an agent cannot turn its own edits on
 EDITS_KEY = "corpus_edits"
 # true, false or null: the workspace's settings.json `labels`, whether Claude makes labels there (labels_on); null takes
-# the key out, which is on. Settings' Labels switch changes it, from the analyst's browser alone
+# the key out, which is on. The Labels sidebar's Label tool switch changes it, from the analyst's browser alone
 LABELS_KEY = "labels"
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", WEB_KEY, PROPOSE_KEY, ASK_KEY,
                       EDITS_KEY, LABELS_KEY, *RETIRED_KEYS})

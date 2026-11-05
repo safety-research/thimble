@@ -200,7 +200,7 @@ class Spec:
     # main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
     corpus_edits: bool | None = None
     no_write: list[Path] = field(default_factory=list)  # the workspace's protected files, never written (protected)
-    # Settings' Labels switch for the workspace (ledger.labels_on): off, `thimble` holds no label tool, and the tools'
+    # the workspace's Label tool switch (ledger.labels_on): off, `thimble` holds no label tool, and the tools'
     # texts say nothing of labels (tools.tool_sections)
     labels: bool = True
 
@@ -614,7 +614,7 @@ class Space:
         tmp = self.dir / "tmp" / conv.id
         nofollow.makedirs(tmp)
         temp: Path | None = None
-        # Settings' Labels switch: off, main and thimble's agents are offered no label tool (labels_off.py)
+        # the Label tool switch: off, main and thimble's agents are offered no label tool (labels_off.py)
         labels = ledger.labels_on(self.c)
         reads = [self.corpus, self.ws, config.REPO_ROOT / "docs", config.REPO_ROOT / "plugin" / "viewers",
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
@@ -944,7 +944,7 @@ async def _run(conv: Conv, text: str) -> TurnEnd:
     except Exception as e:  # noqa: BLE001 — every failure is a line the analyst reads
         if llm.credentials_failure(e):
             _access_record(conv, {"what": llm.failure(e),
-                                  "fix": "Check how thimble reaches Claude with /login in the chat."})
+                                  "fix": "Check Claude access in Settings."})
             return TurnEnd("failed", error=llm.failure(e))
         log.warning("%s: %s's turn failed: %s", conv.c, conv.id, type(e).__name__, exc_info=True)
         _api_error_record(conv, _failure_text(e))

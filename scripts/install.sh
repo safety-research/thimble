@@ -23,7 +23,7 @@ install in ~/.thimble stays as it is, with your fixes, and thimble update moves 
 
   --no-browser       the plugin alone, without the workbench
   --sign-in HOW      how the workbench reaches Claude: claude-code (your Claude Code sign-in), api-key
-                     (ANTHROPIC_API_KEY when it is set, else a key you paste in the workbench) or wif
+                     (ANTHROPIC_API_KEY when it is set, else a key you paste in the workbench's Settings) or wif
                      (Workload Identity Federation, with --wif-file). Without it, the install asks in a terminal;
                      elsewhere the workbench asks when it starts
   --wif-file PATH    your WIF config file, for --sign-in wif

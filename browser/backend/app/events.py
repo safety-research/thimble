@@ -194,7 +194,7 @@ def render_prompts(names: tuple[str, ...] | list[str], workdir: str, terminal: b
     prompt keeps one ending of a turn with nothing for the analyst (terminal_tools.main_prompt): without closing words
     when `terminal`, or when it is None and this process's environment says so (terminal_tools.on). `edits`: whether
     main may write the corpus (CORPUS_WRITES), None where the server does not run main (runtime.py). Which requests to
-    a host ask the analyst follows the way main reaches Claude (network_words). While the workspace's Labels switch is
+    a host ask the analyst follows the way main reaches Claude (network_words). While the workspace's Label tool is
     off (ledger.labels_on), each text leaves out what it says of labels, and the card types' text, whose way of
     answering takes labels, is left out (labels_off.py)."""
     from . import cardtypes, terminal_tools, views  # noqa: PLC0415 — views imports refs, which a launcher does not otherwise need
