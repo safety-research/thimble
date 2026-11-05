@@ -123,20 +123,16 @@ module cannot judge, fails as a check that did not run (`failedBy` `none`), whic
 from __future__ import annotations
 
 import ast
-import bz2
 import difflib
-import gzip
 import io
 import json
 import keyword
-import lzma
 import math
 import operator
 import os
 import re
 import shlex
 import tokenize
-import zlib
 from collections import Counter
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -212,8 +208,6 @@ MAX_RANGE = 50
 NOT_RUN = "The check did not run."
 BLOCK = 1 << 20  # bytes read at a time while counting the lines before a cited one
 LINE_BYTES = 1 << 20  # bytes of a cited line the check reads; a longer line is cut there
-# bytes of a compressed file's lines the check reads at most: a small file that unpacks to more cannot be read
-UNPACKED_MAX = 1 << 28
 SHIFT_MAX = 5  # lines a cited line may be off by and still name the line that holds the words
 OUTPUT_MAX = 20000  # characters of a call's output the evidence keeps, around its first highlight
 LINE_MAX = 600  # characters of a cited line the evidence keeps, around its highlight
@@ -1149,38 +1143,18 @@ def line_span(line: Any) -> tuple[int, int] | None:
     return (a, b) if 1 <= a <= b and b - a <= MAX_RANGE else None
 
 
-def unpacked(raw: Any) -> tuple[Any, bool]:
-    """A file's lines as a stream, and whether the file is compressed: a gzip, bzip2 or xz file, known by its first
-    bytes, reads as the lines it holds, as zcat, bzcat and xzcat print them; any other file as it is."""
-    head = raw.peek(6)[:6]
-    for magic, opened in ((b"\x1f\x8b", lambda: gzip.GzipFile(fileobj=raw)), (b"BZh", lambda: bz2.BZ2File(raw)),
-                          (b"\xfd7zXZ\x00", lambda: lzma.LZMAFile(raw))):
-        if head.startswith(magic):
-            return opened(), True
-    return raw, False
-
-
 def read_lines(path: str, a: int, b: int, partial: bool = False, folders: list[str] | None = None) -> tuple[int, list[str]] | None:
     """Lines a to b of a regular file, as (a, lines), each cut at LINE_BYTES; None when the file cannot be read, is no
-    regular file (a pipe would never end), or, unless `partial`, has no line b. A compressed file's lines are those it
-    holds (unpacked), up to UNPACKED_MAX bytes of them. With `folders`, only a file that lies inside one of them is read,
-    through the descriptor open_inside() opened it with. The lines before line a are counted in blocks, not read one
-    by one, so a line deep in a big file is found quickly."""
+    regular file (a pipe would never end), or, unless `partial`, has no line b. With `folders`, only a file that lies
+    inside one of them is read, through the descriptor open_inside() opened it with. The lines before line a are counted
+    in blocks, not read one by one, so a line deep in a big file is found quickly."""
     fd = open_inside(path, folders) if folders is not None else None
     if fd is None and (folders is not None or not os.path.isfile(path)):
         return None
     out: list[str] = []
     try:
-        with os.fdopen(fd, "rb") if fd is not None else open(path, "rb") as file:
-            f, packed = unpacked(file)
-            too_big = lambda: packed and f.tell() > UNPACKED_MAX  # noqa: E731
+        with os.fdopen(fd, "rb") if fd is not None else open(path, "rb") as f:
             line = 1
-            while line < a and packed:
-                # a compressed stream goes back only by unpacking it again from its start: its lines are read once
-                part = f.readline(LINE_BYTES)
-                if not part or too_big():
-                    return None
-                line += part.endswith(b"\n")
             while line < a:
                 block = f.read(BLOCK)
                 if not block:
@@ -1201,12 +1175,10 @@ def read_lines(path: str, a: int, b: int, partial: bool = False, folders: list[s
                 more = raw
                 while not more.endswith(b"\n"):
                     more = f.readline(LINE_BYTES)
-                    if not more or too_big():
+                    if not more:
                         break
-                if too_big():
-                    return None
                 out.append(raw.decode("utf-8", errors="replace").rstrip("\n").removesuffix("\r"))
-    except (OSError, EOFError, ValueError, lzma.LZMAError, zlib.error):
+    except OSError:
         return None
     return (a, out) if out and (partial or len(out) == b - a + 1) else None
 
@@ -1665,13 +1637,7 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None, 
                 break
         else:
             r["text"] = window(r["text"], [], LINE_MAX)[0]
-    # a file inside the folders shows by the path it was cited by, from the start folder; one cited by a path that
-    # reaches the folder from outside, through a link to it (a session folder ~/traces that links to another disk),
-    # shows by where it lies in the folder, as the folder's own files do
-    top = os.path.abspath(root or cwd)
-    rel = path if not inside(path, [top, cwd]) else os.path.relpath(path, top)
-    if rel.startswith("../"):
-        rel = os.path.relpath(_real(path) or path, _real(top) or top)
+    rel = path if not inside(path, [root or cwd, cwd]) else os.path.relpath(path, os.path.abspath(root or cwd))
     return problems, {"file": rel, "line": line, "lines": rows}, hay
 
 
