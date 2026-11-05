@@ -944,7 +944,7 @@ async def _run(conv: Conv, text: str) -> TurnEnd:
     except Exception as e:  # noqa: BLE001 — every failure is a line the analyst reads
         if llm.credentials_failure(e):
             _access_record(conv, {"what": llm.failure(e),
-                                  "fix": "Check how thimble reaches Claude with /login in the chat."})
+                                  "fix": "Check Claude access in Settings."})
             return TurnEnd("failed", error=llm.failure(e))
         log.warning("%s: %s's turn failed: %s", conv.c, conv.id, type(e).__name__, exc_info=True)
         _api_error_record(conv, _failure_text(e))
