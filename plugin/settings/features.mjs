@@ -97,11 +97,10 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'details', title: 'Heads-ups', group: 'Comments', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['heads'], lensesIn: 'auto',
-    does: 'auto: details that may mislead get a heads-up after each answer, a small part of the call after it; ] opens each one. on demand: press h for heads-ups on the last answer. off: no heads-ups.',
+    key: 'details', title: 'Heads-ups', group: 'Comments', default: 'auto', choices: ['auto', 'off'], lenses: ['heads'],
+    does: 'auto: details that may mislead get a heads-up after each answer, a small part of the call after it; ] opens each one. off: no heads-ups.',
     says: {
       'auto': 'Details that may mislead get a heads-up after each answer.',
-      'on demand': 'Press h for heads-ups on the last answer.',
       'off': 'No heads-ups.',
     },
   },
@@ -148,9 +147,10 @@ export const RETIRED = {
  *  the first session saves the new one (term.ts). */
 export const RENAMED = {
   citations: { 'auto cite + check': 'auto cite + verify' },
-  // a switch until 0.10.4 (Cards until 0.10.8), now modes: on is auto, off is off
+  // a switch until 0.10.4 (Cards until 0.10.8), now modes: on is auto, off is off; Heads-ups' on demand, gone since
+  // 0.10.11, is off
   explain: { true: 'auto', false: 'off' },
-  details: { true: 'auto', false: 'off' },
+  details: { true: 'auto', false: 'off', 'on demand': 'off' },
   cards: { true: 'auto', false: 'off' },
   // the 0.10.6 test branch saved a model by its alias (haiku); now by its name with the version (Haiku 5.5)
   checkerModel: Object.fromEntries(ALIASES.map(a => [a, shownName(a)])),
@@ -255,8 +255,8 @@ export function valueIn(values, key) {
 export const PRESET = { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false }
 
 /** The modes Minimal set from 0.10.4 to 0.10.7: rows that still hold them stand for it, and the first session sets its
- *  modes now (settings/term.ts settleMinimal). */
-export const OLD_PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
+ *  modes now (settings/term.ts settleMinimal). Heads-ups was on demand then, which reads as off now (RENAMED). */
+export const OLD_PRESET = { citations: 'manual', explain: 'on demand', details: 'off', claimsMode: 'on demand' }
 
 /** The modes that stand where thimble's drawing does not show (core/host.ts drawsHere: the desktop app's Code tab,
  *  remote Cowork, claude -p): Citations, Cards, Explainers and Heads-ups off, as if the person had set them off, since
@@ -275,8 +275,6 @@ export function switchesFrom(values) {
   return key => {
     // c on selected words, a citation the analyst asks for, works in every mode of Citations but off
     if (key === 'cite') return valueIn(values, 'citations') !== 'off'
-    // h, heads-ups on an answer the person asks for, is Heads-ups' on demand
-    if (key === 'heads') return valueIn(values, 'details') === 'on demand'
     const v = valueIn(values, ALIAS[key] ?? key)
     return typeof v === 'string' ? v !== 'off' : v
   }

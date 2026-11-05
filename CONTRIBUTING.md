@@ -107,7 +107,6 @@ Every text a model reads is one file in `plugin/prompts/`, each paragraph on one
 | observer | `prompts/observer.md`, `prompts/observer-turn.md` | `observer/observer.ts` | the prompt of the look after each answer: its frame, then the messages to read and what thimble already gave |
 | lenses | `prompts/lens-explain.md`, `prompts/lens-heads.md`, `prompts/lens-claims.md` | `observer/observer.ts` | the sections of the look's prompt, one per switch that is on |
 | explainer on demand | `prompts/explain-expand.md` | `explain/expand.ts` | one model call when the person asks what words of an answer mean |
-| heads-up on demand | `prompts/heads-expand.md` | `explain/expand.ts` | one model call when the person asks for a heads-up on words of an answer |
 | squeeze | `prompts/squeeze.md` | `squeeze/term.ts` | one model call per change of an answer's chips |
 | side thread | `prompts/thread.md` | `threads/thread.ts` | the prompt of the fork that answers a side thread |
 

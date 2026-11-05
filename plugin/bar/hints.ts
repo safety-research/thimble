@@ -24,7 +24,7 @@ async function remindedNow($: Engine): Promise<string[]> {
   return list((await $.state.get(REMINDED)).value)
 }
 
-/** The person used a feature (`explain`, `cite`, `heads`, `rewrite`): its how-to hint and its reminder
+/** The person used a feature (`explain`, `cite`, `rewrite`): its how-to hint and its reminder
  *  stop for the rest of the session. */
 export async function hintUsed($: Engine, feature: string): Promise<void> {
   const used = await usedNow($)
@@ -39,7 +39,6 @@ export async function howTo($: Engine, feature: string, text: string, about?: st
 /** The reminders, in the order they are given: each while its feature waits to be asked. */
 export const REMINDERS: { feature: string; on: () => boolean; text: string }[] = [
   { feature: 'explain', on: () => choiceOf('explain') === 'on demand', text: 'select a passage in an answer and press e to explain it.' },
-  { feature: 'heads', on: () => choiceOf('details') === 'on demand', text: 'press h for heads-ups on the last answer.' },
   { feature: 'cite', on: () => choiceOf('citations') === 'manual', text: 'select a passage in an answer and press c to verify the claim.' },
   { feature: 'rewrite', on: () => featureOn('squeezeAnswers') === true, text: 'press s to rewrite the last answer shorter or longer, more novice or more expert.' },
 ]

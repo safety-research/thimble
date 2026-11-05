@@ -11,8 +11,8 @@
 // `thimble label`, so Claude does not know of them, and `thimble label` refuses its commands (hooks/path.ts). While
 // Claude does not cite (Citations manual or off), the citations in the other sections' examples read as plain words. A
 // mode that changes what Claude or the analyst does adds a sentence at the end (modesNow): Cards on demand, and the
-// modes in which citations, explainers or heads-ups come only when the analyst asks. A switch changed later makes a
-// different text, which the next prompt carries beside the copy the conversation holds.
+// modes in which citations or explainers come only when the analyst asks. A switch changed later makes a different
+// text, which the next prompt carries beside the copy the conversation holds.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
@@ -48,7 +48,6 @@ export function modesNow(): string[] {
   const asked = [
     choiceOf('citations') === 'manual' && 'citations (they select words and press c)',
     choiceOf('explain') === 'on demand' && 'explainers (e)',
-    choiceOf('details') === 'on demand' && 'heads-ups (h)',
   ].filter(Boolean) as string[]
   const list = asked.length > 1 ? `${asked.slice(0, -1).join(', ')} and ${asked.at(-1)}` : asked[0]
   return [

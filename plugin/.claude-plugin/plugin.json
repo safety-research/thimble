@@ -91,10 +91,9 @@
     "details": {
       "type": "string",
       "title": "Heads-ups",
-      "description": "auto: details that may mislead get a heads-up after each answer, a small part of the call after it; ] opens each one. on demand: press h for heads-ups on the last answer. off: no heads-ups.",
+      "description": "auto: details that may mislead get a heads-up after each answer, a small part of the call after it; ] opens each one. off: no heads-ups.",
       "options": [
         "auto",
-        "on demand",
         "off"
       ],
       "default": "auto"
