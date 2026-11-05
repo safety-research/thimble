@@ -30,7 +30,7 @@ mode, since Claude Code obeys an explicit ask rule there (live check: the checks
 mode). The keys earlier builds read for this,
 `installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
 (IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
-from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
+from the Settings pane leaves them in the file. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
 again on, which `off` turns off) are classifier rows.
 
 Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
@@ -536,8 +536,15 @@ def load_or_defaults(c: str | None = None) -> tuple[dict[str, Any], str]:
 
 
 def problem(c: str | None = None) -> str:
-    """The config's error for workspace `c`, '' when it has none."""
-    return load_or_defaults(c)[1]
+    """The config's error for workspace `c`, '' when it has none, each path in the home folder written from ~
+    (home_as_tilde), as Settings, `thimble doctor` and the server's start line show it."""
+    return home_as_tilde(load_or_defaults(c)[1])
+
+
+def home_as_tilde(text: str) -> str:
+    """`text` with each path that starts in the home folder written from ~ (`/home/me/.thimble` as `~/.thimble`)."""
+    home = str(Path.home()).rstrip(os.sep)
+    return text.replace(home + os.sep, "~" + os.sep) if home else text
 
 
 def extension_agent(conf: dict[str, Any], key: str) -> dict[str, Any]:
@@ -629,7 +636,9 @@ def _write(path: Path, data: dict[str, Any]) -> None:
 def save(c: str | None, patch: dict[str, Any]) -> None:
     """Write a nested patch of settings, None for a value that goes back to the one below it. Each value goes where the
     value the Settings pane shows came from: the workspace's override when it sets that key, else the file in thimble's
-    home. ConfigError, writing nothing, when either file has an error or the result would."""
+    home. Only the patch's keys change: every other key stays as the file has it, the keys this build reads and ignores
+    among them (module note, one fence). ConfigError, writing nothing, when either file has an error or the result
+    would."""
     with _lock:
         if c:
             migrate(c)
@@ -643,9 +652,6 @@ def save(c: str | None, patch: dict[str, Any]) -> None:
         for path, value in leaves(patch):
             target = next(p for p, _ in files if _get(held[p], path) is not _MISSING or p == global_file())
             _put(held[target], path, _MISSING if value is None else value)
-        for p, _ in files:  # a save from the Settings pane drops the keys this build ignores (module note, one fence)
-            if held[p] != before[p]:
-                held[p] = without_ignored(held[p])
         for p, scope in files:
             if held[p] != before[p]:
                 if problems := _problems(held[p], scope, p.parent):
