@@ -1199,3 +1199,29 @@ async def test_a_pass_whose_registration_broke_off_leaves_no_stamp_the_next_gate
     res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
     assert not res.is_error and STAMP_LINE not in res.text, res.text
     assert _prop(slug)["status"] == "built"
+
+
+async def test_a_message_s_run_that_begins_before_the_last_run_s_end_is_settled_owns_the_view(board, bridge,
+                                                                                             stamp_gate):
+    """The server's runtime starts a builder's queued message at once when its run ends, before that end is settled:
+    the end leaves the view to the new run, whose failing change leaves the view as it was."""
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    _draft(slug, "<p>v1</p>")
+    views.message(CORPUS, slug, "Show each file's size too.")
+    await _until(lambda: _prop(slug).get("status") == "building" and not _prop(slug).get("changed"),
+                 "the message never reached the running builder")
+    res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert not res.is_error, res.text
+    subagents.run_ended(CORPUS, agent, "done", "Built.", source="handback")  # its end is settled in a task...
+    subagents.run_again(CORPUS, agent, "coordinator")  # ...which the next run begins before
+    await _until(lambda: (CORPUS, slug) not in dev._settling, "the first run's end was never settled")
+    assert _prop(slug)["status"] == "built" and (_prop(slug).get("answering") or {}).get("run") == 1
+    folder = views.views_dir(CORPUS) / slug
+    (folder / views.VIEW_HTML).write_text("<p>FAIL, the change half made</p>")
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"),
+                 "the second run's end was never settled")
+    assert _prop(slug)["status"] == "built" and _prop(slug).get("failed_change") is not None
+    assert (folder / views.VIEW_HTML).read_text() == "<p>v1</p>"
+

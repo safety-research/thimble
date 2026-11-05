@@ -3501,6 +3501,7 @@ async def _settled(c: str, slug: str, run: Any, status: str, report: str, why: s
 
 async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: str) -> None:
     """What a builder's end means for its view, the backstop of finish_view:
+    - its next run began meanwhile: nothing here, since that run's end settles the view;
     - it answered a message about the built view and left its files as they were: nothing changes; one that changed
       them is a change to the view from here (message_changes);
     - it passed: done, its work folder lets go of its extracts, and the review starts; a folder that changed after the
@@ -3518,6 +3519,11 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     prop = views.read_proposal(c, slug)
     if prop is None or prop.get("agent_id") != run.agent_id:
         return  # deleted, or a newer build took over
+    if int((subagents.agent(c, run.agent_id) or {}).get("run") or 0) > run.k:
+        # the builder's next run began before this end was settled, as the server's runtime starts it at once for a
+        # message sent while the builder ran (runtime._agent_loop): the view is that run's, and its end settles it
+        log.info("%s: the end of run %s of the build of %s is left to the run after it", c, run.k, slug)
+        return
     work = view_work_dir(c, slug)
     if answering(prop, run.agent_id) is not None:
         if views.unchanged_since_built(c, slug):  # it answered the message and left the view as it was built
