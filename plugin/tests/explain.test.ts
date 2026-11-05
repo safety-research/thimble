@@ -421,15 +421,15 @@ test('words selected outside Claude\'s answers (a setting\'s name in the pane) a
 
 test('words selected in an answer put the four keys that act on them on the bar, each in its color: c cite, e explain, h heads-up, a ask; in every mode, each while its feature is not off', async () => {
   const chips = ['cite', 'explain', 'heads', 'ask']
-  for (const o of [{}, { minimal: true, ...PRESET }, { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }] as Any[]) {
+  for (const o of [{}, { minimal: true, ...PRESET }, { citations: 'manual', explain: 'on demand', claimsMode: 'on demand' }] as Any[]) {
     setOptions(o)
     try {
       const s = setup([])
       await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
       const keys = async () => (await barLeft(s.$, featureOn, false, new Set())).filter(x => chips.includes(x.id)).map(x => [`${x.key} ${x.words}`, x.color])
-      // none selected: none of them; h asks for heads-ups on the last answer while Heads-ups is on demand
+      // none selected: none of them
       s.$.ui.selection = async () => undefined
-      expect(await keys()).toEqual(o.details === 'on demand' ? [['h heads-ups', undefined]] : [])
+      expect(await keys()).toEqual([])
       s.$.ui.selection = async () => ({ text: 'retry budget', requestId: 't1-row' })
       expect(await keys()).toEqual([['c cite', accent()], ['e explain', markColors('dark').gloss], ['h heads-up', markColors('dark').heads], ['a ask', 'ide']])
     } finally {
@@ -813,40 +813,6 @@ test("an explainer asked for on a heads-up's words, as the evidence pane's e ask
   const [h] = await spansFor(s.$, 't1-row', ANSWER, marksIn(ANSWER))
   await h!.onPress!()
   expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads', id: 'h1' })
-})
-
-test('only what the analyst sees keeps its words: h gives no heads-up on the words of an explainer shown there, and gives one on the words of an explainer Explainers hides', async () => {
-  // Heads-ups on demand: the look after each answer gives explainers alone, and h asks for the heads-up
-  setOptions({ details: 'on demand' })
-  try {
-    const s = setup([
-      reply({ glosses: [{ term: 'network drop', body: 'A moment the office network went down.' }] }),
-      reply({ heads: { term: '30 seconds after a network drop', title: 'One office', bullets: ['The log covers one office.'] } }),
-      reply({ glosses: [{ term: 'power cut', body: 'The building lost its power.' }] }),
-      reply({ heads: { term: '20 seconds after a power cut', title: 'One building', bullets: ['Only one building lost power.'] } }),
-    ])
-    s.$.ui = { invalidate: () => undefined }
-    const h = async () => {
-      await (await headsKey(s.$, 'h', 0))!.later!()
-      await settle()
-      await drainNow(s.$)
-      await settle()
-    }
-    const drawn = async (row: string, text: string) => (await spansFor(s.$, row, text, [])).map(x => [x.id, text.slice(x.start, x.end)])
-    const one = 'Uploads fail when the retry budget runs out: 41 of the 44 failures came 30 seconds after a network drop.'
-    await answered(s, { id: 'k1', prompt: 'Why do uploads fail?', text: one })
-    await h()
-    expect(await drawn('k1-row', one)).toEqual([['g1', 'network drop']])
-    // Explainers off: the analyst sees no explainer on the next answer, so h's heads-up takes its words
-    const two = 'The second office lost 12 uploads 20 seconds after a power cut.'
-    await answered(s, { id: 'k2', prompt: 'And the second office?', text: two })
-    setOptions({ details: 'on demand', explain: 'off' })
-    await h()
-    expect((await partOf<ExplainPart>(s.$, 'k2-row', 'explain'))!.order).toEqual(['g1', 'h1'])
-    expect(await drawn('k2-row', two)).toEqual([['h1', '20 seconds after a power cut']])
-  } finally {
-    setOptions({})
-  }
 })
 
 // ------------------------------------------------------------------------------------------------ c: cite

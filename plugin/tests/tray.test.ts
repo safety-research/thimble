@@ -1695,25 +1695,6 @@ test('each key shows once, where it acts: a card on screen names a in its header
   expect(await head()).toBe('a ask · p artifact')
 })
 
-test('each key shows once, where it acts: with Heads-ups on demand, the tray on a citation with a heads-up on its words names h in its header, and the bar leaves its h heads-ups out until the tray closes', { options: { citations: 'auto cite + verify', details: 'on demand' } }, async ($, on) => {
-  const { clock } = await resumed($, on, QUOTED, 's-tray-h-once', { parts: HEADS })
-  const band = async () => textOf(await $.ui.render(above(40)))
-  expect(await band()).toContain('h heads-ups')
-  // ] reaches the heads-up on the citation's words, and ] again the citation: h opens that heads-up over it, which the
-  // tray's header names alone
-  for (const k of [']', ']']) {
-    expect(await $.prompt.edit(key(k))).toEqual({ text: '', cursor: 0 })
-    await clock.advance(2000)
-  }
-  const open = await band()
-  expect(open).toContain('failed: 12')
-  expect(open.match(/h heads-ups?/g)).toEqual(['h heads-up'])
-  // closed: h asks for heads-ups on the answer again, and the bar names it
-  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
-  await clock.advance(2000)
-  expect(await band()).toContain('h heads-ups')
-})
-
 test("each key shows once, where it acts: while a fix's line names y, d and n, which go to it, the bar names a card's own keys less those", CITES, async ($, on) => {
   const id = 'c0123456789af'
   const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_7', agentId: 'a-made-up', anchorRow: 'row-t1', keys: ['n', 'd', 'o'], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_7: { version: 1 } }, at: 1 }

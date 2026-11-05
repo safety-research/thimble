@@ -8,7 +8,6 @@ import { expect } from 'claude-code/testing'
 import { failLineNow } from '../bar/notice'
 import { registerAnswers, resetAnswers } from '../core/answers'
 import { registerTurn } from '../core/turn'
-import { headsBar, headsKey } from '../explain/seam'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { PRESET, setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -134,35 +133,6 @@ test('with Minimal on, the look after each reply reads the answer with the expla
     expect(s.forks.length).toBe(1)
     expect(s.forks[0]).toContain('OBSERVER\nPROMPT lens-explain\n\nPROMPT lens-heads')
     expect(s.forks[0]).not.toContain('PROMPT lens-claims')
-  } finally {
-    setOptions({})
-  }
-})
-
-test('with Explainers, Heads-ups and Claims on demand, no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
-  setOptions({ explain: 'on demand', details: 'on demand', claimsMode: 'on demand' })
-  try {
-    const s = setup([{ isAnswered: true, text: '{"heads": null}', usage: { input_tokens: 10, output_tokens: 5 } }])
-    s.$.ui = { invalidate: () => undefined }
-    await answered(s, { id: 't1', prompt: 'Why did the build fail?', rows: ['The cache key changed, so every run fetched again.'] })
-    expect(s.forks.length).toBe(0)
-    // the bar names h while the answer has no heads-ups asked for; h queues a look of the heads lens alone
-    expect((await headsBar(s.$, () => true, false)).map(x => `${x.key} ${x.words}`)).toEqual(['h heads-ups'])
-    const take = await headsKey(s.$, 'h', 0)
-    await take!.later!()
-    await settle()
-    await drainNow(s.$)
-    await settle()
-    expect(s.forks.length).toBe(1)
-    expect(s.forks[0]).toContain('PROMPT lens-heads')
-    expect(s.forks[0]).not.toContain('PROMPT lens-explain')
-    expect(s.forks[0]).not.toContain('PROMPT lens-claims')
-    // once per answer: h is typed afterwards, and the bar no longer names it
-    expect(await headsKey(s.$, 'h', 0)).toBe(null)
-    expect(await headsBar(s.$, () => true, false)).toEqual([])
-    // Heads-ups auto: h is not thimble's, the look runs after each reply again
-    setOptions({ claimsMode: 'auto' })
-    expect(await headsKey(s.$, 'h', 0)).toBe(null)
   } finally {
     setOptions({})
   }

@@ -39,10 +39,7 @@
 //                                      overlaps; a heads-up keeps its words
 //   headsKey($, key), headsBar         h at an empty prompt, `h heads-up` on the bar (orange), while words are selected
 //                                      and Heads-ups is not off: a heads-up on them, as e gives an explainer (words
-//                                      inside a heads-up open it). With none selected, while Heads-ups is on demand
-//                                      (nothing is marked by itself then), `h heads-ups`: one look of the heads lens
-//                                      alone at the answer the keys act on (observer/observer.ts headsUpsNow), once
-//                                      per answer
+//                                      inside a heads-up open it)
 //   registerExplain                    the watch of the selection, which draws the bar again when one starts or ends
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
@@ -53,7 +50,7 @@ import type { BarItem } from '../bar/bar'
 import { howTo, hintUsed } from '../bar/hints'
 import { failCleared, failNotice, hintLine } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
-import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
+import { answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
 import { answerSelection, pickedWords, selectionKey, selectionNow, selectionUsed, selectionWaits, waitsNow } from '../core/selection'
@@ -66,7 +63,7 @@ import { sessionKey } from '../hooks/conversation'
 import type { Take } from '../hooks/keys'
 import { citeShown } from '../marks/cite'
 import { withoutMarks } from '../marks/message.js'
-import { headsUpsNow, type Look } from '../observer/observer'
+import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { openTray, trayFocus, trayOffRow } from '../tray/seam'
 import { askGloss, askHeads } from './expand'
@@ -457,28 +454,8 @@ export async function explainBar($: Engine, on: (key: string) => boolean, previe
 
 // ------------------------------------------------------------------------------------------------ heads-ups on demand
 
-/** The bar's key that asks for a heads-up on the selected words, or heads-ups on an answer while Heads-ups is on demand
- *  and none are selected. */
+/** The bar's key that asks for a heads-up on the selected words. */
 export const HEADS_KEYS = ['h']
-
-/** The answers h asked heads-ups for in this load: each once. */
-const headsAsked = new Set<string>()
-
-/** The answer h acts on now, while it has not asked for that one's heads-ups yet. */
-async function headsRow($: Engine): Promise<string | null> {
-  if (!featureOn('heads')) return null
-  const row = await actingRow($).catch(() => null)
-  return row && !headsAsked.has(row) ? row : null
-}
-
-async function askHeadsNow($: Engine, row: string): Promise<void> {
-  headsAsked.add(row)
-  $.ui.invalidate('ui.render')
-  if (!(await headsUpsNow($, row).catch(() => false))) {
-    headsAsked.delete(row)
-    failNotice($, 'thimble could not ask for heads-ups on this answer now. Press h to try again.', 'heads')
-  } else await hintUsed($, 'heads')
-}
 
 /** h, or a click on `h heads-up`: a heads-up on the words the analyst last selected with the mouse, on the answer they
  *  lie in (else the newest answer that holds them), opened in the tray, as e explains them. Words inside a heads-up
@@ -503,25 +480,19 @@ export async function headsSelection($: Engine): Promise<void> {
 }
 
 /** h at an empty prompt: while words are selected that h has not taken (core/selection.ts waitsNow) and Heads-ups is
- *  not off, after the word window (an h that starts a word is typed), a heads-up on them; else, while Heads-ups is on
- *  demand and an answer has no heads-ups asked for yet, heads-ups on it. */
+ *  not off, after the word window (an h that starts a word is typed), a heads-up on them. */
 export async function headsKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  if (!HEADS_KEYS.includes(key)) return null
-  if (featureOn('details') && (await waitsNow($, 'heads'))) return { later: () => headsSelection($) }
-  const row = await headsRow($)
-  return row ? { later: () => askHeadsNow($, row) } : null
+  if (!HEADS_KEYS.includes(key) || !featureOn('details') || !(await waitsNow($, 'heads'))) return null
+  return { later: () => headsSelection($) }
 }
 
 /** `h heads-up` on the bar, in the heads-ups' orange, while words are selected that h has not taken and Heads-ups is
- *  not off; else `h heads-ups` while h asks for an answer's. The settings' preview shows the first, as it would show
- *  with words selected. */
+ *  not off. The settings' preview shows it, as it would show with words selected. */
 export async function headsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  if (!on('details')) return []
   const item = { id: 'heads', key: 'h', words: 'heads-up', color: markColors(themeLast()).heads }
-  if (preview) return on('details') ? [item] : []
-  if (on('details') && (await selectionWaits($, 'heads', await selectionNow($)))) return [{ ...item, press: () => headsSelection($) }]
-  if (!on('heads')) return []
-  const row = await headsRow($)
-  return row ? [{ id: 'heads', key: 'h', words: 'heads-ups', press: () => askHeadsNow($, row) }] : []
+  if (preview) return [item]
+  return (await selectionWaits($, 'heads', await selectionNow($))) ? [{ ...item, press: () => headsSelection($) }] : []
 }
 
 export const registerExplain: Register = on => {

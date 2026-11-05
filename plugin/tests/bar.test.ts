@@ -718,14 +718,12 @@ async function restKey($: Any): Promise<{ words: string; lit: boolean } | null> 
   return { words: textOf(b), lit: words?.props?.color === accent() && !words?.props?.dimColor }
 }
 
-test("the bar's ] is lit while the answer the keys act on shows a mark the person has not opened, and dim once they opened each: opening its explainer leaves it lit while its citation is not opened, a heads-up asked for after lights it again, and a new answer's marks light it", { options: { details: 'on demand' } }, async ($, on) => {
+test("the bar's ] is lit while the answer the keys act on shows a mark the person has not opened, and dim once they opened each: opening its explainer leaves it lit while its citation is not opened, and a new answer's marks light it", async ($, on) => {
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   mock.store(on)
-  // the look after the first answer gives an explainer; h then asks for a heads-up on it; the look after the second
-  // answer gives an explainer on its words
+  // the look after each answer gives an explainer on its words
   looks(on, [
     JSON.stringify({ glosses: [{ term: 'retry budget', body: 'How many times the client tries again.' }], heads: null, claims: [] }),
-    JSON.stringify({ glosses: [], heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['The log covers one office.'] }, claims: [] }),
     JSON.stringify({ glosses: [{ term: 'cache key', body: 'What a build looks its cache up by.' }], heads: null, claims: [] }),
   ])
   on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-check-1' }) as never)
@@ -735,7 +733,7 @@ test("the bar's ] is lit while the answer the keys act on shows a mark the perso
   }
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   await answered($, w.clock, 't1', CITED)
-  // (the reminder of h after the answer stands in place of the bar's keys from its first drawing until it goes)
+  // (the reminder of s after the answer stands in place of the bar's keys from its first drawing until it goes)
   await $.ui.render(BAND)
   await w.clock.advance(HINT_MS)
   await $.ui.render(answerRow('row-t1', CITED))
@@ -747,19 +745,8 @@ test("the bar's ] is lit while the answer the keys act on shows a mark the perso
   // ] from rest opens the citation: each mark the answer shows was opened, and ] names its first mark again
   for (const k of [']', '0']) await press(k)
   expect(await restKey($)).toEqual({ words: '] show explainer', lit: false })
-  // a heads-up asked for on the same answer comes after: lit, until the person opens it too
-  await press('h')
-  await $.ui.render(answerRow('row-t1', CITED))
-  await w.clock.advance(100)
-  const labels = (n: Any): string[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(labels) : [...(n.type === 'Button' ? [String(n.props?.label)] : []), ...labels(n.props?.children), ...labels(n.children)])
-  expect(labels(await $.ui.render(answerRow('row-t1', CITED)))).toContain('heads up 30 seconds after a drop')
-  expect(await restKey($)).toEqual({ words: '] next heads up', lit: true })
-  // ] from rest opens the heads-up, the one mark not opened
-  for (const k of [']', '0']) await press(k)
-  expect(await restKey($)).toEqual({ words: '] show explainer', lit: false })
-  // the next answer, with marks of its own
+  // the next answer, with marks of its own once the look after it lands
   await answered($, w.clock, 't2', 'The cache key changed when the lockfile moved.')
-  // (the reminder of s after it, as after the first)
   await $.ui.render(BAND)
   await w.clock.advance(HINT_MS)
   expect(await restKey($)).toEqual({ words: '] show explainer', lit: true })
@@ -1027,12 +1014,11 @@ test('after each answer one reminder of a feature on demand the session has not 
     const line = await failLineNow($)
     return line ? String(line.text) : null
   }
-  setOptions({ explain: 'on demand', details: 'on demand', citations: 'manual', squeezeAnswers: true })
+  setOptions({ explain: 'on demand', citations: 'manual', squeezeAnswers: true })
   try {
     expect(await answer()).toBe('select a passage in an answer and press e to explain it.')
-    // h is used before its turn comes: the next answer skips it
-    await hintUsed($, 'heads')
-    expect(await answer()).toBe('select a passage in an answer and press c to verify the claim.')
+    // c is used before its turn comes: the next answer skips it
+    await hintUsed($, 'cite')
     expect(await answer()).toBe('press s to rewrite the last answer shorter or longer, more novice or more expert.')
     // each was reminded once: no more this session
     expect(await answer()).toBe(null)

@@ -38,6 +38,10 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.match(heads.does, /heads-up/)
     setOptions({ details: false })
     assert.equal(featureOn('details'), false)
+    // auto and off: on demand, which it had until 0.10.11, reads as off
+    assert.deepEqual(heads.choices, ['auto', 'off'])
+    setOptions({ details: 'on demand' })
+    assert.equal(choiceOf('details'), 'off')
     setOptions({})
   }
   // a feature is on by default, and an option turns it off
@@ -152,13 +156,12 @@ test("the manifest's userConfig is the features, each on by default and turned o
   }
   // Minimal is a preset: its modes (PRESET) keep Claude citing, each citation verified when it is opened, and the
   // explainers and heads-ups in the look after each reply; Cards on demand; Rewrite, Catch-up and the session-wide
-  // panes (Claims, Labels, Coverage) off. h on the last answer acts while Heads-ups is on demand. Explainers and
-  // Heads-ups saved as the switches they were read as auto (on) and off (off)
+  // panes (Claims, Labels, Coverage) off. Explainers and Heads-ups saved as the switches they were read as auto (on)
+  // and off (off)
   {
     setOptions({})
     assert.equal(minimalOn(), false)
     assert.equal(choiceOf('explain'), 'auto')
-    assert.equal(featureOn('heads'), false)
     assert.equal(atPreset({}), false)
     assert.deepEqual(PRESET, { citations: 'auto cite', cards: 'on demand', squeezeAnswers: false, catchUp: false, explain: 'auto', details: 'auto', claimsMode: 'off', labels: false, coverage: false })
     setOptions({ minimal: true, ...PRESET })
@@ -173,7 +176,6 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cite'), true)
     assert.equal(featureOn('explain'), true)
     assert.equal(featureOn('details'), true)
-    assert.equal(featureOn('heads'), false)
     assert.equal(featureOn('cards'), true)
     assert.equal(choiceOf('cards'), 'on demand')
     for (const k of ['claims', 'labels', 'coverage', 'squeezeAnswers', 'catchUp']) assert.equal(featureOn(k), false, k)
@@ -181,14 +183,6 @@ test("the manifest's userConfig is the features, each on by default and turned o
     setOptions({ minimal: true, ...OLD_PRESET })
     assert.equal(atPreset(currentValues()), false)
     assert.equal(atPreset(currentValues(), OLD_PRESET), true)
-    // h on the last answer is Heads-ups' on demand, Minimal or not
-    setOptions({ details: 'on demand' })
-    assert.equal(featureOn('heads'), true)
-    assert.equal(lensesAfterReply('details'), false)
-    assert.equal(lensesAfterReply('explain'), true)
-    setOptions({ details: 'auto' })
-    assert.equal(featureOn('heads'), false)
-    assert.equal(lensesAfterReply('details'), true)
     setOptions({ explain: true, details: false })
     assert.equal(choiceOf('explain'), 'auto')
     assert.equal(choiceOf('details'), 'off')
@@ -205,7 +199,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
 })
 
 test("where thimble's drawing does not show (core/host.ts), Citations, Cards, Explainers and Heads-ups act as off, whatever the person set, Minimal's modes too; what the person set stays, and the other features act on it", () => {
-  setOptions({ citations: 'auto cite + verify', cards: 'auto', explain: 'on demand', details: 'on demand', labels: true })
+  setOptions({ citations: 'auto cite + verify', cards: 'auto', explain: 'on demand', details: 'auto', labels: true })
   setDrawn(false)
   try {
     assert.equal(choiceOf('citations'), 'off')
@@ -214,9 +208,9 @@ test("where thimble's drawing does not show (core/host.ts), Citations, Cards, Ex
     assert.equal(featureOn('cite'), false)
     assert.equal(choiceOf('cards'), 'off')
     assert.equal(featureOn('cards'), false)
-    assert.deepEqual([choiceOf('explain'), choiceOf('details'), featureOn('heads')], ['off', 'off', false])
+    assert.deepEqual([choiceOf('explain'), choiceOf('details')], ['off', 'off'])
     assert.equal(featureOn('labels'), true)
-    assert.deepEqual(currentValues(), { citations: 'auto cite + verify', cards: 'auto', explain: 'on demand', details: 'on demand', labels: true })
+    assert.deepEqual(currentValues(), { citations: 'auto cite + verify', cards: 'auto', explain: 'on demand', details: 'auto', labels: true })
     setOptions({ minimal: true, ...PRESET })
     assert.equal(minimalOn(), true)
     assert.deepEqual([choiceOf('citations'), choiceOf('cards')], ['off', 'off'])

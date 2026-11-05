@@ -210,9 +210,8 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
 
 /** The features' items at the bar's left, after v: the tray's steps (at rest its ]), s, b, then the keys that act on
  *  the selected words, each in its color while words are selected: c cite (purple), e explain (teal), h heads-up
- *  (orange), a ask (blue); with none selected, h heads-ups on the last answer while Heads-ups is on demand. While an
- *  item of what holds the keys shows (`focus`: the keys of a card ] reached, `rewrite for…` while the prompt box holds
- *  /rewrite), the left names only those. An item whose key what holds the keys takes now (`held`, heldKeys: the open
+ *  (orange), a ask (blue). While an item of what holds the keys shows (`focus`: the keys of a card ] reached,
+ *  `rewrite for…` while the prompt box holds /rewrite), the left names only those. An item whose key what holds the keys takes now (`held`, heldKeys: the open
  *  tray's keys are in its header, the open chips' in the chips) is left out: each key shows once, where it acts. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean, held?: Set<string>): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
@@ -258,8 +257,7 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
  *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
  *  tray's ] [ at rest, s, { } over the answers, then the keys that act on the selected words, while they wait (else
- *  typed): e, h (heads-ups on the last answer with none selected, while Heads-ups is on demand), c and a; then w (the
- *  claims), then t. */
+ *  typed): e, h, c and a; then w (the claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   const tray = await safe(trayHolds($), false)
   const chips = await safe(squeezeHolds($), false)

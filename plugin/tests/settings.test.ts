@@ -340,13 +340,14 @@ test("Minimal saved on by 0.10.4 to 0.10.7: the first session after the update s
   await settingsAction(engine, { do: 'set', key: 'minimal', value: false })
   for (let i = 0; i < 24; i++) await s.start(engine)
   expect(rows).toMatchObject({ minimal: false, citations: 'auto cite + verify', cards: 'auto', squeezeAnswers: true, catchUp: true, explain: 'auto', details: 'off', claimsMode: 'auto', labels: true, coverage: true })
-  // Minimal on, its modes kept, and a row changed elsewhere (/config) since: off, as before
+  // Minimal on, its modes kept, and a row changed elsewhere (/config) since: off, as before (Heads-ups' on demand is
+  // saved as off)
   Object.assign(rows, { minimal: true, citations: 'manual', cards: 'auto', explain: 'auto', details: 'on demand', claimsMode: 'on demand' })
   store.set('beforeMinimal', { citations: 'auto cite', explain: 'auto', details: 'auto', claimsMode: 'auto' })
   s.reset()
   registerSettings(s.on, { ...rows } as never)
   await s.start(engine)
-  expect(rows).toMatchObject({ minimal: false, citations: 'manual', explain: 'auto', details: 'on demand', claimsMode: 'on demand', labels: true, coverage: true })
+  expect(rows).toMatchObject({ minimal: false, citations: 'manual', explain: 'auto', details: 'off', claimsMode: 'on demand', labels: true, coverage: true })
   setOptions({})
 })
 
