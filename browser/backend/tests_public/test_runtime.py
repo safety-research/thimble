@@ -210,8 +210,8 @@ def fake_sdk(monkeypatch, script: list[Any], seen: dict[str, Any]) -> None:
         async def __aexit__(self, *a: Any) -> None:
             return None
 
-        async def query(self, prompt: str) -> None:
-            seen["prompt"] = prompt
+        async def query(self, prompt: Any) -> None:  # the turn's prompt, one user message (runtime_cc._message)
+            seen["prompt"] = prompt if isinstance(prompt, str) else "".join([m["message"]["content"] async for m in prompt])
 
         async def receive_response(self):  # noqa: ANN202
             for m in script:
@@ -484,6 +484,77 @@ async def test_a_turn_that_starts_while_main_s_kept_session_closes_goes_on_in_th
         await runtime.rewind_main(CORPUS, next(r["event"] for r in main_records() if runtime._analyst_message(r)))
         assert seen["state"] is False, "the first message: no session is left to resume"
     assert made[0].closed and made[0].jobs[0].poll() is not None
+
+
+class ToldFirst:
+    """A headless `claude` that resumes or forks a session whose background command was still running as that one's
+    `claude` exited: before it reads the prompt, it tells the session of that command in a turn of its own with no
+    reply, as Claude Code does."""
+
+    def __init__(self, options: Any) -> None:
+        self.options, self.prompts, self.stream = options, asyncio.Queue(), None
+
+    async def __aenter__(self) -> "ToldFirst":
+        return self
+
+    async def __aexit__(self, *a: Any) -> None:
+        return None
+
+    async def query(self, prompt: Any) -> None:
+        if isinstance(prompt, str):
+            await self.prompts.put({"message": {"content": prompt}})
+            return
+        async for m in prompt:
+            await self.prompts.put(m)
+
+    async def play(self):  # noqa: ANN201
+        from claude_agent_sdk import (AssistantMessage, ResultMessage, SystemMessage, TaskNotificationMessage, TextBlock,
+                                      UserMessage)
+
+        def done(said: str) -> ResultMessage:
+            return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                                 session_id="sess-told", result=said)
+
+        yield TaskNotificationMessage(subtype="task_notification", data={}, task_id="b1", status="stopped",
+                                      output_file="", summary="Background shell command didn't finish before the "
+                                      "previous session ended", uuid="n1", session_id="sess-told")
+        yield SystemMessage(subtype="init", data={"session_id": "sess-told"})
+        yield done("")
+        sent = await self.prompts.get()
+        yield SystemMessage(subtype="init", data={"session_id": "sess-told"})
+        yield UserMessage(content=sent["message"]["content"], uuid=sent.get("uuid"))  # replay-user-messages
+        yield AssistantMessage(content=[TextBlock(text="Still here.")], model="claude-opus-5-5")
+        yield done("Still here.")
+
+    async def receive_response(self):  # noqa: ANN201
+        from claude_agent_sdk import ResultMessage
+
+        self.stream = self.stream or self.play()
+        async for m in self.stream:
+            yield m
+            if isinstance(m, ResultMessage):
+                return
+
+
+@pytest.mark.parametrize("who", ["main", "a side thread's fork"])
+async def test_a_session_claude_code_tells_of_a_command_left_running_first_still_answers(on, monkeypatch, who):
+    """A session that resumes or forks one whose background command was still running as its `claude` exited, as main's
+    next turn after a Stop does, or a side thread's fork while main's command runs, gets a turn of Claude Code's own
+    first, with no reply: the turn reads past it to its own reply, after the session echoed its prompt."""
+    import claude_agent_sdk as sdk_mod
+
+    fake_sdk(monkeypatch, [], {})
+    monkeypatch.setattr(sdk_mod, "ClaudeSDKClient", ToldFirst)
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    if who == "main":
+        await main_turn("Is the job done?")
+        assert [t for k, t in shape(main_records()) if k == "text"][-1] == "Still here."
+        return
+    runtime.ensure(CORPUS)
+    tid = str(agents.new_thread(CORPUS, None, None, "notes")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "What is in the notes?"})
+    await fork_of_thread().task
+    assert fork_of_thread().last_text == "Still here."
 
 
 # bubblewrap on a host that lets it make its own namespaces but refuses the user namespace the sandbox's seccomp helper

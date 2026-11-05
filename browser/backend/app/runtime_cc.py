@@ -25,8 +25,8 @@ the session that main's next turn, and a fork until then, resumes it up to (resu
 
 A message the analyst sends while main's turn runs goes to main's session at once (_hand), as a message typed in Claude
 Code's prompt mid-turn: Claude Code gives it to the model at the turn's next tool call, or runs it as the session's next
-turn when this one ends first. Main's session echoes each message it reads (`replay-user-messages`), which is when
-main's chat logs it (Conv.heard); the turn goes on until each message handed on is read.
+turn when this one ends first. A session echoes each message it reads (`replay-user-messages`), which is when main's
+chat logs it (Conv.heard); the turn goes on until each message handed on is read.
 
 The sandbox. Claude Code puts its sandbox's proxy sockets in TMPDIR (claude-http-<16 hex>.sock), and a Unix socket's
 path holds at most 104 (macOS) or 108 (Linux) bytes, so with a long TMPDIR (the workspace's runtime/tmp/<conv>, 76
@@ -49,8 +49,9 @@ Background commands. A command Bash runs in the background (`run_in_background`)
 (background_tasks_changed), and main's next turn goes on in it, as the next prompt in a terminal would (Held); it closes
 when a turn ends with none running, when main's settings for a turn change, and when main's session truly ends: a Stop
 or a failure, a new chat, a rewind, the workspace's folder going, another way to reach Claude, the server's stop
-(close). Claude Code runs a turn of its own when such a command ends; main's next turn reads that turn first, and ends
-only at the result after Claude Code echoed its own prompt.
+(close). Claude Code runs a turn of its own when such a command ends, and when a session resumes or forks one whose
+command was still running as its `claude` exited, which it tells of that command (task_notification) before it reads
+the prompt: a turn reads such a turn first, and ends only at the result after Claude Code echoed its own prompt.
 """
 from __future__ import annotations
 
@@ -466,8 +467,9 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         add_dirs=[str(w) for w in spec.write_roots],
         # Claude Code keeps its own temp folder in the short TMPDIR too, whatever CLAUDE_CODE_TMPDIR the server has
         env=sdk.call_env({"TMPDIR": str(tmp or spec.home), **({"CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}),
-        # main's session echoes each message it reads, so a message handed to it mid-turn is known read (_hand)
-        extra_args={"safe-mode": None, **({"replay-user-messages": None} if conv.kind == "main" else {})},
+        # the session echoes each message it reads, so a message handed to main mid-turn is known read (_hand), and a
+        # turn's prompt too, before which a result is one of a turn Claude Code ran of its own (_session)
+        extra_args={"safe-mode": None, "replay-user-messages": None},
         hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])],
                "PostToolUse": [HookMatcher(matcher="Bash", hooks=[ended])],
                "PostToolUseFailure": [HookMatcher(matcher="Bash", hooks=[ended])]},
@@ -598,9 +600,10 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     bash_ids: set[str] = set()
     handed: dict[str, str] = {}  # by uuid, main's messages handed to the session (_hand) that it has not read yet
     closing = asyncio.Event()
-    # in a session kept open, this turn's prompt, by its uuid, until the session echoes it: a result before that ends a
-    # turn Claude Code ran of its own (module note)
-    prompt: str | None = None
+    # the uuid the session echoes this turn's prompt with once it reads it: before that, a result ends a turn Claude Code
+    # ran of its own, in a session kept open since main's last turn, and in any session Claude Code told of a background
+    # command that ended, as it tells one that resumes or forks a session whose command was still running (module note)
+    uid, read, first = str(uuid.uuid4()), False, opts is None
 
     def results(rs: list[dict[str, Any]]) -> None:
         nonlocal box, ran
@@ -616,11 +619,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     keep = False
     try:
         client = held.client
-        if held.tasks:
-            prompt = str(uuid.uuid4())
-            await client.query(_message(text, prompt))
-        else:
-            await client.query(text)
+        await client.query(_message(text, uid))
         hand = asyncio.create_task(_hand(conv, client, handed, closing)) if conv.kind == "main" else None
         try:
             # the session's reply; then, while a message handed to it is not read yet, its next turn, which reads it
@@ -633,6 +632,8 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                             _save(path, {"session_id": sid})
                     elif isinstance(msg, SystemMessage) and msg.subtype == "background_tasks_changed":
                         held.tasks = list((msg.data or {}).get("tasks") or [])
+                    elif isinstance(msg, SystemMessage) and msg.subtype == "task_notification":
+                        first = first or not read
                     elif isinstance(msg, AssistantMessage):
                         if getattr(msg, "parent_tool_use_id", None):
                             continue
@@ -643,11 +644,11 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                         results([r for r in (_result(x) for x in msg.content) if r is not None])
                         said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
                         reply = said or reply
-                        if msg.error and prompt is None:
+                        if msg.error and (read or not first):
                             failed = str(msg.error)
                     elif isinstance(msg, UserMessage):
-                        if prompt is not None and getattr(msg, "uuid", None) == prompt:
-                            prompt = None
+                        if getattr(msg, "uuid", None) == uid:  # the session read this turn's prompt
+                            read = True
                             continue
                         if getattr(msg, "uuid", None) in handed:  # the session read a message handed to it
                             conv.heard(handed.pop(str(msg.uuid)))
@@ -658,7 +659,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                     elif isinstance(msg, ResultMessage):
                         if msg.session_id:
                             _save(path, {"session_id": msg.session_id})
-                        if prompt is not None:  # a turn of Claude Code's own: this one's comes after it
+                        if first and not read:  # a turn of Claude Code's own: this one's comes after it
                             own = True
                             continue
                         ended = True
