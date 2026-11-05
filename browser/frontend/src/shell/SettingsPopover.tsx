@@ -1,18 +1,20 @@
 // The settings gear's popover: one flat list, every change applied at once; Escape or a click outside closes it. While
 // thimble's config has an error the error comes first, its paths from the home folder as ~ (backend userconf.problem),
-// and the config takes no write until the file is fixed, so Ask Claude with and every Models row but main's are
-// dimmed. Then Claude access, how the workbench reaches Claude, one choice for the install (shell/ClaudeAccess
-// ClaudeAccessRow); "Claude can edit files in this folder", whether main and its thread forks may write the corpus
-// folder of this workspace (the workspace's settings.json `corpus_edits`, on by default; thimble's other agents never
-// write it); "Ask Claude with", the key held with a click to ask Claude about what the pointer is on, ⌘-click or ⌥-click
-// (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the canvas (thimble's config `askKey`,
-// lib/platform); then Models, open until the person folds it (kept in this browser, MODELS_OPEN_KEY), whose line then
-// names the models and the efforts in use (modelsGist). Each Models row is an agent by its plain name (MODEL_ROWS) with
-// its model menu (the current models, any other the settings name, then Other, which takes an id), its effort menu
-// (none for a model that runs with none) and, while its model has fast mode, the fast-mode bolt (FAST_ROLES). Main and
-// side threads hold main's session's model, effort and fast mode, the same ones as the composer's line under main's chat
-// (chat/mainChoice), from main's next message; every other row is thimble's config (saveRole), from that agent's next
-// start. The other settings are thimble's config file's (docs/config.md).
+// and the config takes no write until the file is fixed, so Ask Claude with, View proposals and every Models row but
+// main's are dimmed. Then Claude access, how the workbench reaches Claude, one choice for the install
+// (shell/ClaudeAccess ClaudeAccessRow); "Claude can edit files in this folder", whether main and its thread forks may
+// write the corpus folder of this workspace (the workspace's settings.json `corpus_edits`, on by default; thimble's
+// other agents never write it); "Ask Claude with", the key held with a click to ask Claude about what the pointer is
+// on, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the canvas
+// (thimble's config `askKey`, lib/platform); View proposals, whether thimble proposes views after a turn and viewers
+// for file types (thimble's config `views.propose`), which a view proposal's Don't ask again turns off too
+// (chat/ProposalCard proposalsOff); then Models, open until the person folds it (kept in this browser,
+// MODELS_OPEN_KEY), whose line then names the models and the efforts in use (modelsGist). Each Models row is an agent
+// by its plain name (MODEL_ROWS) with its model menu (the current models, any other the settings name, then Other,
+// which takes an id), its effort menu (none for a model that runs with none) and, while its model has fast mode, the
+// fast-mode bolt (FAST_ROLES). Main and side threads hold main's session's model, effort and fast mode, the same ones
+// as the composer's line under main's chat (chat/mainChoice), from main's next message; every other row is thimble's
+// config (saveRole), from that agent's next start. The other settings are thimble's config file's (docs/config.md).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Segmented } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -39,6 +41,8 @@ export const EDITS_LABEL = 'Claude can edit files in this folder'
 export const ASK_KEY_LABEL = 'Ask Claude with'
 export const askKeyOptions = (mac: boolean): { value: AskKey; label: string }[] =>
   (['meta', 'alt'] as const).map((k) => ({ value: k, label: `${askKeyLabel(mac, k)}-click` }))
+/** The switch of whether thimble proposes views (thimble's config `views.propose`, backend ledger.PROPOSE_KEY). */
+export const PROPOSE_LABEL = 'View proposals'
 export const MODELS_LABEL = 'Models'
 
 /** The Models rows in order, each an agent by its plain name and the role whose model and effort it runs (backend
@@ -223,6 +227,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
     : []
   const edits = shown('edits', settings?.corpus_edits !== false)
   const ask = shown<AskKey>('ask', settings?.ask_key === 'alt' ? 'alt' : 'meta')
+  const propose = shown('propose', settings?.propose_views !== false)
   const problem = error || settings?.config_error || ''
 
   const modelItems = (row: Row): MenuItem[] => [
@@ -273,6 +278,18 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 options={askKeyOptions(mac).map((o) => ({ ...o, disabled: frozen }))}
                 value={ask}
                 onChange={(key) => put('ask', key, { ask_key: key === 'alt' ? 'alt' : null }, 'the ask key', () => setAskKey(key))}
+              />
+            </div>
+            <div className="settings-line" data-setting="propose-views" data-frozen={frozen || undefined}>
+              <span className="settings-name">{PROPOSE_LABEL}</span>
+              <Switch
+                checked={propose}
+                disabled={frozen}
+                onChange={(on) => {
+                  track('chat-settings', { target: 'ui:propose-views', detail: { propose_views: on } })
+                  put('propose', on, { propose_views: on ? null : false }, 'view proposals')
+                }}
+                label={PROPOSE_LABEL}
               />
             </div>
             <button type="button" className="settings-fold" aria-expanded={modelsOpen} aria-controls={modelsOpen ? 'settings-models' : undefined} onClick={toggleModels}>

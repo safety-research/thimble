@@ -199,7 +199,7 @@ describe('the ⋯ menu at the end of the views bar', () => {
       await settle()
       expect(settings.propose_views).toBe(false)
       expect(toasts).toEqual([PROPOSALS_OFF_LINE])
-      expect(PROPOSALS_OFF_LINE).toContain(PROPOSE_VIEWS)
+      expect(PROPOSALS_OFF_LINE).toContain('Settings')
       expect(el.querySelector('.chat-offer')).toBeNull()
       await open(el)
       expect(row(PROPOSE_VIEWS).getAttribute('aria-checked')).toBe('false')

@@ -12,7 +12,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ACCESS_LABEL, ACCESS_WAYS, accessNeeds, problemWords } from '../../src/shell/ClaudeAccess.tsx'
-import { ASK_KEY_LABEL, EDITS_LABEL, FAST_ROLES, MODEL_ROWS, MODELS_OPEN_KEY, SettingsPopover, askKeyOptions, modelsGist, roleEfforts, showsFast } from '../../src/shell/SettingsPopover.tsx'
+import { ASK_KEY_LABEL, EDITS_LABEL, FAST_ROLES, MODEL_ROWS, MODELS_OPEN_KEY, PROPOSE_LABEL, SettingsPopover, askKeyOptions, modelsGist, roleEfforts, showsFast } from '../../src/shell/SettingsPopover.tsx'
 import { choiceWords } from '../../src/chat/mainChoice.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { KNOWN_MODELS, invalidateSettings, modelChoices } from '../../src/lib/models.ts'
@@ -169,14 +169,15 @@ describe('the rules', () => {
 })
 
 describe('the popover', () => {
-  test('one flat list: Claude access, the edits switch, Ask Claude with and Models, open, with no Save, Cancel, headings or notes', async () => {
+  test('one flat list: Claude access, the edits switch, Ask Claude with, View proposals and Models, open, with no Save, Cancel, headings or notes', async () => {
     await open()
     const doc = document.body
     const lines = [...doc.querySelectorAll('.settings > [data-setting], .settings > .settings-fold')]
-    expect(lines.map((l) => l.getAttribute('data-setting') ?? 'models')).toEqual(['claude-access', 'corpus-edits', 'ask-key', 'models'])
+    expect(lines.map((l) => l.getAttribute('data-setting') ?? 'models')).toEqual(['claude-access', 'corpus-edits', 'ask-key', 'propose-views', 'models'])
     expect(q('[data-setting="claude-access"] .settings-name')?.textContent).toBe(ACCESS_LABEL)
     expect(q('.settings-line[data-setting="corpus-edits"] .settings-name')?.textContent).toBe(EDITS_LABEL)
     expect(q('.settings-line[data-setting="ask-key"] .settings-name')?.textContent).toBe(ASK_KEY_LABEL)
+    expect(q('.settings-line[data-setting="propose-views"] .settings-name')?.textContent).toBe(PROPOSE_LABEL)
     expect(q('.settings-fold')?.getAttribute('aria-expanded')).toBe('true')
     expect([...doc.querySelectorAll('.settings-row .settings-name')].map((n) => n.textContent)).toEqual(MODEL_ROWS.map((r) => r.name))
     for (const { name } of MODEL_ROWS) {
@@ -187,7 +188,7 @@ describe('the popover', () => {
     expect(q('[aria-label="Effort for Writer"]')?.textContent).toBe('xhigh')
     const buttons = [...doc.querySelectorAll('button')].map((b) => b.textContent)
     for (const gone of ['Save', 'Cancel', 'Take the tour', 'Change']) expect(buttons).not.toContain(gone)
-    expect(doc.querySelectorAll('[role="switch"]')).toHaveLength(1)
+    expect(doc.querySelectorAll('[role="switch"]')).toHaveLength(2)
     expect(doc.textContent).not.toMatch(/if refused|next start|CLAUDE\.md|permission mode|Asks nothing|View proposals switch|ignores|\/login/i)
     expect(doc.querySelector('.settings-error')).toBeNull()
   })
@@ -292,6 +293,30 @@ describe('the popover', () => {
     ])
   })
 
+  test('View proposals, after Ask Claude with, is saved at once in thimble’s config: false turns them off, null back on', async () => {
+    await open()
+    const line = q('.settings-line[data-setting="propose-views"]')!
+    expect(line.previousElementSibling?.getAttribute('data-setting')).toBe('ask-key')
+    const sw = () => line.querySelector<HTMLButtonElement>('[role="switch"]')!
+    expect(sw().getAttribute('aria-label')).toBe(PROPOSE_LABEL)
+    expect(sw().getAttribute('aria-checked')).toBe('true')
+    settings = { ...SETTINGS, propose_views: false }
+    await click(sw())
+    expect(sw().getAttribute('aria-checked')).toBe('false')
+    settings = SETTINGS
+    await click(sw())
+    expect(sw().getAttribute('aria-checked')).toBe('true')
+    expect(puts).toEqual([
+      ['/api/ws/mini/settings', { propose_views: false }],
+      ['/api/ws/mini/settings', { propose_views: null }],
+    ])
+    // a save the server refuses says why, and the switch shows what the server holds
+    refuse = '/settings'
+    await click(sw())
+    expect(toasts).toEqual(['Could not change view proposals: 400 nope'])
+    expect(sw().getAttribute('aria-checked')).toBe('true')
+  })
+
   test('Ask Claude with is saved at once, and the page takes the key', async () => {
     setAskKey('meta')
     try {
@@ -325,7 +350,7 @@ describe('the popover', () => {
     expect(document.body.querySelectorAll('.settings-row')).toHaveLength(MODEL_ROWS.length)
   })
 
-  test("while thimble's config has an error it shows first, and Ask Claude with and every row but main's are dimmed", async () => {
+  test("while thimble's config has an error it shows first, and Ask Claude with, View proposals and every row but main's are dimmed", async () => {
     settings = { ...SETTINGS, config_error: "thimble's config ~/.thimble-browser/config.json: agents.writer.modle is not a setting" }
     await open()
     const first = q('.settings')!.firstElementChild!
@@ -333,6 +358,8 @@ describe('the popover', () => {
     expect(first.textContent).toContain('~/.thimble-browser/config.json')
     expect(q('.settings-line[data-setting="ask-key"]')?.hasAttribute('data-frozen')).toBe(true)
     expect([...document.body.querySelectorAll<HTMLButtonElement>('.settings-ask-key [role="radio"]')].every((o) => o.disabled)).toBe(true)
+    expect(q('.settings-line[data-setting="propose-views"]')?.hasAttribute('data-frozen')).toBe(true)
+    expect(q<HTMLButtonElement>('.settings-line[data-setting="propose-views"] [role="switch"]')!.disabled).toBe(true)
     expect(MODEL_ROWS.filter(({ role }) => row(role).hasAttribute('data-frozen')).map((r) => r.role)).toEqual(['writer', 'dev', 'checks', 'labels', 'verify', 'suggest'])
     expect(q<HTMLButtonElement>('[aria-label="Model for Writer"]')!.disabled).toBe(true)
     expect(q<HTMLButtonElement>('[aria-label="Effort for Card check"]')!.disabled).toBe(true)
