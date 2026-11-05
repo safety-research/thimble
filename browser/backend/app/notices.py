@@ -6,12 +6,12 @@ foreground: in the browser in a strip above the composer of whichever chat the a
 or the failure is fixed; in terminal mode in the band above the prompt. A notice of an agent with a chat of its own (a
 thread, an agent chat; `chat`) is also written into that chat as a row, for its history.
 
-The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, details, agent, chat, action,
-ts}: `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command, such as
-/login or `thimble server restart`); `details` is the whole of it when `text` had to be shortened (TEXT_CHARS, or a
-failure's words cut by gist), which the page shows on Show more, else None; `agent` names the agent in a few words ("Orientation", "View build: Agent Network");
-`chat` is the agent's own chat, which the strip's Open goes to; `action` is the button, one object {label, do, slug?} or
-a list of them, `do` one of ACTIONS:
+The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, details, agent, chat,
+action, ts}: `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command,
+such as /login or `thimble server restart`); `details` is the whole of it when `text` had to be shortened (TEXT_CHARS,
+or a failure's words cut by gist), which the page shows on Show more, else None; `agent` names the agent in a few words
+("Orientation", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to; `action`
+is the button, one object {label, do, slug?} or a list of them, `do` one of ACTIONS:
 
   proposals-retry  POST /api/ws/{c}/views/propose-now (proposer.run_now)
   proposals-off    PUT /api/ws/{c}/settings {propose_views: false}
@@ -22,8 +22,8 @@ a list of them, `do` one of ACTIONS:
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
 for the workspace: dismiss records the key in DISMISSED_FILE, and post then writes no notice under it. Each change is a `notice` event on
-the workspace stream: {id, key, kind, text, details, agent, chat, action, foreground: true} for a notice, {id, key, cleared:
-true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page loaded again shows them.
+the workspace stream: {id, key, kind, text, details, agent, chat, action, foreground: true} for a notice, {id, key,
+cleared: true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page loaded again shows them.
 
 Keys: `agent:<the agent's key>` for an agent of thimble's (agent_key: subagents.py for its runs and starts, dev.py for
 view builds and code tickets, checks.py for report checks), `proposals` for the view proposer (proposer.py),
