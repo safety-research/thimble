@@ -144,6 +144,10 @@ WIDE_USED = 0.7  # of the wide pane, the share a page's text and graphics must s
 ANCHORED_SHARE = 10
 FETCHED_SCAN_MAX = 200_000
 FOLDER_CACHE_S = 5.0  # the corpus's folders, and the files a glob claims, are checked again after this long
+# of a view's claimed files, those a builder's draft check reads (check_answer, draft_files); the gates of record read
+# every one. A draft check of a view over a folder of thousands of files on a slow drive, such as a Windows drive in
+# WSL, read each file through the reader on each check, minutes each time
+DRAFT_FILES = 300
 CLAIMED_MEMO_MAX = 64  # claims whose matching paths are kept, per corpus folder tree version
 _NODE_MODULES = config.REPO_ROOT / "frontend" / "node_modules"
 # thimble's own builds of the libraries a view page may name, inlined into the page; any other library is an npm
@@ -1319,7 +1323,10 @@ def claimed_files(c: str, view: dict[str, Any]) -> list[tuple[str, int, int]]:
     """(path, size, mtime_ns) of every corpus file the view claims, in path order: claimed_paths, each file stat'ed
     but the files a page shows whole (shown_whole), which are taken from the folder tree as (path, 0, 0), so that a view
     of a million images costs no stat each. Files claimed by name are stat'ed on every call, the files of glob claims at
-    most every FOLDER_CACHE_S."""
+    most every FOLDER_CACHE_S. A check in progress reads the files it took at its start (_checking)."""
+    held = _checking.get()
+    if held is not None and held[0] == (c, view.get("slug"), view.get("dir")):
+        return held[1]
     corpus = config.corpus_dir(c)
     claims = tuple(view.get("claims") or [])
     globbed = any(_GLOB_CHARS.search(g) for g in claims)
@@ -1330,8 +1337,17 @@ def claimed_files(c: str, view: dict[str, Any]) -> list[tuple[str, int, int]]:
             hit = _folder_cache.get(key)
             if hit is not None and now - hit["ts"] < FOLDER_CACHE_S:
                 return hit["files"]
+    out = _stat_claimed(corpus, claimed_paths(c, view) or [], globbed)
+    if globbed:
+        with _folder_lock:
+            _folder_cache[key] = {"ts": time.monotonic(), "files": out}
+    return out
+
+
+def _stat_claimed(corpus: Path, paths: list[str], globbed: bool) -> list[tuple[str, int, int]]:
+    """(path, size, mtime_ns) of each of the corpus-relative `paths` that is a file (claimed_files)."""
     out = []
-    for rel in claimed_paths(c, view) or []:
+    for rel in paths:
         if globbed and shown_whole(rel):
             out.append((rel, 0, 0))
             continue
@@ -1340,10 +1356,34 @@ def claimed_files(c: str, view: dict[str, Any]) -> list[tuple[str, int, int]]:
         except (ValueError, OSError):
             continue
         out.append((rel, st.st_size, st.st_mtime_ns))
-    if globbed:
-        with _folder_lock:
-            _folder_cache[key] = {"ts": time.monotonic(), "files": out}
     return out
+
+
+def draft_files(c: str, view: dict[str, Any], locators: list[str] | None = None) -> tuple[list[tuple[str, int, int]],
+                                                                                        int | None]:
+    """The claimed files a builder's draft check reads (check_answer), as claimed_files gives them, and how many the
+    view claims: all of them when they are DRAFT_FILES or fewer (None), else a sample of DRAFT_FILES spread evenly over
+    each claimed folder and kind of file (its suffix), in path order, with every file a locator names. Only the
+    sample's files are stat'ed."""
+    paths = claimed_paths(c, view) or []
+    if len(paths) <= DRAFT_FILES:
+        return claimed_files(c, view), None
+    named = set()
+    for loc in locators or []:
+        with contextlib.suppress(ValueError):
+            named.add(str(refs.parse_ref(str(loc)).get("path") or ""))
+    groups: dict[tuple[str, str], list[str]] = {}
+    for rel in paths:
+        groups.setdefault((rel.rpartition("/")[0], Path(rel).suffix.lower()), []).append(rel)
+    share = max(1, DRAFT_FILES // len(groups))
+    take = [rel for rel in paths if rel in named]
+    for group in groups.values():
+        n = min(share, len(group))
+        take += [group[i * len(group) // n] for i in range(n)]
+    take += paths[::max(1, len(paths) // DRAFT_FILES)]  # then evenly over every claimed file
+    pick = list(dict.fromkeys(take))[:max(DRAFT_FILES, len(named))]
+    claims = view.get("claims") or []
+    return _stat_claimed(config.corpus_dir(c), sorted(pick), any(_GLOB_CHARS.search(g) for g in claims)), len(paths)
 
 
 def unmatched_claims(c: str, claims: Any, near: int = 3) -> dict[str, list[str]]:
@@ -1537,6 +1577,11 @@ _call_limit: contextvars.ContextVar[float | None] = contextvars.ContextVar("view
 # whether the reader calls made in this context read the view's live folder (live_reads), else the view as it last
 # passed its checks (read_built)
 _live: contextvars.ContextVar[bool] = contextvars.ContextVar("view_live_reads", default=False)
+# the files a check in progress reads, which it took at its start, keyed by (workspace, slug, the view's folder): every
+# file its view claims for a gate of record, a sample for a draft check (draft_files); a slow drive is listed once a
+# check, however long its reader takes
+_checking: contextvars.ContextVar[tuple[tuple[Any, ...], list[tuple[str, int, int]]] | None] = \
+    contextvars.ContextVar("view_checking", default=None)
 
 
 @contextlib.contextmanager
@@ -3193,21 +3238,22 @@ def delete_proposal(c: str, slug: str) -> None:
 
 
 async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
-               picture: bool = False) -> dict[str, Any]:
+               picture: bool = False, draft: bool = False) -> dict[str, Any]:
     """Whether the view in the slug's folder may be registered: its files' own problems (source_problems; view.json
     written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
-    sampled lines. The report check() returns, with the files' problems among its `problems`. With `picture` the page
-    as it opens is pictured for the session. Each reader call of the gate may take CHECK_CALL_S, so a reader that never
-    answers fails the checks rather than holding its kernel."""
+    sampled lines, on a sample of the claimed files for a builder's `draft` check (check_answer). The report check()
+    returns, with the files' problems among its `problems`. With `picture` the page as it opens is pictured for the
+    session. Each reader call of the gate may take CHECK_CALL_S, so a reader that never answers fails the checks rather
+    than holding its kernel."""
     token = _call_limit.set(CHECK_CALL_S)
     try:
-        return await _gate(c, slug, locators, shot_dir=shot_dir, picture=picture)
+        return await _gate(c, slug, locators, shot_dir=shot_dir, picture=picture, draft=draft)
     finally:
         _call_limit.reset(token)
 
 
 async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path | None,
-                picture: bool) -> dict[str, Any]:
+                picture: bool, draft: bool = False) -> dict[str, Any]:
     d = views_dir(c) / slug
     if not (d / VIEW_JSON).is_file():
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
@@ -3227,7 +3273,7 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
     if vendored["problems"]:
         return {"ok": False, "view": read_view(c, slug), "problems": vendored["problems"], "checks": [], "page": None,
                 "notes": vendored["notes"]}
-    report = await check(c, slug, locators, shot_dir=shot_dir, picture=picture)
+    report = await check(c, slug, locators, shot_dir=shot_dir, picture=picture, draft=draft)
     if vendored["notes"]:
         report["notes"] = [*vendored["notes"], *report.get("notes", [])]
     if note := await media_note(text[VIEW_HTML]):
@@ -3269,7 +3315,10 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
     """The report as lines for the session: the index, each problem, the reader's traceback, each check and the page."""
     lines: list[str] = []
     if report.get("index"):
-        lines.append(f"index: {report['index']['files']} file(s) in {report['index']['seconds']} s")
+        idx = report["index"]
+        lines.append(f"index: {idx['files']} file(s) in {idx['seconds']} s" if not idx.get("of") else
+                     f"index: {idx['files']} of the {idx['of']} files the view claims, a sample, in {idx['seconds']} s; "
+                     "finish_view's checks read every file")
     if (unread := report.get("unread") or {}).get("count"):
         first = unread["examples"][0]
         lines.append(f"unread: {unread['count']} line(s) the reader could not parse, such as {first['ref']}: {first['why']}")
@@ -3848,14 +3897,17 @@ def _is_line_form(form: str) -> bool:
 
 
 async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
-                picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
-    """_check on the view's live folder (live_reads): what the gates check is the draft, not the view as it last passed."""
+                picture: bool = False, need_locators: bool = True, draft: bool = False) -> dict[str, Any]:
+    """_check on the view's live folder (live_reads): what the gates check is the draft, not the view as it last passed.
+    With `draft`, a builder's check of its draft, a view that claims more than DRAFT_FILES files is checked on a sample
+    of them (draft_files), which its report's index names; the gates of record read every file."""
     with live_reads():
-        return await _check(c, slug, locators, shot_dir=shot_dir, picture=picture, need_locators=need_locators)
+        return await _check(c, slug, locators, shot_dir=shot_dir, picture=picture, need_locators=need_locators,
+                            draft=draft)
 
 
 async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
-                 picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
+                 picture: bool = False, need_locators: bool = True, draft: bool = False) -> dict[str, Any]:
     """A view's checks, all by code: the index builds, every claimed file is read or hidden with a why, locators and
     sampled lines round-trip (the answer cites the line back and its excerpt is literal source), declared keys resolve,
     the page loads headless without errors, and the test label's marks show on the records it shows (label_problems).
@@ -3871,10 +3923,26 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     if not view["ok"]:
         report["problems"].append(f"the view has no reader.py, no {VIEW_HTML} or no claims")
         return report
-    files = await asyncio.to_thread(claimed_files, c, view)
+    if draft:
+        files, of = await asyncio.to_thread(draft_files, c, view, locators)
+    else:
+        files, of = await asyncio.to_thread(claimed_files, c, view), None
     if not files:
         report["problems"].append(f"no file of the corpus matches the claims {', '.join(view['claims'])}")
         return report
+    token = _checking.set(((c, slug, view.get("dir")), files))
+    try:
+        return await _checked(c, slug, view, files, of, report, locators, shot_dir=shot_dir, picture=picture,
+                              need_locators=need_locators)
+    finally:
+        _checking.reset(token)
+
+
+async def _checked(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]], of: int | None,
+                   report: dict[str, Any], locators: list[str] | None, *, shot_dir: Path | None, picture: bool,
+                   need_locators: bool) -> dict[str, Any]:
+    """_check's checks of the view on `files`, the files it reads (every claimed one, or a draft check's sample of `of`
+    claimed files)."""
     t0 = time.monotonic()
     try:
         await reader_call(c, slug, "index")
@@ -3882,7 +3950,7 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
         report["problems"].append(f"build_index failed: {e.message}")
         report["traceback"] = e.detail
         return report
-    report["index"] = {"files": len(files), "seconds": round(time.monotonic() - t0, 2)}
+    report["index"] = {"files": len(files), "seconds": round(time.monotonic() - t0, 2), **({"of": of} if of else {})}
     try:
         report["unread"] = await reader_problems(c, slug)
     except ReaderError as e:
@@ -5740,11 +5808,12 @@ async def resolve_route(c: str, slug: str, ref: str, v: str | None = None) -> di
 
 async def check_answer(c: str, slug: str, locators: list[str], picture: bool) -> dict[str, Any]:
     """A builder's or reviewer's check of its draft (view_tools.tool_view_check): the gate with `locators` beside the
-    sampled lines, the locators kept on the proposal for the gates of record (finish_view). {ok, lines, png}, `png` the
-    path of a picture of the page as it opens when `picture` asks for one."""
+    sampled lines, on a sample of the files a view of many claims (draft_files), the locators kept on the proposal for
+    the gates of record (finish_view), which read every file. {ok, lines, png}, `png` the path of a picture of the page
+    as it opens when `picture` asks for one."""
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
-    report = await gate(c, slug, locators or _kept_locators(c, slug), picture=picture)
+    report = await gate(c, slug, locators or _kept_locators(c, slug), picture=picture, draft=True)
     return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png")}
 
 
