@@ -20,7 +20,7 @@
 //               unnamed. With a thread about it already, a opens that thread
 //   + show all  named before a while the card leaves lines out: all of the mark in the side pane, the same pane a
 //               opens, to read (showAll)
-//   2–9        a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
+//   2–9         a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
 //               links to a file's lines are citations too, drawn as the answer's: the answer's own citation of those
 //               lines when it has one, else the lines themselves (a `place` frame)
 //   x repair    on a failed citation: a check of that one claim again in the background, which looks in
