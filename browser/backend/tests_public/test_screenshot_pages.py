@@ -85,3 +85,30 @@ async def test_a_shot_of_the_page_reads_with_a_shot_token_that_ends_with_it(shot
     assert shots.calls[0][2]["read_token"] != shots.calls[1][2]["read_token"], "a token for each shot"
     await tools._shot_page_file("c1", "<!doctype html><p>figure</p>")
     assert not shots.calls[-1][2].get("read_token") and shots.calls[-1][2]["offline"] is True
+
+
+async def test_a_card_held_from_the_analyst_is_shot_as_the_check_sees_it_not_as_running(shots, monkeypatch, workspaces_tmp):
+    """A card held until its check ends (card_fit) draws in the page as running, so its author's screenshot of it showed
+    only that, again and again. While it is held, the card harness draws it as the check sees it; once shown, the page
+    shoots it."""
+    from app import config, notebook, render  # noqa: PLC0415
+
+    monkeypatch.setattr(tools.headless, "missing", lambda kind: "")
+    monkeypatch.setenv("THIMBLE_PORT", "8721")
+    monkeypatch.setattr(tools, "ui_base", lambda: "http://127.0.0.1:8721")
+    drawn: list[dict] = []
+
+    async def draw(c, cell, **kw):
+        drawn.append(cell)
+        return render.Rendered(png=b"\x89PNG the custom card", box={"width": 720.0})
+
+    monkeypatch.setattr(render, "render_card", draw)
+    nb = notebook.create_notebook(config.workspace_dir("mini"), "Your work")["id"]
+    cell = notebook.new_cell("custom", "model", "How many tickets came in each day?", nb, payload={"html": "<svg></svg>"})
+    cid = notebook.insert_cell("mini", nb, cell)["id"]
+    notebook.set_held("mini", cid, {"checking": True})
+    shot = await tools._shot_card(tools.Ctx(c="mini", actor="analyst"), f"card:{cid}")
+    assert not shot.is_error and [c["id"] for c in drawn] == [cid] and "held" not in drawn[0] and shots.calls == []
+    notebook.set_held("mini", cid, None)
+    await tools._shot_card(tools.Ctx(c="mini", actor="analyst"), f"card:{cid}")
+    assert len(drawn) == 1 and len(shots.calls) == 1, "a card shown is shot in the page"

@@ -41,7 +41,7 @@ Names are lower-case letters, digits and hyphens. A part's name is its folder's 
 
 ```json
 {"name": "tally", "version": "0.1.0", "description": "Counts tally lines by who made them.",
- "scope": ["tally/*.jsonl"], "thimble": ">=0.4", "python": ["pypdf>=4"], "needs": ["multiagent-swimlane"]}
+ "scope": ["tally/*.jsonl"], "thimble": ">=0.4", "python": ["pypdf>=4"], "needs": ["tally-base"]}
 ```
 
 | field | |
@@ -71,7 +71,7 @@ Both files take `description` (shown by `add` and Settings), `model` and `effort
 `subagents`: Claude Code subagents the role can call, in the fields of Claude Code's `--agents` JSON, each prompt in
 its own file. main takes a prompt addition only. [agents.md](agents.md) says what a program that runs a role or a task
 gets and how it answers. Permission modes and hooks are yours, and an extension cannot set them. The orientation's
-`agent.json` of `swarm-orient`, which thimble ships:
+`agent.json` of an extension for swarms, `swarm-orient`:
 
 ```json
 {"description": "Has every record of a swarm read by a model before the orientation drafts.",

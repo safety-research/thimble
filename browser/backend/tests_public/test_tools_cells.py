@@ -160,23 +160,24 @@ async def test_an_example_quotes_several_moments_of_each_trial_and_code_on_it_as
     assert r.is_error and "`refs`" in r.text and "card of code" not in r.text, r.text
 
 
-async def test_the_example_a_card_of_code_that_printed_quotes_should_be_is_a_new_card(group, data_tmp):
-    """A card of code printed two trials' quotes as a Python list. edit_card does not change a card of code into an
-    example: given an example's refs, with the kind or without it, it says to add a new card and leaves the card's code
-    as it was, and add_card makes the example from the same refs."""
+async def test_a_card_of_code_that_printed_quotes_becomes_the_example_in_place(group, data_tmp):
+    """A card of code printed two trials' quotes as a Python list. Given an example's refs without the kind, edit_card
+    says to pass kind example and leaves the card's code as it was; with the kind, the card becomes that example in its
+    place, as add_card would make it from the same refs."""
     said = ["The forecast says rain until noon, so the picnic could start at one instead.",
             "The shelter by the lake seats twenty, and the club has eighteen names on its list."]
     trials = [_trajectory(data_tmp, t, said) for t in ("picnic-lake__RvtmQxa", "picnic-hill__GdsaPwe")]
     code = "quotes = [%r, %r]\nfor q in quotes:\n    print(q)" % tuple(said)
     cid = _cid(await call("add_card", group, kind="code", question="What did the agents say about the weather?", code=code))
     refs = [{"ref": t, "quote": "start at one instead"} for t in trials]
-    for args in ({"kind": "example", "refs": refs}, {"refs": refs}):
-        r = await call("edit_card", group, card=f"card:{cid}", **args)
-        assert r.is_error and tools.hint("edit_card-kind", cid=cid, kind="code", new="example") in r.text, r.text
-        assert notebook.get_cell(CORPUS, cid)["code"] == code
-    made = _cid(await call("add_card", group, kind="example", question="What did the agents say about the weather?",
-                           refs=refs))
-    assert [ref.split("#")[0] for ref in notebook.get_cell(CORPUS, made)["payload"]["refs"]] == trials
+    r = await call("edit_card", group, card=f"card:{cid}", refs=refs)
+    assert r.is_error and "pass kind example to make it an example card" in r.text, r.text
+    assert notebook.get_cell(CORPUS, cid)["code"] == code
+    r = await call("edit_card", group, card=f"card:{cid}", kind="example", refs=refs)
+    assert not r.is_error and _cid(r) == cid, r.text
+    cell = notebook.get_cell(CORPUS, cid)
+    assert cell["kind"] == "example" and "code" not in cell
+    assert [ref.split("#")[0] for ref in cell["payload"]["refs"]] == trials
 
 
 async def test_a_card_deleted_while_its_code_runs_stays_deleted(group, monkeypatch):

@@ -8,7 +8,11 @@ Vite dev server in dev mode, or the built UI served from memory at RENDER_ORIGIN
 RECYCLE_AFTER renders or any failure; without Playwright or its Chromium, available() is False, why() says why, and
 the harness stays down until the server restarts (headless.py). The browser and its driver close once no card was drawn
 for IDLE_S, and the next render launches them again. A card type's frame that is one flat colour in the
-picture is shot again twice, then the render fails, so the check never reads a card whose graphic did not draw."""
+picture is shot again twice, then the render fails, so the check never reads a card whose graphic did not draw.
+A card with a frame that draws itself (a custom card, an html output, a card type's page: `iframe[data-shot]`) draws
+inside its own page, which the render page cannot watch, and may animate there; such a card is shot again until its
+picture stays the same for STILL_QUIET_S, at most STILL_MAX_S (_still), so the picture shows what the frame drew rather
+than its first frames. card_fit, which needs the card's size alone, takes the first picture (`still=False`)."""
 from __future__ import annotations
 
 import asyncio
@@ -42,6 +46,12 @@ VIEWPORT = {"width": 1280, "height": 1000}  # a taller card is shot beyond the v
 CARD_W = 720  # frontend/src/canvas/layout.ts CARD_W: a card's width when it has none of its own
 TYPE_W = 1200  # a card of a card type drawn at least this wide, as focus mode shows it
 BLANK_WAITS_S = (0.5, 1.0, 0.0)  # a card type's frame shot blank is shot again after these waits, then the render fails
+# a card with a frame that draws itself is shot every STILL_POLL_S until its picture stays the same for STILL_QUIET_S,
+# longer than the step of an animation that draws a day at a time, or until STILL_MAX_S passed (_still)
+STILL_POLL_S = 0.2
+STILL_QUIET_S = 1.2
+STILL_MAX_S = 8.0
+SELF_DRAWN = "() => !!document.querySelector('.render-stage iframe[data-shot]')"
 BLANK_RANGE = 8  # grey levels between a frame's darkest and lightest pixels under which it drew nothing
 RENDER_ORIGIN = "http://thimble.render"
 RENDER_PAGE = "render.html"
@@ -241,18 +251,19 @@ class Pool:
         if self._free is not None:
             self._free.put_nowait(fresh)
 
-    async def render(self, request: dict[str, Any], *, timeout_s: float = RENDER_TIMEOUT_S) -> Rendered:
+    async def render(self, request: dict[str, Any], *, timeout_s: float = RENDER_TIMEOUT_S, still: bool = True) -> Rendered:
         """Draw one card (module note, a render). Raises Unavailable when the harness cannot run; any other failure is a
-        Rendered with `error`."""
+        Rendered with `error`. `still`: a card with a frame that draws itself is shot once its picture stays the same
+        (_still), with STILL_MAX_S more time for it."""
         self._busy += 1
         self._used = time.monotonic()
         try:
-            return await self._render(request, timeout_s)
+            return await self._render(request, timeout_s, still)
         finally:
             self._busy -= 1
             self._used = time.monotonic()
 
-    async def _render(self, request: dict[str, Any], timeout_s: float) -> Rendered:
+    async def _render(self, request: dict[str, Any], timeout_s: float, still: bool) -> Rendered:
         if not self.ready and not await self.start():
             raise Unavailable(self.why or "the harness is not running")
         assert self._free is not None
@@ -260,12 +271,13 @@ class Pool:
         t0 = time.perf_counter()
         broken = False
         res = Rendered()
+        limit = timeout_s + (STILL_MAX_S if still else 0.0)
         try:
-            await asyncio.wait_for(self._render_on(page, request, res), timeout_s)
+            await asyncio.wait_for(self._render_on(page, request, res, still), limit)
             return res
         except asyncio.TimeoutError:
             broken = True
-            res.error = res.error or f"the card did not settle within {timeout_s:g} s"
+            res.error = res.error or f"the card did not settle within {limit:g} s"
             res.ms.setdefault("total", round((time.perf_counter() - t0) * 1000, 1))
             return res
         except Exception as e:  # noqa: BLE001 — a page error is the card's finding, and the page is replaced
@@ -281,7 +293,7 @@ class Pool:
             elif self._free is not None:
                 self._free.put_nowait(page)
 
-    async def _render_on(self, page: Any, request: dict[str, Any], res: Rendered) -> None:
+    async def _render_on(self, page: Any, request: dict[str, Any], res: Rendered, still: bool = True) -> None:
         t0 = time.perf_counter()
         out = await page.evaluate("(req) => window.__thimbleRender.render(req)", request)
         t1 = time.perf_counter()
@@ -299,9 +311,15 @@ class Pool:
             self._warned_fonts = True
             log.warning("render: the render page drew in a fallback face (its fonts did not load)")
         if not res.error and res.box.get("width"):
+            clip = _clip(res.box)
+            # a frame's own animations play, so the picture shows the frame as it drew, not reset to its start
+            moving = still and (await page.evaluate(SELF_DRAWN)) is True
+            anim = "allow" if moving else "disabled"
+            png = await self._still(page, clip) if moving else None
             for wait in BLANK_WAITS_S:
-                res.png = await page.screenshot(clip=_clip(res.box), full_page=True, type="png", animations="disabled",
-                                                caret="hide")
+                res.png = png or await page.screenshot(clip=clip, full_page=True, type="png", animations=anim,
+                                                       caret="hide")
+                png = None
                 if not blank_frames(res.png, res.box, res.frames):
                     break
                 await asyncio.sleep(wait)
@@ -311,6 +329,19 @@ class Pool:
         page_ms = {k: v for k, v in (out.get("ms") or {}).items() if isinstance(v, (int, float))}
         res.ms = {"page": round((t1 - t0) * 1000, 1), "shot": round((t2 - t1) * 1000, 1),
                   "total": round((t2 - t0) * 1000, 1), **page_ms}
+
+    @staticmethod
+    async def _still(page: Any, clip: dict[str, float]) -> bytes:
+        """The card shot every STILL_POLL_S until its picture stayed the same for STILL_QUIET_S, or STILL_MAX_S passed:
+        the last picture. Animations play, so a frame's CSS animation is seen as it runs."""
+        start = changed = time.monotonic()
+        last = await page.screenshot(clip=clip, full_page=True, type="png", animations="allow", caret="hide")
+        while time.monotonic() - changed < STILL_QUIET_S and time.monotonic() - start < STILL_MAX_S:
+            await asyncio.sleep(STILL_POLL_S)
+            png = await page.screenshot(clip=clip, full_page=True, type="png", animations="allow", caret="hide")
+            if png != last:
+                last, changed = png, time.monotonic()
+        return last
 
     async def stop(self) -> None:
         async with self._lock:
@@ -613,12 +644,13 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
 
 
 async def render_card(c: str, cell: dict[str, Any], *, width: int | None = None,
-                      timeout_s: float = RENDER_TIMEOUT_S) -> Rendered:
-    """One card of workspace `c` drawn now (Unavailable when the harness cannot run)."""
+                      timeout_s: float = RENDER_TIMEOUT_S, still: bool = True) -> Rendered:
+    """One card of workspace `c` drawn now (Unavailable when the harness cannot run). `still`: shot once a frame that
+    draws itself stopped changing (Pool._still); False for a caller that needs only the card's size."""
     if not enabled():
         raise Unavailable("THIMBLE_RENDER is off")
     req = await asyncio.to_thread(request_for, c, cell, width=width)
-    return await pool().render(req, timeout_s=timeout_s)
+    return await pool().render(req, timeout_s=timeout_s, still=still)
 
 
 # --------------------------------------------------------------------------- routes

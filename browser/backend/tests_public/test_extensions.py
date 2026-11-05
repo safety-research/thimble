@@ -124,13 +124,12 @@ def test_add_lists_each_contribution_with_its_own_description_and_adds_nothing_w
     assert not extensions.remove("ext-min")
 
 
-def _before_the_rename(base: Path) -> Path:
-    """thimble's built-ins as an earlier build shipped them, in `base`: swarm-orient as `swarm`."""
-    shutil.copytree(extensions.builtin_dir(), base)
-    os.replace(base / "swarm-orient", base / "swarm")
-    raw = json.loads((base / "swarm" / "extension.json").read_text())
-    (base / "swarm" / "extension.json").write_text(json.dumps({**raw, "name": "swarm"}))
-    return base
+def test_a_fresh_install_offers_no_extension_in_settings(corpus):
+    """thimble ships no extension (multiagent-swimlane, the last one, is a test fixture now), so Settings lists none to
+    add on a fresh install, and the first run adds none."""
+    assert extensions.builtins() == {} and extensions.not_added() == []
+    assert extensions.ship() == [] and extensions.added() == {}
+    assert extensions.public(CORPUS)["extensions"] == []
 
 
 async def test_a_view_json_in_the_schema_s_form_keeps_its_scope_and_derived_fields_when_installed(corpus, tmp_path):
