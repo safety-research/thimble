@@ -1545,7 +1545,7 @@ test("with Citations manual, ] passes the citations Claude wrote (they draw as p
   expect(textOf(await $.ui.render(above()))).toContain('failed: 12')
 })
 
-test('while the tray is open the bar names what ] goes to from the mark the tray shows, its name in that mark\'s look: a heads-up opened with h over its citation names the citation after it, as when ] reached it, and ] goes there', CITES, async ($, on) => {
+test('while the tray is open the bar names what ] goes to from the mark the tray shows, its name in that mark\'s look', CITES, async ($, on) => {
   const { clock } = await resumed($, on, QUOTED, 's-tray-steps', { parts: HEADS })
   // ] is on the bar, not in the header, while the tray is open
   const stepKey = async () => all(await $.ui.render(above(40))).find(n => n.type === 'Button' && String(n.props?.key ?? '').endsWith('tray-]'))
@@ -1567,18 +1567,6 @@ test('while the tray is open the bar names what ] goes to from the mark the tray
   expect(await head()).toContain('] next explainer')
   // an explainer's name on the explainers' teal
   expect(await named('explainer')).toEqual({ next: { dimColor: true }, what: { backgroundColor: fills.glossBg } })
-  // h on the citation opens the heads-up over it: the same box, the same header
-  await clock.advance(2000)
-  await $.prompt.edit(key('h'))
-  await clock.advance(2000)
-  expect(textOf(await $.ui.render(above(40)))).toContain('Retried runs count twice')
-  expect(await head()).toContain('] next citation')
-  // ] goes to the citation, as the header says
-  await $.prompt.edit(key(']'))
-  await clock.advance(2000)
-  const band = textOf(await $.ui.render(above(40)))
-  expect(band).toContain('failed: 12')
-  expect(band).not.toContain('Retried runs count twice')
 })
 
 test("at rest the bar names ] and the mark it opens while the answer the keys act on shows marks, in either layout, a press that opens it as ] does: `show` the answer's first mark, `next` a later one, the mark's name in its own look; its verb is in thimble's color while one of the answer's marks is not opened, and dim as the bar's other keys' words once the person opened each", CITES, async ($, on) => {

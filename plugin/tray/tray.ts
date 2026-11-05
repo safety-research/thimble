@@ -13,15 +13,14 @@
 // words that name a mark, there and in the tray's header (`] next heads up`), are in that mark's own look (kindLook:
 // an explainer's teal, a heads-up's orange, a citation's underline), so the bar shows what each look is. While it is
 // open, ] and [ stay on the bar, named by the mark they reach, and its other keys are in its header, at the right, each
-// where it acts (the bar keeps its own, less any key the tray takes, as h; a card's header names no a: core/answerview.ts
-// heldKeys):
+// where it acts (the bar keeps its own, less the keys the tray takes, and a card's header names no a:
+// core/answerview.ts heldKeys):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread), its input taking the keys; 1 too,
 //               unnamed. With a thread about it already, a opens that thread
 //   + show all  named before a while the card leaves lines out: all of the mark in the side pane, the same pane a
 //               opens, to read (showAll)
-//   h explain   the explainer (or heads-up) on the citation's words, over it
-//   2–9         a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
+//   2–9        a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
 //               links to a file's lines are citations too, drawn as the answer's: the answer's own citation of those
 //               lines when it has one, else the lines themselves (a `place` frame)
 //   x repair    on a failed citation: a check of that one claim again in the background, which looks in
@@ -160,7 +159,7 @@ export async function trayHolds($: Engine): Promise<boolean> {
 }
 
 /** The keys the tray takes now and names in its own place, which nothing else names (core/answerview.ts heldKeys), so
- *  each key shows once, where it acts: while it is open, its header's (h, + while the card leaves lines out, a, 0), its
+ *  each key shows once, where it acts: while it is open, its header's (+ while the card leaves lines out, a, 0), its
  *  body's (x) and 1 and 2–9, unnamed (its ] and [ are the bar's, trayBar); on a card ] reached, a, ] [ and 0, which the bar names
  *  as the card's. `ask`: the keys asked about, when not all (a key of a citation's body reads the citation). Read from
  *  the state, so a drawing that asks draws again when the tray opens or closes. */
@@ -170,8 +169,7 @@ export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
   if (!tray || !f) return (await standNow($)) ? [']', '[', 'a', '0'] : []
   const out = ['0', 'a', '1']
   if (cutNow?.ref === frameKey(f)) out.push('+')
-  if (f.kind === 'citation' && (!ask || ['h', 'x'].some(k => ask.includes(k)))) {
-    if (await innerOf($, f)) out.push('h')
+  if (f.kind === 'citation' && (!ask || ask.includes('x'))) {
     if (await repairsNow($, await itemOf($, f.row, f.n))) out.push('x')
   } else if (f.kind === 'explain' || f.kind === 'heads') out.push('2', '3', '4', '5', '6', '7', '8', '9')
   return out
@@ -323,10 +321,9 @@ async function allStops($: Engine): Promise<Stop[]> {
   return out
 }
 
-/** Where ] and [ stand now: the mark the tray shows, where ] and [ pass it (a heads-up h opened over a citation stands
- *  where it does, before that citation), so the bar names what follows the mark it shows, whichever way it was
- *  opened; else the tray's first mark (lines of a file an explainer cites stand on it), else the card ] reached (-1:
- *  none). */
+/** Where ] and [ stand now: the mark the tray shows, where ] and [ pass it (a citation opened over the explainer whose
+ *  words cite it stands where it does), so the bar names what follows the mark it shows, whichever way it was opened;
+ *  else the tray's first mark (lines of a file an explainer cites stand on it), else the card ] reached (-1: none). */
 async function stepPlace($: Engine): Promise<{ list: Stop[]; at: number }> {
   const list = await allStops($)
   const tray = await trayNow($)
@@ -411,18 +408,6 @@ async function told($: Engine, f: Frame): Promise<void> {
   await tellOpened($, engagedMark(f, info), info.begins).catch(() => undefined)
 }
 
-/** The explainer or heads-up on a citation's words, if any: a press on those words opens it (marks/view.ts markEl),
- *  and ] goes on to the citation; the citation, reached by ] [ or a press on its other words, offers it (h). */
-async function innerOf($: Engine, f: Frame): Promise<Frame | null> {
-  if (f.kind !== 'citation') return null
-  const shown = await shownOf($, f.row)
-  if (!shown) return null
-  const c = (await citesOf($, f.row, shown)).find(x => x.n === f.n)
-  if (!c) return null
-  const s = (await spansOf($, f.row, shown)).find(x => x.start >= c.start + 1 && x.end <= c.start + 1 + c.words.length)
-  return s ? { row: f.row, kind: s.kind, id: s.id } : null
-}
-
 /** A citation's evidence (or one of its other places) cites lines of the place `p` of a file; a whole file is no
  *  citation's. */
 function citesPlace(ev: Any, p: { path: string; from: number | null; to: number | null }): boolean {
@@ -478,7 +463,7 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
   if (o.reveal) await reveal($, f)
 }
 
-/** A mark over the one the tray shows (a citation inside an explainer, the explainer on a citation's words). */
+/** A mark over the one the tray shows: a citation inside an explainer's or a heads-up's words. */
 async function pushMark($: Engine, f: Frame): Promise<void> {
   await setTray($, push(await trayNow($), f) as Tray)
   await told($, f)
@@ -637,10 +622,6 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
         },
       }
     }
-    if (key === 'h') {
-      const inner = await innerOf($, f)
-      if (inner) return { later: () => pushMark($, inner) }
-    }
     return null
   }
   if (f.kind === 'place') return null
@@ -697,25 +678,16 @@ async function restItem($: Engine): Promise<BarItem[]> {
   return [{ id: 'tray-next', key: ']', words: w.words, shorter: w.shorter, ...markedAs(w.what, w.kind), ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
 }
 
-/** An open tray's keys, in its header at the right, each a click that does what its key does: h the explainer on a
- *  citation's words, + show all (showAll), which the header names only while the card leaves lines out (trayBand), a
- *  ask, 0 back or close (] and [ are on the bar, trayBar). x repair is in the citation's card, where it acts, and 2–9
- *  are its links in an explainer's words. */
+/** An open tray's keys, in its header at the right, each a click that does what its key does: + show all (showAll),
+ *  which the header names only while the card leaves lines out (trayBand), a ask, 0 back or close (] and [ are on the
+ *  bar, trayBar). x repair is in the citation's card, where it acts, and 2–9 are its links in an explainer's words. */
 async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
   await themeNow($)
-  const out: BarItem[] = []
-  if (f.kind === 'citation') {
-    const inner = await innerOf($, f)
-    if (inner) {
-      const g = inner.kind !== 'citation' ? await glossOf($, inner.row, inner.id) : null
-      const term = String(g?.term ?? '')
-      out.push({ id: 'tray-h', key: 'h', words: inner.kind === 'heads' ? 'heads-up' : `explain ${term.length > 24 ? `${term.slice(0, 23)}…` : term}`, press: () => pushMark($, inner) })
-    }
-  }
-  out.push({ id: 'tray-+', key: SHOW_ALL.key, words: SHOW_ALL.words, press: () => showAll($, f) })
-  out.push({ id: 'tray-a', key: 'a', words: 'ask', press: () => askAbout($, f) })
-  out.push({ id: 'tray-0', key: '0', words: tray.stack.length > 1 ? 'back' : 'close', press: () => goBack($) })
-  return out
+  return [
+    { id: 'tray-+', key: SHOW_ALL.key, words: SHOW_ALL.words, press: () => showAll($, f) },
+    { id: 'tray-a', key: 'a', words: 'ask', press: () => askAbout($, f) },
+    { id: 'tray-0', key: '0', words: tray.stack.length > 1 ? 'back' : 'close', press: () => goBack($) },
+  ]
 }
 
 // ------------------------------------------------------------------------------------------------ the answer view
