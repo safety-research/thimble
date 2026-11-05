@@ -597,6 +597,28 @@ async def test_r2_a_new_session_and_one_brought_back_get_none_of_the_temp_files_
     assert "from-session-b.csv" not in [p.name for p in runtime.shell_temp(CORPUS).iterdir()]
 
 
+async def test_a_headless_session_runs_in_fast_mode_only_where_its_spec_has_it(on, monkeypatch):
+    """Main's fast mode is the composer's choice, off until the analyst turns it on, in a headless Claude Code session as
+    on the Messages API, though thimble's own calls default to fast; thimble's agents run without it."""
+    from app import ledger
+
+    monkeypatch.delenv("THIMBLE_MODEL_SPEED", raising=False)
+    assert config.model_speed() == "fast"
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    sp = runtime.ensure(CORPUS)
+    writer = runtime.Conv(sp, "a1", "agent", agent_id="a1", role="writer")
+
+    def fast(conv: Any) -> bool:
+        return json.loads(runtime_cc.options(conv, conv.spec(), {}).settings)["fastMode"]
+
+    assert sp.main.spec().model == "claude-opus-5-5" and config.has_fast_mode(sp.main.spec().model)
+    assert (fast(sp.main), fast(writer)) == (False, False)
+    ledger.put_settings(CORPUS, {config.MODELS_KEY: {"main": {"fast": True}}})  # the composer's switch (events._choose)
+    assert (fast(sp.main), fast(writer)) == (True, False)
+    ledger.put_settings(CORPUS, {config.MODELS_KEY: {"main": {"fast": False}}})
+    assert fast(sp.main) is False
+
+
 async def test_a_thimble_call_in_a_headless_session_runs_as_its_caller(on, monkeypatch):
     seen: dict[str, Any] = {}
     fake_sdk(monkeypatch, [], seen)
