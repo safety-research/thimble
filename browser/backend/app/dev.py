@@ -3238,6 +3238,7 @@ async def _send_message(c: str, slug: str, route: str) -> None:
                     # that run works on the built view again, which builds, a change from the view as it was built
                     # (views.ask kept a copy of it), checked when the run ends (_settle)
                     now = str((views.read_proposal(c, slug) or {}).get("message") or "")
+                    views._stop_review(c, slug)
                     views.update_proposal(c, slug, message=_unsent(now, text) or None, message_sent=None,
                                           status="building", revision=True, asked=True, change=text, finish=None,
                                           attempt=0, checks_failed=None, fed_back=None)
@@ -3372,6 +3373,7 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
         # the run starts from the view as it is now: a copy of it aside, which an earlier run that was stopped may have
         # used up (its _settle put the view back from it, or dropped it), so the run's end can tell a change and put it back
         views._keep_built(c, slug)
+        views._stop_review(c, slug)  # a change to the view stops its review, which would write the same files
         views.update_proposal(c, slug, **going, revision=True, asked=True, change=text or None, message=rest or None,
                               message_sent=None)
         views._emit(c, slug, "building", chat=run.chat)

@@ -949,6 +949,23 @@ async def test_finish_review_keeps_a_passing_revision_and_ends_the_review(board,
     assert view_review.undo(CORPUS, slug)["undo"] and (folder / views.VIEW_HTML).read_text() == "<p>v1</p>"
 
 
+async def test_a_message_s_run_stops_the_view_s_review_which_would_write_the_same_files(board, bridge, gates, pictures,
+                                                                                         hints, monkeypatch):
+    """The builder working on the built view again for a message is a change to it, which stops the view's review as
+    any change does: a reviewer that went on would fix or undo what the message asked for."""
+    slug = _propose(asked=True)
+    reviewer, _ = await _reviewed(slug)
+    builder = str(_prop(slug)["agent_id"])
+    monkeypatch.setattr(dev, "_reachable", lambda c, a: a == builder)
+    views.message(CORPUS, slug, "Make the page throw, for a test.")
+    await _until(lambda: [s for s in bridge.ops("send") if s["agent"] == builder], "the message never reached the builder")
+    subagents.run_again(CORPUS, builder, "coordinator")
+    await _until(lambda: [s for s in bridge.ops("stop") if s.get("agent") == reviewer], "the review was never stopped")
+    subagents.run_ended(CORPUS, reviewer, "stopped", "", source="notification")
+    await _until(lambda: (_prop(slug).get("review") or {}).get("state") == "stopped", "the review never ended")
+    assert _prop(slug)["review"]["note"] == view_review.CHANGED_NOTE and _prop(slug)["status"] == "building"
+
+
 async def test_finish_review_restores_a_failing_revision_and_ends_the_review(board, bridge, gates, pictures, hints):
     """A revision that fails the view's checks is undone, back to the view as it last passed, and ends the review."""
     slug = _propose(asked=True)
