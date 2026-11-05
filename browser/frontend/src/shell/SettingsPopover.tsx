@@ -156,14 +156,11 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
     Promise.all([loadSettings(ws, true), readMain()])
       .then(([s]) => alive && setSettings(s))
       .catch((e) => alive && setError((e as Error).message))
-    // what another surface saves (the composer's line, a view build's line, a proposal's Don't ask again), and main's
-    // session as its meta changes
-    const offSettings = onSettingsChange((w) => w === ws && void refresh())
-    const offChat = bus.on('chat', (e) => e.chat === 'main' && void readMain())
+    // what another surface saves while the menu is open (a view build's line, a proposal's Don't ask again)
+    const off = onSettingsChange((w) => w === ws && void refresh())
     return () => {
       alive = false
-      offSettings()
-      offChat()
+      off()
     }
   }, [ws, open, refresh, readMain])
 
