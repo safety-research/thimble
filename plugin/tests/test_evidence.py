@@ -516,6 +516,53 @@ def test_beside_the_labels_rules_the_workspace_is_no_evidence(tmp_path: Path):
             assert (r["status"], r["reason"]) == ("failed", OUTSIDE), (file, kind, r["reason"])
 
 
+def test_a_quote_of_a_compressed_record_reads_its_lines_as_zcat_prints_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """N39: records kept compressed (events-2.ndjson.gz) are evidence in their own file: a quote cites the line as zcat,
+    bzcat or xzcat numbers it, and the person sees that file and its record decoded. A file is compressed by its first
+    bytes, whatever its name; a broken one, or one that unpacks to more than the check reads, has no such line."""
+    import bz2
+    import gzip
+    import lzma
+
+    from kernel import evidence
+
+    lines = [json.dumps({"run": 2, "event": k, "note": f"run 2 step {k}"}) for k in range(4)]
+    text = ("\n".join(lines) + "\n").encode()
+    (tmp_path / "d1").mkdir()
+    for name, packed in (("events-2.ndjson.gz", gzip.compress(text)), ("events-2.ndjson.bz2", bz2.compress(text)),
+                         ("events-2.ndjson.xz", lzma.compress(text)), ("events-2.ndjson", gzip.compress(text))):
+        (tmp_path / "d1" / name).write_bytes(packed)
+        r = check_mark(mark("run 2 step 3"), quote(f"d1/{name}", 4, "run 2 step 3"), [], str(tmp_path))
+        assert (r["status"], r["evidence"]["file"], r["evidence"]["line"]) == ("verified", f"d1/{name}", "4"), (name, r["reason"])
+        (row,) = [x for x in r["evidence"]["lines"] if x["n"] == 4]
+        assert (row["text"], row["highlight"], row["decoded"]) == ("run 2 step 3", [0, 12], True), row
+    # the record's words, not the compressed bytes, say what the line shows in place of a wrong quote
+    wrong = check_mark(mark("run 2 step 9"), quote("d1/events-2.ndjson.gz", 4, "run 2 step 9"), [], str(tmp_path))
+    assert wrong["status"] == "failed" and "run 2 step 3" in wrong["reason"], wrong["reason"]
+    # broken: cut short in its middle
+    (tmp_path / "d1" / "cut.ndjson.gz").write_bytes(gzip.compress(text)[:30])
+    cut = check_mark(mark("run 2 step 3"), quote("d1/cut.ndjson.gz", 4, "run 2 step 3"), [], str(tmp_path))
+    assert (cut["status"], cut["reason"]) == ("failed", "d1/cut.ndjson.gz has no line 4."), cut
+    # a small file that unpacks to more than the check reads: its lines past the bound are not read
+    monkeypatch.setattr(evidence, "UNPACKED_MAX", len(lines[0]) + 1)
+    big = check_mark(mark("run 2 step 3"), quote("d1/events-2.ndjson.gz", 4, "run 2 step 3"), [], str(tmp_path))
+    assert (big["status"], big["reason"]) == ("failed", "d1/events-2.ndjson.gz has no line 4."), big
+
+
+def test_a_file_cited_through_a_link_to_the_session_folder_shows_by_its_path_in_the_folder(tmp_path: Path):
+    """N39: the session folder ~/traces is a link to a folder on another disk. A quote of one of its files holds by any
+    path that leads there, and the person sees the file by its path in the folder, never one that climbs out of it."""
+    real, home = tmp_path / "disk" / "traces", tmp_path / "home"
+    real.mkdir(parents=True)
+    home.mkdir()
+    (real / "notes.ndjson").write_text(json.dumps({"note": "rolled back at 23:14"}) + "\n")
+    (home / "traces").symlink_to(real)
+    for file, cwd, root in ((home / "traces" / "notes.ndjson", real, real), ("notes.ndjson", home / "traces", real),
+                            (real / "notes.ndjson", home / "traces", home / "traces")):
+        r = check_mark(mark("rolled back at 23:14"), quote(str(file), 1, "rolled back at 23:14"), [], str(cwd), str(root))
+        assert (r["status"], r["evidence"]["file"]) == ("verified", "notes.ndjson"), (file, r)
+
+
 def test_a_quote_in_a_json_document_written_over_many_lines_reads_its_strings_decoded(tmp_path: Path):
     """A line of a JSON document written over many lines holds one member: its string reads decoded, as a JSONL
     record's strings do, so a quote matches the words as they read and shows with its line breaks."""
