@@ -1,9 +1,9 @@
 // How the workbench reaches Claude (backend claude_access.py): the person's Claude Code sign-in (the default, and
 // recommended), an Anthropic API key, or Workload Identity Federation, each in the few words of the install's question
 // (the backend's labels and hints). The setup step opens by itself while no way is chosen (the first run, when the
-// install did not ask), and again from Settings, from a chat's card that says Claude cannot be reached (bus
-// `claudeAccess`), or from the line in Settings. Not now (or Escape) closes it, so the person can still browse without
-// access; it opens by itself again on the next start while nothing is saved. Choosing the Claude Code sign-in, whose
+// install did not ask), and again from a chat's card that says Claude cannot be reached (bus `claudeAccess`). Not now
+// (or Escape) closes it, so the person can still browse without access; it opens by itself again on the next start
+// while nothing is saved. Choosing the Claude Code sign-in, whose
 // words say what it does, is the person's consent to it. The API key is ANTHROPIC_API_KEY when it is set where the
 // workbench runs, else one pasted here. Saving checks the choice with one small call and says what failed in plain
 // words. The first run's step stands alone: the tour's welcome (TourHost) waits until it is answered (accessAnswered).
@@ -152,23 +152,6 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
           </Button>
         </div>
       </div>
-    </div>
-  )
-}
-
-/** Settings' line: the way chosen in words, and Change. */
-export function ClaudeAccessLine() {
-  const [status, setStatus] = useState<ClaudeAccess | null>(null)
-  useEffect(() => {
-    api.claudeAccess().then(setStatus).catch(() => undefined)
-  }, [])
-  return (
-    <div className="settings-access" data-how={status?.how || 'none'}>
-      <span className="settings-access-label">Claude access</span>
-      <span className="settings-access-what">{status ? status.describe : '…'}</span>
-      <Button variant="secondary" size="sm" onClick={() => bus.emit('claudeAccess', {})}>
-        Change
-      </Button>
     </div>
   )
 }
