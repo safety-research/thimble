@@ -39,7 +39,7 @@ EOF
 }
 
 say() { printf '%s\n' "$*"; }
-# stop TEXT: an option that cannot work, said before anything is installed
+# stop TEXT: an option or a system that cannot work, said before anything is installed or run
 stop() { printf 'install.sh: %s\n' "$*" >&2; exit 2; }
 # tilde PATH: a path as the person reads it, with ~ for their home
 tilde() { case "$1" in "$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;; *) printf '%s' "$1" ;; esac; }
@@ -279,8 +279,8 @@ main() {
   [ "$sign_in" != wif ] || [ -n "$wif_file" ] || terminal ||
     stop "--sign-in wif needs --wif-file PATH, the path of your WIF config file"
   [ "$web" = 1 ] || [ -z "$sign_in" ] || stop "--sign-in sets up the workbench, which --no-browser leaves out"
-  py="${THIMBLE_PYTHON:-python3}"
-  url="${THIMBLE_UPDATE_URL:-https://github.com/safety-research/thimble.git}"
+  case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) stop "thimble runs on Windows only in WSL 2 (wsl --install)" ;; esac
+  py="${THIMBLE_PYTHON:-python3}" url="${THIMBLE_UPDATE_URL:-https://github.com/safety-research/thimble.git}"
   home="${THIMBLE_HOME:-$HOME/.thimble}"
   fixes="$home/fixes"
   # the install's own folder: the kernel takes --notes and --state only in one so named (install.py in_work)
