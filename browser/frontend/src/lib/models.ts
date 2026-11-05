@@ -1,5 +1,5 @@
 // Model ids as the UI names them, and the models a chat can pick from.
-import type { ModelConf, Settings } from './types'
+import type { ModelConf, Settings, SettingsPatch } from './types'
 
 /** A model id without its `[…]` tag: `claude-opus-5-5[1m]` → `claude-opus-5-5`. The `[1m]` tag asks Claude Code for
  * the 1M-token context window of the same model, which the server adds for the orientation (backend
@@ -58,7 +58,9 @@ export function hasEffort(model: string | null | undefined): boolean {
   return !!m && !NO_EFFORT_MODELS.some((k) => m.includes(k))
 }
 
-// ---- the settings, read once per workspace and shared by the composer and the settings popover ----
+// ---- the settings, read once per workspace and shared by the composer, the settings popover and the switches that
+// live beside what they turn (the Labels sidebar's, the views bar's ⋯ menu) ----
+import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 
 const cache = new Map<string, Promise<Settings>>()
@@ -90,11 +92,11 @@ export const invalidateSettings = (ws: string): void => {
   listeners.forEach((fn) => fn(ws))
 }
 
-/** Save some of a role's model, effort and fast mode (settings.models: the server merges them into what the role
- * holds), then tell whoever shows the settings, after a failure too, so they show what the server holds. */
-export function saveRole(ws: string, role: string, patch: Partial<ModelConf>): Promise<void> {
+/** Save a change of the settings (PUT /settings merges what it is given), then tell whoever shows them, after a failure
+ * too, so they show what the server holds. */
+export function saveSettings(ws: string, patch: SettingsPatch): Promise<void> {
   return api
-    .putSettings(ws, { models: { [role]: patch } })
+    .putSettings(ws, patch)
     .then(() => invalidateSettings(ws))
     .catch((e: unknown) => {
       invalidateSettings(ws)
@@ -102,10 +104,53 @@ export function saveRole(ws: string, role: string, patch: Partial<ModelConf>): P
     })
 }
 
+/** Save some of a role's model, effort and fast mode (settings.models: the server merges them into what the role
+ * holds), as saveSettings does. */
+export const saveRole = (ws: string, role: string, patch: Partial<ModelConf>): Promise<void> => saveSettings(ws, { models: { [role]: patch } })
+
 /** Hear that the settings of a workspace changed; returns the unsubscribe. */
 export function onSettingsChange(fn: (ws: string) => void): () => void {
   listeners.add(fn)
   return () => {
     listeners.delete(fn)
   }
+}
+
+/** One of the workspace's on/off settings, as `on` reads it from GET /settings: null until they are read, `fallback`
+ * when they cannot be, and read again whenever they change, here or from another surface (onSettingsChange). */
+export function useSettingOn(ws: string, on: (s: Settings) => boolean, fallback = true): boolean | null {
+  const [value, setValue] = useState<boolean | null>(null)
+  const read = useRef(on)
+  read.current = on
+  useEffect(() => {
+    let alive = true
+    const get = () =>
+      loadSettings(ws)
+        .then((s) => alive && setValue(read.current(s)))
+        .catch(() => alive && setValue(fallback))
+    void get()
+    const off = onSettingsChange((w) => w === ws && void get())
+    return () => {
+      alive = false
+      off()
+    }
+  }, [ws, fallback])
+  return value
+}
+
+/** A switch of the workspace's settings that applies at once: its state (useSettingOn), which shows the pick while it
+ * saves, and the turn, which saves `patch(on)` (saveSettings) and on a failure says so with `failed` and shows what the
+ * server holds. */
+export function useSettingSwitch(ws: string, on: (s: Settings) => boolean, patch: (on: boolean) => SettingsPatch, failed: (on: boolean, e: Error) => void): [boolean | null, (on: boolean) => void] {
+  const saved = useSettingOn(ws, on)
+  const [picked, setPicked] = useState<boolean | null>(null)
+  const turn = (v: boolean) => {
+    setPicked(v)
+    saveSettings(ws, patch(v))
+      // the settings read again after the save, which the switch then shows in the pick's place
+      .then(() => loadSettings(ws).then(() => undefined, () => undefined))
+      .catch((e: Error) => failed(v, e))
+      .finally(() => setPicked(null))
+  }
+  return [picked ?? saved, turn]
 }

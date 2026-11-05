@@ -1,7 +1,8 @@
 // The Labels and Comments sidebar, at the right of the page: the one place where the analyst sees, turns on and off,
 // and opens the workspace's labels and its comment categories (the checks: the built-in Heads up, Explainers and
 // Judgment calls, and the analyst's own). It shows one section at a time: the top bar's Labels button, just above it,
-// opens it on the labels, and its Comments button on the comment categories; a second click closes it.
+// opens it on the labels, and its Comments button on the comment categories; a second click closes it. The labels'
+// head holds the switch of whether Claude makes labels in this workspace (MakesLabels), which applies at once.
 //
 // A label's row: its color, name, question, values with their counts, Show in (Files · Cards · Report, where it shows,
 // with what it found there) and its switch. It opens its detail in the sidebar: the label's definition (a model label's
@@ -36,6 +37,8 @@ import { openLabelEditor } from '../files/LabelEditor'
 import { classesOf, colourVar, howMade, labelDefinition, isFilesLabel, mainColour, unitWord } from '../files/labels'
 import { checksApi, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { useSettingSwitch } from '../lib/models'
+import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
 import type { Check, CheckCover, CheckRun, Concept, LabelRowText, TypesState } from '../lib/types'
 import { NewCheckCard, RunLine, RunMark, RunNotes, runCheck, useChecks, type Checks } from '../report/Checks'
@@ -157,6 +160,7 @@ export function LabelsSidebar({ ws, section, onClose }: { ws: string; section: S
             {section === 'labels' ? 'Labels' : 'Comments'} <span className="lside-n">{section === 'labels' ? labels.length : comments.items.length}</span>
           </h2>
         )}
+        {section === 'labels' && !open && <MakesLabels ws={ws} />}
         <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />
       </header>
       <div className="lside-body">
@@ -187,6 +191,35 @@ export function LabelsSidebar({ ws, section, onClose }: { ws: string; section: S
 }
 
 // ---- the parts
+
+/** The words of the switch at the labels' head. */
+export const MAKES_LABELS = 'Claude makes labels'
+
+/** Whether Claude makes labels in this workspace, as the terminal's Labels setting (the workspace's settings.json
+ * `labels`, backend ledger.LABELS_KEY, on by default): off, main's prompt and the tools' texts say nothing of labels and
+ * no agent has a label tool, while the labels made keep their own switches. A turn applies at once, from main's next
+ * message. Its words are part of the switch: a click on them turns it too. */
+function MakesLabels({ ws }: { ws: string }) {
+  const [on, turn] = useSettingSwitch(
+    ws,
+    (s) => s.labels !== false,
+    (v) => ({ labels: v ? null : false }),
+    (v, e) => bus.emit('toast', { text: `Could not turn labels ${v ? 'on' : 'off'}. ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }),
+  )
+  if (on == null) return null
+  return (
+    <label className="lside-makes" data-on={on}>
+      {MAKES_LABELS}
+      <Switch
+        checked={on}
+        onChange={(v) => {
+          track('chat-settings', { target: 'ui:labels', detail: { labels: v } })
+          turn(v)
+        }}
+      />
+    </label>
+  )
+}
 
 function Swatch({ color, hollow }: { color: string; hollow?: boolean }) {
   return <span className={`lside-swatch${hollow ? ' is-hollow' : ''}`} style={{ '--sw': color } as React.CSSProperties} aria-hidden="true" />
