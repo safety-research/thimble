@@ -24,10 +24,10 @@ export const PROPOSAL_HEAD = 'View proposal'
  * PROPOSE_LABEL). */
 export const PROPOSALS_OFF_LINE = 'View proposals are off. Settings turns them on again.'
 
-/** The proposal the card shows: the oldest `suggested` row with `offered` whose view is not switched off. Pure. */
+/** The proposal the card shows: the oldest `suggested` row with `offered`. Pure. */
 export function openOffer(proposals: readonly Proposal[] | null | undefined): Proposal | null {
   if (!Array.isArray(proposals)) return null
-  const open = proposals.filter((p) => p.status === 'suggested' && !!p.offered && !p.off)
+  const open = proposals.filter((p) => p.status === 'suggested' && !!p.offered)
   const at = (p: Proposal) => p.offered?.at ?? ''
   return open.sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0))[0] ?? null
 }

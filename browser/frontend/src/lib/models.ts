@@ -60,7 +60,7 @@ export function hasEffort(model: string | null | undefined): boolean {
 }
 
 // ---- the settings, read once per workspace and shared by the composer, the settings popover and the switches that
-// live beside what they turn (the Labels sidebar's, the views bar's ⋯ menu) ----
+// live beside what they turn (the Labels sidebar's Label tool) ----
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api'
 

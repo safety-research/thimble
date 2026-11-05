@@ -3,7 +3,6 @@ import type { FixStatus, FixTried } from '../chat/fix'
 import type {
   CanvasResponse,
   Extensions,
-  LocalExtension,
   Cell,
   CardVersion,
   CellName,
@@ -718,12 +717,6 @@ export const api = {
   /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
   switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
     j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
-  /** the views built for this workspace, the hidden ones too, each with whether it shows (backend views.local_extension):
-   * the views bar's ⋯ menu lists them */
-  localViews: (c: string) => j<LocalExtension>(`${ws(c)}/views/local`),
-  /** shows or hides a view built for this workspace, the views bar's ⋯ menu's check; the analyst's browser alone may
-   * turn it (backend views.set_view_on) */
-  switchLocalView: (c: string, slug: string, on: boolean) => j<LocalExtension>(`${ws(c)}/views/${enc(slug)}/on`, { method: 'PUT', body: JSON.stringify({ on }) }),
   /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
   reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
 }

@@ -21,8 +21,8 @@ const row = (slug: string, at: string | null, extra: Partial<Proposal> = {}): Pr
   ({ slug, name: slug.replace(/-/g, ' '), description: `What ${slug} shows.`, task: 'compare how the agents coordinated', claims: ['agents/*.jsonl'], status: 'suggested', ...(at ? { offered: { at, after: 'main' } } : {}), ...extra }) as Proposal
 
 describe('which proposal shows, and its line', () => {
-  test('the oldest suggested row with `offered`; a row without it (an older version), one switched off or one answered never shows', () => {
-    const rows = [row('legacy', null), row('later', '2026-10-14T10:05:00Z'), row('first', '2026-10-14T10:00:00Z'), row('off', '2026-10-14T09:00:00Z', { off: true }), row('built', '2026-10-14T08:00:00Z', { status: 'built' })]
+  test('the oldest suggested row with `offered`; a row without it (an older version) or one answered never shows', () => {
+    const rows = [row('legacy', null), row('later', '2026-10-14T10:05:00Z'), row('first', '2026-10-14T10:00:00Z'), row('built', '2026-10-14T08:00:00Z', { status: 'built' })]
     expect(openOffer(rows)?.slug).toBe('first')
     expect(openOffer([row('legacy', null)])).toBeNull()
     expect(openOffer(null)).toBeNull()
