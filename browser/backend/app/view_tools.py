@@ -40,7 +40,6 @@ BUILDER_DESCRIPTION = ("thimble's builder of one view of the analyst's corpus. t
                        "Agent call that starts it.")
 REVIEWER_DESCRIPTION = ("thimble's reviewer of one view it built: it looks at pictures of the view and fixes clear "
                         "problems in how it draws. thimble starts it.")
-UNCHANGED_REPORT = "the view's files are as they were before the change, so the change is not made yet"
 NOT_YOURS = "{tool} is the tool of the agent thimble started for this view, and this call is not that agent's"
 
 
@@ -222,10 +221,8 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     prop = views.read_proposal(c, slug)
     if prop is None:
         return tools.err(f"finish_view: the view {slug} has no proposal any more")
-    if dev.answering(prop, agent_id) is not None:  # the run answers a message about the built view
-        if views.unchanged_since_built(c, slug):
-            return tools.ok(tools.hint("finish-view-unchanged"))
-        prop = dev.message_changes(c, slug, agent_id) or prop  # its earlier pass is no finish of this change
+    if prop.get("revision") and views.unchanged_since_built(c, slug):  # such as a run that answers a message
+        return tools.ok(tools.hint("finish-view-unchanged"))
     done = _finished(prop, agent_id)
     if done is not None and done.get("result") == "pass":
         return tools.ok(tools.hint("finish-view-pass"))
@@ -237,8 +234,6 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     report = await views.gate(c, slug, views._kept_locators(c, slug))
     ok = bool(report.get("ok"))
     lines = "\n".join(views.gate_lines(report))
-    if ok and prop.get("revision") and views.unchanged_since_built(c, slug):
-        ok, lines = False, UNCHANGED_REPORT
     if not still_running(c, key, agent_id):
         log.info("%s: the gate of %s ended after its builder %s stopped, so it registers nothing", c, slug, agent_id)
         return tools.err(f"finish_view: the build of {slug} was stopped, so nothing was registered")

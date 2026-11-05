@@ -2985,7 +2985,7 @@ def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: 
     retry."""
     restore_built(c, slug)
     update_proposal(c, slug, status="built", change=None, changed=None, revision=None, error=error,
-                    failed_change=failed_change, stopped_by=stopped_by)
+                    failed_change=failed_change, stopped_by=stopped_by, checks_failed=None, fed_back=None)
     _emit(c, slug, "built")
 
 
@@ -3015,11 +3015,15 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
             _save_proposals(c, [*items, prop])
         revision = view is not None or bool(prop.get("revision"))
         pending = prop.get("status") in PENDING
-        change = "\n\n".join(x for x in (str(prop.get("change") or "") if pending else "", request) if x)
+        # a change not yet sent to a builder (`changed`) is asked for again with this one; one already sent, as the
+        # message a running builder takes, is not sent twice
+        change = "\n\n".join(x for x in (str(prop.get("change") or "") if pending and prop.get("changed") else "",
+                                           request) if x)
         fields: dict[str, Any] = {"status": "building" if prop.get("status") == "building" else "queued", "error": None,
                                   "change": change or None, "changed": True, "revision": revision or None,
                                   "asked": True if asked else None, "failed_change": None, "ts": _now(),
-                                  "route": route, "refused": None, "stopped_by": None, "quiet": True if quiet else None}
+                                  "route": route, "refused": None, "stopped_by": None, "quiet": True if quiet else None,
+                                  "checks_failed": None, "fed_back": None}
         if values:
             fields["values"] = {k: str(v) for k, v in values.items() if v}
         if description := _one(description):
@@ -3062,18 +3066,18 @@ def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = C
 def ask(c: str, slug: str, text: str, *, route: str = CLICK) -> dict[str, Any]:
     """A message about the built view `slug` from its thread, which may ask for a change or for none: kept on the
     proposal (`message`) for the builder's run that takes it (dev.message_view), with the view's files kept aside as
-    built (_keep_built), so a run that changes them is a change that can be undone. The view stays built, its attempts
-    as they were, unless that run changes it (dev.message_changes). The proposal."""
+    built (_keep_built), so a run that changes them is a change that can be undone. That run is a change to the view:
+    it builds while the run goes, and is as it was if the run leaves its files so (dev._settle). The proposal."""
     from . import dev  # noqa: PLC0415
 
     with _proposals_lock:
         prop = read_proposal(c, slug) or {}
         waiting = str(prop.get("message") or "")
-        if not waiting and not prop.get("answering"):
+        if not waiting:
             drop_built_copy(c, slug)  # left by no change that runs, so not the view as built now
         _keep_built(c, slug)
         prop = update_proposal(c, slug, message="\n\n".join(x for x in (waiting, text) if x), asked=True,
-                               route=route) or prop
+                               route=route, checks_failed=None, fed_back=None) or prop
     dev.message_view(c, slug, route)
     return prop
 
@@ -3113,7 +3117,7 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, 
     if prop.get("status") != "failed":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
     prop = update_proposal(c, slug, status="queued", error=None, refused=None, route=CLICK, repairs=0,
-                           values=vals, stopped_by=None) or prop
+                           values=vals, stopped_by=None, checks_failed=None, fed_back=None) or prop
     _emit(c, slug, "queued", chat=prop.get("chat"))
     _queue(c, slug)
     return prop
@@ -3121,18 +3125,15 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, 
 
 def stop_build(c: str, slug: str) -> dict[str, Any]:
     """The Stop in a view's build thread: the build ends with its session stopped and its draft kept, and the proposal
-    fails with Retry; a change to a built view leaves the view as it was, the change kept for Retry (dev._view_stopped,
-    once the session has stopped); a builder's run that takes a message about the built view stops, and the view is as
-    it was (dev.stop_answer). 404 for no such proposal, 409 for one that is neither queued nor building and whose
-    builder takes no message."""
+    fails with Retry; a change to a built view, such as a run that takes a message about it, leaves the view as it was,
+    a change that wrote something kept for Retry (dev._view_stopped, once the session has stopped). 404 for no such
+    proposal, 409 for one that is neither queued nor building."""
     from . import dev  # noqa: PLC0415
 
     prop = read_proposal(c, slug)
     if prop is None:
         raise HTTPException(404, f"no such proposal: {slug}")
     if prop.get("status") not in PENDING:
-        if dev.stop_answer(c, slug, prop):
-            return {"ok": True}
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not building")
     if not dev.stop_view(c, slug, dev.VIEW_STOPPED):
         dev._view_stopped(c, slug)

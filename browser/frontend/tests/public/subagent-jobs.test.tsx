@@ -110,6 +110,24 @@ describe('a view build\'s chip', () => {
     expect(posted.map(([url]) => url)).toEqual(['/api/ws/jobs/views/posts/build'])
   })
 
+  test('a build whose builder stopped without passing its checks offers no Retry: a click on its name opens its thread', async () => {
+    proposals = [P('posts', { status: 'failed', error: 'problem: the page says FAIL', checks_failed: true, asked: true })]
+    const el = await chip('posts')
+    expect(el.querySelector('.view-chip')?.getAttribute('data-status')).toBe('failed')
+    expect(el.querySelector('.view-chip-why')).not.toBeNull()
+    expect(el.querySelector('.view-chip-retry')).toBeNull()
+    expect(el.querySelector('.view-chip-values')).toBeNull()
+    const opened: unknown[] = []
+    const off = bus.on('openChat', (e) => opened.push(e))
+    try {
+      await act(async () => el.querySelector<HTMLButtonElement>('.view-tab')!.click())
+    } finally {
+      off()
+    }
+    expect(opened).toEqual([{ chatId: 'c-posts' }])
+    expect(posted).toEqual([])
+  })
+
   test('a typed build auto mode refused offers Start it, which posts start-it', async () => {
     proposals = [P('posts', { status: 'failed', refused: { kind: 'auto-mode', reason: '[Auto-Mode Bypass]', request: 'rv' } })]
     const el = await chip('posts')
