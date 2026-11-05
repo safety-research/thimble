@@ -126,9 +126,11 @@ def board(tmp_path, monkeypatch) -> str:
     return "boards"
 
 
-async def test_a_view_that_failed_its_checks_is_told_with_no_retry_and_its_next_build_clears_it(board, bridge):
-    """A builder that stopped without passing the view's checks: the notice says why, and offers no Retry, which would
-    build the same files again; the analyst's reply in the build's thread goes on with the builder (Open)."""
+async def test_a_view_that_failed_its_checks_is_told_with_its_fixes_and_no_retry_and_its_next_build_clears_it(
+        board, bridge):
+    """A builder that stopped without passing the view's checks: the notice says what is wrong with the view in the
+    analyst's words, not the checks' own, and offers no Retry, which would build the same files again, but Ask Claude to
+    fix it, with what failed for the builder, and Discard the view; Open goes to the build's thread."""
     c = board
     slug = views.propose(c, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
     assert (await dev.start_build(c, slug, subagents.CLICK)).started
@@ -139,8 +141,10 @@ async def test_a_view_that_failed_its_checks_is_told_with_no_retry_and_its_next_
     subagents.run_ended(c, prop["agent_id"], "done", "I could not make it pass.", source="handback")
     await _until(lambda: (views.read_proposal(c, slug) or {}).get("status") == "failed", "it never failed")
     n = _open(f"agent:view:{slug}", c)
-    assert n["text"] == "The view Posts failed to build: problem: the page threw."
-    assert not n["action"]
+    assert n["text"] == f"The view Posts failed to build: {views.plain_failure('problem: the page threw')}."
+    fix, discard = n["action"]
+    assert fix["do"] == "view-fix" and "problem: the page threw" in fix["text"]
+    assert discard == {"label": dev.DISCARD_VIEW, "do": "view-discard", "slug": slug}
     assert n["agent"] == "View build: Posts" and n["chat"] == prop["chat"]
     await dev.start_build(c, slug, subagents.CLICK)
     await _until(lambda: _open(f"agent:view:{slug}", c) is None, "its next build left the notice")

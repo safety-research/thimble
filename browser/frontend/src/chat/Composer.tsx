@@ -5,7 +5,8 @@
 // writer, a check's run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the composer
 // carries its Stop, beside the send square once text is typed (ComposerFrame), as Esc is in Claude Code. Each thread
 // keeps its own draft. Text offered
-// from outside the chat (chat/pending offerDraft: a failed fix's Ask Claude) joins its thread's draft. A "/" at the start
+// from outside the chat (chat/pending offerDraft: a failed fix's Ask Claude, a failed view's Ask Claude to fix it)
+// joins its thread's draft, once. A "/" at the start
 // of the text opens the list of the commands the composer handles (commands.ts) above the sheet, one row each, its name
 // and what it does, as Claude Code lists its own; the list follows what is typed. ↑ and ↓ move in it; Enter, Tab or a
 // click puts the command in the text with a space after it, ready for its words, except that Enter on a command typed
@@ -63,9 +64,10 @@ export function withDraft(drafts: Readonly<Record<string, string>>, thread: stri
   return next
 }
 
-/** `drafts` with each offered text after its thread's draft, on a line of its own. Pure. */
+/** `drafts` with each offered text after its thread's draft, on a line of its own, unless the draft holds it already (a
+ * notice's Ask Claude to fix it clicked again). Pure. */
 export function withOffers(drafts: Readonly<Record<string, string>>, offers: readonly Offer[]): Readonly<Record<string, string>> {
-  return offers.reduce((d, o) => withDraft(d, o.thread, d[o.thread] ? `${d[o.thread]}\n${o.text}` : o.text), drafts)
+  return offers.reduce((d, o) => (d[o.thread]?.includes(o.text) ? d : withDraft(d, o.thread, d[o.thread] ? `${d[o.thread]}\n${o.text}` : o.text)), drafts)
 }
 
 export function Composer({ model, models, onModel, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, stop, thread = 'main', commands = COMMANDS, picker }: ComposerProps) {

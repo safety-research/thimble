@@ -8,8 +8,10 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { threadRetry } from '../../src/chat/ChatPanel.tsx'
+import { withOffers } from '../../src/chat/Composer.tsx'
 import { foldRecords, withApiErrors, type NoticeRow as NoticeRowT, type Row } from '../../src/chat/model.ts'
 import { NoticeStrip } from '../../src/chat/Notice.tsx'
+import { takeDrafts } from '../../src/chat/pending.ts'
 import { PROPOSALS_OFF_LINE } from '../../src/chat/ProposalCard.tsx'
 import { ThreadRows } from '../../src/chat/ThreadRows.tsx'
 import { bus } from '../../src/lib/bus.ts'
@@ -32,6 +34,9 @@ describe('a notice as the server sends it', () => {
     expect(parseNotice({ id: 'n2', text: BUILD, chat: 'dev-1', action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } })).toEqual({ id: 'n2', text: BUILD, chat: 'dev-1', action: { label: 'Retry', do: 'view-retry', slug: 'agent-network' } })
     expect(parseNotice({ id: 'n3', text: ' ' })).toBeNull()
     expect(noticeActions(null)).toEqual([])
+    // a view's Ask Claude to fix it keeps the words it puts in the composer
+    const fix = { label: 'Ask Claude to fix it', do: 'view-fix', slug: 'agent-network', text: 'Fix it.' }
+    expect(noticeActions([fix, { label: 'Discard the view', do: 'view-discard', slug: 'agent-network', text: ' ' }])).toEqual([fix, { label: 'Discard the view', do: 'view-discard', slug: 'agent-network' }])
   })
 
   test('one with the key of a notice shown replaces it in place; any other goes at the end; an end takes one by id, else by key', () => {
@@ -266,6 +271,44 @@ describe('the strip above the composer, and the rows', () => {
     ])
     expect(el.querySelector('.chat-notice')).toBeNull()
     expect(toasts).toEqual([PROPOSALS_OFF_LINE])
+  })
+
+  test("a view whose builder stopped without passing its checks: Ask Claude to fix it opens the build's thread with what failed in its composer and leaves the notice; Discard the view drops the view", async () => {
+    const FIX = 'The view didn’t pass its checks: “page: overview: test”. Please fix that and finish the view.'
+    const fix = { label: 'Ask Claude to fix it', do: 'view-fix', slug: 'agent-network', text: FIX }
+    const discard = { label: 'Discard the view', do: 'view-discard', slug: 'agent-network' }
+    open = [{ id: 'v1', key: 'agent:view:agent-network', kind: 'view', agent: 'View build: Agent Network', chat: 'dev-1', text: 'The view Agent Network failed to build: its page showed an error.', action: [fix, discard] }]
+    const opened: unknown[] = []
+    const offOpen = bus.on('openChat', (e) => void opened.push(e))
+    takeDrafts()
+    const el = await strip('nt-fix')
+    expect([...el.querySelectorAll('.chat-notice button')].map((b) => b.textContent || b.getAttribute('aria-label'))).toEqual(['Open', 'Ask Claude to fix it', 'Discard the view', 'Dismiss'])
+    const button = (label: string) => [...el.querySelectorAll('.chat-notice-act')].find((b) => b.textContent === label)
+    await click(button('Ask Claude to fix it'))
+    await settle()
+    offOpen()
+    expect(opened).toEqual([{ chatId: 'dev-1' }])
+    expect(takeDrafts()).toEqual([{ thread: 'dev-1', text: FIX }])
+    expect(sent).toEqual([])
+    expect(el.querySelectorAll('.chat-notice')).toHaveLength(1)
+    // clicked again, the composer holds the words once
+    expect(withOffers({ 'dev-1': FIX }, [{ thread: 'dev-1', text: FIX }])).toEqual({ 'dev-1': FIX })
+    expect(withOffers({ 'dev-1': 'Also a legend.' }, [{ thread: 'dev-1', text: FIX }])).toEqual({ 'dev-1': `Also a legend.\n${FIX}` })
+    await click(button('Discard the view'))
+    await settle()
+    await settle()
+    expect(sent).toEqual(['POST /api/ws/nt-fix/views/proposals/agent-network/discard', 'POST /api/ws/nt-fix/notices/v1/dismiss'])
+    expect(el.querySelector('.chat-notice')).toBeNull()
+  })
+
+  test('Ask Claude to fix it shows only with the thread it opens and the words it puts there', async () => {
+    open = [
+      { id: 'v1', text: 'The view A failed to build: its page showed an error.', action: { label: 'Ask Claude to fix it', do: 'view-fix', slug: 'a', text: 'Fix it.' } },
+      { id: 'v2', chat: 'dev-2', text: 'The view B failed to build: its page showed an error.', action: { label: 'Ask Claude to fix it', do: 'view-fix', slug: 'b' } },
+    ]
+    const el = await strip('nt-fix-none')
+    expect(el.querySelectorAll('.chat-notice')).toHaveLength(2)
+    expect(el.querySelectorAll('.chat-notice-act')).toHaveLength(0)
   })
 
   test('Open Settings opens Settings and leaves the notice; an action this page does not know shows no button', async () => {

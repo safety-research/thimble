@@ -3151,6 +3151,27 @@ def stop_build(c: str, slug: str) -> dict[str, Any]:
     return {"ok": True}
 
 
+def discard(c: str, slug: str) -> dict[str, Any]:
+    """Discard on the notice of a view whose builder stopped without passing its checks (dev._view_notice): a view whose
+    build failed goes, with its proposal (delete_proposal); a built view whose last change failed stays as it is, the
+    change dropped, so its chip shows it built again. 404 for no such proposal, 409 for one with no failed build or
+    change."""
+    from . import dev  # noqa: PLC0415
+
+    prop = read_proposal(c, slug)
+    if prop is None:
+        raise HTTPException(404, f"no such proposal: {slug}")
+    if prop.get("status") == "failed":
+        delete_proposal(c, slug)
+        return {"ok": True, "deleted": True}
+    if prop.get("status") != "built" or prop.get("failed_change") is None:
+        raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, with no failed build or change")
+    update_proposal(c, slug, failed_change=None, error=None, refused=None, stopped_by=None, checks_failed=None)
+    _emit(c, slug, "built", chat=prop.get("chat"))
+    dev._view_cleared(c, slug)
+    return {"ok": True}
+
+
 def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
     """Leave the proposal of an orientation from before 0.8.0 out once the analyst stopped the orientation before its
     view was built (dev.stop_orientation_views): the row stays as `dropped` with the reason, so every chip that names it
@@ -3350,6 +3371,19 @@ def kept_report(report: dict[str, Any], chars: int = 600) -> str:
     lines = "\n".join(gate_lines(report))
     head = first_failure(report)
     return (f"{head}\n{lines}" if head else lines)[:chars]
+
+
+# what is wrong with a view whose checks failed, in the analyst's words, by the kind of their first failure as
+# gate_lines writes it: its page, a citation of its files, or another problem of how it reads and shows them
+PLAIN_FAILURES = (("page: ", "its page showed an error"),
+                  ("bad ", "some citations of its files didn't open the right record in it"),
+                  ("problem: ", "it didn't read or show its files as it should"))
+
+
+def plain_failure(first: str) -> str:
+    """What is wrong with a view whose checks failed, in the analyst's words, for its notice (dev._view_notice): by the
+    kind of `first`, the first failure of its checks' report (first_failure); '' for a line of no such kind."""
+    return next((words for head, words in PLAIN_FAILURES if str(first or "").startswith(head)), "")
 
 
 _PAGE_LOADED = re.compile(r"^page: [a-z]+, ")  # a page line of a page that loaded (gate_lines)
@@ -5438,6 +5472,16 @@ async def stop_build_route(c: str, slug: str, request: Request) -> dict[str, Any
     config.workspace_dir(c)
     _bind_loop()
     return stop_build(c, slug)
+
+
+@router.post("/ws/{c}/views/proposals/{slug}/discard")
+async def discard_route(c: str, slug: str, request: Request) -> dict[str, Any]:
+    """Discard the view whose build failed, or the failed change to a built view (discard), a click (404 for no such
+    proposal, 409 for one with nothing failed)."""
+    _click(request)
+    config.workspace_dir(c)
+    _bind_loop()
+    return discard(c, slug)
 
 
 class ViewMessage(BaseModel):

@@ -11,12 +11,15 @@ action, ts}: `text` is one sentence that reads alone (it names the agent and the
 such as /login or `thimble server restart`); `details` is the whole of it when `text` had to be shortened (TEXT_CHARS,
 or a failure's words cut by gist), which the page shows on Show more, else None; `agent` names the agent in a few words
 ("Orientation", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to; `action`
-is the button, one object {label, do, slug?} or a list of them, `do` one of ACTIONS:
+is the button, one object {label, do, slug?, text?} or a list of them, `do` one of ACTIONS:
 
   proposals-retry  POST /api/ws/{c}/views/propose-now (proposer.run_now)
   proposals-off    PUT /api/ws/{c}/settings {propose_views: false}
   settings         open Settings
   view-retry       the failed view's Retry (its slug in `slug`)
+  view-fix         open the view's build thread (`chat`) with `text` in its composer, for the analyst to send to its
+                   builder (its slug in `slug`)
+  view-discard     POST /api/ws/{c}/views/proposals/{slug}/discard (views.discard)
   sign-out         POST /api/ui/signout (the browser's id in slug)
 
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
@@ -83,7 +86,7 @@ _loop: asyncio.AbstractEventLoop | None = None
 TYPE = "notice"  # the event's type on the workspace stream, and the row's type in a chat's log
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
-ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out")
+ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "view-fix", "view-discard", "sign-out")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
@@ -141,8 +144,9 @@ def gist(text: Any, limit: int) -> str:
 
 def _action(a: Any) -> dict[str, str]:
     if not isinstance(a, dict) or a.get("do") not in ACTIONS or not str(a.get("label") or "").strip():
-        raise ValueError(f"a notice's action is {{label, do, slug?}} with `do` one of {', '.join(ACTIONS)}: {a!r}")
-    return {k: str(a[k]) for k in ("label", "do", "slug") if a.get(k)}
+        raise ValueError(f"a notice's action is {{label, do, slug?, text?}} with `do` one of {', '.join(ACTIONS)}: "
+                         f"{a!r}")
+    return {k: str(a[k]) for k in ("label", "do", "slug", "text") if a.get(k)}
 
 
 def _actions(action: Any) -> dict[str, str] | list[dict[str, str]] | None:
