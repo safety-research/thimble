@@ -344,6 +344,20 @@ def test_the_options_that_cannot_work_stop_before_anything(w):
     assert not w.th.exists()
 
 
+@pytest.mark.parametrize("system", ["MINGW64_NT-10.0-22631", "MSYS_NT-10.0-22631", "CYGWIN_NT-10.0-22631"])
+def test_on_windows_itself_the_install_stops_at_once_and_names_wsl_2(w, system):
+    """Git Bash, MSYS2 or Cygwin on Windows itself, as uname -s names them: thimble runs on Windows only in WSL 2, so
+    the install says so and stops before it runs any program of its own or downloads anything."""
+    stub(w.bin / "uname", f'echo "{system}"\n')
+    ran = w.tmp / "python-ran.log"
+    stub(w.bin / "python3", f'echo "$@" >> "{ran}"\nexec "{sys.executable}" "$@"\n')
+    p = w.install("--no-browser", THIMBLE_PYTHON=str(w.bin / "python3"))
+    assert p.returncode == 2 and p.stdout == "", text_of(p)
+    assert p.stderr == "install.sh: thimble runs on Windows only in WSL 2 (wsl --install)\n"
+    assert not ran.exists() and w.calls() == [] and not w.th.exists() and not w.cc.exists()
+    assert not list((w.tmp / "tmp").glob("thimble-install.*"))
+
+
 # ------------------------------------------------------------------ what is missing, and what fails
 
 
