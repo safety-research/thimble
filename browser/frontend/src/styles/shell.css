@@ -452,6 +452,38 @@
   font: var(--type-body-sm);
   overflow-wrap: anywhere;
 }
+/* Claude access (shell/ClaudeAccess ClaudeAccessRow): its line, the way's menu at the right after the check's spinner or
+   mark, then, above the one hairline, the way's field and what a failed check or a refused save said */
+.settings-access {
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-access > .settings-line {
+  border-bottom: 0;
+}
+/* the chip's chevron lines up with the switches' right edge */
+.settings-access-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-right: -6px;
+}
+.settings-access-ok {
+  flex: none;
+  color: var(--status-positive);
+}
+.settings-access-more {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.settings-access-said {
+  margin: 0;
+  color: var(--status-negative);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
 /* the Models line: its name in a heading's caps, while folded the models and the efforts in use, and its chevron */
 .settings-fold {
   display: flex;

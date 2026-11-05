@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
-// The page's own commands in the chat's composer (src/chat/commands.ts pageCommand, ChatPanel's send): /login opens the
-// step that chooses how the workbench reaches Claude (src/shell/ClaudeAccess.tsx), as Claude Code's /login opens its
-// sign-in, on its own rather than under Settings; /tour runs the tour from its first step (src/shell/TourHost.tsx). A "/"
-// lists both, each with what it does. Alone in the message each goes to no session; with words after it, the message is
-// one for Claude, as any other.
+// The page's own command in the chat's composer (src/chat/commands.ts pageCommand, ChatPanel's send): /tour runs the tour
+// from its first step (src/shell/TourHost.tsx). A "/" lists it with what it does. Alone in the message it goes to no
+// session; with words after it, the message is one for Claude, as any other. There is no /login: the workbench signs
+// no one in, and Settings' first row, Claude access, switches how it reaches Claude (settings.test.tsx).
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
-import { COMMANDS, commandsFor, LOGIN_COMMAND, pageCommand, TOUR_COMMAND } from '../../src/chat/commands.ts'
+import { COMMANDS, commandsFor, pageCommand, TOUR_COMMAND } from '../../src/chat/commands.ts'
 import { bus } from '../../src/lib/bus.ts'
 import type { ChatMeta } from '../../src/lib/types.ts'
 import { ClaudeAccessHost } from '../../src/shell/ClaudeAccess.tsx'
@@ -16,19 +15,20 @@ import { mount, settle, unmountAll } from './mount.tsx'
 const T = '2026-11-05T10:00:00+00:00'
 
 describe('which messages are the page’s own commands', () => {
-  test('/login and /tour alone; with words after them, or as part of a longer name, they are not', () => {
-    expect(pageCommand('/login')).toBe('claudeAccess')
+  test('/tour alone; with words after it, or as part of a longer name, it is not; /login is no command', () => {
     expect(pageCommand('  /tour \n')).toBe('tour')
-    expect(pageCommand('/login with my new key')).toBeNull()
-    expect(pageCommand('/logins')).toBeNull()
+    expect(pageCommand('/tour the views')).toBeNull()
+    expect(pageCommand('/tours')).toBeNull()
     expect(pageCommand('/rewind')).toBeNull()
     expect(pageCommand('what does /tour show?')).toBeNull()
+    expect(pageCommand('/login')).toBeNull()
   })
 
-  test('a "/" lists both, each with what it does', () => {
-    expect(commandsFor('/lo').map((c) => c.name)).toEqual([LOGIN_COMMAND])
+  test('a "/" lists /tour with what it does, and no /login', () => {
     expect(commandsFor('/to').map((c) => c.name)).toEqual([TOUR_COMMAND])
-    for (const name of [LOGIN_COMMAND, TOUR_COMMAND]) expect(COMMANDS.find((c) => c.name === name)?.about, name).toBeTruthy()
+    expect(COMMANDS.find((c) => c.name === TOUR_COMMAND)?.about).toBeTruthy()
+    expect(commandsFor('/lo')).toEqual([])
+    expect(COMMANDS.map((c) => c.name)).not.toContain('/login')
   })
 })
 
@@ -69,24 +69,6 @@ describe("in the chat's composer", () => {
     await act(async () => el.querySelector<HTMLButtonElement>('.chat-composer button.composer-send')!.click())
     await settle()
   }
-  const dialog = () => document.querySelector<HTMLElement>('[role="dialog"].access')
-
-  test('/login opens the step that chooses how the workbench reaches Claude, and goes to no session', async () => {
-    const el = await mount(
-      <>
-        <ChatPanel ws="mini" />
-        <ClaudeAccessHost />
-      </>,
-    )
-    await settle()
-    expect(dialog()).toBeNull()
-    await send(el, '/login')
-    expect(dialog()?.textContent).toContain('How should the workbench reach Claude?')
-    // the chosen way is the one picked
-    expect(dialog()?.querySelector<HTMLInputElement>('[data-how="api-key"] input')?.checked).toBe(true)
-    expect(posted).toEqual([])
-    expect(box(el).value).toBe('')
-  })
 
   test('/tour runs the tour, and goes to no session', async () => {
     const heard = vi.fn()
@@ -103,17 +85,16 @@ describe("in the chat's composer", () => {
     }
   })
 
-  test('with words after it, /login is a message for Claude, as any other', async () => {
-    const heard = vi.fn()
-    const off = bus.on('claudeAccess', heard)
-    try {
-      const el = await mount(<ChatPanel ws="mini" />)
-      await settle()
-      await send(el, '/login with my new key')
-      expect(heard).not.toHaveBeenCalled()
-      expect(posted).toEqual([{ url: '/api/ws/mini/events', body: { kind: 'main', payload: { text: '/login with my new key' } } }])
-    } finally {
-      off()
-    }
+  test('/login is a message for Claude, as any other, and opens no step', async () => {
+    const el = await mount(
+      <>
+        <ChatPanel ws="mini" />
+        <ClaudeAccessHost />
+      </>,
+    )
+    await settle()
+    await send(el, '/login')
+    expect(document.querySelector('[role="dialog"].access')).toBeNull()
+    expect(posted).toEqual([{ url: '/api/ws/mini/events', body: { kind: 'main', payload: { text: '/login' } } }])
   })
 })

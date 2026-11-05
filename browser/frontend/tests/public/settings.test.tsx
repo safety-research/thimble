@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
-// The settings popover (src/shell/SettingsPopover.tsx): one flat list, "Claude can edit files in this folder", Ask Claude
-// with and Models, with no Save, no Cancel, no headings and no notes, every change sent at once. Models is open until
-// the person folds it, which this browser keeps, and folded its line names the models and efforts in use. Each row is
-// an agent by its plain name with a model menu, an effort menu and, where the row has fast mode and its model has it,
-// the fast-mode bolt. Main's row is main's session's model, effort and fast mode, as the composer's line, sent to
-// main's session routes (chat/mainChoice); the others go to thimble's config. While the config has an error, it shows
-// first, and Ask Claude with and every row but main's are dimmed.
+// The settings popover (src/shell/SettingsPopover.tsx): one flat list, Claude access, "Claude can edit files in this
+// folder", Ask Claude with and Models, with no Save, no Cancel, no headings and no notes, every change sent at once.
+// Claude access (src/shell/ClaudeAccess.tsx ClaudeAccessRow) shows how the workbench reaches Claude and switches it with
+// one PUT that saves and checks the way: a pick that has what it needs at once, an API key pasted or a WIF config file
+// named in the field under the row; a failed check or a refused save says why under the row. Models is open until the
+// person folds it, which this browser keeps, and folded its line names the models and efforts in use. Each row is an
+// agent by its plain name with a model menu, an effort menu and, where the row has fast mode and its model has it, the
+// fast-mode bolt. Main's row is main's session's model, effort and fast mode, as the composer's line, sent to main's
+// session routes (chat/mainChoice); the others go to thimble's config. While the config has an error, it shows first,
+// and Ask Claude with and every row but main's are dimmed.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { ACCESS_LABEL, ACCESS_WAYS, accessNeeds, problemWords } from '../../src/shell/ClaudeAccess.tsx'
 import { ASK_KEY_LABEL, EDITS_LABEL, FAST_ROLES, MODEL_ROWS, MODELS_OPEN_KEY, SettingsPopover, askKeyOptions, modelsGist, roleEfforts, showsFast } from '../../src/shell/SettingsPopover.tsx'
 import { choiceWords } from '../../src/chat/mainChoice.ts'
 import { bus } from '../../src/lib/bus.ts'
@@ -36,6 +40,16 @@ const SETTINGS: Settings = {
 }
 const ATTACHED: Attached = { session: 's1', cwd: '/c', since: '', effort: 'medium' }
 
+/** How the workbench reaches Claude, as GET /api/claude-access gives it (backend claude_access.status) */
+interface Access {
+  how: '' | 'api-key' | 'claude-code' | 'wif'
+  key_saved: boolean
+  env_key: boolean
+  wif_file: string
+  problem: { what: string; fix: string } | null
+}
+const SIGNED_IN: Access = { how: 'claude-code', key_saved: false, env_key: false, wif_file: '', problem: null }
+
 let puts: [string, unknown][] = []
 let toasts: string[] = []
 /** main's session, as main's chat gives it */
@@ -44,13 +58,22 @@ let attached: Attached | null = ATTACHED
 let settings: Settings = SETTINGS
 /** a PUT the server refuses, by its route's end */
 let refuse: string | null = null
+/** how the workbench reaches Claude; what the check after a PUT /claude-access finds (null: Claude answers); what a
+ * refused PUT /claude-access says */
+let access: Access = SIGNED_IN
+let checkFails: { what: string; fix: string } | null = null
+let accessRefused: string | null = null
 let offToast = () => {}
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 beforeEach(() => {
   puts = []
   toasts = []
   attached = ATTACHED
   settings = SETTINGS
   refuse = null
+  access = SIGNED_IN
+  checkFails = null
+  accessRefused = null
   invalidateSettings('mini')
   window.localStorage.clear()
   offToast = bus.on('toast', (t) => void toasts.push(t.text))
@@ -59,10 +82,19 @@ beforeEach(() => {
     const u = String(url)
     if (init?.method === 'PUT') {
       puts.push([u, JSON.parse(String(init.body))])
-      if (refuse && u.endsWith(refuse)) return new Response(JSON.stringify({ detail: 'nope' }), { status: 400, headers: { 'content-type': 'application/json' } })
+      if (refuse && u.endsWith(refuse)) return json({ detail: 'nope' }, 400)
+    }
+    if (u.endsWith('/claude-access')) {
+      if (init?.method === 'PUT') {
+        if (accessRefused) return json({ detail: accessRefused }, 400)
+        const b = JSON.parse(String(init.body)) as { how: Access['how']; key?: string; wif_file?: string }
+        access = { ...access, how: b.how, key_saved: access.key_saved || !!b.key, wif_file: b.how === 'wif' ? (b.wif_file ?? '') : '', problem: null }
+        return json({ ...access, describe: '', consent_text: '', check: checkFails ? { ok: false, how: b.how, describe: '', problem: checkFails } : { ok: true, how: b.how, describe: '' } })
+      }
+      return json({ ...access, describe: '', consent_text: '' })
     }
     const body = u.includes('/settings') ? settings : u.includes('/session/') ? {} : { meta: { id: 'main', attached } }
-    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    return json(body)
   })
 })
 afterEach(() => {
@@ -137,9 +169,12 @@ describe('the rules', () => {
 })
 
 describe('the popover', () => {
-  test('one flat list: the edits switch, Ask Claude with and Models, open, with no Save, Cancel, headings or notes', async () => {
+  test('one flat list: Claude access, the edits switch, Ask Claude with and Models, open, with no Save, Cancel, headings or notes', async () => {
     await open()
     const doc = document.body
+    const lines = [...doc.querySelectorAll('.settings > [data-setting], .settings > .settings-fold')]
+    expect(lines.map((l) => l.getAttribute('data-setting') ?? 'models')).toEqual(['claude-access', 'corpus-edits', 'ask-key', 'models'])
+    expect(q('[data-setting="claude-access"] .settings-name')?.textContent).toBe(ACCESS_LABEL)
     expect(q('.settings-line[data-setting="corpus-edits"] .settings-name')?.textContent).toBe(EDITS_LABEL)
     expect(q('.settings-line[data-setting="ask-key"] .settings-name')?.textContent).toBe(ASK_KEY_LABEL)
     expect(q('.settings-fold')?.getAttribute('aria-expanded')).toBe('true')
@@ -153,7 +188,7 @@ describe('the popover', () => {
     const buttons = [...doc.querySelectorAll('button')].map((b) => b.textContent)
     for (const gone of ['Save', 'Cancel', 'Take the tour', 'Change']) expect(buttons).not.toContain(gone)
     expect(doc.querySelectorAll('[role="switch"]')).toHaveLength(1)
-    expect(doc.textContent).not.toMatch(/Claude access|if refused|next start|CLAUDE\.md|permission mode|Asks nothing|View proposals switch|ignores/i)
+    expect(doc.textContent).not.toMatch(/if refused|next start|CLAUDE\.md|permission mode|Asks nothing|View proposals switch|ignores|\/login/i)
     expect(doc.querySelector('.settings-error')).toBeNull()
   })
 
@@ -305,5 +340,133 @@ describe('the popover', () => {
     expect(puts).toEqual([])
     expect(q<HTMLButtonElement>('[aria-label="Model for Main and side threads"]')!.disabled).toBe(false)
     expect(q<HTMLButtonElement>('[role="switch"]')!.disabled).toBe(false)
+    // how the workbench reaches Claude is not thimble's config: its row comes next, and takes picks
+    expect(first.nextElementSibling?.getAttribute('data-setting')).toBe('claude-access')
+    expect(q<HTMLButtonElement>(`[aria-label="${ACCESS_LABEL}"]`)!.disabled).toBe(false)
+  })
+})
+
+describe('Claude access', () => {
+  const access_ = () => q('[data-setting="claude-access"]')!
+  const way = () => q(`[aria-label="${ACCESS_LABEL}"]`)!
+  const under = () => access_().querySelector('.settings-access-said')?.textContent ?? ''
+  const field = (label: string) => q<HTMLInputElement>(`[data-setting="claude-access"] input[aria-label="${label}"]`)
+  const KEY = 'Anthropic API key'
+  const FILE = 'Workload Identity Federation config file'
+  /** `text` typed in the field `label` names, then Enter */
+  const enter = async (label: string, text: string) => {
+    const input = field(label)!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => void input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    await settle()
+    await settle()
+  }
+  const accessPuts = () => puts.filter(([u]) => u.endsWith('/claude-access')).map(([, b]) => b)
+
+  test('the ways in the order of the install’s question; what each needs from the row; a problem in words', () => {
+    expect(ACCESS_WAYS.map((w) => w.label)).toEqual(['Claude Code sign-in', 'API key', 'Workload Identity Federation'])
+    expect(accessNeeds('claude-code', null, '')).toBe('')
+    expect(accessNeeds('api-key', { env_key: false, key_saved: false }, '')).toBe('key')
+    expect(accessNeeds('api-key', { env_key: true, key_saved: false }, '')).toBe('')
+    expect(accessNeeds('api-key', { env_key: false, key_saved: true }, '')).toBe('')
+    expect(accessNeeds('wif', null, ' ')).toBe('file')
+    expect(accessNeeds('wif', null, '~/wif.toml')).toBe('')
+    expect(problemWords({ what: 'Claude Code is not signed in.', fix: 'Run claude in a terminal and sign in.' })).toBe('Claude Code is not signed in. Run claude in a terminal and sign in.')
+    expect(problemWords({ what: 'The check failed.', fix: '' })).toBe('The check failed.')
+    expect(problemWords(null)).toBe('')
+  })
+
+  test('the first row shows the way chosen, and its menu lists the three ways with that one checked', async () => {
+    await open()
+    expect(way().textContent).toBe('Claude Code sign-in')
+    expect(access_().getAttribute('data-how')).toBe('claude-code')
+    await click(way())
+    const items = [...document.body.querySelectorAll<HTMLButtonElement>('.popover[role="menu"] .menu-item')]
+    expect(items.map((b) => [b.textContent, b.getAttribute('aria-checked')])).toEqual([
+      ['Claude Code sign-in', 'true'],
+      ['API key', 'false'],
+      ['Workload Identity Federation', 'false'],
+    ])
+    // nothing is saved or checked by opening it
+    expect(accessPuts()).toEqual([])
+    expect(access_().querySelector('input')).toBeNull()
+    expect(under()).toBe('')
+  })
+
+  test('a pick that has what it needs is saved and checked at once; a failed check says why under the row', async () => {
+    access = { ...SIGNED_IN, how: 'api-key', env_key: true }
+    await open()
+    // ANTHROPIC_API_KEY is set where the workbench runs: the row takes no key
+    expect(way().textContent).toBe('API key')
+    expect(field(KEY)).toBeNull()
+    checkFails = { what: 'Claude Code is not signed in.', fix: 'Run claude in a terminal and sign in.' }
+    await pick(ACCESS_LABEL, 'claude-code')
+    expect(accessPuts()).toEqual([{ how: 'claude-code', consent: true }])
+    expect(way().textContent).toBe('Claude Code sign-in')
+    expect(under()).toBe('Claude Code is not signed in. Run claude in a terminal and sign in.')
+    expect(access_().querySelector('.settings-access-ok')).toBeNull()
+    // a pick of the way saved saves and checks it again
+    checkFails = null
+    await pick(ACCESS_LABEL, 'claude-code')
+    expect(accessPuts()).toHaveLength(2)
+    expect(under()).toBe('')
+    expect(access_().querySelector('.settings-access-ok')).not.toBeNull()
+    await pick(ACCESS_LABEL, 'api-key')
+    expect(accessPuts()[2]).toEqual({ how: 'api-key', consent: false })
+    expect(toasts).toEqual([])
+  })
+
+  test('an API key without ANTHROPIC_API_KEY waits for the key pasted under the row, which Enter saves and checks; the field never shows a key', async () => {
+    await open()
+    await pick(ACCESS_LABEL, 'api-key')
+    // nothing to save yet: the row shows the pick and its field
+    expect(accessPuts()).toEqual([])
+    expect(way().textContent).toBe('API key')
+    expect(field(KEY)?.type).toBe('password')
+    expect(field(KEY)?.placeholder).toBe('sk-ant-…')
+    await enter(KEY, '  sk-ant-made-up  ')
+    expect(accessPuts()).toEqual([{ how: 'api-key', key: 'sk-ant-made-up', consent: false }])
+    expect(field(KEY)?.value).toBe('')
+    expect(field(KEY)?.placeholder).toBe('A key is saved')
+    expect(access_().querySelector('.settings-access-ok')).not.toBeNull()
+    unmountAll()
+    // opened again, the saved key is never in the field
+    await open()
+    expect(way().textContent).toBe('API key')
+    expect(field(KEY)?.value).toBe('')
+    expect(field(KEY)?.placeholder).toBe('A key is saved')
+  })
+
+  test('a refused save says why under the row, and the pick and the path typed stay to be put right', async () => {
+    await open()
+    await pick(ACCESS_LABEL, 'wif')
+    expect(accessPuts()).toEqual([])
+    expect(field(FILE)?.value).toBe('')
+    accessRefused = 'there is no file /home/analyst/wif.toml'
+    await enter(FILE, '~/wif.toml')
+    expect(accessPuts()).toEqual([{ how: 'wif', wif_file: '~/wif.toml', consent: false }])
+    expect(under()).toBe('there is no file /home/analyst/wif.toml')
+    expect(way().textContent).toBe('Workload Identity Federation')
+    expect(field(FILE)?.value).toBe('~/wif.toml')
+    // leaving the field sends nothing it sent before
+    await act(async () => void field(FILE)!.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+    await settle()
+    expect(accessPuts()).toHaveLength(1)
+    accessRefused = null
+    await enter(FILE, '~/wif-config.toml')
+    expect(accessPuts()[1]).toEqual({ how: 'wif', wif_file: '~/wif-config.toml', consent: false })
+    expect(under()).toBe('')
+    expect(field(FILE)?.value).toBe('~/wif-config.toml')
+  })
+
+  test('a way that is chosen but lacks something says so under the row when Settings opens', async () => {
+    access = { ...SIGNED_IN, how: 'api-key', problem: { what: 'No API key: ANTHROPIC_API_KEY is not set, and no key is saved.', fix: 'Paste one in Settings, Claude access, or set ANTHROPIC_API_KEY and start thimble-browser again.' } }
+    await open()
+    expect(under()).toBe('No API key: ANTHROPIC_API_KEY is not set, and no key is saved. Paste one in Settings, Claude access, or set ANTHROPIC_API_KEY and start thimble-browser again.')
+    expect(field(KEY)).not.toBeNull()
+    expect(accessPuts()).toEqual([])
   })
 })

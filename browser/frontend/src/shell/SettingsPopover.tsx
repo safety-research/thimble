@@ -1,7 +1,8 @@
 // The settings gear's popover: one flat list, every change applied at once; Escape or a click outside closes it. While
 // thimble's config has an error the error comes first, its paths from the home folder as ~ (backend userconf.problem),
 // and the config takes no write until the file is fixed, so Ask Claude with and every Models row but main's are
-// dimmed. Then "Claude can edit files in this folder", whether main and its thread forks may write the corpus
+// dimmed. Then Claude access, how the workbench reaches Claude, one choice for the install (shell/ClaudeAccess
+// ClaudeAccessRow); "Claude can edit files in this folder", whether main and its thread forks may write the corpus
 // folder of this workspace (the workspace's settings.json `corpus_edits`, on by default; thimble's other agents never
 // write it); "Ask Claude with", the key held with a click to ask Claude about what the pointer is on, ⌘-click or ⌥-click
 // (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the canvas (thimble's config `askKey`,
@@ -29,6 +30,7 @@ import { EFFORTS, type Attached, type MainEffort, type ModelConf, type Settings 
 import { readStorage, writeStorage } from '../lib/workspace'
 import { chooseMain, type MainChoice } from '../chat/mainChoice'
 import { EFFORT_CHOICES, FastBolt, effortWord, mainEffort, mainFast, mainModel } from '../chat/ModelLine'
+import { ClaudeAccessRow } from './ClaudeAccess'
 
 /** The switch that lets main and its thread forks write the corpus folder, per workspace (backend ledger.EDITS_KEY). */
 export const EDITS_LABEL = 'Claude can edit files in this folder'
@@ -249,6 +251,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             {problem}
           </div>
         )}
+        <ClaudeAccessRow />
         {!settings && !error && (
           <div className="settings-loading dim">
             <Spinner size={10} label="Loading settings" />
