@@ -341,13 +341,17 @@ class BackgroundCLI:
     def __init__(self, options: Any, made: list["BackgroundCLI"], ends: bool) -> None:
         self.options, self.ends, self.jobs, self.closed = options, ends, [], False
         self.prompts: asyncio.Queue = asyncio.Queue()
+        self.sent: list[Any] = []  # the prompts it read
         self.stream: Any = None
+        self.on_close: Any = None  # called as it starts to close, while its commands still run
         made.append(self)
 
     async def __aenter__(self) -> "BackgroundCLI":
         return self
 
     async def __aexit__(self, *a: Any) -> None:
+        if self.on_close is not None:
+            self.on_close()
         self.closed = True
         for p in self.jobs:
             p.kill()
@@ -370,7 +374,7 @@ class BackgroundCLI:
             return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
                                  session_id="sess-bg")
 
-        await self.prompts.get()
+        self.sent.append(await self.prompts.get())
         yield SystemMessage(subtype="init", data={"session_id": "sess-bg"})
         yield AssistantMessage(content=[ToolUseBlock(id="toolu_bg", name="Bash", input={
             "command": "sleep 600", "run_in_background": True})], model="claude-opus-5-5")
@@ -382,6 +386,7 @@ class BackgroundCLI:
         yield done()
         while True:
             sent = await self.prompts.get()
+            self.sent.append(sent)
             if self.ends:  # the command ended while no turn ran: Claude Code's own turn, before it reads the prompt
                 self.jobs.pop().kill()
                 yield SystemMessage(subtype="background_tasks_changed", data={"tasks": []})
@@ -445,6 +450,27 @@ async def test_main_s_next_turn_reads_the_turn_claude_code_ran_when_its_backgrou
     texts = [t for k, t in shape(main_records()) if k == "text"]
     assert texts[-2:] == ["The job ended.", "Still here."]
     assert made[0].closed and runtime._spaces[CORPUS].main.cc is None, "no command runs, so the session closed"
+
+
+@pytest.mark.parametrize("how", ["a new chat", "a rewind"])
+async def test_a_turn_that_starts_while_main_s_kept_session_closes_goes_on_in_the_new_chat_or_at_the_cut(
+        on, monkeypatch, claude_config, how):
+    """Main's kept session takes a while to close, as its `claude` stops its background commands, and a message that
+    comes meanwhile starts main's next turn. So main is the new chat by then, and a rewind has cut main's conversation:
+    that turn goes on in the new chat, and resumes at the cut, never in the chat left or the session before the cut."""
+    made = background_cli(monkeypatch)
+    await main_turn("Start the long job.")
+    sp = runtime._spaces[CORPUS]
+    left, state, seen = sp.main, sp.main.state_path("cc"), {}
+    made[0].on_close = lambda: seen.update(main=sp.main, state=state.exists())
+    if how == "a new chat":
+        await sp.switch(None)
+        assert seen["main"] is not left
+    else:
+        cc_transcript("sess-bg", [cc_record("user", "u0", made[0].sent[0]["message"]["content"])])
+        await runtime.rewind_main(CORPUS, next(r["event"] for r in main_records() if runtime._analyst_message(r)))
+        assert seen["state"] is False, "the first message: no session is left to resume"
+    assert made[0].closed and made[0].jobs[0].poll() is not None
 
 
 # bubblewrap on a host that lets it make its own namespaces but refuses the user namespace the sandbox's seccomp helper

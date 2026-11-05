@@ -432,20 +432,18 @@ class Space:
         (drop_waiting), runtime/main.json names the chat, the mirror follows its transcript (session.attach, which reads
         a chat brought back from its end), and main's log gets one line that says so. A new chat while main's chat has
         no turn yet is that chat. False when nothing changed. ValueError for an id that is no chat of this workspace."""
-        from . import agents  # noqa: PLC0415
+        from . import agents, runtime_cc  # noqa: PLC0415
 
         if sid is not None and (not SID_OK.match(sid) or not (self.dir / f"{sid}.jsonl").is_file()):
             raise ValueError(f"no chat {sid} in this workspace")
         if sid == self.sid or (sid is None and not _chat_of(self.main_path)["turns"]):
             self.attach()
             return False
-        from . import runtime_cc  # noqa: PLC0415
-
         self.drop_waiting()
         self.carried.clear()  # a rewind goes back only within main's chat now (rewind_main)
         if self.main.running:
             await _cancel(self.main.task)
-        await runtime_cc.close(self.main)
+        left = self.main
         self.sid = sid or str(uuid.uuid4())
         nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         self.main = self._main_conv()
@@ -455,6 +453,9 @@ class Space:
         else:
             got = _chat_of(self.main_path)
             agents.chip(self.c, CHAT_CHIP, RESUMED_CHAT.format(first=got["first"] or "a chat"))
+        # the session kept open for the chat left closes, and its background commands with it; a message that comes
+        # while it closes is the new chat's
+        await runtime_cc.close(left)
         return True
 
     @property
@@ -1262,7 +1263,6 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
         except RewindRefused:
             after_stop(c)  # the turn stopped all the same: what waited for it is main's next turn, as after a Stop
             raise
-    await runtime_cc.close(sp.main)  # a session kept open goes too, so main's next turn resumes at the cut
     try:
         for path, held, save in plan:
             if held is None:
@@ -1290,7 +1290,12 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 — such as a full disk: the words still come back in the reply
             log.warning("%s: the rewind's line was not written in main's chat", c, exc_info=True)
     finally:
-        after_stop(c)
+        # a session kept open for main closes too, and its background commands with it, so main's next turn resumes at
+        # the cut, also a turn that starts while it closes
+        try:
+            await runtime_cc.close(sp.main)
+        finally:
+            after_stop(c)
     return {"text": text, "event": event_id}
 
 
