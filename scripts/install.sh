@@ -279,10 +279,10 @@ main() {
   [ "$sign_in" != wif ] || [ -n "$wif_file" ] || terminal ||
     stop "--sign-in wif needs --wif-file PATH, the path of your WIF config file"
   [ "$web" = 1 ] || [ -z "$sign_in" ] || stop "--sign-in sets up the workbench, which --no-browser leaves out"
-  case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) stop "thimble runs on Windows only in WSL 2 (wsl --install)" ;; esac
+  case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) stop "thimble runs on Windows only inside WSL 2. In PowerShell:" \
+    "wsl --install (restart if asked), then open Ubuntu from the Start menu and run this install command there." ;; esac
   py="${THIMBLE_PYTHON:-python3}" url="${THIMBLE_UPDATE_URL:-https://github.com/safety-research/thimble.git}"
-  home="${THIMBLE_HOME:-$HOME/.thimble}"
-  fixes="$home/fixes"
+  home="${THIMBLE_HOME:-$HOME/.thimble}" fixes="${THIMBLE_HOME:-$HOME/.thimble}/fixes"
   # the install's own folder: the kernel takes --notes and --state only in one so named (install.py in_work)
   work="$(mktemp -d "${TMPDIR:-/tmp}/thimble-install.XXXXXX")"
   trap 'rm -rf "$work"' EXIT

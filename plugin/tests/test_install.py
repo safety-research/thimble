@@ -353,7 +353,8 @@ def test_on_windows_itself_the_install_stops_at_once_and_names_wsl_2(w, system):
     stub(w.bin / "python3", f'echo "$@" >> "{ran}"\nexec "{sys.executable}" "$@"\n')
     p = w.install("--no-browser", THIMBLE_PYTHON=str(w.bin / "python3"))
     assert p.returncode == 2 and p.stdout == "", text_of(p)
-    assert p.stderr == "install.sh: thimble runs on Windows only in WSL 2 (wsl --install)\n"
+    assert p.stderr == ("install.sh: thimble runs on Windows only inside WSL 2. In PowerShell: wsl --install (restart if"
+                        " asked), then open Ubuntu from the Start menu and run this install command there.\n")
     assert not ran.exists() and w.calls() == [] and not w.th.exists() and not w.cc.exists()
     assert not list((w.tmp / "tmp").glob("thimble-install.*"))
 
