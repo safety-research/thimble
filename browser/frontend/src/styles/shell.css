@@ -498,7 +498,13 @@
   align-items: center;
   min-height: 34px;
 }
-/* a menu's chip sets its text in line with its column, its hover wash reaching into the gap before it */
+/* a menu's chip sets its text in line with its column, its hover wash reaching into the gap before it, whether it
+   opens a menu or is dimmed */
+.settings-row > .menu-trigger,
+.settings-model,
+.settings-effort {
+  justify-self: start;
+}
 .settings-model,
 .settings-effort {
   position: relative;
