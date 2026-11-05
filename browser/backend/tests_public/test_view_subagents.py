@@ -1266,9 +1266,9 @@ async def test_retry_on_a_view_whose_builder_still_runs_shows_that_build_buildin
 async def test_checks_that_fail_when_the_builder_stops_go_back_to_it_and_then_say_what_is_wrong_with_its_fixes(
         board, bridge, gates, monkeypatch):
     """The builder stops with checks that fail: what they found goes back into its session, which goes on with it while
-    the view builds. Stopped again without passing, the view fails, and its notice says what is wrong with it in the
-    analyst's words, with no Retry, which would build the same files again: Ask Claude to fix it opens the build's
-    thread with what failed for the builder in the composer, and Discard the view. The reply goes on with the same
+    the view builds. Stopped again without passing, the view fails, and its notice says it failed after retry and what
+    is wrong with it in the analyst's words, with no Retry, which would build the same files again: Send puts what
+    failed after /thimble-fix in main's composer, and Discard the view. A reply in its thread goes on with the same
     builder, whose start clears the notice."""
     from app import notices
 
@@ -1289,14 +1289,15 @@ async def test_checks_that_fail_when_the_builder_stops_go_back_to_it_and_then_sa
     p = _prop(slug)
     assert p["error"] == "problem: the page says FAIL" and p.get("checks_failed")
     [n] = [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
-    assert views.plain_failure("problem: the page says FAIL") in n["text"] and "FAIL" not in n["text"]
-    assert [a["do"] for a in n["action"]] == ["view-fix", "view-discard"] and n["chat"] == p["chat"]
-    fix, discard = n["action"]
-    assert fix["slug"] == discard["slug"] == slug and discard["label"] == dev.DISCARD_VIEW
-    assert "problem: the page says FAIL" in fix["text"], "the composer gets what failed, for the builder"
-    views.message(CORPUS, slug, fix["text"])
+    said = views.plain_failure("problem: the page says FAIL")
+    assert n["text"] == f"Posts failed after retry: {said}. Send to thimble-fix?" and n["chat"] == p["chat"]
+    send, discard = n["action"]
+    assert send == {"label": "Send", "do": "thimble-fix",
+                    "text": f"The view Posts failed after retry: {said} (“problem: the page says FAIL”). Make it build."}
+    assert discard == {"label": dev.DISCARD_VIEW, "do": "view-discard", "slug": slug}
+    views.message(CORPUS, slug, "Please fix the page.")
     await _until(lambda: len(bridge.ops("send")) == 2, "the reply never reached the builder")
-    assert bridge.ops("send")[-1]["agent"] == agent and fix["text"] in bridge.ops("send")[-1]["text"]
+    assert bridge.ops("send")[-1]["agent"] == agent and "Please fix the page." in bridge.ops("send")[-1]["text"]
     assert len(bridge.ops("spawn")) == 1, "the same builder goes on, no new build"
     assert _prop(slug)["status"] == "building" and not _prop(slug).get("checks_failed")
     subagents.run_again(CORPUS, agent, "coordinator")
@@ -1306,8 +1307,8 @@ async def test_checks_that_fail_when_the_builder_stops_go_back_to_it_and_then_sa
 async def test_a_change_whose_builder_stops_again_without_passing_says_what_is_wrong_and_discard_keeps_the_view(
         board, bridge, gates, monkeypatch):
     """A change to a built view whose builder stopped again without passing the checks: the view is as it was, and the
-    notice says what is wrong with the change in the analyst's words, with Ask Claude to fix it, which asks for the
-    change again, and Discard the change, which leaves the view as it was and its chip built."""
+    notice says the change failed after retry and what is wrong with it in the analyst's words, with Send to
+    thimble-fix, and Discard the change, which leaves the view as it was and its chip built."""
     from fastapi import HTTPException
 
     from app import notices
@@ -1321,9 +1322,10 @@ async def test_a_change_whose_builder_stops_again_without_passing_says_what_is_w
     p = await _settled_end(slug)
     assert p["status"] == "built" and p.get("failed_change") and p.get("checks_failed")
     [n] = [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
-    assert views.plain_failure("problem: the page says FAIL") in n["text"] and "FAIL" not in n["text"]
-    fix, discard = n["action"]
-    assert fix["do"] == "view-fix" and "problem: the page says FAIL" in fix["text"]
+    said = views.plain_failure("problem: the page says FAIL")
+    assert n["text"] == f"The change to Posts failed after retry: {said}. Send to thimble-fix?"
+    send, discard = n["action"]
+    assert send["do"] == "thimble-fix" and send["text"].startswith("The change to the view Posts failed after retry: ")
     assert discard == {"label": dev.DISCARD_CHANGE, "do": "view-discard", "slug": slug}
     views.discard(CORPUS, slug)
     p = _prop(slug)
@@ -1356,9 +1358,8 @@ def test_what_is_wrong_with_a_view_is_said_by_the_kind_of_its_first_failure_not_
     assert all(said) and len(set(said)) == 3, "the page, a citation and any other problem each have their words"
     assert not any(w in s for s in said for w in ("resolve()", "build_index", "TypeError", "jsonl"))
     assert views.plain_failure("I could not make the page pass.") == ""
-    unfinished, fix = dev._checks_failed({"slug": "posts"}, "")
-    assert unfinished == dev.UNFINISHED and "“" not in fix, "a builder that stopped before its view.json"
+    assert dev._checks_failed("") == (dev.UNFINISHED, ""), "a builder that stopped before its view.json"
     said = "I can't write to the view's folder."
-    assert dev._checks_failed({"slug": "posts"}, "", said)[0] == said, "unless it said why, in its own words"
-    words, change = dev._checks_failed({"slug": "posts", "revision": True}, "page: overview: test.")
-    assert words == views.plain_failure("page: overview: test") and "“page: overview: test”" in change
+    assert dev._checks_failed("", said)[0] == said, "unless it said why, in its own words"
+    words, found = dev._checks_failed("page: overview: test.")
+    assert words == views.plain_failure("page: overview: test") and "“page: overview: test”" in found
