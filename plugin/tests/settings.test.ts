@@ -3,7 +3,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { DEFAULTS, PRESET, choiceOf, citationsFrom, featureOn, noteChange, setOptions, valueIn } from '../settings/features.mjs'
-import { registerSettings, settingsAction, settleMinimal } from '../settings/term'
+import { heldValues, registerSettings, settingsAction, settleMinimal } from '../settings/term'
 import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -14,7 +14,7 @@ const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', reques
 test('/thimble-settings opens the settings under their headings; a press on a choice sets it through Claude Code, and its items leave the preview', async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   mock.clock(on, { now: 0 })
-  const rows: Record<string, boolean> = { marks: true, cards: true, coverage: true, labels: true }
+  const rows: Record<string, boolean | string> = { marks: true, cards: 'auto', coverage: true, labels: true }
   const set: Any[] = []
   const opened: Any[] = []
   on('config.list', () => ({ value: Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })) }))
@@ -49,7 +49,7 @@ test('/thimble-settings opens the settings under their headings; a press on a ch
 test('Citations has four modes: a press on one sets it, the line under the row says what it gives, and the preview of the bar has c cite in every mode but off', async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   mock.clock(on, { now: 0 })
-  const rows: Record<string, boolean | string> = { citations: 'auto cite', explain: true }
+  const rows: Record<string, boolean | string> = { citations: 'auto cite', explain: 'auto' }
   const set: Any[] = []
   on('config.list', () => ({ value: Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })) }))
   on('config.set', (_$: unknown, e: Any) => { set.push(e); rows[String(e.key).split('.').pop()!] = e.value; return { value: e.value } })
@@ -429,6 +429,15 @@ test('a mode saved under the old fields moves to Citations at the first session,
   await call('session.start', { isInteractive: true })
   expect(set).toEqual([])
   expect(choiceOf('citations')).toBe('auto cite')
+  // Heads-ups saved as on demand, which the manifest no longer offers: Claude Code hands the plugin its default, auto,
+  // and keeps on demand in its row, which the settings read as off; the first session saves off
+  set.length = 0
+  Object.assign(rows, { details: 'on demand' })
+  for (const k of Object.keys(hooks)) delete hooks[k]
+  registerSettings(on, { citations: 'auto cite', defaultsAt: DEFAULTS.at, details: 'auto' } as never)
+  expect((await heldValues($)).details).toBe('off')
+  await call('session.start', { isInteractive: true })
+  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['details', 'off']])
   setOptions({})
 })
 
