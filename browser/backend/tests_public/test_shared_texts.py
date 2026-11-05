@@ -27,12 +27,10 @@ TEXT_GLOBS = ("browser/prompts/**/*.md", "plugin/prompts/*.md", "plugin/commands
 CODE_ROOTS = ("browser/backend/app", "plugin")
 NOT_CODE = {"node_modules", ".venv", "__pycache__", "test", "tests", "tests_public"}
 # The copies of today, (file, text): the workbench's Heads up and Explainers checks over a document say what the lenses
-# say, word for word (test_prompts.py holds them equal), until they are made from the lenses, and the terminal's
-# heads-up on picked words (heads-expand.md) names the details to look for in the Heads-ups lens's words. A pair whose
-# copy is gone fails too, so the list only shrinks.
+# say, word for word (test_prompts.py holds them equal), until they are made from the lenses. A pair whose copy is gone
+# fails too, so the list only shrinks.
 KNOWN_COPIES = {("browser/prompts/checks/explainers.md", "lens-explain"),
-                ("browser/prompts/checks/heads-up.md", "lens-heads"),
-                ("plugin/prompts/heads-expand.md", "lens-heads")}
+                ("browser/prompts/checks/heads-up.md", "lens-heads")}
 WORD = re.compile(r"[A-Za-z0-9']+")
 SLOT = re.compile(r"\{\{([A-Z_]+)\}\}")
 

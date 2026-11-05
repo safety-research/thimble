@@ -9,7 +9,7 @@
 // new citation on any of them takes in the whole link, which still draws as its words.
 //
 // c only cites: it acts while words are selected that it has not cited yet, which the bar shows as `c cite`, in the
-// citations' purple, first of the keys that act on them (`c cite · e explain · h heads-up · a ask`; the claims keep
+// citations' purple, first of the keys that act on them (`c cite · e explain · a ask`; the claims keep
 // their item at the right, under their own key, w); with none, c is typed into the prompt.
 // Whether words wait reads every answer's words, so it is kept in memory for the selection the bar last drew with, and
 // c's key reads the selection alone while that one stands.

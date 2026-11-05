@@ -2,7 +2,7 @@
 // press, in 0.10's teal and orange; a term is explained once per conversation; each lens's switch hides what it gave;
 // Claude reads each one shown, with the next prompt; words the analyst picks get an explainer on demand, and one that
 // fails says why. Words selected in an answer put the keys that act on them on the bar, each in its color: c cite,
-// e explain, h heads-up, a ask. All data is made up. `claude plugin test plugin`.
+// e explain, a ask. All data is made up. `claude plugin test plugin`.
 import { expect } from 'claude-code/testing'
 
 import { partOf, registerAnswers, resetAnswers } from '../core/answers'
@@ -15,12 +15,12 @@ import { registerTurn } from '../core/turn'
 import { accent, resetTheme } from '../core/theme'
 import { SPIN, spinNow } from '../bar/busy'
 import { failLineNow } from '../bar/notice'
-import { explainBar, explainKey, headsBar, headsKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { markColors } from '../explain/place.mjs'
 import { askBar, askKey } from '../threads/seam'
 import { resetThreads, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
-import { closeTray, trayBand, trayBar, trayNow } from '../tray/tray'
+import { trayBand, trayBar, trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { citeTint } from '../marks/view'
 import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
@@ -75,7 +75,7 @@ function setup(replies: Any[], o: { theme?: string; complete?: Any; noFork?: boo
       // the look's fork takes the replies in turn; an explainer asked for is a fork too (o.complete answers it), or a side
       // call where there is no conversation to fork (o.noFork)
       fork: async (r: Any) => {
-        if (!/^PROMPT (explain|heads)-expand/.test(String(r?.prompt ?? ''))) return replies.shift() ?? { isAnswered: false, reason: 'empty-reply' }
+        if (!/^PROMPT explain-expand/.test(String(r?.prompt ?? ''))) return replies.shift() ?? { isAnswered: false, reason: 'empty-reply' }
         if (o.noFork) return { isAnswered: false, reason: 'nothing-to-fork' }
         calls.push(r)
         return o.complete ?? { isAnswered: false, reason: 'empty-reply' }
@@ -419,8 +419,8 @@ test('words selected outside Claude\'s answers (a setting\'s name in the pane) a
   }
 })
 
-test('words selected in an answer put the four keys that act on them on the bar, each in its color: c cite, e explain, h heads-up, a ask; in every mode, each while its feature is not off', async () => {
-  const chips = ['cite', 'explain', 'heads', 'ask']
+test('words selected in an answer put the three keys that act on them on the bar, each in its color: c cite, e explain, a ask; in every mode, each while its feature is not off', async () => {
+  const chips = ['cite', 'explain', 'ask']
   for (const o of [{}, { minimal: true, ...PRESET }, { citations: 'manual', explain: 'on demand', claimsMode: 'on demand' }] as Any[]) {
     setOptions(o)
     try {
@@ -431,77 +431,30 @@ test('words selected in an answer put the four keys that act on them on the bar,
       s.$.ui.selection = async () => undefined
       expect(await keys()).toEqual([])
       s.$.ui.selection = async () => ({ text: 'retry budget', requestId: 't1-row' })
-      expect(await keys()).toEqual([['c cite', accent()], ['e explain', markColors('dark').gloss], ['h heads-up', markColors('dark').heads], ['a ask', 'ide']])
+      expect(await keys()).toEqual([['c cite', accent()], ['e explain', markColors('dark').gloss], ['a ask', 'ide']])
     } finally {
       setOptions({})
     }
   }
-  // a feature off takes its key off: c with Citations off, e with Explainers off, h with Heads-ups off; a stays
-  for (const [o, gone] of [[{ citations: 'off' }, 'c cite'], [{ explain: 'off' }, 'e explain'], [{ details: 'off' }, 'h heads-up']] as [Any, string][]) {
+  // a feature off takes its key off: c with Citations off, e with Explainers off; a stays
+  for (const [o, gone] of [[{ citations: 'off' }, 'c cite'], [{ explain: 'off' }, 'e explain']] as [Any, string][]) {
     setOptions(o)
     try {
       const s = setup([])
       await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
       s.$.ui.selection = async () => ({ text: 'retry budget', requestId: 't1-row' })
       const shown = (await barLeft(s.$, featureOn, false, new Set())).filter(x => chips.includes(x.id)).map(x => `${x.key} ${x.words}`)
-      expect(shown).toEqual(['c cite', 'e explain', 'h heads-up', 'a ask'].filter(k => k !== gone))
+      expect(shown).toEqual(['c cite', 'e explain', 'a ask'].filter(k => k !== gone))
     } finally {
       setOptions({})
     }
   }
 })
 
-test("h gives a heads-up on the words selected in an answer, from the heads-expand call: orange on its words and open in the tray from the press on, then kept on the answer as the look's; h on its words opens it; with none selected and Heads-ups auto, or with Heads-ups off, h is typed", async () => {
-  setOptions({})
-  let done: (v: Any) => void = () => undefined
-  const s = setup([LOOK], { complete: new Promise(r => { done = r }) })
-  const text = `${ANSWER} Then the client gives up.`
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text })
-  s.$.ui.open = async () => ({ isPlaced: true })
-  s.$.ui.selection = async () => undefined
-  expect(await headsKey(s.$, 'h', 0)).toBe(null)
-  expect(await headsBar(s.$, featureOn, false)).toEqual([])
-  s.$.ui.selection = async () => ({ text: 'the client gives up', requestId: 't1-row' })
-  const take = await headsKey(s.$, 'h', 0)
-  void take!.later!()
-  await settle()
-  // a fork of the conversation, the words as its term
-  expect(s.calls[0].prompt).toMatch(/^PROMPT heads-expand\n\nThe term: the client gives up\n/)
-  // while it is written: its words orange, and the tray stands on them
-  const pending = await pendingSpans(s.$, 't1-row', text)
-  expect(pending.map(p => text.slice(p.start, p.end))).toEqual(['the client gives up'])
-  expect(pending[0]!.look.backgroundColor).toBe(markColors('dark').headsBg)
-  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads' })
-  done(reply({ title: 'It gives up after one office network', bullets: ['[The log covers one office](logs/upload.log).'] }))
-  await settle()
-  await settle()
-  const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
-  const id = part.order.find(x => part.items[x]!.term === 'the client gives up')!
-  expect(part.items[id]).toMatchObject({ kind: 'heads', asked: true, title: 'It gives up after one office network' })
-  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads', id })
-  expect((await spansFor(s.$, 't1-row', text, marksIn(text))).map(x => x.id)).toContain(id)
-  expect((await explainState(s.$)).headsGiven).toContain('It gives up after one office network')
-  // the bar no longer names h for these words; other words of it selected, the tray closed, h opens it, with no
-  // second call
-  expect(await headsBar(s.$, featureOn, false)).toEqual([])
-  await closeTray(s.$)
-  s.$.ui.selection = async () => ({ text: 'client gives', requestId: 't1-row' })
-  await (await headsKey(s.$, 'h', 0))!.later!()
-  await settle()
-  expect(s.calls.length).toBe(1)
-  expect((await trayNow(s.$))!.stack.at(-1)).toMatchObject({ kind: 'heads', id })
-  // with Heads-ups off, h on selected words is typed, and the bar does not name it
-  setOptions({ details: 'off' })
-  s.$.ui.selection = async () => ({ text: 'uploads', requestId: 't1-row' })
-  expect(await headsKey(s.$, 'h', 0)).toBe(null)
-  expect(await headsBar(s.$, featureOn, false)).toEqual([])
-  setOptions({})
-})
-
-test('after c on the selected words, e and h on them stand on those words, inside the citation c made, not on another word of theirs in the answer', async () => {
+test('after c on the selected words, e on them stands on those words, inside the citation c made, not on another word of theirs in the answer', async () => {
   setOptions({ citations: 'manual' })
   try {
-    const s = setup([LOOK], { complete: reply({ body: 'It reads the last drop alone.', here: '', title: 'One drop only', bullets: ['The log covers one drop.'] }) })
+    const s = setup([LOOK], { complete: reply({ body: 'It reads the last drop alone.', here: '' }) })
     const text = 'Uploads fail after the retry budget runs out, only on Mondays. It only looks at the last drop.'
     await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text })
     s.$.ui.open = async () => ({ isPlaced: true })
@@ -518,11 +471,6 @@ test('after c on the selected words, e and h on them stand on those words, insid
     // the look's explainer (retry budget) stands beside them
     const placed = async () => (await spansFor(s.$, 't1-row', shown, marksIn(shown))).map(x => [x.id, shown.slice(x.start, x.end)])
     expect(await placed()).toEqual([['g1', 'retry budget'], ['a1', words]])
-    // h: the heads-up on the same words stands over the explainer, which yields its words to it
-    await (await headsKey(s.$, 'h', 0))!.later!()
-    await settle()
-    await settle()
-    expect(await placed()).toEqual([['g1', 'retry budget'], ['ah1', words]])
   } finally {
     setOptions({})
   }

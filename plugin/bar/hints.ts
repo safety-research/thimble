@@ -24,7 +24,7 @@ async function remindedNow($: Engine): Promise<string[]> {
   return list((await $.state.get(REMINDED)).value)
 }
 
-/** The person used a feature (`explain`, `cite`, `heads`, `rewrite`): its how-to hint and its reminder
+/** The person used a feature (`explain`, `cite`, `rewrite`): its how-to hint and its reminder
  *  stop for the rest of the session. */
 export async function hintUsed($: Engine, feature: string): Promise<void> {
   const used = await usedNow($)

@@ -9,7 +9,7 @@
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, or at rest `] show explainer` while
 //                  the answer shows marks, the mark's name in its own look, `s squeeze`, and while words are selected
-//                  the keys that act on them, each in its color: `c cite · e explain · h heads-up · a ask`); at its
+//                  the keys that act on them, each in its color: `c cite · e explain · a ask`); at its
 //                  right their items (barRight: `w 11 claims`, `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
 //                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
 //                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
@@ -55,7 +55,7 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
  *  what holds the keys now (a card ] reached), or what the prompt box asks for (`rewrite for…`); while any shows, the
  *  bar's left names only those, after the busy step. (The open tray's keys are in its header and the open chips' in the
  *  chips, so the bar leaves those keys out: core/answerview.ts heldKeys.) `color` and `bold`: the key and its words
- *  drawn lit (`s ● short`), in the color of what the key gives (`h heads-up`, orange), or as a failure, not dim.
+ *  drawn lit (`s ● short`), in the color of what the key gives (`e explain`, teal), or as a failure, not dim.
  *  `shorter`: the words in fewer cells, longest first, which a narrow bar draws after
  *  coverage's file counts gave way: the first of them it keeps longer than the busy step's words, and before any count
  *  gives way (the order at the top of this file); '' is the key alone, drawn as the bar's other keys are (in the item's
