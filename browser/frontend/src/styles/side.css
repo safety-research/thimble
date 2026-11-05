@@ -48,9 +48,9 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 .lside-heading { margin: 0; padding: 4px 0; font: 600 var(--text-ui-sm) / 1.4 var(--font-body); color: var(--text-primary); }
-/* the labels' head: Claude makes labels, its words then its switch, at the right before × (LabelsSidebar MakesLabels);
-   in a narrow sidebar its words give way first */
-.lside-makes {
+/* the labels' head: the Label tool, its words then its switch, at the right before × (LabelsSidebar LabelTool); in a
+   narrow sidebar its words give way first */
+.lside-tool {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -62,8 +62,8 @@
   cursor: pointer;
   user-select: none;
 }
-.lside-makes:hover { color: var(--text-primary); }
-.lside-makes-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lside-tool:hover { color: var(--text-primary); }
+.lside-tool-words { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .lside-back {
   display: inline-flex;
   align-items: center;

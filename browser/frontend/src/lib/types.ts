@@ -1266,9 +1266,9 @@ export interface Settings {
   /** "Claude can edit files in this folder": whether main and its thread forks may write the corpus folder (the
    * workspace's settings.json `corpus_edits`, on by default) */
   corpus_edits?: boolean
-  /** Labels: whether Claude makes labels in this workspace, as the terminal's Labels setting (the workspace's
-   * settings.json `labels`, on by default); off, main's prompt and the tools' texts say nothing of labels, and no agent
-   * has a label tool */
+  /** The Labels sidebar's Label tool: whether Claude makes labels in this workspace, as the terminal's Labels setting
+   * (the workspace's settings.json `labels`, on by default); off, main's prompt and the tools' texts say nothing of
+   * labels, and no agent has a label tool */
   labels?: boolean
   [k: string]: unknown
 }
