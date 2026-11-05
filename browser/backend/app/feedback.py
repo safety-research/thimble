@@ -1075,11 +1075,14 @@ def cli_text(out: dict[str, Any], skill: bool = False) -> str:
 
 
 def reveal_command(path: Path) -> list[str] | None:
-    """The command that shows `path` in the server machine's file manager, or None where there is none."""
+    """The command that shows `path` in the server machine's file manager, or None where there is none. In WSL it is
+    wslview (wslu's), which opens the folder in Windows' Explorer."""
     if sys.platform == "darwin":
         return ["open", "-R", str(path)] if shutil.which("open") else None
     if sys.platform.startswith("win"):
         return ["explorer", f"/select,{path}"]
+    if os.environ.get("WSL_DISTRO_NAME") and shutil.which("wslview"):
+        return ["wslview", str(path.parent)]
     if shutil.which("xdg-open") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         return ["xdg-open", str(path.parent)]
     return None

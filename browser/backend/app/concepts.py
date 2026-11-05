@@ -2303,8 +2303,14 @@ def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, 
                   message: str | None = None, blocked: int = 0) -> None:
     """A run of the label ended: an `error`, or `failed` units it could not label, is told in the foreground under
     `label:<id>`; `blocked` units alone (BLOCKED_MESSAGE) are told there as skipped, with no fix; and a run with none
-    of them clears it. Never raises."""
+    of them clears it. The notice's words of a failure are cut to fit (notices.reason); its details keep them whole.
+    Never raises."""
     from . import notices  # noqa: PLC0415
+
+    def whole(raw: str, why: str) -> str:
+        """The failure's words in full: its own where reason shortened them (a failure of no API class), else reason's
+        plain words with their fix."""
+        return why if notices.failure_class(raw) else " ".join(raw.split()).rstrip(".") or why
 
     key, name = f"label:{concept['id']}", str(concept.get("name") or concept["id"])
     try:
@@ -2313,22 +2319,26 @@ def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, 
             return
         noun = UNIT_NOUNS.get(str(concept.get("unit")), "record")
         of = f"{int(total):,} {noun}s" if isinstance(total, int) and total else f"its {noun}s"
-        kind = "label"
+        kind, details = "label", None
         if error is not None:
             why, fix = notices.reason(error, server=True)
             text = LABEL_FAILED_TEXT.format(name=name, why=why)
+            details = LABEL_FAILED_TEXT.format(name=name, why=whole(str(error), why))
         elif failed:
             problems = [m for m in str(message or "").split("; ")
                         if m and not m.startswith(("Downgrading ", "Claude's safeguards stopped the classifier"))]
-            why, fix = notices.reason("; ".join(problems) or "the classifier gave no label for them", server=True)
+            raw = "; ".join(problems) or "the classifier gave no label for them"
+            why, fix = notices.reason(raw, server=True)
             text = LABEL_UNITS_FAILED_TEXT.format(name=name, failed=f"{failed:,}", total=of, why=why)
+            details = LABEL_UNITS_FAILED_TEXT.format(name=name, failed=f"{failed:,}", total=of, why=whole(raw, why))
             if blocked:
-                text += f" Claude's safeguards stopped the classifier on {blocked:,} more, which it skipped."
+                more = f" Claude's safeguards stopped the classifier on {blocked:,} more, which it skipped."
+                text, details = text + more, details + more
         else:
             kind, fix = "safeguards", None
             text = LABEL_UNITS_BLOCKED_TEXT.format(name=name, blocked=f"{blocked:,}", total=of,
                                                    them="it" if blocked == 1 else "them")
-        notices.post(c, kind=kind, text=text, agent=f"Label: {name}", action=fix, key=key)
+        notices.post(c, kind=kind, text=text, agent=f"Label: {name}", action=fix, key=key, details=details)
     except Exception:  # noqa: BLE001 — the run has ended either way
         log.exception("the end of a run of the label %s was not told", key)
 

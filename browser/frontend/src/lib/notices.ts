@@ -34,7 +34,8 @@ export function noticeActions(a: unknown): NoticeAction[] {
 }
 
 /** A notice as the server sends it (a row of `GET /notices`, the stream's record, a chat's log record), else null for
- * one with no text. `fallbackId` names one that has no id of its own. Pure. */
+ * one with no text; its `details`, the whole of a text shortened to fit, only when they say more. `fallbackId` names
+ * one that has no id of its own. Pure. */
 export function parseNotice(raw: unknown, fallbackId = ''): Notice | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
@@ -42,9 +43,11 @@ export function parseNotice(raw: unknown, fallbackId = ''): Notice | null {
   const id = str(o.id) || fallbackId
   if (!text || !id) return null
   const actions = noticeActions(o.action)
+  const details = str(o.details).trim()
   return {
     id,
     text,
+    ...(details && details !== text ? { details } : {}),
     ...(str(o.key) ? { key: str(o.key) } : {}),
     ...(str(o.kind) ? { kind: str(o.kind) } : {}),
     ...(str(o.agent).trim() ? { agent: str(o.agent).trim() } : {}),

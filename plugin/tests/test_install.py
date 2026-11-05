@@ -393,6 +393,43 @@ def test_an_old_claude_code_is_updated_by_what_installed_it(w):
         assert f"  - Claude Code 2.1.307 or later (the one here is 2.1.283): {fix}" in p.stdout.splitlines(), p.stdout
 
 
+def wsl(w, kernel: str) -> None:
+    """Windows' WSL, as its kernel names itself in uname -r: WSL 1's says Microsoft, WSL 2's microsoft."""
+    stub(w.bin / "uname", f'if [ "$1" = -r ]; then echo "{kernel}"; else echo Linux; fi\n')
+
+
+def test_wsl_1_is_said_with_its_fix_and_nothing_is_installed(w):
+    """WSL 1 has no namespaces, so the sandbox that cards run in cannot start there: the install asks for WSL 2, with
+    the command that converts the distribution, which runs in Windows, not in the distribution."""
+    wsl(w, "4.4.0-19041-Microsoft")
+    p = w.install("--no-browser", WSL_DISTRO_NAME="Made-Up")
+    assert p.returncode == 1, text_of(p)
+    assert "  - WSL 2 (this is WSL 1): in Windows, wsl --set-version Made-Up 2" in p.stdout.splitlines(), p.stdout
+    assert not w.th.exists() and not w.cc.exists()
+
+
+def test_in_wsl_2_a_windows_program_on_its_drives_is_said_and_the_install_goes_on(w):
+    """In WSL 2, WSL puts Windows' folders on PATH, so a node or npm that Windows has can be found before Linux's; the
+    install names each one it finds on Windows' drives (THIMBLE_WSL_DRIVES stands in for /mnt). Linux's are not
+    named."""
+    wsl(w, "5.15.153.1-microsoft-standard-WSL2")
+    drives = w.tmp / "drives"
+    stub(drives / "c" / "nodejs" / "node", NODE)
+    (w.bin / "node").unlink()
+    path = f"{w.bin}:{drives / 'c' / 'nodejs'}:/usr/bin:/bin"
+    p = w.install("--no-browser", PATH=path, THIMBLE_WSL_DRIVES=str(drives), WSL_DISTRO_NAME="Made-Up")
+    assert p.returncode == 0, text_of(p)
+    lines = p.stdout.splitlines()
+    said = [line for line in lines if "Windows' own" in line]
+    assert said == ["  node here is Windows' own, on its drives: install a Linux one in WSL, first on PATH."], lines
+    assert lines.index(said[0]) == lines.index("Checking what thimble needs...") + 1
+    assert (w.th / "fixes" / "live" / ".git").exists()
+    # Linux's node first on PATH: nothing is said
+    stub(w.bin / "node", NODE)
+    p = w.install("--no-browser", PATH=path, THIMBLE_WSL_DRIVES=str(drives), WSL_DISTRO_NAME="Made-Up")
+    assert p.returncode == 0 and "Windows' own" not in p.stdout, text_of(p)
+
+
 def test_a_download_that_fails_says_git_s_last_line_and_installs_nothing(w):
     p = w.install("--no-browser", THIMBLE_UPDATE_URL=str(w.tmp / "no-such-repository.git"))
     assert p.returncode == 1, text_of(p)

@@ -2070,8 +2070,9 @@ button.chat-strip-head:hover {
 .chat-notice-x.btn {
   flex: none;
 }
-/* Open: a link after the words, to the chat the notice happened in */
-.chat-notice-open {
+/* Open: a link after the words, to the chat the notice happened in; Show more, the words in full when they were cut */
+.chat-notice-open,
+.chat-notice-more {
   padding: 0;
   border: 0;
   background: none;
@@ -2080,11 +2081,13 @@ button.chat-strip-head:hover {
   font-weight: 500;
   cursor: pointer;
 }
-.chat-notice-open:hover {
+.chat-notice-open:hover,
+.chat-notice-more:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.chat-notice-open:focus-visible {
+.chat-notice-open:focus-visible,
+.chat-notice-more:focus-visible {
   outline: 1.5px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-chip);
