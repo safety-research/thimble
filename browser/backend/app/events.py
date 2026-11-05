@@ -405,6 +405,8 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         words = str(payload.pop("text", "") or "").strip()
         note = build_note(kind, event_id, words or describe(kind, payload), payload,
                           cap=None if kind == START_AGENT else BODY_CHARS)
+        if kind == "card":  # a card request: main reads it at its running turn's next tool call (runtime.deliver)
+            note["ask"] = True
     note["terminal"] = terminal_line(kind, words, payload) if line is None else line
     if kind in QUIET_KINDS:
         _keep_held(c, [*held(c), note])

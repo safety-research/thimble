@@ -323,12 +323,14 @@ class Conv:
             self.emit({"type": "user", "message": {"role": "user", "content": results}})
 
     def waiting_messages(self) -> list[str]:
-        """The messages the analyst typed in main's chat while its turn ran (Space.said), in main's queue, oldest first.
-        Every other event, such as a /thimble-fix request, which Claude Code too keeps for the turn's end as it keeps a
-        command, waits for the turn to end, and so does any other conversation's queue."""
+        """The messages the analyst typed in main's chat while its turn ran (Space.said) and the card requests they sent
+        meanwhile (Space.asks), in main's queue, oldest first. Every other event, such as a /thimble-fix request, which
+        Claude Code too keeps for the turn's end as it keeps a command, waits for the turn to end, and so does any other
+        conversation's queue."""
         if self.kind != "main":
             return []
-        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in self.space.said]
+        mid_turn = self.space.said.keys() | self.space.asks
+        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in mid_turn]
 
     def take_waiting(self) -> list[str]:
         """The analyst's messages that wait for main's running turn, read now, with the results of the turn's tool
@@ -413,6 +415,10 @@ class Space:
         # by event id, the analyst's words of each message that came while main's turn ran (events.post): main's chat
         # shows them waiting (unread), and their line goes in where main reads them (said_line)
         self.said: dict[str, str] = {}
+        # the event ids of the card requests that wait in main's queue (events.post's `ask`: + Card, or ⌘↵ or /card in
+        # a document): main reads each at its running turn's next tool call, as it reads a message typed in its chat,
+        # and main's chat shows none of them, since the card or the document shows it out with main
+        self.asks: set[str] = set()
         # by event id, the quiet events that rode along with an event for main (events._publish) while it waits in
         # main's queue: a rewind that takes the event back holds them again for main's next event (take_back)
         self.riders: dict[str, list[dict[str, Any]]] = {}
@@ -518,6 +524,7 @@ class Space:
         m = EVENT_ID_RE.match(text)
         if not m:
             return
+        self.asks.discard(m.group(1))
         words = self.said.pop(m.group(1), None)
         riders = self.riders.pop(m.group(1), None)
         if read and riders:
@@ -927,9 +934,9 @@ def _failure_text(e: BaseException) -> str:
 
 def deliver(c: str, note: dict[str, Any]) -> None:
     """A browser event for main (events._publish): a thread's starts or continues its fork; any other starts a turn of
-    main, or waits for main's running turn: a message the analyst typed in main's chat (`said`, events.post) until the
-    turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat shows such a message
-    waiting until main reads it (unread)."""
+    main, or waits for main's running turn: a message the analyst typed in main's chat (`said`, events.post) or a card
+    request (`ask`) until the turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat
+    shows such a message waiting until main reads it (unread)."""
     from . import agents, events  # noqa: PLC0415
 
     sp = ensure(c)
@@ -946,6 +953,8 @@ def deliver(c: str, note: dict[str, Any]) -> None:
     if note.get("said"):
         sp.said[event] = str(note["said"])
         agents.notify(c, agents.MAIN_ID)
+    elif note.get("ask"):
+        sp.asks.add(event)
     if _in_loop():
         main.arrived.set()
     elif _loop is not None:

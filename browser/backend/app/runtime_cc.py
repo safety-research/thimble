@@ -309,7 +309,10 @@ def _tidy(cwd: Path) -> None:
 
 
 def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | None = None) -> dict[str, Any]:
-    """The session's inline settings: its effort as 0.8's calls pinned it (sdk.cli_settings), the sandbox for Bash
+    """The session's inline settings: its effort as 0.8's calls pinned it and its fast mode as its Spec has it
+    (sdk.cli_settings), as the Messages API runtime sends them (runtime_api.request): main's and its thread forks' the
+    composer's choice, off until the analyst turns it on, and none for thimble's agents, whatever speed thimble's own
+    calls default to (config.model_speed); the sandbox for Bash
     (required: a sandbox that cannot start refuses the call, module note), the PATH Bash has on the Messages API
     (runtime_tools.shell_path) and the variables that keep its programs from writing caches beside what they read
     (kernel_wrap.NO_SIDE_WRITES), edits only in the write folders, and no reads of thimble's private files. `tmp` is
@@ -317,7 +320,8 @@ def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | 
     allowed for the workspace (host_asks.kept), which the sandbox's network then reaches unasked."""
     from . import cc_settings, kernel_wrap, runtime_tools, sdk  # noqa: PLC0415
 
-    out = json.loads(sdk.cli_settings(spec.model, spec.effort or None))
+    speed = "fast" if getattr(spec, "fast", False) else "standard"
+    out = json.loads(sdk.cli_settings(spec.model, spec.effort or None, speed))
     out["env"] = {**out.get("env", {}), "PATH": runtime_tools.shell_path(), **kernel_wrap.NO_SIDE_WRITES}
     no_write = list(getattr(spec, "no_write", []) or [])
     corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings lets Claude edit the folder
