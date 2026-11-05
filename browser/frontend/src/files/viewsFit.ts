@@ -1,6 +1,6 @@
 // Which of Files' views fit in its pane head (files/ViewsBar compact): the options in order while they fit, the rest in the ⋯
 // menu. The picked option always shows, in its own place among those shown, taking the room of the last ones that fit;
-// in a bar too narrow for even the picked option beside ⋯ and New view, every option goes in the menu. The file tabs
+// in a bar too narrow for even the picked option beside New view and ⋯, every option goes in the menu. The file tabs
 // (FilesTab ReaderTabs) fit the same way, at their narrowest (fitTabs).
 
 export interface FitInput {
@@ -10,9 +10,10 @@ export interface FitInput {
   room: number
   /** the gap between two items, in px */
   gap: number
-  /** the width of what always follows the options (New view), in px */
+  /** the width of what always follows the options (New view, and the views bar's ⋯ menu), in px */
   tail: number
-  /** the width of the ⋯ button that holds the options that do not fit, in px */
+  /** the width of the button that holds the options that do not fit and shows only then, in px; 0 when it always shows
+   * (the views bar's ⋯ menu), its width in `tail` */
   more: number
   /** the picked option's index, or -1 */
   active: number
@@ -26,15 +27,16 @@ export function fitViews({ widths, room, gap, tail, more, active }: FitInput): n
     return items.reduce((a, w) => a + w, 0) + gap * Math.max(0, items.length - 1)
   }
   if (need(widths, [tail]) <= room) return all
+  const after = more > 0 ? [more, tail] : [tail]
   const shown: number[] = []
   for (const i of all) {
-    if (need([...shown.map((j) => widths[j]), widths[i]], [more, tail]) > room) break
+    if (need([...shown.map((j) => widths[j]), widths[i]], after) > room) break
     shown.push(i)
   }
   if (active < 0 || active >= widths.length || shown.includes(active)) return shown
   // the picked option takes the place of the last ones shown until it fits
-  if (need([widths[active]], [more, tail]) > room) return []
-  while (shown.length && need([...shown.map((j) => widths[j]), widths[active]], [more, tail]) > room) shown.pop()
+  if (need([widths[active]], after) > room) return []
+  while (shown.length && need([...shown.map((j) => widths[j]), widths[active]], after) > room) shown.pop()
   return [...shown, active].sort((a, b) => a - b)
 }
 

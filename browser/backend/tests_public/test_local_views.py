@@ -185,6 +185,39 @@ def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_a
     assert e.value.status_code == 404
 
 
+def test_the_views_bar_menu_lists_the_views_built_here_the_hidden_ones_too(corpora, analyst, monkeypatch):
+    """GET /ws/{c}/views/local lists the views built for the workspace with whether each shows, a hidden one too, for
+    the views bar's ⋯ menu, without finding the extensions again. Its path is no view's: `local` is a slug no view
+    gets, and the route answers before a view's own route would."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    _propose(CORPUS)
+    _write(CORPUS)
+    found: list[str] = []
+
+    async def refresh(c, *_a, **_k):
+        found.append(c)
+        return extensions.read_state(c)
+
+    monkeypatch.setattr(extensions, "refresh", refresh)
+    client = TestClient(app)
+    row = {"slug": "posts", "name": "Posts", "description": "each post", "file_viewer": False, "on": True}
+    got = client.get(f"/api/ws/{CORPUS}/views/local")
+    assert got.status_code == 200 and got.json() == {"name": CORPUS, "views": [row]}
+    assert found == [], "a look at the views finds no extension again"
+
+    asyncio.run(views.view_on_route(CORPUS, "posts", views.OnBody(on=False), analyst))
+    assert client.get(f"/api/ws/{CORPUS}/views/local").json()["views"] == [{**row, "on": False}]
+    assert client.get(f"/api/ws/{OTHER}/views/local").json()["views"] == []
+
+    with pytest.raises(HTTPException) as e:
+        views._check_slug("local")
+    assert e.value.status_code == 400
+    assert views._unique_slug(CORPUS, "Local") == "local-2"
+
+
 def test_a_view_switched_off_takes_its_card_type_with_it_and_a_deleted_one_leaves_no_switch_behind(corpora, analyst):
     """A workspace view that makes a card type leaves the card types while it is off and is back when it is on. A view
     deleted while off leaves nothing off behind, so a new view built under its slug is on."""

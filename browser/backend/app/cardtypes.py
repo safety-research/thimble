@@ -249,7 +249,7 @@ def read_registry(c: str | None) -> dict[str, dict[str, Any]]:
 async def refresh(c: str, *, warm: bool = True) -> dict[str, dict[str, Any]]:
     """The workspace's card types found again and written to REGISTRY_FILE, with each index built on the views kernel in
     the background (`warm`). An extension's type takes the place of thimble's, and of a workspace view's, of the same
-    slug. A workspace view switched off in Settings (views.views_off) makes none. Returns them by name."""
+    slug. A hidden workspace view (views.views_off) makes none. Returns them by name."""
     from . import extensions  # noqa: PLC0415
 
     lock = _locks.setdefault(c, asyncio.Lock())

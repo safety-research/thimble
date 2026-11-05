@@ -95,7 +95,7 @@ SANDBOX_FAILED = "Sandbox is required but failed to initialize"  # Claude Code's
 SANDBOX_KEY = "cc-sandbox"  # the notice's key (notices.py)
 SANDBOX_NOTICE = ("{agent}'s shell commands did not run: Claude Code's Bash sandbox could not start ({why}), and thimble "
                   "runs them only inside it. On Linux the sandbox needs bubblewrap and socat; once they are installed, "
-                  "send the message again. Settings, Claude access, can switch to an API key instead.")
+                  "send the message again. /login in the chat can switch to an API key instead.")
 # what a call that would ask for anything but a host gets (module note, permissions): word for word the refusal of
 # Claude Code's `dontAsk`, which the session ran in before, so the model reads what it read then
 REFUSED = ("Permission to use {tool} has been denied because Claude Code is running in don't ask mode. IMPORTANT: You "
@@ -713,7 +713,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] |
     if failed:
         if "auth" in failed.lower() or "login" in failed.lower() or "401" in failed:
             raise runtime.AccessProblem({"what": f"Claude Code could not sign in: {failed[:300]}",
-                                         "fix": "Run `claude` in a terminal and sign in, or choose another way in "
-                                                "Settings, Claude access."})
+                                         "fix": "Run `claude` in a terminal and sign in, or choose another way with "
+                                                "/login in the chat."})
         raise RuntimeError(failed[:300])
     return runtime.TurnEnd("done", text=reply)

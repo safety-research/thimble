@@ -1,14 +1,15 @@
 // Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented), a view whose
-// newer version builds or is reviewed with its chip shimmering; then New view, a field that asks main for one. A view
-// proposal shows here only once its view is built: until then its build is the chat's chip (chat/ViewChip) and its
-// thread. A view shows × on hover, which deletes it once confirmed. A row across the top of Files, or, while Files shows
-// in a pane beside another, in that pane's head (`compact`, portalled by FilesTab), where what does not fit goes in a ⋯
-// menu (viewsFit.ts). The views list is the shared one (lib/views.ts).
+// newer version builds or is reviewed with its chip shimmering; then New view, a field that asks main for one; then the
+// ⋯ menu (ViewsMenu), always there, with Propose views and a shown/hidden check per view built here. A view proposal
+// shows here only once its view is built: until then its build is the chat's chip (chat/ViewChip) and its thread. A view
+// shows × on hover, which deletes it once confirmed. A row across the top of Files, or, while Files shows in a pane
+// beside another, in that pane's head (`compact`, portalled by FilesTab), where what does not fit goes at the top of the
+// ⋯ menu (viewsFit.ts). The views list is the shared one (lib/views.ts).
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { TextInput } from '../components/Field'
 import { Icon, type IconName } from '../components/Icon'
-import { Menu, Popover } from '../components/Menu'
+import { Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { refreshProposals, useProposals } from '../lib/proposals'
@@ -18,6 +19,7 @@ import { track } from '../lib/telemetry'
 import type { Proposal, View, ViewReview } from '../lib/types'
 import { useReadyViews, useUpdatedViews } from './viewReady'
 import { fitViews } from './viewsFit'
+import { ViewsMenu, type ViewPick } from './ViewsMenu'
 
 export const BROWSER = 'browser'
 /** What the New view field says while it is empty: what to type, and where it goes. */
@@ -91,7 +93,7 @@ export function listedAsView(p: Proposal, known: ReadonlySet<string>): boolean {
 
 /** The views the bar lists and the proposals not yet built (which the bar does not show), from the views list and the
  * proposals. A file viewer (`file_type`) is a mode of the File browser, so the bar leaves it and its proposal out, as it
- * leaves out a view switched off in Settings. Pure. */
+ * leaves out a view hidden from the ⋯ menu. Pure. */
 export function barList(list: readonly View[], all: readonly Proposal[]): { views: BuiltView[]; proposals: Proposal[] } {
   const fileViewers = new Set(list.filter((x) => x.file_type).map((x) => x.slug))
   // a file-type viewer thimble ships is listed where the corpus holds a file it opens
@@ -127,7 +129,7 @@ interface Props {
   value: string
   onChange: (value: string) => void
   views: BuiltView[]
-  /** in a pane's head beside another pane: md, New view a +, and a ⋯ menu for what does not fit */
+  /** in a pane's head beside another pane: md, New view a +, and what does not fit at the top of the ⋯ menu */
   compact?: boolean
 }
 
@@ -212,10 +214,11 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
       // a bar not laid out (hidden, or no layout at all) shows every item
       if (!bar.clientWidth) return setFit(null)
       const kids = [...row.children] as HTMLElement[]
-      const tail = kids.pop()!
-      const more = kids.pop()!
+      // New view's + and the ⋯ menu, which always follow the options; what does not fit goes in that menu
+      const menu = kids.pop()!
+      const plus = kids.pop()!
       const gap = parseFloat(getComputedStyle(bar).columnGap) || 0
-      const next = fitViews({ widths: kids.map((k) => k.offsetWidth), room: bar.clientWidth, gap, tail: tail.offsetWidth, more: more.offsetWidth, active })
+      const next = fitViews({ widths: kids.map((k) => k.offsetWidth), room: bar.clientWidth, gap, tail: plus.offsetWidth + gap + menu.offsetWidth, more: 0, active })
       setFit((cur) => (cur && cur.length === next.length && cur.every((v, i) => v === next[i]) ? cur : next))
     }
     measure()
@@ -227,7 +230,7 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
 
   const shows = (i: number) => !fit || fit.includes(i)
   const hiddenOptions = options.filter((_, i) => !shows(i))
-  const overflow = hiddenOptions.map((o) => ({ id: o.value, label: o.label, icon: o.icon, checked: o.value === value, note: o.note, onSelect: () => onChange(o.value) }))
+  const overflow: ViewPick[] = hiddenOptions.map((o) => ({ value: o.value, label: o.label, icon: o.icon, checked: o.value === value, note: o.note, onSelect: () => onChange(o.value) }))
 
   const confirm = <DeleteViewConfirm asked={removing} onClose={() => setRemoving(null)} onDelete={() => removing && void remove(removing)} />
   const newView = (
@@ -257,6 +260,7 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
         <Button ref={setAskAt} icon="plus" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)}>
           New view
         </Button>
+        <ViewsMenu ws={ws} />
         {newView}
         {confirm}
       </div>
@@ -273,6 +277,7 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
             {o.dot && <span className="dot seg-dot" />}
           </span>
         ))}
+        {/* New view's + and the ⋯ menu */}
         <span className="btn btn-ghost btn-sm btn-square" />
         <span className="btn btn-ghost btn-sm btn-square" />
       </div>
@@ -283,13 +288,8 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
         onPointerDown={dragOut}
       >
         <Segmented label="Views" value={value} onChange={onChange} options={options.filter((_, i) => shows(i))} />
-        {overflow.length > 0 && (
-          <span className="files-views-more">
-            <Menu label="More views" items={overflow} trigger={<Button variant="icon" size="sm" icon="more-horizontal" title="More views" aria-label="More views" />} />
-            {hiddenOptions.some((o) => o.dot) && <span className="dot files-views-more-dot" role="img" aria-label="New" />}
-          </span>
-        )}
         <Button ref={setAskAt} variant="icon" size="sm" icon="plus" title="New view" aria-label="New view" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)} />
+        <ViewsMenu ws={ws} size="sm" overflow={overflow} dot={hiddenOptions.some((o) => o.dot)} />
         {newView}
         {confirm}
       </div>

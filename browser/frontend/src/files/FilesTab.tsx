@@ -282,14 +282,14 @@ function useFlag(ws: string, name: string, def: boolean): [boolean, (v: boolean)
   return [v, set]
 }
 
-/** Why a ref to the view `slug` opens nothing: the view is switched off in Settings (its proposal's `off`), or there is
- * none. */
+/** Why a ref to the view `slug` opens nothing: the view is hidden (its proposal's `off`), which the views bar's ⋯ menu
+ * undoes (ViewsMenu), or there is none. */
 async function missingView(ws: string, slug: string): Promise<string> {
   const p = await api
     .proposals(ws)
     .then((all) => all.find((x) => x.slug === slug))
     .catch(() => undefined)
-  return p?.off ? `${p.name} is switched off in Settings.` : `there is no view ${slug}`
+  return p?.off ? `${p.name} is hidden. The views bar's ⋯ menu shows it again.` : `there is no view ${slug}`
 }
 
 export function FilesTab({ ws, active, focused = active }: { ws: string; active: boolean; focused?: boolean }) {
@@ -527,7 +527,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           const first = (r.refs ?? [])[0]
           const path = first ? refPath(first) : null
           if (!path) throw new Error(`${ref} names no file line`)
-          // a view that is gone or switched off in Settings leaves its refs to the File browser
+          // a view that is gone or hidden leaves its refs to the File browser
           if (!v || (r.meta && (r.meta as { deleted?: boolean }).deleted)) toBrowser({ path, ref: first }, from)
           else if (v.file_type) toFileViewer(p.slug, { path, ref: first }, from)
           else {

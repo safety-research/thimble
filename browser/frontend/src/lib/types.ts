@@ -499,7 +499,7 @@ export interface Proposal {
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
-  /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
+  /** its view is hidden (backend views.views_off): the views bar leaves it out */
   off?: boolean
   status: ProposalStatus
   ts: string
@@ -1388,7 +1388,7 @@ export interface LocalViewRow {
   description?: string
   /** a file viewer, which opens in the File browser */
   file_viewer: boolean
-  /** its switch in Settings: off, it leaves the views bar and the File browser */
+  /** shown: its check in the views bar's ⋯ menu; hidden, it leaves the views bar and the File browser */
   on: boolean
 }
 
