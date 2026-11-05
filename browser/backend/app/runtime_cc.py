@@ -100,6 +100,7 @@ REFUSED = ("Permission to use {tool} has been denied because Claude Code is runn
            "around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If "
            "you believe this capability is essential to complete the user's request, STOP and explain to the user what "
            "you were trying to do and why you need this permission. Let the user decide how to proceed.")
+STOP_TASKS_S = 2.0  # how long a kept session's background commands get to stop as it closes (Held.close)
 _open: dict[str, int] = {}  # the sessions running in each working folder (_enter, _tidy)
 _had_claude: dict[str, bool] = {}  # whether .claude/ was in that folder when its first session started
 
@@ -115,6 +116,13 @@ class Held:
 
     async def close(self) -> None:
         try:
+            # `claude` waits for its background commands before it exits, and the SDK ends it only after a grace period
+            # (5 s), so the session stops them first
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(STOP_TASKS_S):
+                    for t in self.tasks:
+                        with contextlib.suppress(Exception):
+                            await self.client.stop_task(str(t.get("task_id") or ""))
             await self.stack.aclose()  # the SDK's close: `claude` exits, and its background commands with it
         finally:
             if self.ended is not None:

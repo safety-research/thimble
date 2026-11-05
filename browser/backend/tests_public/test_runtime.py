@@ -342,6 +342,7 @@ class BackgroundCLI:
         self.options, self.ends, self.jobs, self.closed = options, ends, [], False
         self.prompts: asyncio.Queue = asyncio.Queue()
         self.sent: list[Any] = []  # the prompts it read
+        self.stopped: list[str] = []  # the tasks stop_task stopped
         self.stream: Any = None
         self.on_close: Any = None  # called as it starts to close, while its commands still run
         made.append(self)
@@ -363,6 +364,12 @@ class BackgroundCLI:
             return
         async for m in prompt:
             await self.prompts.put(m)
+
+    async def stop_task(self, task_id: str) -> None:
+        self.stopped.append(task_id)
+        for p in self.jobs:
+            p.kill()
+            p.wait()
 
     async def play(self):  # noqa: ANN201
         import subprocess
@@ -442,6 +449,7 @@ async def test_a_command_main_s_bash_runs_in_the_background_outlives_the_turn_un
     else:
         await runtime.stop_all()
     assert made[0].closed and job.poll() is not None, f"{how} ends main's session and its background command"
+    assert made[0].stopped == ["b1"], "the session stops the command first: claude would wait for it as it exits"
 
 
 async def test_main_s_next_turn_reads_the_turn_claude_code_ran_when_its_background_command_ended_first(on, monkeypatch):
