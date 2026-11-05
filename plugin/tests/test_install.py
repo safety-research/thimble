@@ -384,11 +384,12 @@ def wsl(w, kernel: str) -> None:
 
 
 def test_wsl_1_is_said_with_its_fix_and_nothing_is_installed(w):
-    """WSL 1 has no namespaces, so the sandbox that cards run in cannot start there: the install asks for WSL 2."""
+    """WSL 1 has no namespaces, so the sandbox that cards run in cannot start there: the install asks for WSL 2, with
+    the command that converts the distribution, which runs in Windows, not in the distribution."""
     wsl(w, "4.4.0-19041-Microsoft")
     p = w.install("--no-browser", WSL_DISTRO_NAME="Made-Up")
     assert p.returncode == 1, text_of(p)
-    assert "  - WSL 2, as cards cannot run in WSL 1: wsl --set-version Made-Up 2" in p.stdout.splitlines(), p.stdout
+    assert "  - WSL 2 (this is WSL 1): in Windows, wsl --set-version Made-Up 2" in p.stdout.splitlines(), p.stdout
     assert not w.th.exists() and not w.cc.exists()
 
 
