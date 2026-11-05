@@ -1080,3 +1080,157 @@ def test_a_later_probe_that_fails_never_takes_the_sandbox_away_and_one_that_work
     answers[:] = [(0, "")]
     assert kernel_wrap.srt_problem(node, box) == ""
     assert kernel_wrap.srt_works(node, box) is True  # given back once a probe works
+
+
+# --------------------------------------------------------------------------- thimble's own `built` stamp
+
+
+@pytest.fixture()
+def stamp_gate(monkeypatch):
+    """views.gate with its own checks of the files (source_problems and its rule on `built`), the reader's checks faked:
+    a page passes them when it says no FAIL."""
+
+    async def check(c, slug, locators=None, **_kw):
+        ok = "FAIL" not in (views.views_dir(c) / slug / views.VIEW_HTML).read_text()
+        return {"ok": ok, "checks": [], "page": {"ok": ok}, "problems": [] if ok else ["the page says FAIL"]}
+
+    async def ensure(c, slug, folder, libs, **_kw):
+        return {"problems": [], "notes": []}
+
+    async def no_note(html):
+        return ""
+
+    monkeypatch.setattr(views, "check", check)
+    monkeypatch.setattr(views.view_libs, "ensure", ensure)
+    monkeypatch.setattr(views, "media_note", no_note)
+    monkeypatch.setattr(views, "build_problem", lambda: "")
+
+
+STAMP_LINE = "names `built`"
+
+
+async def _built_with_a_message_waiting(slug: str) -> str:
+    """A builder of `slug` that was sent the analyst's message while it built, passed, and ended: its agent id. The
+    server's runtime runs such a message as the builder's next run once its run ends (runtime._agent_loop), which the
+    test starts with run_again, as the mirror does when the message reaches the builder's transcript."""
+    agent = await _started(slug)
+    _draft(slug, "<p>v1</p>")
+    views.message(CORPUS, slug, "Show each file's size too.")
+    await _until(lambda: _prop(slug).get("status") == "building" and not _prop(slug).get("changed"),
+                 "the message never reached the running builder")
+    res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert not res.is_error, res.text
+    subagents.run_ended(CORPUS, agent, "done", "Built.", source="handback")
+    await _until(lambda: _prop(slug).get("status") == "built" and (CORPUS, slug) not in dev._settling,
+                 "the view was not built")
+    assert views.read_view(CORPUS, slug)["built"], "thimble stamped the view it registered"
+    return agent
+
+
+async def test_a_builder_that_writes_the_stamp_itself_is_still_told_to_remove_it(board, bridge, stamp_gate):
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    _draft(slug, "<p>v1</p>")
+    d = views.views_dir(CORPUS) / slug
+    raw = json.loads((d / views.VIEW_JSON).read_text())
+    (d / views.VIEW_JSON).write_text(json.dumps({**raw, "built": "2026-11-05T09:00:00Z", "version": "0123456789ab"}))
+    res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert res.is_error and STAMP_LINE in res.text, "a stamp that names no copy thimble kept is the builder's"
+
+
+async def test_a_message_s_run_after_the_view_passed_answers_it_and_leaves_the_view_built(board, bridge, stamp_gate):
+    slug = _propose(asked=True)
+    agent = await _built_with_a_message_waiting(slug)
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert _prop(slug)["status"] == "built", "a run that takes a message about the built view is no new build"
+    subagents.run_ended(CORPUS, agent, "done", "Each file's size shows in the table already.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"),
+                 "the run's end was never settled")
+    assert _prop(slug)["status"] == "built" and not _prop(slug).get("error")
+
+
+async def test_a_message_s_run_that_changes_the_view_is_a_change_never_held_back_by_thimble_s_own_stamp(
+        board, bridge, stamp_gate):
+    slug = _propose(asked=True)
+    agent = await _built_with_a_message_waiting(slug)
+    before = views.read_view(CORPUS, slug)["version"]
+    subagents.run_again(CORPUS, agent, "coordinator")
+    # the page changed, view.json as thimble left it
+    (views.views_dir(CORPUS) / slug / views.VIEW_HTML).write_text("<p>v2, with sizes</p>")
+    res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert not res.is_error and STAMP_LINE not in res.text, res.text
+    assert _prop(slug)["status"] == "built" and views.read_view(CORPUS, slug)["version"] != before
+
+
+async def test_a_retry_after_a_build_failed_on_thimble_s_own_stamp_builds_from_the_view_without_that_failure(
+        board, bridge, stamp_gate, monkeypatch):
+    """A view whose earlier build passed (its files stamped by thimble, the copy at that version kept) and then failed
+    as 0.10.10 failed it: Retry's builder finishes from those files, and the gate takes the stamp for thimble's own."""
+    slug = _propose(asked=True)
+    await _built_with_a_message_waiting(slug)
+    monkeypatch.setattr(dev, "VIEW_POOL", 2)
+    views.update_proposal(CORPUS, slug, status="failed",
+                          error="problem: view.json names `built`, which thimble adds when the view passes; remove it")
+    views.retry(CORPUS, slug)
+    await _until(lambda: len(bridge.ops("spawn")) >= 2 and _prop(slug).get("status") == "building",
+                 "Retry started no builder")
+    agent = str(bridge.ops("spawn")[-1].get("agent") or _prop(slug).get("agent_id"))
+    res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert not res.is_error and STAMP_LINE not in res.text, res.text
+    assert _prop(slug)["status"] == "built"
+
+
+async def test_a_pass_whose_registration_broke_off_leaves_no_stamp_the_next_gate_holds_against_the_view(
+        board, bridge, stamp_gate, monkeypatch):
+    """mark_built keeps the copy readers see before it stamps the view's folder, so a registration that broke off while
+    it kept that copy leaves no stamp of thimble's behind, and the builder's next finish_view passes."""
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    _draft(slug, "<p>v1</p>")
+    real = views._publish
+
+    def broken(*a, **kw):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(views, "_publish", broken)
+    res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert res.is_error and _prop(slug)["status"] == "building"
+    monkeypatch.setattr(views, "_publish", real)
+    res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert not res.is_error and STAMP_LINE not in res.text, res.text
+    assert _prop(slug)["status"] == "built"
+
+
+async def test_a_message_s_run_that_begins_before_the_last_run_s_end_is_settled_owns_the_view(board, bridge,
+                                                                                             stamp_gate):
+    """The server's runtime starts a builder's queued message at once when its run ends, before that end is settled:
+    the end leaves the view to the new run, whose failing change leaves the view as it was."""
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    _draft(slug, "<p>v1</p>")
+    views.message(CORPUS, slug, "Show each file's size too.")
+    await _until(lambda: _prop(slug).get("status") == "building" and not _prop(slug).get("changed"),
+                 "the message never reached the running builder")
+    res = await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    assert not res.is_error, res.text
+    subagents.run_ended(CORPUS, agent, "done", "Built.", source="handback")  # its end is settled in a task...
+    subagents.run_again(CORPUS, agent, "coordinator")  # ...which the next run begins before
+    await _until(lambda: (CORPUS, slug) not in dev._settling, "the first run's end was never settled")
+    assert _prop(slug)["status"] == "built" and (_prop(slug).get("answering") or {}).get("run") == 1
+    folder = views.views_dir(CORPUS) / slug
+    (folder / views.VIEW_HTML).write_text("<p>FAIL, the change half made</p>")
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"),
+                 "the second run's end was never settled")
+    assert _prop(slug)["status"] == "built" and _prop(slug).get("failed_change") is not None
+    assert (folder / views.VIEW_HTML).read_text() == "<p>v1</p>"
+
+
+async def test_retry_on_a_view_whose_builder_still_runs_shows_that_build_building(board, bridge, stamp_gate):
+    """A view that failed while its builder went on (a run the runtime began for a message sent to it): Retry makes
+    that run the build, which shows as building, rather than a queued build that never starts."""
+    slug = _propose(asked=True)
+    await _started(slug)
+    views.update_proposal(CORPUS, slug, status="failed", error="problem: the checks did not pass")
+    assert views.retry(CORPUS, slug)["status"] in ("queued", "building")
+    assert _prop(slug)["status"] == "building" and not _prop(slug).get("error")

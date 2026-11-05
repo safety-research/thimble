@@ -2988,15 +2988,22 @@ def _soon(make: Callable[[], Awaitable[Any]], name: str) -> None:
 def queue_view(c: str, slug: str, recovered: bool = False) -> None:
     """Queue the build of the proposal `slug` and start what the pool has room for (views.propose, views.retry,
     views.revise, recover_views). A build queued already is left as it is; a change to a view whose builder runs goes to
-    that builder as a message (change_view). The proposal records main's session (`queued_in`), unless `recovered`
-    (recover_views queued it again after a restart): a queued build starts only in that session (_same_main)."""
+    that builder as a message (change_view), and Retry while it runs makes that builder's run the build. The proposal
+    records main's session (`queued_in`), unless `recovered` (recover_views queued it again after a restart): a queued
+    build starts only in that session (_same_main)."""
     from . import module_bridge, views  # noqa: PLC0415
 
     key = (c, slug)
     b = _view_runs.get(key)
     if b is not None:
-        if b.agent:
+        prop = views.read_proposal(c, slug) or {}
+        if b.agent and prop.get("changed"):
             _soon(lambda: change_view(c, slug), f"view-change:{c}:{slug}")
+        elif b.agent and prop.get("status") == "queued":
+            # Retry on a view whose builder still runs (a run the server's runtime began for a message sent to it):
+            # that builder is the build
+            views.update_proposal(c, slug, status="building", error=None)
+            views._emit(c, slug, "building", chat=prop.get("chat"))
         return
     if recovered:
         _recovered.add(key)
@@ -3226,7 +3233,9 @@ async def _send_message(c: str, slug: str, route: str) -> None:
             ans = await subagents.send(c, agent_id, message_text(c, prop, new), values=prop.get("values"),
                                        route=route, quiet=True)
             if not ans.refused:
-                if running:  # it joins the run that goes on, which no start handler sees
+                # it joins the run that goes on, which no start handler sees; one the server's runtime queued is the
+                # builder's next run instead, which takes it from `message` (build_started)
+                if running and not ans.get("queued"):
                     now = str((views.read_proposal(c, slug) or {}).get("message") or "")
                     views.update_proposal(c, slug, message=_unsent(now, text) or None, message_sent=None)
                 return
@@ -3356,9 +3365,11 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
 
 def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
     """A builder's run started (subagents.Type.started): its first run makes it the view's build, its attempts at
-    nothing; a later run (a change sent to it, or a message typed to it in the agent tray) is a build again. A run that
-    takes a message about the built view (message_view) answers it, the view as it is and its attempts kept, until it
-    changes the view (message_changes)."""
+    nothing; a later run (a change sent to it, or a message typed to it in the agent tray) is a build again, unless the
+    view is built. A run that takes a message about the built view answers it, the view as it is and its attempts kept,
+    until it changes the view (message_changes): a message from the view's thread (message_view), and any later run
+    while the view is built, such as the one the server's runtime starts for a message sent while the builder ran, once
+    the view passed in between (runtime._agent_loop)."""
     from . import subagents, views  # noqa: PLC0415
 
     slug = run.key.split(":", 1)[-1]
@@ -3371,13 +3382,13 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
     if key in _view_queue:
         _view_queue.remove(key)
     held = views.read_proposal(c, slug) or {}
-    if held.get("message") and held.get("status") == "built":
+    if held.get("status") == "built" and (held.get("message") or run.k > 0):
         # the pass its earlier build finished with is no finish of this run (_settle); words written after the last
         # send stay in `message` for the run, which gets them after its current step (_send_message)
-        rest = _unsent(str(held["message"]), str(held.get("message_sent") or ""))
+        text = str(held.get("message") or "")
+        rest = _unsent(text, str(held.get("message_sent") or ""))
         views.update_proposal(c, slug, message=rest or None, message_sent=None, agent_id=run.agent_id, chat=run.chat,
-                              request=None, finish=None,
-                              answering={"agent": run.agent_id, "run": run.k, "text": str(held["message"])})
+                              request=None, finish=None, answering={"agent": run.agent_id, "run": run.k, "text": text})
         # the run starts from the view as it is now: a copy of it aside, which an earlier run that was stopped may have
         # used up (its _settle put the view back from it, or dropped it), so the run's end can tell a change and put it back
         views._keep_built(c, slug)
@@ -3497,6 +3508,7 @@ async def _settled(c: str, slug: str, run: Any, status: str, report: str, why: s
 
 async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: str) -> None:
     """What a builder's end means for its view, the backstop of finish_view:
+    - its next run began meanwhile: nothing here, since that run's end settles the view;
     - it answered a message about the built view and left its files as they were: nothing changes; one that changed
       them is a change to the view from here (message_changes);
     - it passed: done, its work folder lets go of its extracts, and the review starts; a folder that changed after the
@@ -3514,6 +3526,11 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     prop = views.read_proposal(c, slug)
     if prop is None or prop.get("agent_id") != run.agent_id:
         return  # deleted, or a newer build took over
+    if int((subagents.agent(c, run.agent_id) or {}).get("run") or 0) > run.k:
+        # the builder's next run began before this end was settled, as the server's runtime starts it at once for a
+        # message sent while the builder ran (runtime._agent_loop): the view is that run's, and its end settles it
+        log.info("%s: the end of run %s of the build of %s is left to the run after it", c, run.k, slug)
+        return
     work = view_work_dir(c, slug)
     if answering(prop, run.agent_id) is not None:
         if views.unchanged_since_built(c, slug):  # it answered the message and left the view as it was built

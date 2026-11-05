@@ -992,8 +992,11 @@ def mark_built(c: str, slug: str) -> dict[str, Any]:
     d = views_dir(c) / slug
     raw = _view_json(d)
     version = view_digest(d)[:12]
-    write_json(d / VIEW_JSON, {**raw, "built": _now(), "version": version})
-    _publish(c, slug, version)
+    stamped = {**raw, "built": _now(), "version": version}
+    # the copy readers see first, then the stamp, so a stamp in a view's folder always names a copy the server kept
+    # (own_stamp), even when this registration breaks off
+    _publish(c, slug, version, stamped)
+    write_json(d / VIEW_JSON, stamped)
     _forget(c, slug)
     prop = read_proposal(c, slug)
     # the first build under the proposal, not a change to a view built before (revise marks that `revision`)
@@ -1012,9 +1015,17 @@ def _versions_dir(c: str, slug: str) -> Path:
     return state_dir(c) / VERSIONS_SUBDIR / slug
 
 
-def _publish(c: str, slug: str, version: str) -> None:
-    """Keep the view's files as they passed their checks at `version` (VERSIONS_SUBDIR), the newest VERSIONS_KEPT."""
-    _keep_version(views_dir(c) / slug, _versions_dir(c, slug), version)
+def _publish(c: str, slug: str, version: str, stamped: dict[str, Any]) -> None:
+    """Keep the view's files as they passed their checks at `version` (VERSIONS_SUBDIR), the newest VERSIONS_KEPT, with
+    `stamped` as the copy's view.json."""
+    _keep_version(views_dir(c) / slug, _versions_dir(c, slug), version, stamped)
+
+
+def own_stamp(c: str, slug: str, raw: dict[str, Any]) -> bool:
+    """Whether the `built` stamp of the view.json `raw` is thimble's own: its `version` names a copy of the view the
+    server kept at a pass (_publish), which no agent writes."""
+    version = str(raw.get("version") or "")
+    return bool(VERSION_RE.match(version)) and (_versions_dir(c, slug) / version / VIEW_JSON).is_file()
 
 
 def keep_installed(ws: Path) -> list[str]:
@@ -1067,8 +1078,9 @@ def install_view(ws: Path, src: Path, slug: str | None = None) -> str:
     return version
 
 
-def _keep_version(src: Path, root: Path, version: str) -> None:
-    """The files of the view folder `src` kept at `version` in `root`, the newest VERSIONS_KEPT of its versions."""
+def _keep_version(src: Path, root: Path, version: str, stamped: dict[str, Any] | None = None) -> None:
+    """The files of the view folder `src` kept at `version` in `root`, the newest VERSIONS_KEPT of its versions, with
+    `stamped` as the copy's view.json when given."""
     dst = root / version
     if not dst.is_dir():
         tmp = root / f".{version}.tmp"
@@ -1078,6 +1090,8 @@ def _keep_version(src: Path, root: Path, version: str) -> None:
             if f.is_file() and not f.is_symlink():
                 with contextlib.suppress(nofollow.Linked):
                     nofollow.copy_file(f, tmp / f.name)
+        if stamped is not None:
+            write_json(tmp / VIEW_JSON, stamped)
         view_libs.copy_lib(src, tmp)
         os.replace(tmp, dst)
     os.utime(dst)
@@ -3200,10 +3214,11 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
     text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, VIEW_HTML)}
     problems = source_problems(raw.get("claims") if raw.get("claims") is not None else raw.get("scope"),
                                text[READER_PY], text[VIEW_HTML], raw.get("libs"))
-    # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a builder's
-    # writing there (a session that removes it is fine too; mark_built stamps the view again)
-    if raw.get("built") and (prop := read_proposal(c, slug)) is not None and prop.get("status") != "built" \
-            and not prop.get("revision"):
+    # thimble's own stamp is no sign of a builder's writing there: a change to a built view starts from files that
+    # carry it, and so does a build after one that passed (a session that removes it is fine too; mark_built stamps the
+    # view again)
+    if raw.get("built") and not own_stamp(c, slug, raw) and (prop := read_proposal(c, slug)) is not None \
+            and prop.get("status") != "built" and not prop.get("revision"):
         problems.append("view.json names `built`, which thimble adds when the view passes; remove it")
     if problems:
         return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
