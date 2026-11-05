@@ -67,13 +67,13 @@ export type ChatRecord =
 
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
  * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), open
- * the view's build thread with `text` in its composer (`view-fix`), discard the failed view `slug` or its failed change
+ * main with `/thimble-fix <text>` in its composer (`thimble-fix`), discard the failed view `slug` or its failed change
  * (`view-discard`), or sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'view-fix' | 'view-discard' | 'sign-out' | (string & {})
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'thimble-fix' | 'view-discard' | 'sign-out' | (string & {})
   slug?: string
-  /** view-fix: what it puts in the composer of the notice's chat, the view's build thread */
+  /** thimble-fix: the words it puts after /thimble-fix in main's composer */
   text?: string
 }
 

@@ -17,8 +17,7 @@ is the button, one object {label, do, slug?, text?} or a list of them, `do` one 
   proposals-off    PUT /api/ws/{c}/settings {propose_views: false}
   settings         open Settings
   view-retry       the failed view's Retry (its slug in `slug`)
-  view-fix         open the view's build thread (`chat`) with `text` in its composer, for the analyst to send to its
-                   builder (its slug in `slug`)
+  thimble-fix      open main's chat with `/thimble-fix <text>` in its composer, for the analyst to send (fixes.ask)
   view-discard     POST /api/ws/{c}/views/proposals/{slug}/discard (views.discard)
   sign-out         POST /api/ui/signout (the browser's id in slug)
 
@@ -86,7 +85,7 @@ _loop: asyncio.AbstractEventLoop | None = None
 TYPE = "notice"  # the event's type on the workspace stream, and the row's type in a chat's log
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
-ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "view-fix", "view-discard", "sign-out")
+ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "thimble-fix", "view-discard", "sign-out")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
