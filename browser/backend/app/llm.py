@@ -133,7 +133,7 @@ def failure(e: BaseException) -> str:
                 "IDs and the token source in the config file; whoever manages the federation rule can see the reason.")
     if isinstance(e, anthropic.AuthenticationError):
         where = ("ANTHROPIC_API_KEY where the workbench runs" if claude_access.how() == claude_access.API_KEY
-                 and claude_access.env_key() else "them in Settings, Claude access")
+                 and claude_access.env_key() else "them with /login in the chat")
         return f"Claude refused the credentials (401) at {now}, for {claude_access.describe()}. Check {where}."
     if isinstance(e, anthropic.PermissionDeniedError):
         return f"These credentials may not use this model or feature (403) at {now}, for {claude_access.describe()}."

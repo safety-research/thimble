@@ -1,8 +1,8 @@
 """`thimble-browser --setup`, as scripts/install.sh runs it (--sign-in, or --keep) and as a person runs it: the line
 that says the way chosen and what its check found, in the install's words; the API key from ANTHROPIC_API_KEY when it
-is set, else one pasted in Settings, and never a key read from a file or typed here; the WIF config by its path alone;
-and the Claude Code sign-in, whose `claude` gets the environment as it is and whose login the line names. No model is
-called: the Messages API check is faked, and `claude` is a stand-in script."""
+is set, else one pasted in the workbench, and never a key read from a file or typed here; the WIF config by its path
+alone; and the Claude Code sign-in, whose `claude` gets the environment as it is and whose login the line names. No
+model is called: the Messages API check is faked, and `claude` is a stand-in script."""
 from __future__ import annotations
 
 import json
@@ -65,11 +65,11 @@ def test_the_api_key_from_the_environment_is_used_and_never_printed(capsys, monk
 
 def test_without_anthropic_api_key_the_workbench_asks_for_a_key_when_it_starts(capsys):
     """--sign-in api-key with no ANTHROPIC_API_KEY: the choice is saved, nothing is read from the terminal or a file,
-    and the line says that the workbench asks in its Settings; the page's first start shows that step."""
+    and the line says to paste a key with /login in the workbench's chat, which opens that step."""
     rc, out = run_setup(capsys, "--how", "api-key")
     assert rc == 0
-    assert out == ("Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so the workbench asks for a key in its "
-                   "Settings when it starts.\n")
+    assert out == ("Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so paste a key in the workbench with "
+                   "/login in its chat.\n")
     assert claude_access.how() == claude_access.API_KEY
     assert claude_access.problem()["what"] == "No API key: ANTHROPIC_API_KEY is not set, and no key is saved."
 
@@ -78,7 +78,7 @@ def test_a_key_pasted_in_settings_is_used_when_anthropic_api_key_is_not_set(caps
     claude_access.save(claude_access.API_KEY, key=FAKE_KEY)
     answers(monkeypatch, {"ok": True})
     rc, out = run_setup(capsys, "--how", "api-key")
-    assert rc == 0 and out == "Sign-in: an API key, the one saved in Settings. Checked: Claude answers.\n"
+    assert rc == 0 and out == "Sign-in: an API key, the one saved in the workbench. Checked: Claude answers.\n"
     assert FAKE_KEY not in out
     # ANTHROPIC_API_KEY, once set, wins over the pasted one
     monkeypatch.setenv("ANTHROPIC_API_KEY", "-".join(("sk", "ant", "other", "made", "up")))
@@ -116,7 +116,7 @@ def test_only_anthropic_api_key_goes_to_anthropic_base_url(capsys, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://someone:secret@gw.example.invalid/llm")
     claude_access.save(claude_access.API_KEY, key=FAKE_KEY)
     assert llm.client().base_url.host == "api.anthropic.com"
-    assert claude_access.describe() == "an API key, the one saved in Settings"
+    assert claude_access.describe() == "an API key, the one saved in the workbench"
     monkeypatch.setenv("ANTHROPIC_API_KEY", "-".join(("sk", "ant", "env", "made", "up")))
     assert llm.client().base_url.host == "gw.example.invalid"
     answers(monkeypatch, {"ok": True})
@@ -330,8 +330,8 @@ def test_a_claude_code_that_is_not_signed_in_is_said(tmp_path, capsys, monkeypat
 
 
 def test_a_refused_key_says_where_to_check_it(monkeypatch):
-    """A 401 names the way and where the key comes from: ANTHROPIC_API_KEY where the workbench runs, which Settings
-    cannot change, or the key pasted in Settings."""
+    """A 401 names the way and where the key comes from: ANTHROPIC_API_KEY where the workbench runs, which /login
+    cannot change, or the key pasted with /login."""
     import anthropic
     import httpx
 
@@ -345,6 +345,6 @@ def test_a_refused_key_says_where_to_check_it(monkeypatch):
     assert "for an API key, from ANTHROPIC_API_KEY. Check ANTHROPIC_API_KEY where the workbench runs." in said
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     claude_access.save(claude_access.API_KEY, key=FAKE_KEY)
-    assert llm.failure(refused).endswith("for an API key, the one saved in Settings. Check them in Settings, Claude "
-                                         "access.")
+    assert llm.failure(refused).endswith("for an API key, the one saved in the workbench. Check them with /login in "
+                                         "the chat.")
     assert FAKE_KEY not in said
