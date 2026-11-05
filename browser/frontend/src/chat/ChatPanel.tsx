@@ -33,13 +33,14 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import { useTouring } from '../lib/touring'
 import type { ChatMeta, ChatRecord, MainEffort, Proposal, SessionAlert, Settings, StartAnswer, ThreadComment, Ticket } from '../lib/types'
-import { invalidateSettings, loadSettings, modelChoices, modelLabel, onSettingsChange } from '../lib/models'
+import { loadSettings, modelChoices, onSettingsChange } from '../lib/models'
 import { colourVar } from '../files/labels'
 import { NOTE_COLOR } from '../report/checkComments'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
-import { mainEffort, mainFast, mainModel, NEXT_LAUNCH } from './ModelLine'
+import { chooseMain, type MainChoice } from './mainChoice'
+import { mainEffort, mainFast, mainModel } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
@@ -636,46 +637,17 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     target.to === 'orient'
       ? (orientClosed?.chat === target.chat ? orientClosed.text : '') || continueText(orientContinue, lastSession(curMeta?.id === target.chat ? curMeta : orientMeta))
       : ''
-  const pickEffort = useCallback(
-    (e: MainEffort) => {
-      track('chat-settings', { target: 'chat:main', detail: { effort: e } })
-      api
-        .setEffort(ws, e)
-        .then(() => {
-          main.reload()
-          bus.emit('toast', { text: `Effort ${e}: ${NEXT_LAUNCH}.`, kind: 'info' })
-        })
-        .catch((err: Error) => bus.emit('toast', { text: `Could not set the effort: ${err.message}`, kind: 'error' }))
-    },
+  // main's model, effort and fast mode, which Settings' Main and side threads row changes as well (chat/mainChoice)
+  const choose = useCallback(
+    (choice: MainChoice) =>
+      void chooseMain(ws, choice).then((ok) => {
+        if (ok) void main.reload()
+      }),
     [ws, main.reload],
   )
-  const pickModel = useCallback(
-    (m: string) => {
-      track('chat-settings', { target: 'chat:main', detail: { model: m } })
-      api
-        .setModel(ws, m)
-        .then(() => {
-          invalidateSettings(ws)
-          main.reload()
-          bus.emit('toast', { text: `${modelLabel(m)}: ${NEXT_LAUNCH}.`, kind: 'info' })
-        })
-        .catch((err: Error) => bus.emit('toast', { text: `Could not set the model: ${err.message}`, kind: 'error' }))
-    },
-    [ws, main.reload],
-  )
-  const pickFast = useCallback(
-    (on: boolean) => {
-      track('chat-settings', { target: 'chat:main', detail: { fast: on } })
-      api
-        .setFast(ws, on)
-        .then(() => {
-          main.reload()
-          bus.emit('toast', { text: `Fast mode ${on ? 'on' : 'off'}: ${NEXT_LAUNCH}.`, kind: 'info' })
-        })
-        .catch((err: Error) => bus.emit('toast', { text: `Could not set fast mode: ${err.message}`, kind: 'error' }))
-    },
-    [ws, main.reload],
-  )
+  const pickEffort = useCallback((e: MainEffort) => choose({ effort: e }), [choose])
+  const pickModel = useCallback((m: string) => choose({ model: m }), [choose])
+  const pickFast = useCallback((on: boolean) => choose({ fast: on }), [choose])
   const nodes = useMemo(
     () =>
       baseNodes.map((n) => {

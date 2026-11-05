@@ -350,3 +350,32 @@ def test_the_propose_views_switch_is_on_by_default_and_only_the_analyst_s_browse
     _write(userconf.global_file(), {"views": False})
     assert "views must be an object" in userconf.problem(CORPUS)
     assert userconf.propose_views(CORPUS), "a config with an error leaves view proposals on, as its defaults"
+
+
+def test_a_settings_change_leaves_the_keys_this_version_ignores_in_the_file(workspaces_tmp, analyst):
+    """Each Settings change writes its own key alone: the keys earlier builds read, which this one reads and ignores,
+    stay in the file as they were, in the workspace's file as in thimble's home, and are still ignored."""
+    held = {"installs": "ask", "agents": {"writer": {"fast": True, "permissionMode": "auto", "web": "allow"}}}
+    _write(userconf.global_file(), held)
+    _write(userconf.workspace_file(CORPUS), {"agents": {"checks": {"fast": True, "effort": "low"}}})
+    assert set(userconf.ignored(CORPUS)) == {"installs", "agents.writer.fast", "agents.writer.permissionMode",
+                                             "agents.writer.web", "agents.checks.fast"}
+    ledger.put_settings_route(CORPUS, analyst, {"models": {"writer": {"effort": "high"}, "checks": {"effort": "max"}}})
+    assert json.loads(userconf.global_file().read_text()) == {
+        "installs": "ask", "agents": {"writer": {"fast": True, "permissionMode": "auto", "web": "allow", "effort": "high"}}}
+    assert json.loads(userconf.workspace_file(CORPUS).read_text()) == {"agents": {"checks": {"fast": True, "effort": "max"}}}
+    ledger.put_settings_route(CORPUS, analyst, {"models": {"writer": {"effort": ""}}, "ask_key": "alt"})
+    assert json.loads(userconf.global_file().read_text()) == {**held, "askKey": "alt"}, "back to the default, and askKey"
+    got = ledger.get_settings(CORPUS)
+    assert got["config_error"] == "" and got["models"]["writer"]["fast"] is False and got["models"]["checks"]["effort"] == "max"
+
+
+def test_the_config_s_error_names_its_file_from_the_home_folder(workspaces_tmp, monkeypatch, tmp_path):
+    """The error Settings shows at its top, and `thimble doctor` prints, writes a path in the home folder from ~."""
+    monkeypatch.setenv("HOME", str(tmp_path / "me"))
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "me" / ".thimble-browser"))
+    _write(userconf.global_file(), {"agents": {"writer": {"modle": "claude-opus-5-5"}}})
+    assert userconf.problem().startswith("thimble's config ~/.thimble-browser/config.json: agents.writer.modle is not a "
+                                         "setting; it takes model, effort")
+    assert ledger.get_settings(CORPUS)["config_error"] == userconf.problem(CORPUS)
+    assert userconf.home_as_tilde(f"{tmp_path}/me/x and {tmp_path}/mex/y") == f"~/x and {tmp_path}/mex/y"

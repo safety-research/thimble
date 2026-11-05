@@ -26,17 +26,18 @@ export function modelLabel(id: string): string {
 /** The current models by their ids, offered in every model menu. */
 export const KNOWN_MODELS: readonly string[] = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-haiku-5-5']
 
-/** The models GET /settings names across roles plus `current`, then the current models, in first-seen order, each
- * once by its id without a tag (baseModel). */
+/** The current models in their order, then `current` and the other models GET /settings names across roles, in
+ * first-seen order, each once by its id without a tag (baseModel): every menu lists the models in the same order,
+ * whichever one is picked. */
 export function modelChoices(settings: Settings | null | undefined, current?: string | null): string[] {
   const out: string[] = []
   const add = (m: unknown) => {
     const id = typeof m === 'string' ? baseModel(m) : ''
     if (id && !out.includes(id)) out.push(id)
   }
+  for (const m of KNOWN_MODELS) add(m)
   add(current)
   for (const conf of Object.values(settings?.models ?? {})) add(conf?.model)
-  for (const m of KNOWN_MODELS) add(m)
   return out
 }
 
