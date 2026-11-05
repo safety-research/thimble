@@ -1358,5 +1358,7 @@ def test_what_is_wrong_with_a_view_is_said_by_the_kind_of_its_first_failure_not_
     assert views.plain_failure("I could not make the page pass.") == ""
     unfinished, fix = dev._checks_failed({"slug": "posts"}, "")
     assert unfinished == dev.UNFINISHED and "“" not in fix, "a builder that stopped before its view.json"
+    said = "I can't write to the view's folder."
+    assert dev._checks_failed({"slug": "posts"}, "", said)[0] == said, "unless it said why, in its own words"
     words, change = dev._checks_failed({"slug": "posts", "revision": True}, "page: overview: test.")
     assert words == views.plain_failure("page: overview: test") and "“page: overview: test”" in change
