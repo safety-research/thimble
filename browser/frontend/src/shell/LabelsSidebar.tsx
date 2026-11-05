@@ -209,7 +209,7 @@ function MakesLabels({ ws }: { ws: string }) {
   if (on == null) return null
   return (
     <label className="lside-makes" data-on={on}>
-      {MAKES_LABELS}
+      <span className="lside-makes-words">{MAKES_LABELS}</span>
       <Switch
         checked={on}
         onChange={(v) => {
