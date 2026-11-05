@@ -135,6 +135,10 @@ needs() {
     else missing+=("uv: $(fix uv)"); fi
     if v=$(npm --version 2>/dev/null) && [ -n "$v" ]; then have+=("npm $v"); else missing+=("npm: $(fix npm)"); fi
   fi
+  case "$(uname -r)" in  # Windows: WSL 1 has no namespaces for the cards' sandbox; WSL 2 has Windows' drives in /mnt
+    *Microsoft*) missing+=("WSL 2 (this is WSL 1): in Windows, wsl --set-version ${WSL_DISTRO_NAME:-DISTRO} 2") ;;
+    *microsoft*) for v in node npm "$py" claude; do case "$(command -v "$v")" in "${THIMBLE_WSL_DRIVES:-/mnt}"/*)
+      say "  $v here is Windows' own, on its drives: install a Linux one in WSL, first on PATH." ;; esac; done ;; esac
   if [ ${#missing[@]} -gt 0 ]; then
     say "thimble needs these first:"
     for v in "${missing[@]}"; do say "  - $v"; done

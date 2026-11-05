@@ -162,7 +162,7 @@ def _scan(text: str, st: Store | None, own: list[str] | None = None) -> tuple[li
 
 def opener() -> list[str] | None:
     """The command that opens a link in the person's browser, or None on a machine with no browser to show (a remote
-    one, reached over ssh)."""
+    one, reached over ssh). In WSL it is wslview (wslu's), which opens it in Windows' browser."""
     o = os.environ.get("THIMBLE_OPEN")
     if o:
         return None if o == "none" else [o]
@@ -170,6 +170,8 @@ def opener() -> list[str] | None:
         return ["open"] if shutil.which("open") else None
     if sys.platform.startswith("win"):
         return ["cmd", "/c", "start", ""]
+    if os.environ.get("WSL_DISTRO_NAME") and shutil.which("wslview"):
+        return ["wslview"]
     if shutil.which("xdg-open") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         return ["xdg-open"]
     return None

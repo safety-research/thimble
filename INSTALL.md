@@ -5,7 +5,7 @@ One script installs both, or the plugin alone, in `~/.thimble`.
 
 ## What you need
 
-- **macOS or Linux**, with **git**.
+- **macOS or Linux**, with **git**. On Windows, **WSL 2**: see [Windows](#windows) below.
 - **Node.js 22.18 or later** (the workbench alone runs on 22.12 or later) and **Python 3.10 or later** (`python3`, or
   the Python that `THIMBLE_PYTHON` names). Check with `node --version` and `python3 --version`.
 - **Claude Code 2.1.307 or later**. Check with `claude --version`. `claude update` updates it, unless a package manager
@@ -19,6 +19,21 @@ One script installs both, or the plugin alone, in `~/.thimble`.
 
 The install checks these first. When something is missing, it says what, with the command that installs it, and
 installs nothing until it is there.
+
+### Windows
+
+thimble runs in WSL 2, in a Linux distribution such as Ubuntu. It does not run on Windows itself yet, nor in WSL 1,
+which has no namespaces for the sandbox that cards run in (`wsl --set-version NAME 2`, in Windows, converts a
+distribution; the install stops in WSL 1 and says so). In the distribution:
+
+- Install everything above there, with its package manager (on Ubuntu, `sudo apt-get install git python3 bubblewrap
+  socat ripgrep`), and Node.js and Claude Code too. thimble needs Linux's `node`, `npm`, `python3` and `claude`, not
+  the Windows ones that WSL puts on `PATH` from Windows' drives, under `/mnt`: `command -v node npm python3 claude`
+  should name none there, and the install says which it finds there.
+- Keep thimble and your data in Linux's file system, in your home folder (`~`), not on Windows' drives under `/mnt`:
+  files there go through a slow bridge (9P), and the file modes thimble sets and checks do not hold there.
+- thimble opens links in Windows' browser with `wslview`, from wslu (`sudo apt-get install wslu`). The workbench's link
+  (127.0.0.1) opens in Windows' browser too, since WSL 2 passes localhost through.
 
 ## Install
 
