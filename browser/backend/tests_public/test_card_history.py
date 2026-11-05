@@ -177,6 +177,59 @@ async def test_an_edit_of_a_card_of_code_keeps_its_code_takeaway_and_the_outputs
     assert "out: print(2)" in json.dumps(_record(cid, back["id"])["shown"]["outputs"])
 
 
+async def test_a_new_kind_replaces_the_card_in_place_and_restore_and_undo_bring_it_back(group, ran):
+    """Asked to animate a plot, main gives the plot card the kind custom and its page: the card keeps its id and its
+    place and shows the page, its code and outputs gone, as one edit whose record keeps them, so Restore and Undo show
+    the plot again without a run. A custom card given a running kind and code runs the code in its place."""
+    from app import undo  # noqa: PLC0415
+
+    other = _cid(await call("add_card", group, kind="note", question="What is on the board?", text="Two cards."))
+    cid = _cid(await call("add_card", group, kind="plot", question="How many tickets came in each day?",
+                          code="print(7)", takeaway="Seven a day."))
+    order = [c["id"] for c in notebook.read_notebook(config.workspace_dir(CORPUS), group)["cells"]]
+    r = await call("edit_card", group, card=f"card:{cid}", kind="custom", html="<svg id='c'></svg><script>draw()</script>")
+    assert not r.is_error and _cid(r) == cid and "<svg id='c'>" in r.text, r.text
+    cell = _cell(cid)
+    assert (cell["kind"], cell["payload"]["html"], cell["takeaway"]) == ("custom", "<svg id='c'></svg><script>draw()</script>", "")
+    assert not {"code", "outputs", "status", "exec_count"} & set(cell)
+    assert [c["id"] for c in notebook.read_notebook(config.workspace_dir(CORPUS), group)["cells"]] == order == [other, cid]
+    [e] = _edits(cid)
+    assert e["fields"] == ["kind", "code", "payload", "takeaway"]
+    rec = _record(cid, e["id"])
+    assert (rec["was"]["kind"], rec["was"]["code"]) == ("plot", "print(7)") and "out: print(7)" in json.dumps(rec["shown"])
+    runs = len(ran)
+    notebook.restore_version(CORPUS, cid, e["id"])
+    cell = _cell(cid)
+    assert (cell["kind"], cell["code"], cell["takeaway"]) == ("plot", "print(7)", "Seven a day.") and "payload" not in cell
+    assert "out: print(7)" in json.dumps(cell["outputs"]) and len(ran) == runs, "the plot as it was, without a run"
+    undo.undo(CORPUS)  # the Restore, then the change of kind
+    undo.undo(CORPUS)
+    cell = _cell(cid)
+    assert (cell["kind"], cell["code"]) == ("plot", "print(7)") and "out: print(7)" in json.dumps(cell["outputs"])
+    undo.redo(CORPUS)
+    assert _cell(cid)["kind"] == "custom" and "code" not in _cell(cid)
+    r = await call("edit_card", group, card=f"card:{cid}", kind="plot", code="print(8)")
+    cell = _cell(cid)
+    assert not r.is_error and (cell["kind"], cell["code"]) == ("plot", "print(8)") and "payload" not in cell, r.text
+    assert "out: print(8)" in json.dumps(cell["outputs"]) and ran[-1].endswith("print(8)")
+
+
+async def test_a_plan_keeps_its_kind_and_a_page_given_without_its_kind_is_refused(group, ran):
+    """A plan holds a piece of work, so edit_card makes it no other kind, nor another card a plan; a custom card's
+    `html` given to a card of code without the kind custom says to pass it, and changes nothing."""
+    plan = _cid(await call("add_card", group, kind="plan", question="How will we mirror the forge?", steps=STEPS))
+    r = await call("edit_card", group, card=f"card:{plan}", kind="note", text="Mirror it.")
+    assert r.is_error and tools.hint("edit_card-kind", cid=plan, kind="plan", new="note") in r.text, r.text
+    cid = _cid(await call("add_card", group, kind="code", question="How many?", code="print(1)"))
+    r = await call("edit_card", group, card=f"card:{cid}", kind="plan", steps=STEPS)
+    assert r.is_error and tools.hint("edit_card-kind", cid=cid, kind="code", new="plan") in r.text, r.text
+    r = await call("edit_card", group, card=f"card:{cid}", html="<p>one</p>")
+    assert r.is_error and "pass kind custom to make it a custom card" in r.text, r.text
+    assert (_cell(cid)["kind"], _cell(cid)["code"], _edits(cid)) == ("code", "print(1)", [])
+    r = await call("edit_card", group, card=f"card:{cid}", kind="custom")
+    assert r.is_error and "a custom card needs `html`" in r.text and _cell(cid)["kind"] == "code", r.text
+
+
 async def test_a_card_checks_fix_and_its_undo_are_entries(group, ran):
     cid = _cid(await call("add_card", group, question="How many?", code="print(1)", takeaway="One."))
     chk = checkstore.begin(CORPUS, cid)

@@ -392,106 +392,161 @@
   pointer-events: none;
 }
 
-/* -------- settings popover (shell/SettingsPopover, inside a glass Popover): one table, role · model · effort · fast,
-   caps headers, the names in the body face, rows on hairlines -------- */
+/* -------- settings popover (shell/SettingsPopover, inside a Popover): one flat list on hairlines, each line a name in
+   the body face at its left and its control at its right; the Models line folds the agents' rows, each its name, its
+   model menu, its effort menu and fast mode's bolt in four columns -------- */
 .settings-pop {
   max-width: calc(100vw - 16px);
 }
 .settings {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: min(480px, calc(100vw - 32px));
-  padding: 4px 6px;
+  width: min(440px, calc(100vw - 32px));
 }
 .settings-loading {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 0;
+  padding: 10px;
 }
-.settings-grid {
+.settings-name {
+  min-width: 0;
+  color: var(--text-primary);
+  font: var(--type-body);
+  line-height: 1.3;
+}
+.settings-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+/* thimble's config error, the first line while the config has one */
+.settings-error {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--status-negative);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+/* Claude access (shell/ClaudeAccess ClaudeAccessRow): its line, the way's menu at the right after the check's spinner or
+   mark, then, above the one hairline, the way's field and what a failed check or a refused save said */
+.settings-access {
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-access > .settings-line {
+  border-bottom: 0;
+}
+/* the chip's chevron lines up with the switches' right edge */
+.settings-access-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-right: -6px;
+}
+.settings-access-ok {
+  flex: none;
+  color: var(--status-positive);
+}
+.settings-access-more {
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.settings-access-said {
+  margin: 0;
+  color: var(--status-negative);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+/* the Models line: its name in a heading's caps, while folded the models and the efforts in use, and its chevron */
+.settings-fold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: transparent;
+  color: var(--text-tertiary);
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.settings-fold:hover {
+  background: var(--surface-hover);
+}
+.settings-fold:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.settings-gist {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font: var(--type-ui-sm);
+}
+.settings-fold-chevron {
+  flex: none;
+}
+.settings-models {
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px 6px;
 }
 .settings-row {
   display: grid;
-  grid-template-columns: 84px minmax(0, 1fr) 108px 40px;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 100px 88px 24px;
+  column-gap: 6px;
   align-items: center;
-  min-height: 30px;
-  padding: 0 6px;
-  border-bottom: 1px solid var(--border-hairline);
+  min-height: 34px;
 }
-.settings-row:last-child {
-  border-bottom: 0;
-}
-.settings-headrow {
-  min-height: 24px;
-  padding-bottom: 2px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.settings-role {
-  color: var(--text-secondary);
-  font: var(--type-ui-sm);
-}
-.settings-model {
-  justify-self: start;
-  max-width: 100%;
-}
-.field.settings-model {
-  width: 100%;
-  font: var(--type-mono);
-}
+/* a menu's chip sets its text in line with its column, its hover wash reaching into the gap before it, whether it
+   opens a menu or is dimmed */
+.settings-row > .menu-trigger,
+.settings-model,
 .settings-effort {
   justify-self: start;
 }
-/* a cell that cannot be changed here (SettingsPopover's lockedWhy): dimmed as a menu's disabled item, still focusable,
-   its reason in the tooltip; no wash on hover, since a click does nothing */
-.settings-locked {
-  justify-self: start;
-  opacity: 0.4;
-  cursor: default;
+.settings-model,
+.settings-effort {
+  position: relative;
+  left: -8px;
 }
-.chip.settings-locked.chip-act:hover,
-.btn.settings-locked:hover {
-  border-color: transparent;
-  background: transparent;
+.settings-model-cell {
+  position: relative;
+  display: flex;
+  min-width: 0;
 }
-/* fast mode's lightning bolt in the table (ModelLine's FastBolt; its accent while on is components.css .fast-bolt) */
+/* Other's field, over the model's and the effort's columns */
+.field.settings-typed {
+  position: absolute;
+  top: 50%;
+  left: -8px;
+  z-index: 2;
+  width: 196px;
+  transform: translateY(-50%);
+}
 .settings-fast {
-  justify-self: start;
+  justify-self: center;
 }
-/* each agent's permission mode under the table (SettingsPopover's MODE_ROWS): its name, then the mode's menu */
-.settings-modes {
-  border-top: 1px solid var(--border-subtle);
+/* while thimble's config has an error it takes no write: Ask Claude with and every Models row but main's are dimmed,
+   their controls disabled */
+.settings-line[data-frozen] .settings-name,
+.settings-row[data-frozen] .settings-name,
+.settings-row[data-frozen] .fast-bolt {
+  opacity: 0.4;
 }
-.settings-modes .settings-row {
-  grid-template-columns: 132px minmax(0, 1fr);
-}
-.settings-mode {
-  justify-self: start;
-}
-/* the Ask key choice (SettingsPopover's ASK_KEY_LABEL): ⌘-click or ⌥-click */
-.settings-ask-key {
-  justify-self: start;
-}
-/* labels' and the card check's cell where the others have their mode's menu (SettingsPopover's CALL_ROWS) */
-.chip.settings-mode-none {
-  color: var(--text-secondary);
-}
-/* under an agent's mode: who runs it and what it may do (SettingsPopover's agentLine) */
-.settings-agent-line {
-  grid-column: 2;
-  padding-bottom: 6px;
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-}
-.settings-agent-main {
-  margin: 6px 6px 0;
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-}
+/* a warning under the extensions' switches (ExtensionsSettings) */
 .settings-modes-warn {
   margin: 6px 6px 0;
   color: var(--status-warning);
@@ -632,28 +687,6 @@ button.settings-ext-name:hover .settings-ext-caret {
 .settings-ext-row-extension-view {
   padding-top: 0;
   padding-left: 20px;
-}
-.settings-error {
-  color: var(--status-negative);
-  font: var(--type-body-sm);
-}
-/* the popover scrolls as a whole when it is taller than the window; Save and Cancel stay in view at its bottom */
-.settings-foot {
-  position: sticky;
-  bottom: -4px;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  margin: 0 -6px -4px;
-  padding: 6px 6px 8px;
-  background: var(--overlay-bg);
-  border-top: 1px solid var(--border-subtle);
-}
-.settings-foot .settings-tour {
-  margin-right: auto;
-  margin-left: -6px;
 }
 
 /* -------- Report a problem (shell/ProblemReport, inside a glass Popover): the form, then where the bundle is and where
@@ -909,49 +942,6 @@ button.settings-ext-name:hover .settings-ext-caret {
   user-select: all;
 }
 
-/* the model table's notes and switches: a row's note under its name, an agent's web switch, the refusal row's switch */
-.settings-row-noted {
-  padding-bottom: 4px;
-}
-/* the dev row's fast switch, for code tickets alone, after its note */
-.settings-ticket-fast {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  white-space: nowrap;
-}
-.settings-role-note {
-  grid-column: 1 / -1;
-  margin-top: -6px;
-  color: var(--text-tertiary);
-  font: var(--type-body-sm);
-}
-.settings-row-off .settings-model,
-.settings-row-off .settings-effort {
-  opacity: 0.4;
-}
-.settings-web {
-  justify-self: start;
-  display: inline-flex;
-}
-.settings-next-start,
-.settings-main-mode,
-.settings-ignored {
-  color: var(--text-tertiary);
-}
-.settings-mode-cell {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-}
-.settings-card-wait {
-  color: var(--text-tertiary);
-  font: var(--type-body-sm);
-}
-.settings-fence-note {
-  color: var(--text-tertiary);
-}
 .shell-gone-agents {
   color: var(--text-secondary);
 }
@@ -1145,7 +1135,7 @@ button.settings-ext-name:hover .settings-ext-caret {
   }
 }
 
-/* how thimble reaches Claude (shell/ClaudeAccess): the setup step, and its line in Settings */
+/* how thimble reaches Claude (shell/ClaudeAccess): the setup step */
 .access-scrim {
   position: fixed;
   inset: 0;
@@ -1220,23 +1210,4 @@ button.settings-ext-name:hover .settings-ext-caret {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
-}
-.settings-access {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 0 10px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--border-hairline);
-}
-.settings-access-label {
-  font-weight: 600;
-}
-.settings-access-what {
-  flex: 1;
-  min-width: 0;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }

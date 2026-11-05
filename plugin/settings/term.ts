@@ -53,14 +53,16 @@ async function configRows($: Engine): Promise<Map<string, ConfigRow>> {
 }
 
 /** Each feature's value as Claude Code holds it now: a change made a moment ago is here before the plugin loads again
- *  with it. A feature Claude Code lists no value for has the value this load runs with. */
+ *  with it. A feature Claude Code lists no value for has the value this load runs with. A mode saved under its old
+ *  name reads as its new one (RENAMED): Claude Code's row keeps it as saved. */
 export async function heldValues($: Engine): Promise<Record<string, boolean | string>> {
   const rows = await configRows($).catch(() => new Map<string, ConfigRow>())
   // a value the retired fields saved stands while the setting that replaced it holds its default
   const values: Record<string, unknown> = currentValues()
   for (const s of SWITCHES) {
     const r = rows.get(s.key)
-    if (r && (s.choices ? s.choices.includes(r.value as string) : typeof r.value === 'boolean')) values[s.key] = r.value
+    const v = renamedTo(s.key, r?.value) ?? r?.value
+    if (r && (s.choices ? s.choices.includes(v as string) : typeof v === 'boolean')) values[s.key] = v
   }
   // with defaultsAt, so the values read again (the bar's preview, the preset's rows) read a moved default as these do
   const at = typeof values.defaultsAt === 'string' ? { defaultsAt: values.defaultsAt } : {}
@@ -198,9 +200,11 @@ const retiredKey = (featureKey: string, field: string) => featureKey.replace(/\.
 async function moveRetired($: Engine, saved: Record<string, unknown>): Promise<void> {
   const moved = movedFrom(saved) as Record<string, boolean | string>
   const stale = Object.entries(RETIRED).filter(([field, f]) => saved[field] !== undefined && saved[field] !== f.default)
-  const renamed = Object.keys(RENAMED).filter(key => renamedTo(key, saved[key]))
-  if (!stale.length && !renamed.length) return
+  // a mode the manifest no longer offers (Heads-ups' on demand) reaches the plugin as its default, so its row, which
+  // keeps it as saved, says it was saved
   const rows = await configRows($)
+  const renamed = Object.keys(RENAMED).filter(key => renamedTo(key, rows.get(key)?.value) ?? renamedTo(key, saved[key]))
+  if (!stale.length && !renamed.length) return
   const any = rows.values().next().value as ConfigRow | undefined
   if (!any) return
   // a mode saved under its old name is saved under its new one

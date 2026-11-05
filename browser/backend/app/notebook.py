@@ -1523,6 +1523,45 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     return cell
 
 
+# what a card of code carries beside its code that a card of another kind does not: its run and what the run read
+RUN_STATE = ("code", "previous_code", "outputs", "status", "exec_count", "started", "kernel", "timeout_s", "label_revs",
+             KEPT_ARGS, OUT_MEMO, TAKEAWAY_STALE, REGENERATING_FOR)
+
+
+@_changes
+def change_kind(workspace: str, cell_id: str, kind: str, *, payload: dict, title: str | None = None,
+                by: str | None = None) -> dict:
+    """Make a card one that shows what it holds, of `kind` (an example, a note or a custom card), in place, for
+    edit_card: `payload` its content, its code and run gone (RUN_STATE), and its takeaway cleared, since it was written
+    for what the card showed (as edit_and_run clears it). One edit, recorded with what it replaced and the outputs it
+    showed (stamp_edit), so Restore and Undo bring the card back as it was. 400 for a label or a plan card, or for
+    another kind; 404 for an unknown cell."""
+    if kind not in DATA_KINDS or kind in ("label", PLAN_KIND):
+        raise HTTPException(400, f"a card cannot become a {kind} card")
+    ws = _ws(workspace)
+    hit = _locate(ws, cell_id)
+    if hit is None:
+        raise HTTPException(404, f"no such card: {cell_id}")
+    nb, cell = hit
+    if cell.get("kind") in ("label", PLAN_KIND):
+        raise HTTPException(400, f"a {cell.get('kind')} card keeps its kind")
+    before, shown = content_of(cell), shown_of(cell)
+    for k in RUN_STATE:
+        cell.pop(k, None)
+    cell.pop("text", None)
+    cell.update(kind=kind, payload=_payload_of(kind, payload), labels=[], takeaway="", takeaway_author=None)
+    if kind == "note":
+        cell["text"] = cell["payload"]["text"]
+    if title is not None and title != cell.get("title", ""):
+        cell["title"] = title
+        _name_cell(ws, cell)
+    stamp_edit(ws, cell, before, by, shown=shown)
+    _while_measured(cell)
+    write_notebook(ws, nb)
+    _emit(workspace, cell)
+    return cell
+
+
 @_changes
 def drop_payload_key(workspace: str, cell_id: str, key: str) -> bool:
     """Drop `key` from a data card's payload and announce the card, with no `edited` stamp: for what the card shows
@@ -3726,17 +3765,17 @@ async def _run_cell(workspace: str, nb_id: str, cell_id: str, kernel: str | None
 
 async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, by: str,
                        timeout_s: float | None = None, default_timeout_s: float | None = None,
-                       title: str | None = None, kind: str | None = None, from_dataset: bool = False) -> dict:
+                       title: str | None = None, kind: str | None = None, from_data: bool = False) -> dict:
     """Replace a cell's code and run it again in place, for the `edit_card` tool. The replaced code stays as
     `previous_code`, the edit is recorded in `edited` with what it replaced (stamp_edit), the stale takeaway is cleared.
     A run of the same code, title and kind keeps the takeaway, marked TAKEAWAY_STALE when the outputs' text changed.
-    `title` and `kind` change in the same edit when given. `from_dataset` turns a diagram or timeline stored with a
-    dataset into a card of code. Returns the cell with complete outputs. 404 for an unknown cell, 400 for a data cell or
-    a kind without code."""
+    `title` and `kind` change in the same edit when given. `from_data` turns a card that shows what it holds (a diagram
+    or timeline stored with a dataset, or an example, a note or a custom card given a running `kind`) into a card of
+    code. Returns the cell with complete outputs. 404 for an unknown cell, 400 for a data cell or a kind without code."""
     nb = load_notebook(workspace, nb_id)
     cell = _find(nb, cell_id)
     before, shown = content_of(cell), shown_of(cell)
-    changed = _edit_code(cell, code, title=title, kind=kind, from_dataset=from_dataset)
+    changed = _edit_code(cell, code, title=title, kind=kind, from_data=from_data)
     if not changed and (live := _label_reruns.get((workspace, cell_id))) is not None:
         rerun = await asyncio.shield(live)
         if rerun is not None:
@@ -3752,16 +3791,23 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
 
 
 def _edit_code(cell: dict, code: str, *, title: str | None = None, kind: str | None = None,
-               from_dataset: bool = False) -> bool:
+               from_data: bool = False) -> bool:
     """edit_and_run's change to the card before it runs: the code (the replaced code kept as `previous_code`), the
     title and the kind. Whether anything changed; the caller records the edit (stamp_edit) once the takeaway it clears
     (_keep_takeaway) is gone too. 400 for a data cell or a kind without code."""
-    if from_dataset and cell.get("kind") in ("diagram", "timeline") and isinstance(cell.get("payload"), dict):
-        cell.pop("payload", None)
-    _reject_data_run(cell)
     if kind is not None and kind not in RUNNABLE_KINDS:
         raise HTTPException(400, f"a {kind} card has no code to run; the runnable kinds are {', '.join(RUNNABLE_KINDS)}")
-    changed = code != cell.get("code") or (title and title != cell.get("title")) or (kind and kind != cell.get("kind"))
+    new_kind = bool(kind and kind != cell.get("kind"))
+    if (from_data and isinstance(cell.get("payload"), dict) and cell.get("kind") not in ("label", PLAN_KIND)
+            and (new_kind or cell.get("kind") in ("diagram", "timeline"))):
+        # what the card held goes with its old kind, which its history keeps (stamp_edit)
+        cell.pop("payload", None)
+        cell.pop("text", None)
+        cell["labels"] = []
+        cell.update(kind=kind or cell.get("kind"), code=str(cell.get("code") or ""), exec_count=None, status="idle",
+                    outputs=[])
+    _reject_data_run(cell)
+    changed = code != cell.get("code") or (title and title != cell.get("title")) or new_kind
     if code != cell.get("code"):
         cell["previous_code"] = str(cell.get("code") or "")
         cell["code"] = code

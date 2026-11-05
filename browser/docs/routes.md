@@ -286,6 +286,7 @@ knows the key.
 | GET | `/api/ws/{c}/views/proposals` | views | cookie or token |
 | DELETE | `/api/ws/{c}/views/proposals/{slug}` | views | cookie |
 | POST | `/api/ws/{c}/views/proposals/{slug}/accept` | views | cookie |
+| POST | `/api/ws/{c}/views/proposals/{slug}/discard` | views | cookie |
 | POST | `/api/ws/{c}/views/proposals/{slug}/message` | views | cookie |
 | POST | `/api/ws/{c}/views/proposals/{slug}/reject` | views | cookie |
 | POST | `/api/ws/{c}/views/proposals/{slug}/retry` | views | cookie |
@@ -302,7 +303,6 @@ knows the key.
 | POST | `/api/ws/{c}/views/{slug}/marks` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/media` | views | cookie or token |
 | GET | `/api/ws/{c}/views/{slug}/media/{key}` | views | media key |
-| PUT | `/api/ws/{c}/views/{slug}/on` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/problems` | views | cookie or token |
 | POST | `/api/ws/{c}/views/{slug}/records` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/resolve` | views | cookie or token |

@@ -3,7 +3,6 @@ import type { FixStatus, FixTried } from '../chat/fix'
 import type {
   CanvasResponse,
   Extensions,
-  LocalExtension,
   Cell,
   CardVersion,
   CellName,
@@ -582,6 +581,9 @@ export const api = {
    * that thread (views.message); answers the proposal. */
   messageView: (c: string, slug: string, text: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/message`, { method: 'POST', body: JSON.stringify({ text }) }),
   deleteProposal: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}`, { method: 'DELETE' }),
+  /** Discard on the notice of a view whose builder stopped without passing its checks (backend views.discard): a view
+   * whose build failed goes, a built view's failed change is dropped. */
+  discardView: (c: string, slug: string) => j<{ ok: boolean; deleted?: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}/discard`, { method: 'POST' }),
   /** every view of the workspace; with `wait`, never `files_pending` */
   views: (c: string, wait = false) => j<View[]>(`${ws(c)}/views${wait ? q({ wait: 1 }) : ''}`),
   /** the working views that claim a file, in the order a citation into it opens them */
@@ -718,8 +720,6 @@ export const api = {
   /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
   switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
     j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
-  /** this workspace's switch of a view built for it; the analyst's browser alone may turn it (backend views.set_view_on) */
-  switchLocalView: (c: string, slug: string, on: boolean) => j<LocalExtension>(`${ws(c)}/views/${enc(slug)}/on`, { method: 'PUT', body: JSON.stringify({ on }) }),
   /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
   reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
 }

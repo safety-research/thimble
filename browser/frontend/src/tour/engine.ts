@@ -128,7 +128,7 @@ export interface StartOptions {
   welcome?: boolean
   /** what the welcome says above its buttons, a paragraph of markup each (./steps welcomeTexts) */
   says?: string[]
-  /** the tour was asked for again (Settings) */
+  /** the tour was asked for again (the composer's /tour) */
   replay?: boolean
   /** shows a surface (the shell's own tab switch) */
   showTab?: (tab: 'files' | 'canvas' | 'report') => void

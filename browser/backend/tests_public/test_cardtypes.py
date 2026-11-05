@@ -1,16 +1,16 @@
-"""app.cardtypes and thimble.card, with the `multiagent-swimlane` card type, which the swarm extension (now
-swarm-orient) gave as `swarm` and then `agent-swimlane` before. On a corpus of JSON Lines records, the registry finds
-the type without any view proposal and lists it for main's prompt; a card's code draws it with thimble.card, which
-checks the arguments against the type's schema, runs card.py on the reader's cached index under the labels the call
-names, whatever Files highlights, and shows the data with a listing main reads and cites; the card check's page gets the
-type's frame from the request. Keep writes a patch of the arguments into the card's one thimble.card call (its tests
-with a type that has such arguments are in test_extensions). Main hears when a label it ran finishes, and can colour a
-label's values.
+"""app.cardtypes and thimble.card, with the `multiagent-swimlane` card type of an extension in fixtures/ (one thimble
+shipped until 0.10.10), known as `swarm` and then `agent-swimlane` before. On a corpus of JSON Lines records, the
+registry finds the type without any view proposal and lists it for main's prompt; a card's code draws it with
+thimble.card, which checks the arguments against the type's schema, runs card.py on the reader's cached index under the
+labels the call names, whatever Files highlights, and shows the data with a listing main reads and cites; the card
+check's page gets the type's frame from the request. Keep writes a patch of the arguments into the card's one
+thimble.card call (its tests with a type that has such arguments are in test_extensions). Main hears when a label it
+ran finishes, and can colour a label's values.
 
 The corpus `crew` is 140 saves of 35 accounts on 4 pages, each naming the next account, which the Swarm reader reads as
-a swarm; swarm-orient is added, and with it multiagent-swimlane. Reader calls run in this process (views._runner
-replaced by an exec of the kernel's snippet), and thimble.card runs in this process in a module built from
-kernel_thimble.py, as a kernel builds it."""
+a swarm; the extension is added from its folder. Reader calls run in this process (views._runner replaced by an exec of
+the kernel's snippet), and thimble.card runs in this process in a module built from kernel_thimble.py, as a kernel
+builds it."""
 from __future__ import annotations
 
 import asyncio
@@ -31,7 +31,8 @@ from fastapi import HTTPException
 
 from app import card_check, cardtypes, concepts, config, extensions, notebook, render, tools, views
 
-SWIMLANE = extensions.builtin_dir() / "multiagent-swimlane" / "cards" / "multiagent-swimlane"
+EXTENSION = Path(__file__).parent / "fixtures" / "multiagent-swimlane"
+SWIMLANE = EXTENSION / "cards" / "multiagent-swimlane"
 
 CORPUS = "crew"
 ROWS = [{"page": f"p{i % 4}", "user": f"bot{i % 35}", "ts": f"2026-04-14T{i // 60:02d}:{i % 60:02d}:00Z",
@@ -45,7 +46,7 @@ def crew(workspaces_tmp, tmp_path, monkeypatch) -> Path:
     (d / "saves.jsonl").write_text("".join(json.dumps(r) + "\n" for r in ROWS))
     (d / "manifest.json").write_text(json.dumps({"name": CORPUS, "description": "a swarm"}))
     monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
-    extensions.add("multiagent-swimlane", yes=True, say=lambda _: None)
+    extensions.add(str(EXTENSION), yes=True, say=lambda _: None)
     return d.resolve()
 
 

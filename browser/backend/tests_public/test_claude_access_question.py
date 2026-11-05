@@ -42,8 +42,8 @@ def test_the_question_gives_the_claude_code_sign_in_first_and_enter_chooses_late
 
 @pytest.mark.parametrize("answer, how, said", [
     ("1", claude_access.CLAUDE_CODE, "Sign-in: your Claude Code sign-in."),
-    ("2", claude_access.API_KEY, "Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so the workbench asks for a "
-                                 "key in its Settings when it starts."),
+    ("2", claude_access.API_KEY, "Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so paste a key in the "
+                                 "workbench's Settings, Claude access."),
 ])
 def test_each_number_chooses_the_way_it_names(capsys, monkeypatch, answer, how, said):
     rc, out, _ = ask(monkeypatch, capsys, answer)

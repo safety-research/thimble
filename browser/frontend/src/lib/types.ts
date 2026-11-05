@@ -66,12 +66,15 @@ export type ChatRecord =
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
 
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
- * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
- * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
+ * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), open
+ * main with `/thimble-fix <text>` in its composer (`thimble-fix`), discard the failed view `slug` or its failed change
+ * (`view-discard`), or sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'thimble-fix' | 'view-discard' | 'sign-out' | (string & {})
   slug?: string
+  /** thimble-fix: the words it puts after /thimble-fix in main's composer */
+  text?: string
 }
 
 /** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the
@@ -499,8 +502,6 @@ export interface Proposal {
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
-  /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
-  off?: boolean
   status: ProposalStatus
   ts: string
   error?: string
@@ -508,9 +509,9 @@ export interface Proposal {
   failed_change?: string
   /** a change to a built view is being made (backend views.revise); the view stays open at the version it last passed */
   revision?: boolean
-  /** the builder's run that takes a message about the built view, while it has not changed the view (backend
-   * dev.build_started); its thread's Stop stops it (dev.stop_answer) */
-  answering?: { agent: string; run?: number; text?: string } | null
+  /** its builder stopped without passing the view's checks (backend dev._settle): its chip offers no Retry, which
+   * would build the same files again; the analyst's reply in its thread goes on with the builder */
+  checks_failed?: boolean | null
   chat?: string | null
   attempts?: number
   /** the review of the built view's pictures (backend view_review) */
@@ -1266,9 +1267,9 @@ export interface Settings {
   /** "Claude can edit files in this folder": whether main and its thread forks may write the corpus folder (the
    * workspace's settings.json `corpus_edits`, on by default) */
   corpus_edits?: boolean
-  /** Labels: whether Claude makes labels in this workspace, as the terminal's Labels setting (the workspace's
-   * settings.json `labels`, on by default); off, main's prompt and the tools' texts say nothing of labels, and no agent
-   * has a label tool */
+  /** The Labels sidebar's Label tool: whether Claude makes labels in this workspace, as the terminal's Labels setting
+   * (the workspace's settings.json `labels`, on by default); off, main's prompt and the tools' texts say nothing of
+   * labels, and no agent has a label tool */
   labels?: boolean
   [k: string]: unknown
 }
@@ -1388,7 +1389,7 @@ export interface LocalViewRow {
   description?: string
   /** a file viewer, which opens in the File browser */
   file_viewer: boolean
-  /** its switch in Settings: off, it leaves the views bar and the File browser */
+  /** true: every view built here shows (backend views.local_extension) */
   on: boolean
 }
 

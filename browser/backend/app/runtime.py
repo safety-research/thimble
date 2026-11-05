@@ -200,9 +200,17 @@ class Spec:
     # main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
     corpus_edits: bool | None = None
     no_write: list[Path] = field(default_factory=list)  # the workspace's protected files, never written (protected)
-    # Settings' Labels switch for the workspace (ledger.labels_on): off, `thimble` holds no label tool, and the tools'
+    # the workspace's Label tool switch (ledger.labels_on): off, `thimble` holds no label tool, and the tools'
     # texts say nothing of labels (tools.tool_sections)
     labels: bool = True
+
+
+def narrows(old: Spec, new: Spec) -> bool:
+    """Whether an agent may do less on `new` than on `old`: a folder it reads or writes, or a tool, taken away, or a
+    private or protected file added."""
+    return not (set(old.read_roots) <= set(new.read_roots) and set(old.write_roots) <= set(new.write_roots)
+                and set(old.builtins) <= set(new.builtins) and set(old.thimble) <= set(new.thimble)
+                and set(new.private) <= set(old.private) and set(new.no_write) <= set(old.no_write))
 
 
 @dataclass
@@ -225,13 +233,17 @@ class Conv:
     key: str = ""  # the key of the start it runs for (subagents' request), such as `view:<slug>` (agent_writes)
     transcript: Transcript | None = None
     queue: list[str] = field(default_factory=list)
-    # set as a message joins the queue (deliver), so a Claude Code session of main's hands it on while its turn runs
-    # (runtime_cc._hand)
+    # set as a message joins the queue (deliver, module_op send), so a Claude Code session of main's or of one of
+    # thimble's agents hands it on while its turn runs (runtime_cc._hand)
     arrived: asyncio.Event = field(default_factory=asyncio.Event)
+    # the messages sent to one of thimble's agents while its turn ran (module_op send), which it reads at the turn's
+    # next tool call (take_waiting), as main reads a message typed in its chat
+    sent: list[str] = field(default_factory=list)
     task: asyncio.Task | None = None
     last_text: str = ""
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
     switched: str | None = None  # the model Claude's safeguards answer this conversation on instead (switches)
+    cc: Any = None  # its Claude Code session, open past its turn while a background command runs (runtime_cc.Held)
 
     @property
     def c(self) -> str:
@@ -323,17 +335,25 @@ class Conv:
             self.emit({"type": "user", "message": {"role": "user", "content": results}})
 
     def waiting_messages(self) -> list[str]:
-        """The messages the analyst typed in main's chat while its turn ran (Space.said), in main's queue, oldest first.
-        Every other event, such as a /thimble-fix request, which Claude Code too keeps for the turn's end as it keeps a
-        command, waits for the turn to end, and so does any other conversation's queue."""
+        """The messages the analyst typed in main's chat while its turn ran (Space.said) and the card requests they sent
+        meanwhile (Space.asks), in main's queue, oldest first. Every other event, such as a /thimble-fix request, which
+        Claude Code too keeps for the turn's end as it keeps a command, waits for the turn to end, and so does any other
+        conversation's queue."""
         if self.kind != "main":
             return []
-        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in self.space.said]
+        mid_turn = self.space.said.keys() | self.space.asks
+        return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in mid_turn]
+
+    def waiting_sent(self) -> list[str]:
+        """The messages sent to one of thimble's agents while its turn ran (module_op send), in its queue, oldest
+        first; none for main or a fork."""
+        return [t for t in self.queue if t in self.sent] if self.kind == "agent" else []
 
     def take_waiting(self) -> list[str]:
-        """The analyst's messages that wait for main's running turn, read now, with the results of the turn's tool
-        calls, as Claude Code gives a message typed mid-turn to the model at its next tool call (heard)."""
-        got = self.waiting_messages()
+        """The analyst's messages that wait for main's running turn, or the messages sent to an agent while its turn
+        ran, read now, with the results of the turn's tool calls, as Claude Code gives a message typed mid-turn to the
+        model at its next tool call (heard)."""
+        got = [*self.waiting_messages(), *self.waiting_sent()]
         for text in got:
             self.heard(text)
         return got
@@ -341,9 +361,15 @@ class Conv:
     def heard(self, text: str) -> None:
         """Main read `text`, a message that waited in its queue, in its running turn: it leaves the queue, the
         transcript records it as Claude Code records a message typed mid-turn (a queued_command attachment, which the
-        mirror reads as an event of the turn), and the analyst's line goes into main's chat here (Space.said_line)."""
+        mirror reads as an event of the turn), and the analyst's line goes into main's chat here (Space.said_line). An
+        agent's is a message of its own run, as the transcript records any message thimble sends an agent."""
         with contextlib.suppress(ValueError):
             self.queue.remove(text)
+        if self.kind == "agent":
+            with contextlib.suppress(ValueError):
+                self.sent.remove(text)
+            self.emit({"type": "user", "message": {"role": "user", "content": text}, "origin": {"kind": "coordinator"}})
+            return
         self.emit({"type": "attachment", "attachment": {"type": "queued_command", "prompt": text,
                                                        "origin": {"kind": "task-notification"}}})
         self.space.said_line(text)
@@ -413,6 +439,10 @@ class Space:
         # by event id, the analyst's words of each message that came while main's turn ran (events.post): main's chat
         # shows them waiting (unread), and their line goes in where main reads them (said_line)
         self.said: dict[str, str] = {}
+        # the event ids of the card requests that wait in main's queue (events.post's `ask`: + Card, or ⌘↵ or /card in
+        # a document): main reads each at its running turn's next tool call, as it reads a message typed in its chat,
+        # and main's chat shows none of them, since the card or the document shows it out with main
+        self.asks: set[str] = set()
         # by event id, the quiet events that rode along with an event for main (events._publish) while it waits in
         # main's queue: a rewind that takes the event back holds them again for main's next event (take_back)
         self.riders: dict[str, list[dict[str, Any]]] = {}
@@ -431,7 +461,7 @@ class Space:
         (drop_waiting), runtime/main.json names the chat, the mirror follows its transcript (session.attach, which reads
         a chat brought back from its end), and main's log gets one line that says so. A new chat while main's chat has
         no turn yet is that chat. False when nothing changed. ValueError for an id that is no chat of this workspace."""
-        from . import agents  # noqa: PLC0415
+        from . import agents, runtime_cc  # noqa: PLC0415
 
         if sid is not None and (not SID_OK.match(sid) or not (self.dir / f"{sid}.jsonl").is_file()):
             raise ValueError(f"no chat {sid} in this workspace")
@@ -442,6 +472,7 @@ class Space:
         self.carried.clear()  # a rewind goes back only within main's chat now (rewind_main)
         if self.main.running:
             await _cancel(self.main.task)
+        left = self.main
         self.sid = sid or str(uuid.uuid4())
         nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         self.main = self._main_conv()
@@ -451,6 +482,9 @@ class Space:
         else:
             got = _chat_of(self.main_path)
             agents.chip(self.c, CHAT_CHIP, RESUMED_CHAT.format(first=got["first"] or "a chat"))
+        # the session kept open for the chat left closes, and its background commands with it; a message that comes
+        # while it closes is the new chat's
+        await runtime_cc.close(left)
         return True
 
     @property
@@ -518,6 +552,7 @@ class Space:
         m = EVENT_ID_RE.match(text)
         if not m:
             return
+        self.asks.discard(m.group(1))
         words = self.said.pop(m.group(1), None)
         riders = self.riders.pop(m.group(1), None)
         if read and riders:
@@ -579,7 +614,7 @@ class Space:
         tmp = self.dir / "tmp" / conv.id
         nofollow.makedirs(tmp)
         temp: Path | None = None
-        # Settings' Labels switch: off, main and thimble's agents are offered no label tool (labels_off.py)
+        # the Label tool switch: off, main and thimble's agents are offered no label tool (labels_off.py)
         labels = ledger.labels_on(self.c)
         reads = [self.corpus, self.ws, config.REPO_ROOT / "docs", config.REPO_ROOT / "plugin" / "viewers",
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
@@ -808,6 +843,8 @@ async def forget(c: str) -> None:
     (Space.drop_waiting), its conversations' running turns stop, awaited, so none writes into the folder that takes its
     place, and its runtime is dropped, so the next ensure reads that folder (a new session's empty one, or a session
     brought back)."""
+    from . import runtime_cc  # noqa: PLC0415
+
     sp = _spaces.pop(c, None)
     if sp is None:
         return
@@ -816,6 +853,7 @@ async def forget(c: str) -> None:
         if conv.running:
             conv.queue.clear()
             await _cancel(conv.task)
+        await runtime_cc.close(conv)
 
 
 def ensure_soon(c: str) -> None:
@@ -849,12 +887,13 @@ async def _engine_turn(conv: Conv, text: str) -> TurnEnd:
     notes = conv.take_notes()
     if notes:
         text = "\n".join([NOTES_HEAD, *notes, "", text])
+    from . import runtime_cc  # noqa: PLC0415
+
     if kind == "api":
         from . import runtime_api  # noqa: PLC0415
 
+        await runtime_cc.close(conv)  # the Claude Code session kept open for it, if any, ends
         return await runtime_api.turn(conv, text)
-    from . import runtime_cc  # noqa: PLC0415
-
     return await runtime_cc.turn(conv, text)
 
 
@@ -904,7 +943,8 @@ async def _run(conv: Conv, text: str) -> TurnEnd:
         return TurnEnd("failed", error=str(e))
     except Exception as e:  # noqa: BLE001 — every failure is a line the analyst reads
         if llm.credentials_failure(e):
-            _access_record(conv, {"what": llm.failure(e), "fix": "Check how thimble reaches Claude in Settings."})
+            _access_record(conv, {"what": llm.failure(e),
+                                  "fix": "Check Claude access in Settings."})
             return TurnEnd("failed", error=llm.failure(e))
         log.warning("%s: %s's turn failed: %s", conv.c, conv.id, type(e).__name__, exc_info=True)
         _api_error_record(conv, _failure_text(e))
@@ -927,9 +967,9 @@ def _failure_text(e: BaseException) -> str:
 
 def deliver(c: str, note: dict[str, Any]) -> None:
     """A browser event for main (events._publish): a thread's starts or continues its fork; any other starts a turn of
-    main, or waits for main's running turn: a message the analyst typed in main's chat (`said`, events.post) until the
-    turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat shows such a message
-    waiting until main reads it (unread)."""
+    main, or waits for main's running turn: a message the analyst typed in main's chat (`said`, events.post) or a card
+    request (`ask`) until the turn's next tool call (Conv.take_waiting), any other event until the turn ends. Main's chat
+    shows such a message waiting until main reads it (unread)."""
     from . import agents, events  # noqa: PLC0415
 
     sp = ensure(c)
@@ -946,6 +986,8 @@ def deliver(c: str, note: dict[str, Any]) -> None:
     if note.get("said"):
         sp.said[event] = str(note["said"])
         agents.notify(c, agents.MAIN_ID)
+    elif note.get("ask"):
+        sp.asks.add(event)
     if _in_loop():
         main.arrived.set()
     elif _loop is not None:
@@ -1226,7 +1268,7 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
     cannot be changed, the turn stays stopped, as after a Stop. A request cancelled while main's turn stops does no
     more than a Stop. Once the cut is made, a step after it that fails is logged, and the words come back all the
     same."""
-    from . import agents, fixes, session  # noqa: PLC0415
+    from . import agents, fixes, runtime_cc, session  # noqa: PLC0415
 
     sp = ensure(c)
     records = agents.read_events(agents.paths(c, agents.MAIN_ID)[1])
@@ -1281,7 +1323,12 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 — such as a full disk: the words still come back in the reply
             log.warning("%s: the rewind's line was not written in main's chat", c, exc_info=True)
     finally:
-        after_stop(c)
+        # a session kept open for main closes too, and its background commands with it, so main's next turn resumes at
+        # the cut, also a turn that starts while it closes
+        try:
+            await runtime_cc.close(sp.main)
+        finally:
+            after_stop(c)
     return {"text": text, "event": event_id}
 
 
@@ -1328,6 +1375,8 @@ async def _agent_loop(conv: Conv) -> None:
     sp = conv.space
     while conv.queue:
         text = conv.queue.pop(0)
+        with contextlib.suppress(ValueError):  # it came after the last tool call of the turn it was sent in
+            conv.sent.remove(text)
         first = conv.transcript is not None and not conv.transcript.path.exists()
         rec: dict[str, Any] = {"type": "user", "message": {"role": "user", "content": text}}
         if not first:
@@ -1342,6 +1391,7 @@ async def _agent_loop(conv: Conv) -> None:
         except asyncio.CancelledError:
             status, report = "stopped", ""
             conv.queue.clear()
+            conv.sent.clear()
             _ended(conv, status, report)
             raise
         _ended(conv, status, report)
@@ -1377,9 +1427,15 @@ async def module_op(c: str, op: str, args: dict[str, Any]) -> dict[str, Any]:
         if conv is None:
             return {"error": "the agent ended with the server that ran it", "gone": True}
         conv.values = dict(args.get("values") or conv.values)
-        conv.queue.append(str(args.get("text") or ""))
+        text = str(args.get("text") or "")
+        conv.queue.append(text)
         queued = conv.running
-        if not queued:
+        if queued:
+            # its running turn reads it at its next tool call (Conv.take_waiting), as main reads a message typed in its
+            # chat, so the message is part of the run that goes on rather than a run of its own after it
+            conv.sent.append(text)
+            conv.arrived.set()
+        else:
             conv.task = _spawn_task(_agent_loop(conv), f"agent:{c}:{conv.id}")
         return {"agentId": conv.id, **({"queued": True} if queued else {})}
     if op == "stop":
@@ -1424,11 +1480,40 @@ def _spawn_agent(sp: Space, args: dict[str, Any]) -> dict[str, Any]:
     return {"agentId": agent_id, **({"model": model} if model else {})}
 
 
-def access_changed() -> None:
-    """The way to reach Claude changed: nothing to restart, since each turn reads it anew."""
-    from . import llm  # noqa: PLC0415
+async def access_changed() -> None:
+    """The way to reach Claude changed: nothing to restart, since each turn reads it anew, but once it is no longer
+    Claude Code sign-in, the sessions kept open for main's background commands close, and the commands with them."""
+    from . import llm, runtime_cc  # noqa: PLC0415
 
     llm.forget()
+    if engine() != "cc":
+        await asyncio.gather(*(runtime_cc.close(sp.main) for sp in list(_spaces.values())))
+
+
+def settings_changed(c: str) -> None:
+    """Settings changed for workspace `c`: when main may do less now than in its session kept open for a background
+    command (narrows, such as "Claude can edit files in this folder" turned off), that session closes at once, and the
+    command with it, so no command keeps a permission taken back; a turn that runs keeps its session only while main
+    may do as much as in it (runtime_cc._session). A change that only widens leaves it to main's next turn
+    (runtime_cc.turn). From any thread: the check runs on the server's loop."""
+    from . import runtime_cc  # noqa: PLC0415
+
+    sp = _spaces.get(c)
+    # while a turn runs the check goes too, as the turn may keep its session just before the change lands
+    if sp is None or sp.main.cc is None and not sp.main.running:
+        return
+
+    async def go() -> None:
+        held = sp.main.cc
+        try:
+            less = held is not None and narrows(held.spec, sp.main.spec())
+        except Exception:  # noqa: BLE001 — what main may do now is unknown, so the session closes as for less
+            log.warning("%s: main's settings could not be read, so its kept session closes", c, exc_info=True)
+            less = True
+        if less:
+            await runtime_cc.close(sp.main)
+
+    _spawn_task(go(), f"settings:{c}")
 
 
 def start_line() -> str:
@@ -1484,6 +1569,10 @@ async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
         if late:
             log.warning("%d agent(s) did not stop within %g s", len(late), wait_s)
         log.info("the server stops: stopped %s", ", ".join(i for i, _ in stopping))
+    from . import runtime_cc  # noqa: PLC0415
+
+    # the sessions kept open for a background command close, and the commands with them
+    await asyncio.gather(*(runtime_cc.close(conv) for sp in _spaces.values() for conv in [sp.main, *sp.convs.values()]))
     for c in mains:  # main's turn ends with a note, as the Stop button ends it (agents.interrupt_route)
         with contextlib.suppress(Exception):
             session.turn_stopped(c, stopped=True, text=session.QUIT_TEXT)

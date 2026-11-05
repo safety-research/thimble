@@ -282,15 +282,6 @@ function useFlag(ws: string, name: string, def: boolean): [boolean, (v: boolean)
   return [v, set]
 }
 
-/** Why a ref to the view `slug` opens nothing: the view is switched off in Settings (its proposal's `off`), or there is
- * none. */
-async function missingView(ws: string, slug: string): Promise<string> {
-  const p = await api
-    .proposals(ws)
-    .then((all) => all.find((x) => x.slug === slug))
-    .catch(() => undefined)
-  return p?.off ? `${p.name} is switched off in Settings.` : `there is no view ${slug}`
-}
 
 export function FilesTab({ ws, active, focused = active }: { ws: string; active: boolean; focused?: boolean }) {
   const folders = useFolderStore(ws)
@@ -490,7 +481,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
         const from = pressedPane()
         findView(ws, slug)
           .then(async (v) => {
-            if (!v?.first_file) throw new Error(v ? `there is no view ${slug}` : await missingView(ws, slug))
+            if (!v?.first_file) throw new Error(`there is no view ${slug}`)
             if (v.file_type) toFileViewer(slug, { path: v.first_file }, from)
             else toView(slug, { path: v.first_file, query: query ?? undefined }, from)
           })
@@ -518,7 +509,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
         if (p?.kind === 'view') {
           const v = await findView(ws, p.slug)
           if (!p.key) {
-            if (!v) throw new Error(await missingView(ws, p.slug))
+            if (!v) throw new Error(`there is no view ${p.slug}`)
             if (v.file_type && v.first_file) toFileViewer(p.slug, { path: v.first_file }, from)
             else toView(p.slug, v.first_file ? { path: v.first_file } : null, from)
             return
@@ -527,7 +518,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           const first = (r.refs ?? [])[0]
           const path = first ? refPath(first) : null
           if (!path) throw new Error(`${ref} names no file line`)
-          // a view that is gone or switched off in Settings leaves its refs to the File browser
+          // a view that is gone leaves its refs to the File browser
           if (!v || (r.meta && (r.meta as { deleted?: boolean }).deleted)) toBrowser({ path, ref: first }, from)
           else if (v.file_type) toFileViewer(p.slug, { path, ref: first }, from)
           else {

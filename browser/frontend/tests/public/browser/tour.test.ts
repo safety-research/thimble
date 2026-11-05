@@ -4,8 +4,8 @@
 //   - the first launch asks first (a welcome, "Would you like a short tour? The demo tour uses example data.", with
 //     Skip and Take the tour) and records the answer (Skip, Take the tour or Esc) in thimble's own state (POST
 //     /api/tour/seen); a welcome no one answered is offered again by the next page, and a page loaded after an answer
-//     offers nothing; Settings' Take the tour replays the tour from step 1; when no way to reach Claude is chosen, the
-//     step that chooses it opens first, alone, and the welcome follows once it is answered;
+//     offers nothing; when no way to reach Claude is chosen, the step that chooses it opens first, alone, and the
+//     welcome follows once it is answered;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
@@ -1460,25 +1460,3 @@ for (const [W, H] of [
     }
   }, 60_000)
 }
-
-test('Settings’ Take the tour replays the tour from step 1, without the welcome', async () => {
-  const { page, close } = await open({ W: 1440, H: 900, seen: true })
-  try {
-    await page.waitForSelector('.shell .chat-foot')
-    await sleep(1500)
-    assert.equal(await page.$('.tour-root'), null, 'nothing shows by itself once offered')
-    await page.click('[data-tel="settings"]')
-    await page.waitForSelector('.settings-foot .settings-tour')
-    const foot = await page.evaluate(() => [...document.querySelectorAll('.settings-foot button')].map((b) => b.textContent?.trim()))
-    assert.deepEqual(foot, ['Take the tour', 'Cancel', 'Save'])
-    await page.click('.settings-foot .settings-tour')
-    await onStep(page, 1, 'Your chat with Claude')
-    const st = await state(page)
-    assert.ok(st && !st.welcome && st.i === 0 && st.total === 8, 'step 1 of 8, no welcome')
-    await page.keyboard.press('Escape')
-    await sleep(400)
-    assert.equal(await page.$('.tour-root'), null, 'Esc closes the tour')
-  } finally {
-    await close()
-  }
-}, 60_000)

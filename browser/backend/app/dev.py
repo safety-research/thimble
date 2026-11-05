@@ -56,10 +56,12 @@ program builds the view instead, turn by turn (program_build), checked the same 
 
 Notices. A view whose build failed after the repairs it gets, a change to a view that failed, a build that did not
 start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
-notices.agent_key: Retry on a view), since the analyst may be in another chat; a build that starts or passes, and a
-ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit and the analyst's Stop tell
-nothing. A builder's start probes the sandbox its commands run in, and where it can't start on this machine one notice
-says so, why and the fix, with a row in the build's thread; the next start where it starts clears it (_box_notice).
+notices.agent_key: Retry on a view; for a builder that stopped without passing the view's checks, what is wrong with
+the view in the analyst's words, Send to thimble-fix and Discard), since the analyst may be in another chat; a build
+that starts or passes, and a ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit
+and the analyst's Stop tell nothing. A builder's start probes the sandbox its commands run in, and where it can't
+start on this machine one notice says so, why and the fix, with a row in the build's thread; the next start where it
+starts clears it (_box_notice).
 
 Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode, Bypass
 included, and ask as main does, in the analyst's terminal. Where the server runs its agents itself (runtime.py), no
@@ -2935,7 +2937,6 @@ WORKSPACE_CLOSED = "the workspace was archived"  # the builds of a workspace tha
 TAKEN_OVER = ("revised", "replaced", "deleted", WORKSPACE_CLOSED)
 # the stage line of a repair: a build nobody asked for that ran out of attempts starts again with a new builder
 REPAIR_LINE = "the view did not pass, so a new builder builds it again from what failed (repair {n} of {of})"
-UNCHANGED_LINE = "the builder changed none of the view's files"
 ORPHANED_LINE = "the build ended while thimble's server was not running"
 SHUTDOWN = "the server stopped"  # why a program's build was cancelled at shutdown: it is built again (recover_views)
 OLD_BUILD_LINE = "this build ran in an earlier version of thimble; Retry builds the view afresh"
@@ -2988,15 +2989,22 @@ def _soon(make: Callable[[], Awaitable[Any]], name: str) -> None:
 def queue_view(c: str, slug: str, recovered: bool = False) -> None:
     """Queue the build of the proposal `slug` and start what the pool has room for (views.propose, views.retry,
     views.revise, recover_views). A build queued already is left as it is; a change to a view whose builder runs goes to
-    that builder as a message (change_view). The proposal records main's session (`queued_in`), unless `recovered`
-    (recover_views queued it again after a restart): a queued build starts only in that session (_same_main)."""
+    that builder as a message (change_view), and Retry while it runs makes that builder's run the build. The proposal
+    records main's session (`queued_in`), unless `recovered` (recover_views queued it again after a restart): a queued
+    build starts only in that session (_same_main)."""
     from . import module_bridge, views  # noqa: PLC0415
 
     key = (c, slug)
     b = _view_runs.get(key)
     if b is not None:
-        if b.agent:
+        prop = views.read_proposal(c, slug) or {}
+        if b.agent and prop.get("changed"):
             _soon(lambda: change_view(c, slug), f"view-change:{c}:{slug}")
+        elif b.agent and prop.get("status") == "queued":
+            # Retry on a view whose builder still runs (a run the server's runtime began for a message sent to it):
+            # that builder is the build
+            views.update_proposal(c, slug, status="building", error=None)
+            views._emit(c, slug, "building", chat=prop.get("chat"))
         return
     if recovered:
         _recovered.add(key)
@@ -3186,10 +3194,11 @@ def message_text(c: str, prop: dict[str, Any], text: str) -> str:
 
 def message_view(c: str, slug: str, route: str) -> None:
     """The message the analyst wrote in the thread of the built view `slug` (views.ask, the proposal's `message`) goes
-    to the view's builder, quietly, since the thread shows it as written: a builder that runs gets it after its current
-    step; one that finished runs again with it when it can be reached; else a new builder takes it (start_build). The
-    view stays as it is: the run that takes the message answers it (`answering`), and is a change only once it changes
-    the view (message_changes). A typed message (route typed) is started by main's exact Agent call instead."""
+    to the view's builder, quietly, since the thread shows it as written: a builder that runs gets it at its current
+    run's next step; one that finished goes on with it in its session when it can be reached; else a new builder takes
+    it (start_build). Whichever run takes it works on the view as a change from it as built: the view builds, and when
+    the run ends it is as it was if its files are, else checked (_settle). A typed message (route typed) is started by
+    main's exact Agent call instead."""
     from . import subagents  # noqa: PLC0415
 
     if route == subagents.TYPED:
@@ -3226,9 +3235,16 @@ async def _send_message(c: str, slug: str, route: str) -> None:
             ans = await subagents.send(c, agent_id, message_text(c, prop, new), values=prop.get("values"),
                                        route=route, quiet=True)
             if not ans.refused:
-                if running:  # it joins the run that goes on, which no start handler sees
+                if running:
+                    # it joins the run that goes on, at the run's next step, which no start handler sees: from here
+                    # that run works on the built view again, which builds, a change from the view as it was built
+                    # (views.ask kept a copy of it), checked when the run ends (_settle)
                     now = str((views.read_proposal(c, slug) or {}).get("message") or "")
-                    views.update_proposal(c, slug, message=_unsent(now, text) or None, message_sent=None)
+                    views._stop_review(c, slug)
+                    views.update_proposal(c, slug, message=_unsent(now, text) or None, message_sent=None,
+                                          status="building", revision=True, asked=True, change=text, finish=None,
+                                          attempt=0, checks_failed=None, fed_back=None)
+                    views._emit(c, slug, "building", chat=prop.get("chat"))
                 return
             views.update_proposal(c, slug, message_sent=sent or None)
             log.info("%s: the message about %s did not reach its builder (%s), so a new builder takes it", c, slug,
@@ -3240,30 +3256,6 @@ async def _send_message(c: str, slug: str, route: str) -> None:
         if ans.refused:
             _view_runs.pop((c, slug), None)
             views.update_proposal(c, slug, message=None, message_sent=None)
-
-
-def answering(prop: dict[str, Any], agent_id: str | None) -> dict[str, Any] | None:
-    """The run of the builder `agent_id` that takes a message about the built view (`answering`), while it has not
-    changed the view; else None."""
-    a = prop.get("answering")
-    return a if isinstance(a, dict) and agent_id and a.get("agent") == agent_id else None
-
-
-def message_changes(c: str, slug: str, agent_id: str | None) -> dict[str, Any] | None:
-    """The run that answers a message changes the view (its finish_view, or files changed at its end): from here it is
-    a change to the view, the message its request, with the view's files as they were built kept aside (views.ask), its
-    attempts counted from the first, and the view building. The proposal, or None when the run answers no message."""
-    from . import views  # noqa: PLC0415
-
-    prop = views.read_proposal(c, slug) or {}
-    a = answering(prop, agent_id)
-    if a is None:
-        return None
-    prop = views.update_proposal(c, slug, answering=None, status="building", revision=True, asked=True,
-                                 change=str(a.get("text") or "") or None, attempt=0, finish=None, last_report=None,
-                                 error=None) or prop
-    views._emit(c, slug, "building", chat=prop.get("chat"))
-    return prop
 
 
 def build_task(c: str, prop: dict[str, Any], *, repair: str = "") -> str:
@@ -3355,10 +3347,12 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
 
 
 def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
-    """A builder's run started (subagents.Type.started): its first run makes it the view's build, its attempts at
-    nothing; a later run (a change sent to it, or a message typed to it in the agent tray) is a build again. A run that
-    takes a message about the built view (message_view) answers it, the view as it is and its attempts kept, until it
-    changes the view (message_changes)."""
+    """A builder's run started (subagents.Type.started): the view builds until the run ends and is checked (_settle).
+    Its first run makes it the view's build, its attempts at nothing, and so does a later one, the builder's session
+    going on with a change or a message, or with what its checks found (_feedback), whose attempts go on. A run on the
+    built view, for a message about it (message_view) or one that came after the view passed, as the server's runtime
+    starts one for a message sent while the builder ran (runtime._agent_loop), is a change to the view from its files as
+    they were built (kept aside), and readers keep the view as it last passed meanwhile."""
     from . import subagents, views  # noqa: PLC0415
 
     slug = run.key.split(":", 1)[-1]
@@ -3371,24 +3365,26 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
     if key in _view_queue:
         _view_queue.remove(key)
     held = views.read_proposal(c, slug) or {}
-    if held.get("message") and held.get("status") == "built":
-        # the pass its earlier build finished with is no finish of this run (_settle); words written after the last
-        # send stay in `message` for the run, which gets them after its current step (_send_message)
-        rest = _unsent(str(held["message"]), str(held.get("message_sent") or ""))
-        views.update_proposal(c, slug, message=rest or None, message_sent=None, agent_id=run.agent_id, chat=run.chat,
-                              request=None, finish=None,
-                              answering={"agent": run.agent_id, "run": run.k, "text": str(held["message"])})
+    going = {"status": "building", "agent_id": run.agent_id, "chat": run.chat, "finish": None, "last_report": None,
+             "error": None, "refused": None, "request": None, "checks_failed": None,
+             "attempt": held.get("attempt") if held.get("fed_back") else 0}
+    if held.get("status") == "built" and (held.get("message") or run.k > 0):
+        # words written after the last send stay in `message` for the run, which gets them at its next step
+        text = str(held.get("message") or "")
+        rest = _unsent(text, str(held.get("message_sent") or ""))
         # the run starts from the view as it is now: a copy of it aside, which an earlier run that was stopped may have
         # used up (its _settle put the view back from it, or dropped it), so the run's end can tell a change and put it back
         views._keep_built(c, slug)
-        views._emit(c, slug, "built", chat=run.chat)  # its thread offers Stop while the run answers (stop_answer)
+        views._stop_review(c, slug)  # a change to the view stops its review, which would write the same files
+        views.update_proposal(c, slug, **going, revision=True, asked=True, change=text or None, message=rest or None,
+                              message_sent=None)
+        views._emit(c, slug, "building", chat=run.chat)
+        _view_cleared(c, slug)
         if rest:
             route = run.route if run.route in (subagents.CLICK, subagents.FOLLOW_ON) else subagents.FOLLOW_ON
             _soon(lambda: _send_message(c, slug, route), f"view-message:{c}:{slug}")
         return
-    prop = views.update_proposal(c, slug, status="building", agent_id=run.agent_id, chat=run.chat, attempt=0,
-                                 finish=None, last_report=None, error=None, refused=None, request=None,
-                                 session=None, session_id=None, values=run.values or None)
+    prop = views.update_proposal(c, slug, **going, session=None, session_id=None, values=run.values or None)
     if prop is not None:
         views._emit(c, slug, "building", chat=run.chat)
     _view_cleared(c, slug)
@@ -3450,6 +3446,7 @@ def register_pass(c: str, slug: str, agent_id: str | None) -> dict[str, Any]:
 
     view = views.mark_built(c, slug)
     views.update_proposal(c, slug, changed=None, change=None, revision=None, failed_change=None, last_report=None,
+                          checks_failed=None, fed_back=None,
                           finish={"agent": agent_id, "result": "pass", "version": view.get("version")})
     views.drop_built_copy(c, slug)
     _view_cleared(c, slug)
@@ -3497,32 +3494,33 @@ async def _settled(c: str, slug: str, run: Any, status: str, report: str, why: s
 
 async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: str) -> None:
     """What a builder's end means for its view, the backstop of finish_view:
-    - it answered a message about the built view and left its files as they were: nothing changes; one that changed
-      them is a change to the view from here (message_changes);
+    - its next run began meanwhile: nothing here, since that run's end settles the view;
     - it passed: done, its work folder lets go of its extracts, and the review starts; a folder that changed after the
       pass is gated again (views.regate: a pass is the new version, a failure puts the version that passed back);
+    - a change to the built view that left its files as they were built (a message the run answered, or a change it was
+      stopped before it wrote): the view is as it was, with nothing to check;
     - it was stopped: main's quit fails the view with MAIN_ENDED and Retry, the analyst's Stop with VIEW_STOPPED, and a
       change, a replacement or a deletion that took it over leaves the view to what took over;
-    - it ended without a pass and never called finish_view: the gate runs once, and a pass registers the view;
+    - it ended without a pass: the gate runs, and a pass registers the view; a failure goes back to the builder, whose
+      session goes on with it while an attempt is left (_feedback), and the view builds meanwhile;
     - still not built while main's plan mode held it at its end, where it could only read and plan: the view fails
       with Retry and that reason (subagents.plan_failed_line), and no repair starts;
-    - still not built: a change to a built view leaves the view as it was, a proposal the analyst did not ask for gets
-      up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view
-      the analyst asked for fails with Retry."""
+    - still not built when the builder stopped without passing: a change to a built view leaves the view as it was, a
+      proposal the analyst did not ask for gets up to VIEW_REPAIRS new builders started with what failed, and then
+      fails with Retry (_repairs_failed), and a view the analyst asked for fails with the reason. Neither offers Retry,
+      since a build of the same files fails the same way; the analyst's reply in its thread goes on with the builder."""
     from . import notices, subagents, view_review, view_tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
     if prop is None or prop.get("agent_id") != run.agent_id:
         return  # deleted, or a newer build took over
+    if int((subagents.agent(c, run.agent_id) or {}).get("run") or 0) > run.k:
+        # the builder's next run began before this end was settled, as the server's runtime starts it at once for a
+        # message that came after the run's last step (runtime._agent_loop): the view is that run's, and its end
+        # settles it
+        log.info("%s: the end of run %s of the build of %s is left to the run after it", c, run.k, slug)
+        return
     work = view_work_dir(c, slug)
-    if answering(prop, run.agent_id) is not None:
-        if views.unchanged_since_built(c, slug):  # it answered the message and left the view as it was built
-            views.update_proposal(c, slug, answering=None)
-            views.drop_built_copy(c, slug)
-            work_files.after_run(c, work, "done")
-            views._emit(c, slug, "built", chat=run.chat)
-            return
-        prop = message_changes(c, slug, run.agent_id) or prop  # it changed the view's files: a change, gated below
     finish = prop.get("finish") if isinstance(prop.get("finish"), dict) and prop["finish"].get("agent") == run.agent_id else {}
     if finish.get("result") == "pass":
         regated = await views.regate(c, slug)
@@ -3531,6 +3529,10 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         work_files.after_run(c, work, "done")
         log.info("the view %s/%s was built", c, slug)
         view_review.after_built(c, slug)
+        return
+    if prop.get("revision") and views.unchanged_since_built(c, slug):
+        views.end_revision(c, slug)
+        work_files.after_run(c, work, status)
         return
     a = subagents.agent(c, run.agent_id) or {}
     if status == "stopped" and finish.get("result") != "stop":
@@ -3548,20 +3550,21 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     if finish.get("result") != "stop" and (folder / views.VIEW_JSON).is_file():
         rep = await views.gate(c, slug, views._kept_locators(c, slug))
         gate_step(c, slug, rep, chat=run.chat)
-        if rep.get("ok") and not (prop.get("revision") and views.unchanged_since_built(c, slug)):
+        if rep.get("ok"):
             register_pass(c, slug, run.agent_id)
             work_files.after_run(c, work, "done")
             view_review.after_built(c, slug)
             return
-        if not rep.get("ok"):
-            prop = views.update_proposal(c, slug, last_report="\n".join(views.gate_lines(rep))[:ERROR_CHARS]) or prop
+        lines = "\n".join(views.gate_lines(rep))
+        prop = views.update_proposal(c, slug, last_report=views.kept_report(rep, ERROR_CHARS)) or prop
+        if status == "done" and await _feedback(c, slug, run, prop, lines):  # the whole report, as finish_view gives
+            return
     if status == "done" and finish.get("result") != "stop" and subagents.ended_in_plan(c, run.agent_id, run.k):
         if not prop.get("revision"):
             views.update_proposal(c, slug, held=None)  # a held proposal shows in the views list, failed
         _view_failed(c, slug, subagents.plan_failed_line(view_tools.BUILDER), run.chat)
         return
     failure = (str(finish.get("report") or prop.get("last_report") or "")
-               or (UNCHANGED_LINE if prop.get("revision") and views.unchanged_since_built(c, slug) else "")
                or " ".join(str(report or "").split()) or "the checks did not pass")
     first = next((ln for ln in failure.splitlines() if ln.startswith(("problem: ", "bad ", "page: "))), "")
     # a builder's long report shows on the chip and in the notice as its first sentence and its last, where it says
@@ -3569,9 +3572,14 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     # gets the gate's report and finish_view's (both kept cut there).
     shown = first[:ERROR_CHARS] or notices.gist(failure, notices.REASON_CHARS)
     log.warning("the view %s/%s was not built: %s", c, slug, shown)
+    # its notice says what is wrong with the view in the analyst's words, with what failed for thimble-fix: what its
+    # checks found, or the builder's own words when it stopped before its view.json and they found nothing
+    built = (folder / views.VIEW_JSON).is_file()
+    checks = _checks_failed(first[:ERROR_CHARS] if built else "", "" if first else shown)
     if prop.get("revision"):
         views.end_revision(c, slug, shown, failed_change=str(prop.get("change") or ""))
-        _change_failed_chip(c, prop, shown)
+        views.update_proposal(c, slug, checks_failed=True)
+        _change_failed_chip(c, prop, shown, checks=checks)
         return
     done = int(prop.get("repairs") or 0)
     if not prop.get("asked") and done < VIEW_REPAIRS:
@@ -3586,7 +3594,30 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     if not prop.get("asked"):
         _repairs_failed(c, slug, shown, run.chat)
         return
-    _view_failed(c, slug, shown, run.chat)
+    _view_failed(c, slug, shown, run.chat, checks=checks)
+
+
+async def _feedback(c: str, slug: str, run: Any, prop: dict[str, Any], report: str) -> bool:
+    """The checks a builder's end ran failed: what they found goes back to the builder, whose session goes on with it,
+    as Claude Code keeps working on what a check reports. Once since the analyst's last word to it (`fed_back`, cleared
+    by a message, a change or Retry), while an attempt is left (the gate counts as one of MAX_ATTEMPTS, as finish_view's
+    do) and its session can be reached; a builder that stops again without passing has stopped without passing. The
+    view builds meanwhile. Whether it went back."""
+    from . import subagents, tools, views  # noqa: PLC0415
+
+    n = int(prop.get("attempt") or 0) + 1
+    if prop.get("fed_back") or n > MAX_ATTEMPTS or not _reachable(c, run.agent_id):
+        return False
+    views.update_proposal(c, slug, attempt=n, fed_back=True)
+    route = run.route if run.route in (subagents.CLICK, subagents.FOLLOW_ON) else subagents.FOLLOW_ON
+    ans = await subagents.send(c, run.agent_id, tools.hint("finish-view-fail", report=report, n=str(n),
+                                                           of=str(MAX_ATTEMPTS)), values=prop.get("values"), route=route)
+    if ans.refused:
+        views.update_proposal(c, slug, fed_back=None)
+        log.info("%s: what the checks of %s found did not reach its builder: %s", c, slug, ans.reason)
+        return False
+    views._emit(c, slug, "building", chat=run.chat)
+    return True
 
 
 def stop_view(c: str, slug: str, why: str) -> bool:
@@ -3616,22 +3647,6 @@ def stop_view(c: str, slug: str, why: str) -> bool:
         subagents.refuse(c, b.request, why, subagents.HOOK)
     _start_views()
     return False
-
-
-def stop_answer(c: str, slug: str, prop: dict[str, Any]) -> bool:
-    """The analyst's Stop on the builder's run that takes a message about the built view `slug` (`answering`): the
-    builder stops, and its end leaves the view as it was, or puts back the files the run changed, as a stopped change
-    does (_settle). False when no run takes a message."""
-    from . import subagents  # noqa: PLC0415
-
-    a = prop.get("answering")
-    agent_id = str(a.get("agent") or "") if isinstance(a, dict) else ""
-    if not agent_id:
-        return False
-    if not stop_view(c, slug, VIEW_STOPPED):  # no place in the pool, as after a restart of the server
-        _view_stopping[(c, agent_id)] = VIEW_STOPPED
-        _soon(lambda: subagents.stop(c, agent_id), f"view-stop:{c}:{slug}")
-    return True
 
 
 async def stop_views(c: str) -> None:
@@ -3728,25 +3743,33 @@ def _view_chat(c: str, prop: dict[str, Any]) -> str | None:
         return None
 
 
-def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
+def _change_failed_chip(c: str, prop: dict[str, Any], why: str, *, checks: tuple[str, str] | None = None) -> None:
     """Main's chip for a change to a built view that failed, or that main's quit stopped (MAIN_ENDED), since the view's
-    own chip shows it built again."""
+    own chip shows it built again, and its notice (_view_notice): with Retry, or for a change whose builder stopped
+    without passing the view's checks (`checks`, _checks_failed), with what is wrong in the analyst's words and whether
+    to send it to thimble-fix."""
     name = prop.get("name") or prop.get("slug")
     quit_ = why == MAIN_ENDED
+    words = checks[0] if checks else why
     text = (f"the change to the view {name} stopped when your Claude Code session ended, so the view is as it was"
-            if quit_ else f"the change to the view {name} failed, so it is as it was: {why}")
+            if quit_ else f"the change to the view {name} failed, so it is as it was: {words}")
     try:
         agents.chip(c, "ticket", text, ref=f"view:{prop.get('slug')}", chat=prop.get("chat"),
                     status="stopped" if quit_ else "failed")
     except Exception:  # noqa: BLE001
         log.exception("could not chip the failed change to %s/%s", c, prop.get("slug"))
     if not quit_:
-        _view_notice(c, prop, CHANGE_FAILED_TEXT, why, chat=prop.get("chat"))
+        _view_notice(c, prop, CHANGE_ASK_TEXT if checks else CHANGE_FAILED_TEXT, words, chat=prop.get("chat"),
+                     found=checks[1] if checks else None)
 
 
-def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None:
+def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *,
+                 checks: tuple[str, str] | None = None) -> None:
     """A build that ended without its view: a change to a built view leaves the view as it was (views.end_revision),
-    and a new view fails, its chip showing why with Retry."""
+    and a new view fails, its chip showing why with Retry; with no Retry for a view whose builder stopped without
+    passing its checks (`checks`, _checks_failed), which a build of the same files would fail again: its notice says
+    what is wrong in the analyst's words and asks to send it to thimble-fix, and their reply in its thread goes on with
+    the builder."""
     from . import views  # noqa: PLC0415
 
     current = views.read_proposal(c, slug) or {}
@@ -3757,38 +3780,83 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None
                            stopped_by="quit" if error == MAIN_ENDED else None)
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "failed", error)
-        _change_failed_chip(c, current, error)
+        _change_failed_chip(c, current, error, checks=checks)
         return
     if not current:
         return
     # a build main's quit stopped says so on its chip (`stopped_by`), as a chat of a thimble agent does
-    views.update_proposal(c, slug, status="failed", error=error, stopped_by="quit" if error == MAIN_ENDED else None)
+    views.update_proposal(c, slug, status="failed", error=error, stopped_by="quit" if error == MAIN_ENDED else None,
+                          checks_failed=True if checks else None)
     views._emit(c, slug, "failed", chat=chat)
     if chat:
         _close_chat({"workspace": c, "chat": chat}, "failed", error)
     if error != MAIN_ENDED:
-        _view_notice(c, current, BUILD_FAILED_TEXT, error, chat=chat)
+        _view_notice(c, current, ASK_TEXT if checks else BUILD_FAILED_TEXT, checks[0] if checks else error, chat=chat,
+                     found=checks[1] if checks else None)
 
 
 # the notices of a view's build (module note, notices): {name} the view's, {why} the failure in plain words
 BUILD_FAILED_TEXT = "The view {name} failed to build: {why}."
 BUILD_REFUSED_TEXT = "The build of the view {name} didn't start: {why}."
 CHANGE_FAILED_TEXT = "The change to the view {name} failed, so the view is as it was: {why}."
+# a view whose builder stopped without passing its checks (_checks_failed), or a change to it: the notice asks to send
+# the failure to thimble-fix ({after}: AFTER_RETRY when the builder tried again with what failed, _retried); why, when
+# it stopped before its view.json and said nothing; Send, which puts SEND_TEXT after /thimble-fix in main's composer
+# ({found}: the checks' first failure, quoted in at most FOUND_CHARS, or nothing); and Discard, of the view or of the
+# change to it
+ASK_TEXT = "{name} failed{after}: {why}. Send to thimble-fix?"
+CHANGE_ASK_TEXT = "The change to {name} failed{after}: {why}. Send to thimble-fix?"
+AFTER_RETRY = " after retry"
+UNFINISHED = "Claude didn't finish it"
+SEND_LABEL = "Send"
+SEND_TEXT = "The view {name} failed{after}: {why}{found}. Make it build."
+CHANGE_SEND_TEXT = "The change to the view {name} failed{after}: {why}{found}. Make it work."
+FOUND_CHARS = 160  # of the checks' first failure in Send's words, which a citation's excerpt would make long
+DISCARD_VIEW, DISCARD_CHANGE = "Discard the view", "Discard the change"
 
 
-def _view_notice(c: str, prop: dict[str, Any], text: str, why: Any, chat: Any = None) -> None:
-    """A view's build or change failed, or its build did not start: the notice in the foreground with Retry, under the
-    build's key, with Open on its thread. Never raises."""
+def _checks_failed(first: str, said: str = "") -> tuple[str, str]:
+    """(what is wrong with the view in the analyst's words, what its checks found as Send quotes it) for a view whose
+    builder stopped without passing its checks: by the kind of `first`, their first failure (views.plain_failure); for
+    '', a builder that stopped before the view's view.json, its own words `said`, else UNFINISHED; and `first` quoted,
+    cut at a word (FOUND_CHARS), or '' for none."""
+    from . import notices, views  # noqa: PLC0415
+
+    cut = notices.gist(first.strip().rstrip("."), FOUND_CHARS)
+    return views.plain_failure(first) or said or UNFINISHED, f" (“{cut}”)" if cut else ""
+
+
+def _retried(prop: dict[str, Any]) -> bool:
+    """Whether the builder of the view `prop` tried again with what its checks found: the gate's failure went back to it
+    (_feedback), or finish_view answered more than one of its attempts."""
+    return bool(prop.get("fed_back")) or int(prop.get("attempt") or 0) > 1
+
+
+def _view_notice(c: str, prop: dict[str, Any], text: str, why: Any, chat: Any = None, *,
+                 found: str | None = None) -> None:
+    """A view's build or change failed, or its build did not start: the notice in the foreground, under the build's key,
+    with Open on its thread, why in plain words (notices.reason), and Retry. A view whose builder stopped without
+    passing its checks (`found`, what they found, _checks_failed), which a build of the same files would fail again,
+    offers no Retry: its notice asks to send the failure to thimble-fix, with Send, which puts it after /thimble-fix in
+    main's composer, and Discard, of the view or of the change to it (views.discard). Never raises."""
     from . import notices  # noqa: PLC0415
 
     try:
         slug = str(prop.get("slug") or "")
         name = str(prop.get("name") or slug)
-        words, fix = notices.reason(why)
-        retry_ = {"label": "Retry", "do": "view-retry", "slug": slug}
-        notices.post(c, kind="view", text=text.format(name=name, why=words), agent=notices.who("view-builder", name)[0],
-                     chat=str(chat) if chat else None, action=[retry_, fix] if fix else retry_,
-                     key=notices.agent_key(view_key(slug)))
+        words, more = notices.reason(why)
+        after = AFTER_RETRY if _retried(prop) else ""
+        if found is None:
+            acts = [{"label": "Retry", "do": "view-retry", "slug": slug}, *([more] if more else [])]
+        else:
+            send = (CHANGE_SEND_TEXT if prop.get("revision") else SEND_TEXT).format(name=name, after=after, why=words,
+                                                                                    found=found)
+            acts = [{"label": SEND_LABEL, "do": "thimble-fix", "text": send},
+                    {"label": DISCARD_CHANGE if prop.get("revision") else DISCARD_VIEW, "do": "view-discard",
+                     "slug": slug}, *([more] if more else [])]
+        notices.post(c, kind="view", text=text.format(name=name, why=words, after=after),
+                     agent=notices.who("view-builder", name)[0], chat=str(chat) if chat else None,
+                     action=acts if len(acts) > 1 else acts[0], key=notices.agent_key(view_key(slug)))
     except Exception:  # noqa: BLE001 — the view has failed either way
         log.exception("%s: the failure of the view %s was not told", c, prop.get("slug"))
 

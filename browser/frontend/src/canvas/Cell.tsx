@@ -3,8 +3,8 @@
 // left, the details, chat, delete, star and lock icons at the right. Any edge or corner resizes it. A locked card is one
 // no model may change or delete. Selected alone, a click on its question or takeaway edits it in place (RefEditor); a
 // double click opens focus mode. ⌘↵ in the question typed in place saves it and sends it to main as a request on the
-// card (lib/agentKey), and the card says `sent to main` until main's turn ends. The board (Canvas.tsx) owns placement,
-// selection, drag and resize. The card is its citations' home (`data-cite-home`).
+// card (lib/agentKey), and the card says `sent to main` until main's work lands in it. The board (Canvas.tsx) owns
+// placement, selection, drag and resize. The card is its citations' home (`data-cite-home`).
 import { memo, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { Button } from '../components/Button'
 import { askMain, whenMainIdle } from '../lib/agentKey'
@@ -118,23 +118,42 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
       p.onEdit(cell.id, field)
     }, DOUBLE_MS)
   }
-  // ⌘↵ in the question typed in place: the question is saved, then sent to main as a request on this card, which shows
-  // `sent to main` until main's turn ends
+  // ⌘↵ in the question typed in place: the question is saved, then sent to main as a request on this card, which main
+  // reads at its next step. The card shows `sent to main` until main's work lands: an edit of the card that is not the
+  // analyst's, or a card the stream names for the request (`cardRequest`); else until main's turn ends
   const [asking, setAsking] = useState(false)
   const idle = useRef<(() => void) | null>(null)
+  // the request out with main, and how many edits the card had when it went
+  const asked = useRef<{ request: string; edits: number } | null>(null)
+  const landed = () => {
+    idle.current?.()
+    idle.current = null
+    asked.current = null
+    setAsking(false)
+  }
   useEffect(() => () => idle.current?.(), [])
+  useEffect(
+    () =>
+      bus.on('cardRequest', ({ request }) => {
+        if (request === asked.current?.request) landed()
+      }),
+    [],
+  )
+  useEffect(() => {
+    const at = asked.current
+    if (at && (cell.edited ?? []).slice(at.edits).some((e) => e.by && e.by !== 'user' && e.by !== 'analyst')) landed()
+  }, [cell.edited])
   const ask = async (field: CardField, value: string) => {
     const text = value.trim()
+    const edits = (cell.edited ?? []).length
     await saveTyped(field, text)
     setAsking(true)
     try {
       const request = await askMain(ctx.ws, text, { card: cell.id })
+      asked.current = { request, edits }
       track('ui-click', { target: `cell:${cell.id}`, detail: { action: 'ask', request } })
       idle.current?.()
-      idle.current = whenMainIdle(ctx.ws, () => {
-        idle.current = null
-        setAsking(false)
-      })
+      idle.current = whenMainIdle(ctx.ws, landed)
     } catch (e) {
       setAsking(false)
       fail(e)

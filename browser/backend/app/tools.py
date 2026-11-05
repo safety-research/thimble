@@ -100,6 +100,8 @@ CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline",
 # classifier is the label card, which apply_label makes.
 ADD_CELL_KINDS = ("example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan")
 EDIT_CELL_KINDS = ADD_CELL_KINDS
+# the kinds edit_card changes no card to or from: a label card is drawn from its label, and a plan holds a piece of work
+FIXED_KINDS = ("label", "plan")
 RUN_KINDS = ("plot", "table", "code", "timeline", "diagram")  # notebook.RUNNABLE_KINDS: the kinds that run `code`
 INSTRUCTIONS_HINT = "instructions"  # prompts/tools.md `## instructions`: the shim's MCP server instructions (instructions)
 SCREENSHOT_HOSTS = ("127.0.0.1", "localhost", "::1")  # a page screenshot is of thimble's own interface on this machine
@@ -1142,17 +1144,19 @@ def _code_on_data(tool: str, kind: str, args: dict[str, Any]) -> str:
     return f"{tool}: {a} {kind} card shows `{key}` and runs no `code`, so leave `code` out and give what it shows as `{key}`"
 
 
-def _content_on_code(tool: str, kind: str, args: dict[str, Any]) -> str:
+def _content_on_code(tool: str, kind: str, args: dict[str, Any], *, change: bool = False) -> str:
     """The error line for a data kind's field (`refs`, `text`, `html`) given to a card that runs code, which would store
     the
-    card without it."""
+    card without it. `change`: for edit_card, whose `kind` makes the card one that shows the field."""
     field = next((f for f in CONTENT_FIELDS if _given(args, f)), None)
     if field is None:
         return ""
     other = FIELD_KINDS[field]
     a = "an" if other[:1] in "aeiou" else "a"
+    turns = change and other not in FIXED_KINDS
+    instead = f"pass kind {other} to make it {a} {other} card" if turns else f"add {a} {other} card for it"
     return (f"{tool}: a {kind} card shows what its `code` outputs, and `{field}` is what {a} {other} card shows, so "
-            f"leave `{field}` out, or add {a} {other} card for it")
+            f"leave `{field}` out, or {instead}")
 
 
 def _example_ref(c: str | None, item: Any) -> tuple[str, str]:
@@ -1486,6 +1490,38 @@ def _edit_data_cell(ctx: Ctx, nb_id: str, cid: str, cell: dict, args: dict[str, 
               + "".join(f"\n\n{line}" for line in lines))
 
 
+async def _to_data_card(ctx: Ctx, nb_id: str, cid: str, args: dict[str, Any], kind: str, title: str | None,
+                        takeaway: str | None, group: str, place: "tuple[str, str | None] | None",
+                        kept: "builtins.list[str]") -> ToolResult:
+    """edit_card with a new `kind` that shows what the card holds (an example, a note or a custom card): the card shows
+    the call's content in its place, with its id, group and links, as one edit that Restore and Undo take back
+    (notebook.change_kind). `group` and `place` move it once the call is known to be good."""
+    from . import notebook
+
+    if problem := _code_on_data("edit_card", kind, args):
+        return err(problem)
+    await _warm_view_refs(ctx.c, args)
+    payload, problem = _payload_args(kind, args, "edit_card", ctx.c)
+    if problem or payload is None:
+        return err(problem)
+    if kind == "custom" and payload.get("libs"):
+        from . import card_libs  # noqa: PLC0415
+
+        if problems := await card_libs.ensure(ctx.c, payload.get("libs")):
+            return err("; ".join(f"edit_card: {p}" for p in problems))
+    lines: builtins.list[str] = []
+    if group:
+        nb_id = _move_to_group(ctx, cid, nb_id, group, lines)
+    if place:
+        _place(ctx, cid, place[0], place[1], lines)
+        nb_id = place[0]
+    updated = notebook.change_kind(ctx.c, cid, kind, payload=payload, title=title, by=ctx.cell_author)
+    _remember_cell(ctx, nb_id, cid)
+    tail = [*kept, *([_takeaway_after(ctx, cid, takeaway, None)[0]] if takeaway is not None else [])]
+    return ok(f"card:{cid}\n\n" + "\n".join(_payload_lines(kind, updated.get("payload") or {}))
+              + "".join(f"\n\n{line}" for line in [*lines, *tail] if line))
+
+
 def _edit_plan(ctx: Ctx, cid: str, steps: "builtins.list[dict]", title: str | None) -> dict:
     """edit_card's new `steps` for plan `cid`, at any time: merged with the steps the card holds under the groups' lock
     (plans.merge_steps), so each step it replaces keeps its id, its clock while its text is unchanged and what the edit
@@ -1640,11 +1676,20 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if problem:
             return err(problem)
         place, group = (target, after), ""  # `after` names the column, so `group` has nothing left to do
-    # a dataset-backed diagram or timeline becomes a card of code when the call gives code (notebook.edit_and_run's
-    # from_dataset)
-    from_dataset = (not notebook.runnable(cell) and cell.get("kind") in KIND_ENDINGS
-                    and bool(str(args.get("code") or "").strip()))
-    if not notebook.runnable(cell) and not from_dataset:
+    # a new kind replaces the card in place, whatever it was, except a label or a plan card (FIXED_KINDS)
+    old_kind = str(cell.get("kind") or notebook.DEFAULT_KIND)
+    new_kind = kind if kind is not None and kind != old_kind else None
+    if new_kind and (old_kind in FIXED_KINDS or new_kind in FIXED_KINDS):
+        return err(hint("edit_card-kind", cid=cid, kind=old_kind, new=new_kind))
+    if new_kind in notebook.DATA_KINDS:
+        return await _to_data_card(ctx, nb_id, cid, args, new_kind, title, takeaway, group, place, kept)
+    code_given = bool(str(args.get("code") or "").strip())
+    if new_kind and not notebook.runnable(cell) and not code_given:
+        return err(_needs_code("edit_card", new_kind))
+    # a card that shows what it holds becomes a card of code when the call gives code: a diagram or timeline drawn from
+    # its dataset, or any card the call gives a running kind (notebook.edit_and_run's from_data)
+    from_data = not notebook.runnable(cell) and code_given and (old_kind in KIND_ENDINGS or new_kind is not None)
+    if not notebook.runnable(cell) and not from_data:
         await _warm_view_refs(ctx.c, args)
         if cell.get("kind") == "custom" and (args.get("html") is not None or args.get("libs") is not None):
             # the html or the libraries alone change, and the other is kept
@@ -1659,11 +1704,8 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             return res
         tail = [*kept, *([_takeaway_after(ctx, cid, takeaway, None)[0]] if takeaway is not None else [])]
         return ok("\n\n".join([res.text, *tail])) if tail else res
-    if kind is not None and kind not in RUN_KINDS:
-        return err(hint("edit_card-kind", cid=cid, kind=cell.get("kind") or notebook.DEFAULT_KIND, new=kind))
-    field = next((f for f in CONTENT_FIELDS if _given(args, f)), None)
-    if field:  # a note's `text` or an example's `refs` on a card of code, which would be dropped and the code run again
-        return err(hint("edit_card-kind", cid=cid, kind=cell.get("kind") or notebook.DEFAULT_KIND, new=FIELD_KINDS[field]))
+    if any(_given(args, f) for f in CONTENT_FIELDS):  # a note's `text` or a custom card's `html` beside code, dropped
+        return err(_content_on_code("edit_card", new_kind or old_kind, args, change=True))
     if problem := _card_installs(ctx, str(args.get("code") or ""), "edit_card"):
         return err(problem)
     # the card moves only once the call is known to be good, so a refused call leaves it where it was
@@ -1689,7 +1731,7 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     was = notebook.outputs_key(ctx.ws, cell.get("outputs")) if only_code else ""
     cell = await notebook.edit_and_run(ctx.c, nb_id, cid, code, by=ctx.cell_author,
                                        default_timeout_s=_default_timeout(ctx), title=title, kind=kind,
-                                       from_dataset=from_dataset)
+                                       from_data=from_data)
     _remember_cell(ctx, nb_id, cid)
     text = _format_cell_result(cell, lines=result_lines(ctx.c))
     text += _run_hint(cell, str(cell.get("kind") or notebook.DEFAULT_KIND))
@@ -2299,6 +2341,12 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
         return err(f"screenshot: there is no card {cid or ref}")
     if any(CARD_MIME in b for _, b in cite.iter_outputs(cell.get("outputs"))):
         return await _shot_type_card(ctx, cid, cell)
+    if cell.get(notebook.HELD):
+        # held from the analyst until its measure or its check ends (card_fit), which the page draws as running: the
+        # card harness draws it as the check sees it, where it can
+        shot = await _shot_type_card(ctx, cid, {k: v for k, v in cell.items() if k != notebook.HELD})
+        if not shot.is_error:
+            return shot
     ui = ui_base()
     if ui:
         shot = await _shot_card_in_ui(ctx.c, cid, ui)

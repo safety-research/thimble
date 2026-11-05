@@ -53,7 +53,7 @@ Options go after `bash -s --`:
   - Your Claude Code sign-in: the workbench runs Claude Code in the background, on your Claude plan, with the
     environment as it is, so that Claude Code signs in as it does in your terminal.
   - An API key: `ANTHROPIC_API_KEY` when it is set where the workbench runs, otherwise a key you paste in the
-    workbench's Settings.
+    workbench's Settings, Claude access.
   - Workload Identity Federation: the path of your WIF config file (`browser/backend/app/wif.py` lists its keys).
 
   Without `--sign-in`, the script asks in a terminal, and otherwise the workbench asks when it starts. The script
@@ -190,4 +190,4 @@ The workbench:
   bubblewrap; on a Linux whose AppArmor keeps bubblewrap from making namespaces, the card says how to allow it.
   After the fix, run the card again.
 - **The chat says the credentials failed (401).** It names the credentials it used and the time. Check them in
-  Settings; whoever manages the credentials can see the reason on the admin side.
+  Settings, Claude access; whoever manages the credentials can see the reason on the admin side.

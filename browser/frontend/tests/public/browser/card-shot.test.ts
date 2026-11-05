@@ -117,3 +117,17 @@ test('ui_shot --settle shoots the card once its body is drawn, with a flash on i
   assert.equal(JSON.parse(run.stdout).found, true)
   assert.deepEqual(await middle(readFileSync(out)), [0, 170, 0], 'the drawn body, with no red over it')
 })
+
+test('ui_shot --settle shoots a card whose frame animates once the frame stopped changing', async () => {
+  // a custom card's frame draws itself, out of the page's sight: a step every 400 ms, green from the fourth on
+  const frame = `<body style='margin:0;height:200px;background:#ccc'><script>let n = 0; const t = setInterval(() => { n++; document.body.style.background = n < 4 ? '#' + n * 3 + '00' : '#0a0'; if (n >= 4) clearInterval(t) }, 400)</script></body>`
+  const html = `<!doctype html><html><head><style>body { margin: 0; background: #fff } #card { width: 300px; height: 200px; margin: 40px }
+    iframe { border: 0; display: block; width: 300px; height: 200px }</style></head>
+    <body><div id="card"><iframe data-shot="" sandbox="allow-scripts" srcdoc="${frame}"></iframe></div></body></html>`
+  const file = path.join(dir, 'animated.html')
+  const out = path.join(dir, 'animated.png')
+  writeFileSync(file, html)
+  const run = spawnSync('node', [path.join(FRONTEND, '..', 'scripts', 'ui_shot.mjs'), '--url', pathToFileURL(file).href, '--out', out, '--selector', '#card', '--settle', '--wait', '0', '--offline'], { encoding: 'utf8', timeout: 45_000 })
+  assert.equal(run.status, 0, run.stderr)
+  assert.deepEqual(await middle(readFileSync(out)), [0, 170, 0], 'the frame as the animation left it')
+})

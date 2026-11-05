@@ -1,10 +1,10 @@
-"""How thimble reaches Claude: one choice per install, made once and changed in Settings.
+"""How thimble reaches Claude: one choice per install, made once and changed in Settings, Claude access.
 
     claude-code   the person's Claude Code sign-in (the default, and recommended). thimble runs Claude Code in the
                   background (runtime_cc.py), with the environment as it is, so that Claude Code signs in as it does in
                   the person's terminal; only with the person's consent to CONSENT, which choosing it gives.
     api-key       an Anthropic API key: ANTHROPIC_API_KEY when it is set where the workbench runs, else the key the
-                  person pasted in Settings. The server calls the Messages API itself.
+                  person pasted in the workbench. The server calls the Messages API itself.
     wif           Workload Identity Federation, from the config file the person names (wif.py). The server calls the
                   Messages API itself.
 
@@ -16,7 +16,7 @@ it is not API_HOST.
 With api-key and wif nothing launches a `claude` process: every agent runs in the server (runtime_api.py). The choice
 is kept in <home>/claude-access.json ({how, wif_file, consent}), a pasted key in <home>/anthropic-api-key (0600).
 scripts/install.sh sets the choice (`thimble-browser --setup`, with --sign-in, or asked in a terminal); the page's
-first-run step and Settings change it (the routes).
+first-run step and Settings' Claude access change it (the routes).
 
 problem() says, without a network call, what is missing (no choice, no key, a WIF file that cannot be used, no consent,
 no `claude`), in words for the chat's card and the server's start line; check() makes one small call to be sure (with
@@ -108,7 +108,7 @@ def env_key() -> str:
 
 
 def saved_key() -> str:
-    """The key the person pasted in Settings, which the workbench uses when ANTHROPIC_API_KEY is not set."""
+    """The key the person pasted in the workbench, which it uses when ANTHROPIC_API_KEY is not set."""
     try:
         return key_path().read_text("utf-8").strip()
     except OSError:
@@ -200,7 +200,7 @@ def describe() -> str:
     if h == API_KEY:
         if env_key():
             return "an API key, from ANTHROPIC_API_KEY" + _sent_to()
-        return "an API key, the one saved in Settings" if saved_key() else "an API key (none yet)"
+        return "an API key, the one saved in the workbench" if saved_key() else "an API key (none yet)"
     if h == WIF:
         return f"Workload Identity Federation, with {_tilde(str(rec.get('wif_file') or '(no file)'))}" + _sent_to()
     if h == CLAUDE_CODE:
@@ -370,7 +370,7 @@ async def put_route(body: AccessBody, request: Request) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from None
     from . import runtime  # noqa: PLC0415
 
-    runtime.access_changed()
+    await runtime.access_changed()
     return {**status(), "check": await check()}
 
 
@@ -427,8 +427,8 @@ def line(no_check: bool = False) -> tuple[int, list[str]]:
     if not h:
         return 0, ["Sign-in: not chosen yet. The workbench asks when it starts."]
     if h == API_KEY and not has_key():
-        return 0, ["Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so the workbench asks for a key in its "
-                   "Settings when it starts."]
+        return 0, ["Sign-in: an API key. ANTHROPIC_API_KEY is not set here, so paste a key in the workbench's "
+                   "Settings, Claude access."]
     if no_check:
         return 0, [f"Sign-in: {describe()}."]
     got = asyncio.run(check())
@@ -446,10 +446,10 @@ def setup(argv: list[str] | None = None) -> int:
 
     --how chooses the way (claude-code, api-key or wif; --wif-file alone is wif). Choosing the Claude Code sign-in is
     the consent to what it does (CONSENT). The API key needs nothing here: the workbench uses ANTHROPIC_API_KEY when it
-    is set, and else asks for a key in its Settings. Without --how, a terminal gets the question (Enter chooses later),
-    and with --keep a way chosen before stays (the install's run); with no terminal, the way chosen stays as it is. Then
-    the line that says the way and what the check found (line). The question goes to stderr and the lines to stdout.
-    Exit 0, 1 when nothing was saved, 2 when the check failed."""
+    is set, and else takes one pasted in its Settings, Claude access. Without --how, a terminal gets the question (Enter
+    chooses later), and with --keep a way chosen before stays (the install's run); with no terminal, the way chosen
+    stays as it is. Then the line that says the way and what the check found (line). The question goes to stderr and
+    the lines to stdout. Exit 0, 1 when nothing was saved, 2 when the check failed."""
     ap = argparse.ArgumentParser(prog="thimble-browser --setup")
     ap.add_argument("--how", choices=CHOICES)
     ap.add_argument("--wif-file", help="the WIF config file (implies --how wif)")

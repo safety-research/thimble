@@ -838,7 +838,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       anchor: (api) => [reportPanel, ...(api.els.side ? [api.els.side, sideButton('comments')] : [])],
       title: 'Checks',
       body: 'Checks read the report and the cards, and comment on what they find. Comments, at the top, lists the checks and their comments. Press + New check there to add one: say what to look for, in a line.',
-      note: 'Reopen this tour from Settings.',
+      note: 'Reopen this tour with /tour in the chat.',
       scroll: (api) => api.els.page ?? null,
       leave: (api) => api.els.hideSide?.(),
       // the Comments sidebar opens beside the Report, and its + New check opens a new check, which is named and

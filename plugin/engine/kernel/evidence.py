@@ -1637,7 +1637,13 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None, 
                 break
         else:
             r["text"] = window(r["text"], [], LINE_MAX)[0]
-    rel = path if not inside(path, [root or cwd, cwd]) else os.path.relpath(path, os.path.abspath(root or cwd))
+    # a file inside the folders shows by the path it was cited by, from the start folder; one cited by a path that
+    # reaches the folder from outside, through a link to it (a session folder ~/traces that links to another disk),
+    # shows by where it lies in the folder, as the folder's own files do
+    top = os.path.abspath(root or cwd)
+    rel = path if not inside(path, [top, cwd]) else os.path.relpath(path, top)
+    if rel.startswith("../"):
+        rel = os.path.relpath(_real(path) or path, _real(top) or top)
     return problems, {"file": rel, "line": line, "lines": rows}, hay
 
 

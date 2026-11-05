@@ -126,7 +126,11 @@ def board(tmp_path, monkeypatch) -> str:
     return "boards"
 
 
-async def test_a_view_that_failed_to_build_is_told_with_retry_and_its_next_build_clears_it(board, bridge):
+async def test_a_view_that_failed_its_checks_is_told_with_its_fixes_and_no_retry_and_its_next_build_clears_it(
+        board, bridge):
+    """A builder that stopped without passing the view's checks: the notice says what is wrong with the view in the
+    analyst's words, not the checks' own, and offers no Retry, which would build the same files again, but asks to send
+    it to thimble-fix, with what failed, or Discard the view; Open goes to the build's thread."""
     c = board
     slug = views.propose(c, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
     assert (await dev.start_build(c, slug, subagents.CLICK)).started
@@ -137,8 +141,10 @@ async def test_a_view_that_failed_to_build_is_told_with_retry_and_its_next_build
     subagents.run_ended(c, prop["agent_id"], "done", "I could not make it pass.", source="handback")
     await _until(lambda: (views.read_proposal(c, slug) or {}).get("status") == "failed", "it never failed")
     n = _open(f"agent:view:{slug}", c)
-    assert n["text"] == "The view Posts failed to build: problem: the page threw."
-    assert n["action"] == {"label": "Retry", "do": "view-retry", "slug": slug}
+    assert n["text"] == f"Posts failed: {views.plain_failure('problem: the page threw')}. Send to thimble-fix?"
+    send, discard = n["action"]
+    assert send["do"] == "thimble-fix" and "problem: the page threw" in send["text"]
+    assert discard == {"label": dev.DISCARD_VIEW, "do": "view-discard", "slug": slug}
     assert n["agent"] == "View build: Posts" and n["chat"] == prop["chat"]
     await dev.start_build(c, slug, subagents.CLICK)
     await _until(lambda: _open(f"agent:view:{slug}", c) is None, "its next build left the notice")
@@ -157,7 +163,7 @@ async def test_a_builder_s_long_report_is_told_by_its_first_sentence_and_the_las
     assert len(report) > 900
     subagents.run_ended(c, prop["agent_id"], "done", report, source="handback")
     await _until(lambda: (views.read_proposal(c, slug) or {}).get("status") == "failed", "it never failed")
-    assert _open(f"agent:view:{slug}", c)["text"] == f"The view Posts failed to build: {first} … {last}"
+    assert _open(f"agent:view:{slug}", c)["text"] == f"Posts failed: {first} … {last} Send to thimble-fix?"
     assert views.read_proposal(c, slug)["error"] == f"{first} … {last}"
 
 

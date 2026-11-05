@@ -306,10 +306,10 @@ def agent_ended(c: str, agent_id: str) -> list[str]:
 
 
 async def _measure(c: str, cell: dict[str, Any]) -> Size | None:
-    """The card's size as the harness draws it; None where no card can be drawn, or this card did not draw (its author
-    reads its run's result, and the page measures what it shows)."""
+    """The card's size as the harness draws it, from its first picture (a card is held until then); None where no card
+    can be drawn, or this card did not draw (its author reads its run's result, and the page measures what it shows)."""
     try:
-        drawn = await render.render_card(c, {k: v for k, v in cell.items() if k != HELD})
+        drawn = await render.render_card(c, {k: v for k, v in cell.items() if k != HELD}, still=False)
     except render.Unavailable as e:
         log.debug("card fit: card:%s not drawn (%s)", cell.get("id"), e)
         return None

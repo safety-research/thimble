@@ -40,8 +40,7 @@
 // A lens whose feature has a mode (Claims: auto, on demand, off) joins the look after each reply only in its `auto` mode;
 // else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims have not read,
 // for a look of that lens alone. While a look reads the claims, either way, the pane says they are being found
-// (claims/seam.ts claimsFindStart) in place of f. While Heads-ups is on demand, h asks for a look of the heads lens alone
-// at one answer (headsUpsNow).
+// (claims/seam.ts claimsFindStart) in place of f.
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import { update, type EngineInterface, type Register } from 'claude-code'
 
@@ -256,17 +255,6 @@ export async function findClaimsNow($: Engine): Promise<number> {
   await claimsFindStart($, turns.length)
   for (const t of turns) for (const m of await answerMsgs($, t)) await enqueue($, { ...m, only: ['claims'] })
   return turns.length
-}
-
-/** h while Heads-ups is on demand (explain/seam.ts headsKey): the answer at `row` queued for a look of the heads lens alone.
- *  Answers whether it was queued: Heads-ups is on, a person is here, and `row` is an answer. */
-export async function headsUpsNow($: Engine, row: string): Promise<boolean> {
-  if (!featureOn('details') || S.person !== 'now') return false
-  const t = await turnOfRow($, row)
-  if (!t || t.answer !== row) return false
-  const msgs = await answerMsgs($, t)
-  for (const m of msgs) await enqueue($, { ...m, only: ['heads'] })
-  return msgs.length > 0
 }
 
 /** A catch-up's version shown (squeeze/term.ts settled): the explain and heads lenses read it as they read an answer,

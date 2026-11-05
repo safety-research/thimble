@@ -1,7 +1,7 @@
 """What a shell command did with each file of the folder it names, for coverage (coverage.py).
 
-    read      some of its lines reached Claude: `cat`, `head`, `tail` or `sed` printed them, and what came after in the
-              pipeline passed them on
+    read      some of its lines reached Claude: `cat`, `head`, `tail` or `sed` printed them (`zcat` or `gzip -dc` those
+              of a compressed file), and what came after in the pipeline passed them on
     searched  a search (`grep`, `rg`, `sed -n '/re/p'`) went over it and showed only the lines that matched
     computed  a program went over its content and only its results came back: code (`python`, `jq`, `awk`, …) that
               names the file in its arguments, in a here-document or in the script it runs; a count (`wc`,
@@ -46,6 +46,11 @@ COUNTS = {"wc", "md5sum", "sha1sum", "sha256sum", "sha512sum", "cksum", "cmp"}
 DECODES = {"ffmpeg", "ffprobe", "mediainfo", "exiftool", "sox", "soxi", "pdftotext", "pdftoppm", "pdfinfo", "pdfimages",
            "tesseract", "identify", "convert", "magick", "whisper"}
 SCRIPT_MAX_BYTES = 1 << 20
+# programs that print a compressed file's lines, as cat prints a file's
+UNPACKS = {"zcat", "gzcat", "bzcat", "xzcat", "lzcat", "zstdcat", "lz4cat", "zless", "zmore"}
+# programs that compress or decompress a file: they print its lines only when they decompress to their output
+# (`gzip -dc`, `gunzip -c`, `xz -dc`); else they write a file of their own, having gone over the one they read
+PACKS = {"gzip", "gunzip", "pigz", "unpigz", "bzip2", "bunzip2", "xz", "unxz", "lzma", "unlzma", "zstd", "unzstd", "lz4"}
 # programs that pass on the lines they get (head, tail and sed narrow them; uniq -c counts them)
 PASSES = {"cat", "less", "more", "cut", "column", "nl", "tr", "fold", "fmt", "expand", "sort", "tee", "uniq", "head", "tail", "sed"}
 WRAPPERS = {"!", "{", "}", "if", "then", "else", "elif", "do", "while", "until", "time", "sudo", "command", "nohup", "exec",
@@ -188,6 +193,35 @@ def pipelines(cmd: str) -> list[list[dict]]:
         i += 1
     end_stage(True)
     return [p for p in pipes if p]
+
+
+# a group's first word, and the word that ends it: a loop's body, an if's branches, a brace group
+GROUPS = {"do": "done", "then": "fi", "{": "}"}
+
+
+def grouped(pipes: list[list[dict]]) -> list[list[dict]]:
+    """The pipelines, each command of a loop's body (or of an if's branches, or a brace group) sent where the group's
+    end sends its output: `for f in *.gz; do zcat "$f"; done > all.jsonl` writes zcat's lines to a file, as `zcat a.gz >
+    all.jsonl` does, and `…; done | wc -l` gives them to wc. A command of the body that sends its own output to a file
+    keeps it there."""
+    opened: list[tuple[str, int]] = []
+    before = ""
+    for i, pipe in enumerate(pipes):
+        first = pipe[0]["words"][0] if pipe[0]["words"] else ""
+        if first in GROUPS and not (first == "then" and before == "elif"):
+            opened.append((GROUPS[first], i))
+        elif opened and first == opened[-1][0]:
+            _, at = opened.pop()
+            end, after = pipe[0], pipe[1:]
+            for body in pipes[at:i]:
+                if body[-1]["out"]:
+                    continue
+                if end["out"]:
+                    body[-1] = {**body[-1], "out": True, "to": [*body[-1]["to"], *end["to"]]}
+                else:
+                    body.extend(after)
+        before = first
+    return pipes
 
 
 def _subst_end(cmd: str, i: int) -> int:
@@ -345,8 +379,13 @@ def stage_shows(prog: str, args: list[str]) -> tuple[str, Range | None]:
         if "--files" in args:  # `rg --files` lists the names it would search
             return "listed", None
         return ("computed" if counts_only(args) else "searched"), None
-    if prog in ("cat", "tac", "nl", "less", "more", "bat", "batcat"):
+    if prog in ("cat", "tac", "nl", "less", "more", "bat", "batcat") or prog in UNPACKS:
         return "read", None
+    if prog in PACKS:
+        flags = "".join(a[1:] for a in args if re.fullmatch(r"-[A-Za-z0-9]+", a))
+        out = "c" in flags or any(a in ("--stdout", "--to-stdout") for a in args)
+        unpack = "un" in prog or "d" in flags or any(a in ("--decompress", "--uncompress") for a in args)
+        return ("read" if out and unpack else "computed"), None
     if prog in ("head", "tail"):
         k, v = _count(args)
         if k == "c":
@@ -444,17 +483,23 @@ def _literal_parts(pat: str) -> list[str]:
 _TOKEN = re.compile(r"[\w./*?\[\]~+-]+")
 _SHELL_TOKEN = re.compile(r"[\w./*?\[\]{}~+$-]+")
 _VAR = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*|[0-9@*#?])\}?")
+_HOME = re.compile(r"^\$(?:HOME|\{HOME\})(?=/|$)")
+
+
+def homed(word: str) -> str:
+    """A word that starts at $HOME, from the home folder it names (`$HOME/traces/*.gz`)."""
+    return _HOME.sub(lambda _m: os.path.expanduser("~"), word)
 
 
 def variables(cmd: str) -> dict[str, list[str]]:
     """The values a command gives its shell variables: `R=runs/a` and `for r in a b; do`. A variable set twice keeps
-    each value."""
+    each value; a value that starts at $HOME starts at the home folder."""
     out: dict[str, list[str]] = {}
     for m in re.finditer(r"(?:^|[\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\s;&|)]*)", cmd):
-        out.setdefault(m.group(1), []).append(m.group(2).strip("'\""))
+        out.setdefault(m.group(1), []).append(homed(m.group(2).strip("'\"")))
     for m in re.finditer(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;\n]*?)\s*(?:;|\n)\s*do\b", cmd):
         words = re.findall(r"\"[^\"]*\"|'[^']*'|\S+", m.group(2))
-        out.setdefault(m.group(1), []).extend(w.strip("'\"") for w in words)
+        out.setdefault(m.group(1), []).extend(homed(w.strip("'\"")) for w in words)
     return out
 
 
@@ -927,14 +972,39 @@ def _outermost(folders: Iterable[str]) -> list[str]:
     return out
 
 
+@functools.lru_cache(maxsize=4096)
+def _real(path: str) -> str:
+    """A path as the shell reaches it, each link on its way followed; the path itself when that cannot be read."""
+    try:
+        return os.path.realpath(path)
+    except (OSError, ValueError):
+        return path
+
+
+def rooted(word: str, root: str) -> str:
+    """A path that leads into the root another way, written from the root's own path: from the home folder (`~/…`,
+    `$HOME/…`), or through a link to the root or to a folder in it (a session folder `~/traces` that links to the root
+    on another disk), as the shell follows it, a glob's folders up to its first wildcard. Any other word as it is."""
+    w = os.path.expanduser(word) if word[:1] == "~" else homed(word)
+    if w[:1] != "/" or w == root or w.startswith(root + "/"):
+        return w if w == root or w.startswith(root + "/") else word
+    parts = w.split("/")
+    k = next((i for i, p in enumerate(parts) if any(c in p for c in "*?[")), len(parts))
+    real = _real("/".join(parts[:k]) or "/")
+    return "/".join([real, *parts[k:]]) if real == root or real.startswith(root + "/") else word
+
+
 def _here(cwd: str | None, root: str) -> str:
-    """The command's folder relative to the root (`.` for the root); "\\0" for a folder beside the root, whose paths
-    resolve only by their end."""
+    """The command's folder relative to the root (`.` for the root), also when it leads there through a link; "\\0"
+    for a folder beside the root, whose paths resolve only by their end."""
     root = root.rstrip("/")
     if not cwd:
         return "."
     if cwd == root or cwd.startswith(root + "/") or root.startswith(cwd.rstrip("/") + "/"):
         return os.path.relpath(cwd, root)
+    real = _real(cwd)
+    if real == root or real.startswith(root + "/"):
+        return os.path.relpath(real, root)
     return "\0"
 
 
@@ -978,10 +1048,15 @@ def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None 
         t = m.group(0)
         if values is None and m.start() and text[m.start() - 1] == "}" and t[:1] in "/._-":
             t = "*" + t
+        if values is not None and not values.get("HOME"):
+            t = homed(t)
         tokens.update(_expand(t, values) if values is not None and "$" in t else [t])
     for t in tokens:
-        t = t.strip("'\"")
+        t = rooted(t.strip("'\""), root)
         if len(t) < 3:
+            continue
+        if t == root:
+            folders.add(".")
             continue
         if t.startswith(root + "/"):
             t, rel = t[len(root) + 1:], os.path.normpath(t[len(root) + 1:])
@@ -1068,12 +1143,12 @@ def shows_sets(cmd: str, known: "Known | Iterable[str]", root: str, cwd: str | N
             out.append((files, "computed", None, prog))
         out.extend((d + "/", "listed", None, prog) for d in sorted(folders))
 
-    for pipe in pipelines(cmd):
+    for pipe in grouped(pipelines(cmd)):
         sent = not pipe[-1]["out"]
         for k, st in enumerate(pipe):
             prog, args = program(st["words"])
             if prog == "cd" and args and args[0] != "-":
-                cwd = os.path.normpath(os.path.join(cwd or root, os.path.expanduser(args[0])))
+                cwd = os.path.normpath(os.path.join(cwd or root, os.path.expanduser(homed(args[0]))))
                 continue
             if prog == "thimble":
                 continue

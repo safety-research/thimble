@@ -250,7 +250,7 @@ test('w at an empty prompt is taken only while the bar names it: before any answ
 })
 
 test("the features' letters are thimble's own, so no card takes them", () => {
-  expect(restoredKeys()).toEqual(['s', 'b', 'e', 'h', 'c', 'w', 't', 'a'])
+  expect(restoredKeys()).toEqual(['s', 'b', 'e', 'c', 'w', 't', 'a'])
   for (const k of restoredKeys()) expect(ownKeys()).toContain(k)
 })
 

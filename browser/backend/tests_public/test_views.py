@@ -464,6 +464,51 @@ DERIVING_READER = THREADS_READER.replace(
     ' "words": b.split()[:2]}')
 
 
+def test_a_failed_gate_s_kept_report_says_what_failed_first_however_long_its_passing_lines():
+    """A proposal keeps a failed gate's report cut short for its chip and notice, which show its first failure: one
+    that comes after long passing lines (records' excerpts) is put first, rather than cut away."""
+    oks = [{"locator": f"runs/r{n}.json#L1", "ok": True, "label": f"run {n}", "excerpt": "x" * 300} for n in range(4)]
+    report = {"index": {"files": 5000, "seconds": 0.04}, "checks": [*oks, {"locator": "runs/r9.json#L1", "ok": False,
+                                                                            "why": "the page threw: Error: test"}]}
+    kept = views.kept_report(report, 600)
+    assert len(kept) <= 600 and kept.startswith("bad runs/r9.json#L1: the page threw: Error: test")
+    assert views.kept_report({"index": {"files": 3, "seconds": 0.1}}, 600) == "index: 3 file(s) in 0.1 s"
+
+
+async def test_a_builder_s_draft_check_of_a_view_over_many_files_reads_a_sample_and_finish_view_s_gate_reads_them_all(
+        ws, inproc, bound, monkeypatch):
+    """A view of thousands of files on a slow drive took minutes a check, each check reading every file through the
+    reader: a builder's draft check (view_check) reads DRAFT_FILES of them, spread over the claimed folders and kinds
+    of file, with each file a locator names, and says so; the gates of record (finish_view) read every one."""
+    async def no_page(c, slug, states, **_kw):
+        return [{"ok": True, "errors": [], "fetches": 0} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    monkeypatch.setattr(views, "DRAFT_FILES", 6)
+    corpus = config.corpus_dir(CORPUS)
+    for day in ("day-1", "day-2"):
+        (corpus / "logs" / day).mkdir(parents=True)
+        for n in range(1, 11):
+            (corpus / "logs" / day / f"part-{n:02d}.jsonl").write_text(
+                json.dumps({"thread": f"t{n}", "author": "ada", "time": "2026-06-01T10:00:00Z", "body": day}) + "\n")
+    read: list[int] = []
+    reader = THREADS_READER.replace("def build_index(paths):", "def build_index(paths):\n    READ.append(len(paths))")
+    monkeypatch.setitem(__builtins__ if isinstance(__builtins__, dict) else vars(__builtins__), "READ", read)
+    views.write_view(CORPUS, "logs", name="Logs", description="The logs.", claims=["logs/**/*.jsonl"],
+                     accepts=VIEW["accepts"], reader=reader, html=THREADS_HTML)
+    named = "logs/day-2/part-07.jsonl#L1"
+    files, of = views.draft_files(CORPUS, views.read_view(CORPUS, "logs"), [named])
+    assert of == 20 and len(files) == 6 and "logs/day-2/part-07.jsonl" in [f[0] for f in files]
+    assert {f[0].split("/")[1] for f in files} == {"day-1", "day-2"}, "a sample of each folder"
+    read.clear()
+    out = await views.check_answer(CORPUS, "logs", [named], picture=False)
+    assert max(read) == 6, read  # and the checks' run on a copy with one of them missing
+    assert any(ln.startswith("index: 6 of the 20 files the view claims, a sample") for ln in out["lines"])
+    read.clear()
+    rep = await views.gate(CORPUS, "logs", [named])
+    assert max(read) == 20 and rep["index"]["files"] == 20 and "of" not in rep["index"]
+
+
 async def test_a_field_whose_values_the_cited_lines_do_not_hold_fails_the_checks_until_the_view_lists_it(
         ws, inproc, bound, monkeypatch):
     """The checks compare the records the reader hands the page with the lines they cite, by code: every field whose

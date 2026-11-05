@@ -14,8 +14,8 @@ When someone asks you to install thimble, ask what they want, run the install sc
 
    When they choose the workbench, then ask how it reaches Claude:
    - **Claude Code sign-in** (recommended): it runs Claude Code in the background, on their Claude plan.
-   - **API key**: it uses `ANTHROPIC_API_KEY` when that is set, and otherwise asks for a key in its Settings. Never ask
-     for the key yourself.
+   - **API key**: it uses `ANTHROPIC_API_KEY` when that is set, and otherwise takes a key pasted in its Settings,
+     Claude access. Never ask for the key yourself.
    - **Workload Identity Federation**: ask for the path of their WIF config file.
 
 2. Run the install script:

@@ -30,7 +30,7 @@
 //   selectionNow($), selectionKey(sel)   Claude Code's selection as it answers it, and what tells one selection from
 //                        another ('' for none)
 //   dropSelection($)     the pane closes: a selection outside the transcript (the pane's) is dropped
-//   selectionUsed($, by, sel), usedBy($, by, sel)   c, e, h or a took this selection, so the bar stops naming that
+//   selectionUsed($, by, sel), usedBy($, by, sel)   c, e or a took this selection, so the bar stops naming that
 //                        key for it until words are selected anew
 //   selectionWaits($, by, raw), waitsNow($, by)   whether words of the answers stand selected that a key has not taken
 //                        yet: worked out, and kept for the selection; a key's hook reads what was kept while the
@@ -44,7 +44,7 @@
 //   titleWords(card, row, title)   the title a card draws now in a row of the transcript, a press that asks about the
 //                        card (none once the card leaves the screen), kept in memory
 //
-// state: selectionDone, the selection dropped and the ones c, e, h and a took, by row and words: kept across the
+// state: selectionDone, the selection dropped and the ones c, e and a took, by row and words: kept across the
 // plugin's loads, since a change in the settings loads it again while the same selection stands
 import type { EngineInterface } from 'claude-code'
 
@@ -55,8 +55,8 @@ import { messageOf, textRows } from './answers'
 
 type Engine = EngineInterface
 export type Sel = { text: string; requestId?: string }
-/** The keys that act on the selected words: c, e, h and a. */
-export type By = 'cite' | 'explain' | 'heads' | 'ask'
+/** The keys that act on the selected words: c, e and a. */
+export type By = 'cite' | 'explain' | 'ask'
 
 const DONE = { plugin: 'thimble', key: 'selectionDone' } as const
 type Done = { dropped?: string } & { [by in By]?: string }
@@ -238,8 +238,7 @@ export async function usedBy($: Engine, by: By, sel: Sel | undefined): Promise<b
   return !!sel && (await doneNow($))[by] === selKey(sel)
 }
 
-/** The most of a selection a key acts on: as long a term as an explainer or a heads-up can stand on (explain/place.mjs
- *  anchorTerm). */
+/** The most of a selection a key acts on: as long a term as an explainer can stand on (explain/place.mjs anchorTerm). */
 const PICK_MAX = 120
 
 /** The words of a selection a key acts on: on one line, without the space and quotes around them, at most PICK_MAX

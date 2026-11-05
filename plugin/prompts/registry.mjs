@@ -105,11 +105,6 @@ export const TEXTS = {
     terminal: 'explain/expand.ts',
     use: 'one fork of the conversation when the person asks what words of an answer mean (e on selected words, a press on cited words in a pane)',
   },
-  'heads-expand': {
-    about: 'a heads-up on words the analyst picked, the detail to know before relying on them, over the conversation, the words, the answer and the files it cites',
-    terminal: 'explain/expand.ts',
-    use: 'one fork of the conversation when the person asks for a heads-up on words of an answer (h on selected words)',
-  },
   squeeze: {
     about: 'an answer rewritten at the levels the person picked on its chips, or a catch-up of the replies they missed',
     terminal: 'squeeze/term.ts',

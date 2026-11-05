@@ -33,13 +33,14 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import { useTouring } from '../lib/touring'
 import type { ChatMeta, ChatRecord, MainEffort, Proposal, SessionAlert, Settings, StartAnswer, ThreadComment, Ticket } from '../lib/types'
-import { invalidateSettings, loadSettings, modelChoices, modelLabel, onSettingsChange } from '../lib/models'
+import { loadSettings, modelChoices, onSettingsChange } from '../lib/models'
 import { colourVar } from '../files/labels'
 import { NOTE_COLOR } from '../report/checkComments'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
-import { mainEffort, mainFast, mainModel, NEXT_LAUNCH } from './ModelLine'
+import { chooseMain, type MainChoice } from './mainChoice'
+import { mainEffort, mainFast, mainModel } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
@@ -51,6 +52,7 @@ import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
 import { offerDraft, replayHeld } from './pending'
+import { pageCommand } from './commands'
 import { chatStart, isRewindCommand, NOTHING_TO_REWIND, notePutBack, rewindChoices, wordsOnLine, wordsPutBack } from './rewind'
 import { RewindPicker } from './RewindPicker'
 import { ThreadRows } from './ThreadRows'
@@ -93,9 +95,9 @@ const CRITIQUE_STOP = 'Stop the critique'
 
 /** The Stop the composer carries for the thread shown, while what it stops runs: main's while its turn runs, a side
  * thread's while its fork runs (none while its question waits for main to fork it), a session's (STOP_LABELS), its dev
- * ticket's, or, in a view's thread, the view's build while its proposal is queued or building or its builder's run
- * takes a message about the built view (`answering`), and else its review's while the review runs (`view`, the
- * thread's proposal). A step, a part of its parent's session whose composer sends to
+ * ticket's, or, in a view's thread, the view's build while its proposal is queued or building, as it is while its
+ * builder takes a message about the built view, and else its review's while the review runs (`view`, the thread's
+ * proposal). A step, a part of its parent's session whose composer sends to
  * that parent (threads.composerTarget), carries its parent's Stop (`parent`, the step's parent chat) while the parent
  * runs. The critique's thread, and a step of the critic's, stops only the critique, which the orientation then goes on
  * without. Null for a ticket that waits in the queue (its Discard is at the thread's foot) or that an older chat of a
@@ -105,7 +107,7 @@ export function composerStopOf(
   meta: StopMeta | null,
   ticket: Pick<Ticket, 'id' | 'n' | 'status' | 'chat'> | null,
   parent: (StopMeta & Pick<ChatMeta, 'role'>) | null = null,
-  view: Pick<Proposal, 'slug' | 'status' | 'chat' | 'review' | 'answering'> | null = null,
+  view: Pick<Proposal, 'slug' | 'status' | 'chat' | 'review'> | null = null,
 ): ComposerStop | null {
   if (!meta) return null
   if (kind === 'main') return meta.running ? { kind: 'session', chat: meta.id, role: 'main', label: STOP_MAIN } : null
@@ -116,7 +118,7 @@ export function composerStopOf(
   if (kind === 'step' && parent && parent.status === 'running' && STOP_LABELS[parent.role]) return { kind: 'session', chat: parent.id, role: parent.role, label: STOP_LABELS[parent.role] }
   if (kind === 'dev' && ticket && ticket.chat === meta.id && ticket.status === 'running') return { kind: 'ticket', ticket: ticket.id, label: `Stop ticket #${ticket.n}` }
   if (kind === 'dev' && view && view.chat === meta.id && meta.status === 'running') {
-    if (view.status === 'queued' || view.status === 'building' || view.answering) return { kind: 'view', slug: view.slug, review: false, label: 'Stop the build' }
+    if (view.status === 'queued' || view.status === 'building') return { kind: 'view', slug: view.slug, review: false, label: 'Stop the build' }
     if (view.review?.state === 'running') return { kind: 'view', slug: view.slug, review: true, label: 'Stop the review' }
   }
   return null
@@ -635,46 +637,17 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     target.to === 'orient'
       ? (orientClosed?.chat === target.chat ? orientClosed.text : '') || continueText(orientContinue, lastSession(curMeta?.id === target.chat ? curMeta : orientMeta))
       : ''
-  const pickEffort = useCallback(
-    (e: MainEffort) => {
-      track('chat-settings', { target: 'chat:main', detail: { effort: e } })
-      api
-        .setEffort(ws, e)
-        .then(() => {
-          main.reload()
-          bus.emit('toast', { text: `Effort ${e}: ${NEXT_LAUNCH}.`, kind: 'info' })
-        })
-        .catch((err: Error) => bus.emit('toast', { text: `Could not set the effort: ${err.message}`, kind: 'error' }))
-    },
+  // main's model, effort and fast mode, which Settings' Main and side threads row changes as well (chat/mainChoice)
+  const choose = useCallback(
+    (choice: MainChoice) =>
+      void chooseMain(ws, choice).then((ok) => {
+        if (ok) void main.reload()
+      }),
     [ws, main.reload],
   )
-  const pickModel = useCallback(
-    (m: string) => {
-      track('chat-settings', { target: 'chat:main', detail: { model: m } })
-      api
-        .setModel(ws, m)
-        .then(() => {
-          invalidateSettings(ws)
-          main.reload()
-          bus.emit('toast', { text: `${modelLabel(m)}: ${NEXT_LAUNCH}.`, kind: 'info' })
-        })
-        .catch((err: Error) => bus.emit('toast', { text: `Could not set the model: ${err.message}`, kind: 'error' }))
-    },
-    [ws, main.reload],
-  )
-  const pickFast = useCallback(
-    (on: boolean) => {
-      track('chat-settings', { target: 'chat:main', detail: { fast: on } })
-      api
-        .setFast(ws, on)
-        .then(() => {
-          main.reload()
-          bus.emit('toast', { text: `Fast mode ${on ? 'on' : 'off'}: ${NEXT_LAUNCH}.`, kind: 'info' })
-        })
-        .catch((err: Error) => bus.emit('toast', { text: `Could not set fast mode: ${err.message}`, kind: 'error' }))
-    },
-    [ws, main.reload],
-  )
+  const pickEffort = useCallback((e: MainEffort) => choose({ effort: e }), [choose])
+  const pickModel = useCallback((m: string) => choose({ model: m }), [choose])
+  const pickFast = useCallback((on: boolean) => choose({ fast: on }), [choose])
   const nodes = useMemo(
     () =>
       baseNodes.map((n) => {
@@ -772,6 +745,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
+    // `/tour`, from any thread: the tour from its first step (commands.ts pageCommand)
+    const page = pageCommand(text)
+    if (page) {
+      bus.emit(page, {})
+      return Promise.resolve(true)
+    }
     // `/rewind`: the analyst's messages in main's current chat, newest first, to pick how far back to go, as Claude
     // Code's /rewind lists the prompts of its session
     if (isRewindCommand(text)) {

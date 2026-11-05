@@ -17,6 +17,9 @@ from test_runtime import CORPUS, FakeClient, Final, Hang, api_key, call, main_re
 
 FIRST = "What happened?"
 SECOND = "And how many files are there?"
+PLOT = "A plot of the failed runs over the last week"
+# a card request as the page sends it (api.askCard): + Card's on the card it made, or a document's with ⌘↵ or /card
+CARD = {"text": PLOT, "group": "request:r7days", "card": "c1"}
 
 
 def transcript() -> list[dict[str, Any]]:
@@ -54,6 +57,30 @@ async def test_a_message_sent_while_main_works_reaches_it_with_the_results_of_it
     queued = [r["attachment"] for r in transcript() if r.get("type") == "attachment"]
     assert [a["type"] for a in queued] == ["queued_command"] and SECOND in queued[0]["prompt"]
     assert await page_unread() == [] and not runtime._spaces[CORPUS].main.queue
+
+
+async def test_a_card_request_sent_while_main_works_reaches_it_with_the_results_of_its_next_tool_call(on, monkeypatch):
+    """A card request goes to the model with the results of the call that ran while it was sent, as a typed message
+    does, not after main's whole turn. Main's chat shows it neither waiting nor as a line: the card shows it out with
+    main."""
+    meanwhile: dict[str, Any] = {}
+
+    def ask_for_a_card_while_it_works(body: dict[str, Any]) -> list[Any]:
+        events.post(CORPUS, "card", dict(CARD))
+        meanwhile["unread"] = [m["text"] for m in runtime.unread(CORPUS)]
+        return call("list_cards", {"group": "all"})
+
+    client = api_key(monkeypatch, [ask_for_a_card_while_it_works, text("Nothing broke.")])
+    await main_turn(FIRST)
+    assert meanwhile == {"unread": []}
+    assert len(client.bodies) == 2, "no turn of its own"
+    last = client.bodies[1]["messages"][-1]["content"]
+    assert [b["type"] for b in last] == ["tool_result", "text"]
+    assert PLOT in last[1]["text"] and 'kind="card"' in last[1]["text"] and 'card="c1"' in last[1]["text"]
+    assert shape(main_records()) == [("user", FIRST), ("tool_use", "list_cards"), ("tool_result", ""),
+                                     ("text", "Nothing broke."), ("done", "")]
+    sp = runtime._spaces[CORPUS]
+    assert await page_unread() == [] and not sp.main.queue and not sp.asks
 
 
 async def test_a_message_sent_as_main_ends_its_reply_is_its_next_turn(on, monkeypatch):
@@ -212,6 +239,36 @@ async def test_on_claude_code_sign_in_a_message_sent_while_main_works_goes_to_it
     assert shape(main_records()) == [("user", FIRST), ("tool_use", "Read"), ("tool_result", ""), ("user", SECOND),
                                      ("text", "Nothing broke, and there are 12 files."), ("done", "")]
     assert await page_unread() == [] and not runtime._spaces[CORPUS].main.queue
+
+
+async def test_on_claude_code_sign_in_a_card_request_sent_while_main_works_goes_to_its_session_at_once(on, monkeypatch):
+    """Main's session gets a card request as it comes, while a call runs, as it gets a typed message, and reads it with
+    the call's result, in the same turn."""
+    from claude_agent_sdk import AssistantMessage, SystemMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
+
+    meanwhile: dict[str, Any] = {}
+
+    async def play(client: CCClient):  # noqa: ANN202
+        await client.sent.get()
+        yield SystemMessage(subtype="init", data={"session_id": "sess-1"})
+        yield AssistantMessage(content=[ToolUseBlock(id="toolu_r", name="Read", input={"file_path": "notes.txt"})],
+                               model="claude-opus-5-5")
+        events.post(CORPUS, "card", dict(CARD))  # the analyst asks for a card while the call runs
+        handed = await asyncio.wait_for(client.sent.get(), 5)
+        meanwhile["handed"] = handed
+        yield UserMessage(content=[ToolResultBlock(tool_use_id="toolu_r", content="12 files")])
+        yield UserMessage(content=handed["message"]["content"], uuid=handed["uuid"])
+        yield AssistantMessage(content=[TextBlock(text="Nothing broke.")], model="claude-opus-5-5")
+        yield result(2)
+
+    made = fake_cc(monkeypatch, play)
+    await main_turn(FIRST)
+    assert PLOT in meanwhile["handed"]["message"]["content"] and 'kind="card"' in meanwhile["handed"]["message"]["content"]
+    assert len(made) == 1
+    assert shape(main_records()) == [("user", FIRST), ("tool_use", "Read"), ("tool_result", ""),
+                                     ("text", "Nothing broke."), ("done", "")]
+    sp = runtime._spaces[CORPUS]
+    assert await page_unread() == [] and not sp.main.queue and not sp.asks
 
 
 async def test_on_claude_code_sign_in_a_message_its_session_got_as_the_reply_ended_is_read_as_its_next_turn(

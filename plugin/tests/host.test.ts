@@ -116,13 +116,13 @@ test("in an SDK host's session, Citations manual and Cards on demand act as off 
 })
 
 /** The sentence of main's guidance on the comments that come only when the analyst asks, with their keys. */
-const ASKED = 'These come only when the analyst asks: explainers (e) and heads-ups (h).'
+const ASKED = 'These come only when the analyst asks: explainers (e).'
 
 for (const [who, options] of [
-  ['Explainers and Heads-ups on demand', { explain: 'on demand', details: 'on demand' }],
+  ['Explainers on demand', { explain: 'on demand' }],
   ['the rows of a Minimal saved by 0.10.4 to 0.10.7, which a session there does not move', { minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }],
 ] as const) {
-  test(`in an SDK host's session, ${who}: Explainers and Heads-ups act as off too, since no key reaches thimble there, and the guidance names no key for them`, { options }, async ($, on) => {
+  test(`in an SDK host's session, ${who}: Explainers act as off too, since no key reaches thimble there, and the guidance names no key for them`, { options }, async ($, on) => {
     const w = await session($, on, SDK)
     const guidance = await ask($, w)
     expect(guidance).not.toContain('These come only')
@@ -130,7 +130,7 @@ for (const [who, options] of [
   })
 }
 
-test('in the terminal, Explainers and Heads-ups on demand: the guidance says they come when the analyst asks, by their keys', { options: { explain: 'on demand', details: 'on demand' } }, async ($, on) => {
+test('in the terminal, Explainers on demand: the guidance says they come when the analyst asks, by their key', { options: { explain: 'on demand' } }, async ($, on) => {
   const w = await session($, on, TERMINAL)
   expect((await ask($, w)).endsWith(ASKED)).toBe(true)
 })

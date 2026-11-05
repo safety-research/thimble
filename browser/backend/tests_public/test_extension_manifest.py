@@ -11,6 +11,7 @@ import pytest
 from app import config, extension_manifest, extensions
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ext-min"
+SWIMLANE = Path(__file__).parent / "fixtures" / "multiagent-swimlane"
 
 
 def _write(root: Path, rel: str, data) -> None:
@@ -34,10 +35,10 @@ def test_the_schema_is_a_json_schema_and_names_every_part():
     assert "permissionMode" not in agent["properties"] and "hooks" not in agent["properties"]
 
 
-def test_the_extensions_thimble_ships_and_the_fixture_have_no_problem():
-    for d in sorted(p for p in extensions.builtin_dir().iterdir() if (p / "extension.json").is_file()):
-        assert _problems(d) == [], d.name
-    assert _problems(FIXTURE) == []
+def test_the_extensions_thimble_ships_and_the_fixtures_have_no_problem():
+    for name, d in sorted(extensions.builtins().items()):
+        assert _problems(d) == [], name
+    assert _problems(FIXTURE) == [] and _problems(SWIMLANE) == []
 
 
 def test_a_problem_names_its_file_and_line_and_the_nearest_known_key(tmp_path):

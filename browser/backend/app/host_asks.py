@@ -6,11 +6,12 @@ Claude Code settings allow (`sandbox.network.allowedDomains`, and allow rules `W
 any other host through the session's permission callback, as the tool SandboxNetworkAccess with `{"host": ...}` for its
 input. The ask waits on the chat of the agent whose command made the request, whose meta carries it (`hosts`) as the
 chat is read (agents.py), and the page shows it under the command: Allow once, Always allow, Deny. While it waits, the
-command waits, and so does the agent's turn. Allow once lets the host through for the rest of the turn's session.
-Always allow keeps the host for the workspace as the web rule `WebFetch(domain:<host>)`, beside the ones a code ticket's
-card keeps (agent_session.keep_web_rule), which every later session's settings allow (runtime_cc.settings), so it does
-not ask again; it also answers the other asks for that host that wait. Deny refuses the connection, and the command
-fails as Claude Code refuses a host ("user denied").
+command waits, and so does the agent's turn. Allow once lets the host through for the rest of the turn's session, which
+Claude Code cannot take back, so main's session then closes as that turn ends, even while a command it ran in the
+background runs (runtime_cc.Held). Always allow keeps the host for the workspace as the web rule
+`WebFetch(domain:<host>)`, beside the ones a code ticket's card keeps (agent_session.keep_web_rule), which every later
+session's settings allow (runtime_cc.settings), so it does not ask again; it also answers the other asks for that host
+that wait. Deny refuses the connection, and the command fails as Claude Code refuses a host ("user denied").
 
 Claude Code's ask names the host alone, so the ask also carries the call whose request it is (`call`: the session's
 Bash call that runs, runtime_cc.options), and the page shows what Claude said the command does (its `description`)

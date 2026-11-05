@@ -2,15 +2,17 @@
 // The view proposal above the chat's composer (src/chat/ProposalCard.tsx): the oldest open proposal (a `suggested` row
 // with `offered`), with its name and what it shows in view, never behind a click, and not the task it names; Accept and
 // Reject are clicks of their own routes, each tracked; a click in the first ARM_MS does nothing; an Accept that cannot
-// start says why under the buttons.
+// start says why under the buttons; Don't ask again turns view proposals off, and Settings' View proposals switch turns
+// them on again.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ARM_MS } from '../../src/chat/PermissionCard.tsx'
-import { openOffer, PROPOSAL_HEAD, ProposalCard } from '../../src/chat/ProposalCard.tsx'
+import { openOffer, PROPOSAL_HEAD, PROPOSALS_OFF_LINE, ProposalCard } from '../../src/chat/ProposalCard.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { track } from '../../src/lib/telemetry.ts'
 import type { Proposal } from '../../src/lib/types.ts'
+import { PROPOSE_LABEL, SettingsPopover } from '../../src/shell/SettingsPopover.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 vi.mock('../../src/lib/telemetry.ts', async (orig) => ({ ...(await orig<typeof import('../../src/lib/telemetry.ts')>()), track: vi.fn() }))
@@ -19,8 +21,8 @@ const row = (slug: string, at: string | null, extra: Partial<Proposal> = {}): Pr
   ({ slug, name: slug.replace(/-/g, ' '), description: `What ${slug} shows.`, task: 'compare how the agents coordinated', claims: ['agents/*.jsonl'], status: 'suggested', ...(at ? { offered: { at, after: 'main' } } : {}), ...extra }) as Proposal
 
 describe('which proposal shows, and its line', () => {
-  test('the oldest suggested row with `offered`; a row without it (an older version), one switched off or one answered never shows', () => {
-    const rows = [row('legacy', null), row('later', '2026-10-14T10:05:00Z'), row('first', '2026-10-14T10:00:00Z'), row('off', '2026-10-14T09:00:00Z', { off: true }), row('built', '2026-10-14T08:00:00Z', { status: 'built' })]
+  test('the oldest suggested row with `offered`; a row without it (an older version) or one answered never shows', () => {
+    const rows = [row('legacy', null), row('later', '2026-10-14T10:05:00Z'), row('first', '2026-10-14T10:00:00Z'), row('built', '2026-10-14T08:00:00Z', { status: 'built' })]
     expect(openOffer(rows)?.slug).toBe('first')
     expect(openOffer([row('legacy', null)])).toBeNull()
     expect(openOffer(null)).toBeNull()
@@ -106,6 +108,32 @@ describe('the card', () => {
     await settle()
     expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST /api/ws/pc-reject/views/proposals/agent-timeline/reject'])
     expect(track).toHaveBeenCalledWith('view-dismiss', { target: 'view:agent-timeline', detail: { offer: true } })
+  })
+
+  test("Don't ask again turns view proposals off, and Settings' View proposals switch turns them on: the proposal is back", async () => {
+    const el = await card('pc-off')
+    await click(el, '.chat-offer-off')
+    await settle()
+    expect(sent).toEqual([{ method: 'PUT', url: '/api/ws/pc-off/settings', body: { propose_views: false } }])
+    expect(toasts).toEqual([PROPOSALS_OFF_LINE])
+    expect(PROPOSALS_OFF_LINE).toBe('View proposals are off. Settings turns them on again.')
+    expect(el.querySelector('.chat-offer')).toBeNull()
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="pc-off" anchor={anchor} open onClose={() => undefined} />)
+    await settle()
+    await settle()
+    const line = document.querySelector<HTMLElement>('[data-setting="propose-views"]')!
+    expect(line.querySelector('.settings-name')?.textContent).toBe(PROPOSE_LABEL)
+    const sw = () => line.querySelector<HTMLButtonElement>('[role="switch"]')!
+    expect(sw().getAttribute('aria-checked')).toBe('false')
+    await act(async () => sw().click())
+    await settle()
+    await settle()
+    expect(sent.at(-1)).toEqual({ method: 'PUT', url: '/api/ws/pc-off/settings', body: { propose_views: null } })
+    expect(sw().getAttribute('aria-checked')).toBe('true')
+    expect(el.querySelector('.chat-offer')).not.toBeNull()
   })
 
   test('a click in the first ARM_MS after the proposal shows does nothing', async () => {

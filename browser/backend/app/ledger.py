@@ -385,10 +385,10 @@ def corpus_edits(c: str | None) -> bool:
 
 
 def labels_on(c: str | None) -> bool:
-    """Whether Claude makes labels in workspace `c` (LABELS_KEY, Settings' Labels switch, as the terminal's Labels
-    setting): on unless the workspace's settings.json sets it false, and on for no workspace or a settings file that
-    cannot be read. Off, main's prompt and the tools' texts say nothing of labels, and no agent is offered a label tool
-    (labels_off.py)."""
+    """Whether Claude makes labels in workspace `c` (LABELS_KEY, the Labels sidebar's Label tool switch, as the
+    terminal's Labels setting): on unless the workspace's settings.json sets it false, and on for no workspace or a
+    settings file that cannot be read. Off, main's prompt and the tools' texts say nothing of labels, and no agent is
+    offered a label tool (labels_off.py)."""
     if not c:
         return True
     try:
@@ -511,7 +511,7 @@ ASK_KEY = "ask_key"
 # switch changes it, from the analyst's browser alone, so an agent cannot turn its own edits on
 EDITS_KEY = "corpus_edits"
 # true, false or null: the workspace's settings.json `labels`, whether Claude makes labels there (labels_on); null takes
-# the key out, which is on. Settings' Labels switch changes it, from the analyst's browser alone
+# the key out, which is on. The Labels sidebar's Label tool switch changes it, from the analyst's browser alone
 LABELS_KEY = "labels"
 PUT_KEYS = frozenset({*SETTINGS_DEFAULTS, config.MODELS_KEY, "permission_modes", WEB_KEY, PROPOSE_KEY, ASK_KEY,
                       EDITS_KEY, LABELS_KEY, *RETIRED_KEYS})
@@ -586,9 +586,10 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     it out) go to thimble's config
     (userconf.save), which raises userconf.ConfigError for a value it does not take;
     main's model settings and everything else to settings.json, where only what was stored plus the patch is written,
-    never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. Returns the effective
-    settings."""
-    from . import modes, userconf  # noqa: PLC0415 — they import this module
+    never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. A change that lets main
+    do less closes main's session kept open for a background command at once (runtime.settings_changed). Returns the
+    effective settings."""
+    from . import modes, runtime, userconf  # noqa: PLC0415 — they import this module
 
     models = settings.get(config.MODELS_KEY) if isinstance(settings.get(config.MODELS_KEY), dict) else {}
     patch = userconf.pane_patch(models, settings.get(modes.SETTING) if isinstance(settings.get(modes.SETTING), dict)
@@ -626,6 +627,7 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
             for role, conf in settings[config.MODELS_KEY].items()}}
     if merged != stored or not path.exists() and settings:
         rewrite_text(path, json.dumps(merged, indent=2, ensure_ascii=False))  # in place: kernels' hide of it holds
+    runtime.settings_changed(c)
     return with_features(merged, c)
 
 
