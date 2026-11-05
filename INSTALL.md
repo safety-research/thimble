@@ -32,9 +32,8 @@ distribution; the install stops in WSL 1 and says so). In the distribution:
   should name none there, and the install says which it finds there.
 - Keep thimble and your data in Linux's file system, in your home folder (`~`), not on Windows' drives under `/mnt`:
   files there go through a slow bridge (9P), and the file modes thimble sets and checks do not hold there.
-- thimble opens links in Windows' browser with `wslview`, from wslu (`sudo apt-get install wslu`). Set `THIMBLE_OPEN`
-  to another command to open them with it, or to `none` to only print them. The workbench's link (127.0.0.1) opens in
-  Windows' browser too, since WSL 2 passes localhost through.
+- thimble opens links in Windows' browser with `wslview`, from wslu (`sudo apt-get install wslu`). The workbench's link
+  (127.0.0.1) opens in Windows' browser too, since WSL 2 passes localhost through.
 - A fresh distribution may lack the system libraries of the headless Chromium that exports and view checks start:
   `npx playwright install-deps chromium` installs them.
 
