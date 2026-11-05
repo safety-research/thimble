@@ -51,6 +51,7 @@ import { AgentCard, stopSession, useAgentRows } from './AgentCard'
 import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
 import { offerDraft, replayHeld } from './pending'
+import { pageCommand } from './commands'
 import { chatStart, isRewindCommand, NOTHING_TO_REWIND, notePutBack, rewindChoices, wordsOnLine, wordsPutBack } from './rewind'
 import { RewindPicker } from './RewindPicker'
 import { ThreadRows } from './ThreadRows'
@@ -772,6 +773,13 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
+    // `/login` and `/tour`, from any thread: the step that chooses how the workbench reaches Claude, as Claude Code's
+    // /login, and the tour from its first step (commands.ts pageCommand)
+    const page = pageCommand(text)
+    if (page) {
+      bus.emit(page, {})
+      return Promise.resolve(true)
+    }
     // `/rewind`: the analyst's messages in main's current chat, newest first, to pick how far back to go, as Claude
     // Code's /rewind lists the prompts of its session
     if (isRewindCommand(text)) {

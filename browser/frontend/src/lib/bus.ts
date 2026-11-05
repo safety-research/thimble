@@ -103,7 +103,7 @@ export type Events = {
   citeHover: { card: string; ref: string | null }
   /** ⌘ went down or up: a view's frame shows the ⌘ arrow (`cursor`, a CSS cursor value) while it is held */
   cmdHeld: { on: boolean; cursor: string }
-  /** run the product tour again (Settings' Take the tour) */
+  /** run the product tour again (the composer's /tour) */
   tour: Record<string, never>
   /** the stream's `notice` record (backend notices.py, lib/notices.ts): a new notice (`notice`; `foreground` unless the
    * server says otherwise), or the end of one by its id or key (`gone`: a fix that worked cleared it, or the analyst

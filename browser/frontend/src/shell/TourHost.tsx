@@ -4,7 +4,7 @@
 // example data, until the person answers one (Take the tour, Skip or Esc), whatever the answer: that
 // answer is recorded, so a welcome no one answered, on a page opened before the person's own, leaves the offer to the
 // next page, and a welcome this page shows goes once the person answers the offer in another page (watchAnswer).
-// Settings' Take the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While
+// /tour in the chat (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While
 // it runs, telemetry records nothing and the chat shows no view proposal (lib/touring). When it closes, the focused pane
 // shows the surface it showed before; a session that ends while it runs closes it.
 import { useEffect } from 'react'
