@@ -22,7 +22,8 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPe
 from fastapi import FastAPI
 
 from app import agents, claude_access, events, host_asks, ledger, llm, runtime, runtime_cc, runtime_tools, session
-from tests_public.test_runtime import CORPUS, FakeClient, call, fake_sdk, main_turn, on, text  # noqa: F401 — fixtures
+from tests_public.test_runtime import (CORPUS, FakeClient, background_cli, call, fake_sdk, main_turn, text,
+                                       on)  # noqa: F401 — fixtures
 
 HOST = "data.example-lab.test"
 
@@ -205,6 +206,42 @@ async def test_an_ask_whose_session_ends_leaves_its_chat(cc, api):
     assert await asks_on(api, "main") == []
     r = await api.post(f"/api/ws/{CORPUS}/host-asks/{ask['id']}", json={"choice": "once"})
     assert r.status_code == 404
+
+
+@pytest.mark.parametrize("choice", ["once", "always"])
+async def test_a_host_allowed_once_ends_with_the_turn_that_asked_for_it(cc, api, monkeypatch, choice):
+    """Claude Code lets a host allowed once through to its session's end and cannot take it back, so main's session,
+    which stays open past its turn while a command it ran in the background runs, closes as the turn that asked for the
+    host ends, and the command with it. A host always allowed is the workspace's: the session stays for the command."""
+    async def ask_host(cli: Any) -> None:  # the command asks to reach the host, as Claude Code's sandbox asks
+        assert isinstance(await network_ask(cli.options), PermissionResultAllow)
+
+    made = background_cli(monkeypatch, during=ask_host)
+    events.post(CORPUS, "main", {"text": "Start the job that fetches the runs."})
+    ask = (await shown(api, "main"))[0]
+    assert (await api.post(f"/api/ws/{CORPUS}/host-asks/{ask['id']}", json={"choice": choice})).status_code == 200
+    await cc.main.task
+    job = made[0].jobs[0]
+    if choice == "once":
+        assert made[0].closed and job.poll() is not None, "the host ends with the turn, and the command with it"
+        return
+    assert not made[0].closed and job.poll() is None, "a host always allowed leaves the command running"
+    await runtime_cc.close(cc.main)
+
+
+async def test_a_host_allowed_once_while_no_turn_runs_ends_as_main_s_next_turn_starts(cc, api, monkeypatch):
+    """A command main left running in the background asks for a host while no turn runs: allowed once, the command goes
+    on, and main's next turn starts a new session, never one that lets the host through."""
+    made = background_cli(monkeypatch)
+    await main_turn("Start the long job.")
+    asked = network_ask(made[0].options)
+    ask = (await shown(api, "main"))[0]
+    assert (await api.post(f"/api/ws/{CORPUS}/host-asks/{ask['id']}", json={"choice": "once"})).status_code == 200
+    assert isinstance(await asked, PermissionResultAllow)
+    assert not made[0].closed and made[0].jobs[0].poll() is None, "the command that asked goes on"
+    await main_turn("Is it done?")
+    assert made[0].closed and made[0].jobs[0].poll() is not None and len(made) == 2
+    await runtime_cc.close(cc.main)  # the next session's own command
 
 
 async def test_every_other_ask_is_refused_at_once_as_don_t_ask_mode_refused_it(cc, api):

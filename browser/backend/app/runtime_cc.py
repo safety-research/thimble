@@ -25,8 +25,8 @@ the session that main's next turn, and a fork until then, resumes it up to (resu
 
 A message the analyst sends while main's turn runs goes to main's session at once (_hand), as a message typed in Claude
 Code's prompt mid-turn: Claude Code gives it to the model at the turn's next tool call, or runs it as the session's next
-turn when this one ends first. Main's session echoes each message it reads (`replay-user-messages`), which is when
-main's chat logs it (Conv.heard); the turn goes on until each message handed on is read.
+turn when this one ends first. A session echoes each message it reads (`replay-user-messages`), which is when main's
+chat logs it (Conv.heard); the turn goes on until each message handed on is read.
 
 The sandbox. Claude Code puts its sandbox's proxy sockets in TMPDIR (claude-http-<16 hex>.sock), and a Unix socket's
 path holds at most 104 (macOS) or 108 (Linux) bytes, so with a long TMPDIR (the workspace's runtime/tmp/<conv>, 76
@@ -43,6 +43,19 @@ The agent's own files stay in the workspace (Spec.home), as before.
 Claude Code's sandbox makes an empty .claude/.cc-writes/ folder in the session's working folder (the corpus) when it
 starts, and no setting moves it, so the last session of a corpus to end removes that folder, and .claude/ when the
 sandbox made it, when they are still empty (_tidy).
+
+Background commands. A command Bash runs in the background (`run_in_background`) lives as long as its session's
+`claude`, which kills it as it exits. So main's session stays open after a turn while such a command runs
+(background_tasks_changed), and main's next turn goes on in it, as the next prompt in a terminal would (Held); it closes
+when a turn ends with none running, when main's settings for a turn change, and when main's session truly ends: a Stop
+or a failure, a new chat, a rewind, the workspace's folder going, another way to reach Claude, the server's stop
+(close). A permission taken back never stays with a command that runs: a Settings change that lets main do less closes
+the session at once (runtime.settings_changed), and a turn that ends after one does not keep it; a host the analyst
+allowed once, which Claude Code allows to the session's end and cannot take back, ends with the turn that asked for
+it, as the session closes when that turn ends, or, asked while no turn ran, when main's next turn starts (Held.once).
+Claude Code runs a turn of its own when such a command ends, and when a session resumes or forks one whose command
+was still running as its `claude` exited, which it tells of that command (task_notification) before it reads the
+prompt: a turn reads such a turn first, and ends only at the result after Claude Code echoed its own prompt.
 """
 from __future__ import annotations
 
@@ -57,6 +70,7 @@ import secrets
 import tempfile
 import uuid
 import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -91,8 +105,47 @@ REFUSED = ("Permission to use {tool} has been denied because Claude Code is runn
            "around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If "
            "you believe this capability is essential to complete the user's request, STOP and explain to the user what "
            "you were trying to do and why you need this permission. Let the user decide how to proceed.")
+STOP_TASKS_S = 2.0  # how long a kept session's background commands get to stop as it closes (Held.close)
 _open: dict[str, int] = {}  # the sessions running in each working folder (_enter, _tidy)
 _had_claude: dict[str, bool] = {}  # whether .claude/ was in that folder when its first session started
+
+
+@dataclass
+class Held:
+    """Main's session, open past its turn while a command it ran in the background runs (module note)."""
+    spec: Any  # the turn's Spec: a turn with another opens a new session
+    client: Any
+    stack: contextlib.AsyncExitStack
+    tasks: list[Any] = field(default_factory=list)  # its background tasks that run (background_tasks_changed)
+    ended: Any = None  # what goes once it closes: its TMPDIR, and the sandbox's folder in the corpus (turn)
+    # the hosts the analyst allowed once in it (options): it then never goes on into another turn (module note)
+    once: list[str] = field(default_factory=list)
+
+    async def close(self) -> None:
+        try:
+            # `claude` waits for its background commands before it exits, and the SDK ends it only after a grace period
+            # (5 s), so the session stops them first
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(STOP_TASKS_S):
+                    for t in self.tasks:
+                        with contextlib.suppress(Exception):
+                            await self.client.stop_task(str(t.get("task_id") or ""))
+            await self.stack.aclose()  # the SDK's close: `claude` exits, and its background commands with it
+        finally:
+            if self.ended is not None:
+                self.ended()
+
+
+async def close(conv: Any) -> None:
+    """`conv`'s session that stayed open after its turn (Held) closes; nothing when none did. Never raises."""
+    held = getattr(conv, "cc", None)
+    if held is None:
+        return
+    conv.cc = None
+    try:
+        await held.close()
+    except Exception:  # noqa: BLE001
+        log.warning("%s: %s's Claude Code session did not close cleanly", conv.c, conv.id, exc_info=True)
 
 
 def _load(path: Any) -> dict[str, Any]:
@@ -348,7 +401,9 @@ def _chat(conv: Any) -> str | None:
     return agents.MAIN_ID if conv.kind == "main" else session.chat_of_agent(conv.c, conv.agent_id)
 
 
-def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | None = None) -> Any:
+def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | None = None,
+            once: list[str] | None = None) -> Any:
+    """The session's options; its permission callback adds to `once` each host the analyst allows once (Held.once)."""
     from claude_agent_sdk import (ClaudeAgentOptions, HookMatcher, PermissionResultAllow,  # noqa: PLC0415
                                   PermissionResultDeny, SdkMcpTool, create_sdk_mcp_server)
 
@@ -388,7 +443,10 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
             return PermissionResultDeny(message=REFUSED.format(tool=name))
         # the request is the running Bash call's (module note, permissions): the one started last, should two run
         call = next(reversed(shell.values()), None)
-        if await host_asks.ask(conv.c, _chat(conv), str((inp or {}).get("host") or ""), call):
+        host = str((inp or {}).get("host") or "")
+        if await host_asks.ask(conv.c, _chat(conv), host, call):
+            if once is not None and host_asks.rule(host) not in host_asks.kept(conv.c):  # not kept: allowed once
+                once.append(host)
             return PermissionResultAllow()
         return PermissionResultDeny()
 
@@ -424,8 +482,9 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
         add_dirs=[str(w) for w in spec.write_roots],
         # Claude Code keeps its own temp folder in the short TMPDIR too, whatever CLAUDE_CODE_TMPDIR the server has
         env=sdk.call_env({"TMPDIR": str(tmp or spec.home), **({"CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}),
-        # main's session echoes each message it reads, so a message handed to it mid-turn is known read (_hand)
-        extra_args={"safe-mode": None, **({"replay-user-messages": None} if conv.kind == "main" else {})},
+        # the session echoes each message it reads, so a message handed to main mid-turn is known read (_hand), and a
+        # turn's prompt too, before which a result is one of a turn Claude Code ran of its own (_session)
+        extra_args={"safe-mode": None, "replay-user-messages": None},
         hooks={"PreToolUse": [HookMatcher(matcher=None, hooks=[pre])],
                "PostToolUse": [HookMatcher(matcher="Bash", hooks=[ended])],
                "PostToolUseFailure": [HookMatcher(matcher="Bash", hooks=[ended])]},
@@ -465,18 +524,31 @@ async def turn(conv: Any, text: str) -> Any:
     """One turn of `conv` on `text` in a session with a short TMPDIR (module note): the workspace's own for main and its
     thread forks (Spec.temp), which stays; any other agent's own, removed when the turn ends."""
     spec = conv.spec()
+    held = getattr(conv, "cc", None)
+    if held is not None and held.spec == spec and not held.once:
+        return await _session(conv, spec, text, None)  # the session open since its last turn (module note)
+    await close(conv)
     pending: dict[str, list[str]] = {}
+    once: list[str] = []
     kept = workspace_tmp(conv.c) if spec.temp is not None else None
     tmp = kept or short_tmp()
     if tmp is None:
         log.warning("%s: no short TMPDIR for %s's session; its sandbox may not start", conv.c, conv.id)
     _enter(spec.cwd)
-    try:
-        return await _session(conv, spec, text, options(conv, spec, pending, tmp))
-    finally:
+
+    def ended() -> None:
         if tmp is not None and tmp != kept:
             nofollow.rmtree(tmp, root=tmp.parent, ignore_errors=True)  # the session's Bash wrote it: no link followed
         _tidy(spec.cwd)
+
+    try:
+        return await _session(conv, spec, text, options(conv, spec, pending, tmp, once), once)
+    finally:
+        held = getattr(conv, "cc", None)
+        if held is None:
+            ended()
+        else:
+            held.ended = ended  # once it closes
 
 
 def _box_failure(results: list[dict[str, Any]]) -> str:
@@ -533,7 +605,9 @@ async def _message(text: str, uid: str) -> Any:
     yield {"type": "user", "message": {"role": "user", "content": text}, "parent_tool_use_id": None, "uuid": uid}
 
 
-async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
+async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] | None = None) -> Any:
+    """One turn in a new session on `opts`, whose callback adds to `once` (options), or, with none, in `conv`'s session
+    open since its last turn (Held)."""
     from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage, SystemMessage, UserMessage  # noqa: PLC0415
 
     from . import runtime  # noqa: PLC0415
@@ -543,6 +617,10 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     bash_ids: set[str] = set()
     handed: dict[str, str] = {}  # by uuid, main's messages handed to the session (_hand) that it has not read yet
     closing = asyncio.Event()
+    # the uuid the session echoes this turn's prompt with once it reads it: before that, a result ends a turn Claude Code
+    # ran of its own, in a session kept open since main's last turn, and in any session Claude Code told of a background
+    # command that ended, as it tells one that resumes or forks a session whose command was still running (module note)
+    uid, read, first = str(uuid.uuid4()), False, opts is None
 
     def results(rs: list[dict[str, Any]]) -> None:
         nonlocal box, ran
@@ -551,18 +629,29 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
         box = box or _box_failure(mine)
         ran = ran or any(not _box_failure([r]) for r in mine)
 
-    async with ClaudeSDKClient(opts) as client:
-        await client.query(text)
+    held, conv.cc = getattr(conv, "cc", None), None
+    if held is None:
+        stack = contextlib.AsyncExitStack()
+        held = Held(spec, await stack.enter_async_context(ClaudeSDKClient(opts)), stack,
+                    once=[] if once is None else once)
+    keep = False
+    try:
+        client = held.client
+        await client.query(_message(text, uid))
         hand = asyncio.create_task(_hand(conv, client, handed, closing)) if conv.kind == "main" else None
         try:
             # the session's reply; then, while a message handed to it is not read yet, its next turn, which reads it
             while True:
-                ended = False
+                ended = own = False
                 async for msg in client.receive_response():
                     if isinstance(msg, SystemMessage) and msg.subtype == "init":
                         sid = (msg.data or {}).get("session_id")
                         if sid:
                             _save(path, {"session_id": sid})
+                    elif isinstance(msg, SystemMessage) and msg.subtype == "background_tasks_changed":
+                        held.tasks = list((msg.data or {}).get("tasks") or [])
+                    elif isinstance(msg, SystemMessage) and msg.subtype == "task_notification":
+                        first = first or not read
                     elif isinstance(msg, AssistantMessage):
                         if getattr(msg, "parent_tool_use_id", None):
                             continue
@@ -573,9 +662,12 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                         results([r for r in (_result(x) for x in msg.content) if r is not None])
                         said = "".join(b.get("text", "") for b in blocks if b.get("type") == "text").strip()
                         reply = said or reply
-                        if msg.error:
+                        if msg.error and (read or not first):
                             failed = str(msg.error)
                     elif isinstance(msg, UserMessage):
+                        if getattr(msg, "uuid", None) == uid:  # the session read this turn's prompt
+                            read = True
+                            continue
                         if getattr(msg, "uuid", None) in handed:  # the session read a message handed to it
                             conv.heard(handed.pop(str(msg.uuid)))
                             continue
@@ -583,11 +675,16 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                             continue
                         results([r for r in (_result(x) for x in msg.content) if r is not None])
                     elif isinstance(msg, ResultMessage):
-                        ended = True
                         if msg.session_id:
                             _save(path, {"session_id": msg.session_id})
+                        if first and not read:  # a turn of Claude Code's own: this one's comes after it
+                            own = True
+                            continue
+                        ended = True
                         if msg.is_error and not failed:
                             failed = str(msg.result or msg.subtype or "the Claude Code session failed")
+                if own:
+                    continue
                 if not ended or failed:
                     break
                 if not handed and hand is not None:  # nothing more is handed on: what comes waits for main's next turn
@@ -603,6 +700,14 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                 hand.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await hand
+        # kept only while main may do as much as in it, and with no host allowed once (module note)
+        keep = (ended and not failed and bool(held.tasks) and conv.kind == "main" and not held.once
+                and not runtime.narrows(held.spec, conv.spec()))
+    finally:
+        if keep:
+            conv.cc = held
+        else:
+            await held.close()
     if box or ran:
         _tell_box(conv, box)
     if failed:

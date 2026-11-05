@@ -11,7 +11,8 @@ from typing import Any
 
 import pytest
 
-from app import agents, claude_access, config, events, llm, runtime, runtime_cc, session, subagents, write_session
+from app import (agents, claude_access, config, events, ledger, llm, runtime, runtime_cc, session, subagents,
+                 write_session)
 
 CORPUS = "mini"
 
@@ -210,8 +211,8 @@ def fake_sdk(monkeypatch, script: list[Any], seen: dict[str, Any]) -> None:
         async def __aexit__(self, *a: Any) -> None:
             return None
 
-        async def query(self, prompt: str) -> None:
-            seen["prompt"] = prompt
+        async def query(self, prompt: Any) -> None:  # the turn's prompt, one user message (runtime_cc._message)
+            seen["prompt"] = prompt if isinstance(prompt, str) else "".join([m["message"]["content"] async for m in prompt])
 
         async def receive_response(self):  # noqa: ANN202
             for m in script:
@@ -331,6 +332,268 @@ async def test_a_headless_session_s_bash_sandbox_gets_a_short_tmpdir_and_fails_c
     assert not [n for n in notices.open_notices(CORPUS) if n["key"] == runtime_cc.SANDBOX_KEY]
     assert (Path(opts.cwd) / ".claude").is_dir() and not (Path(opts.cwd) / ".claude" / ".cc-writes").exists()
     assert Path(opts.cwd).is_relative_to(data_tmp), "the test's own copy of the corpus"
+
+
+class BackgroundCLI:
+    """A headless `claude` whose first turn runs a Bash command in the background: a real process, which lives until the
+    session closes, as Claude Code kills its background commands as it exits. `ends` makes the command end between the
+    turns, which Claude Code answers with a turn of its own before it echoes the next prompt; `during` is awaited with
+    the session once the command runs, while the first turn still runs."""
+
+    def __init__(self, options: Any, made: list["BackgroundCLI"], ends: bool, during: Any = None) -> None:
+        self.options, self.ends, self.during, self.jobs, self.closed = options, ends, during, [], False
+        self.prompts: asyncio.Queue = asyncio.Queue()
+        self.sent: list[Any] = []  # the prompts it read
+        self.stopped: list[str] = []  # the tasks stop_task stopped
+        self.stream: Any = None
+        self.on_close: Any = None  # called as it starts to close, while its commands still run
+        made.append(self)
+
+    async def __aenter__(self) -> "BackgroundCLI":
+        return self
+
+    async def __aexit__(self, *a: Any) -> None:
+        if self.on_close is not None:
+            self.on_close()
+        self.closed = True
+        for p in self.jobs:
+            p.kill()
+            p.wait()
+
+    async def query(self, prompt: Any) -> None:
+        if isinstance(prompt, str):
+            await self.prompts.put({"message": {"content": prompt}})
+            return
+        async for m in prompt:
+            await self.prompts.put(m)
+
+    async def stop_task(self, task_id: str) -> None:
+        self.stopped.append(task_id)
+        for p in self.jobs:
+            p.kill()
+            p.wait()
+
+    async def play(self):  # noqa: ANN201
+        import subprocess
+
+        from claude_agent_sdk import (AssistantMessage, ResultMessage, SystemMessage, TextBlock, ToolResultBlock,
+                                      ToolUseBlock, UserMessage)
+
+        def done() -> ResultMessage:
+            return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                                 session_id="sess-bg")
+
+        self.sent.append(await self.prompts.get())
+        yield SystemMessage(subtype="init", data={"session_id": "sess-bg"})
+        yield AssistantMessage(content=[ToolUseBlock(id="toolu_bg", name="Bash", input={
+            "command": "sleep 600", "run_in_background": True})], model="claude-opus-5-5")
+        self.jobs.append(subprocess.Popen(["sleep", "600"], start_new_session=True))
+        if self.during is not None:
+            await self.during(self)
+        yield SystemMessage(subtype="background_tasks_changed",
+                            data={"tasks": [{"task_id": "b1", "task_type": "local_bash"}]})
+        yield UserMessage(content=[ToolResultBlock(tool_use_id="toolu_bg", content="Command running in background")])
+        yield AssistantMessage(content=[TextBlock(text="The job runs.")], model="claude-opus-5-5")
+        yield done()
+        while True:
+            sent = await self.prompts.get()
+            self.sent.append(sent)
+            if self.ends:  # the command ended while no turn ran: Claude Code's own turn, before it reads the prompt
+                self.jobs.pop().kill()
+                yield SystemMessage(subtype="background_tasks_changed", data={"tasks": []})
+                yield AssistantMessage(content=[TextBlock(text="The job ended.")], model="claude-opus-5-5")
+                yield done()
+                self.ends = False
+            yield UserMessage(content=sent["message"]["content"], uuid=sent.get("uuid"))  # replay-user-messages
+            yield AssistantMessage(content=[TextBlock(text="Still here.")], model="claude-opus-5-5")
+            yield done()
+
+    async def receive_response(self):  # noqa: ANN201
+        from claude_agent_sdk import ResultMessage
+
+        self.stream = self.stream or self.play()
+        async for m in self.stream:
+            yield m
+            if isinstance(m, ResultMessage):
+                return
+
+
+def background_cli(monkeypatch, ends: bool = False, during: Any = None) -> list[BackgroundCLI]:
+    import claude_agent_sdk as sdk_mod
+
+    made: list[BackgroundCLI] = []
+    fake_sdk(monkeypatch, [], {})
+    monkeypatch.setattr(sdk_mod, "ClaudeSDKClient", lambda options: BackgroundCLI(options, made, ends, during))
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    return made
+
+
+@pytest.mark.parametrize("how", ["a new session", "a new chat", "an API key", "the server's stop"])
+async def test_a_command_main_s_bash_runs_in_the_background_outlives_the_turn_until_main_s_session_ends(on, monkeypatch,
+                                                                                                       analyst, how):
+    """Claude Code kills the commands Bash ran in the background (`run_in_background`) as it exits, so main's session
+    stays open past the turn while one runs, and main's next turn goes on in it; once main's session truly ends (the
+    workspace moved aside for a new session, a new chat, an API key chosen in Settings, the server's stop) it closes,
+    and the command ends with it."""
+    made = background_cli(monkeypatch)
+    await main_turn("Start the long job.")
+    job = made[0].jobs[0]
+    assert job.poll() is None and not made[0].closed, "the background command outlives main's turn"
+    await main_turn("Is it still running?")
+    assert len(made) == 1 and job.poll() is None, "main's next turn goes on in the same session"
+    assert [t for k, t in shape(main_records()) if k == "text"][-1] == "Still here."
+    if how == "a new session":
+        await runtime.forget(CORPUS)
+    elif how == "a new chat":
+        await runtime._spaces[CORPUS].switch(None)
+    elif how == "an API key":
+        api_key(monkeypatch, [])
+        await claude_access.put_route(claude_access.AccessBody(how=claude_access.API_KEY, key="sk-ant-test-key"),
+                                      analyst)
+    else:
+        await runtime.stop_all()
+    assert made[0].closed and job.poll() is not None, f"{how} ends main's session and its background command"
+    assert made[0].stopped == ["b1"], "the session stops the command first: claude would wait for it as it exits"
+
+
+async def test_main_s_next_turn_reads_the_turn_claude_code_ran_when_its_background_command_ended_first(on, monkeypatch):
+    """A background command that ends between main's turns gets a turn of Claude Code's own: main's next turn shows it,
+    goes on to its own reply (after the session echoed its prompt), and with no command left running the session
+    closes when the turn ends."""
+    made = background_cli(monkeypatch, ends=True)
+    await main_turn("Start a short job.")
+    assert runtime._spaces[CORPUS].main.cc is not None
+    await main_turn("Did it finish?")
+    texts = [t for k, t in shape(main_records()) if k == "text"]
+    assert texts[-2:] == ["The job ended.", "Still here."]
+    assert made[0].closed and runtime._spaces[CORPUS].main.cc is None, "no command runs, so the session closed"
+
+
+@pytest.mark.parametrize("how", ["a new chat", "a rewind"])
+async def test_a_turn_that_starts_while_main_s_kept_session_closes_goes_on_in_the_new_chat_or_at_the_cut(
+        on, monkeypatch, claude_config, how):
+    """Main's kept session takes a while to close, as its `claude` stops its background commands, and a message that
+    comes meanwhile starts main's next turn. So main is the new chat by then, and a rewind has cut main's conversation:
+    that turn goes on in the new chat, and resumes at the cut, never in the chat left or the session before the cut."""
+    made = background_cli(monkeypatch)
+    await main_turn("Start the long job.")
+    sp = runtime._spaces[CORPUS]
+    left, state, seen = sp.main, sp.main.state_path("cc"), {}
+    made[0].on_close = lambda: seen.update(main=sp.main, state=state.exists())
+    if how == "a new chat":
+        await sp.switch(None)
+        assert seen["main"] is not left
+    else:
+        cc_transcript("sess-bg", [cc_record("user", "u0", made[0].sent[0]["message"]["content"])])
+        await runtime.rewind_main(CORPUS, next(r["event"] for r in main_records() if runtime._analyst_message(r)))
+        assert seen["state"] is False, "the first message: no session is left to resume"
+    assert made[0].closed and made[0].jobs[0].poll() is not None
+
+
+@pytest.mark.parametrize("change", ["edits off", "labels off", "edits back on"])
+async def test_a_settings_change_that_lets_main_do_less_closes_its_kept_session_at_once(on, monkeypatch, analyst,
+                                                                                       change):
+    """Taking a permission back leaves no command running with it: a Settings change that lets main do less ("Claude can
+    edit files in this folder" or labels off) closes main's session kept open for a background command at once, not at
+    main's next turn, and the command with it. A change that only widens leaves the command running."""
+    made = background_cli(monkeypatch)
+    if change == "edits back on":
+        ledger.put_settings_route(CORPUS, analyst, {"corpus_edits": False})
+    await main_turn("Start the long job.")
+    job = made[0].jobs[0]
+    ledger.put_settings_route(CORPUS, analyst, {"edits off": {"corpus_edits": False}, "labels off": {"labels": False},
+                                                "edits back on": {"corpus_edits": None}}[change])
+    if change == "edits back on":
+        await asyncio.sleep(0.2)
+        assert not made[0].closed and job.poll() is None, "a change that only widens leaves the command running"
+        await runtime_cc.close(runtime._spaces[CORPUS].main)
+        return
+    await until(lambda: made[0].closed, f"{change} closes main's kept session")
+    assert job.poll() is not None and made[0].stopped == ["b1"] and runtime._spaces[CORPUS].main.cc is None
+
+
+async def test_a_turn_that_ends_after_main_may_do_less_closes_its_session_though_a_background_command_runs(
+        on, monkeypatch, analyst):
+    """Edits turned off while main's turn runs: the turn's session still lets main edit the folder, so it closes as the
+    turn ends, and the background command with it, rather than stay open for the command until main's next turn."""
+    async def edits_off(cli: BackgroundCLI) -> None:
+        ledger.put_settings_route(CORPUS, analyst, {"corpus_edits": False})
+        await asyncio.sleep(0.05)  # what the change starts on the server's loop runs while the turn runs
+
+    made = background_cli(monkeypatch, during=edits_off)
+    await main_turn("Start the long job.")
+    assert made[0].closed and made[0].jobs[0].poll() is not None and runtime._spaces[CORPUS].main.cc is None
+
+
+class ToldFirst:
+    """A headless `claude` that resumes or forks a session whose background command was still running as that one's
+    `claude` exited: before it reads the prompt, it tells the session of that command in a turn of its own with no
+    reply, as Claude Code does."""
+
+    def __init__(self, options: Any) -> None:
+        self.options, self.prompts, self.stream = options, asyncio.Queue(), None
+
+    async def __aenter__(self) -> "ToldFirst":
+        return self
+
+    async def __aexit__(self, *a: Any) -> None:
+        return None
+
+    async def query(self, prompt: Any) -> None:
+        if isinstance(prompt, str):
+            await self.prompts.put({"message": {"content": prompt}})
+            return
+        async for m in prompt:
+            await self.prompts.put(m)
+
+    async def play(self):  # noqa: ANN201
+        from claude_agent_sdk import (AssistantMessage, ResultMessage, SystemMessage, TaskNotificationMessage, TextBlock,
+                                      UserMessage)
+
+        def done(said: str) -> ResultMessage:
+            return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                                 session_id="sess-told", result=said)
+
+        yield TaskNotificationMessage(subtype="task_notification", data={}, task_id="b1", status="stopped",
+                                      output_file="", summary="Background shell command didn't finish before the "
+                                      "previous session ended", uuid="n1", session_id="sess-told")
+        yield SystemMessage(subtype="init", data={"session_id": "sess-told"})
+        yield done("")
+        sent = await self.prompts.get()
+        yield SystemMessage(subtype="init", data={"session_id": "sess-told"})
+        yield UserMessage(content=sent["message"]["content"], uuid=sent.get("uuid"))  # replay-user-messages
+        yield AssistantMessage(content=[TextBlock(text="Still here.")], model="claude-opus-5-5")
+        yield done("Still here.")
+
+    async def receive_response(self):  # noqa: ANN201
+        from claude_agent_sdk import ResultMessage
+
+        self.stream = self.stream or self.play()
+        async for m in self.stream:
+            yield m
+            if isinstance(m, ResultMessage):
+                return
+
+
+@pytest.mark.parametrize("who", ["main", "a side thread's fork"])
+async def test_a_session_claude_code_tells_of_a_command_left_running_first_still_answers(on, monkeypatch, who):
+    """A session that resumes or forks one whose background command was still running as its `claude` exited, as main's
+    next turn after a Stop does, or a side thread's fork while main's command runs, gets a turn of Claude Code's own
+    first, with no reply: the turn reads past it to its own reply, after the session echoed its prompt."""
+    import claude_agent_sdk as sdk_mod
+
+    fake_sdk(monkeypatch, [], {})
+    monkeypatch.setattr(sdk_mod, "ClaudeSDKClient", ToldFirst)
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    if who == "main":
+        await main_turn("Is the job done?")
+        assert [t for k, t in shape(main_records()) if k == "text"][-1] == "Still here."
+        return
+    runtime.ensure(CORPUS)
+    tid = str(agents.new_thread(CORPUS, None, None, "notes")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "What is in the notes?"})
+    await fork_of_thread().task
+    assert fork_of_thread().last_text == "Still here."
 
 
 # bubblewrap on a host that lets it make its own namespaces but refuses the user namespace the sandbox's seccomp helper
@@ -516,9 +779,9 @@ async def test_r2_main_s_short_tmpdir_stays_from_turn_to_turn_and_another_agent_
     from types import SimpleNamespace
 
     seen: list[Path] = []
-    monkeypatch.setattr(runtime_cc, "options", lambda conv, spec, pending, tmp: seen.append(tmp))
+    monkeypatch.setattr(runtime_cc, "options", lambda conv, spec, pending, tmp, once: seen.append(tmp))
 
-    async def session(conv: Any, spec: Any, text: str, opts: Any) -> None:
+    async def session(conv: Any, spec: Any, text: str, opts: Any, once: list[str]) -> None:
         return None
 
     monkeypatch.setattr(runtime_cc, "_session", session)

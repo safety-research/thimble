@@ -205,6 +205,14 @@ class Spec:
     labels: bool = True
 
 
+def narrows(old: Spec, new: Spec) -> bool:
+    """Whether an agent may do less on `new` than on `old`: a folder it reads or writes, or a tool, taken away, or a
+    private or protected file added."""
+    return not (set(old.read_roots) <= set(new.read_roots) and set(old.write_roots) <= set(new.write_roots)
+                and set(old.builtins) <= set(new.builtins) and set(old.thimble) <= set(new.thimble)
+                and set(new.private) <= set(old.private) and set(new.no_write) <= set(old.no_write))
+
+
 @dataclass
 class TurnEnd:
     status: str  # done, failed, stopped
@@ -232,6 +240,7 @@ class Conv:
     last_text: str = ""
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
     switched: str | None = None  # the model Claude's safeguards answer this conversation on instead (switches)
+    cc: Any = None  # its Claude Code session, open past its turn while a background command runs (runtime_cc.Held)
 
     @property
     def c(self) -> str:
@@ -437,7 +446,7 @@ class Space:
         (drop_waiting), runtime/main.json names the chat, the mirror follows its transcript (session.attach, which reads
         a chat brought back from its end), and main's log gets one line that says so. A new chat while main's chat has
         no turn yet is that chat. False when nothing changed. ValueError for an id that is no chat of this workspace."""
-        from . import agents  # noqa: PLC0415
+        from . import agents, runtime_cc  # noqa: PLC0415
 
         if sid is not None and (not SID_OK.match(sid) or not (self.dir / f"{sid}.jsonl").is_file()):
             raise ValueError(f"no chat {sid} in this workspace")
@@ -448,6 +457,7 @@ class Space:
         self.carried.clear()  # a rewind goes back only within main's chat now (rewind_main)
         if self.main.running:
             await _cancel(self.main.task)
+        left = self.main
         self.sid = sid or str(uuid.uuid4())
         nofollow.write_text(self.dir / "main.json", json.dumps({"session": self.sid, "at": _now()}))
         self.main = self._main_conv()
@@ -457,6 +467,9 @@ class Space:
         else:
             got = _chat_of(self.main_path)
             agents.chip(self.c, CHAT_CHIP, RESUMED_CHAT.format(first=got["first"] or "a chat"))
+        # the session kept open for the chat left closes, and its background commands with it; a message that comes
+        # while it closes is the new chat's
+        await runtime_cc.close(left)
         return True
 
     @property
@@ -815,6 +828,8 @@ async def forget(c: str) -> None:
     (Space.drop_waiting), its conversations' running turns stop, awaited, so none writes into the folder that takes its
     place, and its runtime is dropped, so the next ensure reads that folder (a new session's empty one, or a session
     brought back)."""
+    from . import runtime_cc  # noqa: PLC0415
+
     sp = _spaces.pop(c, None)
     if sp is None:
         return
@@ -823,6 +838,7 @@ async def forget(c: str) -> None:
         if conv.running:
             conv.queue.clear()
             await _cancel(conv.task)
+        await runtime_cc.close(conv)
 
 
 def ensure_soon(c: str) -> None:
@@ -856,12 +872,13 @@ async def _engine_turn(conv: Conv, text: str) -> TurnEnd:
     notes = conv.take_notes()
     if notes:
         text = "\n".join([NOTES_HEAD, *notes, "", text])
+    from . import runtime_cc  # noqa: PLC0415
+
     if kind == "api":
         from . import runtime_api  # noqa: PLC0415
 
+        await runtime_cc.close(conv)  # the Claude Code session kept open for it, if any, ends
         return await runtime_api.turn(conv, text)
-    from . import runtime_cc  # noqa: PLC0415
-
     return await runtime_cc.turn(conv, text)
 
 
@@ -1235,7 +1252,7 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
     cannot be changed, the turn stays stopped, as after a Stop. A request cancelled while main's turn stops does no
     more than a Stop. Once the cut is made, a step after it that fails is logged, and the words come back all the
     same."""
-    from . import agents, fixes, session  # noqa: PLC0415
+    from . import agents, fixes, runtime_cc, session  # noqa: PLC0415
 
     sp = ensure(c)
     records = agents.read_events(agents.paths(c, agents.MAIN_ID)[1])
@@ -1290,7 +1307,12 @@ async def rewind_main(c: str, event_id: str) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 — such as a full disk: the words still come back in the reply
             log.warning("%s: the rewind's line was not written in main's chat", c, exc_info=True)
     finally:
-        after_stop(c)
+        # a session kept open for main closes too, and its background commands with it, so main's next turn resumes at
+        # the cut, also a turn that starts while it closes
+        try:
+            await runtime_cc.close(sp.main)
+        finally:
+            after_stop(c)
     return {"text": text, "event": event_id}
 
 
@@ -1433,11 +1455,40 @@ def _spawn_agent(sp: Space, args: dict[str, Any]) -> dict[str, Any]:
     return {"agentId": agent_id, **({"model": model} if model else {})}
 
 
-def access_changed() -> None:
-    """The way to reach Claude changed: nothing to restart, since each turn reads it anew."""
-    from . import llm  # noqa: PLC0415
+async def access_changed() -> None:
+    """The way to reach Claude changed: nothing to restart, since each turn reads it anew, but once it is no longer
+    Claude Code sign-in, the sessions kept open for main's background commands close, and the commands with them."""
+    from . import llm, runtime_cc  # noqa: PLC0415
 
     llm.forget()
+    if engine() != "cc":
+        await asyncio.gather(*(runtime_cc.close(sp.main) for sp in list(_spaces.values())))
+
+
+def settings_changed(c: str) -> None:
+    """Settings changed for workspace `c`: when main may do less now than in its session kept open for a background
+    command (narrows, such as "Claude can edit files in this folder" turned off), that session closes at once, and the
+    command with it, so no command keeps a permission taken back; a turn that runs keeps its session only while main
+    may do as much as in it (runtime_cc._session). A change that only widens leaves it to main's next turn
+    (runtime_cc.turn). From any thread: the check runs on the server's loop."""
+    from . import runtime_cc  # noqa: PLC0415
+
+    sp = _spaces.get(c)
+    # while a turn runs the check goes too, as the turn may keep its session just before the change lands
+    if sp is None or sp.main.cc is None and not sp.main.running:
+        return
+
+    async def go() -> None:
+        held = sp.main.cc
+        try:
+            less = held is not None and narrows(held.spec, sp.main.spec())
+        except Exception:  # noqa: BLE001 — what main may do now is unknown, so the session closes as for less
+            log.warning("%s: main's settings could not be read, so its kept session closes", c, exc_info=True)
+            less = True
+        if less:
+            await runtime_cc.close(sp.main)
+
+    _spawn_task(go(), f"settings:{c}")
 
 
 def start_line() -> str:
@@ -1493,6 +1544,10 @@ async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
         if late:
             log.warning("%d agent(s) did not stop within %g s", len(late), wait_s)
         log.info("the server stops: stopped %s", ", ".join(i for i, _ in stopping))
+    from . import runtime_cc  # noqa: PLC0415
+
+    # the sessions kept open for a background command close, and the commands with them
+    await asyncio.gather(*(runtime_cc.close(conv) for sp in _spaces.values() for conv in [sp.main, *sp.convs.values()]))
     for c in mains:  # main's turn ends with a note, as the Stop button ends it (agents.interrupt_route)
         with contextlib.suppress(Exception):
             session.turn_stopped(c, stopped=True, text=session.QUIT_TEXT)
