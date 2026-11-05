@@ -1292,8 +1292,8 @@ async def test_checks_that_fail_when_the_builder_stops_go_back_to_it_and_then_sa
     said = views.plain_failure("problem: the page says FAIL")
     assert n["text"] == f"Posts failed after retry: {said}. Send to thimble-fix?" and n["chat"] == p["chat"]
     send, discard = n["action"]
-    assert send == {"label": "Send", "do": "thimble-fix",
-                    "text": f"The view Posts failed after retry: {said} (“problem: the page says FAIL”). Make it build."}
+    words = f"The view Posts failed after retry: {said} (“problem: the page says FAIL”). Make it build."
+    assert send == {"label": "Send", "do": "thimble-fix", "text": words}, "Send's words say what failed"
     assert discard == {"label": dev.DISCARD_VIEW, "do": "view-discard", "slug": slug}
     views.message(CORPUS, slug, "Please fix the page.")
     await _until(lambda: len(bridge.ops("send")) == 2, "the reply never reached the builder")
@@ -1363,3 +1363,4 @@ def test_what_is_wrong_with_a_view_is_said_by_the_kind_of_its_first_failure_not_
     assert dev._checks_failed("", said)[0] == said, "unless it said why, in its own words"
     words, found = dev._checks_failed("page: overview: test.")
     assert words == views.plain_failure("page: overview: test") and "“page: overview: test”" in found
+    assert dev._checks_failed("bad view:posts/1: the excerpt is not literal text: " + "x " * 300)[1].endswith("…”)")

@@ -3802,7 +3802,8 @@ CHANGE_FAILED_TEXT = "The change to the view {name} failed, so the view is as it
 # a view whose builder stopped without passing its checks (_checks_failed), or a change to it: the notice asks to send
 # the failure to thimble-fix ({after}: AFTER_RETRY when the builder tried again with what failed, _retried); why, when
 # it stopped before its view.json and said nothing; Send, which puts SEND_TEXT after /thimble-fix in main's composer
-# ({found}: the checks' first failure, quoted, or nothing); and Discard, of the view or of the change to it
+# ({found}: the checks' first failure, quoted in at most FOUND_CHARS, or nothing); and Discard, of the view or of the
+# change to it
 ASK_TEXT = "{name} failed{after}: {why}. Send to thimble-fix?"
 CHANGE_ASK_TEXT = "The change to {name} failed{after}: {why}. Send to thimble-fix?"
 AFTER_RETRY = " after retry"
@@ -3810,6 +3811,7 @@ UNFINISHED = "Claude didn't finish it"
 SEND_LABEL = "Send"
 SEND_TEXT = "The view {name} failed{after}: {why}{found}. Make it build."
 CHANGE_SEND_TEXT = "The change to the view {name} failed{after}: {why}{found}. Make it work."
+FOUND_CHARS = 160  # of the checks' first failure in Send's words, which a citation's excerpt would make long
 DISCARD_VIEW, DISCARD_CHANGE = "Discard the view", "Discard the change"
 
 
@@ -3817,11 +3819,11 @@ def _checks_failed(first: str, said: str = "") -> tuple[str, str]:
     """(what is wrong with the view in the analyst's words, what its checks found as Send quotes it) for a view whose
     builder stopped without passing its checks: by the kind of `first`, their first failure (views.plain_failure); for
     '', a builder that stopped before the view's view.json, its own words `said`, else UNFINISHED; and `first` quoted,
-    or '' for none."""
-    from . import views  # noqa: PLC0415
+    cut at a word (FOUND_CHARS), or '' for none."""
+    from . import notices, views  # noqa: PLC0415
 
-    found = f" (“{first.strip().rstrip('.')}”)" if first.strip() else ""
-    return views.plain_failure(first) or said or UNFINISHED, found
+    cut = notices.gist(first.strip().rstrip("."), FOUND_CHARS)
+    return views.plain_failure(first) or said or UNFINISHED, f" (“{cut}”)" if cut else ""
 
 
 def _retried(prop: dict[str, Any]) -> bool:
