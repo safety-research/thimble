@@ -14,11 +14,19 @@
 //                                spawned from a timer or a handler has the whole plugin as its caller, and none of the
 //                                plugin's hooks would see its calls.
 //   forkOf(agentId)              {kind, agentId} of a fork thimble started, or null (main, or another agent)
+//   foreground(call)             a fork's Bash call as it runs: in the foreground, for as long as Claude Code lets a
+//                                foreground command run (FORK_BASH_MS); null for main's, another agent's and the fixer's
+//                                (fix/fixer.ts keeps its own)
 //
 // A module hears its fork's end in its own `turn.complete` hook ({agentId, reason, answer, refusal}), where
 // forkOf(e.agentId) names the kind. (Claude Code follows `$` only into functions a file declares or imports, so a
 // list of handlers that take `$` cannot be called from here.)
 // A fork's end never reaches main's conversation: its task notification or hand-back is dropped at prompt.submit.
+// A fork that runs a command in the background (asked, or moved there when its time limit ran out) waits for it:
+// Claude Code parks the fork until the command ends, its row in Claude Code's list of agents standing still the while,
+// and once the fork stops again it sends main the fork's end, which the drop keeps out with a line in main's
+// conversation (`Prompt dropped by a hook: thimble's thread finished`). So a fork's commands run in the foreground
+// (foreground), and its end stays its own turn's.
 // Claude Code counts a fork as a background agent of the session, and the line that closes a turn of main's that ended
 // while forks still ran says `Waiting for 5 background agents to finish`, then counts their time in the next turn's
 // (`Cooked for 6m 11s` under a 5 s reply). The person's next prompt does not wait for them. So the line that waits only
@@ -37,6 +45,9 @@ export type ForkKind = 'checker' | 'designer' | 'thread' | 'fixer' | 'artifact'
 
 const FORKS = { plugin: 'thimble', key: 'forks' } as const
 const KEPT = 64
+/** The longest a foreground command of Claude Code's Bash tool may run, which a fork's commands get (Claude Code may cut
+ *  it shorter itself). A shorter limit would move a long command to the background when it ran out. */
+export const FORK_BASH_MS = 600_000
 const known = new Map<string, ForkKind>()
 
 /** The forks a reload of the plugin left running, known again. */
@@ -67,6 +78,14 @@ export async function spawnFork($: Engine, o: { kind: ForkKind; prompt: string; 
   return { agentId }
 }
 
+/** A fork's Bash call as it runs, in the foreground for FORK_BASH_MS; null for any other's. The fixer's calls keep its
+ *  own limit and sandbox (fix/fixer.ts fixerCall). */
+export function foreground<C extends { agentId?: string; run_in_background?: unknown; timeout?: unknown }>(call: C): C | null {
+  const kind = forkOf(call.agentId)?.kind
+  if (!kind || kind === 'fixer') return null
+  return { ...call, run_in_background: false, timeout: FORK_BASH_MS }
+}
+
 /** The fork a row in main's queue reports on: a hand-back (`<agent-message from="<id>">`) or a task notification
  *  (`<task-id><id></task-id>`) of a fork thimble started. */
 export function reportOf(text: string): string | null {
@@ -87,6 +106,9 @@ export const registerForks: Register = on => {
     }
     return r
   }).catch(($, e, next) => next(e))
+
+  // a fork's command in the foreground, so that no fork waits on a command in the background (the note above)
+  on('tool.call', { tool: 'Bash', agentId: /./ }, async ($, e, next) => next((foreground(e) ?? e) as never)).catch(($, e, next) => next(e))
 
   on('prompt.submit', { origin: { kind: /^(task-notification|peer)$/ } }, async ($, e, next) => {
     const id = reportOf(e.text)
