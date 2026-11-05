@@ -3,10 +3,10 @@
 // (the backend's labels and hints). The setup step opens by itself while no way is chosen (the first run, when the
 // install did not ask), and again from a chat's card that says Claude cannot be reached (bus `claudeAccess`). Not now
 // (or Escape) closes it, so the person can still browse without access; it opens by itself again on the next start
-// while nothing is saved. Choosing the Claude Code sign-in, whose
-// words say what it does, is the person's consent to it. The API key is ANTHROPIC_API_KEY when it is set where the
-// workbench runs, else one pasted here. Saving checks the choice with one small call and says what failed in plain
-// words. The first run's step stands alone: the tour's welcome (TourHost) waits until it is answered (accessAnswered).
+// while nothing is saved. Choosing the Claude Code sign-in, whose words say what it does, is the person's consent to
+// it. The API key is ANTHROPIC_API_KEY when it is set where the workbench runs, else one pasted here. Saving checks the
+// choice with one small call and says what failed in plain words. The first run's step stands alone: the tour's
+// welcome (TourHost) waits until it is answered (accessAnswered).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { TextInput } from '../components/Field'
