@@ -120,7 +120,7 @@ describe('the ⋯ menu at the end of the views bar', () => {
     expect(sent).toEqual([])
   })
 
-  test('a view’s description shows beside the menu on hover, with a file viewer’s line', async () => {
+  test('a view’s description shows beside the menu on hover', async () => {
     local = [NIGHT, SUBS, OLD]
     const el = await bar('w3')
     await open(el)
@@ -130,7 +130,7 @@ describe('the ⋯ menu at the end of the views bar', () => {
     expect(row('Night Runs').getAttribute('aria-describedby')).toBe(tip()?.id)
     await act(async () => void row('Night Runs').dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
     expect(tip()).toBeNull()
-    expect(viewTip(SUBS)).toBe('Each cue with its time.\nOpens in the File browser.')
+    expect(viewTip(SUBS)).toBe('Each cue with its time.')
     expect(viewTip(OLD)).toBe('')
   })
 

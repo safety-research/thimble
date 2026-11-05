@@ -22,8 +22,6 @@ import { refreshViews } from '../lib/views'
 export const VIEWS_MENU = 'More views'
 /** The check of whether thimble proposes views. */
 export const PROPOSE_VIEWS = 'Propose views'
-/** A file viewer's line under its description: it opens in the File browser rather than in the views bar. */
-export const FILE_VIEWER_LINE = 'Opens in the File browser.'
 
 /** A view the bar has no room for, picked from the menu as from the bar. */
 export interface ViewPick {
@@ -35,10 +33,8 @@ export interface ViewPick {
   onSelect: () => void
 }
 
-/** What a view's row says on hover and keyboard focus: its description, and for a file viewer that it opens in the
- * File browser, a line each; '' for none. Pure. */
-export const viewTip = (v: Pick<LocalViewRow, 'description' | 'file_viewer'>): string =>
-  [v.description?.trim() ?? '', v.file_viewer ? FILE_VIEWER_LINE : ''].filter(Boolean).join('\n')
+/** What a view's row says on hover and keyboard focus: its description; '' for none. Pure. */
+export const viewTip = (v: Pick<LocalViewRow, 'description'>): string => v.description?.trim() ?? ''
 
 /** `rows` with the view `slug` shown (`on`) or hidden. Pure. */
 export const withShown = (rows: readonly LocalViewRow[], slug: string, on: boolean): LocalViewRow[] => rows.map((r) => (r.slug === slug ? { ...r, on } : r))
