@@ -464,6 +464,17 @@ DERIVING_READER = THREADS_READER.replace(
     ' "words": b.split()[:2]}')
 
 
+def test_a_failed_gate_s_kept_report_says_what_failed_first_however_long_its_passing_lines():
+    """A proposal keeps a failed gate's report cut short for its chip and notice, which show its first failure: one
+    that comes after long passing lines (records' excerpts) is put first, rather than cut away."""
+    oks = [{"locator": f"runs/r{n}.json#L1", "ok": True, "label": f"run {n}", "excerpt": "x" * 300} for n in range(4)]
+    report = {"index": {"files": 5000, "seconds": 0.04}, "checks": [*oks, {"locator": "runs/r9.json#L1", "ok": False,
+                                                                            "why": "the page threw: Error: test"}]}
+    kept = views.kept_report(report, 600)
+    assert len(kept) <= 600 and kept.startswith("bad runs/r9.json#L1: the page threw: Error: test")
+    assert views.kept_report({"index": {"files": 3, "seconds": 0.1}}, 600) == "index: 3 file(s) in 0.1 s"
+
+
 async def test_a_builder_s_draft_check_of_a_view_over_many_files_reads_a_sample_and_finish_view_s_gate_reads_them_all(
         ws, inproc, bound, monkeypatch):
     """A view of thousands of files on a slow drive took minutes a check, each check reading every file through the

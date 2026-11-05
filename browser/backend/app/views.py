@@ -3378,6 +3378,15 @@ def first_failure(report: dict[str, Any]) -> str:
     return ""
 
 
+def kept_report(report: dict[str, Any], chars: int = 600) -> str:
+    """A failed gate's report as a proposal keeps it (`last_report`, `finish`'s report) for its chip and notice: its
+    first failure first, then its lines, cut at `chars` (dev.ERROR_CHARS), so a report whose index, file and record
+    lines come before what failed still says what failed."""
+    lines = "\n".join(gate_lines(report))
+    head = first_failure(report)
+    return (f"{head}\n{lines}" if head else lines)[:chars]
+
+
 _PAGE_LOADED = re.compile(r"^page: [a-z]+, ")  # a page line of a page that loaded (gate_lines)
 
 

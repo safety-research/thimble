@@ -3551,9 +3551,9 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             work_files.after_run(c, work, "done")
             view_review.after_built(c, slug)
             return
-        lines = "\n".join(views.gate_lines(rep))[:ERROR_CHARS]
-        prop = views.update_proposal(c, slug, last_report=lines) or prop
-        if status == "done" and await _feedback(c, slug, run, prop, lines):
+        lines = "\n".join(views.gate_lines(rep))
+        prop = views.update_proposal(c, slug, last_report=views.kept_report(rep, ERROR_CHARS)) or prop
+        if status == "done" and await _feedback(c, slug, run, prop, lines):  # the whole report, as finish_view gives
             return
     if status == "done" and finish.get("result") != "stop" and subagents.ended_in_plan(c, run.agent_id, run.k):
         if not prop.get("revision"):

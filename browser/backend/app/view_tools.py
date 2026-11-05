@@ -243,10 +243,11 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
         stop_after_grace(c, key, agent_id)
         return tools.ok(tools.hint("finish-view-pass"))
     if attempt >= dev.MAX_ATTEMPTS:
-        views.update_proposal(c, slug, finish={"agent": agent_id, "result": "stop", "report": lines[:dev.ERROR_CHARS]})
+        views.update_proposal(c, slug, finish={"agent": agent_id, "result": "stop",
+                                               "report": views.kept_report(report, dev.ERROR_CHARS)})
         stop_after_grace(c, key, agent_id)
         return tools.err(tools.hint("finish-view-stop"))
-    views.update_proposal(c, slug, last_report=lines[:dev.ERROR_CHARS])
+    views.update_proposal(c, slug, last_report=views.kept_report(report, dev.ERROR_CHARS))
     # an error result: the build's thread shows the failed gate on its finish_view row, not a ✓ (live check L25)
     return tools.err(tools.hint("finish-view-fail", report=lines, n=str(attempt), of=str(dev.MAX_ATTEMPTS)))
 
