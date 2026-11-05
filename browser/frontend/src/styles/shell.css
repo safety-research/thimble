@@ -17,10 +17,6 @@
   gap: 2px;
   height: var(--h-topbar);
   padding: 0 16px 0 24px;
-  /* never wider than the window: on a narrow one, a phone's, what does not fit scrolls under the tools */
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
 }
 .shell-brand {
   flex: none;
@@ -90,24 +86,8 @@
 }
 .shell-tools {
   display: inline-flex;
-  align-self: stretch;
   align-items: center;
   gap: 2px;
-  /* at the bar's right end whatever its width, so the settings gear stays in reach; what scrolls under it is hidden,
-     in the bar's right padding too */
-  position: sticky;
-  right: 0;
-  z-index: 1;
-  background: var(--bg-page);
-}
-.shell-tools::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 100%;
-  width: 16px;
-  background: var(--bg-page);
 }
 /* the links toggle: the accent while citations show */
 .shell-links.on,
