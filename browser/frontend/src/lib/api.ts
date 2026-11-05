@@ -582,6 +582,9 @@ export const api = {
    * that thread (views.message); answers the proposal. */
   messageView: (c: string, slug: string, text: string) => j<Proposal>(`${ws(c)}/views/proposals/${enc(slug)}/message`, { method: 'POST', body: JSON.stringify({ text }) }),
   deleteProposal: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}`, { method: 'DELETE' }),
+  /** Discard on the notice of a view whose builder stopped without passing its checks (backend views.discard): a view
+   * whose build failed goes, a built view's failed change is dropped. */
+  discardView: (c: string, slug: string) => j<{ ok: boolean; deleted?: boolean }>(`${ws(c)}/views/proposals/${enc(slug)}/discard`, { method: 'POST' }),
   /** every view of the workspace; with `wait`, never `files_pending` */
   views: (c: string, wait = false) => j<View[]>(`${ws(c)}/views${wait ? q({ wait: 1 }) : ''}`),
   /** the working views that claim a file, in the order a citation into it opens them */

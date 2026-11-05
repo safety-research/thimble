@@ -56,10 +56,12 @@ program builds the view instead, turn by turn (program_build), checked the same 
 
 Notices. A view whose build failed after the repairs it gets, a change to a view that failed, a build that did not
 start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
-notices.agent_key: Retry on a view), since the analyst may be in another chat; a build that starts or passes, and a
-ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit and the analyst's Stop tell
-nothing. A builder's start probes the sandbox its commands run in, and where it can't start on this machine one notice
-says so, why and the fix, with a row in the build's thread; the next start where it starts clears it (_box_notice).
+notices.agent_key: Retry on a view; for a builder that stopped without passing the view's checks, what is wrong with
+the view in the analyst's words, Ask Claude to fix it and Discard), since the analyst may be in another chat; a build
+that starts or passes, and a ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit
+and the analyst's Stop tell nothing. A builder's start probes the sandbox its commands run in, and where it can't
+start on this machine one notice says so, why and the fix, with a row in the build's thread; the next start where it
+starts clears it (_box_notice).
 
 Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode, Bypass
 included, and ask as main does, in the analyst's terminal. Where the server runs its agents itself (runtime.py), no
@@ -3570,10 +3572,12 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     # gets the gate's report and finish_view's (both kept cut there).
     shown = first[:ERROR_CHARS] or notices.gist(failure, notices.REASON_CHARS)
     log.warning("the view %s/%s was not built: %s", c, slug, shown)
+    # its notice says what is wrong with the view in the analyst's words, with what failed for its builder to fix
+    checks = _checks_failed(prop, first[:ERROR_CHARS] if (folder / views.VIEW_JSON).is_file() else "")
     if prop.get("revision"):
         views.end_revision(c, slug, shown, failed_change=str(prop.get("change") or ""))
         views.update_proposal(c, slug, checks_failed=True)
-        _change_failed_chip(c, prop, shown, retry=False)
+        _change_failed_chip(c, prop, shown, checks=checks)
         return
     done = int(prop.get("repairs") or 0)
     if not prop.get("asked") and done < VIEW_REPAIRS:
@@ -3588,7 +3592,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     if not prop.get("asked"):
         _repairs_failed(c, slug, shown, run.chat)
         return
-    _view_failed(c, slug, shown, run.chat, checks=True)
+    _view_failed(c, slug, shown, run.chat, checks=checks)
 
 
 async def _feedback(c: str, slug: str, run: Any, prop: dict[str, Any], report: str) -> bool:
@@ -3737,27 +3741,31 @@ def _view_chat(c: str, prop: dict[str, Any]) -> str | None:
         return None
 
 
-def _change_failed_chip(c: str, prop: dict[str, Any], why: str, *, retry: bool = True) -> None:
+def _change_failed_chip(c: str, prop: dict[str, Any], why: str, *, checks: tuple[str, str] | None = None) -> None:
     """Main's chip for a change to a built view that failed, or that main's quit stopped (MAIN_ENDED), since the view's
-    own chip shows it built again; its notice offers Retry unless `retry` is false (_view_notice)."""
+    own chip shows it built again, and its notice (_view_notice): with Retry, or for a change whose builder stopped
+    without passing the view's checks (`checks`, _checks_failed), with what is wrong in the analyst's words and its
+    fixes."""
     name = prop.get("name") or prop.get("slug")
     quit_ = why == MAIN_ENDED
+    words = checks[0] if checks else why
     text = (f"the change to the view {name} stopped when your Claude Code session ended, so the view is as it was"
-            if quit_ else f"the change to the view {name} failed, so it is as it was: {why}")
+            if quit_ else f"the change to the view {name} failed, so it is as it was: {words}")
     try:
         agents.chip(c, "ticket", text, ref=f"view:{prop.get('slug')}", chat=prop.get("chat"),
                     status="stopped" if quit_ else "failed")
     except Exception:  # noqa: BLE001
         log.exception("could not chip the failed change to %s/%s", c, prop.get("slug"))
     if not quit_:
-        _view_notice(c, prop, CHANGE_FAILED_TEXT, why, chat=prop.get("chat"), retry=retry)
+        _view_notice(c, prop, CHANGE_FAILED_TEXT, words, chat=prop.get("chat"), fix=checks[1] if checks else None)
 
 
-def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, checks: bool = False) -> None:
+def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *,
+                 checks: tuple[str, str] | None = None) -> None:
     """A build that ended without its view: a change to a built view leaves the view as it was (views.end_revision),
     and a new view fails, its chip showing why with Retry; with no Retry for a view whose builder stopped without
-    passing its checks (`checks`), which a build of the same files would fail again: the analyst's reply in its thread
-    goes on with the builder."""
+    passing its checks (`checks`, _checks_failed), which a build of the same files would fail again: its notice says
+    what is wrong in the analyst's words, and their reply in its thread goes on with the builder."""
     from . import views  # noqa: PLC0415
 
     current = views.read_proposal(c, slug) or {}
@@ -3768,7 +3776,7 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, chec
                            stopped_by="quit" if error == MAIN_ENDED else None)
         if chat:
             _close_chat({"workspace": c, "chat": chat}, "failed", error)
-        _change_failed_chip(c, current, error)
+        _change_failed_chip(c, current, error, checks=checks)
         return
     if not current:
         return
@@ -3779,27 +3787,59 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None, *, chec
     if chat:
         _close_chat({"workspace": c, "chat": chat}, "failed", error)
     if error != MAIN_ENDED:
-        _view_notice(c, current, BUILD_FAILED_TEXT, error, chat=chat, retry=not checks)
+        _view_notice(c, current, BUILD_FAILED_TEXT, checks[0] if checks else error, chat=chat,
+                     fix=checks[1] if checks else None)
 
 
 # the notices of a view's build (module note, notices): {name} the view's, {why} the failure in plain words
 BUILD_FAILED_TEXT = "The view {name} failed to build: {why}."
 BUILD_REFUSED_TEXT = "The build of the view {name} didn't start: {why}."
 CHANGE_FAILED_TEXT = "The change to the view {name} failed, so the view is as it was: {why}."
+# a view whose builder stopped without passing its checks (_checks_failed): why, when it stopped before its view.json;
+# the button that opens its thread with what failed in the composer, which one send asks the builder to fix
+# ({failure}: the checks' first failure, quoted, or nothing), and the ones that discard the view or the change to it
+UNFINISHED = "Claude didn't finish it"
+FIX_LABEL = "Ask Claude to fix it"
+FIX_TEXT = "The view didn't pass its checks{failure}. Please fix that and finish the view."
+CHANGE_FIX_TEXT = ("The change didn't pass its checks{failure}, so the view is back as it was. Please make the change "
+                   "again so that it passes.")
+DISCARD_VIEW, DISCARD_CHANGE = "Discard the view", "Discard the change"
 
 
-def _view_notice(c: str, prop: dict[str, Any], text: str, why: Any, chat: Any = None, *, retry: bool = True) -> None:
-    """A view's build or change failed, or its build did not start: the notice in the foreground with Retry (unless
-    `retry` is false), under the build's key, with Open on its thread. Never raises."""
+def _checks_failed(prop: dict[str, Any], first: str) -> tuple[str, str]:
+    """(what is wrong with the view in the analyst's words, what Ask Claude to fix it puts in the composer of its
+    thread) for the view `prop` whose builder stopped without passing its checks: by the kind of `first`, their first
+    failure (views.plain_failure), or UNFINISHED for '', a builder that stopped before the view's view.json; and the
+    message that asks the builder to fix that, or to make a change to a built view again."""
+    from . import views  # noqa: PLC0415
+
+    failure = f": “{first.strip().rstrip('.')}”" if first.strip() else ""
+    fix = (CHANGE_FIX_TEXT if prop.get("revision") else FIX_TEXT).format(failure=failure)
+    return views.plain_failure(first) or UNFINISHED, fix
+
+
+def _view_notice(c: str, prop: dict[str, Any], text: str, why: Any, chat: Any = None, *,
+                 fix: str | None = None) -> None:
+    """A view's build or change failed, or its build did not start: the notice in the foreground, under the build's key,
+    with Open on its thread, and Retry. A view whose builder stopped without passing its checks, which a build of the
+    same files would fail again, has `why` in the analyst's words and no Retry, but Ask Claude to fix it, which opens
+    its thread with `fix` in the composer, and Discard, of the view or of the change to it (views.discard). Never
+    raises."""
     from . import notices  # noqa: PLC0415
 
     try:
         slug = str(prop.get("slug") or "")
         name = str(prop.get("name") or slug)
-        words, fix = notices.reason(why)
-        acts = [a for a in ({"label": "Retry", "do": "view-retry", "slug": slug} if retry else None, fix) if a]
+        if fix is None:
+            words, more = notices.reason(why)
+            acts = [{"label": "Retry", "do": "view-retry", "slug": slug}, *([more] if more else [])]
+        else:
+            words = str(why)
+            acts = [*([{"label": FIX_LABEL, "do": "view-fix", "slug": slug, "text": fix}] if chat else []),
+                    {"label": DISCARD_CHANGE if prop.get("revision") else DISCARD_VIEW, "do": "view-discard",
+                     "slug": slug}]
         notices.post(c, kind="view", text=text.format(name=name, why=words), agent=notices.who("view-builder", name)[0],
-                     chat=str(chat) if chat else None, action=acts if len(acts) > 1 else (acts[0] if acts else None),
+                     chat=str(chat) if chat else None, action=acts if len(acts) > 1 else acts[0],
                      key=notices.agent_key(view_key(slug)))
     except Exception:  # noqa: BLE001 — the view has failed either way
         log.exception("%s: the failure of the view %s was not told", c, prop.get("slug"))

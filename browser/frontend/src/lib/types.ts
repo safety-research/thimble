@@ -66,12 +66,15 @@ export type ChatRecord =
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
 
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
- * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
- * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
+ * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), open
+ * the view's build thread with `text` in its composer (`view-fix`), discard the failed view `slug` or its failed change
+ * (`view-discard`), or sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'view-fix' | 'view-discard' | 'sign-out' | (string & {})
   slug?: string
+  /** view-fix: what it puts in the composer of the notice's chat, the view's build thread */
+  text?: string
 }
 
 /** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the

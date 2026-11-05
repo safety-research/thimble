@@ -6,7 +6,10 @@
 // (`/login`, `thimble server restart`), the command in code, Show more when the server shortened the words to fit and
 // kept them whole (`details`), which shows them all in place (Show less goes back), and Open for the chat it happened
 // in when another one is shown; then its fix as buttons under the words, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
-// that failed, or that the server could not start, says why in a toast and leaves it. A failure of main's own request
+// that failed, or that the server could not start, says why in a toast and leaves it. A view whose builder stopped
+// without passing its checks offers Ask Claude to fix it, which opens the view's build thread with what failed in its
+// composer, for one send to ask the builder, and leaves the notice until the builder takes it up; and Discard, of the
+// view or of the change to it. A failure of main's own request
 // shows in the strip only while another chat is open, since main's chat shows its API error card, and a switch of
 // Claude's safeguards only in the chat whose replies it switched: main's in main, a thread's in that thread. In the
 // agent's own chat the notice is also a row (NoticeRow), the same words without buttons, kept as a quiet line of the
@@ -22,19 +25,26 @@ import { refreshProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
 import type { Notice, NoticeAction } from '../lib/types'
 import type { NoticeRow as NoticeRowT } from './model'
+import { offerDraft } from './pending'
 import { proposalsOff } from './ProposalCard'
 
 /** The actions a notice's button can run; one with another `do` shows no button. */
-export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out']
+export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'view-fix', 'view-discard', 'sign-out']
+/** The actions that name what they act on in `slug`: a view, or a browser to sign out. */
+const NEEDS_SLUG: readonly string[] = ['view-retry', 'view-fix', 'view-discard', 'sign-out']
 
-/** Whether `action` is one this page can run. Pure. */
-export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && ((action.do !== 'view-retry' && action.do !== 'sign-out') || !!action.slug)
+/** Whether `action` is one this page can run: one that acts on a view or a browser names it, and Ask Claude to fix it
+ * has its words and the chat it opens (`chat`, the notice's). Pure. */
+export const runnable = (action: NoticeAction, chat?: string | null): boolean =>
+  NOTICE_DOS.includes(action.do) && (!NEEDS_SLUG.includes(action.do) || !!action.slug) && (action.do !== 'view-fix' || (!!chat && !!action.text))
 
 /** Run a notice's action: true when the failure is answered and the notice can go (Open Settings leaves it). A fix the
  * server could not start (a check that cannot run now, a build refused at once) throws with its reason, which the
  * toast says, and the notice stays. Try again names the notice's key, so the check that failed is the one run again.
- * Sign it out signs out the browser a sign-in notice names (its slug). */
-export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<Notice, 'key'>): Promise<boolean> {
+ * Ask Claude to fix it opens the notice's chat, the view's build thread, with the action's words in its composer, and
+ * leaves the notice, which the builder's start clears. Sign it out signs out the browser a sign-in notice names (its
+ * slug). */
+export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<Notice, 'key' | 'chat'>): Promise<boolean> {
   switch (action.do) {
     case 'proposals-retry': {
       const got = await api.proposeNow(ws, notice?.key ?? undefined)
@@ -54,6 +64,16 @@ export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<
       if (row?.refused) throw new Error(row.refused.reason || 'the build could not start')
       return true
     }
+    case 'view-fix':
+      if (!notice?.chat || !action.text) return false
+      offerDraft(notice.chat, action.text)
+      bus.emit('openChat', { chatId: notice.chat })
+      return false
+    case 'view-discard':
+      if (!action.slug) return false
+      await api.discardView(ws, action.slug)
+      void refreshProposals(ws)
+      return true
     case 'sign-out':
       if (!action.slug) return false
       await api.signOut(action.slug, ws)
@@ -93,7 +113,7 @@ function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; 
   const [busy, setBusy] = useState<string | null>(null)
   const [more, setMore] = useState(false)
   const details = notice.details && notice.details !== notice.text ? notice.details : ''
-  const actions = noticeActions(notice.action).filter(runnable)
+  const actions = noticeActions(notice.action).filter((a) => runnable(a, notice.chat))
   const target = `notice:${notice.key || notice.id}`
   const run = (a: NoticeAction) => {
     if (busy) return

@@ -1042,6 +1042,7 @@ VIEW_CLICKS = [("post", "/api/ws/boards/views/posts/build", {"effort": "low"}),
                ("post", "/api/ws/boards/views/proposals/posts/stop", None),
                ("post", "/api/ws/boards/views/proposals/posts/accept", None),
                ("post", "/api/ws/boards/views/proposals/posts/message", {"text": "a legend"}),
+               ("post", "/api/ws/boards/views/proposals/posts/discard", None),
                ("post", "/api/ws/boards/views/posts/review", None),
                ("delete", "/api/ws/boards/views/posts/review", None)]
 
@@ -1262,11 +1263,13 @@ async def test_retry_on_a_view_whose_builder_still_runs_shows_that_build_buildin
     assert _prop(slug)["status"] == "building" and not _prop(slug).get("error")
 
 
-async def test_checks_that_fail_when_the_builder_stops_go_back_to_it_and_then_show_their_reason_without_retry(
+async def test_checks_that_fail_when_the_builder_stops_go_back_to_it_and_then_say_what_is_wrong_with_its_fixes(
         board, bridge, gates, monkeypatch):
     """The builder stops with checks that fail: what they found goes back into its session, which goes on with it while
-    the view builds. Stopped again without passing, the view fails with the reason and no Retry, which would build the
-    same files again; the analyst's reply in its thread goes on with the same builder."""
+    the view builds. Stopped again without passing, the view fails, and its notice says what is wrong with it in the
+    analyst's words, with no Retry, which would build the same files again: Ask Claude to fix it opens the build's
+    thread with what failed for the builder in the composer, and Discard the view. The reply goes on with the same
+    builder, whose start clears the notice."""
     from app import notices
 
     slug = _propose(asked=True)
@@ -1286,9 +1289,74 @@ async def test_checks_that_fail_when_the_builder_stops_go_back_to_it_and_then_sh
     p = _prop(slug)
     assert p["error"] == "problem: the page says FAIL" and p.get("checks_failed")
     [n] = [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
-    assert "the page says FAIL" in n["text"] and not any(a.get("do") == "view-retry" for a in n["action"] or [])
-    views.message(CORPUS, slug, "The page should say PASS.")
+    assert views.plain_failure("problem: the page says FAIL") in n["text"] and "FAIL" not in n["text"]
+    assert [a["do"] for a in n["action"]] == ["view-fix", "view-discard"] and n["chat"] == p["chat"]
+    fix, discard = n["action"]
+    assert fix["slug"] == discard["slug"] == slug and discard["label"] == dev.DISCARD_VIEW
+    assert "problem: the page says FAIL" in fix["text"], "the composer gets what failed, for the builder"
+    views.message(CORPUS, slug, fix["text"])
     await _until(lambda: len(bridge.ops("send")) == 2, "the reply never reached the builder")
-    assert bridge.ops("send")[-1]["agent"] == agent and "The page should say PASS." in bridge.ops("send")[-1]["text"]
+    assert bridge.ops("send")[-1]["agent"] == agent and fix["text"] in bridge.ops("send")[-1]["text"]
     assert len(bridge.ops("spawn")) == 1, "the same builder goes on, no new build"
     assert _prop(slug)["status"] == "building" and not _prop(slug).get("checks_failed")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"], "the builder took it up"
+
+
+async def test_a_change_whose_builder_stops_again_without_passing_says_what_is_wrong_and_discard_keeps_the_view(
+        board, bridge, gates, monkeypatch):
+    """A change to a built view whose builder stopped again without passing the checks: the view is as it was, and the
+    notice says what is wrong with the change in the analyst's words, with Ask Claude to fix it, which asks for the
+    change again, and Discard the change, which leaves the view as it was and its chip built."""
+    from fastapi import HTTPException
+
+    from app import notices
+
+    slug = _propose(asked=True)
+    agent = await _answer_changes(slug, "<p>FAIL v2</p>", bridge, monkeypatch)
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    await _settled_end(slug)
+    subagents.run_again(CORPUS, agent, "coordinator")  # its session goes on with what the checks found, and stops again
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    p = await _settled_end(slug)
+    assert p["status"] == "built" and p.get("failed_change") and p.get("checks_failed")
+    [n] = [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
+    assert views.plain_failure("problem: the page says FAIL") in n["text"] and "FAIL" not in n["text"]
+    fix, discard = n["action"]
+    assert fix["do"] == "view-fix" and "problem: the page says FAIL" in fix["text"]
+    assert discard == {"label": dev.DISCARD_CHANGE, "do": "view-discard", "slug": slug}
+    views.discard(CORPUS, slug)
+    p = _prop(slug)
+    assert p["status"] == "built" and not p.get("failed_change") and not p.get("error") and not p.get("checks_failed")
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>", "the view is as it was"
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"], "nothing failed is left"
+    with pytest.raises(HTTPException) as e:
+        views.discard(CORPUS, slug)
+    assert e.value.status_code == 409, "a built view with nothing failed is not discarded"
+
+
+async def test_discard_on_a_view_whose_build_failed_drops_the_view_and_its_proposal(board, bridge, gates):
+    from fastapi import HTTPException
+
+    slug = _propose(asked=True)
+    await _started(slug)
+    _draft(slug, "<p>FAIL</p>")
+    views.update_proposal(CORPUS, slug, status="failed", error="problem: the page says FAIL", checks_failed=True)
+    assert views.discard(CORPUS, slug)["deleted"]
+    assert views.read_proposal(CORPUS, slug) is None and not (views.views_dir(CORPUS) / slug).exists()
+    with pytest.raises(HTTPException) as e:
+        views.discard(CORPUS, slug)
+    assert e.value.status_code == 404
+
+
+def test_what_is_wrong_with_a_view_is_said_by_the_kind_of_its_first_failure_not_in_the_checks_words():
+    lines = ["page: overview: TypeError: x is undefined", "bad runs/a.jsonl#L3: resolve() answered None",
+             "problem: build_index failed: KeyError: 'id'"]
+    said = [views.plain_failure(ln) for ln in lines]
+    assert all(said) and len(set(said)) == 3, "the page, a citation and any other problem each have their words"
+    assert not any(w in s for s in said for w in ("resolve()", "build_index", "TypeError", "jsonl"))
+    assert views.plain_failure("I could not make the page pass.") == ""
+    unfinished, fix = dev._checks_failed({"slug": "posts"}, "")
+    assert unfinished == dev.UNFINISHED and "“" not in fix, "a builder that stopped before its view.json"
+    words, change = dev._checks_failed({"slug": "posts", "revision": True}, "page: overview: test.")
+    assert words == views.plain_failure("page: overview: test") and "“page: overview: test”" in change

@@ -55,6 +55,17 @@ async def test_an_agent_s_notice_is_also_a_row_in_its_chat_and_dismiss_leaves_th
     assert sent[-1] == {"type": "notice", "id": n["id"], "key": "agent:view:board", "cleared": True}
 
 
+def test_a_view_s_fix_keeps_the_words_it_puts_in_the_composer_of_its_thread():
+    """Ask Claude to fix it (view-fix) carries what it puts in the composer of the build's thread, and Discard
+    (view-discard) names the view; a field no action has is left out."""
+    fix = {"label": "Ask Claude to fix it", "do": "view-fix", "slug": "board", "text": "Please fix it.", "at": "x"}
+    discard = {"label": "Discard the view", "do": "view-discard", "slug": "board"}
+    n = notices.post(CORPUS, kind="view", text="The view Board failed to build: its page showed an error.",
+                     chat="c1", action=[fix, discard], key="agent:view:board")
+    assert n["action"] == [{k: v for k, v in fix.items() if k != "at"}, discard]
+    assert notices.open_notices(CORPUS)[0]["action"][0]["text"] == "Please fix it."
+
+
 def test_a_notice_for_a_chat_that_is_gone_is_still_open():
     n = notices.post(CORPUS, chat="nochat", kind="safeguards", text="Gone.")
     assert n is not None and [x["id"] for x in notices.open_notices(CORPUS)] == [n["id"]]
