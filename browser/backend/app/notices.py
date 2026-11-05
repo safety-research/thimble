@@ -6,11 +6,12 @@ foreground: in the browser in a strip above the composer of whichever chat the a
 or the failure is fixed; in terminal mode in the band above the prompt. A notice of an agent with a chat of its own (a
 thread, an agent chat; `chat`) is also written into that chat as a row, for its history.
 
-The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, agent, chat, action, ts}:
-`text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command, such as /login
-or `thimble server restart`); `agent` names the agent in a few words ("Orientation", "View build: Agent Network");
-`chat` is the agent's own chat, which the strip's Open goes to; `action` is the button, one object {label, do, slug?} or
-a list of them, `do` one of ACTIONS:
+The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, details, agent, chat,
+action, ts}: `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command,
+such as /login or `thimble server restart`); `details` is the whole of it when `text` had to be shortened (TEXT_CHARS,
+or a failure's words cut by gist), which the page shows on Show more, else None; `agent` names the agent in a few words
+("Orientation", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to; `action`
+is the button, one object {label, do, slug?} or a list of them, `do` one of ACTIONS:
 
   proposals-retry  POST /api/ws/{c}/views/propose-now (proposer.run_now)
   proposals-off    PUT /api/ws/{c}/settings {propose_views: false}
@@ -21,8 +22,8 @@ a list of them, `do` one of ACTIONS:
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
 for the workspace: dismiss records the key in DISMISSED_FILE, and post then writes no notice under it. Each change is a `notice` event on
-the workspace stream: {id, key, kind, text, agent, chat, action, foreground: true} for a notice, {id, key, cleared:
-true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page loaded again shows them.
+the workspace stream: {id, key, kind, text, details, agent, chat, action, foreground: true} for a notice, {id, key,
+cleared: true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page loaded again shows them.
 
 Keys: `agent:<the agent's key>` for an agent of thimble's (agent_key: subagents.py for its runs and starts, dev.py for
 view builds and code tickets, checks.py for report checks), `proposals` for the view proposer (proposer.py),
@@ -90,7 +91,13 @@ REMEMBERED = ("manual-mode", "no-box:")
 OPEN_MAX = 50  # open notices kept; the oldest go first
 TEXT_CHARS = 480  # a notice's text at most, cut at a word (long enough for a fix in the terminal and its words)
 REASON_CHARS = 280  # a failure's own words inside a notice at most
+DETAILS_CHARS = 4000  # a notice's `details`, its whole text when `text` was shortened, at most
 SENTENCE_END = re.compile(r"[.!?][)\]\"'’”]*$")  # the end of a whole sentence, which a text cut short lacks
+# a stop that ends an abbreviation rather than a sentence ("1 record has no readable text (e.g. Runs/a.jsonl)")
+ABBREVIATION = re.compile(r"(?:^|[\s(])(?:e\.g|i\.e|etc|vs|cf)\.$", re.I)
+# a "(" that opens words in parentheses: one at the start of a word, not one of code or quotes ("f(x", "'(' was never
+# closed")
+PAREN = re.compile(r"(?<!\S)\(")
 SETTINGS = {"label": "Open Settings", "do": "settings"}
 
 
@@ -107,6 +114,18 @@ def _short(text: Any, limit: int) -> str:
     return (cut or t[: limit - 1]) + "…"
 
 
+def _sentences(t: str) -> list[str]:
+    """The sentences of `t`, a text on one line: split after a stop before a capital, a backtick or a "(", but not after
+    an abbreviation (ABBREVIATION) nor inside parentheses (PAREN), whose words belong to the sentence around them."""
+    out: list[str] = []
+    for part in re.split(r"(?<=[.!?])\s+(?=[A-Z`(])", t):
+        if out and (ABBREVIATION.search(out[-1]) or len(PAREN.findall(out[-1])) > out[-1].count(")")):
+            out[-1] = f"{out[-1]} {part}"
+        else:
+            out.append(part)
+    return out
+
+
 def gist(text: Any, limit: int) -> str:
     """`text` on one line in at most `limit` characters: whole when it fits, else its first sentence and its last (where
     a fix usually is) when that one ends as a sentence does, which the end of a text cut short does not, else its first
@@ -114,7 +133,7 @@ def gist(text: Any, limit: int) -> str:
     t = " ".join(str(text or "").split())
     if len(t) <= limit:
         return t
-    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z`(])", t)
+    parts = _sentences(t)
     if len(parts) > 1 and SENTENCE_END.search(parts[-1]) and len(parts[0]) + len(parts[-1]) + 3 <= limit:
         return f"{parts[0]} … {parts[-1]}"
     return _short(parts[0], limit)
@@ -226,19 +245,23 @@ def _row(c: str, chat: str, rec: dict[str, Any]) -> None:
 
 
 def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | None = None, action: Any = None,
-         key: str | None = None, row: bool = True) -> dict[str, Any] | None:
+         key: str | None = None, row: bool = True, details: str | None = None) -> dict[str, Any] | None:
     """Tell the analyst in the foreground that something failed (module note): an open notice, replacing the one under
     the same `key`, a row in the agent's chat `chat` when it has one (not with `row` false: the chat shows the failure
     itself, as main's API error card does), and the `notice` event. `kind` names what failed ("agent", "safeguards",
     "view", "proposals", "card-check", "label", API for main's own request, or a setup kind of the module note). The
-    notice, or None when it was not written, as for a REMEMBERED key the analyst dismissed (dismissed)."""
+    notice, or None when it was not written, as for a REMEMBERED key the analyst dismissed (dismissed). `details` is the
+    whole of a text the caller shortened (a failure's words cut by gist); a text longer than TEXT_CHARS keeps its own
+    whole as `details`."""
+    whole = _short(details or text, DETAILS_CHARS)
     text = _short(text, TEXT_CHARS)
     if not text:
         raise ValueError("a notice says something")
     if key and dismissed(c, str(key)):
         return None
     rec: dict[str, Any] = {"id": secrets.token_hex(6), "key": str(key) if key else None, "kind": str(kind or "agent"),
-                           "text": text, "agent": str(agent) if agent else None, "chat": str(chat) if chat else None,
+                           "text": text, "details": whole if whole != text else None,
+                           "agent": str(agent) if agent else None, "chat": str(chat) if chat else None,
                            "action": _actions(action), "ts": _now()}
 
     def change(raw: Any) -> list[dict[str, Any]]:
@@ -256,7 +279,7 @@ def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | 
             _row(c, rec["chat"], rec)
         except (OSError, ValueError, HTTPException):
             log.debug("%s: the notice's row in %s was not written", c, rec["chat"], exc_info=True)
-    _emit(c, {"type": TYPE, **{k: rec[k] for k in ("id", "key", "kind", "text", "agent", "chat", "action")},
+    _emit(c, {"type": TYPE, **{k: rec[k] for k in ("id", "key", "kind", "text", "details", "agent", "chat", "action")},
               "foreground": True})
     log.info("%s: notice%s: %s", c, f" ({rec['key']})" if rec["key"] else "", text)
     return rec

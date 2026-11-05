@@ -147,6 +147,24 @@ describe('the strip above the composer, and the rows', () => {
     expect(build.querySelector('.chat-notice-text .chat-notice-open')).not.toBeNull()
   })
 
+  test('a notice the server shortened shows Show more, which shows its whole words in place, and Show less goes back', async () => {
+    const cut = "The label suspect answer couldn't label 5 of 1,383 records: 1 record has no readable text (e.g. Runs/a/board.jsonl#L3), so it was not labeled; board.jsonl: ValueError: the record…."
+    const whole = `${cut.slice(0, -2)} at line 9 is a list of values, not an object, so skip it.`
+    open = [{ id: 'n1', key: 'label:k1', kind: 'label', agent: 'Label: suspect answer', text: cut, details: whole }, { id: 'n2', key: 'proposals', text: BLOCKED, details: BLOCKED }]
+    const el = await strip('nt-more')
+    const [label, plain] = el.querySelectorAll('.chat-notice')
+    const more = label.querySelector<HTMLButtonElement>('.chat-notice-text .chat-notice-more')
+    expect(lines(el)).toEqual([`Label: suspect answer ${cut} Show more`, `${BLOCKED}`])
+    expect(more?.getAttribute('aria-expanded')).toBe('false')
+    expect(plain.querySelector('.chat-notice-more')).toBeNull()
+    await click(more)
+    expect(lines(el)[0]).toBe(`Label: suspect answer ${whole} Show less`)
+    expect(more?.getAttribute('aria-expanded')).toBe('true')
+    await click(more)
+    expect(lines(el)[0]).toBe(`Label: suspect answer ${cut} Show more`)
+    expect(parseNotice({ id: 'n3', text: 'Same.', details: ' Same. ' })).toEqual({ id: 'n3', text: 'Same.' })
+  })
+
   test('a command in the text is code; with no agent named, the thread it happened in names it', async () => {
     open = [{ id: 'n1', text: SIGN_IN, action: TRY }, { id: 'n2', chat: 'orient-1', text: DOWNGRADE }]
     const el = await strip('nt-code')

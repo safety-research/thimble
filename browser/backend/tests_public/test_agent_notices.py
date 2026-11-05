@@ -262,6 +262,19 @@ async def test_a_label_run_whose_unit_the_safeguards_stopped_tells_it_as_skipped
     assert _open(f"label:{k['id']}") is None
 
 
+def test_a_label_notice_with_a_long_failure_keeps_its_whole_words_as_details():
+    """A run's problems too long for the notice's line are cut at a word there, never mid-sentence at "(e.g.", and the
+    notice's details hold them whole, for the page's Show more."""
+    k = concepts.define_concept(CORPUS, "suspect answer", "an answer that looks wrong", "prompt")
+    blank = concepts.blank_text_cause(1, "record", "Runs/a/board.jsonl#L3")
+    other = "board.jsonl: ValueError: " + "the record at line 9 is a list of values, not an object, " * 5 + "so skip it"
+    concepts._label_notice(CORPUS, k, failed=5, total=1383, message=f"{blank}; {other}")
+    n = _open(f"label:{k['id']}")
+    head = f"The label suspect answer couldn't label 5 of 1,383 records: {blank}; board.jsonl: ValueError:"
+    assert n["text"].startswith(head) and n["text"].endswith("….")
+    assert n["details"] == f"The label suspect answer couldn't label 5 of 1,383 records: {blank}; {other}."
+
+
 def test_units_with_no_text_are_counted_in_the_count_s_own_form():
     assert concepts.blank_text_cause(1, "record", "runs/a/board.jsonl#L3") == (
         "1 record has no readable text (e.g. runs/a/board.jsonl#L3), so it was not labeled")

@@ -3,8 +3,9 @@
 // is open (NoticeStrip), under the view proposal card's place, and stays there across thread switches until the
 // analyst dismisses it (×) or a fix that worked clears it. Each is one line in the warning's colors: the agent it
 // happened to in bold ("Orientation", "View build: Agent Network"), the failure and, when the fix is a command
-// (`/login`, `thimble server restart`), the command in code, and Open for the chat it happened in when another one is
-// shown; then its fix as buttons under the words, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
+// (`/login`, `thimble server restart`), the command in code, Show more when the server shortened the words to fit and
+// kept them whole (`details`), which shows them all in place (Show less goes back), and Open for the chat it happened
+// in when another one is shown; then its fix as buttons under the words, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one
 // that failed, or that the server could not start, says why in a toast and leaves it. A failure of main's own request
 // shows in the strip only while another chat is open, since main's chat shows its API error card, and a switch of
 // Claude's safeguards only in the chat whose replies it switched: main's in main, a thread's in that thread. In the
@@ -86,9 +87,12 @@ function NoticeWords({ agent, text, after }: { agent: string; text: string; afte
   )
 }
 
-/** One open notice in the foreground: its words, its fix, Open for its chat when another is shown, and ×. */
+/** One open notice in the foreground: its words, Show more for its whole words when they were shortened, its fix, Open
+ * for its chat when another is shown, and ×. */
 function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; notice: Notice; current: string; agent: string; onOpen: (chat: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null)
+  const [more, setMore] = useState(false)
+  const details = notice.details && notice.details !== notice.text ? notice.details : ''
   const actions = noticeActions(notice.action).filter(runnable)
   const target = `notice:${notice.key || notice.id}`
   const run = (a: NoticeAction) => {
@@ -113,11 +117,30 @@ function ForegroundNotice({ ws, notice, current, agent, onOpen }: { ws: string; 
       Open
     </button>
   ) : undefined
+  const moreLink = details ? (
+    <button
+      type="button"
+      className="chat-notice-more"
+      aria-expanded={more}
+      onClick={() => {
+        track('ui-click', { target, detail: { action: more ? 'less' : 'more' } })
+        setMore(!more)
+      }}
+    >
+      {more ? 'Show less' : 'Show more'}
+    </button>
+  ) : undefined
+  const after =
+    moreLink && openLink ? (
+      <>
+        {moreLink} {openLink}
+      </>
+    ) : (moreLink ?? openLink)
   return (
     <div className="chat-notice" role="status" data-notice={notice.id} data-key={notice.key ?? undefined} data-kind={notice.kind} data-chat={notice.chat ?? undefined}>
       <Icon name="warning" size={13} className="chat-notice-ico" />
       <div className="chat-notice-body">
-        <NoticeWords agent={agent} text={notice.text} after={openLink} />
+        <NoticeWords agent={agent} text={more && details ? details : notice.text} after={after} />
         {actions.length > 0 && (
           <span className="chat-notice-acts">
             {actions.map((a) => (

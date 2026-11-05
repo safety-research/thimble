@@ -36,7 +36,7 @@ async def test_a_notice_with_a_key_is_one_open_notice_that_clear_takes_away(sent
     b = notices.post(CORPUS, kind="proposals", text="Second try.", agent="View proposals", key="k")
     assert a["text"] == "First try." and a["action"] == retry and a["chat"] is None
     assert sent[0] == {"type": "notice", "id": a["id"], "key": "k", "kind": "proposals", "text": "First try.",
-                       "agent": "View proposals", "chat": None, "action": retry, "foreground": True}
+                       "details": None, "agent": "View proposals", "chat": None, "action": retry, "foreground": True}
     assert [n["id"] for n in notices.open_notices(CORPUS)] == [b["id"]], "the later one replaced it in place"
     assert notices.clear(CORPUS, "k") and notices.open_notices(CORPUS) == []
     assert sent[-1] == {"type": "notice", "id": b["id"], "key": "k", "cleared": True}
@@ -197,6 +197,38 @@ def test_a_long_reason_cut_short_ends_on_a_whole_sentence():
     assert notices.reason(cut)[0] == first.rstrip(".")
     said = f"{cut}sh, copy views-work/posts into extension/views/posts (then Retry)."
     assert notices.reason(said)[0].endswith("… To finish, copy views-work/posts into extension/views/posts (then Retry)")
+
+
+def test_a_long_reason_is_not_cut_at_an_abbreviation_or_inside_parentheses():
+    """"(e.g. Runs/…" is not the end of a sentence: the first sentence runs on to its own end, cut at a word with an
+    ellipsis when it is too long, never stopped mid-sentence at "(e.g."."""
+    blank = "1 record has no readable text (e.g. Runs/a/board.jsonl#L3), so it was not labeled"
+    long = f"{blank}; board.jsonl: ValueError: {'the record is a list, not an object; ' * 8}"
+    words, _ = notices.reason(long)
+    assert words.startswith(f"{blank}; board.jsonl: ValueError:") and words.endswith("…")
+    assert notices.gist("It failed (i.e. Nothing ran). It stopped there. Retry.", 40) == (
+        "It failed (i.e. Nothing ran). … Retry.")
+
+
+def test_a_parenthesis_in_quotes_or_code_does_not_join_the_sentences_after_it():
+    """Only a "(" at the start of a word opens words in parentheses: the "'('" of an error does not, so the fix at the
+    end of a long failure still shows."""
+    said = ("The build failed: SyntaxError: '(' was never closed (app.js, line 3). "
+            + "Every write there was refused, by the file tool and by the shell alike. " * 6
+            + "To finish, copy views-work/posts into extension/views/posts (then Retry).")
+    assert notices.reason(said)[0] == ("The build failed: SyntaxError: '(' was never closed (app.js, line 3). … To "
+                                       "finish, copy views-work/posts into extension/views/posts (then Retry)")
+
+
+async def test_a_notice_cut_short_keeps_its_whole_text_as_details(sent):
+    whole = "The label x couldn't label 5 of 9 records: " + "a reason that goes on, " * 30 + "and ends."
+    n = notices.post(CORPUS, kind="label", text=whole, key="label:x")
+    assert len(n["text"]) <= notices.TEXT_CHARS and n["text"].endswith("…") and n["details"] == whole
+    assert sent[-1]["details"] == whole and notices.open_notices(CORPUS)[0]["details"] == whole
+    short = notices.post(CORPUS, kind="label", text="The label x failed: it broke.", details="The label x failed: "
+                         "it broke, in full.", key="label:x")
+    assert short["details"] == "The label x failed: it broke, in full."
+    assert notices.post(CORPUS, kind="label", text="Same.", details="Same.", key="label:x")["details"] is None
 
 
 def test_an_agent_is_named_by_its_role_and_its_run_s_title():
