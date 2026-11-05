@@ -20,9 +20,9 @@
   min-height: 0;
 }
 
-/* -------- the views bar: File browser and the views as one exclusive choice, then the proposals (files/ViewsBar.tsx):
-   a row across Files' top, or, while Files shows beside another pane, in its pane head (.is-compact, shell.css
-   .pane-head-views) with the ⋯ menu of what does not fit and New view's + -------- */
+/* -------- the views bar: File browser and the views as one exclusive choice, then New view and the ⋯ menu
+   (files/ViewsBar.tsx, ViewsMenu.tsx): a row across Files' top, or, while Files shows beside another pane, in its pane
+   head (.is-compact, shell.css .pane-head-views), where what does not fit goes at the top of the ⋯ menu -------- */
 .files-views {
   flex: none;
   display: flex;
@@ -75,6 +75,11 @@
   position: absolute;
   top: 3px;
   right: 3px;
+}
+/* the ⋯ menu's checks, Propose views and a view's shown or hidden: the check holds its place while off, so the names
+   line up (ViewsMenu.tsx) */
+.files-views-menu .menu-check.is-off {
+  visibility: hidden;
 }
 .files-views .seg-opt {
   color: var(--text-secondary);

@@ -23,7 +23,7 @@ describe('barList', () => {
     expect(Object.fromEntries(got.views.map((v) => [v.slug, !!v.label_controls]))).toEqual({ board: true, plain: false, mine: true })
   })
 
-  it('leaves out a view switched off in Settings', () => {
+  it('leaves out a hidden view', () => {
     const got = barList([view('board')], [{ ...built('timeline'), off: true }, built('board')])
     expect(got.views.map((v) => v.slug)).toEqual(['board'])
     expect(got.proposals).toEqual([])

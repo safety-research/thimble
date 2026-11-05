@@ -305,8 +305,9 @@ export function Menu({ trigger, items, align = 'start', label, width, onOpenChan
   )
 }
 
-/** A disabled item's reason in the tooltip beside the item (placeAside); the item names it with aria-describedby. */
-function MenuTip({ id, anchor, text }: { id: string; anchor: HTMLElement; text: string }) {
+/** A menu item's tooltip beside the menu, level with the item (placeAside): a disabled item's reason, or what an item
+ * names (files/ViewsMenu, a view's description); the item names it with aria-describedby. */
+export function MenuTip({ id, anchor, text, className }: { id: string; anchor: HTMLElement; text: string; className?: string }) {
   // beside the menu's edge, not the item's, which sits inside the menu's padding; level with the item
   const place = useCallback(
     (w: number, h: number) => {
@@ -316,7 +317,7 @@ function MenuTip({ id, anchor, text }: { id: string; anchor: HTMLElement; text: 
     },
     [anchor],
   )
-  return <Tip id={id} text={text} place={place} />
+  return <Tip id={id} text={text} place={place} className={className} />
 }
 
 export default Menu
