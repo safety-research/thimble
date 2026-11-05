@@ -12,7 +12,10 @@
 // then waits until the --selector match is drawn: no part of it still drawing (a `data-settled="false"` body, a chart
 // with no svg yet: the card harness's test, frontend/src/render.tsx settled), the page's fonts loaded, and its box and
 // content unchanged for 100 ms, at most 5 s; and the png shows every CSS animation and transition at its end, so a
-// highlight fading out is not half there. Then --wait ms (default 500) to settle, then the png: the element's bounding
+// highlight fading out is not half there. A match that holds a frame drawing itself (a custom card, an html output, a
+// card type's page: `iframe[data-shot]`) draws inside the frame's own page, which that wait cannot watch, and may
+// animate there: it is shot again until its picture stays the same for 1.2 s, at most 8 s (waitStill), and the png
+// shows its animations as they play. Then --wait ms (default 500) to settle, then the png: the element's bounding
 // box padded by 24 px when --selector is given and found, else the full viewport. --highlight outlines the --selector
 // match; --element-out writes the padded element crop to a second png, and --out is then the full viewport; --info
 // writes the result JSON to a file as well as stdout. --offline refuses every request but the page's own, as for a
@@ -43,6 +46,11 @@ const IDLE_POLL_MS = 50
 const ACTION_TIMEOUT_MS = 5_000
 const SETTLE_QUIET_MS = 100
 const SETTLE_MAX_MS = 5_000
+// a frame that draws itself: shot every STILL_POLL_MS until its picture stays the same for STILL_QUIET_MS, longer than
+// the step of an animation that draws a day at a time, or until STILL_MAX_MS passed (the card harness's render.py _still)
+const STILL_POLL_MS = 200
+const STILL_QUIET_MS = 1_200
+const STILL_MAX_MS = 8_000
 const STREAM_RE = /\/(events|stream)$/
 const MUTATING = new Set(['PUT', 'POST', 'DELETE', 'PATCH'])
 const SHOT_HEADER = 'x-thimble-shot'
@@ -211,6 +219,22 @@ async function drawn([selector, quiet, max]) {
   }
 }
 
+/** Resolves once the picture of `clip` stayed the same for STILL_QUIET_MS, shot every STILL_POLL_MS with animations
+ * playing, or once STILL_MAX_MS passed. */
+async function waitStill(page, clip) {
+  const start = Date.now()
+  let changed = start
+  let last = await page.screenshot({ clip, animations: 'allow' })
+  while (Date.now() - changed < STILL_QUIET_MS && Date.now() - start < STILL_MAX_MS) {
+    await page.waitForTimeout(STILL_POLL_MS)
+    const png = await page.screenshot({ clip, animations: 'allow' })
+    if (!png.equals(last)) {
+      last = png
+      changed = Date.now()
+    }
+  }
+}
+
 /** Runs in the page: a fixed box over the element with an accent outline. */
 function highlightBox(box) {
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#3b6ef5'
@@ -296,10 +320,13 @@ try {
       console.error(`selector error: ${String(e?.message ?? e).split('\n')[0]}`)
     }
   }
+  // a settled match with a frame that draws itself is shot once the frame stopped changing, its animations playing
+  const moving = args.settle && found && (await page.locator(args.selector).first().evaluate((el) => !!el.querySelector('iframe[data-shot]')).catch(() => false))
+  if (moving) await waitStill(page, box)
   if (found && args.highlight) await page.evaluate(highlightBox, raw)
 
   let elementOut = null
-  const animations = args.settle ? 'disabled' : 'allow'
+  const animations = args.settle && !moving ? 'disabled' : 'allow'
   if (elementOutPath) {
     await page.screenshot({ path: outPath, animations })
     if (found) {

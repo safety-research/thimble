@@ -157,3 +157,40 @@ async def test_the_browser_closes_when_no_card_was_drawn_for_a_while_and_comes_b
         assert log[4:] == ["close", "stop"]
     finally:
         await pool.stop()
+
+
+class _AnimatedPage(_FakePage):
+    """A card with a frame that draws itself (render.SELF_DRAWN), whose picture changes with each shot until its
+    `frames`-th, as an animation that draws a day at a time does, and stays the same after."""
+
+    def __init__(self, frames: int) -> None:
+        super().__init__()
+        self.frames, self.shots, self.animations = frames, 0, []
+
+    async def evaluate(self, js, req=None):
+        return True if js == render.SELF_DRAWN else await super().evaluate(js, req)
+
+    async def screenshot(self, **kw):
+        self.shots += 1
+        self.animations.append(kw.get("animations"))
+        return f"frame {min(self.shots, self.frames)}".encode()
+
+
+async def test_a_card_whose_frame_animates_is_shot_once_its_picture_stays_the_same(monkeypatch):
+    """A custom card's page draws inside its own frame, which the render page cannot watch: the card is shot again until
+    its picture stays the same, with the frame's animations playing, so the check reads what the animation drew rather
+    than its first frame. One that never stops is shot as it stands at STILL_MAX_S, and card_fit, which needs the size
+    alone, takes the first picture."""
+    monkeypatch.setattr(render, "STILL_POLL_S", 0.01)
+    monkeypatch.setattr(render, "STILL_QUIET_S", 0.08)
+    monkeypatch.setattr(render, "STILL_MAX_S", 1.0)
+    page, res = _AnimatedPage(frames=6), render.Rendered()
+    await render.Pool(pages=1)._render_on(page, {}, res)
+    assert res.png == b"frame 6" and res.ok and set(page.animations) == {"allow"}
+    first = render.Rendered()
+    await render.Pool(pages=1)._render_on(_AnimatedPage(frames=6), {}, first, still=False)
+    assert first.png == b"frame 1"
+    monkeypatch.setattr(render, "STILL_MAX_S", 0.2)
+    endless, res = _AnimatedPage(frames=10**9), render.Rendered()
+    await render.Pool(pages=1)._render_on(endless, {}, res)
+    assert res.ok and 5 < endless.shots < 40, endless.shots
