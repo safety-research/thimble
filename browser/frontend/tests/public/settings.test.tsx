@@ -149,6 +149,7 @@ describe('the popover', () => {
     expect(doc.querySelectorAll('[data-mode-agent]')).toHaveLength(0)
     expect(doc.querySelector('.settings-main-mode')?.textContent).toBe(MAIN_MODE_LINE)
     expect(doc.querySelector('.settings-card-wait')?.textContent).toBe(cardWaitLine(10))
+    expect(cardWaitLine(10)).toBe("A code ticket asks you before its change reaches thimble's own code; its card waits 10 min.")
     expect(doc.querySelector('[data-memory-agent="writer"]')?.textContent).toContain('CLAUDE.md files: off')
     expect(doc.textContent).not.toMatch(/installs/i)
     expect(doc.querySelector('.settings-ignored')?.textContent).toContain('agents.writer.fast')

@@ -11,7 +11,7 @@ import { mount, unmountAll } from './mount.tsx'
 const LONG = 'A description far too long for one line of the popover, which the row cuts short and opens in full.'
 const base = { version: '', active: true, why: '', note: '', locked: false, on: true, views: [], parts: [], consent: '', sandboxed: null }
 const rows: ExtensionRow[] = [
-  { ...base, name: 'swarm-orient', version: '0.4.0', builtin: true, description: 'Reads every message.', active: false, why: 'not added', on: false, addable: true, parts: ['swarm-reader agent'], consent: 'swarm-reader: network.', needs: ['multiagent-swimlane'] },
+  { ...base, name: 'swarm-orient', version: '0.4.0', builtin: true, description: 'Reads every message.', active: false, why: 'not added', on: false, addable: true, parts: ['swarm-reader agent'], consent: 'swarm-reader: network.', needs: ['tally-base'] },
   {
     ...base,
     name: 'tally',

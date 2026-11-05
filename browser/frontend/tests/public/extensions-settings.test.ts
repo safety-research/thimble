@@ -61,9 +61,9 @@ describe('an extension row', () => {
     expect(extensionVersion({ ...ext, version: '0.4.0', builtin: true })).toBe('')
   })
   it('names in its details what turning it on adds with it, while it is not added', () => {
-    const swarmOrient = { ...ext, on: false, addable: true, builtin: true, needs: ['multiagent-swimlane'] }
-    expect(extensionDetails(swarmOrient).some(([, words]) => words.includes('multiagent-swimlane'))).toBe(true)
-    expect(extensionDetails({ ...swarmOrient, addable: false }).some(([, words]) => words.includes('multiagent-swimlane'))).toBe(false)
+    const swarmOrient = { ...ext, on: false, addable: true, builtin: true, needs: ['tally-base'] }
+    expect(extensionDetails(swarmOrient).some(([, words]) => words.includes('tally-base'))).toBe(true)
+    expect(extensionDetails({ ...swarmOrient, addable: false }).some(([, words]) => words.includes('tally-base'))).toBe(false)
   })
 })
 

@@ -250,9 +250,10 @@ export type WebRow = (typeof WEB_ROWS)[number]
 export const TICKET_FAST = "thimble fix's fast mode"
 /** The dev row's web switch's reason: the dev agent's web in thimble's config reaches all of its work. */
 export const DEV_WEB_WHY = "The dev agent's view builds, reviews and code tickets follow agents.dev.web in thimble's config."
-/** The line on how long a code ticket's question about thimble's own code waits on its card (cardWait). */
+/** The line on how long a code ticket's question about thimble's own code waits on its card (cardWait, which its hover
+ * names as the config's other settings name theirs). */
 export const cardWaitLine = (minutes: number): string =>
-  `A code ticket asks you before its change reaches thimble's own code; its card waits ${minutes} min (cardWait).`
+  `A code ticket asks you before its change reaches thimble's own code; its card waits ${minutes} min.`
 /** The line under the table. */
 export const NEXT_START_LINE = "An agent's row applies to its next start; a run that goes on keeps its own model and effort."
 /** The View proposals switch's name. */
