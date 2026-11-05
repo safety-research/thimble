@@ -225,9 +225,12 @@ class Conv:
     key: str = ""  # the key of the start it runs for (subagents' request), such as `view:<slug>` (agent_writes)
     transcript: Transcript | None = None
     queue: list[str] = field(default_factory=list)
-    # set as a message joins the queue (deliver), so a Claude Code session of main's hands it on while its turn runs
-    # (runtime_cc._hand)
+    # set as a message joins the queue (deliver, module_op send), so a Claude Code session of main's or of one of
+    # thimble's agents hands it on while its turn runs (runtime_cc._hand)
     arrived: asyncio.Event = field(default_factory=asyncio.Event)
+    # the messages sent to one of thimble's agents while its turn ran (module_op send), which it reads at the turn's
+    # next tool call (take_waiting), as main reads a message typed in its chat
+    sent: list[str] = field(default_factory=list)
     task: asyncio.Task | None = None
     last_text: str = ""
     base: str | None = None  # a fork's source conversation (main), copied at its first turn
@@ -330,10 +333,16 @@ class Conv:
             return []
         return [t for t in self.queue if (m := EVENT_ID_RE.match(t)) and m.group(1) in self.space.said]
 
+    def waiting_sent(self) -> list[str]:
+        """The messages sent to one of thimble's agents while its turn ran (module_op send), in its queue, oldest
+        first; none for main or a fork."""
+        return [t for t in self.queue if t in self.sent] if self.kind == "agent" else []
+
     def take_waiting(self) -> list[str]:
-        """The analyst's messages that wait for main's running turn, read now, with the results of the turn's tool
-        calls, as Claude Code gives a message typed mid-turn to the model at its next tool call (heard)."""
-        got = self.waiting_messages()
+        """The analyst's messages that wait for main's running turn, or the messages sent to an agent while its turn
+        ran, read now, with the results of the turn's tool calls, as Claude Code gives a message typed mid-turn to the
+        model at its next tool call (heard)."""
+        got = [*self.waiting_messages(), *self.waiting_sent()]
         for text in got:
             self.heard(text)
         return got
@@ -341,9 +350,15 @@ class Conv:
     def heard(self, text: str) -> None:
         """Main read `text`, a message that waited in its queue, in its running turn: it leaves the queue, the
         transcript records it as Claude Code records a message typed mid-turn (a queued_command attachment, which the
-        mirror reads as an event of the turn), and the analyst's line goes into main's chat here (Space.said_line)."""
+        mirror reads as an event of the turn), and the analyst's line goes into main's chat here (Space.said_line). An
+        agent's is a message of its own run, as the transcript records any message thimble sends an agent."""
         with contextlib.suppress(ValueError):
             self.queue.remove(text)
+        if self.kind == "agent":
+            with contextlib.suppress(ValueError):
+                self.sent.remove(text)
+            self.emit({"type": "user", "message": {"role": "user", "content": text}, "origin": {"kind": "coordinator"}})
+            return
         self.emit({"type": "attachment", "attachment": {"type": "queued_command", "prompt": text,
                                                        "origin": {"kind": "task-notification"}}})
         self.space.said_line(text)
@@ -1328,6 +1343,8 @@ async def _agent_loop(conv: Conv) -> None:
     sp = conv.space
     while conv.queue:
         text = conv.queue.pop(0)
+        with contextlib.suppress(ValueError):  # it came after the last tool call of the turn it was sent in
+            conv.sent.remove(text)
         first = conv.transcript is not None and not conv.transcript.path.exists()
         rec: dict[str, Any] = {"type": "user", "message": {"role": "user", "content": text}}
         if not first:
@@ -1342,6 +1359,7 @@ async def _agent_loop(conv: Conv) -> None:
         except asyncio.CancelledError:
             status, report = "stopped", ""
             conv.queue.clear()
+            conv.sent.clear()
             _ended(conv, status, report)
             raise
         _ended(conv, status, report)
@@ -1377,9 +1395,15 @@ async def module_op(c: str, op: str, args: dict[str, Any]) -> dict[str, Any]:
         if conv is None:
             return {"error": "the agent ended with the server that ran it", "gone": True}
         conv.values = dict(args.get("values") or conv.values)
-        conv.queue.append(str(args.get("text") or ""))
+        text = str(args.get("text") or "")
+        conv.queue.append(text)
         queued = conv.running
-        if not queued:
+        if queued:
+            # its running turn reads it at its next tool call (Conv.take_waiting), as main reads a message typed in its
+            # chat, so the message is part of the run that goes on rather than a run of its own after it
+            conv.sent.append(text)
+            conv.arrived.set()
+        else:
             conv.task = _spawn_task(_agent_loop(conv), f"agent:{c}:{conv.id}")
         return {"agentId": conv.id, **({"queued": True} if queued else {})}
     if op == "stop":

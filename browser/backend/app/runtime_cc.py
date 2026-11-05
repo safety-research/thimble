@@ -505,12 +505,13 @@ def _tell_box(conv: Any, why: str) -> None:
 
 
 async def _hand(conv: Any, client: Any, handed: dict[str, str], closing: asyncio.Event) -> None:
-    """The analyst's messages that wait for main's running turn (Conv.waiting_messages), each handed to main's session
-    as it comes (Conv.arrived), under a uuid it echoes once it reads the message (`handed`, _session), until the turn
-    ends (`closing`). A message that cannot be handed on stays in main's queue, for main's next turn."""
+    """The analyst's messages that wait for main's running turn (Conv.waiting_messages), or the messages sent to an
+    agent while its turn runs (Conv.waiting_sent), each handed to the session as it comes (Conv.arrived), under a uuid
+    it echoes once it reads the message (`handed`, _session), until the turn ends (`closing`). A message that cannot be
+    handed on stays in the queue, for the next turn."""
     while not closing.is_set():
         conv.arrived.clear()
-        for text in conv.waiting_messages():
+        for text in [*conv.waiting_messages(), *conv.waiting_sent()]:
             if closing.is_set() or text in handed.values():
                 continue
             uid = str(uuid.uuid4())
@@ -537,7 +538,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     path = conv.state_path("cc")
     reply, failed, box, ran = "", "", "", False
     bash_ids: set[str] = set()
-    handed: dict[str, str] = {}  # by uuid, main's messages handed to the session (_hand) that it has not read yet
+    handed: dict[str, str] = {}  # by uuid, the messages handed to the session (_hand) that it has not read yet
     closing = asyncio.Event()
 
     def results(rs: list[dict[str, Any]]) -> None:
@@ -549,7 +550,7 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
 
     async with ClaudeSDKClient(opts) as client:
         await client.query(text)
-        hand = asyncio.create_task(_hand(conv, client, handed, closing)) if conv.kind == "main" else None
+        hand = asyncio.create_task(_hand(conv, client, handed, closing)) if conv.kind in ("main", "agent") else None
         try:
             # the session's reply; then, while a message handed to it is not read yet, its next turn, which reads it
             while True:
