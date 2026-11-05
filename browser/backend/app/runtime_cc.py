@@ -320,7 +320,8 @@ def settings(spec: Any, bash: bool, tmp: Path | None = None, hosts: list[str] | 
     allowed for the workspace (host_asks.kept), which the sandbox's network then reaches unasked."""
     from . import cc_settings, kernel_wrap, runtime_tools, sdk  # noqa: PLC0415
 
-    out = json.loads(sdk.cli_settings(spec.model, spec.effort or None, "fast" if spec.fast else "standard"))
+    speed = "fast" if getattr(spec, "fast", False) else "standard"
+    out = json.loads(sdk.cli_settings(spec.model, spec.effort or None, speed))
     out["env"] = {**out.get("env", {}), "PATH": runtime_tools.shell_path(), **kernel_wrap.NO_SIDE_WRITES}
     no_write = list(getattr(spec, "no_write", []) or [])
     corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings lets Claude edit the folder
