@@ -417,12 +417,13 @@ def background_cli(monkeypatch, ends: bool = False) -> list[BackgroundCLI]:
     return made
 
 
-@pytest.mark.parametrize("how", ["a new session", "a new chat", "the server's stop"])
+@pytest.mark.parametrize("how", ["a new session", "a new chat", "an API key", "the server's stop"])
 async def test_a_command_main_s_bash_runs_in_the_background_outlives_the_turn_until_main_s_session_ends(on, monkeypatch,
-                                                                                                       how):
+                                                                                                       analyst, how):
     """Claude Code kills the commands Bash ran in the background (`run_in_background`) as it exits, so main's session
     stays open past the turn while one runs, and main's next turn goes on in it; once main's session truly ends (the
-    workspace moved aside for a new session, a new chat, the server's stop) it closes, and the command ends with it."""
+    workspace moved aside for a new session, a new chat, an API key chosen in Settings, the server's stop) it closes,
+    and the command ends with it."""
     made = background_cli(monkeypatch)
     await main_turn("Start the long job.")
     job = made[0].jobs[0]
@@ -434,6 +435,10 @@ async def test_a_command_main_s_bash_runs_in_the_background_outlives_the_turn_un
         await runtime.forget(CORPUS)
     elif how == "a new chat":
         await runtime._spaces[CORPUS].switch(None)
+    elif how == "an API key":
+        api_key(monkeypatch, [])
+        await claude_access.put_route(claude_access.AccessBody(how=claude_access.API_KEY, key="sk-ant-test-key"),
+                                      analyst)
     else:
         await runtime.stop_all()
     assert made[0].closed and job.poll() is not None, f"{how} ends main's session and its background command"

@@ -370,7 +370,7 @@ async def put_route(body: AccessBody, request: Request) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from None
     from . import runtime  # noqa: PLC0415
 
-    runtime.access_changed()
+    await runtime.access_changed()
     return {**status(), "check": await check()}
 
 

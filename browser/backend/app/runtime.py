@@ -1438,11 +1438,14 @@ def _spawn_agent(sp: Space, args: dict[str, Any]) -> dict[str, Any]:
     return {"agentId": agent_id, **({"model": model} if model else {})}
 
 
-def access_changed() -> None:
-    """The way to reach Claude changed: nothing to restart, since each turn reads it anew."""
-    from . import llm  # noqa: PLC0415
+async def access_changed() -> None:
+    """The way to reach Claude changed: nothing to restart, since each turn reads it anew, but once it is no longer
+    Claude Code sign-in, the sessions kept open for main's background commands close, and the commands with them."""
+    from . import llm, runtime_cc  # noqa: PLC0415
 
     llm.forget()
+    if engine() != "cc":
+        await asyncio.gather(*(runtime_cc.close(sp.main) for sp in list(_spaces.values())))
 
 
 def start_line() -> str:
