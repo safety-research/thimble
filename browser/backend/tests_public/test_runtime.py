@@ -11,7 +11,8 @@ from typing import Any
 
 import pytest
 
-from app import agents, claude_access, config, events, llm, runtime, runtime_cc, session, subagents, write_session
+from app import (agents, claude_access, config, events, ledger, llm, runtime, runtime_cc, session, subagents,
+                 write_session)
 
 CORPUS = "mini"
 
@@ -336,10 +337,11 @@ async def test_a_headless_session_s_bash_sandbox_gets_a_short_tmpdir_and_fails_c
 class BackgroundCLI:
     """A headless `claude` whose first turn runs a Bash command in the background: a real process, which lives until the
     session closes, as Claude Code kills its background commands as it exits. `ends` makes the command end between the
-    turns, which Claude Code answers with a turn of its own before it echoes the next prompt."""
+    turns, which Claude Code answers with a turn of its own before it echoes the next prompt; `during` is awaited with
+    the session once the command runs, while the first turn still runs."""
 
-    def __init__(self, options: Any, made: list["BackgroundCLI"], ends: bool) -> None:
-        self.options, self.ends, self.jobs, self.closed = options, ends, [], False
+    def __init__(self, options: Any, made: list["BackgroundCLI"], ends: bool, during: Any = None) -> None:
+        self.options, self.ends, self.during, self.jobs, self.closed = options, ends, during, [], False
         self.prompts: asyncio.Queue = asyncio.Queue()
         self.sent: list[Any] = []  # the prompts it read
         self.stopped: list[str] = []  # the tasks stop_task stopped
@@ -386,6 +388,8 @@ class BackgroundCLI:
         yield AssistantMessage(content=[ToolUseBlock(id="toolu_bg", name="Bash", input={
             "command": "sleep 600", "run_in_background": True})], model="claude-opus-5-5")
         self.jobs.append(subprocess.Popen(["sleep", "600"], start_new_session=True))
+        if self.during is not None:
+            await self.during(self)
         yield SystemMessage(subtype="background_tasks_changed",
                             data={"tasks": [{"task_id": "b1", "task_type": "local_bash"}]})
         yield UserMessage(content=[ToolResultBlock(tool_use_id="toolu_bg", content="Command running in background")])
@@ -414,12 +418,12 @@ class BackgroundCLI:
                 return
 
 
-def background_cli(monkeypatch, ends: bool = False) -> list[BackgroundCLI]:
+def background_cli(monkeypatch, ends: bool = False, during: Any = None) -> list[BackgroundCLI]:
     import claude_agent_sdk as sdk_mod
 
     made: list[BackgroundCLI] = []
     fake_sdk(monkeypatch, [], {})
-    monkeypatch.setattr(sdk_mod, "ClaudeSDKClient", lambda options: BackgroundCLI(options, made, ends))
+    monkeypatch.setattr(sdk_mod, "ClaudeSDKClient", lambda options: BackgroundCLI(options, made, ends, during))
     claude_access.save(claude_access.CLAUDE_CODE, consent=True)
     return made
 
@@ -484,6 +488,41 @@ async def test_a_turn_that_starts_while_main_s_kept_session_closes_goes_on_in_th
         await runtime.rewind_main(CORPUS, next(r["event"] for r in main_records() if runtime._analyst_message(r)))
         assert seen["state"] is False, "the first message: no session is left to resume"
     assert made[0].closed and made[0].jobs[0].poll() is not None
+
+
+@pytest.mark.parametrize("change", ["edits off", "labels off", "edits back on"])
+async def test_a_settings_change_that_lets_main_do_less_closes_its_kept_session_at_once(on, monkeypatch, analyst,
+                                                                                       change):
+    """Taking a permission back leaves no command running with it: a Settings change that lets main do less ("Claude can
+    edit files in this folder" or labels off) closes main's session kept open for a background command at once, not at
+    main's next turn, and the command with it. A change that only widens leaves the command running."""
+    made = background_cli(monkeypatch)
+    if change == "edits back on":
+        ledger.put_settings_route(CORPUS, analyst, {"corpus_edits": False})
+    await main_turn("Start the long job.")
+    job = made[0].jobs[0]
+    ledger.put_settings_route(CORPUS, analyst, {"edits off": {"corpus_edits": False}, "labels off": {"labels": False},
+                                                "edits back on": {"corpus_edits": None}}[change])
+    if change == "edits back on":
+        await asyncio.sleep(0.2)
+        assert not made[0].closed and job.poll() is None, "a change that only widens leaves the command running"
+        await runtime_cc.close(runtime._spaces[CORPUS].main)
+        return
+    await until(lambda: made[0].closed, f"{change} closes main's kept session")
+    assert job.poll() is not None and made[0].stopped == ["b1"] and runtime._spaces[CORPUS].main.cc is None
+
+
+async def test_a_turn_that_ends_after_main_may_do_less_closes_its_session_though_a_background_command_runs(
+        on, monkeypatch, analyst):
+    """Edits turned off while main's turn runs: the turn's session still lets main edit the folder, so it closes as the
+    turn ends, and the background command with it, rather than stay open for the command until main's next turn."""
+    async def edits_off(cli: BackgroundCLI) -> None:
+        ledger.put_settings_route(CORPUS, analyst, {"corpus_edits": False})
+        await asyncio.sleep(0.05)  # what the change starts on the server's loop runs while the turn runs
+
+    made = background_cli(monkeypatch, during=edits_off)
+    await main_turn("Start the long job.")
+    assert made[0].closed and made[0].jobs[0].poll() is not None and runtime._spaces[CORPUS].main.cc is None
 
 
 class ToldFirst:
@@ -740,9 +779,9 @@ async def test_r2_main_s_short_tmpdir_stays_from_turn_to_turn_and_another_agent_
     from types import SimpleNamespace
 
     seen: list[Path] = []
-    monkeypatch.setattr(runtime_cc, "options", lambda conv, spec, pending, tmp: seen.append(tmp))
+    monkeypatch.setattr(runtime_cc, "options", lambda conv, spec, pending, tmp, once: seen.append(tmp))
 
-    async def session(conv: Any, spec: Any, text: str, opts: Any) -> None:
+    async def session(conv: Any, spec: Any, text: str, opts: Any, once: list[str]) -> None:
         return None
 
     monkeypatch.setattr(runtime_cc, "_session", session)

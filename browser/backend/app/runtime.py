@@ -205,6 +205,14 @@ class Spec:
     labels: bool = True
 
 
+def narrows(old: Spec, new: Spec) -> bool:
+    """Whether an agent may do less on `new` than on `old`: a folder it reads or writes, or a tool, taken away, or a
+    private or protected file added."""
+    return not (set(old.read_roots) <= set(new.read_roots) and set(old.write_roots) <= set(new.write_roots)
+                and set(old.builtins) <= set(new.builtins) and set(old.thimble) <= set(new.thimble)
+                and set(new.private) <= set(old.private) and set(new.no_write) <= set(old.no_write))
+
+
 @dataclass
 class TurnEnd:
     status: str  # done, failed, stopped
@@ -1446,6 +1454,32 @@ async def access_changed() -> None:
     llm.forget()
     if engine() != "cc":
         await asyncio.gather(*(runtime_cc.close(sp.main) for sp in list(_spaces.values())))
+
+
+def settings_changed(c: str) -> None:
+    """Settings changed for workspace `c`: when main may do less now than in its session kept open for a background
+    command (narrows, such as "Claude can edit files in this folder" turned off), that session closes at once, and the
+    command with it, so no command keeps a permission taken back; a turn that runs keeps its session only while main
+    may do as much as in it (runtime_cc._session). A change that only widens leaves it to main's next turn
+    (runtime_cc.turn). From any thread: the check runs on the server's loop."""
+    from . import runtime_cc  # noqa: PLC0415
+
+    sp = _spaces.get(c)
+    # while a turn runs the check goes too, as the turn may keep its session just before the change lands
+    if sp is None or sp.main.cc is None and not sp.main.running:
+        return
+
+    async def go() -> None:
+        held = sp.main.cc
+        try:
+            less = held is not None and narrows(held.spec, sp.main.spec())
+        except Exception:  # noqa: BLE001 — what main may do now is unknown, so the session closes as for less
+            log.warning("%s: main's settings could not be read, so its kept session closes", c, exc_info=True)
+            less = True
+        if less:
+            await runtime_cc.close(sp.main)
+
+    _spawn_task(go(), f"settings:{c}")
 
 
 def start_line() -> str:

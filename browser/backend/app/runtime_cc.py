@@ -49,9 +49,13 @@ Background commands. A command Bash runs in the background (`run_in_background`)
 (background_tasks_changed), and main's next turn goes on in it, as the next prompt in a terminal would (Held); it closes
 when a turn ends with none running, when main's settings for a turn change, and when main's session truly ends: a Stop
 or a failure, a new chat, a rewind, the workspace's folder going, another way to reach Claude, the server's stop
-(close). Claude Code runs a turn of its own when such a command ends, and when a session resumes or forks one whose
-command was still running as its `claude` exited, which it tells of that command (task_notification) before it reads
-the prompt: a turn reads such a turn first, and ends only at the result after Claude Code echoed its own prompt.
+(close). A permission taken back never stays with a command that runs: a Settings change that lets main do less closes
+the session at once (runtime.settings_changed), and a turn that ends after one does not keep it; a host the analyst
+allowed once, which Claude Code allows to the session's end and cannot take back, ends with the turn that asked for
+it, as the session closes when that turn ends, or, asked while no turn ran, when main's next turn starts (Held.once).
+Claude Code runs a turn of its own when such a command ends, and when a session resumes or forks one whose command
+was still running as its `claude` exited, which it tells of that command (task_notification) before it reads the
+prompt: a turn reads such a turn first, and ends only at the result after Claude Code echoed its own prompt.
 """
 from __future__ import annotations
 
@@ -114,6 +118,8 @@ class Held:
     stack: contextlib.AsyncExitStack
     tasks: list[Any] = field(default_factory=list)  # its background tasks that run (background_tasks_changed)
     ended: Any = None  # what goes once it closes: its TMPDIR, and the sandbox's folder in the corpus (turn)
+    # the hosts the analyst allowed once in it (options): it then never goes on into another turn (module note)
+    once: list[str] = field(default_factory=list)
 
     async def close(self) -> None:
         try:
@@ -391,7 +397,9 @@ def _chat(conv: Any) -> str | None:
     return agents.MAIN_ID if conv.kind == "main" else session.chat_of_agent(conv.c, conv.agent_id)
 
 
-def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | None = None) -> Any:
+def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | None = None,
+            once: list[str] | None = None) -> Any:
+    """The session's options; its permission callback adds to `once` each host the analyst allows once (Held.once)."""
     from claude_agent_sdk import (ClaudeAgentOptions, HookMatcher, PermissionResultAllow,  # noqa: PLC0415
                                   PermissionResultDeny, SdkMcpTool, create_sdk_mcp_server)
 
@@ -431,7 +439,10 @@ def options(conv: Any, spec: Any, pending: dict[str, list[str]], tmp: Path | Non
             return PermissionResultDeny(message=REFUSED.format(tool=name))
         # the request is the running Bash call's (module note, permissions): the one started last, should two run
         call = next(reversed(shell.values()), None)
-        if await host_asks.ask(conv.c, _chat(conv), str((inp or {}).get("host") or ""), call):
+        host = str((inp or {}).get("host") or "")
+        if await host_asks.ask(conv.c, _chat(conv), host, call):
+            if once is not None and host_asks.rule(host) not in host_asks.kept(conv.c):  # not kept: allowed once
+                once.append(host)
             return PermissionResultAllow()
         return PermissionResultDeny()
 
@@ -510,10 +521,11 @@ async def turn(conv: Any, text: str) -> Any:
     thread forks (Spec.temp), which stays; any other agent's own, removed when the turn ends."""
     spec = conv.spec()
     held = getattr(conv, "cc", None)
-    if held is not None and held.spec == spec:
+    if held is not None and held.spec == spec and not held.once:
         return await _session(conv, spec, text, None)  # the session open since its last turn (module note)
     await close(conv)
     pending: dict[str, list[str]] = {}
+    once: list[str] = []
     kept = workspace_tmp(conv.c) if spec.temp is not None else None
     tmp = kept or short_tmp()
     if tmp is None:
@@ -526,7 +538,7 @@ async def turn(conv: Any, text: str) -> Any:
         _tidy(spec.cwd)
 
     try:
-        return await _session(conv, spec, text, options(conv, spec, pending, tmp))
+        return await _session(conv, spec, text, options(conv, spec, pending, tmp, once), once)
     finally:
         held = getattr(conv, "cc", None)
         if held is None:
@@ -589,8 +601,9 @@ async def _message(text: str, uid: str) -> Any:
     yield {"type": "user", "message": {"role": "user", "content": text}, "parent_tool_use_id": None, "uuid": uid}
 
 
-async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
-    """One turn in a new session on `opts`, or, with none, in `conv`'s session open since its last turn (Held)."""
+async def _session(conv: Any, spec: Any, text: str, opts: Any, once: list[str] | None = None) -> Any:
+    """One turn in a new session on `opts`, whose callback adds to `once` (options), or, with none, in `conv`'s session
+    open since its last turn (Held)."""
     from claude_agent_sdk import AssistantMessage, ClaudeSDKClient, ResultMessage, SystemMessage, UserMessage  # noqa: PLC0415
 
     from . import runtime  # noqa: PLC0415
@@ -615,7 +628,8 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
     held, conv.cc = getattr(conv, "cc", None), None
     if held is None:
         stack = contextlib.AsyncExitStack()
-        held = Held(spec, await stack.enter_async_context(ClaudeSDKClient(opts)), stack)
+        held = Held(spec, await stack.enter_async_context(ClaudeSDKClient(opts)), stack,
+                    once=[] if once is None else once)
     keep = False
     try:
         client = held.client
@@ -682,7 +696,9 @@ async def _session(conv: Any, spec: Any, text: str, opts: Any) -> Any:
                 hand.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await hand
-        keep = ended and not failed and bool(held.tasks) and conv.kind == "main"
+        # kept only while main may do as much as in it, and with no host allowed once (module note)
+        keep = (ended and not failed and bool(held.tasks) and conv.kind == "main" and not held.once
+                and not runtime.narrows(held.spec, conv.spec()))
     finally:
         if keep:
             conv.cc = held

@@ -586,9 +586,10 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
     it out) go to thimble's config
     (userconf.save), which raises userconf.ConfigError for a value it does not take;
     main's model settings and everything else to settings.json, where only what was stored plus the patch is written,
-    never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. Returns the effective
-    settings."""
-    from . import modes, userconf  # noqa: PLC0415 — they import this module
+    never SETTINGS_DEFAULTS, so a changed default takes effect, and RETIRED_KEYS are left out. A change that lets main
+    do less closes main's session kept open for a background command at once (runtime.settings_changed). Returns the
+    effective settings."""
+    from . import modes, runtime, userconf  # noqa: PLC0415 — they import this module
 
     models = settings.get(config.MODELS_KEY) if isinstance(settings.get(config.MODELS_KEY), dict) else {}
     patch = userconf.pane_patch(models, settings.get(modes.SETTING) if isinstance(settings.get(modes.SETTING), dict)
@@ -626,6 +627,7 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
             for role, conf in settings[config.MODELS_KEY].items()}}
     if merged != stored or not path.exists() and settings:
         rewrite_text(path, json.dumps(merged, indent=2, ensure_ascii=False))  # in place: kernels' hide of it holds
+    runtime.settings_changed(c)
     return with_features(merged, c)
 
 
