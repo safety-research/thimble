@@ -516,6 +516,20 @@ def test_beside_the_labels_rules_the_workspace_is_no_evidence(tmp_path: Path):
             assert (r["status"], r["reason"]) == ("failed", OUTSIDE), (file, kind, r["reason"])
 
 
+def test_a_file_cited_through_a_link_to_the_session_folder_shows_by_its_path_in_the_folder(tmp_path: Path):
+    """N39: the session folder ~/traces is a link to a folder on another disk. A quote of one of its files holds by any
+    path that leads there, and the person sees the file by its path in the folder, never one that climbs out of it."""
+    real, home = tmp_path / "disk" / "traces", tmp_path / "home"
+    real.mkdir(parents=True)
+    home.mkdir()
+    (real / "notes.ndjson").write_text(json.dumps({"note": "rolled back at 23:14"}) + "\n")
+    (home / "traces").symlink_to(real)
+    for file, cwd, root in ((home / "traces" / "notes.ndjson", real, real), ("notes.ndjson", home / "traces", real),
+                            (real / "notes.ndjson", home / "traces", home / "traces")):
+        r = check_mark(mark("rolled back at 23:14"), quote(str(file), 1, "rolled back at 23:14"), [], str(cwd), str(root))
+        assert (r["status"], r["evidence"]["file"]) == ("verified", "notes.ndjson"), (file, r)
+
+
 def test_a_quote_in_a_json_document_written_over_many_lines_reads_its_strings_decoded(tmp_path: Path):
     """A line of a JSON document written over many lines holds one member: its string reads decoded, as a JSONL
     record's strings do, so a quote matches the words as they read and shows with its line breaks."""
