@@ -240,7 +240,7 @@ def _row(c: str, chat: str, rec: dict[str, Any]) -> None:
     if not meta_path.is_file():
         return
     agents.append(log_path, {"type": TYPE, "ts": rec["ts"], "id": rec["id"],
-                             **{k: rec[k] for k in ("key", "kind", "text", "details", "agent", "action") if rec.get(k)}})
+                             **{k: rec[k] for k in ("key", "kind", "text", "agent", "action") if rec.get(k)}})
     agents.notify(c, chat)
 
 
