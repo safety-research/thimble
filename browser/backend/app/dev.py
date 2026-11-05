@@ -2988,15 +2988,22 @@ def _soon(make: Callable[[], Awaitable[Any]], name: str) -> None:
 def queue_view(c: str, slug: str, recovered: bool = False) -> None:
     """Queue the build of the proposal `slug` and start what the pool has room for (views.propose, views.retry,
     views.revise, recover_views). A build queued already is left as it is; a change to a view whose builder runs goes to
-    that builder as a message (change_view). The proposal records main's session (`queued_in`), unless `recovered`
-    (recover_views queued it again after a restart): a queued build starts only in that session (_same_main)."""
+    that builder as a message (change_view), and Retry while it runs makes that builder's run the build. The proposal
+    records main's session (`queued_in`), unless `recovered` (recover_views queued it again after a restart): a queued
+    build starts only in that session (_same_main)."""
     from . import module_bridge, views  # noqa: PLC0415
 
     key = (c, slug)
     b = _view_runs.get(key)
     if b is not None:
-        if b.agent:
+        prop = views.read_proposal(c, slug) or {}
+        if b.agent and prop.get("changed"):
             _soon(lambda: change_view(c, slug), f"view-change:{c}:{slug}")
+        elif b.agent and prop.get("status") == "queued":
+            # Retry on a view whose builder still runs (a run the server's runtime began for a message sent to it):
+            # that builder is the build
+            views.update_proposal(c, slug, status="building", error=None)
+            views._emit(c, slug, "building", chat=prop.get("chat"))
         return
     if recovered:
         _recovered.add(key)

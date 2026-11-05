@@ -1225,3 +1225,12 @@ async def test_a_message_s_run_that_begins_before_the_last_run_s_end_is_settled_
     assert _prop(slug)["status"] == "built" and _prop(slug).get("failed_change") is not None
     assert (folder / views.VIEW_HTML).read_text() == "<p>v1</p>"
 
+
+async def test_retry_on_a_view_whose_builder_still_runs_shows_that_build_building(board, bridge, stamp_gate):
+    """A view that failed while its builder went on (a run the runtime began for a message sent to it): Retry makes
+    that run the build, which shows as building, rather than a queued build that never starts."""
+    slug = _propose(asked=True)
+    await _started(slug)
+    views.update_proposal(CORPUS, slug, status="failed", error="problem: the checks did not pass")
+    assert views.retry(CORPUS, slug)["status"] in ("queued", "building")
+    assert _prop(slug)["status"] == "building" and not _prop(slug).get("error")
