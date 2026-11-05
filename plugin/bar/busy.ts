@@ -23,7 +23,8 @@
 //                             draw again at each tick.
 //   busySteps()               the steps running now, by their words, the oldest first.
 //   spinNow($)                the turning glyph's frame as the bar last drew it, for a glyph elsewhere that turns with
-//                             it (a citation being checked: in the reply, and beside `checking` in the tray)
+//                             it (a citation being checked: in the reply, and beside `checking` in the tray; the steps
+//                             row of a side thread's answer on its way: threads/pane.tsx)
 //
 // A job shorter than SHOW_MS never shows, so quick work does not flicker. A failure says itself where it happened
 // (failNotice). The times are the session's clock ($.clock), so a test steps them.
@@ -122,8 +123,8 @@ function spinFrame(): string {
 }
 
 /** The glyph's frame as the busy line last drew it, which the reply draws after a citation being checked
- *  (marks/register.ts) and the tray beside `checking` (tray/tray.ts), so each turns with the others. Reading it makes
- *  the drawing draw again at each tick. */
+ *  (marks/register.ts), the tray beside `checking` (tray/tray.ts) and a side thread's pane on the steps row of its answer
+ *  on its way (threads/pane.tsx), so each turns with the others. Reading it makes the drawing draw again at each tick. */
 export async function spinNow($: Engine): Promise<string> {
   const v = (await $.state.get(BUSY)).value as { frame?: number } | null
   return SPIN[Number(v?.frame ?? 0) % SPIN.length]!

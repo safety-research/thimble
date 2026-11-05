@@ -18,12 +18,13 @@
 //   ❯ why so many links?   about Jun 18       each question after ❯ on the prompt's background, with what it is about
 //
 //   ● 2 steps · python3 count.py              the steps the thread took, on one dim row, without the folders they
-//                                             ran in (threads.mjs stepWords)
+//                                             ran in (threads.mjs stepWords); while the answer is on its way, its ●
+//                                             turns with the bar's glyph, alone before the first step
 //
 //   ● Links peaked that day: 2,994 of …       the answer after ●
 //
 //     [a card it drew]
-//                                             a question at work: the bar says `⠋ answering: <thread>` (bar/busy.ts)
+//                                             a question at work: the bar says `⠋ answering: <thread>` too (bar/busy.ts)
 //   e: show the card · m: add this answer…    the keys' row, as other panes draw keys: e the card whole or not (a
 //                                             card's thread), m (or a click) adds the answer to the main conversation
 //                                             once it answered, and says so after
@@ -34,7 +35,7 @@
 //   ─────────────────────────────────         terminal) the field alone (core/pane.ts shortPane)
 import type { EngineInterface } from 'claude-code'
 
-import { SPIN } from '../bar/busy'
+import { SPIN, spinNow } from '../bar/busy'
 import { failNotice } from '../bar/notice'
 import { cardOffPane, frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
@@ -176,14 +177,20 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
   const out: Any[] = []
   const head = ` ${cut(nameOf(t), w - 8)} `
   out.push(Text({ key: 'conv-head', dimColor: true, wrap: 'truncate-end', children: `──${head}${'─'.repeat(Math.max(2, w - textWidth(head) - 2))}` }))
-  // the newest turns that fit, and always the newest answer with the question before it (the pane scrolls)
+  // a question at work: the steps row of the answer on its way turns with the bar's glyph in place of ●, and stands
+  // alone before its first step, so the pane shows that the thread works while its fork runs one long command (beside
+  // this pane the bar is narrow, and gives up the step's words first: bar/bar.tsx). Read only while the thread runs,
+  // since reading the bar's frame draws the pane again at each tick
+  const spin = t.status === 'running' ? await spinNow($) : ''
   const last = turns.length - 1
+  const working = (i: number) => !!spin && i === last && turns[i]!.role !== 'person' && !turns[i]!.text
+  // the newest turns that fit, and always the newest answer with the question before it (the pane scrolls)
   const always = turns[last]!.role !== 'person' && turns[last - 1]?.role === 'person' ? last - 1 : last
-  let used = 0
+  let used = spin && turns[last]!.role === 'person' ? 2 : 0
   let from = turns.length
   while (from > 0) {
     const x = turns[from - 1]!
-    const h = rowsAt(x.text, w - 2) + 1 + (x.calls?.length ? 2 : 0) + (x.cards?.length ? 8 : 0)
+    const h = rowsAt(x.text, w - 2) + 1 + (x.calls?.length || working(from - 1) ? 2 : 0) + (x.cards?.length ? 8 : 0)
     if (used + h > room && from <= always) break
     used += h
     from--
@@ -204,9 +211,10 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
       continue
     }
     const calls = x.calls ?? []
-    if (calls.length) {
+    if (calls.length || working(i)) {
+      const glyph = working(i) ? spin : '●'
       out.push(Text({ key: `${k}-sgap`, children: ' ' }))
-      out.push(Text({ key: `${k}-steps`, dimColor: true, wrap: 'truncate-end', children: `● ${cut(`${calls.length} step${calls.length === 1 ? '' : 's'} · ${stepWords(calls[calls.length - 1], t.root)}`, w - 4)}` }))
+      out.push(Text({ key: `${k}-steps`, dimColor: true, wrap: 'truncate-end', children: calls.length ? `${glyph} ${cut(`${calls.length} step${calls.length === 1 ? '' : 's'} · ${stepWords(calls[calls.length - 1], t.root)}`, w - 4)}` : glyph }))
     }
     if (x.text) out.push(await answerEl($, els, t, i, x.text, w, `${k}-a`))
     // the cards its fork drew while it answered this question
@@ -215,6 +223,11 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
       else if (meta.anchorRow !== `thread:${t.key}`) out.push(Text({ key: `${k}-c-${meta.id}`, dimColor: true, wrap: 'truncate-end', children: `  ⎿ drew a new version of “${cut(meta.title, 40)}” in the conversation` }))
       else out.push(Box({ key: `${k}-c-${meta.id}`, marginTop: 1, children: [await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: w + 2 } }, meta, { pane: `thread:${t.key}` })] }))
     }
+  }
+  // the question's fork has not written yet: its steps row, the glyph alone
+  if (spin && turns[last]!.role === 'person') {
+    out.push(Text({ key: `conv-t${last + 1}-sgap`, children: ' ' }))
+    out.push(Text({ key: `conv-t${last + 1}-steps`, dimColor: true, wrap: 'truncate-end', children: spin }))
   }
   if (t.status === 'failed') {
     out.push(Text({ key: 'conv-fail-gap', children: ' ' }))
