@@ -13,7 +13,7 @@ import { Composer } from '../../src/chat/Composer.tsx'
 import { MAIN_DEFAULT_MODEL, mainModel } from '../../src/chat/ModelLine.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { dispatch } from '../../src/lib/events.ts'
-import { modelChoices } from '../../src/lib/models.ts'
+import { KNOWN_MODELS, modelChoices } from '../../src/lib/models.ts'
 import type { ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -119,9 +119,9 @@ describe("main's model", () => {
   })
 
   test('its menu still offers Sonnet 5 and Haiku 4.5 where main runs on them or the settings name them, as any model outside the current ones', () => {
-    expect(modelChoices(null, 'claude-sonnet-5')[0]).toBe('claude-sonnet-5')
+    expect(modelChoices(null, 'claude-sonnet-5')).toEqual([...KNOWN_MODELS, 'claude-sonnet-5'])
     expect(modelChoices({ models: { writer: { model: 'claude-sonnet-5', effort: 'high', fast: false } } }, 'claude-opus-5-5')).toContain('claude-sonnet-5')
-    expect(modelChoices(null, 'claude-haiku-4-5-20251001')[0]).toBe('claude-haiku-4-5-20251001')
+    expect(modelChoices(null, 'claude-haiku-4-5-20251001')).toEqual([...KNOWN_MODELS, 'claude-haiku-4-5-20251001'])
     expect(modelChoices({ models: { checks: { model: 'claude-haiku-4-5-20251001', effort: '', fast: false } } }, 'claude-opus-5-5')).toContain('claude-haiku-4-5-20251001')
   })
 
