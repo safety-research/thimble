@@ -1038,6 +1038,38 @@ async def test_write_starts_the_writer_in_the_server(on, monkeypatch):
         conv.transcript.path.name.replace(".jsonl", ".meta.json")).is_file()
 
 
+async def test_a_message_sent_to_an_agent_while_it_works_is_read_at_its_running_turn_s_next_step(on, monkeypatch):
+    """A follow-up sent to one of thimble's agents while its turn runs (module_op send), such as the analyst's message in
+    a view build's thread, is read at the turn's next tool call, after the call's results, as main reads a message typed
+    in its chat (Conv.take_waiting): part of the run that goes on, not a run of its own after it."""
+    seen: dict[str, Any] = {}
+
+    def agent() -> Any:
+        return next(c for c in runtime._spaces[CORPUS].convs.values() if c.kind == "agent")
+
+    def look_then_hear(body: dict[str, Any]) -> list[Block]:
+        seen["send"] = asyncio.get_running_loop().create_task(
+            runtime.module_op(CORPUS, "send", {"agent": agent().id, "text": "Also give each section a date."}))
+        return call("Glob", {"pattern": "*"})
+
+    def answer(body: dict[str, Any]) -> list[Block]:
+        seen["next"] = json.dumps(body["messages"][-1])
+        return text("Written, each section dated.")
+
+    client = api_key(monkeypatch, [look_then_hear, answer])
+    runtime.ensure(CORPUS)
+    ans = await write_session.start(CORPUS, "report", "Write it up.")
+    conv = runtime._spaces[CORPUS].convs[str(ans.agent_id)]
+    await conv.task
+    assert (await seen["send"]).get("queued"), "it came while the turn ran"
+    assert "Also give each section a date." in seen["next"] and "tool_result" in seen["next"], seen["next"]
+    assert len(client.bodies) == 2 and not conv.queue and not conv.sent
+    assert (subagents.agent(CORPUS, str(ans.agent_id)) or {}).get("run", 0) == 0, "no run of its own after the turn"
+    said = [json.loads(ln) for ln in conv.transcript.path.read_text().splitlines()]
+    assert any(r.get("type") == "user" and r.get("message", {}).get("content") == "Also give each section a date."
+               and (r.get("origin") or {}).get("kind") == "coordinator" for r in said), "its transcript records it"
+
+
 async def test_typed_start_tools_start_at_once(on, monkeypatch):
     api_key(monkeypatch, [call("start_writing", {"doc": "report", "request": "Write it up."}), text("ok"),
                           text("The report is written.")])

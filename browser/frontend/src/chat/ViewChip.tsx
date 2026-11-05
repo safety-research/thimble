@@ -7,7 +7,9 @@
 // Failed (a view the analyst asked for, or one nobody asked for after its repairs), or stopped when the analyst's
 // Claude Code session ended: ✕ with why in its tooltip, Retry, and Report a problem (shell/ProblemReport); Retry is a
 // click that starts a builder through thimble's plugin, and its menu picks the run's model and effort (Settings' dev
-// row by default). A start that did not happen says why, with Start it where the kind takes it (chat/Refused). A
+// row by default). A build whose builder stopped without passing its checks (`checks_failed`) offers no Retry, which
+// would build the same files again: the analyst's reply in its thread, which a click on its name opens, goes on with
+// the builder. A start that did not happen says why, with Start it where the kind takes it (chat/Refused). A
 // dropped proposal (a view proposal the analyst rejected, or an orientation's from before 0.8.0 that the analyst stopped)
 // is not drawn (lib/proposals isDropped). A built view whose last change failed (`failed_change`) shows the same as a
 // failed one. A view proposal (`suggested`), which waits on the chat's card, is a plain name until it is accepted.
@@ -143,6 +145,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
   const changeFailed = status === 'built' && p?.failed_change != null
   const refused = !!p?.refused && !pending && status !== 'built'
   const failed = status === 'failed' || changeFailed || refused
+  const retryable = !p?.checks_failed
   const ran = p?.values?.model ? { model: p.values.model, effort: p.values.effort ?? '' } : p?.model ? { model: p.model, effort: p.effort ?? '' } : null
   const values = picked ?? ran ?? dev ?? { model: '', effort: '' }
   const open = () => {
@@ -219,12 +222,12 @@ export function ViewChip({ ws, slug, name, className }: Props) {
             <Button size="sm" className="view-chip-start-it" busy={retrying} aria-label={`Start ${name}`} onClick={(e) => (e.stopPropagation(), startIt())}>
               Start it
             </Button>
-          ) : !refused || actions.includes('try-again') ? (
+          ) : (!refused && retryable) || actions.includes('try-again') ? (
             <Button size="sm" className="view-chip-retry" busy={retrying} aria-label={`${refused ? 'Try again' : 'Retry'} ${name}`} onClick={(e) => (e.stopPropagation(), retry())}>
               {refused ? 'Try again' : 'Retry'}
             </Button>
           ) : null}
-          {!refused && <BuildMenu ws={ws} name={name} values={values} onPick={setPicked} />}
+          {!refused && retryable && <BuildMenu ws={ws} name={name} values={values} onPick={setPicked} />}
           {!refused && p?.stopped_by !== 'quit' && <ReportProblemButton compact description={failureText(changeFailed ? `The change to the view ${name} failed.` : `The view ${name} did not build.`, p?.error)} focus={p?.chat ? [p.chat] : []} className="view-chip-report" />}
         </>
       )}

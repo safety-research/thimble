@@ -508,9 +508,9 @@ export interface Proposal {
   failed_change?: string
   /** a change to a built view is being made (backend views.revise); the view stays open at the version it last passed */
   revision?: boolean
-  /** the builder's run that takes a message about the built view, while it has not changed the view (backend
-   * dev.build_started); its thread's Stop stops it (dev.stop_answer) */
-  answering?: { agent: string; run?: number; text?: string } | null
+  /** its builder stopped without passing the view's checks (backend dev._settle): its chip offers no Retry, which
+   * would build the same files again; the analyst's reply in its thread goes on with the builder */
+  checks_failed?: boolean | null
   chat?: string | null
   attempts?: number
   /** the review of the built view's pictures (backend view_review) */

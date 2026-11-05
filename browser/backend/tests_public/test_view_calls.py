@@ -391,7 +391,7 @@ async def test_a_request_the_page_drops_cancels_its_call(ws, kernels):
 async def test_a_check_s_reader_call_has_a_limit_and_its_kernel_settles_after_it(ws, kernels, monkeypatch):
     seen = []
 
-    async def body(c, slug, locators, *, shot_dir, picture):
+    async def body(c, slug, locators, *, shot_dir, picture, draft=False):
         seen.append(views._call_limit.get())
         try:
             await views.reader_call(c, slug, "records", {"steps": 400})

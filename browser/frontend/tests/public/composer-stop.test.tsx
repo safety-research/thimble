@@ -110,11 +110,11 @@ describe('what the composer stops (composerStopOf)', () => {
     expect(composerStopOf('dev', meta('v1', 'running'), null, null, view('building', undefined, 'v2'))).toBeNull()
   })
 
-  test("a view's thread while its builder's run takes a message about the built view: the build's Stop", () => {
-    const view = { slug: 'posts', status: 'built', chat: 'v1', answering: { agent: 'a1', run: 2 } } as Pick<Proposal, 'slug' | 'status' | 'chat' | 'review' | 'answering'>
+  test("a view's thread while its builder's run takes a message about the built view, which builds meanwhile: the build's Stop", () => {
+    const view = { slug: 'posts', status: 'building', chat: 'v1' } as Pick<Proposal, 'slug' | 'status' | 'chat' | 'review'>
     expect(composerStopOf('dev', meta('v1', 'running'), null, null, view)).toEqual({ kind: 'view', slug: 'posts', review: false, label: 'Stop the build' })
     expect(composerStopOf('dev', meta('v1', 'done'), null, null, view)).toBeNull()
-    expect(composerStopOf('dev', meta('v1', 'running'), null, null, { ...view, answering: null })).toBeNull()
+    expect(composerStopOf('dev', meta('v1', 'running'), null, null, { ...view, status: 'built' })).toBeNull()
   })
 
   test("a step: its parent's Stop while the parent runs, since its composer sends to the parent", () => {

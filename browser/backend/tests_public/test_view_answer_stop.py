@@ -1,5 +1,6 @@
-"""A view whose builder answers a message, stopped and asked again: each run starts from a copy of the view as it is, so
-its end tells a change from no change and puts a failed change back (N3)."""
+"""A view whose builder answers a message, stopped and asked again: each run is a change to the view from a copy of it
+as it is, building while the builder works, so its end tells a change from no change and puts a failed change back
+(N3)."""
 from __future__ import annotations
 
 import asyncio
@@ -17,13 +18,14 @@ def _sent(bridge) -> str:
 
 async def _settled(slug: str) -> dict:
     await asyncio.sleep(0.05)
-    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"), "not settled")
+    await _until(lambda: (CORPUS, slug) not in dev._settling and _prop(slug).get("status") != "building", "not settled")
     return _prop(slug)
 
 
 async def test_stop_an_answer_then_ask_again(board, bridge, gates, monkeypatch):
     """Stop the run that answers a question (no change), then ask another: the second is answered by a run of its own,
-    no rebuild, no error, the chat not left running, nothing stale in the stop bookkeeping."""
+    the view building while each runs and as it was after, no error, the chat not left running, nothing stale in the
+    stop bookkeeping."""
     slug = _propose(asked=True)
     agent = await _built_in_two_attempts(slug, monkeypatch)
     views.message(CORPUS, slug, "Why is run 3 missing?")
@@ -31,9 +33,9 @@ async def test_stop_an_answer_then_ask_again(board, bridge, gates, monkeypatch):
     subagents.run_again(CORPUS, agent, "coordinator")
     p = _prop(slug)
     chat = str(p.get("chat") or "")
-    print("WHILE ANSWERING:", {k: p.get(k) for k in ("status", "answering", "chat")},
+    print("WHILE ANSWERING:", {k: p.get(k) for k in ("status", "revision", "chat")},
           "chat status:", (agents.meta_or_none(CORPUS, chat) or {}).get("status"))
-    assert p["status"] == "built" and p.get("answering")
+    assert p["status"] == "building" and p.get("revision")
     assert (agents.meta_or_none(CORPUS, chat) or {}).get("status") == "running", "the thread's composer needs a running chat"
     assert views.stop_build(CORPUS, slug) == {"ok": True}
     await _until(lambda: bridge.ops("stop"), "no TaskStop through the module")
@@ -43,24 +45,25 @@ async def test_stop_an_answer_then_ask_again(board, bridge, gates, monkeypatch):
                                                   "message_sent")},
           "chat status:", (agents.meta_or_none(CORPUS, chat) or {}).get("status"),
           "stopping:", dict(dev._view_stopping))
-    assert p["status"] == "built" and not p.get("error") and p["attempt"] == 2 and not p.get("revision")
+    assert p["status"] == "built" and not p.get("error") and not p.get("revision")
     assert (agents.meta_or_none(CORPUS, chat) or {}).get("status") != "running"
     assert (CORPUS, agent) not in dev._view_stopping
     views.message(CORPUS, slug, "And where is run 4?")
     await _until(lambda: len(bridge.ops("send")) >= 2, "the second message never reached the builder")
     subagents.run_again(CORPUS, agent, "coordinator")
     p = _prop(slug)
-    assert p["status"] == "built" and (p.get("answering") or {}).get("text") == "And where is run 4?"
+    assert p["status"] == "building" and p.get("change") == "And where is run 4?"
     subagents.run_ended(CORPUS, agent, "done", "Run 4 was filtered out.", source="handback")
     p = await _settled(slug)
     print("AFTER SECOND ANSWER:", {k: p.get(k) for k in ("status", "error", "attempt", "revision", "change")})
-    assert p["status"] == "built" and not p.get("revision") and not p.get("error") and p["attempt"] == 2
+    assert p["status"] == "built" and not p.get("revision") and not p.get("error")
     assert _sent(bridge).count("Why is run 3 missing?") == 1 and _sent(bridge).count("And where is run 4?") == 1
 
 
 async def test_message_written_while_a_stop_is_under_way(board, bridge, gates, monkeypatch):
     """Stop the answering run and write a second message before the stopped run has ended: each message reaches the
-    builder once, the second is answered by the next run as a message, and the view is as it was."""
+    builder once, the second, written while the view builds, as a change to it, which the next run answers, and the view
+    is as it was."""
     slug = _propose(asked=True)
     agent = await _built_in_two_attempts(slug, monkeypatch)
     views.message(CORPUS, slug, "Why is run 3 missing?")
@@ -73,24 +76,25 @@ async def test_message_written_while_a_stop_is_under_way(board, bridge, gates, m
     subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
     await asyncio.sleep(0.1)
     p = _prop(slug)
-    print("AFTER STOPPED END:", {k: p.get(k) for k in ("status", "error", "answering", "message", "message_sent",
+    print("AFTER STOPPED END:", {k: p.get(k) for k in ("status", "error", "change", "message", "message_sent",
                                                         "revision")}, "sends:", len(bridge.ops("send")),
           "starts:", len(bridge.ops("start")))
     assert p["status"] == "built" and not p.get("revision") and not p.get("error")
     subagents.run_again(CORPUS, agent, "coordinator")  # the builder runs again with the second message
     p = _prop(slug)
-    print("NEXT RUN:", {k: p.get(k) for k in ("status", "answering", "message", "message_sent")})
-    assert p["status"] == "built" and (p.get("answering") or {}).get("text") == "And where is run 4?"
+    print("NEXT RUN:", {k: p.get(k) for k in ("status", "revision", "message", "message_sent")})
+    assert p["status"] == "building" and p.get("revision")
     subagents.run_ended(CORPUS, agent, "done", "Run 4 was filtered out.", source="handback")
     p = await _settled(slug)
-    assert p["status"] == "built" and not p.get("revision") and p["attempt"] == 2
+    assert p["status"] == "built" and not p.get("revision")
     assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>"
     assert _sent(bridge).count("Why is run 3 missing?") == 1 and _sent(bridge).count("And where is run 4?") == 1
 
 
 async def test_message_after_stop_whose_run_changes_and_fails(board, bridge, gates, monkeypatch):
-    """As above, but the run that takes the second message writes a failing page and ends without finish_view: the
-    view must be put back as it was (v1), as a failed change is."""
+    """As above, but the run that takes the second message writes a failing page and ends without finish_view, and
+    again after what the checks found went back to it: the view must be put back as it was (v1), as a failed change
+    is."""
     slug = _propose(asked=True)
     agent = await _built_in_two_attempts(slug, monkeypatch)
     v_before = (views.read_view(CORPUS, slug) or {}).get("version")
@@ -105,6 +109,9 @@ async def test_message_after_stop_whose_run_changes_and_fails(board, bridge, gat
     print("COPY KEPT BEFORE SECOND RUN:", views._revision_dir(CORPUS, slug).is_dir())
     subagents.run_again(CORPUS, agent, "coordinator")
     _draft(slug, "<p>FAIL v2</p>")
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    await _until(lambda: "problem: the page says FAIL" in _sent(bridge), "what the checks found never went back")
+    subagents.run_again(CORPUS, agent, "coordinator")
     subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
     p = await _settled(slug)
     html = (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text()
