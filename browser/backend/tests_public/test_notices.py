@@ -210,6 +210,16 @@ def test_a_long_reason_is_not_cut_at_an_abbreviation_or_inside_parentheses():
         "It failed (i.e. Nothing ran). … Retry.")
 
 
+def test_a_parenthesis_in_quotes_or_code_does_not_join_the_sentences_after_it():
+    """Only a "(" at the start of a word opens words in parentheses: the "'('" of an error does not, so the fix at the
+    end of a long failure still shows."""
+    said = ("The build failed: SyntaxError: '(' was never closed (app.js, line 3). "
+            + "Every write there was refused, by the file tool and by the shell alike. " * 6
+            + "To finish, copy views-work/posts into extension/views/posts (then Retry).")
+    assert notices.reason(said)[0] == ("The build failed: SyntaxError: '(' was never closed (app.js, line 3). … To "
+                                       "finish, copy views-work/posts into extension/views/posts (then Retry)")
+
+
 async def test_a_notice_cut_short_keeps_its_whole_text_as_details(sent):
     whole = "The label x couldn't label 5 of 9 records: " + "a reason that goes on, " * 30 + "and ends."
     n = notices.post(CORPUS, kind="label", text=whole, key="label:x")

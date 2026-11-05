@@ -95,6 +95,9 @@ DETAILS_CHARS = 4000  # a notice's `details`, its whole text when `text` was sho
 SENTENCE_END = re.compile(r"[.!?][)\]\"'’”]*$")  # the end of a whole sentence, which a text cut short lacks
 # a stop that ends an abbreviation rather than a sentence ("1 record has no readable text (e.g. Runs/a.jsonl)")
 ABBREVIATION = re.compile(r"(?:^|[\s(])(?:e\.g|i\.e|etc|vs|cf)\.$", re.I)
+# a "(" that opens words in parentheses: one at the start of a word, not one of code or quotes ("f(x", "'(' was never
+# closed")
+PAREN = re.compile(r"(?<!\S)\(")
 SETTINGS = {"label": "Open Settings", "do": "settings"}
 
 
@@ -113,10 +116,10 @@ def _short(text: Any, limit: int) -> str:
 
 def _sentences(t: str) -> list[str]:
     """The sentences of `t`, a text on one line: split after a stop before a capital, a backtick or a "(", but not after
-    an abbreviation (ABBREVIATION) nor inside parentheses, whose words belong to the sentence around them."""
+    an abbreviation (ABBREVIATION) nor inside parentheses (PAREN), whose words belong to the sentence around them."""
     out: list[str] = []
     for part in re.split(r"(?<=[.!?])\s+(?=[A-Z`(])", t):
-        if out and (ABBREVIATION.search(out[-1]) or out[-1].count("(") > out[-1].count(")")):
+        if out and (ABBREVIATION.search(out[-1]) or len(PAREN.findall(out[-1])) > out[-1].count(")")):
             out[-1] = f"{out[-1]} {part}"
         else:
             out.append(part)
