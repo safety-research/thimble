@@ -37,8 +37,8 @@ PLACE_KEYS = ("notebook", "pos")
 TEXT_MIMES = ("text/plain", "text/markdown")
 
 # the caller a thimble tool runs for and the task running the call, set by tools.call around the handler (acting); unset
-# on the browser's routes. A task the call starts (the orientation's follower, a job) inherits the context, so the author
-# holds only in the calling task itself or in a worker thread (asyncio.to_thread, where there is no current task).
+# on the browser's routes. A task the call starts (a job) inherits the context, so the author holds only in the calling
+# task itself or in a worker thread (asyncio.to_thread, where there is no current task).
 AUTHOR: contextvars.ContextVar[tuple[str, Any] | None] = contextvars.ContextVar("thimble_canvas_author", default=None)
 
 _lock = threading.Lock()
@@ -316,7 +316,7 @@ def _record(c: str, cell: dict[str, Any], what: str | None) -> tuple[tuple | Non
         h = _digest(parts)
         line = {"ts": _now(), "op": op, "card": cid, "group": cell.get("notebook"), "by": by,
                 "changed": changed, "h": h, "state": state}
-        ledger.append_jsonl_locked(path, line)  # the shim and the hooks' backend calls write it in terminal mode
+        ledger.append_jsonl_locked(path, line)
         if op == "deleted":
             _last.pop(key, None)
         else:

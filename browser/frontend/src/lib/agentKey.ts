@@ -1,10 +1,10 @@
-// ⌘ while typing: with the caret in text that can go to the agent (a report block, a slide's or the story's text, a
-// card's question), holding ⌘ (Ctrl off a Mac, lib/platform) tints that text in the accent, and ⌘↵ sends it to main as
-// a request made at that place (a `card` event, prompts/main.md). Text registers as a zone: the element that holds the
-// focus while it is typed in, and what ⌘↵ would send from it now. ⌘ here is the shortcuts' key (lib/platform
-// modKeyHeld) whichever key Settings picks for asking. The ⌘ pointer (pointer/CmdPointer) keeps the mouse: once the
-// mouse moves with ⌘ held the tint goes, since the analyst is pointing or dragging. A shortcut (⌘ with another key)
-// shows no tint: the tint waits TINT_DELAY_MS after ⌘ goes down and goes at the next key.
+// ⌘ while typing: with the caret in text that can go to the agent (a report block, a card's question), holding ⌘ (Ctrl
+// off a Mac, lib/platform) tints that text in the accent, and ⌘↵ sends it to main as a request made at that place (a
+// `card` event, prompts/main.md). Text registers as a zone: the element that holds the focus while it is typed in, and
+// what ⌘↵ would send from it now. ⌘ here is the shortcuts' key (lib/platform modKeyHeld) whichever key Settings picks
+// for asking. The ⌘ pointer (pointer/CmdPointer) keeps the mouse: once the mouse moves with ⌘ held the tint goes, since
+// the analyst is pointing or dragging. A shortcut (⌘ with another key) shows no tint: the tint waits TINT_DELAY_MS
+// after ⌘ goes down and goes at the next key.
 import { api } from './api'
 import { bus } from './bus'
 import { isMacPlatform, isModKey, modKeyHeld } from './platform'

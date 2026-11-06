@@ -2,7 +2,7 @@
 // know of, with an easy fix. Every open notice shows in the foreground, in a strip above the composer of whichever chat
 // is open (NoticeStrip), under the view proposal card's place, and stays there across thread switches until the
 // analyst dismisses it (×) or a fix that worked clears it. Each is one line in the warning's colors: the agent it
-// happened to in bold ("Orientation", "View build: Agent Network"), the failure and, when the fix is a command
+// happened to in bold ("View build: Agent Network"), the failure and, when the fix is a command
 // (`/login`, `thimble server restart`), the command in code, Show more when the server shortened the words to fit and
 // kept them whole (`details`), which shows them all in place (Show less goes back), and Open for the chat it happened
 // in when another one is shown; then its fix as buttons under the words, and ×. A fix that went through dismisses the notice (a new failure brings a new one); one

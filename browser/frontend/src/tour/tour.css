@@ -315,9 +315,6 @@
   padding-top: 0;
   margin-top: 16px;
 }
-body[data-cmd] .tour-ex .tour-try {
-  cursor: var(--cmd-cursor, pointer);
-}
 .tour-ex .refchip-value {
   cursor: pointer;
 }

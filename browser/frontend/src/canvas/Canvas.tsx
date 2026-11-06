@@ -359,7 +359,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         void loadChats()
       }, REFETCH_DEBOUNCE_MS)
     }
-    const offs = [bus.on('cell', later), bus.on('chat', later), bus.on('orient', later), bus.on('filter', () => void loadFilters())]
+    const offs = [bus.on('cell', later), bus.on('chat', later), bus.on('filter', () => void loadFilters())]
     return () => {
       offs.forEach((f) => f())
       if (timer != null) window.clearTimeout(timer)
@@ -1189,23 +1189,13 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (p?.kind === 'cell') id = p.cellId
     else if (p?.kind === 'group') id = p.groupId
     else if (p?.kind === 'concept') id = data.cells.find((c) => (c.payload as { concept?: unknown } | undefined)?.concept === p.conceptId)?.id ?? null
-    // a label the workspace holds with no card of its own (the orientation's, backend concepts.apply_scoped) opens its
-    // review in the side panel; one not listed yet may be a label whose card is on its way, and is waited for
+    // a label the workspace holds with no card of its own opens its review in the side panel; one not listed yet may be
+    // a label whose card is on its way, and is waited for
     if (p?.kind === 'concept' && !id && concepts.has(p.conceptId)) {
       pendingRef.current = null
       pendingSince.current = 0
       setDetail(null)
       setLabelPanel(p.conceptId)
-      return
-    }
-    // orientation scratch work is not on the board (backend notebook.canvas): the analyst is told so and the board opens
-    // on the deck instead
-    if (p?.kind === 'cell' && id && data.hidden?.includes(id)) {
-      bus.emit('toast', { text: 'This card is scratch work of an older orientation, which is not on the canvas.', kind: 'info' })
-      const deck = openingFrame(board, lay)
-      pendingRef.current = deck ? `group:${deck}` : null
-      pendingSince.current = 0
-      bump((n) => n + 1)
       return
     }
     // a card or frame not on the board yet (the re-read under way) is waited for a while; one that never arrives is

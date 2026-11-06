@@ -18,7 +18,7 @@ export const WAITING_TEXT = 'Waiting for you'
 
 export interface ThreadNode {
   id: string
-  /** the row's text: main, orient, why-the-spike */
+  /** the row's text: main, why-the-spike */
   name: string
   /** the full name the collapsed card shows: main/why-the-spike, dev/group-board-by-round; `name` when absent */
   path?: string
@@ -164,10 +164,6 @@ export function attention(nodes: readonly ThreadNode[], current: string, starter
     waiting: nodes.filter((n) => n.waiting).length,
   }
 }
-
-/** How many threads want attention: running, or holding a reply the analyst has not read (the current one is being
- * read). Pure. */
-export const activeCount = (nodes: readonly ThreadNode[], current: string): number => nodes.filter((n) => n.running || (n.unread && n.id !== current)).length
 
 /** `nodes` in the order `kept` lists them, those it does not know after, in their own order: the open tree holds the
  * order it opened with, so rows do not move under the pointer as activity comes in. Pure. */
@@ -466,5 +462,3 @@ function MoreButton({ label, open, onOpen }: { label: string; open: boolean; onO
     </>
   )
 }
-
-export default ThreadTree

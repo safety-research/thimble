@@ -26,5 +26,3 @@ export function Switch({ checked, onChange, label, className, disabled, ref, ...
     </button>
   )
 }
-
-export default Switch

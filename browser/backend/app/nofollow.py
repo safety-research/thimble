@@ -78,10 +78,9 @@ LOCK_SUFFIX = ".lock"
 
 
 def lock_file(path: PathLike) -> Path:
-    """The lock file of the store at `path`, the one every process that writes the store flocks (ledger.locked,
-    calls_file). For a store in a workspace, <workspace>/locks/<the store's path in the workspace>.lock: every lock of
-    a workspace lies in its locks folder (kernel_wrap.LOCKS_DIR), which no kernel can see, so no card's code can hold
-    one. A store elsewhere keeps its lock beside it: `<path>.lock` beside a file, `<path>/.lock` inside a folder."""
+    """The lock file of the store at `path`, the one every process that writes the store flocks (ledger.locked). For a
+    store in a workspace, <workspace>/locks/<the store's path in the workspace>.lock: every lock of a workspace lies in
+    its locks folder (kernel_wrap.LOCKS_DIR), which no kernel can see, so no card's code can hold one. A store elsewhere keeps its lock beside it: `<path>.lock` beside a file, `<path>/.lock` inside a folder."""
     p = Path(path)
     sp = split(p)
     if sp is not None and len(sp[1]) > 1:

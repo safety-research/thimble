@@ -34,11 +34,6 @@ export async function tempDir($: Engine): Promise<string> {
   return dir
 }
 
-/** The session's temp folder when a load of the plugin in this session found it already, else ''. */
-export async function keptTempDir($: Engine): Promise<string> {
-  return (await $.state.get(TEMP)).value || ''
-}
-
 /** Claude Code's own temp folder, as a real path: `claude-<uid>/` in CLAUDE_CODE_TMPDIR, where hooks/path.ts keeps it,
  *  when it is a folder this user owns and no link. Claude Code's Bash sandbox lets a command write only there and in
  *  the working folder, and gives it that folder as its TMPDIR, not tempDir, so the files such a command makes for thimble

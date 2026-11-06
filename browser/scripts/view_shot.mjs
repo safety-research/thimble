@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A view's page loaded headless, for a view's checks, its review and the screenshot tool (backend/app/views.py
-// shoot_states), and a video's film for the frames the writer looks at (backend/app/video.py), in the headless Chromium
-// of the frontend's Playwright (frontend/node_modules, which scripts/install.sh installs).
+// shoot_states), in the headless Chromium of the frontend's Playwright (frontend/node_modules, which scripts/install.sh
+// installs).
 //   node scripts/view_shot.mjs --frame <html> --states <json> [--viewport <w>x<h>] [--media <url>]
 // --states names a JSON list of states, [{out, open, actions?, viewport?}], each loaded on a fresh page of one browser,
 // PAGES_AT_ONCE at a time:
@@ -49,8 +49,7 @@ const SWEEP_MS = 10_000 // the most one choice of the sweep waits for its page
 const SWEEP_MAX = 40 // the choices one sweep tries
 const MIN_MS = 1200
 const HARD_MS = 25_000
-// a fetch or marks request still unanswered at HARD_MS is waited for this long, since a view's data calls have no time
-// limit (backend views.ANSWER_WAIT_S)
+// a fetch or marks request still unanswered at HARD_MS is waited for this long: a view's data calls have no time limit
 const ANSWER_MS = 600_000
 const READY_MS = 10_000
 const PAGES_AT_ONCE = 3 // states loaded side by side, each on its own page

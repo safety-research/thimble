@@ -10,8 +10,7 @@ tools it calls:
 
 Each runs only for the agent registered for the key its call runs as (`ticket:<id>`), itself and not a descendant of it,
 whose run goes now: never for main (its Spec names no session of main's) or another agent. finish_ticket blocks while
-its gates run, is cancelled when its caller drops the call (tools.Spec.drop_stops: Claude Code closes it when the agent
-is stopped), registers a pass only for a caller still running, and after the last attempt runs nothing. An agent still
+its gates run, is cancelled when its agent is stopped, registers a pass only for a caller still running, and after the last attempt runs nothing. An agent still
 running view_tools.FINISH_GRACE_S after its pass or its last attempt is stopped through the module, and its end settles
 the ticket as the tool said (dev.ticket_ended reads the outcome the tool kept on the ticket)."""
 from __future__ import annotations

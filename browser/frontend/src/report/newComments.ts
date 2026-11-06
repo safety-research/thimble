@@ -1,8 +1,8 @@
 // New comments: a check that is on ended a run that left comments the analyst has not looked at. The Comments control
 // of the surface they are on carries the accent dot, named "New comments" (Checks.tsx NewCommentsDot): for the cards
 // the canvas's Comments button (canvas/Controls.tsx CommentsButton), for the documents the top bar's Comments
-// (shell/TopBar.tsx) and, for its own document's runs, the head of the Comments pane beside the slides, the story or a
-// page (Checks.tsx CommentsPane), so a run that commented on the Report alone leaves the canvas's button as it was. A
+// (shell/TopBar.tsx) and, for its own document's runs, the head of the Comments pane beside a page (Checks.tsx
+// CommentsPane), so a run that commented on the Report alone leaves the canvas's button as it was. A
 // run counts once it ends (the stream's `check` record, then the checks' list). The runs looked at are kept per browser
 // and workspace (localStorage), so a reload shows the dot again until the analyst looks: the first time a browser reads
 // a workspace's checks, every run that has ended counts as looked at, so only later runs are news. A run is looked at

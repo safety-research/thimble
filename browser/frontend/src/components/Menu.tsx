@@ -318,5 +318,3 @@ function MenuTip({ id, anchor, text }: { id: string; anchor: HTMLElement; text: 
   )
   return <Tip id={id} text={text} place={place} />
 }
-
-export default Menu

@@ -10,7 +10,6 @@
 // one column in the order they were made. What a thread made and no one has placed, a loose card or a frame of its
 // cards, stands right of the card the thread is about (or of the collapsed frame that card is folded in), as does a
 // thread's frame about a loose card. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
-import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
 
@@ -775,7 +774,6 @@ export const stepZoom = (scale: number, dir: 1 | -1): number =>
 
 export const panBy = (view: View, dx: number, dy: number): View => ({ ...view, x: view.x + dx, y: view.y + dy })
 export const toPlane = (view: View, px: number, py: number): Pos => ({ x: (px - view.x) / view.scale, y: (py - view.y) / view.scale })
-export const toScreen = (view: View, x: number, y: number): Pos => ({ x: x * view.scale + view.x, y: y * view.scale + view.y })
 
 export interface WheelLike {
   deltaX: number
@@ -969,23 +967,11 @@ export function scopeForUnit(unit: string | undefined): FilterScope | null {
 /** Whether `filters[scope]` is exactly this concept and value. */
 export const filterIs = (filters: Filters | null | undefined, scope: FilterScope, concept: string, value: string): boolean => filters?.[scope]?.concept === concept && filters?.[scope]?.value === value
 
-/** The chip tone for a `whoMade` word: thimble accent, orient warning, the analyst and anyone else neutral. */
-export const WHO_TONE: Readonly<Record<string, ChipTone>> = { thimble: 'accent', orient: 'warning' }
-export const whoTone = (who: string): ChipTone => WHO_TONE[who] ?? 'neutral'
-
-/** `you` for the analyst, `thimble` for a chat, `orient` for the orientation, else the creator as written. */
-export function whoMade(createdBy: string | null | undefined): string {
-  const c = createdBy ?? ''
-  if (!c || c === 'user' || c === 'terminal') return 'you'
-  if (c.startsWith('chat:')) return 'thimble'
-  return c
-}
-
 /** The thread a card came from: its chat, and its name as the card's foot shows it. */
 export interface CellThread {
   /** the chat to go back to; null when the maker is not a chat */
   chatId: string | null
-  /** `main`, a thread's name, or an agent's role (`orient`), in mono */
+  /** `main`, a thread's name, or an agent's role (`writer`), in mono */
   name: string
   /** main or a thread: a chat the analyst can write to */
   writable: boolean
@@ -993,7 +979,7 @@ export interface CellThread {
 
 /**
  * The analyst's own cards and a chat's cards say which thread made them (the analyst's say `main`, an agent's its role:
- * `orient`); anything else is named as written and has no chat to open.
+ * `writer`); anything else is named as written and has no chat to open.
  */
 export function cellThread(createdBy: string | null | undefined, chats: ReadonlyMap<string, Pick<ChatMeta, 'kind' | 'role' | 'title'>>): CellThread {
   const c = createdBy ?? ''

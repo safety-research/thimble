@@ -23,7 +23,7 @@
 // on, none. It is set at each load of the plugin, which a change of the setting starts, and before each Bash call.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { keptTempDir, tempDir } from '../core/home'
+import { tempDir } from '../core/home'
 import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
 
@@ -77,19 +77,8 @@ async function keepClaudeTemp($: Engine): Promise<boolean> {
   if (await $.env.get('CLAUDE_CODE_TMPDIR')) return true
   const uname = await $.process.run(['uname', '-s'])
   if (uname.exitCode !== 0) return false
-  const root = claudeTempRoot(String(uname.stdout).trim(), { TMPDIR: await startTmp($), TMP: await $.env.get('TMP'), TEMP: await $.env.get('TEMP') })
+  const root = claudeTempRoot(String(uname.stdout).trim(), { TMPDIR: await $.env.get('TMPDIR'), TMP: await $.env.get('TMP'), TEMP: await $.env.get('TEMP') })
   return !(await $.env.set('CLAUDE_CODE_TMPDIR', root)).deny
-}
-
-/** The TMPDIR Claude Code started with. thimble 0.10.5 and before moved TMPDIR into its temp folder and left
- *  CLAUDE_CODE_TMPDIR unset, so after a reload of the plugin over such a load, TMPDIR is the temp folder $.state keeps
- *  (core/home.ts tempDir): then the TMPDIR that load replaced, the folder around `thimble/`, or none when the temp
- *  folder is the home's tmp/. */
-async function startTmp($: Engine): Promise<string | undefined> {
-  const tmp = await $.env.get('TMPDIR')
-  const kept = await keptTempDir($)
-  if (!tmp || !kept || tmp.replace(/\/+$/, '') !== kept) return tmp
-  return kept.endsWith('/thimble') ? kept.slice(0, -'/thimble'.length) || '/' : undefined
 }
 
 /** THIMBLE_LABELS_OFF as the Labels setting has it now: the line of prompts/labels-off.md while it is off, unset while
@@ -102,7 +91,7 @@ async function labelsOff($: Engine): Promise<void> {
 export const registerPath: Register = on => {
   // the cwd matcher keeps this hook apart from the other modules' (one hook per event and matcher in a module)
   on('session.start', { cwd: /^\// }, async ($, e, next) => {
-    // CLAUDE_CODE_TMPDIR whether TMPDIR moves or not: after a reload over thimble 0.10.5, TMPDIR has moved already
+    // CLAUDE_CODE_TMPDIR whether TMPDIR moves or not
     const kept = await keepClaudeTemp($).catch(() => false)
     const r = await next(e)
     try {

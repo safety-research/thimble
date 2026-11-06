@@ -5,10 +5,7 @@ model or corpus wrote (shown in sandboxed frames with `Origin: null`) may reach 
 
 - OriginCheck refuses a state-changing request (any method but GET, HEAD, OPTIONS) whose Origin is present and not this
   server's own (or, under THIMBLE_DEV, the Vite origin), or which has no Origin and Sec-Fetch-Site cross-site. A request
-  with neither header (CLI, MCP shim, hooks' curl) passes. The plugin's routes (/api/events and under it) refuse, on
-  every method, any request that carries an Origin or a Sec-Fetch-* header, which a browser sends and the shim and hooks
-  never do: the shim's subscription GET attaches the session it names, the watcher's pull takes main's events, and even
-  the app's own page (an <img> in markdown a model wrote) sends GETs.
+  with neither header (the CLI) passes.
 - SecurityHeaders gives every response nosniff, frame-ancestors 'self' (and X-Frame-Options) and a CSP unless the
   route set its own: APP_CSP on the built UI, API_CSP on /api.
 - dev_origins: the Vite origins that CORS and OriginCheck accept under THIMBLE_DEV.
@@ -96,17 +93,13 @@ class OriginCheck:
         return origin.lower() in self.extra or same_origin(origin, host)
 
     async def __call__(self, scope, receive, send) -> None:
-        plugin = is_plugin_route(scope.get("path", ""))
-        if scope["type"] != "http" or (scope.get("method", "GET") in SAFE_METHODS and not plugin):
+        if scope["type"] != "http" or scope.get("method", "GET") in SAFE_METHODS:
             await self.app(scope, receive, send)
             return
         h = Headers(scope=scope)
         origin = h.get("origin")
         site = h.get("sec-fetch-site")
-        if plugin:
-            browser = origin is not None or any(k.startswith("sec-fetch-") for k in h.keys())
-            why = "a web page may not reach the plugin's routes" if browser else None
-        elif origin is not None:
+        if origin is not None:
             why = None if self.allowed(origin, h.get("host", "")) else f"a page at {origin} may not change state here"
         else:
             why = "a cross-site page may not change state here" if site == "cross-site" else None
@@ -122,11 +115,6 @@ class OriginCheck:
 
 def is_api(path: str) -> bool:
     return path == "/api" or path.startswith("/api/")
-
-
-def is_plugin_route(path: str) -> bool:
-    """The routes only the plugin's shim and hooks call (events.py), which OriginCheck guards on every method."""
-    return path == "/api/events" or path.startswith("/api/events/")
 
 
 class SecurityHeaders:

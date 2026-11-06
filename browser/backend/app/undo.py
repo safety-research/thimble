@@ -1,21 +1,16 @@
 """Undo and redo over the workspace's changes, whoever made them.
 
 A step is one change to a card (recorded by canvas_history.record via notebook._emit: add, delete, edit, move,
-resize;
-a code change keeps the outputs on either side, RUN_FIELDS) or one saved edit of a document's text
+resize; a code change keeps the outputs on either side, RUN_FIELDS) or one saved edit of a document's text
 (report_types.write_doc/write_frame), or a label's delete (concepts.delete_concept_route), whose files wait in
 TRASH_NAME/<id> until Undo restores them or the step leaves the journal. Other changes to labels, groups and frames are
-not undoable. Steps made inside batching() share
-a
-`batch` (an orientation follow-up), and one Undo reverts the whole batch. Steps of a session thimble started carry
-its
-THIMBLE_SESSION; while it runs, Undo passes over them, refusing when one of them changed the same target above.
+not undoable. Steps of a session thimble started carry its THIMBLE_SESSION; while it runs, Undo passes over them,
+refusing when one of them changed the same target above.
 
 The journal, workspaces/<c>/undo.jsonl, holds `step`, `undo`, `redo` and `ran` lines, replayed into the two stacks
 and
-rewritten to MAX_STEPS per stack past MAX_LINES lines. In terminal mode a second process writes it (`thimble-run`, whose
-runs fill in `ran` lines), so each line is appended under the journal's lock (ledger.locked), and the stacks held in
-memory are replayed again when the file is not as this process left it. POST /ws/{c}/undo and /redo apply a step inside `applying()`,
+rewritten to MAX_STEPS per stack past MAX_LINES lines. Each line is appended under the journal's lock (ledger.locked),
+and the stacks held in memory are replayed again when the file is not as this process left it. POST /ws/{c}/undo and /redo apply a step inside `applying()`,
 so those writes make no step of their own; GET /ws/{c}/undo names {undo, redo, held}."""
 from __future__ import annotations
 
@@ -56,7 +51,6 @@ DOC_VOLATILE = {"comments", "locked", "lock_reverts", "generation", "generated_a
                 "partial", "ts", "by", "actor", "was_on"}
 
 _APPLYING: contextvars.ContextVar[bool] = contextvars.ContextVar("thimble_undo_applying", default=False)
-_BATCH: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar("thimble_undo_batch", default=None)
 # (THIMBLE_SESSION, the task running the call) of a session's tool call (acting_session); the session holds only in the
 # calling task itself or in a worker thread, as in canvas_history.author
 _SESSION: contextvars.ContextVar[tuple[str, Any] | None] = contextvars.ContextVar("thimble_undo_session", default=None)
@@ -79,18 +73,6 @@ def applying() -> Iterator[None]:
 
 def is_applying() -> bool:
     return _APPLYING.get()
-
-
-@contextmanager
-def batching(batch: tuple[str, str] | None) -> Iterator[None]:
-    """Stamp the steps made inside with `batch`, (id, label), the one change they are part of (module note, batches);
-    None stamps nothing."""
-    token = _BATCH.set(batch) if batch else None
-    try:
-        yield
-    finally:
-        if token is not None:
-            _BATCH.reset(token)
 
 
 @contextmanager
@@ -120,12 +102,6 @@ def _acting() -> str | None:
     key, task = held
     now = _task()
     return key if now is None or task is None or now is task else None
-
-
-def current_batch() -> tuple[str, str] | None:
-    """The batch that steps made here are stamped with (batching), for work queued now that writes later in another
-    task, such as the links job (module note, batches)."""
-    return _BATCH.get()
 
 
 def log_path(c: str) -> Path:
@@ -268,9 +244,6 @@ def push(c: str, step: dict[str, Any]) -> None:
         with _lock, ledger.locked(log_path(c)):
             undo, redo = _load(c)
             step = {"type": "step", "id": secrets.token_hex(4), "ts": _now(), **step}
-            batch = _BATCH.get()
-            if batch and "batch" not in step:
-                step["batch"], step["batch_label"] = batch
             session = _acting()
             if session and "session" not in step:
                 step["session"] = session
@@ -286,24 +259,14 @@ def push(c: str, step: dict[str, Any]) -> None:
 
 
 def _label(step: dict[str, Any]) -> str:
-    return str(step.get("batch_label") or step["label"]) if step.get("batch") else str(step["label"])
+    return str(step["label"])
 
 
 def _run_of(stack: list[dict[str, Any]], top: int | None = None) -> list[dict[str, Any]]:
-    """The steps one undo or redo applies from `stack` at `top` (its top by default) down, top first: that step, and
-    with a batch every step under it with the same batch (module note, batches)."""
+    """The steps one undo or redo applies from `stack`: the step at `top` (its top by default), or none."""
     if not stack:
         return []
-    at = len(stack) - 1 if top is None else top
-    first = stack[at]
-    if not first.get("batch"):
-        return [first]
-    out = []
-    for step in reversed(stack[:at + 1]):
-        if step.get("batch") != first["batch"]:
-            break
-        out.append(step)
-    return out
+    return [stack[len(stack) - 1 if top is None else top]]
 
 
 def _running(c: str, stack: list[dict[str, Any]]) -> set[str]:
@@ -317,17 +280,16 @@ def _running(c: str, stack: list[dict[str, Any]]) -> set[str]:
 
 
 def session_name(key: str) -> str:
-    """A THIMBLE_SESSION as the analyst reads it: the orientation, the writer of the report, the critique, a check."""
+    """A THIMBLE_SESSION as the analyst reads it: the writer of the report, a check."""
     kind, _, rest = str(key).partition(":")
     if kind == "writer":
         return f"the writer of the {rest}" if rest else "the writer"
-    return {"orient": "the orientation", "critique": "the critique", "check": "a report check"}.get(kind, f"the session {key}")
+    return {"check": "a report check"}.get(kind, f"the session {key}")
 
 
 def _pick(c: str, stack: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
-    """(the steps one undo reverts, top first; why it cannot, or None): the newest step no running session made, with
-    its
-    batch, refused when a running session's step above it changed the same card or document."""
+    """(the steps one undo reverts; why it cannot, or None): the newest step no running session made, refused when a
+    running session's step above it changed the same card or document."""
     live = _running(c, stack)
     at = next((i for i in range(len(stack) - 1, -1, -1) if stack[i].get("session") not in live), None) if live else len(stack) - 1
     if at is None:
@@ -342,34 +304,13 @@ def _pick(c: str, stack: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], st
 
 
 def labels(c: str) -> dict[str, str | None]:
-    """{undo, redo, undo_run, held}: the label of the step or batch each would apply, the batch the undo would revert
-    (`<chat>/<run>`), and why a running session holds the undo; each None when absent."""
+    """{undo, redo, held}: the label of the step each would apply, and why a running session holds the undo; each None
+    when absent."""
     with _lock:
         undo, redo = _load(c)
         group, held = _pick(c, undo) if undo else ([], None)
         first = group[0] if group else None
-        return {"undo": _label(first) if first else None, "redo": _label(redo[-1]) if redo else None,
-                "undo_run": str(first["batch"]) if first and first.get("batch") else None, "held": held}
-
-
-def batch_steps(c: str, batch: str) -> list[dict[str, Any]]:
-    """Every step the journal holds with the batch `batch`, oldest first, whichever stack it is on now: what a
-    follow-up of the orientation changed (orient_session counts them)."""
-    try:  # as _load reads it
-        text = nofollow.read_text(log_path(c))
-    except (OSError, ValueError, HTTPException):
-        return []
-    out: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for raw in text.splitlines():
-        try:
-            r = json.loads(raw)
-        except ValueError:
-            continue
-        if isinstance(r, dict) and r.get("type") == "step" and r.get("batch") == batch and r.get("id") not in seen:
-            seen.add(str(r.get("id")))
-            out.append(r)
-    return out
+        return {"undo": _label(first) if first else None, "redo": _label(redo[-1]) if redo else None, "held": held}
 
 
 def forget(c: str | None = None) -> None:
@@ -647,11 +588,10 @@ def _apply(c: str, step: dict[str, Any], forward: bool) -> None:
 
 
 def undo(c: str, expect: tuple[str, str] | None = None) -> dict[str, Any]:
-    """Revert the top step of the undo stack, or its batch, passing over the steps of a running session; 409 when there
-    is
-    none, a running session holds it, or nothing of it can be reverted (then it is dropped). With `expect` (kind,
-    target), only when that step is the one it reverts, else 409 and nothing changes: the terminal's undo of a label's
-    delete (`thimble act label-undelete`), which must not revert a later change."""
+    """Revert the top step of the undo stack, passing over the steps of a running session; 409 when there is none, a
+    running session holds it, or nothing of it can be reverted (then it is dropped). With `expect` (kind,
+    target), only when that step is the one it reverts, else 409 and nothing changes, so that it never reverts a later
+    change."""
     with _lock:
         stack, redo = _load(c)
         if not stack:
@@ -681,8 +621,8 @@ def undo(c: str, expect: tuple[str, str] | None = None) -> dict[str, Any]:
 
 
 def redo(c: str) -> dict[str, Any]:
-    """Apply the top step of the redo stack again, or the batch it starts; 409 when there is none or nothing of it can
-    be applied (which drops it)."""
+    """Apply the top step of the redo stack again; 409 when there is none or nothing of it can be applied (which drops
+    it)."""
     with _lock:
         stack, redo_ = _load(c)
         if not redo_:

@@ -7,10 +7,7 @@
 //   cancel    the page dropped a fetch, so its reader's call is cancelled; closing the frame or loading another page in
 //             it cancels every fetch still running
 //   cite      a ⌘-click inside the frame opens the pointer's box on that element
-//   wheel     in a card's frame, a wheel turn its page did not take, turned again on the frame (wheelOver), so the
-//             canvas pans or zooms as over any other card
 //   navigate  another place, opened the way a chip opens it (lib/teleport)
-//   size      the height the page needs, used when the frame sizes to its content (`fit`)
 //   reveal    a box of the page to bring into view: the boxes around the frame scroll to it (revealBox), and the
 //             canvas pans to it (bus revealBox)
 //   anchors   the data-anchor refs the page shows, answered with `labels`: the marks of its records (labels.ts
@@ -33,12 +30,6 @@
 // plus ready, error, point and cmd (for the ⌘ pointer). A new ref is sent as a new `open` without reloading the page.
 // The page and every call it makes are of the view's `version`, so the page stays as it was loaded while the view
 // changes (backend views.VERSIONS_SUBDIR).
-// A card of a card type (`card`, backend cardtypes.py) loads the type's page, which gets `init` with what the card
-// stored once it is ready and says `settled` once it has drawn it; its fetches go to the type's records route under the
-// card's labels, its `open` names the record ref as it is (with `pick` to open it in full), and its height stays within
-// the type's range. The page's `setQuery` says how the analyst reshaped the card, as a patch of its call's arguments
-// (onQuery). Every `open` of a view carries `query`: the card it was opened from with its arguments, or null, which
-// drops them; a view's `setQuery` null says the page dropped them itself (onQuery).
 // A page thimble draws itself (`host`, the File browser's Timeline mode) loads the document the host gives, its fetches
 // are answered by the host with no reader of a view, its `open` names the ref as it is, and it keeps its Colour by under
 // `slug`, which names no view.
@@ -46,7 +37,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { viewFonts, viewStyle, withFrameStyle } from '../lib/frame'
-import { shotScript } from '../lib/frameShot'
 import { getAskKey, onAskKey } from '../lib/platform'
 import { recordOf } from '../lib/refs'
 import { notePress } from '../lib/surfaces'
@@ -55,14 +45,12 @@ import { useTheme } from '../lib/theme'
 import { token } from '../lib/vizTheme'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { cmdCursors } from '../pointer/cursor'
-import type { Concept, LabelRow, ViewOpen, ViewQuery } from '../lib/types'
+import type { Concept, LabelRow, ViewOpen } from '../lib/types'
 import { callKey, inGesture, NO_GESTURE, runLabelCall, type ViewLabelActions } from './labelCalls'
 import { pageLabelList, pageLabels, pagePalette, viewMarks, withKeeps, type Keep, type LabelFilter, type PageLabelItem, type ViewMark } from './labels'
 import { labelsArrived, wantRecordLabels, watchPathLabels } from './marks'
 
 const P = 'thimble:'
-const FIT_MIN = 80
-const FIT_MAX = 1600
 const STATE_WAIT_MS = 400 // how long a page has to say what the analyst is looking at
 const PROGRESS_MS = 1000 // how often a running fetch's progress is asked for
 
@@ -93,8 +81,6 @@ export interface ViewerFrameProps {
   /** the analyst opened the view on `path` (Open in), sent as `open`'s picked */
   pathPicked?: boolean
   title: string
-  /** the frame is as tall as its page (a card) rather than filling its box (Files) */
-  fit?: boolean
   /** the labels that are on, drawn over the records the page shows */
   labels?: readonly Concept[]
   /** the Files label filter, which the view keeps its records by, with every label by id to name it */
@@ -123,17 +109,6 @@ export interface ViewerFrameProps {
   restore?: ViewState | null
   /** filled with what the frame's owner can ask of it */
   handle?: RefObject<ViewerFrameHandle | null>
-  /** a card of a card type, in place of the view `slug` names (slug is then the type) */
-  card?: CardFrame
-  /** a card's page has drawn what it was given */
-  onSettled?: () => void
-  /** a card's page asks for its call's arguments to change (the patch), or for none (null); a view's page dropped the
-   * card's arguments it was opened with (null) */
-  onQuery?: (patch: Record<string, unknown> | null) => void
-  /** in a card, the record `targetRef` names is opened in full rather than lit */
-  targetPick?: boolean
-  /** a view opened from a card: the card and its arguments, which the page draws its records by */
-  query?: ViewQuery | null
   /** a page thimble draws itself, in place of the view `slug` names (slug then only keeps its Colour by) */
   host?: FrameHost
 }
@@ -143,20 +118,6 @@ export interface ViewerFrameProps {
 export interface FrameHost {
   page: () => Promise<string>
   records: (query: unknown, signal: AbortSignal) => Promise<unknown>
-}
-
-/** A card of a card type drawn in the frame: the card's id, its type, how it is drawn (on the canvas, full size or for
- * the card check's picture), what its code stored, its width and the type's height range. `key` names what it stored:
- * the page is sent `init` again only when the key, the mode or the width changes. */
-export interface CardFrame {
-  id: string
-  type: string
-  mode: 'card' | 'full' | 'render'
-  data: unknown
-  args: Record<string, unknown>
-  width: number
-  size: [number, number]
-  key: string
 }
 
 /** A quoted passage: the record ref it sits in and its text. */
@@ -420,13 +381,12 @@ function useViewLabels(
   return useMemo(() => ({ add, see, reset, ready }), [add, see, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onHidden, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query, host }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onHidden, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, host }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const hosted = useRef(host)
   hosted.current = host
   const isHosted = !!host
   const [page, setPage] = useState<string | null>(null)
-  const [height, setHeight] = useState<number | null>(null)
   const { resolved, key } = useTheme()
   const ready = useRef(false)
   const target = useRef(targetRef)
@@ -442,18 +402,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   const restoring = useRef(restore ?? null)
   const asked = useRef(new Map<number, (s: ViewState | null) => void>())
   const seq = useRef(0)
-  const drawn = useRef(card)
-  drawn.current = card
-  const settledFn = useRef(onSettled)
-  settledFn.current = onSettled
-  const queryFn = useRef(onQuery)
-  queryFn.current = onQuery
-  const pick = useRef(targetPick)
-  pick.current = targetPick
-  const viewQuery = useRef(query)
-  viewQuery.current = query
-  const queryKey = query ? JSON.stringify(query) : ''
-  const cardType = card?.type
 
   // the page's fetches still running, by the page's id: what drops the request, the call's name, the progress timer.
   // A call's name is unique for the frame's life, since a new page in the frame counts its fetches from 1 again.
@@ -481,21 +429,20 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     let alive = true
     ready.current = false
     const own = hosted.current
-    ;(own ? own.page() : cardType ? api.cardTypeFrame(ws, cardType) : api.viewFrame(ws, slug, version))
+    ;(own ? own.page() : api.viewFrame(ws, slug, version))
       .then((doc) => alive && setPage(doc))
       .catch((e: Error) => alive && (noPage.current ? noPage.current(e.message) : report.current?.(`the view's page did not load: ${e.message}`)))
     void viewFonts().then((f) => alive && setFonts(f))
     return () => {
       alive = false
     }
-  }, [ws, slug, version, cardType, isHosted])
+  }, [ws, slug, version, isHosted])
   // the theme's tokens are read when the page is built, so a theme change reloads the page with the new colours; the
   // page waits for the app's faces so it is drawn once, in them
   // the Colour by choice kept for the view is read as the page is built, so the page starts on it; the page's later
-  // choices are kept (the `colour` message) without building it again. A card's page draws itself for a ⌘-click's
-  // picture of the card (lib/frameShot)
+  // choices are kept (the `colour` message) without building it again
   const doc = useMemo(
-    () => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts + (card ? shotScript() : colourScript(readStorage<unknown>(colourKey(ws, slug), null))))),
+    () => (page == null || fonts == null ? null : withFrameStyle(page, viewStyle(resolved) + fonts + colourScript(readStorage<unknown>(colourKey(ws, slug), null)))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [page, fonts, resolved, key], // key: the tokens are read again when the paper or the accent changes
   )
@@ -505,7 +452,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   const all = useMemo(() => pageLabelList(byId.values(), resolveToken, first), [byId, first, resolved, key])
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const palette = useMemo(() => pagePalette(resolveToken), [resolved, key])
-  const marks = useViewLabels(ws, slug, version, labels, filter, filterFiles, byId, all, palette, post, !card && !isHosted)
+  const marks = useViewLabels(ws, slug, version, labels, filter, filterFiles, byId, all, palette, post, !isHosted)
   const actions = useRef(labelActions)
   actions.current = labelActions
   const known = useRef(byId)
@@ -560,16 +507,11 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
     hidden.current = { page: null, reader: 0 }
     turn.current += 1
   }, [doc, marks, stopCalls])
-  const sendInit = () => {
-    const c = drawn.current
-    if (c) post({ type: P + 'init', mode: c.mode, data: c.data, args: c.args, width: c.width, card: c.id, key: c.key })
-  }
   // the page with no record named: the file the view was opened on, else its own start
-  const bare = (): ViewOpen => (path && !drawn.current ? { ref: null, path, ...(pathPicked ? { picked: true } : {}) } : { ref: null })
+  const bare = (): ViewOpen => (path ? { ref: null, path, ...(pathPicked ? { picked: true } : {}) } : { ref: null })
   const sendOpen = async (r: string | undefined) => {
     let open = bare()
-    if (drawn.current && r) open = { ref: r, target: { ref: r, pick: !!pick.current } } as ViewOpen
-    else if (hosted.current && r) open = { ref: r, ...(path ? { path } : {}) }
+    if (hosted.current && r) open = { ref: r, ...(path ? { path } : {}) }
     else if (r) {
       try {
         open = await api.viewOpen(ws, slug, r, version)
@@ -579,8 +521,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
       if (open.error) report.current?.(`${r}: ${open.error}`)
     }
     const q = quoted.current
-    const withQuery = drawn.current ? open : { ...open, query: viewQuery.current ?? null }
-    if (target.current === r) post({ type: P + 'open', open: withQuery, quote: q && q.record === r ? q : undefined })
+    if (target.current === r) post({ type: P + 'open', open, quote: q && q.record === r ? q : undefined })
   }
   // A newer version's page opens where the analyst was: at the record the page showed, when this version knows that
   // place, else where the ref it was given names; and on no record when the page showed none, as once they closed the
@@ -588,9 +529,9 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   // rest of what they were looking at is put back.
   const reopen = async (st: ViewState) => {
     const at = st.ref && st.ref !== target.current ? await api.viewOpen(ws, slug, st.ref, version).catch(() => null) : null
-    if (at && !at.error) post({ type: P + 'open', open: { ...at, query: viewQuery.current ?? null } })
+    if (at && !at.error) post({ type: P + 'open', open: at })
     else if (st.ref) await sendOpen(target.current)
-    else post({ type: P + 'open', open: { ...bare(), query: viewQuery.current ?? null } })
+    else post({ type: P + 'open', open: bare() })
     post({ type: P + 'restore', state: st })
   }
 
@@ -605,12 +546,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   useEffect(() => {
     if (ready.current) void sendOpen(targetRef)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [targetRef, quote?.text, targetPick, queryKey, path, pathPicked])
-  // a card run again, or drawn in another mode or width: a new `init`, no reload
-  useEffect(() => {
-    if (ready.current) sendInit()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card?.key, card?.mode, card?.width])
+  }, [targetRef, quote?.text, path, pathPicked])
 
   useEffect(() => {
     const onMessage = async (e: MessageEvent) => {
@@ -622,7 +558,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           ready.current = true
           post({ type: P + 'key', key: pageKey.current })
           marks.ready()
-          sendInit()
           const st = restoring.current
           restoring.current = null
           if (st) void reopen(st)
@@ -639,9 +574,8 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
         }
         case P + 'fetch': {
           const id = Number(d.id)
-          const c = drawn.current
           const own = hosted.current
-          const f = { ctrl: new AbortController(), call: `${frameId}-${++callSeq.current}`, view: !c && !own, timer: null as number | null }
+          const f = { ctrl: new AbortController(), call: `${frameId}-${++callSeq.current}`, view: !own, timer: null as number | null }
           const askedUnder = filterNow.current
           const askedTurn = turn.current
           calls.current.set(id, f)
@@ -654,7 +588,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
             }, PROGRESS_MS)
           try {
             const key = typeof d.key === 'string' ? d.key : undefined
-            const res = own ? { data: await own.records(d.query, f.ctrl.signal) } : c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal, key, frame: frameId, turn: askedTurn })
+            const res = own ? { data: await own.records(d.query, f.ctrl.signal) } : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal, key, frame: frameId, turn: askedTurn })
             if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data })
             const left = 'hidden' in res ? res.hidden : undefined
             if (f.view && left !== undefined && askedUnder === filterNow.current && askedTurn === turn.current && left !== hidden.current.reader) {
@@ -685,9 +619,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
         case P + 'point':
           bus.emit('pointHover', { rect: d.rect ? toPage(frame, d.rect) : null })
           return
-        case P + 'wheel':
-          if (drawn.current) wheelOver(frame, d as FrameWheel)
-          return
         case P + 'reveal':
           if (!d.rect) return
           revealBox(frame, toPage(frame, d.rect))
@@ -701,17 +632,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           return
         case P + 'error':
           report.current?.(String(d.message ?? 'the view failed'))
-          return
-        case P + 'size': {
-          const [lo, hi] = drawn.current?.size ?? [FIT_MIN, FIT_MAX]
-          if (typeof d.height === 'number' && Number.isFinite(d.height)) setHeight(Math.min(hi, Math.max(lo, Math.ceil(d.height))))
-          return
-        }
-        case P + 'settled':
-          settledFn.current?.()
-          return
-        case P + 'setQuery':
-          queryFn.current?.(d.patch && typeof d.patch === 'object' && Object.keys(d.patch).length ? (d.patch as Record<string, unknown>) : null)
           return
         case P + 'anchors':
           marks.see(d.seen)
@@ -740,7 +660,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           tellHidden()
           return
         case P + 'colour': {
-          if (drawn.current || !d.state || typeof d.state !== 'object') return
+          if (!d.state || typeof d.state !== 'object') return
           const text = JSON.stringify(d.state)
           if (text.length <= COLOUR_MAX) writeStorage(colourKey(ws, slug), d.state)
           return
@@ -768,8 +688,6 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
       allow="fullscreen"
       srcDoc={doc}
       title={title}
-      style={fit && height ? { height } : undefined}
-      data-shot={card ? '' : undefined}
     />
   )
 }

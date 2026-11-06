@@ -30,7 +30,7 @@ export interface ReportPageProps {
   onSaved: (doc: Writeup) => void
 }
 
-/** The canvas's cards and groups, read again when a card or a group changes, and when an orientation ends. */
+/** The canvas's cards and groups, read again when a card or a group changes. */
 export function useCanvas(ws: string): { cells: Cell[]; groups: Group[] } {
   const [state, setState] = useState<{ cells: Cell[]; groups: Group[] }>({ cells: [], groups: [] })
   useEffect(() => {
@@ -53,7 +53,6 @@ export function useCanvas(ws: string): { cells: Cell[]; groups: Group[] } {
       bus.on('wsEvent', (ev) => {
         if (ev.type === 'notebook' || ev.type === 'group' || ev.type === 'canvas') later()
       }),
-      bus.on('orient', later),
     ]
     return () => {
       live = false

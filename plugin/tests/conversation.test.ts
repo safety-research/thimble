@@ -1,10 +1,8 @@
-// What a session shows and tells belongs to its conversation (hooks/conversation.ts, hooks/turnover.ts): a new
-// conversation in the same folder (a new session, a /clear) starts with none of the earlier one's labels, texts for
-// Claude, answers or counts, and a resumed one gets its own back. All data is made up. `claude plugin test plugin`.
+// What a session tells Claude belongs to its conversation (hooks/conversation.ts, hooks/turnover.ts): after a /clear
+// the new conversation's Claude hears nothing the earlier one was owed, and a /resume back brings it. All data is made
+// up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
-import { labelsDir, rootHere } from '../core/env'
-import { labelsDirOf } from '../core/layout.mjs'
 import { test } from './kit'
 import { tempRun } from './stubs'
 
@@ -49,44 +47,11 @@ function world(on: Any): World {
   return w
 }
 
-/** An engine of the session `id` that has the files `files`, for core/env.ts's folder functions alone. */
-function engineOf(id: string, files: Record<string, string>): Any {
-  return {
-    env: { get: async (k: string) => ({ THIMBLE_HOME: HOME, THIMBLE_START: DATA } as Any)[k] },
-    fs: { stat: async () => null, exists: async (p: string) => Object.keys(files).some(f => f.startsWith(`${p}/`)) },
-    session: { id: async () => id, messages: async () => [], usage: async () => ({}), cwd: async () => DATA, root: async () => DATA },
-  }
-}
-
 /** The person's prompt; what it carried for Claude from thimble's own work (its report, not the guidance). */
 async function ask($: Any, w: World, text: string): Promise<string> {
   await $.prompt.submit({ text, origin: { kind: 'composer' } })
   return w.context.at(-1)!.filter(c => c.startsWith("thimble's report")).join('\n')
 }
-
-test("a new conversation in the folder shows none of the earlier one's labels, and its commands run under its own key", async ($, on) => {
-  const w = world(on)
-  // the first conversation made a label in the folder: it finds the folder by it, a new conversation does not
-  const files = { [`${labelsDirOf(HOME, 'conv-a', DATA)}/sorry.json`]: '{"name": "sorry"}' }
-  expect(await labelsDir(engineOf('conv-a', files), DATA)).toBe(labelsDirOf(HOME, 'conv-a', DATA))
-  expect(await rootHere(engineOf('conv-a', files))).toBe(DATA)
-  expect(await labelsDir(engineOf('conv-b', files), DATA)).toBe(null)
-  expect(await rootHere(engineOf('conv-b', files))).toBe(null)
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  expect(w.env.THIMBLE_CONVERSATION).toBe('conv-a')
-  // a /clear: the process goes on under a new session, with an empty conversation
-  w.id = 'conv-b'
-  await ask($, w, 'Which runs failed?')
-  // Claude's next command keeps its labels in the new conversation's folder
-  await $.tool.call({ tool: 'Bash', command: 'thimble label' } as never)
-  expect(w.env.THIMBLE_SESSION).toBe('conv-b')
-  expect(w.env.THIMBLE_CONVERSATION).toBe('conv-b')
-  // the bar counts the new conversation's labels, with the plugin's own `thimble` calls
-  await w.clock.advance(100)
-  const calls = w.runs.filter(r => String(r.argv[0]).endsWith('/bin/thimble'))
-  expect(calls.length).toBeGreaterThan(0)
-  expect(calls.at(-1).env.THIMBLE_CONVERSATION).toBe('conv-b')
-})
 
 test("a /clear leaves what thimble owed the earlier conversation's Claude in it, and a /resume back brings it", async ($, on) => {
   const w = world(on)

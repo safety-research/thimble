@@ -300,9 +300,9 @@ def session_records(ws: Path, chats: list[dict[str, Any]], tickets: Iterable[dic
         if kind == "main":
             put((meta.get("attached") or {}).get("session") if isinstance(meta.get("attached"), dict) else None, role="main", chat="main")
             put(meta.get("sdk_session_id"), role="main", chat="main")
-        # A `step` with a session and no agent id is a session started as a step of another (such as a critique); a step
-        # with an agent id is a subagent, found under its parent's folder.
-        elif meta.get("session") and not meta.get("agent_id") and role in ("orient", "writer", "dev", "step"):
+        # A `step` with a session and no agent id is a session started as a step of another; a step with an agent id is a
+        # subagent, found under its parent's folder.
+        elif meta.get("session") and not meta.get("agent_id") and role in ("writer", "dev", "step"):
             put(meta.get("session"), role=role, chat=meta.get("id"))
         elif kind == "thread":
             put(meta.get("sdk_session_id"), role="thread", chat=meta.get("id"))
@@ -361,8 +361,8 @@ def _sessions(w: Writer, ws: Path, chats: list[dict[str, Any]], tickets: list[di
                     meta = _read_json(meta_path) if _own_file(meta_path, side) else None
                     fork = threads.FORK_DESCRIPTION_RE.match(str(meta.get("description") or "")) if isinstance(meta, dict) else None
                     # A thread's fork is described `thread:<fork name>` or `thread:<id>` (threads.FORK_DESCRIPTION_RE),
-                    # which names its thread even when the thread's meta no longer lists it; in terminal mode its
-                    # description is the thread's question, and its name the fork name (threads.fork_ref).
+                    # which names its thread even when the thread's meta no longer lists it; a fork whose
+                    # description is the thread's question has the fork name as its name (threads.fork_ref).
                     named = fork.group(1) if fork else None
                     alias = str(meta.get("name") or "") if isinstance(meta, dict) and meta.get("isFork") else ""
                     by_name = {str(c.get(threads.FORK_NAME_KEY)): str(c["id"]) for c in chats if c.get(threads.FORK_NAME_KEY)}
@@ -546,13 +546,6 @@ def _documents(w: Writer, ws: Path) -> dict[str, int]:
             "documents/comments.jsonl": w.jsonl("documents/comments.jsonl", [v for _, v in sorted(comments.values(), key=lambda kv: str(kv[1].get("ts") or ""))])}
 
 
-def _orientation(w: Writer, ws: Path) -> None:
-    for name in ("run.json", "summary.md"):
-        p = ws / "orient" / name
-        if p.is_file():
-            w.copy(f"orientation/{name}", p)
-
-
 def _dev_rows(c: str, name: str) -> list[dict[str, Any]]:
     """The dev tickets filed from this workspace (dev/ holds every workspace's)."""
     from . import dev  # noqa: PLC0415
@@ -614,7 +607,6 @@ def build(c: str, out: Path) -> dict[str, Any]:
         _labels(w, ws)
         _views(w, ws)
         _documents(w, ws)
-        _orientation(w, ws)
         w.jsonl("tickets.jsonl", tickets)
         try:
             corpus_info = _corpus_files(c)

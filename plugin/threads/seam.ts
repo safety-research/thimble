@@ -22,8 +22,6 @@
 //                                      a mark there); true when it opened. `key`: the key and the bar's words that open
 //                                      it where the key at the prompt cannot (a narrow terminal); `click`, other words
 //                                      that do
-//   threadAsked($, scope)              the first question of the thread about `scope`, or null when none was asked:
-//                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
 //                                      conversation and its input bar, about what the pane shows (core/pane.ts)
 //   threadUnderSplit($, e, kind, args, els)   the same in two parts: the conversation, and the key row with the input
@@ -60,7 +58,7 @@ import { passageLabel } from '../core/askcell.js'
 import { answerSelection, pickedWords, selectionNow, selectionUsed, selectionWaits, waitsNow } from '../core/selection'
 import { rowHolding } from '../explain/seam'
 import type { Take } from '../hooks/keys'
-import { askHere, drawThreads, ringMoved, ringReleased, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
+import { drawThreads, ringMoved, ringReleased, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadAnchor as anchorOf, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadQuestion as question, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
@@ -159,15 +157,6 @@ export async function threadKnown($: Engine, key: string): Promise<boolean> {
   return !!threadOf(key)
 }
 
-/** The first question asked in the thread about `scope`, or null when it has none; read again when a thread changes. */
-export async function threadAsked($: Engine, scope: ThreadScope): Promise<string | null> {
-  await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
-  await restoreThreads($)
-  const t = threadFor(scope)
-  const q = t?.asks[0]?.text ?? t?.turns.find(x => x.role === 'person')?.text
-  return q ? String(q) : null
-}
-
 export async function threadUnder($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<unknown[]> {
   return under($, e, kind, args, els)
 }
@@ -197,11 +186,6 @@ export type { PaneEdit }
 
 export async function openThread($: Engine, scope: ThreadScope, o: { key?: string; click?: string; where?: string; read?: boolean } = {}): Promise<boolean> {
   return openThreadOn($, scope, o)
-}
-
-/** A question asked at once in the thread on `scope`, as its input bar asks it (a heads-up's offer, from the tray). */
-export async function askInThread($: Engine, scope: ThreadScope, text: string): Promise<void> {
-  return askHere($, scope, text)
 }
 
 /** A reply's passages as the margin asks about them; read again when a thread changes. */

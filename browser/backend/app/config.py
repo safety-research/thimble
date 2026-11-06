@@ -52,14 +52,12 @@ def default_data_dir() -> Path:
 
 
 DATA_DIR = Path(os.environ.get("THIMBLE_DATA_DIR") or default_data_dir()).resolve()
-# The install tree's data/: a legacy registry location and where a checkout's own corpora sit as directories
-# data/<c>/manifest.json. migrate_registry brings the records it holds into DATA_DIR at server start.
-LEGACY_DATA_DIR = REPO_ROOT / "data"
 WORKSPACES_DIR = Path(os.environ.get("THIMBLE_WORKSPACES_DIR") or REPO_ROOT / "workspaces").resolve()
 # The built UI (frontend/dist). main.py serves it at / when the server is not in dev mode (a release install has no
-# Vite); cli.py's ensure and doctor print NO_UI_BUILD_HINT when it is missing. Tests point FRONTEND_DIST at a scratch dir.
+# Vite); the server's start and cli.py's doctor print NO_UI_BUILD_HINT when it is missing. Tests point FRONTEND_DIST at
+# a scratch dir.
 FRONTEND_DIST = Path(os.environ.get("THIMBLE_FRONTEND_DIST") or REPO_ROOT / "frontend" / "dist").resolve()
-NO_UI_BUILD_HINT = "no frontend build: run scripts/release.sh or npm run build, or start with THIMBLE_DEV=1"
+NO_UI_BUILD_HINT = "no frontend build: run npm run build in frontend/, or start with THIMBLE_DEV=1"
 # how a person restarts the server in this version: thimble-browser holds it until Ctrl-C, and --continue brings the
 # folder's latest session back (the texts that say to restart it: cli, notices, main)
 RESTART_HOW = "press Ctrl-C in the terminal that runs thimble-browser, then run `thimble-browser --continue`"
@@ -133,20 +131,6 @@ CLI_PATH = _resolve_cli()
 CLAUDE_BIN = CLI_PATH or "claude"
 NO_CLAUDE_FOUND = "the `claude` CLI was not found (not on PATH, not at ~/.local/bin/claude)"  # what a model call says
 NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIMBLE_CLAUDE_BIN"
-
-# thimble's marketplace (install.sh registers this tree under its name: thimble in a checkout, thimble-local from a
-# release zip) lists one plugin, thimble (./plugin)
-MARKETPLACE_FILE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
-
-
-def marketplace_name() -> str:
-    """The name of this install's marketplace (MARKETPLACE_FILE); '' when it cannot be read."""
-    try:
-        name = json.loads(MARKETPLACE_FILE.read_text("utf-8")).get("name")
-    except (OSError, ValueError, AttributeError):
-        return ""
-    return name if isinstance(name, str) else ""
-
 
 # --------------------------------------------------------------------------- the kernel wrapper
 #
@@ -226,7 +210,7 @@ def _skip() -> bool:
 def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
     """Add 127.0.0.1 and localhost to NO_PROXY / no_proxy in `env` (default os.environ), so that thimble's calls to its
     own server on 127.0.0.1 never go through an HTTP proxy the shell sets. urllib and httpx read these variables, and
-    every process thimble starts inherits them. The launcher does the same for the Claude Code session it starts."""
+    every process thimble starts inherits them."""
     env = os.environ if env is None else env
     for name in ("NO_PROXY", "no_proxy"):
         cur = env.get(name, "")
@@ -234,9 +218,6 @@ def keep_local_off_proxy(env: dict[str, str] | None = None) -> None:
             env[name] = f"{cur},127.0.0.1,localhost" if cur else "127.0.0.1,localhost"
 
 
-# NO_PROXY and no_proxy as this process got them, before keep_local_off_proxy adds 127.0.0.1 and localhost: what the
-# session that ran this command sets, which /thimble's proxy line and `setup` notice read (cli.proxy_unsafe)
-GIVEN_NO_PROXY = {name: os.environ.get(name, "") for name in ("NO_PROXY", "no_proxy")}
 keep_local_off_proxy()
 
 
@@ -304,25 +285,12 @@ def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = N
 AUTH_HELP = "log in with `claude auth login` (INSTALL.md, Authentication, has more ways)"
 
 
-def auth_problem(status: dict[str, Any] | None = None) -> str:
-    """The alert when a model call cannot run: no `claude`, or `claude auth status` reporting no login; '' otherwise,
-    when the status cannot be read (the call itself then says what failed), and under THIMBLE_SKIP_KEY. When the server
-    runs its agents itself (runtime.py), what keeps the way to reach Claude the person chose from working
-    (claude_access.problem_line)."""
-    from . import runtime  # noqa: PLC0415
+def auth_problem() -> str:
+    """The alert when a model call cannot run: what keeps the way to reach Claude the person chose from working
+    (claude_access.problem_line), '' when nothing does."""
+    from . import claude_access  # noqa: PLC0415
 
-    if runtime.enabled():
-        from . import claude_access  # noqa: PLC0415
-
-        return claude_access.problem_line()
-    if _skip():
-        return ""
-    if not CLI_PATH:
-        return NO_CLAUDE
-    st = auth_status() if status is None else status
-    if st is not None and st.get("loggedIn") is False:
-        return f"Claude Code is not logged in (`claude auth status`): {AUTH_HELP}, then try again"
-    return ""
+    return claude_access.problem_line()
 
 
 # The default model of the `refusal` row (models_for): the model a structured call (model.structured) runs on again, once,
@@ -334,9 +302,9 @@ FALLBACK_EFFORT = "high"  # the refusal row's default effort
 
 
 # Claude Code's config dir: CLAUDE_CONFIG_DIR, else ~/.claude (transcripts, sessions/<pid>.json, settings.json, the
-# login). The one that counts is the one the served `claude` process runs with, which need not be this server's, so
-# the session's shim reports it in its signed subscription (session.connected), and claude_config_dir() answers with it
-# from then on (serve_claude_config), while this server's own CLAUDE_CONFIG_DIR is unchanged. Sessions this server
+# login). The one that counts is the one the served `claude` process runs with, which need not be this server's: once
+# the mirror learns it (session._learn_config), claude_config_dir() answers with it (serve_claude_config), while this
+# server's own CLAUDE_CONFIG_DIR is unchanged. Sessions this server
 # starts get the same value (claude_env).
 CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
 _served_config: tuple[str | None, str | None] | None = None  # (our own value when learned, the served process's value)
@@ -398,19 +366,17 @@ def claude_env(env: dict[str, str]) -> dict[str, str]:
 # below that the session does not set is given this server's value or "", so a value meant for another session or
 # another thimble never reaches it.
 # The names thimble sets for one session: a THIMBLE_* one is "" unless the session sets it; another is the server's
-# own value, else "". THIMBLE_MODE and THIMBLE_WS name a terminal-mode session and its workspace (launch_mode), which
-# no session the server starts is.
-SESSION_VARS = ("THIMBLE_SESSION", "THIMBLE_SESSION_TOKEN", "THIMBLE_RENDERED_PROMPTS", "THIMBLE_AGENT_TOKEN",
-                "THIMBLE_API", "THIMBLE_LAUNCHED", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "THIMBLE_MODE", "THIMBLE_WS",
-                "XDG_CACHE_HOME", "MPLCONFIGDIR", "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
+# own value, else "".
+SESSION_VARS = ("THIMBLE_SESSION", "THIMBLE_CALLER_CWD", "XDG_CACHE_HOME", "MPLCONFIGDIR",
+                "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
 # The names that place a stack and tune its plugin and hooks, which the code a session runs reads: the server's value
 # in a session that talks to this server (session_env's `stack`), else "". Every reader takes "" as unset.
 STACK_VARS = ("THIMBLE_HOME", "THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_WORKSPACES_DIR", "THIMBLE_DATA_DIR",
-              "THIMBLE_DEV_DIR", "THIMBLE_APP_DIR", "THIMBLE_PLUGIN_ROOT", "THIMBLE_FRONTEND_URL",
+              "THIMBLE_DEV_DIR", "THIMBLE_PLUGIN_ROOT", "THIMBLE_FRONTEND_URL",
               "THIMBLE_FRONTEND_DIST", "THIMBLE_DEV", "THIMBLE_SUPERVISED", "THIMBLE_STACK_PORT",
               "THIMBLE_STACK_UI_PORT", "THIMBLE_CLAUDE_BIN", "THIMBLE_SKIP_KEY", "THIMBLE_PROMPTS_DIR",
-              "THIMBLE_PROMPT_CAPTURE", "THIMBLE_KERNEL_WRAP", "THIMBLE_MODEL_SPEED", "THIMBLE_MCP_PROGRESS_S",
-              "THIMBLE_MCP_RETRY_S", "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB", "THIMBLE_BIN_DIR")
+              "THIMBLE_PROMPT_CAPTURE", "THIMBLE_KERNEL_WRAP", "THIMBLE_MODEL_SPEED",
+              "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB")
 OWN_PREFIX = "THIMBLE_"
 
 
@@ -563,8 +529,8 @@ def _shortened(part: str, n: int) -> str:
 
 def session_name(role: str, workspace: str | None) -> str:
     """The name a Claude Code session thimble starts goes by: main's (`claude -n`), as `claude agents`, the /resume
-    picker and SendMessage's `to` know it, and each agent's in the agent tray (tray.py): `thimble:<role> · <workspace>`,
-    such as `thimble:main · logs-2` or `thimble:writer-story · logs-2`, since those lists hold the sessions of every
+    picker and SendMessage's `to` know it, and each agent's in the agent tray: `thimble:<role> · <workspace>`,
+    such as `thimble:main · logs-2` or `thimble:dev · logs-2`, since those lists hold the sessions of every
     folder, so two workspaces must not share a name; `thimble:<role>` alone for a session of no workspace (`thimble fix`'s code ticket). A name is at most
     SESSION_NAME_MAX characters: a longer one shortens its workspace first, down to SESSION_PART_MIN characters, then its
     role (_shortened), so distinct roles and workspaces keep distinct names."""
@@ -671,24 +637,6 @@ def workspace_for_cwd(path: str | Path) -> str | None:
     return found[0] if found else None
 
 
-def workspace_for_folder(path: str | Path | None) -> str | None:
-    """The workspace whose folder, WORKSPACES_DIR/<c>, holds `path`, such as the orientation's work folder, which its
-    session runs in (agent_session, the fence), so its thimble tools find their workspace from its shim's cwd; None
-    for a path outside WORKSPACES_DIR or a folder of no corpus."""
-    if not path:
-        return None
-    try:
-        rel = Path(path).resolve().relative_to(WORKSPACES_DIR)
-    except (OSError, ValueError):
-        return None
-    name = rel.parts[0] if rel.parts else ""
-    try:
-        corpus_dir(name)
-    except ValueError:
-        return None
-    return name
-
-
 def workspace_for_corpus_dir(path: str | Path) -> str:
     """The workspace (= corpus) name a corpus directory is served under: DATA_DIR/<c> is `c`; a registered directory is
     its sidecar's name, which need not be the basename; a directory that is neither falls back to its basename. Never
@@ -729,20 +677,16 @@ def shown_alias(shown: object, p: Path) -> str | None:
         return None
 
 
-def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KEEP_SHOWN, name: str | None = None) -> dict:
-    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest, shown?,
-    renamed_from?}. `shown` is the folder as the analyst named it when that was another path to it, through a symlink
-    (shown_alias), which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves
-    it. `name` is the name a new registration takes in place of the basename (`thimble demo` registers demo-<dataset>);
-    a folder registered already keeps its own name. `renamed_from` lists the names an earlier build moved the corpus from.
+def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KEEP_SHOWN) -> dict:
+    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest, shown?}.
+    `shown` is the folder as the analyst named it when that was another path to it, through a symlink (shown_alias),
+    which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves it. A folder
+    registered already keeps its own name.
 
     A path inside DATA_DIR/<c> is corpus c: nothing written. A path inside (not at) a registered directory is that
     directory's corpus unless `exact`, which registers the folder itself. Exactly a registered working directory refreshes
     its sidecar; exactly a root writes nothing. Otherwise the sidecar DATA_DIR/<name>.corpus.json is written atomically,
-    <name> being `name` (else the basename) or the next free `-2`, `-3` …. Raises ValueError for a path that is not a
-    directory and for a `name` that is not a valid corpus name."""
-    if name is not None and not _valid_name(name):
-        raise ValueError(f"invalid corpus name: {name!r}")
+    <name> being the basename or the next free `-2`, `-3` …. Raises ValueError for a path that is not a directory."""
     p = Path(path).expanduser().resolve()
     if not p.is_dir():
         raise ValueError(f"not a directory: {path}")
@@ -767,7 +711,7 @@ def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KE
             return {"name": kname, "root": str(bases.get("root", kbase)), "path": str(corpus_dir(kname)),
                     "registered_at": rec.get("registered_at"), "manifest": corpus_manifest(kname)}
         # inside (not at) a registered directory with `exact`: the folder becomes a corpus of its own
-    name = prev["name"] if prev else free_name(name or corpus_name_for(p))
+    name = prev["name"] if prev else free_name(corpus_name_for(p))
     # the working directory again: the root stays what the first registration recorded
     root = str(_sidecar_bases(prev).get("root", p)) if prev is not None else str(p)
     rec = {"name": name, "root": root, "path": str(p), "registered_at": (prev or {}).get("registered_at") or _now(),
@@ -775,8 +719,6 @@ def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KE
     alias = shown_alias((prev or {}).get("shown"), p) if shown is KEEP_SHOWN else shown_alias(shown, p)
     if alias:
         rec["shown"] = alias
-    if (prev or {}).get("renamed_from"):
-        rec["renamed_from"] = prev["renamed_from"]
     _write_sidecar(rec)
     log.info("registered corpus %r at %s (sidecar %s)", name, p, sidecar_path(name))
     return rec
@@ -817,77 +759,6 @@ def _write_sidecar(rec: dict) -> None:
 def name_taken(name: str) -> bool:
     """Whether a corpus of DATA_DIR holds `name`: a corpus directory DATA_DIR/<name>, or a sidecar, readable or not."""
     return _dir_corpus(name) is not None or sidecar_path(name).exists()
-
-
-def _registry_holds(data_dir: Path, name: str) -> str | None:
-    """The folder the registry `data_dir` maps `name` to — a corpus directory of that name, else the path a sidecar
-    records (the sidecar itself, marked unreadable, when it does not parse) — or None when the name is free."""
-    if (data_dir / name / "manifest.json").is_file():
-        return str(data_dir / name)
-    sidecar = data_dir / f"{name}{SIDECAR_SUFFIX}"
-    if not sidecar.exists():
-        return None
-    try:
-        cur = json.loads(sidecar.read_text("utf-8"))
-    except (OSError, ValueError):
-        cur = None
-    return cur["path"] if isinstance(cur, dict) and isinstance(cur.get("path"), str) else f"{sidecar} (unreadable)"
-
-
-def migrate_registry(data_dir: Path | None = None, legacy: Path | None = None,
-                     workspaces: Path | None = None) -> list[Path]:
-    """At server start: bring the records the install tree's data/ (`legacy`) holds into the registry `data_dir`, so every
-    folder the install knew stays mapped. Idempotent: writes only names `data_dir` does not have, and only for names with a
-    workspace under `workspaces` (a record with no workspace holds no state, and would take the name from the analyst's own
-    folder of that name). A name held for another folder is skipped with a warning. Runs only when `data_dir` is
-    $THIMBLE_HOME/data and `legacy` is another, existing directory. Returns the paths written."""
-    target = (DATA_DIR if data_dir is None else Path(data_dir)).resolve()
-    source = (LEGACY_DATA_DIR if legacy is None else Path(legacy)).resolve()
-    ws_root = (WORKSPACES_DIR if workspaces is None else Path(workspaces)).resolve()
-    if target != default_data_dir() or source == target or not source.is_dir():
-        return []
-    try:
-        entries = sorted(source.iterdir())
-    except OSError:
-        return []
-    written: list[Path] = []
-    for entry in entries:
-        if entry.name.endswith(SIDECAR_SUFFIX) and entry.is_file():
-            name = entry.name[: -len(SIDECAR_SUFFIX)]
-            try:
-                text = entry.read_text("utf-8")
-                rec = json.loads(text)
-            except (OSError, ValueError):
-                continue
-            if not isinstance(rec, dict) or not isinstance(rec.get("path"), str):
-                continue
-            folder = rec["path"]
-            what = f"copied the registration of {folder}"
-        elif entry.is_dir() and (entry / "manifest.json").is_file():
-            name = entry.name
-            folder = str(entry)
-            text = json.dumps({"name": name, "root": folder, "path": folder, "registered_at": _now(),
-                               "manifest": _scan_manifest(entry)}, indent=1, ensure_ascii=False) + "\n"
-            what = f"registered the corpus directory {entry}"
-        else:
-            continue
-        if not _valid_name(name) or not (ws_root / name).is_dir():
-            continue
-        held = _registry_holds(target, name)
-        if held is not None:
-            if Path(held).expanduser().resolve() != Path(folder).expanduser().resolve():
-                log.warning("registry: the name %r in %s is held for %s; the record for %s in %s was not brought along "
-                            "(a /thimble there registers the folder under the next free name)", name, target, held, folder, source)
-            continue
-        target.mkdir(parents=True, exist_ok=True)
-        dest = target / f"{name}{SIDECAR_SUFFIX}"
-        fd, tmp = tempfile.mkstemp(prefix=f".{dest.name}.", suffix=".tmp", dir=str(target))
-        os.close(fd)
-        Path(tmp).write_text(text, "utf-8")
-        os.replace(tmp, dest)
-        log.info("registry: %s as %r in %s (from %s)", what, name, target, source)
-        written.append(dest)
-    return written
 
 
 def workspace_path(name: str) -> Path:
@@ -933,8 +804,8 @@ def workspace_dir(name: str) -> Path:
 
 
 def registry_dir(name: str) -> Path:
-    """The workspace's registry folder, created on demand (private_dir): the card types and extensions the server found
-    there, which a wrapped kernel may only read (kernel_wrap.READ_ONLY_DIRS)."""
+    """The workspace's registry folder, created on demand (private_dir): the web rules the analyst kept, which a
+    wrapped kernel may only read (kernel_wrap.READ_ONLY_DIRS)."""
     from . import kernel_wrap  # noqa: PLC0415
 
     return private_dir(workspace_dir(name) / kernel_wrap.REGISTRY_DIR)
@@ -965,9 +836,9 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 
 # --------------------------------------------------------------------------- models per role
 #
-# Every role that runs a model, with exactly the model and effort it runs on. main is the analyst's own session: its
-# model is the session's, and the composer chip's effort and fast mode for it are kept as settings.json `models.main` and
-# applied at its next launch (cli.launch_args), so main is not a role here. Every other role is set in thimble's config
+# Every role that runs a model, with exactly the model and effort it runs on. main's model, effort and fast mode are the
+# composer's, kept as settings.json `models.main` and read at main's next turn (runtime.Space.spec_of), so main is not
+# a role here. Every other role is set in thimble's config
 # (userconf: `agents.<agent>.model` and `effort`, and `fast` for a classifier; userconf.ROLES naming each agent's role),
 # applied to the next start:
 #   orient     the orientation, a subagent of main (thimble:orientation)
@@ -995,8 +866,8 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev", "suggest", "refusal")
 ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "subagents": {"model": "", "effort": "", "fast": False},  # '' is the orientation's model and effort (models_for)
-    "critic": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/critic.md's frontmatter
-    "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's
+    "critic": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},
+    "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's frontmatter
     "checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False},  # under prompts/check.md's
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
     "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone
@@ -1009,10 +880,8 @@ ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the ana
 # `haiku` as the plugin has them (plugin/core/models.js). A role whose model is an alias is kept as the id, so the
 # popover names the version and the session runs the model shown.
 MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
-# The agent file a role's defaults come from: prompts/<name>.md (prompts.AGENT_FILES), or a plugin agent's file
-# (plugin/agents/<name>.md) for `plugin:<name>`.
+# The agent file a role's defaults come from: prompts/<name>.md (prompts.AGENT_FILES).
 ROLE_AGENTS: dict[str, str] = {"writer": "writer", "checks": "check"}
-PLUGIN_AGENTS_DIR = REPO_ROOT / "plugin" / "agents"
 # the classifiers, each a call the server makes, which runs at its own speed, and the dev row's `thimble fix`, the one
 # `claude -p` job of the server, which keeps the fast mode it had (on by default)
 ROLES_WITH_FAST = ("labels", "verify", "suggest", "dev")
@@ -1088,17 +957,10 @@ def context_tokens(model: str) -> int:
 
 def agent_front(name: str) -> dict[str, Any]:
     """The frontmatter of an agent file (ROLE_AGENTS' names); {} when it cannot be read."""
-    import yaml  # noqa: PLC0415 — only the agent files need it
-
     try:
-        if name.startswith("plugin:"):
-            text = (PLUGIN_AGENTS_DIR / f"{name.split(':', 1)[1]}.md").read_text("utf-8")
-            head, sep, _ = text.removeprefix("---\n").partition("\n---\n")
-            front = yaml.safe_load(head) if sep else None
-        else:
-            from . import prompts  # noqa: PLC0415 — prompts imports config
+        from . import prompts  # noqa: PLC0415 — prompts imports config
 
-            front = prompts.agent_file(name)[0]
+        front = prompts.agent_file(name)[0]
     except Exception:  # noqa: BLE001 — a missing or broken file leaves the role on Claude Code's own defaults
         return {}
     return front if isinstance(front, dict) else {}

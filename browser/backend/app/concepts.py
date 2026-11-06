@@ -29,8 +29,7 @@ label shows as a version outside the workspace (card_values, label_versions.keep
 label through, as it was when the cited words were written (marks.session_cards). When a run of a label ends, not stopped, or a moment after
 the analyst's last correction of it (rerun_after_verdicts), thimble runs every card that read it again (rerun_readers),
 and main hears which of them it should write a takeaway for again
-(`rerun`, or inside `label_done`). bring_current reruns labels whose rows were made under another definition before a
-card runs on POST .../regenerate.
+(`rerun`, or inside `label_done`).
 The ask: a prompt label over more than label_asks.SAMPLE units does not start until the person chooses, in the page, to
 run it on all of them, on a sample, or not at all (ask_first, label_asks.py), whoever started it.
 Notices: a run that fails, or that leaves units it could not label, is told in the foreground (notices.post, under
@@ -69,7 +68,6 @@ from typing import Any, Callable, Iterable, Iterator, NamedTuple
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
-from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from . import capture, cite, concept_scan, config, corpus, label_asks, label_versions, labels_store, ledger, nofollow, records, refs
 from .kernel_thimble import LABEL_ORDER, palette_from
@@ -556,9 +554,8 @@ _building_answers: dict[Path, dict] = {}  # {path: rows} the jsonl answered whil
 
 
 class _StoreLock:
-    """A labels file's lock: this process's threads wait on an RLock, then the process takes ledger.locked on the file,
-    since in terminal mode `thimble-run` (a code label's rows), `thimble act` (a verdict) and the shim (a prompt label's
-    rows) append to one labels file from three processes. Re-entrant, as the RLock it replaces."""
+    """A labels file's lock: this process's threads wait on an RLock, then the process takes ledger.locked on the file.
+    Re-entrant, as the RLock it replaces."""
 
     def __init__(self, p: Path) -> None:
         self.p = p
@@ -760,12 +757,9 @@ def _stats(ws: Path, concept_id: str) -> dict:
     return st.stats() if st is not None else label_stats([])
 
 
-def rows_for_path(ws: Path, concept_id: str, path: str | None, lines: tuple[int, int] | None = None) -> list[dict]:
+def rows_for_path(ws: Path, concept_id: str, path: str | None) -> list[dict]:
     """The merged rows (latest classifier row per ref with the analyst's verdict) on one corpus path; every row when
-    `path` is None; with `lines` (a, b) those on lines a..b of the path and its whole-file rows, so the reader asks for
-    its page and never for every row of a large labelled file."""
-    if path is not None and lines is not None:
-        return rows_on_lines(ws, concept_id, path, [lines])
+    `path` is None."""
     st, building = _store(ws, concept_id)
     if st is not None:
         return st.rows_for_path(path)
@@ -1038,32 +1032,6 @@ def label_stats(rows: list[dict]) -> dict:
     for r in model.values():
         counts[str(r.get("label"))] = counts.get(str(r.get("label")), 0) + 1
     return {"n_labeled": len(model), "n_reviewed": sum(1 for ref in analyst if ref in model), "n_marked": len(analyst), "counts": counts}
-
-
-def _merged_rows(rows: list[dict], path: str | None = None) -> list[dict]:
-    """Latest classifier row per ref with the analyst's verdict attached (and the texts it marks), optionally only for
-    refs on `path`."""
-    model, analyst = latest_rows(rows)
-    out = []
-    for ref, r in model.items():
-        if path is not None and _ref_path(ref) != path:
-            continue
-        a = analyst.get(ref)
-        row = {"ref": ref, "label": r.get("label"), "confidence": r.get("confidence"), "rationale": r.get("rationale"),
-               "source": r.get("source"), "ts": r.get("ts"), "analyst": a.get("label") if a else None}
-        marked = labels_store.spans_field(r.get("spans"))
-        if marked:
-            row["spans"] = marked
-        out.append(row)
-    for ref, a in analyst.items():
-        if ref not in model and (path is None or _ref_path(ref) == path):
-            out.append({"ref": ref, "label": None, "confidence": None, "rationale": None, "source": None, "ts": a.get("ts"),
-                        "analyst": a.get("label")})
-    return out
-
-
-def _ref_path(ref: str) -> str | None:
-    return labels_store.ref_parts(ref)[0]
 
 
 def verdicts_applied(ws: Path, concept_id: str, counts: dict[str, int]) -> tuple[dict[str, int], int]:
@@ -1890,10 +1858,9 @@ def scope_units(c: str, unit: str) -> list[Unit]:
     raise ValueError(f"not a scope unit: {unit}")
 
 
-# --------------------------------------------------------------------------- progress (SSE)
+# --------------------------------------------------------------------------- progress
 
 _runs: dict[tuple[str, str], dict] = {}  # (workspace, concept id) -> the run record
-_subs: dict[tuple[str, str], set[asyncio.Queue]] = {}
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 _cancels: dict[tuple[str, str], threading.Event] = {}
 _tasks: dict[tuple[str, str], asyncio.Task] = {}
@@ -1917,8 +1884,8 @@ PARENT_WATCH_S = 1.0  # how often a scan worker looks whether the process that m
 
 def _watch_parent(parent: int) -> None:
     """A scan worker's initializer: the worker ends once the process that made its pool has gone. That process ends
-    its workers when it can (_pool_shutdown); the terminal mode's shim is ended by a signal as Claude Code quits, and a
-    worker it leaves waits on its queue for good (live check T9)."""
+    its workers when it can (_pool_shutdown); one ended by a signal cannot, and a worker it leaves waits on its queue
+    for good (live check T9)."""
 
     def watch() -> None:
         while True:
@@ -1964,24 +1931,11 @@ def _pool_reset(broken: ProcessPoolExecutor) -> ProcessPoolExecutor:
     return _pool_get()
 
 
-def _subscribe(c: str, concept_id: str) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
-    _subs.setdefault((c, concept_id), set()).add(q)
-    return q
-
-
-def _unsubscribe(c: str, concept_id: str, q: asyncio.Queue) -> None:
-    _subs.get((c, concept_id), set()).discard(q)
-
-
 def _progress(c: str, concept_id: str, **fields: Any) -> dict:
-    """Update the concept's run record and stream it (`done` once the status is done or error, `progress` before)."""
+    """Update the concept's run record (the `run` of GET /concepts/{id}); the record."""
     key = (c, concept_id)
     state = {**_runs.get(key, {"concept": concept_id, **RUN_FIELDS}), **fields, "ts": _now()}
     _runs[key] = state
-    event = "done" if state["status"] in ("done", "error") else "progress"
-    for q in _subs.get(key, ()):
-        q.put_nowait((event, json.dumps(state)))
     return state
 
 
@@ -2066,7 +2020,7 @@ def few_shot_examples(ws: Path, concept: dict, corpus_dir: Path | None = None, l
 
 
 def label_input(concept: dict, items: list[tuple[str, str]], comment: bool = True) -> dict:
-    """The labels task's input (tasks.py) for one batch of (ref, text) items: the label's name, unit, definition (''
+    """The labels task's input (labels_task) for one batch of (ref, text) items: the label's name, unit, definition (''
     for none), values, marks, the analyst's examples (few_shot_examples, attached by run_apply for the run) and whether
     a one-line rationale is asked for; then the items, numbered from 1."""
     return {"label": {"name": str(concept["name"]), "unit": str(concept["unit"]), "definition": definition_text(concept),
@@ -2120,7 +2074,7 @@ def labels_tool(label: dict) -> Any:
 
 async def labels_task(c: str, inp: dict, *, model: str | None = None,
                       on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
-    """thimble's own labels task (tasks.py): one classifier batch through model.structured (never raises; read the
+    """The labels task: one classifier batch through model.structured (never raises; read the
     CallResult's status), on `model` when given, else the label's own model, else the labels role's. A batch longer than
     a 200k-token window holds, a whole file read as far as the model's context holds (whole_read_chars), runs on the
     model's 1M-token window, which Claude Code opens with `[1m]` (config.long_context), and so does its refusal rerun."""
@@ -2152,15 +2106,12 @@ async def labels_task(c: str, inp: dict, *, model: str | None = None,
 
 async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]], comment: bool = True,
                               on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
-    """One classifier batch as the labels task (tasks.call: an extension's program, else labels_task, on the concept's
-    `model` when it names one); never raises, read the CallResult's status. `on_retry` hears each retry
-    model.structured waits for."""
-    from . import tasks  # noqa: PLC0415
-
+    """One classifier batch as the labels task (labels_task, on the concept's `model` when it names one); never raises,
+    read the CallResult's status. `on_retry` hears each retry model.structured waits for."""
     inp = label_input(concept, items, comment)
     if concept.get("model"):
         inp["label"]["model"] = str(concept["model"])
-    return await tasks.call(c, "labels", inp, schema=labels_tool(inp["label"]).input_schema, on_retry=on_retry)
+    return await labels_task(c, inp, on_retry=on_retry)
 
 
 def parse_labels(output: dict | None, concept: dict, n_items: int, comment: bool = True) -> dict[int, dict]:
@@ -3101,17 +3052,6 @@ def _parse_code_rows(lines: Iterator[str] | list[str]) -> tuple[list[dict], int,
     return rows, errors, message
 
 
-def parse_code_output(outputs: list[dict], rows_file: Path | None) -> tuple[list[dict], int, str | None]:
-    """(rows with the cover and clear lines among them, n_errors, message) for a code-kind run: the rows from
-    `rows_file` (none when the code never wrote it), the first error the kernel reported as the message."""
-    if rows_file is not None and rows_file.is_file():
-        with open(rows_file, "r", encoding="utf-8") as f:
-            rows, errors, message = _parse_code_rows(f)
-    else:
-        rows, errors, message = [], 0, None
-    return rows, errors, _kernel_error(outputs) or message
-
-
 def _kernel_error(outputs: list[dict]) -> str | None:
     """The first error the kernel reported for a code-kind run, as `<name>: <value>`."""
     for b in outputs or []:
@@ -3572,16 +3512,6 @@ def _stop_apply(key: tuple[str, str]) -> asyncio.Task | None:
     else:
         task.get_loop().call_soon_threadsafe(task.cancel)
     return task
-
-
-def stop_workspace(c: str) -> int:
-    """End every apply running for workspace `c` (agents.stop_all), keeping its run records. Returns how many ran."""
-    return sum(_stop_apply(key) is not None for key in [k for k in list(_tasks) if k[0] == c])
-
-
-def workspaces_at_work() -> set[str]:
-    """The workspaces with an apply running."""
-    return {k[0] for k, task in list(_tasks.items()) if not task.done()}
 
 
 def _partial_record(c: str, concept_id: str) -> dict:
@@ -4059,36 +3989,6 @@ async def answer_ask(c: str, ask_id: str, choice: str) -> dict:
         except HTTPException as e:
             log.info("%s: the %s event for concept:%s was not posted: %s", c, LABEL_ASK_KIND, cid, e.detail)
     return {"ok": True, "choice": choice, "concept": cid, "run": record}
-
-
-async def bring_current(c: str, concept_ids: list[str], created_by: str = "user") -> list[str]:
-    """Start a run of each label in `concept_ids` whose rows do not answer its definition as it stands (covered), so a card
-    run after them counts by each label as now defined (notebook.regenerate_cell). A running label is waited for; one that
-    is gone is left out. Returns the ids of the labels whose runs to wait for (wait_apply)."""
-    ws = _ws(c)
-    out: list[str] = []
-    for cid in dict.fromkeys(str(x) for x in concept_ids if x):
-        concept = read_concept(ws, cid)
-        if concept is None:
-            continue
-        if running_apply(c, cid) is not None:
-            out.append(cid)
-            continue
-        last = concept["applications"][-1] if concept["applications"] else {}
-        paths = (glob_patterns(concept["glob"]) or _patterns(last.get("paths"))) if concept["unit"] in FILE_UNITS else []
-        limit = last.get("limit") if concept["trial"] else None
-        if concept["unit"] in FILE_UNITS and not paths:
-            continue
-        if await asyncio.to_thread(covered, c, concept, paths, limit):
-            continue
-        if await ask_first(c, concept, paths, limit, created_by=created_by) is not None:
-            continue  # the run waits for the person's choice, and the card runs on the rows the label has
-        await start_apply(c, cid, paths, limit, created_by)
-        cards = await asyncio.to_thread(_label_cards, ws, cid)
-        tell_main(c, concept, dict(cards[0][1]) if cards else None)
-        _notify(c, cid, "applying")  # the canvas reads the run record again, so the label card shows its run meanwhile
-        out.append(cid)
-    return out
 
 
 def stale_cards(ws: Path, concept: dict) -> list[dict]:
@@ -5123,25 +5023,6 @@ async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Respon
     return result
 
 
-@router.get("/ws/{c}/concepts/{concept_id}/apply/runs")
-def apply_runs_route(c: str, concept_id: str) -> list[dict]:
-    """The concept's run record this server knows: the running one, else the last one that ended here."""
-    load_concept(c, concept_id)
-    state = _runs.get((c, concept_id))
-    return [state] if state else []
-
-
-@router.post("/ws/{c}/concepts/{concept_id}/apply/cancel")
-def cancel_apply_route(c: str, concept_id: str) -> dict:
-    """Stop the concept's running apply after the current unit, chunk or batch; the rows written so far stay."""
-    load_concept(c, concept_id)
-    state = _runs.get((c, concept_id))
-    running = bool(state and state.get("status") == "running")
-    if running:
-        _cancel_event(c, concept_id).set()
-    return {"ok": True, "cancelling": running}
-
-
 class AskAnswerBody(BaseModel):
     choice: str  # all, sample or cancel
 
@@ -5156,26 +5037,6 @@ def label_asks_route(c: str) -> list[dict]:
 async def answer_ask_route(c: str, ask_id: str, body: AskAnswerBody) -> dict:
     """The person's choice for an ask: all, sample or cancel (answer_ask)."""
     return await answer_ask(c, ask_id, body.choice)
-
-
-@router.get("/ws/{c}/concepts/{concept_id}/events")
-async def events_route(c: str, concept_id: str) -> EventSourceResponse:
-    """SSE: the current run state first (if any), then `progress` events and a final `done`."""
-    load_concept(c, concept_id)
-    q = _subscribe(c, concept_id)
-
-    async def gen():
-        try:
-            state = _runs.get((c, concept_id))
-            if state is not None:
-                yield {"event": "done" if state["status"] in ("done", "error") else "progress", "data": json.dumps(state)}
-            while True:
-                event, data = await q.get()
-                yield {"event": event, "data": data}
-        finally:
-            _unsubscribe(c, concept_id, q)
-
-    return EventSourceResponse(gen(), ping=15, ping_message_factory=lambda: ServerSentEvent(data="{}", event="ping"))
 
 
 @router.post("/ws/{c}/concepts/{concept_id}/labels")
@@ -5217,22 +5078,6 @@ def parse_spans(lines: str | None) -> list[tuple[int, int]] | None:
     except HTTPException:
         raise HTTPException(400, "lines must be ranges a-b of 1-based line numbers with a <= b, comma-separated, e.g. "
                                  "lines=1-500,2001-2500") from None
-
-
-@router.get("/ws/{c}/concepts/{concept_id}/labels")
-def labels_route(c: str, concept_id: str, path: str | None = None, lines: str | None = None) -> dict:
-    """Latest label per ref (with the analyst's verdict); `?path=` narrows to one file, `&lines=a-b` to the rows on
-    those lines of it (plus its whole-file rows), which is what a reader showing one page asks for."""
-    ws, concept = load_concept(c, concept_id)
-    span = parse_lines(lines)
-    if span is not None and path is None:
-        raise HTTPException(400, "lines needs path: the range is of one file's lines")
-    out = {"concept": {"id": concept["id"], "name": concept["name"], "labels": concept["labels"], "unit": concept["unit"]},
-           "rows": rows_for_path(ws, concept_id, path, span)}
-    if index_building(ws, concept_id):
-        out["building"] = True
-        out["note"] = INDEX_BUILDING
-    return out
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/coverage")
@@ -5500,16 +5345,15 @@ def draft_of(output: dict | None, paths: list[str]) -> dict:
 
 
 async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
-    """thimble's own label-draft task (tasks.py): from the analyst's `description` and the `records` of the files the
-    label would apply to (sample_records), one structured call of the labels role, on `model` when given, whose output
-    is a label definition (draft_tool). Never raises; read the CallResult's status."""
-    from . import model as model_mod, prompts, tasks  # noqa: PLC0415
+    """The label-draft task: from the analyst's `description` and the `records` of the files the label would apply to
+    (sample_records), one structured call of the labels role, on `model` when given, whose output is a label definition
+    (draft_tool). Never raises; read the CallResult's status."""
+    from . import model as model_mod  # noqa: PLC0415
 
     records = inp.get("records") if isinstance(inp.get("records"), dict) else {}
     slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines")}
-    with prompts.custom(tasks.files(c, "labels")):
-        prompt = labels_part("draft", description=str(inp.get("description") or ""),
-                             records=labels_part("records", **slots) if slots["lines"] else "")
+    prompt = labels_part("draft", description=str(inp.get("description") or ""),
+                         records=labels_part("records", **slots) if slots["lines"] else "")
     role = labels_model(c)
     with capture.scope("concepts draft", keep=True):
         return await model_mod.structured(prompt, tool=draft_tool(), model=model or role["model"],
@@ -5518,13 +5362,8 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
 
 
 def _call_failed(call: Any) -> HTTPException:
-    """A labels call that gave no output, as the error the bar shows: 429 at capacity, else 502 with its detail, which
-    names the extension's program when one ran the task (tasks.call)."""
-    from . import tasks  # noqa: PLC0415
-
+    """A labels call that gave no output, as the error the bar shows: 429 at capacity, else 502 with its detail."""
     status = 429 if call.status == "rate_limited" else 502
-    if tasks.by_program(call):
-        return HTTPException(status, f"{call.model_requested} gave no label: {call.detail or 'no detail'}")
     return HTTPException(status, f"the labels model gave no label ({call.status}): {call.detail or 'no detail'}")
 
 
@@ -5541,10 +5380,7 @@ async def draft_route(c: str, body: DraftBody) -> dict:
         records = await asyncio.to_thread(sample_records, c, body.paths)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    from . import tasks  # noqa: PLC0415
-
-    call = await tasks.call(c, "label-draft", {"description": text, "paths": list(body.paths), "records": records},
-                            schema=draft_tool().input_schema)
+    call = await draft_task(c, {"description": text, "paths": list(body.paths), "records": records})
     if call.status != "ok":
         raise _call_failed(call)
     return draft_of(call.output, body.paths)

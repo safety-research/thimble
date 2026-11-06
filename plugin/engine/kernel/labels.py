@@ -58,13 +58,12 @@ from . import codebox as CB
 from . import refs as R
 from . import regextext as RT
 from . import sources as S
-from .store import Store, conversation_dir, folder_name, legacy_dir, safe_name, thimble_home
+from .store import Store, folder_name, safe_name, thimble_home
 
 DEFAULT_VALUES = ["yes", "no"]
 BATCH_ITEMS = 50  # records per model call, at most
 BATCH_CHARS = 36_000  # or fewer, when their texts add up to this many characters (about 10k tokens)
 UNIT_CHARS = 4_000  # characters of one record the model reads
-KINDS = ("regex", "code", "prompt", "set")
 SESSIONS_MAX = 50  # sessions a label keeps as the ones that applied it
 
 
@@ -165,9 +164,6 @@ def keep_version(st: Store, lab: dict[str, Any], p: Path) -> None:
 
 # ------------------------------------------------------------------ what coverage reads of the labels
 
-SUMMARIES = "labels.json"  # in the folder's cache: thimble 0.10's labels of the folder (legacy_summaries)
-
-
 def _summary(p: Path, lab: dict[str, Any]) -> dict[str, Any]:
     """What coverage reads of a label: its name, the sessions that applied it, and for each file the records a model
     read and the records a rule (regex, code) went over, keyed by the label file's size and time."""
@@ -230,24 +226,12 @@ def summaries(st: Store, every: bool = False) -> list[dict[str, Any]]:
     return out
 
 
-def legacy_summaries(st: Store) -> list[dict[str, Any]]:
-    """The labels thimble 0.10 and before kept for the whole folder (store.legacy_dir, or the root's own thimble/labels
-    folder an earlier thimble wrote), as `_summary` reads them, each with its `path`: what Store._migrate reads to find
-    a resumed conversation's own."""
-    out: list[dict[str, Any]] = []
-    for d, cache in ((legacy_dir(st.root) / "labels", st.cache / SUMMARIES),
-                     (st.root / "thimble" / "labels", st.cache / "labels-own.json")):
-        out += [{**v, "path": d / k} for k, v in _summaries_of(st, d, cache).items()]
-    return out
-
-
 def reads_elsewhere(st: Store, name: str, d: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """The values a model gave records of the same label (its name and definition `d`) that another conversation of the
-    folder made, or thimble 0.10 kept for the folder, by ref: the model's reads are the same reads, so they are not made
+    folder made, by ref: the model's reads are the same reads, so they are not made
     again. Only the model's values: no check of a person's, nothing a rule or Claude gave."""
     mine = (st.dir / "labels").resolve()
     found = sorted((thimble_home() / "conversations").glob(f"*/folders/{folder_name(str(st.root))}/labels/{slug(name)}.json"))
-    found.append(legacy_dir(st.root) / "labels" / f"{slug(name)}.json")
     out: dict[str, dict[str, Any]] = {}
     for p in found:
         try:

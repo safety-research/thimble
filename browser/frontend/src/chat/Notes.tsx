@@ -1,5 +1,5 @@
 // The quiet lines of the transcript and the chips in them: small tertiary text with accent chips for what it points at
-// (a thread, an orientation, a dev ticket, a view, a ticket stage). A shot is a dev ticket's picture of its target,
+// (a thread, a dev ticket, a view, a ticket stage). A shot is a dev ticket's picture of its target,
 // before or after the change.
 import { createContext, useContext, type ReactNode } from 'react'
 import { Chip } from '../components/Chip'
@@ -10,7 +10,7 @@ import { track } from '../lib/telemetry'
 import type { ChatMeta } from '../lib/types'
 
 export interface ThreadsCtx {
-  /** every listed chat's full name by id: main, main/why-the-spike, orient, dev/group-board-by-round */
+  /** every listed chat's full name by id: main, main/why-the-spike, dev/group-board-by-round */
   labels: ReadonlyMap<string, string>
   /** every chat's meta by id, the agent chats' status among them (a label run's card reads its runs' state here) */
   metas?: ReadonlyMap<string, ChatMeta>

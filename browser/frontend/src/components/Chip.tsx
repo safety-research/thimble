@@ -63,5 +63,3 @@ export function Chip({ kind, tone, face, icon, trailingIcon, count, active, onCl
     </span>
   )
 }
-
-export default Chip

@@ -96,8 +96,6 @@ declare module 'claude-code' {
       settingsRow: string
       /** the selection the pane held when it closed, and the ones e and c took, by row and words (core/selection.ts) */
       selectionDone: { dropped?: string; explain?: string; cite?: string }
-      /** whether thimble is off in this session (/thimble-off, settings/term.ts) */
-      sessionOff: boolean
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */
       mainTurn: string | null
       /** which agents are thimble's forks, and their kind (core/forks.ts) */

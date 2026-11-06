@@ -8,7 +8,6 @@
 //   card:<id>#<path>#L<n>…   a file's line cited through the card that shows it: read as the file's line (<path>#L<n>…)
 //   group:<id> | report:<slug>#<sid> | report:<slug>#p<pid> | concept:<id> | chat:<id>[#<index>] | ui:<name>
 //   concept:<id>/<value>   one value of a label (the value raw or encoded)
-//   call:<chat>/<n> | call:<chat>/<n>#L<a>[-L<b>]   the orientation's call number n, or lines of its whole output
 //   view:<slug> | view:<slug>/<key>   a view, or a unit only that view defines
 //   <path>#<locator>   any other part of a file, in the notation of the file's type (budget.xlsx#Q3!B2:B40,
 //                      paper.pdf#p4): the file itself, with the locator kept as text; a view that claims the file and
@@ -23,7 +22,6 @@ export type ParsedRef =
   | { kind: 'view'; slug: string; key?: string }
   | { kind: 'concept'; conceptId: string; value?: string }
   | { kind: 'chat'; chatId: string; eventIndex?: number }
-  | { kind: 'call'; chat: string; n: number; line?: number; endLine?: number }
   | { kind: 'ui'; name: string }
   | { kind: 'table'; path: string; table: string }
   | { kind: 'row'; path: string; table: string; pk: string }
@@ -43,8 +41,6 @@ export type ParsedRef =
 export const CARD = 'card:'
 /** Whether a string is a card's ref, by either prefix. */
 export const isCardRef = (ref: string): boolean => ref.startsWith('card:') || ref.startsWith('cell:')
-/** `card:<id>` for a card id. */
-export const cardRef = (id: string): string => `${CARD}${id}`
 const CELL_RE = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@(out)?(\d+))?(?:#(.*))?$/
 const CELL_LINES_RE = /^L(\d+)(?:-L?(\d+))?$/
 const CELL_TD_RE = /^([^/]+)\/(.+)$/
@@ -75,24 +71,6 @@ function parseCellRef(ref: string): ParsedRef | null {
   const td = CELL_TD_RE.exec(frag)
   if (td) return { kind: 'cell', cellId, col: td[1], row: td[2] }
   return whole
-}
-
-/** A call ref's parts: the whole call, or its output's lines. A fragment that is not a line form is no ref, as a
- * mistyped line of a card's output is not: the citation check reports it rather than the chip opening the whole call. */
-function parseCallRef(chat: string, n: number, frag: string | undefined): ParsedRef | null {
-  if (frag == null) return { kind: 'call', chat, n }
-  const lines = CELL_LINES_RE.exec(frag)
-  if (!lines) return null
-  const line = +lines[1]
-  const end = lines[2] != null ? +lines[2] : undefined
-  return end != null && end > line ? { kind: 'call', chat, n, line, endLine: end } : { kind: 'call', chat, n, line }
-}
-
-/** `call:<chat>/<n>`, with `#L<a>` or `#L<a>-L<b>` for lines of its output. */
-export function callRef(chat: string, n: number, line?: number, endLine?: number): string {
-  const base = `call:${chat}/${n}`
-  if (line == null) return base
-  return endLine != null && endLine > line ? `${base}#L${line}-L${endLine}` : `${base}#L${line}`
 }
 
 // A file's path may hold spaces (`run 1/agent one.jsonl`), never at its ends and never a newline or `#`, as refs.py
@@ -137,7 +115,6 @@ export function parseRef(ref: string): ParsedRef | null {
   if ((m = ref.match(/^view:([a-z0-9][a-z0-9-]{0,39})(?:\/(\S+))?$/))) return m[2] ? { kind: 'view', slug: m[1], key: m[2] } : { kind: 'view', slug: m[1] }
   if ((m = ref.match(/^concept:([A-Za-z0-9_-]+)(?:\/(.+))?$/))) return m[2]?.trim() ? { kind: 'concept', conceptId: m[1], value: decodeLabel(m[2].trim()) } : { kind: 'concept', conceptId: m[1] }
   if ((m = ref.match(/^chat:([A-Za-z0-9_-]+)(?:#(\d+))?$/))) return { kind: 'chat', chatId: m[1], eventIndex: m[2] ? Number(m[2]) : undefined }
-  if ((m = ref.match(/^call:([A-Za-z0-9_-]+)\/(\d+)(?:#(.*))?$/))) return parseCallRef(m[1], Number(m[2]), m[3])
   if ((m = ref.match(/^ui:([A-Za-z0-9_.-]+)$/))) return { kind: 'ui', name: m[1] }
   if ((m = ref.match(DATABASE_RE))) {
     return m[3] ? { kind: 'row', path: m[1], table: m[2], pk: m[3] } : { kind: 'table', path: m[1], table: m[2] }
@@ -253,13 +230,6 @@ export function hiddenPath(ref: string): string | null {
   return p && 'path' in p && p.path.split('/').filter(Boolean).length > 2 ? p.path : null
 }
 
-export function ordinal(n: number): string {
-  const v = n % 100
-  if (v >= 11 && v <= 13) return `${n}th`
-  const last = n % 10
-  return `${n}${last === 1 ? 'st' : last === 2 ? 'nd' : last === 3 ? 'rd' : 'th'}`
-}
-
 /** A card's printed lines as every chip and hover names them, whichever of the card's outputs holds them: `card output
  * line 2`, `card output lines 2–3`; '' for a ref that is not an output span. */
 export function cellSpanLabel(p: { out?: number; line?: number; endLine?: number }): string {
@@ -313,8 +283,6 @@ export function refLabel(ref: string, among: readonly string[] = []): string {
       return p.value ? `label · ${locatorLabel(p.value)}` : 'label'
     case 'chat':
       return `chat${p.eventIndex != null ? ` #${p.eventIndex}` : ''}`
-    case 'call':
-      return `step ${p.n}${p.line != null ? ` · ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}` : ''}`
     case 'ui':
       return p.name
     case 'table':
@@ -442,8 +410,8 @@ export function surfaceOf(ref: string): Surface | null {
   }
 }
 
-/** The ref kinds that name the data: a file or a place in it, a database's table or row, a call's output. */
-const EVIDENCE_KINDS: ReadonlySet<ParsedRef['kind']> = new Set(['call', 'table', 'row', 'record', 'range', 'block', 'span', 'path'])
+/** The ref kinds that name the data: a file or a place in it, a database's table or row. */
+const EVIDENCE_KINDS: ReadonlySet<ParsedRef['kind']> = new Set(['table', 'row', 'record', 'range', 'block', 'span', 'path'])
 
 /** True when a ref points at the data (EVIDENCE_KINDS, or a card's table cell or printed lines), whose chip is the
  * evidence chip; false for what the agent made (a whole card, a group, a label, a thread, a document, a view, a part

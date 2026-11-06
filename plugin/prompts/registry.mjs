@@ -127,11 +127,6 @@ export const TEXTS = {
     browser: 'browser/backend/app/fixes.py',
     use: 'the start of the first message of the fork that /thimble-fix starts, the fixer',
   },
-  'fix-draft': {
-    about: "a public GitHub issue's title, what was wrong and how it was fixed, for one of the person's fixes, before the privacy scan",
-    browser: 'browser/backend/app/fix_share.py',
-    use: 'one model call per fix the person shares from the browser',
-  },
   reapply: {
     about: 'bring back the fixes thimble update set aside, each one the new release still needs, once',
     terminal: 'engine/kernel/fixes.py',

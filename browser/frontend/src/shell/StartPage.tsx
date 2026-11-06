@@ -1,6 +1,6 @@
 // thimble's start page: the page whose URL names no workspace, or names one this server does not hold (a tab kept from
-// another run or another server). A title and the server's workspaces in groups (WorkspaceList), each row opening its
-// workspace, and a link's sign-in code that was used or expired.
+// another run or another server). A title and the server's workspaces (WorkspaceList), each row opening its workspace,
+// and a link's sign-in code that was used or expired.
 import { useEffect, useState } from 'react'
 import { PageNoticeStrip } from '../chat/Notice'
 import { Icon } from '../components/Icon'

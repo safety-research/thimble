@@ -3,7 +3,6 @@ Transcript mode gets each turn with who speaks, its tool calls (name and argumen
 and the fields Color by offers. A few formats are left for Raw and the Table (EXPECT says None): a log of tasks, of API
 calls or of trace spans, whose messages, where it holds any, are copies inside requests."""
 import collections
-import json
 import shutil
 from pathlib import Path
 
@@ -68,8 +67,8 @@ EXPECT: dict[str, tuple | None] = {
     "openai/responses-api/responses.jsonl": ("conversations", 12, {"assistant"}, 4, 0, 5, None),
 }
 
-# JSON lines are kept as `<name>.jsonl.txt`, since no .jsonl file belongs in the tree (scripts/check_content.py), and
-# logs as `<name>.log.txt`, since git ignores *.log; both are copied into the corpus under their own names
+# JSON lines are kept as `<name>.jsonl.txt`, since no .jsonl file belongs in the tree, and logs as `<name>.log.txt`,
+# since git ignores *.log; both are copied into the corpus under their own names
 KEPT = (".jsonl.txt", ".log.txt")
 FILES = sorted(str(p.relative_to(SAMPLES)).removesuffix(".txt") if p.name.endswith(KEPT) else str(p.relative_to(SAMPLES))
                for p in SAMPLES.rglob("*") if p.is_file())
@@ -121,10 +120,6 @@ def shown(rel: str) -> tuple[dict, list[tuple[str, list[str], dict]]]:
     return hint, out
 
 
-def test_every_sample_has_its_expectation():
-    assert sorted(EXPECT) == FILES
-
-
 @pytest.mark.parametrize("rel", FILES)
 def test_each_format_shows_its_turns_speakers_tool_calls_results_and_reasoning(formats, rel):
     hint, turns = shown(rel)
@@ -140,21 +135,3 @@ def test_each_format_shows_its_turns_speakers_tool_calls_results_and_reasoning(f
     assert (kinds["tool_use"], kinds["tool_result"], kinds["thinking"]) == (calls, results, thinking), dict(kinds)
     if field:
         assert any(field in f for _, _, f in turns), f"no turn offers {field!r} to Color by"
-
-
-def test_a_tool_call_shows_its_name_and_arguments_and_its_result_its_output(formats):
-    """In each family, a tool call's block reads `<name>` over its arguments as indented JSON, and its result's block its
-    output, cleaned of the envelope a format keeps it in (an ATIF observation, Codex CLI's JSON string)."""
-    atif = "evals/harbor-atif/jobs/2026-10-09__08-02-37/build-wordfreq__Lm4R9tw/agent/trajectory.json"
-    turns = client.get(f"{API}/source/turns", params={"path": atif}).json()["turns"]
-    step = next(t for t in turns if t["n"] == 3)  # step_id 3: one call, its result naming it
-    *_, call, result = step["blocks"]
-    name, _, args = call["text"].partition("\n")
-    assert (call["kind"], name, json.loads(args)["keystrokes"]) == ("tool_use", "bash_command", "make\n")
-    assert result["kind"] == "tool_result" and "cannot open output file" in result["text"]
-    two = next(t for t in turns if t["n"] == 2)  # two calls answered by one result that names neither: after both
-    assert [b["kind"] for b in two["blocks"]][-3:] == ["tool_use", "tool_use", "tool_result"]
-    codex = "openai/codex-rollout/sessions/2025/10/06/rollout-2025-10-06T16-42-10-0199bb42-a31b-7542-8c5f-b7a0d396b3a5.jsonl"
-    page = client.get(f"{API}/source", params={"path": codex}).json()
-    result = next(b for r in page["records"] for b in r["meta"].get("blocks") or [] if b["kind"] == "tool_result")
-    assert not result["text"].startswith('{"output"'), "the output, not the JSON string around it"

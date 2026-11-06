@@ -1,6 +1,6 @@
 """The view jobs' thimble tools: a view's builder (`thimble:view-builder`, dev.py) and its reviewer
-(`thimble:view-reviewer`, view_review.py) are subagents of the analyst's Claude Code session, and the gate loops the
-server ran around a `claude -p` session are tools they call (plan, lane E):
+(`thimble:view-reviewer`, view_review.py) are subagents of main, and the gate loops the server ran around a `claude -p`
+session are tools they call (plan, lane E):
 
   view_check     the draft check (views.check_answer), as often as the agent wants: the gate with the locators it names,
                  and a picture of the page as it opens when it asks for one
@@ -13,9 +13,8 @@ server ran around a `claude -p` session are tools they call (plan, lane E):
 
 Each takes its view from its caller's key (`view:<slug>`, `review:<slug>`), and runs only for the agent registered for
 that key's current run, never for main (its Spec names no session of main's), another agent or a descendant of the
-agent; an extension's program that builds the view (dev.program_build) may call view_check. A finish tool blocks while
-its gate runs and is cancelled when its caller drops the call (tools.Spec.drop_stops: Claude Code closes it when the
-agent is stopped), and it registers a pass only for a caller still running. A finish call after the last attempt or
+agent. A finish tool blocks while
+its gate runs and is cancelled when its agent is stopped, and it registers a pass only for a caller still running. A finish call after the last attempt or
 round runs nothing and registers nothing. An agent still running FINISH_GRACE_S after its pass or its last attempt is
 stopped through the module (subagents.stop), and its run ends as the finish tool said (dev.build_ended,
 view_review.subagent_ended read the outcome the tool kept on the proposal)."""
@@ -63,8 +62,7 @@ def slug_of(key: str | None) -> str:
 def builder_definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:view-builder` for workspace `c` (subagents.roles adds its model, effort and
     `background`): prompts/dev.md with prompts/dev-view.md, the fixed part of every build, as its task (the dev agent's
-    prompt as the config or the active extensions change it), a fixed description, and the thimble tools that are not
-    a builder's taken away. The view a run builds is in its prompt (dev.build_task)."""
+    prompt as the config changes it), a fixed description, and the thimble tools that are not a builder's taken away. The view a run builds is in its prompt (dev.build_task)."""
     from . import dev, prompts, userconf, views  # noqa: PLC0415 — dev imports the view modules, which import this one
 
     with prompts.custom(userconf.prompt_files(c, "dev")):
@@ -75,13 +73,12 @@ def builder_definition(c: str) -> dict[str, Any]:
 
 
 def reviewer_definition(c: str) -> dict[str, Any]:
-    """The registration of `thimble:view-reviewer` for workspace `c`: the `review` section of prompts/view-review.md,
-    the view-review task's part (tasks.py), as the active extensions change it, a fixed description, and the thimble
-    tools that are not a reviewer's taken away. The view a run reviews is in its prompt (view_review.task)."""
-    from . import prompts, tasks, view_review  # noqa: PLC0415
+    """The registration of `thimble:view-reviewer` for workspace `c`: the `review` section of prompts/view-review.md, a
+    fixed description, and the thimble tools that are not a reviewer's taken away. The view a run reviews is in its
+    prompt (view_review.task)."""
+    from . import view_review  # noqa: PLC0415
 
-    with prompts.custom(tasks.files(c, view_review.PROMPT)):
-        prompt = view_review.reviewer_prompt(c)
+    prompt = view_review.reviewer_prompt(c)
     return {"description": REVIEWER_DESCRIPTION, "prompt": prompt,
             "disallowedTools": [*tools.not_own(REVIEWER_TOOLS), "Monitor"]}  # a review ends with its turn
 
@@ -107,17 +104,6 @@ async def _caller(ctx: Any, tool: str, role: str) -> tuple[str, str]:
     if who is None or run is None or who.agent_id != who.root or who.role != role or who.agent_id != run.agent_id:
         raise Refused(NOT_YOURS.format(tool=tool))
     return slug, who.agent_id
-
-
-def _program_call(ctx: Any) -> str:
-    """The slug a program's call of view_check checks: a call that runs as a build's key with no tool-use id of Claude
-    Code's comes from the harness, which runs as that key only while the program's run goes (harness.tool_call)."""
-    from . import harness  # noqa: PLC0415
-
-    key = str(ctx.session or "")
-    if tools.session_kind(key) == tools.VIEW_SESSION and not ctx.tool_use_id and harness.running(ctx.c, key):
-        return slug_of(key)
-    return ""
 
 
 def still_running(c: str, key: str, agent_id: str) -> bool:
@@ -180,17 +166,14 @@ def _check_text(answer: dict[str, Any]) -> str:
 
 async def tool_view_check(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_check`: the checks of the view the caller builds or reviews, with the `locators` it names beside the
-    sampled lines, and with `picture` a picture of the page as it opens, or in terminal mode the view drawn as text
-    (views.check_answer)."""
+    sampled lines, and with `picture` a picture of the page as it opens (views.check_answer)."""
     from . import views  # noqa: PLC0415
 
-    slug = _program_call(ctx)
-    if not slug:
-        try:
-            slug, _ = await _caller(ctx, "view_check",
-                                    BUILDER if tools.session_kind(ctx.session) == tools.VIEW_SESSION else REVIEWER)
-        except Refused as e:
-            return tools.err(str(e))
+    try:
+        slug, _ = await _caller(ctx, "view_check",
+                                BUILDER if tools.session_kind(ctx.session) == tools.VIEW_SESSION else REVIEWER)
+    except Refused as e:
+        return tools.err(str(e))
     raw = args.get("locators") or []
     raw = [raw] if isinstance(raw, str) else raw
     locators = [str(x).strip() for x in raw if str(x).strip()]
@@ -257,8 +240,8 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
 
 async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_pictures`: pictures of the view the caller reviews, the overview first in each round, then the states it
-    asks for, up to view_review.EXTRA_SHOTS more a round, with the records the pages fetched, what the checks found and
-    what an extension's program that replaces the view-review task found in them (view_review.pictures)."""
+    asks for, up to view_review.EXTRA_SHOTS more a round, with the records the pages fetched and what the checks found
+    (view_review.pictures)."""
     from . import view_review  # noqa: PLC0415
 
     try:
@@ -266,10 +249,10 @@ async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     except Refused as e:
         return tools.err(str(e))
     try:
-        paths, records, reading = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
+        paths, records = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
     except view_review.NoPictures as e:
         return tools.err(str(e))
-    return tools.ok("\n\n".join(x for x in (tools.hint("view-pictures", paths=paths, records=records), reading) if x))
+    return tools.ok(tools.hint("view-pictures", paths=paths, records=records))
 
 
 # --------------------------------------------------------------------------- finish_review

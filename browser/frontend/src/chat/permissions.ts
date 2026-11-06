@@ -45,10 +45,8 @@ export function askThread(ask: PendingAsk, metas?: ReadonlyMap<string, ChatMeta>
   const id = ask.request.chat
   const m = id ? metas?.get(id) : undefined
   if (!id || !m || threadKind(m) != null) return id || 'main'
-  // a subagent of main, which the thread tree does not list: main, or (in a chat an earlier build left) the orientation
-  // run as main's subagent that started it
-  const parent = m.parent ? metas?.get(m.parent) : undefined
-  return parent && threadKind(parent) === 'orient' ? parent.id : 'main'
+  // a subagent of main, which the thread tree does not list: main
+  return 'main'
 }
 
 /** What a call of each tool asks to do, as the card's head says it (asks to run a command). */
@@ -74,43 +72,34 @@ export function asksTo(tool: string): string {
   return ASKS_TO[name] ?? `use ${name}`
 }
 
-/** The session that asks, in words: your Claude Code session for main (or the thread of it that asked), the
- * orientation, its critique, the report writer, a report check, the dev agent and its task (dev · view Posts, dev ·
- * ticket #3). `labels` names each chat as the thread tree does. Pure. */
+/** The session that asks, in words: your Claude Code session for main (or the thread of it that asked), the report
+ * writer, a report check, the dev agent and its task (dev · view Posts, dev · ticket #3). `labels` names each chat as
+ * the thread tree does. Pure. */
 export function askedBy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, labels: ReadonlyMap<string, string> = new Map()): string {
   if (ask.chat === 'main') {
     const id = ask.request.chat
     const own = id ? metas.get(id) : undefined
     if (own?.route === 'subagent') return subagentName(own)
     const from = id ? labels.get(id) : null
-    if (from && from !== 'main') return from === 'orient' || from.startsWith('orient-') ? 'The orientation' : `The thread ${from}`
-    // a subagent of main, or (in a chat an earlier build left) one an orientation run as main's subagent started, which
-    // the tree does not list
+    if (from && from !== 'main') return `The thread ${from}`
+    // a subagent of main, which the tree does not list
     const m = id ? metas.get(id) : undefined
     if (!m || from === 'main') return 'Your Claude Code session'
-    const parent = m.parent ? metas.get(m.parent) : undefined
-    const title = (m.title || 'agent').trim()
-    return parent && threadKind(parent) === 'orient' ? `The orientation's agent “${title}”` : `Main's agent “${title}”`
+    return `Main's agent “${(m.title || 'agent').trim()}”`
   }
   const m = metas.get(ask.chat)
   const kind = m ? threadKind(m) : null
-  if (kind === 'orient') return 'The orientation'
   if (kind === 'writer') return 'The report writer'
   if (kind === 'check') return m?.title ? `The ${m.title} check` : 'A report check'
   if (kind === 'dev') return `dev · ${devTask(m?.title ?? '', !!m?.view)}`
-  if (kind === 'step') {
-    const parent = m?.parent ? metas.get(m.parent) : undefined
-    const title = (m?.title || 'step').trim()
-    return parent && threadKind(parent) === 'orient' ? `The orientation's ${title}` : `The step ${title}`
-  }
+  if (kind === 'step') return `The step ${(m?.title || 'step').trim()}`
   return labels.get(ask.chat) ?? 'A session'
 }
 
-/** One of thimble's agents run as a subagent of main, as the card names it: the orientation, the writer of a document,
- * a report check, the builder or the reviewer of a view (its chat titled `view: <name>` or `review: <name>`, live check
+/** One of thimble's agents run as a subagent of main, as the card names it: the writer of a document, a report check,
+ * the builder or the reviewer of a view (its chat titled `view: <name>` or `review: <name>`, live check
  * L31: "The view: Stored Revisions By Label asks to run a command"). Pure. */
 export function subagentName(m: Pick<ChatMeta, 'role' | 'title' | 'doc'>): string {
-  if (m.role === 'orient') return 'The orientation'
   if (m.role === 'writer') return m.doc ? `The writer of the ${m.doc}` : 'The report writer'
   if (m.role === 'check') return m.title ? `The ${m.title} check` : 'A report check'
   const view = /^(view|review):\s*(.+)$/.exec((m.title ?? '').trim())
@@ -181,7 +170,7 @@ function declineLine(seconds: number | null | undefined): string {
 export const MAIN_ASKS_LINE = 'Answer here or in your terminal.'
 
 /** Where a request of one of thimble's agents is answered: in the terminal, which asks at once (U6b). `who` is the
- * agent as the card names it ("The orientation"); `plugin` says Claude Code names it as from thimble's plugin, for an
+ * agent as the card names it ("The report writer"); `plugin` says Claude Code names it as from thimble's plugin, for an
  * agent a click started (spike T2d). Pure. */
 export function terminalAsksLine(who: string, plugin: boolean): string {
   const name = who.replace(/^The /, 'the ')
@@ -189,8 +178,8 @@ export function terminalAsksLine(who: string, plugin: boolean): string {
 }
 
 /** Whether Claude Code names a request of the agent of chat `id` as from thimble's plugin: the agent, or an agent it
- * descends from (the critic of a click-started orientation, live check L13), was started by a click through the
- * plugin, and Claude Code marks every descendant of such an agent plugin-steered (V1). Pure. */
+ * descends from, was started by a click through the plugin, and Claude Code marks every descendant of such an agent
+ * plugin-steered (V1). Pure. */
 export function pluginSteered(id: string | null | undefined, metas: ReadonlyMap<string, ChatMeta>): boolean {
   const seen = new Set<string>()
   for (let m = id ? metas.get(id) : undefined; m && !seen.has(m.id) && m.id !== 'main'; m = m.parent ? metas.get(m.parent) : undefined) {

@@ -1,4 +1,4 @@
-// A document's sentences as plain prose where the editor is not shown (a slide, a story's beat, a page's claims): each
+// A document's sentences as plain prose where the editor is not shown (a page's claims): each
 // sentence a span with `data-anchor` and `data-sid`, inline markdown rendered, citations as RefChip, and the tint of a
 // shown comment's check (checkComments.ts passageFlags).
 import type { ReactNode } from 'react'

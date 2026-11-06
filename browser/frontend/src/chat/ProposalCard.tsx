@@ -1,12 +1,11 @@
-// A view proposal (backend views.offer: after a turn, a side thread's answer or the orientation's end, or a viewer for
-// the type of a file opened in Files), as one card above the chat's composer in the accent: "View proposal", the view's
-// name in bold and what it shows (for a file-type viewer, then the files it reads), then Accept, which builds it as a
-// view the analyst asked for, Reject, and a quiet Don't ask again, which turns view proposals off (Settings' View
-// proposals switch turns them on again). The oldest open proposal shows (openOffer); a `suggested` row without
-// `offered` is from an older version and never shows, and nothing shows while view proposals are off. A new proposal
-// ignores clicks for ARM_MS, so a double click never answers it unread. An Accept that cannot start a build now keeps
-// the proposal and says why, and what to do, under its buttons. The card never takes the focus, and a request that
-// fails says so in a toast.
+// A view proposal (backend views.offer: after a turn or a side thread's answer, or a viewer for the type of a file
+// opened in Files), as one card above the chat's composer in the accent: "View proposal", the view's name in bold and
+// what it shows (for a file-type viewer, then the files it reads), then Accept, which builds it as a view the analyst
+// asked for, Reject, and a quiet Don't ask again, which turns view proposals off (Settings' View proposals switch turns
+// them on again). The oldest open proposal shows (openOffer), and nothing shows while view proposals are off. A new
+// proposal ignores clicks for ARM_MS, so a double click never answers it unread. An Accept that cannot start a build
+// now keeps the proposal and says why, and what to do, under its buttons. The card never takes the focus, and a request
+// that fails says so in a toast.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -72,8 +71,6 @@ export function ProposalCard({ ws }: { ws: string }) {
     return () => window.clearTimeout(t)
   }, [slug])
   const [busy, setBusy] = useState<'accept' | 'reject' | 'off' | null>(null)
-  // why this tab's Accept could not start the build, for the proposal it answered
-  const [refused, setRefused] = useState<{ slug: string; reason: string } | null>(null)
   if (!offer) return null
   const p = offer
   const ready = armed === p.slug && !busy
@@ -81,14 +78,9 @@ export function ProposalCard({ ws }: { ws: string }) {
     if (!ready) return
     track('view-build', { target: `view:${p.slug}`, detail: { offer: true } })
     setBusy('accept')
-    setRefused(null)
     api
       .acceptProposal(ws, p.slug)
-      .then((row) => {
-        // a start that cannot happen keeps the proposal open with the refusal (backend views.click_refused)
-        if (row?.status === 'suggested' && row.refused) setRefused({ slug: p.slug, reason: row.refused.reason || 'The build could not start.' })
-        return refreshProposals(ws)
-      })
+      .then(() => refreshProposals(ws))
       .catch((e: Error) => bus.emit('toast', { text: `Could not build ${p.name}. ${why(e)}`, kind: 'error' }))
       .finally(() => setBusy(null))
   }
@@ -114,8 +106,6 @@ export function ProposalCard({ ws }: { ws: string }) {
       .finally(() => setBusy(null))
   }
   const gate = { 'aria-disabled': !ready || undefined }
-  // this tab's refusal, else the one the row keeps from an earlier Accept
-  const reason = refused?.slug === p.slug ? refused.reason : p.refused?.reason || null
   const line = offerFor(p)
   const files = (p.claims ?? []).filter(Boolean)
   return (
@@ -140,11 +130,6 @@ export function ProposalCard({ ws }: { ws: string }) {
           Don&rsquo;t ask again
         </button>
       </div>
-      {reason && (
-        <p className="chat-offer-refused" role="status">
-          {reason}
-        </p>
-      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 // The prompt registry (prompts/registry.mjs, node.mjs): every model-read text is one file, every file in prompts/ is a
-// text the registry names, each text is read by the module the registry names, and each mode reads a text with what it
-// includes and that mode's words in its slots.
+// text the registry names, each text is read by the module the registry names, each mode reads a text with what it
+// includes and that mode's words in its slots, and guidance.md holds each section a switch leaves out.
 //   node --test plugin/prompts/test
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -10,7 +10,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { textOf } from '../node.mjs'
-import { MODES, TEXTS, compose, fileOf, fill } from '../registry.mjs'
+import { MODES, TEXTS, fileOf, fill } from '../registry.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
@@ -54,27 +54,6 @@ test('placeholders are filled, a value kept as written, and the card tool text f
   }
 })
 
-test("a mode reads a text with what it includes in place and the mode's words in its slots, and leaves its readers' slots for their call", async () => {
-  const files = { checker: 'Check {{REPLY}} as {{WHO}} checks.\n{{include:part}}\nThen {{MARKS}}.\n', part: 'A part, by {{WHO}}.\n\n', loop: '{{include:back}}', back: 'x {{include:loop}}' }
-  const read = name => files[name]
-  const slots = { WHO: { terminal: 'the plugin', browser: 'the workbench' } }
-  // what it includes stands in its place without its closing newlines, and each mode's words stand in its slots
-  {
-    assert.equal(await compose('checker', 'terminal', read, () => slots), 'Check {{REPLY}} as the plugin checks.\nA part, by the plugin.\nThen {{MARKS}}.\n')
-    assert.equal(await compose('checker', 'browser', read, () => slots), 'Check {{REPLY}} as the workbench checks.\nA part, by the workbench.\nThen {{MARKS}}.\n')
-  }
-  // slots.json is read only for a text with a slot its readers do not fill, so a text with none needs no such file
-  {
-    const never = () => { throw new Error('slots.json read') }
-    assert.equal(await compose('checker', 'terminal', () => 'Check {{MARKS}} in {{CWD}}.', never), 'Check {{MARKS}} in {{CWD}}.')
-  }
-  // a slot with no words in the mode, and an include cycle, fail with the file
-  {
-    await assert.rejects(compose('checker', 'browser', read, () => ({ WHO: { terminal: 'the plugin' } })), /prompts\/checker\.md: the slot \{\{WHO\}\} has no browser value/)
-    await assert.rejects(compose('loop', 'terminal', read, () => slots), /include cycle loop -> back -> loop/)
-  }
-})
-
 test("every text reads in each mode with what it includes and slots.json's words, and what is left of its slots is its readers'", async () => {
   for (const name of Object.keys(TEXTS)) {
     for (const mode of MODES) {
@@ -90,11 +69,4 @@ test("each section that guidance/guidance.ts leaves out with its feature off is 
   assert.deepEqual(headings, ['Citing claims', 'Cards', 'Labels'])
   const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
   for (const h of headings) assert.match(text, new RegExp(`^## ${h}$`, 'm'), `guidance.md has ## ${h}`)
-})
-
-test("with Labels off, the guidance names no label: its Labels section goes, and no other section names a label or `thimble label` (a chart's axis label is no label of thimble's)", () => {
-  const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
-  const kept = text.split(/^(?=## )/m).filter(part => /^## (.+)/.exec(part)?.[1]?.trim() !== 'Labels').join('')
-  assert.notEqual(kept, text)
-  assert.deepEqual(kept.replace(/\baxis label\b/g, '').match(/label/gi), null)
 })

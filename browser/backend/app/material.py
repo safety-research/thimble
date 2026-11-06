@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from . import cite, config, frames, notebook, refs
-from .kernel_thimble import CARD_MIME, DIAGRAM_MIME, TIMELINE_MIME
+from .kernel_thimble import DIAGRAM_MIME, TIMELINE_MIME
 
 log = logging.getLogger("thimble.material")
 
@@ -30,13 +30,13 @@ FIGURE_WORDS = "a chart, a table, a timeline, a diagram or a custom card's page"
 
 def _chart_of(b: Any) -> str | None:
     """What one output bundle draws as a chart (frontend components/Outputs isChart): `timeline` or `diagram` for a
-    drawing, `chart` for an image, a vega spec or a card type's graphic; None for another bundle."""
+    drawing, `chart` for an image or a vega spec; None for another bundle."""
     if not isinstance(b, dict):
         return None
     drawn = next((DRAWINGS[k] for k in b if k in DRAWINGS), None)
     if drawn:
         return drawn
-    return "chart" if CARD_MIME in b or any(str(k).startswith("image/") or "vega" in str(k) for k in b) else None
+    return "chart" if any(str(k).startswith("image/") or "vega" in str(k) for k in b) else None
 
 
 def has_table(outputs: Any) -> bool:
@@ -52,7 +52,7 @@ def has_table(outputs: Any) -> bool:
 def figure_kind(cell: Any) -> str | None:
     """What a card draws that a document can show as a figure (frontend components/Outputs figureKind): `timeline` or
     `diagram` for a drawing, from its code's thimble.timeline or thimble.diagram or from its dataset; `chart` for an
-    image, a vega spec or a card type's graphic; `table` for an html table or a table card's frame; `custom` for a custom
+    image or a vega spec; `table` for an html table or a table card's frame; `custom` for a custom
     card's page. None for a card that draws none: a note, an example, a label, or code that only printed. The first
     output that draws a chart decides, as the card shows it."""
     if not isinstance(cell, dict):

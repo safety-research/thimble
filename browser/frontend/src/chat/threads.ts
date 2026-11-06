@@ -1,26 +1,26 @@
-// The chat's threads as the thread tree lists them (components/ThreadTree). The top level is main, the latest
-// orientation and the `dev` group (DEV_GROUP, a row that only folds), under which hangs every dev ticket, a view build
-// among them, named `dev/…`. Everything else started from main hangs
-// under main (threads, writers, earlier orientations, running report checks); a thread born from a ⌘-click hangs under the chat it was started from (`parent`), and each
-// step of an orientation or writer under that session. Rows are ordered by latest activity. Work the analyst did not
-// start (a report check's run) is listed only while it is relevant (running, waiting, or shown); every dev ticket, the
-// orientation's view builds among them, is always listed.
+// The chat's threads as the thread tree lists them (components/ThreadTree). The top level is main and the `dev` group
+// (DEV_GROUP, a row that only folds), under which hangs every dev ticket, a view build among them, named `dev/…`.
+// Everything else started from main hangs under main (threads, writers, running report checks); a thread born from a
+// ⌘-click hangs under the chat it was started from (`parent`), and each step of a writer under that session. Rows are
+// ordered by latest activity. Work the analyst did not start (a report check's run) is listed only while it is relevant
+// (running, waiting, or shown); every dev ticket is always listed.
 //
-// Names: `main/<title>` for a thread, `orient` (and `orient-1`, `orient-2`, ...), `write-<document>` (`-2`, `-3` for
-// later runs), `main/fixing <name>` (or `main/changing <name>`) for a fix of the person's thimble, `check/<title>`, `dev/<view>` for a view's build and `dev/<first words of its title>` for another ticket, and a step `orient/<phase>: <agent key>`. A chat's
-// own `name` replaces the last part.
+// Names: `main/<title>` for a thread, `write-<document>` (`-2`, `-3` for later runs), `main/fixing <name>` (or
+// `main/changing <name>`) for a fix of the person's thimble, `check/<title>`, `dev/<view>` for a view's build and
+// `dev/<first words of its title>` for another ticket, and a step `write-<document>/<phase>: <agent key>`. A chat's own
+// `name` replaces the last part.
 import type { ThreadNode } from '../components/ThreadTree'
 import { hhmm } from '../lib/time'
 import type { ChatMeta } from '../lib/types'
 
-/** What a chat is: main, a thread (a fork of main), the orientation, a writer, a report check's run on a document, a
- * dev ticket's session (a view build among them), a fix's fixer (backend fixes.fixer_chat), or a step of the
- * orientation or a writer (a subagent or workflow agent of its session, nested under it and opened from its card). */
-export type ThreadKind = 'main' | 'thread' | 'orient' | 'writer' | 'check' | 'dev' | 'fix' | 'step'
+/** What a chat is: main, a thread (a fork of main), a writer, a report check's run on a document, a dev ticket's
+ * session (a view build among them), a fix's fixer (backend fixes.fixer_chat), or a step of a writer (a subagent or
+ * workflow agent of its session, nested under it and opened from its card). */
+export type ThreadKind = 'main' | 'thread' | 'writer' | 'check' | 'dev' | 'fix' | 'step'
 
 export interface PickItem {
   id: string
-  /** the full name: main, main/why-the-spike, orient, dev/group-board-by-round */
+  /** the full name: main, main/why-the-spike, write-report, dev/group-board-by-round */
   label: string
   /** the name the tree's row shows: the label after its slash, '' for main */
   title: string
@@ -30,7 +30,7 @@ export interface PickItem {
   unread: boolean
   /** the chat has finished its work */
   done: boolean
-  /** the row this one hangs under: main, the orientation, the chat a thread was asked from; null at the top level */
+  /** the row this one hangs under: main, a writer, the chat a thread was asked from; null at the top level */
   parent: string | null
   /** when the chat last changed, which orders the rows under a row */
   lastTs?: string | null
@@ -57,7 +57,6 @@ const byCreation = (a: ChatMeta, b: ChatMeta) => (a.created_at < b.created_at ? 
 export function threadKind(m: Pick<ChatMeta, 'kind' | 'role'>): ThreadKind | null {
   if (m.kind === 'main') return 'main'
   if (m.kind === 'thread') return 'thread'
-  if (m.kind === 'agent' && m.role === 'orient') return 'orient'
   if (m.kind === 'agent' && m.role === 'writer') return 'writer'
   if (m.kind === 'agent' && m.role === 'check') return 'check'
   if (m.kind === 'agent' && m.role === 'dev') return 'dev'
@@ -78,29 +77,28 @@ export function answeredSince(was: ReadonlyMap<string, boolean>, chats: readonly
 }
 
 /** Where a message typed in a thread's composer goes: `here`, the chat's own session (main, or a thread's fork); the
- * latest orientation from its thread or its steps' (`orient`); the view a build thread builds (`view`); the fix a fix's
- * thread works on (`fix`: a round of that fix); else main, for threads of sessions that take no message. */
-export type ComposerTarget = { to: 'here' } | { to: 'main' } | { to: 'orient'; chat: string } | { to: 'view'; slug: string } | { to: 'fix'; fix: number }
+ * view a build thread builds (`view`); the fix a fix's thread works on (`fix`: a round of that fix); else main, for
+ * threads of sessions that take no message. */
+export type ComposerTarget = { to: 'here' } | { to: 'main' } | { to: 'view'; slug: string } | { to: 'fix'; fix: number }
 
-/** The composer's target in the thread of `meta` (ComposerTarget), `latestOrient` the latest orientation's chat. Pure. */
-export function composerTarget(kind: ThreadKind | null, meta: Pick<ChatMeta, 'id' | 'parent'> & { view?: string | null; fix?: number | null } | null, latestOrient: string | null): ComposerTarget {
+/** The composer's target in the thread of `meta` (ComposerTarget). Pure. */
+export function composerTarget(kind: ThreadKind | null, meta: { view?: string | null; fix?: number | null } | null): ComposerTarget {
   if (kind === 'main' || kind === 'thread' || kind == null) return { to: 'here' }
-  if (latestOrient && ((kind === 'orient' && meta?.id === latestOrient) || (kind === 'step' && meta?.parent === latestOrient))) return { to: 'orient', chat: latestOrient }
   if (kind === 'dev' && meta?.view) return { to: 'view', slug: meta.view }
   if (kind === 'fix' && typeof meta?.fix === 'number') return { to: 'fix', fix: meta.fix }
   return { to: 'main' }
 }
 
-/** Whether the chat is the build of a view the analyst never asked for, such as one an orientation from before 0.8.0
- * proposed (backend dev._view_chat marks the build of one they asked for `asked`). Pure. */
-export function orientBuild(m: Pick<ChatMeta, 'kind' | 'role'> & { view?: string | null; asked?: boolean | null }): boolean {
+/** Whether the chat is the build of a view the analyst never asked for (backend dev._view_chat marks the build of one
+ * they asked for `asked`). Pure. */
+export function unaskedBuild(m: Pick<ChatMeta, 'kind' | 'role'> & { view?: string | null; asked?: boolean | null }): boolean {
   return m.kind === 'agent' && m.role === 'dev' && !!m.view && !m.asked
 }
 
 /** Whether the analyst did not start the chat themselves: the build of a view nobody asked for (its view's chip is its
  * home) or a check's run. Pure. */
 export function startedByThimble(m: Pick<ChatMeta, 'kind' | 'role'> & { view?: string | null; asked?: boolean | null }): boolean {
-  return orientBuild(m) || (m.kind === 'agent' && m.role === 'check')
+  return unaskedBuild(m) || (m.kind === 'agent' && m.role === 'check')
 }
 
 /**
@@ -125,7 +123,7 @@ export function stepParts(title: string): { phase: string; key: string } {
 }
 
 /** The names of a session's steps as its card and its strip list them (stepParts): each agent's key alone while every
- * step shares one phase (`run-logs`, not `orient/read: run-logs`), and `phase: key` once the steps span two phases, so
+ * step shares one phase (`run-logs`, not `read: run-logs`), and `phase: key` once the steps span two phases, so
  * a reader and a verifier read apart. Pure. */
 export function shortStepNames(titles: readonly string[]): string[] {
   const parts = titles.map(stepParts)
@@ -152,7 +150,7 @@ export function ticketSlug(title: string): string {
 }
 
 /**
- * The tree's items: main and what hangs under it, then the latest orientation and each dev ticket and what hangs under them, each row's
+ * The tree's items: main and what hangs under it, then each dev ticket and what hangs under it, each row's
  * children in the order they started. Every chat the tree knows is an item, so every chip that points at one has its
  * name; `hidden` says which the tree leaves out (module note). Pure.
  */
@@ -160,20 +158,17 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
   const main = chats.find((m) => m.kind === 'main')
   const listedChats = chats.filter((m) => m.kind !== 'main' && threadKind(m) != null).sort(byCreation)
   const listed = new Set<string>([...(main ? [main.id] : []), ...listedChats.map((t) => t.id)])
-  const orients = listedChats.filter((m) => threadKind(m) === 'orient')
-  const latestOrient = orients[orients.length - 1]?.id ?? null
   const mainId = main?.id ?? null
-  // the row a chat hangs under: a thread under the chat it was asked from, a step under its session, the latest
-  // orientation and each dev ticket at the top level, and every other chat under main
+  // the row a chat hangs under: a thread under the chat it was asked from, a step under its session, each dev ticket at
+  // the top level, and every other chat under main
   const parentOf = (t: ChatMeta): string | null => {
     const kind = threadKind(t)
-    if (kind === 'main' || kind === 'dev' || t.id === latestOrient) return null
+    if (kind === 'main' || kind === 'dev') return null
     if ((kind === 'thread' || kind === 'step') && t.parent && t.parent !== t.id && listed.has(t.parent)) return t.parent
     return mainId
   }
   const labels = new Map<string, string>()
   if (main) labels.set(main.id, 'main')
-  orients.forEach((m, i) => labels.set(m.id, i === orients.length - 1 ? 'orient' : `orient-${i + 1}`))
   const writes = new Map<string, ChatMeta[]>()
   for (const m of listedChats) if (threadKind(m) === 'writer') writes.set(writerDoc(m), [...(writes.get(writerDoc(m)) ?? []), m])
   // a document's first writer is `write-<doc>` and each later one takes the next number, so a name never moves to
@@ -207,22 +202,22 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
   const item = (m: ChatMeta): PickItem => {
     const kind = threadKind(m) ?? 'thread'
     const label = labelOf(m)
-    const agent = kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'dev' || kind === 'fix' || kind === 'step'
+    const agent = kind === 'writer' || kind === 'check' || kind === 'dev' || kind === 'fix' || kind === 'step'
     const isRunning = agent ? m.status === 'running' || running(m) : running(m)
     const shown = m.id === opts.current
     // a thread with nothing in it (asked nothing yet, or its first question never went out) is noise in the tree
     const empty = kind === 'thread' && !m.n_messages && !isRunning
     const waiting = !!opts.waiting?.has(m.id)
-    // every dev ticket is listed (the orientation's view builds among them); a report check's run only while it runs
+    // every dev ticket is listed; a report check's run only while it runs
     const left = kind === 'dev' ? false : (startedByThimble(m) && !isRunning) || empty
     return {
       id: m.id,
       label,
-      title: kind === 'main' ? '' : kind === 'orient' || kind === 'writer' ? label : kind === 'thread' ? m.title || m.id : label.slice(label.indexOf('/') + 1),
+      title: kind === 'main' ? '' : kind === 'writer' ? label : kind === 'thread' ? m.title || m.id : label.slice(label.indexOf('/') + 1),
       isMain: kind === 'main',
       kind,
       running: isRunning,
-      // an orientation, a writer or a ticket reports in main (its card, its chip), so its own chat is never unread
+      // a writer or a ticket reports in main (its card, its chip), so its own chat is never unread
       unread: agent ? false : unread(m),
       done: m.status === 'done' || m.status === 'failed' || m.status === 'stopped',
       parent: parentOf(m),
@@ -308,7 +303,7 @@ export function threadNodes(items: readonly PickItem[]): ThreadNode[] {
   return nodes
 }
 
-/** The label of every listed chat by id, for the chips that point at a thread (main/why-the-spike, orient). Pure. */
+/** The label of every listed chat by id, for the chips that point at a thread (main/why-the-spike, write-report). Pure. */
 export function threadLabels(items: readonly PickItem[]): Map<string, string> {
   return new Map(items.map((it) => [it.id, it.label]))
 }

@@ -144,10 +144,9 @@ do_status() {
 
 do_start() {
   if [ ! -f "$STATE" ]; then echo "dev_stack.sh: no $STATE (run thimble server up first)" >&2; exit 1; fi
-  local DATA_DIR WS_SRC PLUGIN REPO
+  local DATA_DIR WS_SRC REPO
   DATA_DIR="$(jsonq "$STATE" env.data_dir)"
   WS_SRC="$(jsonq "$STATE" env.workspaces_dir)"
-  PLUGIN="$(jsonq "$STATE" env.plugin_dir)"
   REPO="$(jsonq "$STATE" repo)"
   WORKTREE="${WORKTREE:-$REPO}"
   WORKSPACES="${WORKSPACES:-$DEV/stack.workspaces}"
@@ -171,7 +170,7 @@ do_start() {
   for v in $(compgen -e); do [[ "$v" =~ $keep ]] || common+=(-u "$v"); done
   common+=(LANG="${LANG:-C.UTF-8}" THIMBLE_DATA_DIR="$DATA_DIR" THIMBLE_WORKSPACES_DIR="$WORKSPACES"
     THIMBLE_PORT="$API_PORT" THIMBLE_UI_PORT="$UI_PORT" THIMBLE_FRONTEND_URL="http://127.0.0.1:$UI_PORT"
-    THIMBLE_HOME="$DEV/stack.home" THIMBLE_PLUGIN_DIR="$PLUGIN" THIMBLE_DEV_STACK=0
+    THIMBLE_HOME="$DEV/stack.home" THIMBLE_DEV_STACK=0
     VITE_CACHE_DIR="${VITE_CACHE_DIR:-$DEV/vite-cache}")  # frontend/vite.config.ts: never the shared node_modules/.vite of a symlinked checkout
 
   seed_home "$DEV/stack.home" "$API_PORT"

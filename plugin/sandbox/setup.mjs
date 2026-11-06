@@ -1,8 +1,8 @@
 // setup.mjs: installs the sandbox the card runner runs in, and says whether it works. The sandbox is Anthropic's sandbox
 // runtime (srt, npm @anthropic-ai/sandbox-runtime), at the version package.json beside this file pins, installed with
 // `npm ci` from package-lock.json (which holds each package's checksum) into <THIMBLE_HOME>/srt/<version>, the one place
-// the plugin keeps it. scripts/install.sh and the try-it script run it after they install the plugin, and the plugin
-// runs it at each session start (a plugin installed with `claude plugin install` alone runs no setup of its own).
+// the plugin keeps it. scripts/install.sh runs it after it installs the plugin, and the plugin runs it at each session
+// start (a plugin installed with `claude plugin install` alone runs no setup of its own).
 //
 //   node setup.mjs [--home DIR] [--json] [--probe] [--repair]
 //

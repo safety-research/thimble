@@ -22,9 +22,8 @@ wide). No model takes part in the measure. A body past card_size.BODY_MAX, or co
    as a thread's fork (`agent`); neither for main's own call. Every held card shows when the server starts again
    (notebook.mark_interrupted_cells).
 
-Where no card can be drawn (render.down, or the harness failed on this card), outside browser mode, where no server
-hears main's turn end, or where the workspace does not check cards by itself (card_check.auto), nothing is held. Each
-step is one line of workspaces/<c>/card-fit.jsonl.
+Where no card can be drawn (render.down, or the harness failed on this card), or where the workspace does not check
+cards by itself (card_check.auto), nothing is held. Each step is one line of workspaces/<c>/card-fit.jsonl.
 """
 from __future__ import annotations
 
@@ -100,20 +99,19 @@ def too_large(cell: dict[str, Any] | None) -> bool:
 
 
 def holds_here(c: str) -> bool:
-    """Whether a card can be held in workspace `c`: the harness can draw it, this is the server, which hears main's turn
-    end (launch_mode: the server runs in browser mode), and the card check reads a card by itself (card_check.auto)."""
-    from . import card_check, launch_mode  # noqa: PLC0415
+    """Whether a card can be held in workspace `c`: the harness can draw it, and the card check reads a card by itself
+    (card_check.auto)."""
+    from . import card_check  # noqa: PLC0415
 
-    return (render.enabled() and not render.down() and launch_mode.current() == launch_mode.BROWSER
-            and card_check.enabled() and card_check.auto(c))
+    return render.enabled() and not render.down() and card_check.enabled() and card_check.auto(c)
 
 
 def holder(c: str, name: str, session: str | None, tool_use_id: str | None) -> dict[str, str]:
     """Who makes the version an add_card or edit_card call stores, as the card's held record names it: `author`, the
-    session of one of thimble's agents the call runs as (tools.Ctx.session, such as `orient` or `writer:<doc>`, its
-    descendants' calls too), or `agent`, the subagent of main's that made a call through main's shim, such as a thread's
-    fork (the caller hook's line, subagent_files.find_caller). {} for main's own call, for any other tool, and where no
-    card is held."""
+    session of one of thimble's agents the call runs as (tools.Ctx.session, such as `writer:<doc>`, its
+    descendants' calls too), or `agent`, the subagent of main's that made the call, such as a thread's fork (its line in
+    callers.jsonl, subagent_files.find_caller). {} for main's own call, for any other tool, and where no card is
+    held."""
     if name not in FIT_TOOLS or not holds_here(c):
         return {}
     if session:
@@ -294,8 +292,8 @@ def turn_ended(c: str) -> list[str]:
 
 
 def run_ended(c: str, key: str) -> list[str]:
-    """A run of the agent of thimble's whose session is `key` ended (subagents.run_ended; an extension's program,
-    harness): each card it holds shows as it stands. The cards shown."""
+    """A run of the agent of thimble's whose session is `key` ended (subagents.run_ended): each card it holds shows as
+    it stands. The cards shown."""
     return _release(c, lambda author, agent: author == key, "run ended") if key else []
 
 

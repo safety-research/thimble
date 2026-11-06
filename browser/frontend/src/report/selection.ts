@@ -2,7 +2,7 @@
 // starts in; else the first one after its start in the same block (a selection starting in the space between sentences
 // is in no mark); else the block's last one; else the block's own id, as a heading has.
 
-/** The id a block's ⌘ anchor names, when a comment can go on it: a heading, slide, beat or list item's sentence; not a
+/** The id a block's ⌘ anchor names, when a comment can go on it: a heading or a list item's sentence; not a
  * paragraph (`#p<id>`) nor the document itself. */
 export function anchorId(block: Element | null): string | null {
   const m = /^report:[^#\s]+#([A-Za-z0-9_-]+)$/.exec(block?.getAttribute('data-anchor') ?? '')

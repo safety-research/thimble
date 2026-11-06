@@ -1,6 +1,6 @@
 // The chat column: the thread tree at the top, the transcript of the thread being read, and the composer floating over
 // it. Main is the analyst's Claude Code session and leaves out what shows elsewhere (model.mainSkips). A thread is a
-// fork of main: main's conversation up to where it branched, then its own rows. The orientation and a writer show their
+// fork of main: main's conversation up to where it branched, then its own rows. A writer and a check's run show their
 // card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While
 // main or a thread works, a strip of its steps rides behind the composer, and every permission request waits on one
 // card above it (PermissionCard); a message sent to main meanwhile waits under main's rows until main reads it (useChat
@@ -9,12 +9,12 @@
 // while the agent a thread shows (or a step's parent) runs and the browser can stop it, the composer carries its Stop
 // (composerStopOf). A thread
 // whose run ended without a reply offers Ask again. Main opens empty with its composer, as Claude Code does; a start that
-// did not happen shows its card in main (OrientStart). A view proposal waits above the composer until the analyst
+// did not happen shows its card in main (Refused). A view proposal waits above the composer until the analyst
 // answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
 // agents shows as a notice with its fix under the proposal's place, above the composer of whichever chat is open, and
 // as a row in the chat it happened in (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode
 // notice shows there in red.
-import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { Icon } from '../components/Icon'
@@ -26,9 +26,7 @@ import { useTooltip } from '../components/Tooltip'
 import { StepGlyph, type StepState, type ToolStep } from '../components/ToolCard'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { fetchCall } from '../lib/calls'
 import { newest, STALE } from '../lib/newest'
-import { callRef, parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import { useTouring } from '../lib/touring'
@@ -41,15 +39,14 @@ import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { Composer } from './Composer'
 import { chooseMain, type MainChoice } from './mainChoice'
 import { mainEffort, mainFast, mainModel } from './ModelLine'
-import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
+import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, mainSkips, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
 import { TicketStatus, useTicket } from './TicketStatus'
 import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
-import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry, type RewindHooks } from './Rows'
+import { MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type ErrorRetry, type RewindHooks } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
 import { AgentCard, stopSession, useAgentRows } from './AgentCard'
-import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
 import { offerDraft, replayHeld } from './pending'
 import { pageCommand } from './commands'
@@ -73,8 +70,8 @@ import { pendingRequests } from './permissions'
 const LIST_DEBOUNCE_MS = 300
 const ANCHORS_SHOWN = 6
 
-/** What the composer's stop square stops in the thread shown: main's turn, a side thread's fork, or the session of the
- * orientation, a writer or a check's run (backend agents.interrupt_route), the dev ticket the thread runs
+/** What the composer's stop square stops in the thread shown: main's turn, a side thread's fork, or the session of a
+ * writer or a check's run (backend agents.interrupt_route), the dev ticket the thread runs
  * (dev.stop_ticket), or the view's build (views.stop_build) or its review's revision (view_review.stop) in the view's
  * thread. */
 export type ComposerStop =
@@ -82,16 +79,11 @@ export type ComposerStop =
   | { kind: 'ticket'; ticket: string; label: string }
   | { kind: 'view'; slug: string; review: boolean; label: string }
 
-const STOP_LABELS: Readonly<Record<string, string>> = { orient: 'Stop the orientation', writer: 'Stop the writer', check: 'Stop the check' }
+const STOP_LABELS: Readonly<Record<string, string>> = { writer: 'Stop the writer', check: 'Stop the check' }
 export const STOP_MAIN = 'Stop main'
 export const STOP_THREAD = 'Stop the thread'
 
-type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'agent_type' | 'running' | 'fork'>>
-
-/** Whether a chat is the critique's, a step of the orientation run by its critic (`thimble:critic`) or an extension's
- * critic program. Pure. */
-const isCritique = (m: StopMeta | null): boolean => !!m && m.role === 'step' && !!m.agent_type?.endsWith(':critic')
-const CRITIQUE_STOP = 'Stop the critique'
+type StopMeta = Pick<ChatMeta, 'id' | 'status'> & Partial<Pick<ChatMeta, 'role' | 'running' | 'fork'>>
 
 /** The Stop the composer carries for the thread shown, while what it stops runs: main's while its turn runs, a side
  * thread's while its fork runs (none while its question waits for main to fork it), a session's (STOP_LABELS), its dev
@@ -99,8 +91,7 @@ const CRITIQUE_STOP = 'Stop the critique'
  * builder takes a message about the built view, and else its review's while the review runs (`view`, the thread's
  * proposal). A step, a part of its parent's session whose composer sends to
  * that parent (threads.composerTarget), carries its parent's Stop (`parent`, the step's parent chat) while the parent
- * runs. The critique's thread, and a step of the critic's, stops only the critique, which the orientation then goes on
- * without. Null for a ticket that waits in the queue (its Discard is at the thread's foot) or that an older chat of a
+ * runs. Null for a ticket that waits in the queue (its Discard is at the thread's foot) or that an older chat of a
  * retried ticket ran. Pure. */
 export function composerStopOf(
   kind: ThreadKind | null,
@@ -112,9 +103,7 @@ export function composerStopOf(
   if (!meta) return null
   if (kind === 'main') return meta.running ? { kind: 'session', chat: meta.id, role: 'main', label: STOP_MAIN } : null
   if (kind === 'thread') return meta.running && meta.fork?.agent_id && !meta.fork.ended ? { kind: 'session', chat: meta.id, role: 'thread', label: STOP_THREAD } : null
-  if (kind === 'orient' || kind === 'writer' || kind === 'check') return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: kind, label: STOP_LABELS[kind] } : null
-  if (kind === 'step' && isCritique(meta)) return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: 'critic', label: CRITIQUE_STOP } : null
-  if (kind === 'step' && parent && isCritique(parent)) return parent.status === 'running' ? { kind: 'session', chat: parent.id, role: 'critic', label: CRITIQUE_STOP } : null
+  if (kind === 'writer' || kind === 'check') return meta.status === 'running' ? { kind: 'session', chat: meta.id, role: kind, label: STOP_LABELS[kind] } : null
   if (kind === 'step' && parent && parent.status === 'running' && STOP_LABELS[parent.role]) return { kind: 'session', chat: parent.id, role: parent.role, label: STOP_LABELS[parent.role] }
   if (kind === 'dev' && ticket && ticket.chat === meta.id && ticket.status === 'running') return { kind: 'ticket', ticket: ticket.id, label: `Stop ticket #${ticket.n}` }
   if (kind === 'dev' && view && view.chat === meta.id && meta.status === 'running') {
@@ -287,10 +276,6 @@ export function taskStrip(kind: ThreadKind | null, running: boolean, rows: reado
     const steps = sessionSteps(own, metas, true)
     return { title, steps, count: subagentCount(steps) }
   }
-  if (kind === 'orient') {
-    const runs = orientRuns(rows)
-    return session('Orienting', runs[runs.length - 1].rows)
-  }
   if (kind === 'writer') return session('Writing', rows)
   // a dev ticket's (or a view's build) and a check's steps are their session's subagents too; their calls are rows in
   // the thread, never steps, so one that only makes calls has no step list
@@ -377,26 +362,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     if (current !== 'main' && other.error && /no such chat/.test(other.error)) setCurrent('main')
   }, [current, other.error])
 
-  // a followed `call:` ref (a citation's click, teleport): the thread whose log holds the call opens (the store names it:
-  // the orientation's own, or a step's), and the call opens there, marked, its cited lines with it (Rows.CallLine)
-  const [focus, setFocus] = useState<CallFocus | null>(null)
-  useEffect(
-    () =>
-      bus.on('openRef', (e) => {
-        const p = parseRef(e.ref)
-        if (p?.kind !== 'call') return
-        track('chip-teleport', { target: e.ref, detail: { kind: 'call' } })
-        void fetchCall(ws, p.chat, p.n)
-          .then((c) => c.chat || p.chat)
-          .catch(() => p.chat)
-          .then((holder) => {
-            setCurrent(holder)
-            setFocus((f) => ({ ref: callRef(p.chat, p.n), line: p.line, endLine: p.endLine, seq: (f?.seq ?? 0) + 1 }))
-          })
-      }),
-    [ws],
-  )
-
   // Go to it on a check's comment on Claude's answer, `answer:<turn>#s<n>`: main's chat opens, where Rows opens the comment
   useEffect(
     () =>
@@ -424,10 +389,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     nearEnd.current = true
     setStripOpen(false)
   }, [current])
-  // a followed call brings itself into view (Rows.CallLine), so the list stops following its end
-  useEffect(() => {
-    if (focus) nearEnd.current = false
-  }, [focus])
   useEffect(() => {
     const el = listRef.current
     if (!el || !nearEnd.current) return
@@ -544,7 +505,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const mainModelNow = mainModel(main.meta?.attached, mainKept?.models?.main?.model)
   const curMeta = (chat.meta?.id === current ? chat.meta : null) ?? chats.find((m) => m.id === current) ?? null
   const kind: ThreadKind | null = current === 'main' ? 'main' : curMeta ? threadKind(curMeta) : null
-  const agent = kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'dev' || kind === 'step'
+  const agent = kind === 'writer' || kind === 'check' || kind === 'dev' || kind === 'step'
   const running = agent ? curMeta?.status === 'running' : chat.running
   // the dev ticket the thread shows runs (its thread's foot, TicketView), and what the composer's stop square stops
   const [ticket, setTicket] = useTicket<TicketWithShots>(kind === 'dev' && !curMeta?.view ? (curMeta?.ticket ?? null) : null)
@@ -575,10 +536,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       if (!ok || ofMain) setStopping((s) => (s === key ? null : s))
     })
   }
-  // the orientation and the tickets that run: their steps at their rows' edge, and in main the orientation's strip
-  const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'orient' || threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
-  // the orientations' logs are read as well: main leaves out its relay of the summary one handed back
-  const orientIds = useMemo(() => chats.filter((m) => threadKind(m) === 'orient').map((m) => m.id), [chats])
+  // the writers and the tickets that run: their steps at their rows' edge
+  const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
   // while the product tour runs, no view proposal shows over its examples
   const touring = useTouring()
   const reloadMain = main.reload
@@ -586,9 +545,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // read again at once
   const reloadOther = other.reload
   useEffect(() => bus.on('notice', (e) => void (e.replay ? undefined : e.chat === 'main' ? reloadMain() : e.chat && e.chat === current ? reloadOther() : undefined)), [reloadMain, reloadOther, current])
-  const agentRows = useAgentRows(ws, [...new Set([...runningAgents.map((m) => m.id), ...orientIds])])
-  // the orientation whose strip main shows while it runs, unless main's own turn runs, whose strip main shows then
-  const orienting = current === 'main' && !running ? runningAgents.find((m) => threadKind(m) === 'orient') : undefined
+  const agentRows = useAgentRows(ws, runningAgents.map((m) => m.id))
   const metaMap = useMemo(() => new Map(chats.map((m) => [m.id, m])), [chats])
   // a ticket that waits in the queue, or for the analyst's Start, is not at work: its foot says so (TicketStatus)
   const waitingTicket = kind === 'dev' && !curMeta?.view && ticket?.status === 'queued'
@@ -597,46 +554,24 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // main's turn that only takes the thread's question to its fork is the thread's start: the thread's tree does not
   // show it as main at work
   const starter = kind === 'thread' && mainRelays(main.records, main.running, chat.records, running) ? 'main' : null
-  const strip = waitingTicket ? null : orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view, stage)
-  // the orientation waits for its critic's report: the strip says so (subagents' `paused: critique`)
-  const pausedFor = (orienting ?? (kind === 'orient' ? curMeta : null))?.paused === 'critique'
-  if (strip && pausedFor) strip.title = PAUSED_LINE
-  // the orientation the strip follows in main (its retry below), and the session whose strip it is in its own thread
-  const stripMeta = orienting ?? (kind === 'orient' ? curMeta : null)
-  const stripSession = orienting ?? (kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'step' || kind === 'dev' ? curMeta : null)
-  // the session the strip follows is waiting for the analyst while a request that waits at it, or at its critique, is
-  // open (chat/waiting.ts: at the thread the permission card's head names); main's turn and a thread's fork while one of
+  const strip = waitingTicket ? null : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view, stage)
+  // the session whose strip it is in its own thread
+  const stripSession = kind === 'writer' || kind === 'check' || kind === 'step' || kind === 'dev' ? curMeta : null
+  // the session the strip follows is waiting for the analyst while a request that waits at it is open
+  // (chat/waiting.ts: at the thread the permission card's head names); main's turn and a thread's fork while one of
   // their own is (waitsItself)
   const stripped = !!strip
   const waitingFor = useMemo(() => (stripped && stripSession ? waitingAt(stripSession.id, metaMap.values(), main.meta) : null), [stripped, stripSession, metaMap, main.meta])
   const waiting = !!waitingFor || (stripped && !stripSession && (kind === 'main' || kind === 'thread') && waitsItself(curMeta, main.meta, metaMap.values()))
   // every request of every session that waits for the analyst, on the one card above the composer
   const asks = useMemo(() => pendingRequests(main.meta, metaMap.values()), [main.meta, metaMap])
-  // the latest orientation, which the orientation's composer and main's message_orientation reach
-  const latestOrient = orientIds.length ? [...chats].filter((m) => threadKind(m) === 'orient').sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]?.id ?? null : null
-  // where the composer sends (threads.composerTarget), which its placeholder names and whose model its chip shows; in
-  // the thread of a pre-cached orientation that kept no session, main
-  const target = composerTarget(kind, curMeta, latestOrient)
+  // where the composer sends (threads.composerTarget), which its placeholder names and whose model its chip shows
+  const target = composerTarget(kind, curMeta)
   const [sendingView, setSendingView] = useState(false)
-  // the analyst's messages to the orientation, from their send until its log holds them; `held` while the server holds
-  // one until the coverage line is measured
-  const [outbox, setOutbox] = useState<{ chat: string; text: string; key: number; held?: boolean }[]>([])
-  // the server's text when the orientation cannot take a message here (409 earlier session, 410 earlier version)
-  const [orientClosed, setOrientClosed] = useState<{ chat: string; text: string } | null>(null)
-  const [sendingOrient, setSendingOrient] = useState(false)
-  const outboxSeq = useRef(0)
   // main's session as the composer shows it (ModelLine): its effort and fast mode, and whether one is attached at all,
   // which is known once main's meta has loaded
   const attached = main.meta?.attached ?? null
   const detached = !!main.meta && !attached
-  // the orientation the composer would reach, when it cannot take a message here: an earlier Claude Code session's or an
-  // earlier version's, whose text takes the composer's place (backend orient_session.latest's 409 and 410)
-  const orientMeta = target.to === 'orient' ? metaMap.get(target.chat) ?? (curMeta?.id === target.chat ? curMeta : null) : null
-  const orientContinue = target.to === 'orient' ? continueOf(curMeta?.id === target.chat ? curMeta : orientMeta, attached?.session) : null
-  const orientClosedText =
-    target.to === 'orient'
-      ? (orientClosed?.chat === target.chat ? orientClosed.text : '') || continueText(orientContinue, lastSession(curMeta?.id === target.chat ? curMeta : orientMeta))
-      : ''
   // main's model, effort and fast mode, which Settings' Main and side threads row changes as well (chat/mainChoice)
   const choose = useCallback(
     (choice: MainChoice) =>
@@ -663,14 +598,11 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     const agentsMeta = chats.filter((m) => m.kind === 'agent')
     return {
       spawned: new Set(agentsMeta.map((m) => (m as { tool_use_id?: string | null }).tool_use_id).filter((id): id is string => !!id)),
-      summaries: orientIds.flatMap((id) => orientSummaries(agentRows.get(id) ?? [], metaMap.get(id)?.status === 'done')),
       runs: agentsMeta
         .filter((m) => m.role !== 'labels' && m.role !== 'dev' && m.role !== 'check')
         .map((m) => ({ from: m.created_at, to: m.ts_end ?? (m.status === 'running' ? null : (m.last_ts ?? m.created_at)) })),
-      views: orientIds.flatMap((id) => madeBy(agentRows.get(id) ?? []).views),
-      orientWriters: orientWriters(chats),
     }
-  }, [chats, orientIds, agentRows, metaMap])
+  }, [chats])
   const mainSkip = useMemo(() => mainSkips(main.records, mainCtx), [main.records, mainCtx])
   const mainRows = useMemo(() => withApiErrors(foldRecords(main.records, mainSkip)), [main.records, mainSkip])
   // Claude Code's API error that ended main's last turn: its Retry sends the analyst's message again
@@ -792,31 +724,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     // what the analyst sends shows at the list's end, also when they had scrolled up to read: the list follows it
     nearEnd.current = true
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
-    if (target.to === 'orient') {
-      // the latest orientation takes the analyst's message itself: it resumes the finished session, or waits for the run
-      // going on to end; from one of its steps, its thread opens, where the message and the reply show
-      const chatId = target.chat
-      if (current !== chatId) setCurrent(chatId)
-      const key = ++outboxSeq.current
-      setSendingOrient(true)
-      setOutbox((o) => [...o, { chat: chatId, text, key }])
-      return api
-        .messageOrientation(ws, text)
-        .then((r) => {
-          if (r.status === 'held') setOutbox((o) => o.map((m) => (m.key === key ? { ...m, held: true } : m)))
-          return true
-        })
-        .catch((e: Error) => {
-          setOutbox((o) => o.filter((m) => m.key !== key))
-          // an orientation of an earlier session or version: its text takes the composer's place (one stopped with Esc
-          // takes the message, which starts its continuation)
-          const closed = /^(409|410)\s+(This orientation ran in an earlier.*)$/s.exec(e.message)
-          if (closed) setOrientClosed({ chat: chatId, text: closed[2] })
-          else bus.emit('toast', { text: `Your message was not passed on: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
-          return false
-        })
-        .finally(() => setSendingOrient(false))
-    }
     if (target.to === 'view') {
       // a view build's thread: the message is a change to the view, run by its build in this thread
       const slug = target.slug
@@ -833,20 +740,15 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         .finally(() => setSendingView(false))
     }
     if (target.to === 'main') {
-      // a ticket, a writer, a check's run and an older orientation run in sessions of their own that take no message;
-      // what the analyst says there goes to main, as the composer says
+      // a ticket, a writer and a check's run run in sessions of their own that take no message; what the analyst says
+      // there goes to main, as the composer says
       setCurrent('main')
       return main.send(text)
     }
     return chat.send(text)
   }
   // the composer's chip: the model and effort of the session the message goes to; main's for main and its threads
-  const roleChip =
-    target.to === 'orient' ? (
-      <RoleChip ws={ws} role="orient" label="the orientation" values={orientMeta?.values ?? null} />
-    ) : target.to === 'view' ? (
-      <RoleChip ws={ws} role="dev" label="the view build" />
-    ) : undefined
+  const roleChip = target.to === 'view' ? <RoleChip ws={ws} role="dev" label="the view build" /> : undefined
   const mainChip = !!attached && !roleChip
 
   return (
@@ -890,7 +792,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             aside={onCollapse && <Button variant="icon" size="sm" icon="panel-left" title="Collapse the chat" className="chat-head-collapse" onClick={onCollapse} />}
           />
         </header>
-        <FixPage ws={ws} />
+        <FixPage />
         <div
           className="chat-list"
           ref={listRef}
@@ -899,7 +801,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             nearEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
           }}
         >
-          <CallFocusContext.Provider value={focus}>
           <div className="chat-flow" ref={flowRef}>
             {chat.loading && (
               <div className="chat-empty">
@@ -917,7 +818,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               </>
             )}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} skip={mainSkip} branches={branches} detached={detached} />}
-            {!chat.loading && !chat.error && kind === 'orient' && <SessionView ws={ws} id={current} chat={chat} role="orient" title="Orientation" running={running} outbox={outbox.filter((m) => m.chat === current)} attached={!!attached} />}
             {!chat.loading && !chat.error && kind === 'writer' && <SessionView ws={ws} id={current} chat={chat} role="writer" title={curMeta?.title || 'Writer'} running={running} />}
             {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Check'} running={running} fromMain={false} />}
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
@@ -926,7 +826,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {/* an ask about a host waits at the end, under the command that waits for it */}
             {!chat.loading && !chat.error && <HostAsks ws={ws} asks={hostAsks(chat.meta)} />}
           </div>
-          </CallFocusContext.Provider>
         </div>
         <div ref={footRef} className="chat-foot">
           {/* what waits for the analyst above the composer, together at most a part of the column's height, so the
@@ -940,30 +839,23 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           </div>
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
           <FixWorking />
-          {orientClosedText ? (
-            <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
-              <Icon name="terminal" size={13} className="chat-continue-ico" />
-              <span>{orientClosedText}</span>
-            </div>
-          ) : (
-            <Composer
-              model={mainChip ? mainModelNow : null}
-              models={mainChip ? modelChoices(mainKept, mainModelNow) : undefined}
-              onModel={mainChip ? pickModel : undefined}
-              effort={mainChip ? mainEffort(attached) : null}
-              onEffort={mainChip ? pickEffort : undefined}
-              fast={mainChip ? mainFast(attached) : null}
-              onFast={mainChip ? pickFast : undefined}
-              chip={roleChip}
-              onSend={send}
-              sending={target.to === 'orient' ? sendingOrient : target.to === 'view' ? sendingView : target.to === 'main' ? main.streaming : chat.streaming}
-              placeholder={`Reply in ${target.to === 'main' ? 'main' : target.to === 'orient' ? labels.get(target.chat) ?? 'orient' : curPath}…`}
-              disabled={chat.loading || !!chat.error}
-              stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
-              thread={current}
-              picker={picking && current === 'main' && rewindable.length > 0 ? <RewindPicker ws={ws} choices={rewindable} busy={rewinding} onPick={rewindTo} onClose={closePicker} /> : undefined}
-            />
-          )}
+          <Composer
+            model={mainChip ? mainModelNow : null}
+            models={mainChip ? modelChoices(mainKept, mainModelNow) : undefined}
+            onModel={mainChip ? pickModel : undefined}
+            effort={mainChip ? mainEffort(attached) : null}
+            onEffort={mainChip ? pickEffort : undefined}
+            fast={mainChip ? mainFast(attached) : null}
+            onFast={mainChip ? pickFast : undefined}
+            chip={roleChip}
+            onSend={send}
+            sending={target.to === 'view' ? sendingView : target.to === 'main' ? main.streaming : chat.streaming}
+            placeholder={`Reply in ${target.to === 'main' ? 'main' : curPath}…`}
+            disabled={chat.loading || !!chat.error}
+            stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
+            thread={current}
+            picker={picking && current === 'main' && rewindable.length > 0 ? <RewindPicker ws={ws} choices={rewindable} busy={rewinding} onPick={rewindTo} onClose={closePicker} /> : undefined}
+          />
         </div>
       </section>
     </ThreadsContext.Provider>
@@ -1105,11 +997,11 @@ function AskAgain({ ws, id, detached, onAsked }: { ws: string; id: string; detac
   )
 }
 
-/** The rows of the orientation or a writer as its thread shows them: its whole session less its first message, which
- * is the card's. A session that handed its summary back to main at its end (a SubagentHandback call, which Claude Code
+/** The rows of a writer or a check's run as its thread shows them: its whole session less its first message, which is
+ * the card's. A session that handed its summary back to main at its end (a SubagentHandback call, which Claude Code
  * has it make in auto mode) ends on one folded hand-back row that holds the summary, in place of the call and the text
  * that followed it; with no summary, on neither. Pure. */
-export function orientMessages(rows: readonly Row[]): Row[] {
+export function sessionMessages(rows: readonly Row[]): Row[] {
   const first = rows.findIndex((r) => r.kind === 'user')
   const own = rows.filter((_, i) => i !== first)
   const back = [...own].reverse().find((r) => r.kind === 'tool' && r.name === 'SubagentHandback')
@@ -1122,34 +1014,10 @@ export function orientMessages(rows: readonly Row[]): Row[] {
   return [...rest.filter((r) => r.index < back.index || r.kind !== 'text'), handed].sort((a, b) => a.index - b.index)
 }
 
-/** An orientation's call numbers by tool_use id, read from its store's index while any call in `rows` has none in its
- * record; empty otherwise. */
-function useCallIndex(ws: string, chat: string | null, rows: readonly Row[]): ReadonlyMap<string, number> {
-  const [index, setIndex] = useState<ReadonlyMap<string, number>>(new Map())
-  const missing = useMemo(() => rows.filter((r) => r.kind === 'tool' && r.n == null && !index.has(r.id)).length, [rows, index])
-  useEffect(() => setIndex(new Map()), [ws, chat])
-  useEffect(() => {
-    if (!chat || !missing) return
-    let alive = true
-    api
-      .callIndex(ws, chat)
-      .then((d) => {
-        const list = Array.isArray(d) ? d : (d.calls ?? [])
-        if (alive) setIndex(new Map(list.filter((c) => c && typeof c.id === 'string' && typeof c.n === 'number').map((c) => [c.id, c.n] as const)))
-      })
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-    // read again when calls without a number arrive, not on every row
-  }, [ws, chat, missing > 0 ? rows.length : 0])
-  return index
-}
-
 /** The note under a message the server holds until the coverage line is measured, which goes with it. */
 export const HELD_NOTE = 'Sent when the coverage check ends (at most 2 minutes)'
 
-/** A message on its way to the orientation, or to main while main works, until main reads it (useChat unread): the
+/** A message on its way to main while main works, until main reads it (useChat unread): the
  * analyst's tile, a step quieter, which alone says that it waits (the strip behind the composer says that the agent
  * works), with the note under it while the server holds it. */
 function PendingMessage({ text, ws, held }: { text: string; ws: string; held: boolean }) {
@@ -1163,54 +1031,29 @@ function PendingMessage({ text, ws, held }: { text: string; ws: string; held: bo
   )
 }
 
-/** The thread of the orientation, a writer or a check's run: where it came from, the orientation's request as the
- * analyst's message, its card, then its whole transcript (orientMessages); then the analyst's messages still on their
- * way (`outbox`). An orientation that main's quit stopped and `thimble --continue` brought back says a message continues
- * it. */
-function SessionView({ ws, id, chat, role, title, running, outbox = [], fromMain = true, attached = false }: { ws: string; id: string; chat: ChatState; role: string; title: string; running: boolean; outbox?: readonly { text: string; held?: boolean }[]; fromMain?: boolean; attached?: boolean }) {
-  const orient = role === 'orient'
-  // an orientation `thimble demo` installed from a pre-cache, which ran in advance with no session kept
-  const mark = orient && chat.meta?.id === id ? chat.meta?.precached ?? null : null
-  const own = useMemo(() => orientMessages(chat.rows), [chat.rows])
-  const index = useCallIndex(ws, orient ? id : null, own)
-  const rows = useMemo(() => withCallNumbers(own, index), [own, index])
+/** The thread of a writer or a check's run: where it came from, its card, then its whole transcript (sessionMessages). */
+function SessionView({ ws, id, chat, role, title, running, fromMain = true }: { ws: string; id: string; chat: ChatState; role: string; title: string; running: boolean; fromMain?: boolean }) {
+  const rows = useMemo(() => sessionMessages(chat.rows), [chat.rows])
   const log = useMemo(() => ({ meta: chat.meta, records: chat.records as ChatRecord[], error: chat.error }), [chat.meta, chat.records, chat.error])
-  const meta = chat.meta?.id === id ? chat.meta : null
-  const here = orient && !running && meta?.status === 'stopped' && meta.stopped_by === 'quit' && meta.continue === 'here'
-  // stopped with Esc, which Claude Code resumes no more: a message starts a continuation in this thread (U2)
-  const escStopped = orient && !running && meta?.continue === 'stopped-by-user'
-  // a message sent from here is shown until the log holds it (a follow-up's first record)
-  const landed = landedTexts(chat.rows)
-  const sending = outbox.filter((m) => !landed.has(m.text.trim()))
   return (
     <>
-      {fromMain && !mark && <Note className="chat-origin" text="Started from main" chips={<ThreadChip id="main" />} />}
-      <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning stopHere={false} briefAbove={orient} />
-      <Rows rows={rows} ws={ws} chat={id} calls={orient ? id : undefined} live={running} />
-      {here && <Note className="chat-continue-here" text={CONTINUE_HERE_LINE} />}
-      {escStopped && <Note className="chat-continue-here" data-continue="stopped-by-user" text={STOPPED_CONTINUE_LINE} />}
-      {sending.map((m, i) => (
-        <PendingMessage key={`s:${i}:${m.text}`} text={m.text} ws={ws} held={!!m.held} />
-      ))}
+      {fromMain && <Note className="chat-origin" text="Started from main" chips={<ThreadChip id="main" />} />}
+      <AgentCard ws={ws} chat={id} role={role} title={title} log={log} openWhileRunning stopHere={false} />
+      <Rows rows={rows} ws={ws} chat={id} live={running} />
     </>
   )
 }
 
-/** A step of the orientation: the transcript of one of its session's subagents or workflow agents, under a note that
- * goes back to the orientation. Its calls are the orientation's, numbered in the same sequence, so each carries its ref. */
+/** A step of a session: the transcript of one of its subagents or workflow agents, under a note that goes back to the
+ * session. */
 function StepView({ ws, meta, chat, running }: { ws: string; meta: ChatMeta; chat: ChatState; running: boolean }) {
-  const { metas } = useContext(ThreadsContext)
-  const parent = meta.parent ? metas?.get(meta.parent) : undefined
-  const orient = parent && threadKind(parent) === 'orient' ? parent.id : null
-  const index = useCallIndex(ws, orient, chat.rows)
-  const rows = useMemo(() => withCallNumbers(chat.rows, index), [chat.rows, index])
-  // a step that is a session of its own (the orientation's critique, backend critique_session.py) asks in its own chat
+  // a step asks in its own chat
   const own = chat.meta?.id === meta.id ? chat.meta : meta
   return (
     <>
       <Note className="chat-origin" text="A step of" chips={<ThreadChip id={meta.parent ?? 'main'} />} />
       <Holds className="chat-step-holds" rules={running ? own.session_rules : null} />
-      <Rows rows={rows} ws={ws} chat={meta.id} calls={orient ?? undefined} live={running} />
+      <Rows rows={chat.rows} ws={ws} chat={meta.id} live={running} />
     </>
   )
 }

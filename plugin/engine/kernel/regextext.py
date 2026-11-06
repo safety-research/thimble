@@ -1,8 +1,5 @@
 """The text a regex label matches in a JSON or JSONL record: its values, decoded, one per line. Pure: no files.
 
-The browser keeps the same file in browser/server/thimble_browser/labels/regextext.py, and a test there holds the two
-byte-identical. Change both together.
-
 A file holds a newline inside a JSON value as the two characters backslash and n, and a quote as backslash and quote.
 A regex over that raw line misses what a person reads: `\\bhttps?://` finds no word boundary after `\\n`, since n is a
 word character. So a regex reads the record's values, as a person reads them: each string as it is (real newlines),

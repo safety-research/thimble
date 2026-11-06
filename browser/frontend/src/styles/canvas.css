@@ -705,29 +705,11 @@ body[data-cmd] .board-stage * {
 .bcell-check-what {
   color: var(--text-primary);
 }
-.bcell-check-before {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-hairline);
-  color: var(--text-secondary);
-}
 .bcell-check-label {
   font: var(--type-label);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
   color: var(--text-tertiary);
-}
-.bcell-check-before .chat-text {
-  font: inherit;
-}
-.bcell-check-before .chat-text p {
-  margin: 0;
-}
-/* the question before the check replaced it, above the takeaway before it */
-.bcell-check-q {
-  color: var(--text-primary);
 }
 .bcell-check-acts {
   display: flex;
@@ -1259,10 +1241,6 @@ button.plan-run-name:hover {
 .rec-fact-text.hl {
   padding: 0 2px;
 }
-.bcell-quote-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 /* a box that shows its content up to a height, faded at the bottom while there is more, with Show all under it
    (bodies.tsx Clamp): a quoted record, a label's code */
 .bcell-clamp {
@@ -1387,11 +1365,6 @@ audio.bcell-media {
   line-height: var(--h-chip);
   color: var(--text-tertiary);
 }
-.bcell-quotes-text {
-  font: var(--type-ui-sm);
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
 /* a label: its label row (the Label tag, the label's square and name or its tag, then how it is defined and what it ran
    on), the value table, and the foot: the Rule disclosure, which opens how it is computed on the inset paper, and
    Definition and records */
@@ -1481,10 +1454,6 @@ audio.bcell-media {
   padding: 8px 10px;
   border-radius: var(--radius-ui);
   background: var(--bg-sunken);
-}
-.bcell-label-kind {
-  font: 400 10.5px / 1.5 var(--font-mono);
-  color: var(--text-tertiary);
 }
 .bcell-label-prompt {
   font: var(--type-body-sm);
@@ -2437,9 +2406,6 @@ button.bdetail-hist:hover {
   max-width: 760px;
   margin: 0 auto;
 }
-.bfocus-col.is-wide {
-  max-width: none;
-}
 .bfocus-meta,
 .bfocus-pos {
   font: var(--type-mono-sm);
@@ -2934,41 +2900,6 @@ button.bdetail-hist:hover {
 .canvas-diagram-note-ends {
   font: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
   color: var(--text-tertiary);
-}
-
-/* a card type's frame (canvas/TypeCard): as tall as its page asks, or filling a card the analyst sized */
-.bcell-type {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.bcell-type .viewer-frame {
-  flex: none;
-}
-.bcell-type .viewer-frame-loading {
-  min-height: 120px;
-}
-.bcell-type-gone {
-  margin: 0 0 6px;
-  font: var(--type-body-sm);
-  color: var(--text-secondary);
-}
-.bcell.is-sized .bcell-type {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.bcell.is-sized .bcell-type .viewer-frame {
-  flex: 1 1 auto;
-}
-/* Keep and Undo while the analyst reshaped the card in its page, and Open as view at full size */
-.bcell-type-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-top: 8px;
-}
-.bcell-type-view {
-  margin-left: auto;
 }
 
 /* Comments in the top bar: its count of the comments shown, in the secondary ink */

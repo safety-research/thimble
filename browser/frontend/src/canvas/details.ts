@@ -221,7 +221,7 @@ export function unitWord(unit: string | undefined, n: number): string {
 
 /** A value's share of all the units a label labeled, as a label card's table writes it: whole percents, so shares side by
  * side read alike (`7%` beside `93%`), one decimal under 1%, `<0.1%` below that, and `>99%` for a part that rounds to
- * the whole; '' with no total. The terminal's label card writes it so too (mods/thimble-term draw.share). */
+ * the whole; '' with no total. */
 export function labelShare(count: number, total: number): string {
   if (!(total > 0) || !(count >= 0)) return ''
   if (!count) return '0%'
@@ -234,7 +234,7 @@ export function labelShare(count: number, total: number): string {
 
 /** Each value's share as a label card's table shows it: every value's share of the same total, the units the label
  * labeled (labelShare), those in whole percents rounded so that they add up to 100% when the values' counts make the
- * total (largest remainders, as the terminal's label card does, mods/thimble-term draw.shares). Pure. */
+ * total (largest remainders). Pure. */
 export function labelShares(values: readonly string[], counts: Readonly<Record<string, number>> | null | undefined, total: number): Record<string, string> {
   const parts = values.map((v) => counts?.[v] ?? 0)
   const out: Record<string, string> = Object.fromEntries(values.map((v, i) => [v, labelShare(parts[i], total)]))

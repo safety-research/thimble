@@ -120,16 +120,6 @@ function scopeShort(l) {
   return l.checked ? `you checked ${num(l.checked)} · ${n}` : n
 }
 
-/** What a label went over, whole, for its definition. `show` gives a path as the pane shows it. */
-export function scopeWords(l, show = p => p) {
-  const parts = [`${num(l.records)} record${l.records === 1 ? '' : 's'} in ${l.in ? show(String(l.in)) : 'the records Claude named'}`]
-  if (l.where) parts.push(`where ${cut(oneLine(String(l.where)), 160)}`)
-  if (l.within) parts.push(`within ${l.within[0]} = ${l.within[1]}`)
-  if (l.trial) parts.push(`a trial: ${num(l.records)} of ${num(l.matched)} at random`)
-  if (l.checked) parts.push(`you checked ${num(l.checked)}: ${num(l.agree)} agree, ${num(l.disagree)} changed`)
-  return parts.join(' · ')
-}
-
 // ------------------------------------------------------------------------------------------------ rows
 
 const runsWidth = runs => runs.reduce((s, r) => s + width(r.s) + (r.hotkey ? width(r.hotkey) + 2 : 0), 0)
@@ -594,12 +584,9 @@ export function rowText(row) {
 
 // ------------------------------------------------------------------------------------------------ a change, applied
 
-/** What a label is and how it was applied, as the pane can show and change it: its kind, its rule, the plain sentence,
- *  the records it goes over, its values, its model (a prompt label's; null: the reads' own), the trial's size. */
-export const EDITABLE = ['rule', 'says', 'in', 'values', 'where', 'within', 'model', 'limit']
-
 /** The `thimble label` command that applies the label `l` (as `thimble label --json` gives it) again with `change`
- *  (fields of EDITABLE; null clears where, within, model or limit): the command Claude runs, so the label's versions,
+ *  (its rule, plain sentence, records, values, where, within, model or limit; null clears where, within, model or
+ *  limit): the command Claude runs, so the label's versions,
  *  checks and records stay right. A code label's code goes on stdin. Null when it cannot be applied again (no kind
  *  with a rule, or no records named). */
 export function rerunArgs(l, change = {}) {

@@ -3,14 +3,14 @@ looking, with an easy fix.
 
 A notice is one short line in a warning style, an optional action button, and x to dismiss it. It shows in the
 foreground: in the browser in a strip above the composer of whichever chat the analyst has open, until they dismiss it
-or the failure is fixed; in terminal mode in the band above the prompt. A notice of an agent with a chat of its own (a
-thread, an agent chat; `chat`) is also written into that chat as a row, for its history.
+or the failure is fixed. A notice of an agent with a chat of its own (a thread, an agent chat; `chat`) is also written
+into that chat as a row, for its history.
 
 The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, details, agent, chat,
 action, ts}: `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command,
 such as /login or `thimble server restart`); `details` is the whole of it when `text` had to be shortened (TEXT_CHARS,
 or a failure's words cut by gist), which the page shows on Show more, else None; `agent` names the agent in a few words
-("Orientation", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to; `action`
+("Citation check", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to; `action`
 is the button, one object {label, do, slug?, text?} or a list of them, `do` one of ACTIONS:
 
   proposals-retry  POST /api/ws/{c}/views/propose-now (proposer.run_now)
@@ -36,16 +36,10 @@ chat alone, since it tells of that chat's own replies), `thread:<chat>` and
 
 Kinds that tell of the setup rather than a failure:
 
-  manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode in
-               browser mode, local_hooks' mode-notice in terminal mode), shown in red; it goes when main reports
-               another mode
-  sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py); key
-               `cc-sandbox`: Claude Code's Bash sandbox could not start in a session of the Claude Code sign-in, so
+  sandbox      key `cc-sandbox`: Claude Code's Bash sandbox could not start in a session of the Claude Code sign-in, so
                its Bash calls were refused (runtime_cc.py), cleared by a later Bash call that ran; key `view-sandbox`:
                the sandbox of a view build's commands can't start on this machine (dev._box_notice), cleared by a
                later build's start where it starts
-  setup        keys `env:<NAME>` and `proxy`: what /thimble found in the shell (events.session_route), in words this
-               module writes from the key (setup_text), never words from the request
   sign-in      key `sign-in:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out
 
 A failure of Anthropic's API is told in plain words with its fix, and each fix says where it runs (reason, API_WORDS):
@@ -88,8 +82,7 @@ API = "api"  # the kind of a notice of main's own request that Anthropic's API f
 ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "thimble-fix", "view-discard", "sign-out")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
-# keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
-REMEMBERED = ("manual-mode", "no-box:")
+REMEMBERED = ("manual-mode",)  # keys whose dismissal holds for the workspace
 OPEN_MAX = 50  # open notices kept; the oldest go first
 TEXT_CHARS = 480  # a notice's text at most, cut at a word (long enough for a fix in the terminal and its words)
 REASON_CHARS = 280  # a failure's own words inside a notice at most
@@ -159,7 +152,7 @@ def _actions(action: Any) -> dict[str, str] | list[dict[str, str]] | None:
 
 def _emit(c: str, event: dict[str, Any]) -> None:
     """The event on the workspace stream, from the loop or scheduled onto the server's loop from a worker thread; off
-    any loop (terminal mode's passes) the notices file alone tells."""
+    any loop the notices file alone tells."""
 
     def send() -> None:
         try:
@@ -197,7 +190,7 @@ def open_notices(c: str) -> list[dict[str, Any]]:
 def remembered(key: Any) -> bool:
     """Whether a dismissal of `key` holds for the workspace (REMEMBERED)."""
     k = str(key or "")
-    return bool(k) and any(k == r or (r.endswith(":") and k.startswith(r)) for r in REMEMBERED)
+    return k in REMEMBERED
 
 
 def _dismissed_file(c: str) -> Path:
@@ -328,27 +321,6 @@ def dismiss(c: str, notice_id: str) -> bool:
 
 # --------------------------------------------------------------------------- the setup /thimble found
 
-# the `setup` notices' words by key (events.session_route): `env:<NAME>` for each NAME the launcher unsets (cli.UNSET_VARS),
-# and `proxy`; the request names only the key
-SETUP_TEXTS = {
-    "env": ("Your shell sets {name}, so thimble's agents may not use the models and efforts in Settings. In your "
-            "terminal: quit, unset {name} and start claude again, or start with `thimble`."),
-    "proxy": ("Your shell sets a proxy, so thimble's plugin may not reach thimble's server. In your terminal: quit, add "
-              "127.0.0.1 and localhost to NO_PROXY, and start claude again."),
-}
-
-
-def setup_text(key: Any) -> str:
-    """The words of the `setup` notice under `key` (SETUP_TEXTS), '' for a key that is none of them."""
-    from . import cli  # noqa: PLC0415 — cli imports config, procs and cc_plugin only
-
-    k = str(key or "")
-    if k == "proxy":
-        return SETUP_TEXTS["proxy"]
-    kind, _, name = k.partition(":")
-    return SETUP_TEXTS["env"].format(name=name) if kind == "env" and name in cli.UNSET_VARS else ""
-
-
 # --------------------------------------------------------------------------- what failed, in plain words
 
 # the words of an error that says Claude's safeguards refused the request, and of one that says Claude Code has no
@@ -406,12 +378,6 @@ SERVER_AUTH = ("Claude Code isn't signed in for thimble's server",
                f"example exported ANTHROPIC_API_KEY), restart the server: {config.RESTART_HOW}", TERMINAL)
 
 
-def fix_where(cls: Any) -> str:
-    """Where the fix of a failure of class `cls` (API_WORDS' keys) runs: BROWSER or TERMINAL; BROWSER for any other
-    failure, whose words say what to do."""
-    return API_WORDS.get(str(cls or ""), ("", "", BROWSER))[2]
-
-
 def failure_class(text: Any, *, status: Any = None, error: Any = None) -> str | None:
     """The class of an API failure (API_WORDS' keys), or None for any other failure: Claude's safeguards by the line's
     words, then the record's HTTP `status` (Claude Code's apiErrorStatus), then a connection failure by its words where
@@ -459,24 +425,20 @@ def reason(text: Any, *, server: bool = False, cls: str | None = None, main_mode
 
 # a role of subagents.TYPES -> (its name on a notice, the subject of a sentence about it); {t} is the run's title
 ROLE_NAMES: dict[str, tuple[str, str]] = {
-    "orientation": ("Orientation", "The orientation"),
-    "critic": ("Critic", "The orientation's critic"),
     "writer": ("Writer: {t}", "The writer of {t}"),
     "view-builder": ("View build: {t}", "The build of the view {t}"),
     "view-reviewer": ("View review: {t}", "The review of the view {t}"),
     "check": ("Report check: {t}", "The report check {t}"),
     "dev-ticket": ("Code ticket: {t}", "The code ticket {t}"),
-    "orient-helper": ("Orientation helper", "A helper of the orientation"),
     "thread": ("Side thread: {t}", "The side thread \"{t}\""),
 }
 # the words a chat's title has before the run's own title (dev.py's "view: …", view_review's "review: …",
-# write_session's "Write …"), and the titles that only name the role
+# write_session's "Write …")
 TITLE_PREFIXES = ("view: ", "review: ", "write ")
-ROLE_TITLES = ("orientation", "critic", "critique", "orientation critic")
 
 
 def agent_key(key: Any) -> str:
-    """The notices' key of an agent of thimble's, by the key it runs under (its session: `orientation`, `view:<slug>`,
+    """The notices' key of an agent of thimble's, by the key it runs under (its session: `view:<slug>`,
     `check:<id>:<doc>`)."""
     return f"agent:{key}"
 
@@ -488,8 +450,6 @@ def who(role: Any, title: Any = "") -> tuple[str, str]:
     for p in TITLE_PREFIXES:
         if t.lower().startswith(p):
             t = t[len(p):].strip()
-    if t.lower() in ROLE_TITLES:
-        t = ""
     name, subject = ROLE_NAMES.get(str(role or ""), ("Agent: {t}", "The agent \"{t}\""))
     if not t:
         name = name.replace(": {t}", "")

@@ -1,5 +1,5 @@
-// The open notices of a workspace (backend notices.py): failures of main or of any of thimble's agents (the orientation
-// and its helpers, writers, view builds and reviews, checks, code tickets, labels, the view proposals), each with its
+// The open notices of a workspace (backend notices.py): failures of main or of any of thimble's agents (writers, view
+// builds and reviews, checks, code tickets, labels, the view proposals), each with its
 // fix. The chat shows them in the foreground, above the composer of whichever chat is open (chat/Notice.tsx), until the
 // analyst dismisses one or a fix that worked clears it. Read from `GET /ws/{c}/notices` when the first reader mounts
 // and again when the stream comes back after a failure, and kept up to date by the stream's `notice` records: a notice

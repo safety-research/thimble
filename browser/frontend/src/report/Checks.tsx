@@ -1,17 +1,17 @@
 // The checks: one row per check that covers a surface (GET /ws/{c}/checks, built-ins first; CheckRows), which the
-// Comments pane beside the slides, the story and a page lists for the documents (CommentsPane, the whole of their
-// sidebar, CommentsSidebar) and the canvas's Comments button for the cards (canvas/Controls.tsx), each with its colour
-// square to show or hide its tints and comments, its count of open comments (or a spinner while it runs, ✕ when it
-// failed: RunMark), and ⋯ to open its card (CheckCard: its last run with Stop, its prompt, Re-run); under the row, the
-// passages changed since it checked them with Run, and a start that did not happen (RunNotes); and the new-check card
-// (NewCheckCard), which the pane's +, that button's + and the end of the top bar's Comments list open. The top bar's
-// Comments (shell/LabelsSidebar.tsx) shows the same parts for each check's runs on the documents: RunMark, RunNotes,
-// and RunLine with Stop in its Last run. Whether a check is on is kept on the server (`shown`), so one switch covers a
-// check's comments in the documents and on the cards, and the server runs what is asked for (backend checks.py);
-// `check` stream records say when a run starts and ends, and `checks` records when a check changes, so every list
-// follows one switch. The pane's head carries the accent dot while a check's run left comments on its document that
-// the analyst has not looked at (newComments.ts); opening the pane looks at them. `useChecks` holds the list;
-// `useSidebar` is a document's sidebar's state (shown or hidden, beside the document or over it).
+// Comments pane beside a page lists for the documents (CommentsPane, the whole of its sidebar, CommentsSidebar) and the
+// canvas's Comments button for the cards (canvas/Controls.tsx), each with its colour square to show or hide its tints
+// and comments, its count of open comments (or a spinner while it runs, ✕ when it failed: RunMark), and ⋯ to open its
+// card (CheckCard: its last run with Stop, its prompt, Re-run); under the row, the passages changed since it checked
+// them with Run, and a start that did not happen (RunNotes); and the new-check card (NewCheckCard), which the pane's +,
+// that button's + and the end of the top bar's Comments list open. The top bar's Comments (shell/LabelsSidebar.tsx)
+// shows the same parts for each check's runs on the documents: RunMark, RunNotes, and RunLine with Stop in its Last
+// run. Whether a check is on is kept on the server (`shown`), so one switch covers a check's comments in the documents
+// and on the cards, and the server runs what is asked for (backend checks.py); `check` stream records say when a run
+// starts and ends, and `checks` records when a check changes, so every list follows one switch. The pane's head carries
+// the accent dot while a check's run left comments on its document that the analyst has not looked at (newComments.ts);
+// opening the pane looks at them. `useChecks` holds the list; `useSidebar` is a document's sidebar's state (shown or
+// hidden, beside the document or over it).
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Button } from '../components/Button'
 import { TextArea, TextInput } from '../components/Field'
@@ -264,8 +264,7 @@ export interface DocSidebar extends FoldingSide {
   probe: (el: HTMLElement | null) => void
 }
 
-/** A document's sidebar: the report's cards (Sidebar.tsx), the Comments pane beside the slides, the story and a page
- * (CommentsSidebar). While the pane holds it beside a column of 60-character lines of the report's text (the row's
+/** A document's sidebar: the report's cards (Sidebar.tsx), the Comments pane beside a page (CommentsSidebar). While the pane holds it beside a column of 60-character lines of the report's text (the row's
  * ReadProbe, report.css), it docks and shows as the analyst left it, per workspace; hidden, a toggle over the page's top
  * left brings it back. In a narrower pane it starts folded to that toggle, which opens it over the document's left edge
  * (shell/dock.tsx useFoldingSide). */
@@ -305,7 +304,7 @@ export interface CommentsPaneProps {
 
 /** The accent dot on a Comments control while a check's run left comments there that the analyst has not looked at
  * (newComments.ts): the canvas's Comments button for the cards, the top bar's Comments for the documents, and the head
- * of the Comments pane beside the slides, the story or a page for its document. */
+ * of the Comments pane beside a page for its document. */
 export function NewCommentsDot() {
   return <span className="dot wu-new-dot" role="img" aria-label="New comments" title="New comments" />
 }
@@ -656,8 +655,8 @@ export function NewCheckCard({ colour, taken, onAdd, onClose }: { colour: string
   )
 }
 
-/** The sidebar of the slides, the story and a page: the Comments pane alone, with the hide toggle in its head; `over`
- * when it shows over the view's left edge. */
+/** The sidebar of a page: the Comments pane alone, with the hide toggle in its head; `over` when it shows over the
+ * view's left edge. */
 export function CommentsSidebar({ onHide, over, ...pane }: CommentsPaneProps & { onHide: () => void; over: boolean }) {
   return (
     <aside className={'wu-side wu-side-checks' + (over ? ' is-over' : '')} aria-label="Comments">

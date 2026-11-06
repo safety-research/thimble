@@ -1,4 +1,4 @@
-// The checks in views without the margin (slides, story, a page): a sentence a shown comment is on takes its check's
+// The checks in the view without the margin (a page): a sentence a shown comment is on takes its check's
 // tint, and on hover or pick an opaque card at the pane's top right lists its comments with their refs and, given
 // `EvidenceActions`, ✓ to resolve one. `docComments` gives a view its document's comments; `useEvidence` gives a view
 // the tints and hover handlers; `EvidencePop` is the card.
@@ -7,7 +7,7 @@ import { useRefLabel } from '../components/RefChip'
 import type { AnyDoc } from '../lib/types'
 import { openComments, passageFlags, shownComments, type CheckLook, type DocComment, type Flag } from './checkComments'
 import { Glyph, IconButton } from './icons'
-import { allSentences, asWriteup, paragraphOf, passageOrder, shapeOf } from './model'
+import { allSentences, asWriteup, paragraphOf, passageOrder } from './model'
 
 /** What the evidence card can do beyond showing: resolve a stored comment (the margin's ✓). */
 export interface EvidenceActionsValue {
@@ -23,15 +23,10 @@ export interface Evidence {
   onLeave: () => void
 }
 
-/** A document's open comments, whatever its shape, in reading order. In a deck or a story a comment on a slide or a
- * beat as a whole (its id, as add_comment and a check leave one on a slide's heading) tints every line of it, since
- * neither view marks a heading. */
+/** A document's open comments, whatever its shape, in reading order. */
 export function docComments(doc: AnyDoc): DocComment[] {
   const view = asWriteup(doc)
-  const out = openComments(view.comments, allSentences(view), passageOrder(view), paragraphOf(view))
-  if (shapeOf(doc) === 'document') return out
-  const units = new Map((view.sections ?? []).map((sec) => [sec.id, (sec.paragraphs ?? []).flatMap((pa) => (pa.sentences ?? []).map((x) => x.id))]))
-  return out.map((c) => (units.get(c.sid)?.length ? { ...c, span: units.get(c.sid)! } : c))
+  return openComments(view.comments, allSentences(view), passageOrder(view), paragraphOf(view))
 }
 
 /** The tints of the comments the checks that are on show, each in its check's colour, with the hovered or picked

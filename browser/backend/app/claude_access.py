@@ -374,11 +374,6 @@ async def put_route(body: AccessBody, request: Request) -> dict[str, Any]:
     return {**status(), "check": await check()}
 
 
-@router.post("/claude-access/check")
-async def check_route() -> dict[str, Any]:
-    return await check()
-
-
 # --------------------------------------------------------------------------- thimble-browser --setup
 
 

@@ -53,8 +53,8 @@ KINDS = frozenset({
     "page-load", "page-unload", "visibility", "corpus-switch",
     # the surfaces: the chat and the three center tabs
     "panel-open", "panel-close", "tab-activate",
-    # the chat: an orientation's start in a page before 0.8.0, agent rows, chips, the ⌘ pointer, threads
-    "start-toggle", "start-run", "agent-row-expand", "chip-teleport", "pointer-open", "pointer-send",
+    # the chat: agent rows, chips, the ⌘ pointer, threads
+    "agent-row-expand", "chip-teleport", "pointer-open", "pointer-send",
     "chat-open", "chat-interrupt", "chat-settings", "thread-open", "thread-switch", "thread-fold", "thread-rename", "thread-delete",
     "thread-ask-again", "chat-retry",
     "ask-send",
@@ -67,9 +67,9 @@ KINDS = frozenset({
     # labels and filters
     "label-edit", "label-delete", "label-calibrate", "label-refine", "label-apply", "label-cancel",
     "filter-set", "filter-clear",
-    # documents: the frame, the report, story, slides, custom types
+    # documents: the frame, the report, custom types
     "report-open", "report-close", "report-edit", "report-tag", "report-fix", "report-revise", "report-generate",
-    "report-drag-cell", "report-frame-edit", "rewrite-span",
+    "report-drag-cell", "report-frame-edit",
     "report-type-create", "report-type-edit", "report-type-delete",
     # comments on report units
     "comment-add", "comment-reply", "comment-dismiss", "comment-reopen", "comment-incorporate",
@@ -87,19 +87,17 @@ KINDS = frozenset({
 
 TARGET_KINDS = frozenset({
     "file", "dir", "cell", "group", "notebook", "chat", "thread", "concept", "report", "sentence", "section",
-    "comment", "panel", "orient", "ticket", "view", "search", "workspace", "ui", OTHER,
+    "comment", "panel", "ticket", "view", "search", "workspace", "ui", OTHER,
 })
 # a card's ref reads as the kind `cell` by either prefix (cite.CARD_PREFIXES)
 _PREFIX_KIND = {
     "cell": "cell", "card": "cell", "group": "group", "chat": "chat", "concept": "concept", "thread": "thread", "report": "report",
     "doc": "report", "type": "report", "sentence": "sentence", "section": "section", "comment": "comment",
-    "panel": "panel", "notebook": "notebook", "file": "file", "dir": "dir", "orient": "orient", "ticket": "ticket",
+    "panel": "panel", "notebook": "notebook", "file": "file", "dir": "dir", "ticket": "ticket",
     "view": "view", "workspace": "workspace", "ui": "ui",
 }
 
 # events.jsonl records that are user actions or their direct outcomes: status -> (kind, actor)
-_ORIENT_EVENTS = {"started": ("orient-start", "analyst"), "stopped": ("orient-stop", "analyst"),
-                  "done": ("orient-done", "system"), "failed": ("orient-failed", "system")}
 _REPORT_EVENTS = {"generating": ("report-request", None), "generated": ("report-generated", "system"),
                   "failed": ("report-failed", "system")}
 _TICKET_STATUSES = ("queued",)
@@ -391,14 +389,7 @@ def _event_rows(ws: Path) -> list[dict]:
         if not ts:
             continue
         rest = {k: v for k, v in ev.items() if k not in ("ts", "seq", "type") and v not in (None, "", [])}
-        if t == "orient":
-            hit = _ORIENT_EVENTS.get(str(ev.get("status")))
-            if hit is None:
-                continue
-            kind, actor = hit
-            run = ev.get("run")
-            out.append(_row(ts, actor, kind, f"orient:{run}" if run is not None else None, "orient", rest, None, None, "event"))
-        elif t == "report":
+        if t == "report":
             hit = _REPORT_EVENTS.get(str(ev.get("status")))
             if hit is None:
                 continue

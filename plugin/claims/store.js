@@ -52,8 +52,6 @@ const MAX_BECAUSE = 600
 const MAX_ABOUT = 240
 /** A cluster's name is kept up to this many characters (past that, cut after a word). */
 const MAX_NAME = 160
-/** The length a store of v 1 cut every cluster name at. */
-const V1_NAME = 60
 /** A cluster grown this much since it was named is offered to the lens to rename or split. */
 export const GROWN = { least: 6, factor: 2 }
 
@@ -80,8 +78,7 @@ export function emptyStore(session = '') {
   return { v: 2, session: String(session || ''), updated: null, claims: [], clusters: [], gaps: [] }
 }
 
-/** A store read from its file's text (or parsed JSON): whatever holds is kept, the rest starts empty. A map of the
- *  whole folder an earlier version kept (claims by `folder`, clusters from `folder`) is left out. */
+/** A store read from its file's text (or parsed JSON): whatever holds is kept, the rest starts empty. */
 export function readStore(text, session = '') {
   let d = text
   if (typeof text === 'string') {
@@ -90,15 +87,11 @@ export function readStore(text, session = '') {
   const s = emptyStore(session || d?.session)
   if (!d || typeof d !== 'object') return s
   s.updated = d.updated || null
-  s.claims = (Array.isArray(d.claims) ? d.claims : []).filter(c => c && c.id && c.text && c.by !== 'folder').map(c => {
-    const { folder: _, ...rest } = c
-    return { ...rest, said: (Array.isArray(c.said) ? c.said : []).filter(p => p?.by !== 'folder'), ...(Array.isArray(c.links) ? { links: c.links.filter(l => !l?.folder) } : {}) }
-  }).map(c => ({ ...c, said: Array.isArray(c.said) ? c.said : [], sources: (Array.isArray(c.sources) ? c.sources : []).map(sourceOf).filter(Boolean) }))
-  s.clusters = (Array.isArray(d.clusters) ? d.clusters : []).filter(c => c && c.id && c.from !== 'folder')
-  // a store of v 1 cut each name at 60 characters, often in a word: the name ends after its last whole word, then …
-  if (!(Number(d.v) >= 2)) s.clusters = s.clusters.map(c => (Array.from(String(c.name ?? '')).length === V1_NAME ? { ...c, name: cutWords(c.name, V1_NAME - 1) } : c))
+  s.claims = (Array.isArray(d.claims) ? d.claims : []).filter(c => c && c.id && c.text)
+    .map(c => ({ ...c, said: Array.isArray(c.said) ? c.said : [], sources: (Array.isArray(c.sources) ? c.sources : []).map(sourceOf).filter(Boolean) }))
+  s.clusters = (Array.isArray(d.clusters) ? d.clusters : []).filter(c => c && c.id)
   s.gaps = Array.isArray(d.gaps) ? d.gaps : []
-  for (const [k, v] of Object.entries(d)) if (!(k in s) && k !== 'folder' && k !== 'folderAsked') s[k] = v
+  for (const [k, v] of Object.entries(d)) if (!(k in s)) s[k] = v
   return oneNameOneCluster(s)
 }
 

@@ -30,8 +30,7 @@ export function cardShape(figure: string | null | undefined): CardShape {
   return figure === 'table' ? 'table' : figure ? 'bars' : 'text'
 }
 
-/** The section a group's cards list under: Figures for a writer's figure group and its subgroups; else Your work (an
- * earlier orientation's deck too, since browser mode runs no orientation). */
+/** The section a group's cards list under: Figures for a writer's figure group and its subgroups; else Your work. */
 export function sectionOf(group: Pick<Group, 'session' | 'parent'> | undefined, byId?: ReadonlyMap<string, Pick<Group, 'session' | 'parent'>>): CardSectionKey {
   const seen = new Set<string>()
   let g = group

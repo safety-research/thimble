@@ -26,6 +26,7 @@
 //   designer    ../designer/v.ts        v at an empty prompt: a card of the last answer, made by a fork
 //   answerview  ../core/answerview.ts   what the features draw under an answer after its cards
 //   cards       ../cards/register.ts    the card tool, its runner and its drawing
+//   cardhead    ../cards/head.ts        the keys in a card's header: a side thread about it, and its claude.ai artifact
 //   marks       ../marks/register.ts    the reply's marks, their checker and their evidence; the answer's words as the
 //                                       features show them
 //   labels      ../labels/register.ts   a --prompt label's model reads; the person's checks
@@ -33,6 +34,7 @@
 //   observer    ../observer/observer.ts one look at each answer, for the explainers, important details and claims
 //   squeeze     ../squeeze/seam.ts      squeeze, stretch and catch-up
 //   claims      ../claims/seam.ts       the claims
+//   explain     ../explain/seam.ts      the explainers and heads-ups on Claude's answers
 //   threads     ../threads/seam.ts      the side threads
 //   tray        ../tray/seam.ts         the citation and explanation tray
 //   bar         ../bar/register.ts      the line above the prompt: busy step, failure and fix lines, counts

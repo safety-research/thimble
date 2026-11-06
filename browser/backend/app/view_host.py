@@ -5,9 +5,7 @@ A viewer's reader.py defines build_index(paths) -> index, records(index, query) 
 {excerpt, label, refs, key?, target?} or None, and may define problems(index) -> the lines it could not read, as
 [{ref, why}] or {count, examples: [{ref, why}]}, hidden(index) -> the claimed files it leaves out on purpose, as
 [{path, why}], unplaced(index) -> the records it read but could not place in the page, as problems() gives them, and
-derived(index) -> the fields it made rather than read, as [{field, from, how, kind?}]; a card type thimble
-ships may also define applies(paths) -> {claims, found} or None, whether it fits a corpus (cardtypes.claims_of), which
-runs with no index. `call` loads reader.py (again when it changed), builds the index or loads it from a pickle keyed by
+derived(index) -> the fields it made rather than read, as [{field, from, how, kind?}]. `call` loads reader.py (again when it changed), builds the index or loads it from a pickle keyed by
 the files' and reader's fingerprint, runs one operation and prints SENTINEL followed by the JSON answer. A reader that
 raises answers {ok: false, error, traceback}. The indexes in memory are the most recently used, at most
 INDEXES_PER_VIEW per view and at most the request's `memory` bytes in all; the one in use always stays, and so does
@@ -465,7 +463,7 @@ def answer(req: dict) -> dict:
     view_paths?, root?}; without `paths`, {need_paths: true} when the index must be built (NeedPaths);
     op is index, records, resolve, resolve_many (a list of locators, answered with a list), problems ([] for a reader
     without problems()), shown ({reads, hidden, derived, unplaced}: the bytes build_index read of each claimed file, and
-    hidden(), derived() and unplaced() each as {result} or {error}) or applies (the corpus's record files as `arg`). A
+    hidden(), derived() and unplaced() each as {result} or {error}). A
     records call runs with `labels`, the labels context, as thimble's _view_ctx, which thimble.marked and thimble.kept
     read, and `view_paths`, else the claimed paths but those shown whole (shown_whole), as its _view_paths; its answer's
     `left_out_n` counts the refs thimble.kept and kept_unit refused for the filter, and `left_out` lists them when there
@@ -487,10 +485,6 @@ def answer(req: dict) -> dict:
         if th is not None:
             th._progress = progress.set  # type: ignore[attr-defined]
         mod = _reader(req["slug"], req["reader"])
-        if req.get("op") == "applies":
-            fn = getattr(mod, "applies", None)
-            result = fn(list(req.get("arg") or [])) if callable(fn) else None
-            return {"ok": True, "result": result, "built": False, "ms": round((time.monotonic() - t0) * 1000)}
         paths = req["paths"] or [] if "paths" in req else None
         idx, built = _index(req["slug"], mod, req["fp"], paths, req.get("cache"), req.get("reads"), progress)
         dropped = _evict((req["slug"], req["fp"]), req.get("memory"))

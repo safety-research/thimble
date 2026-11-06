@@ -1,7 +1,7 @@
 {
   "name": "thimble-sandbox",
   "private": true,
-  "description": "The sandbox runtime that card views (the plugin), card code and view readers (the browser) run in: Anthropic's sandbox runtime, pinned",
+  "description": "The sandbox runtime that card views, code labels and a fix's fixer and tests run in: Anthropic's sandbox runtime, pinned",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"

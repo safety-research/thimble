@@ -29,6 +29,8 @@ The layout is that of a real corpus, and the tests cite these facts:
       3 lines, starting "# Your role".
   manifest.json, README.md
 
+tiny_pdf writes a made-up PDF of a few pages for the tests that read one.
+
 Usage: python3 mini_corpus.py OUT_DIR   (writes OUT_DIR/mini)
 """
 from __future__ import annotations
@@ -384,6 +386,30 @@ Timestamps are UTC.
 """
 
 WORKER = "# Your role\n\nYou are one of {{N_AGENTS}} engineers on the team. Coordinate on the board and work through the backlog.\n"
+
+
+def tiny_pdf(pages: list[str]) -> bytes:
+    """A valid PDF whose pages each hold one line of text in Helvetica."""
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", ""]
+    kids = []
+    for text in pages:
+        stream = f"BT /F1 12 Tf 72 700 Td ({text}) Tj ET"
+        content = len(objs) + 1
+        objs.append(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream")
+        kids.append(len(objs) + 1)
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {content} 0 R "
+                    f"/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>")
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(f'{k} 0 R' for k in kids)}] /Count {len(kids)} >>"
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, body in enumerate(objs, 1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n{body}\nendobj\n".encode()
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    out += "".join(f"{o:010d} 00000 n \n" for o in offsets).encode()
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
 
 
 def _jsonl(path: Path, rows: list[dict]) -> None:

@@ -1,34 +1,15 @@
-"""The routes only thimble's plugin and hooks call: the plugin's hooks' (plugin/bin/.thimble-watch, and
-bin/thimble-agents for /api/agents), its MCP shim's (bin/thimble-mcp: the event subscription and tool
-calls), its hooks module's (plugin/hooks/thimble.ts: /api/module/*, app/module_bridge.py), and the hooks of the
-sessions thimble starts (app/permission_hook.py).
+"""The routes only thimble's CLI calls (cli._request): the registration of a folder, the sign-in codes and the dev
+agent's own steps (guarded).
 
-Any process on the machine can reach a loopback port, and the plugin runs in every Claude Code session that has it,
-so each side proves it holds the token the supervisor writes into <home>/server.json (readable by its owner alone,
-cli.write_state) without sending it: a request carries a fresh nonce, `<unix time>.<random hex>` (new_nonce), and
+Any process on the machine can reach a loopback port, so each side proves it holds the token the supervisor writes into
+<home>/server.json (readable by its owner alone, cli.write_state) without sending it: a request carries a fresh nonce, `<unix time>.<random hex>` (new_nonce), and
 HMAC-SHA256(token, "hook@<port>:" + nonce) for the port it was sent to (request_proof), and the answer carries
 HMAC-SHA256(token, "server:" + nonce). The server checks the proof against the port it listens on, refuses one whose
 time is more than PROOF_TTL_S away from its own clock, and takes each nonce once (proven). So a proof a client sent to
 another process, such as another account's program that holds the recorded port while thimble's server runs on
 another, proves nothing anywhere: not on this server's port, not later, not twice. HookAuth answers a request on a
-guarded route without a valid proof with 401. A hook or shim that finds no server.json, no token in it, or no valid
-proof on the answer sends nothing more or believes nothing, so a process that holds the recorded port learns nothing
-from the plugin and cannot answer it.
-
-A program thimble runs for one of its agents (harness.py) cannot read server.json. It gets a token of its own instead,
-`<id>.<secret>`, valid while it runs and only on the routes its grant allows (grant): its requests carry AGENT_HEADER
-with the id and HMAC-SHA256(token, "hook:" + nonce) for any fresh nonce (docs/agents.md documents it for extension
-programs, and its WebSocket to the session route proves the token the same way, harness._proven), and the answer proves
-it back. That proof is bound to no port or time: the program is handed the address of the server that runs it, so it
-sends the token nowhere else, and the token stops working when the run ends. The request's scope then holds the id
-under AGENT_SCOPE, so a route acts for that agent alone.
-
-A session thimble starts tells its tool calls apart from main's by THIMBLE_SESSION, which its shim sends with each
-call. Any process can set that variable, the user's own sessions included, so the name alone
-proves nothing: each session also gets THIMBLE_SESSION_TOKEN in its --settings `env`, a nonce and its
-HMAC-SHA256 under SESSION_KEY with the workspace and the session's key (session_token), and the server believes the
-name only with a token it signed for that workspace (session_proven). The key is a file in thimble's home that no agent
-may read (userconf.private_paths), and it outlives a restart, as the sessions a restart resumes do.
+guarded route without a valid proof with 401. The CLI believes no answer without a valid proof, so a process that holds
+the recorded port learns nothing from it and cannot answer it.
 
 Everything the analyst does in thimble (a message, a click, a permission answer, a change of Settings or of a permission
 mode) must come from a signed-in browser (analyst). The dashboard link carries a one-time code after `#p=`, which the
@@ -90,36 +71,22 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-HOOK_PATHS = frozenset({
-    "/api/events/pull", "/api/events/ack", "/api/events/held", "/api/events/mode", "/api/events/permission",
-    "/api/agents", "/api/bg/agent-check",
-    # thimble's agents' hooks (subagents.py), each beside the record it wrote to the workspace's files
-    "/api/subagents/started", "/api/subagents/denied", "/api/subagents/stopped", "/api/subagents/end",
-    "/api/subagents/rekey",
-})
-SHIM_PATHS = frozenset({"/api/events"})
-MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method
-TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
-SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
-# the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes the Stop hook and
-# `thimble up` / `thimble unpair` call
+# the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes thimble-browser
+# and `thimble unpair` call
 CLI_PATHS = frozenset({
-    "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
+    "/api/corpora/register", "/api/dev/announce", "/api/dev/revert",
     "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
 })
-CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename)")  # POST
+CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(archive|restore)")  # POST
 CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
 NONCE_HEADER = "x-thimble-nonce"
-AGENT_HEADER = "x-thimble-agent"  # the id of an agent's token (module note)
-AGENT_SCOPE = "thimble_agent"  # where a request proven with an agent's token keeps its id, in the ASGI scope's state
 AUTH_HEADER = "x-thimble-auth"
 PROOF_HEADER = "x-thimble-proof"
 NONCE_MAX = 128  # characters
 # a request's proof is good while the time in its nonce is this close to the server's clock, and once (module note)
 PROOF_TTL_S = 300
 PROOF_SCOPE = "thimble_proof"  # where a request's checked proof is kept in the ASGI scope's state (proven_by)
-SESSION_KEY = "session.key"  # in thimble's home: the secret session tokens are signed with (module note)
-SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
+SESSION_KEY = "session.key"  # in thimble's home: the secret media keys are signed with (module note)
 _secret_lock = threading.Lock()
 UI_COOKIE = "thimble-ui"  # the cookie's name, with this server's port after it (ui_cookie)
 UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
@@ -131,8 +98,6 @@ BROWSER_PREFIX = "/b/"
 BROWSER_PATH = re.compile(r"/b/([A-Za-z0-9_-]{16,128})(/api(?:/.*)?)", re.DOTALL)
 BROWSER_KEY_SCOPE = "thimble_browser_key"  # where BrowserPath keeps a request's key, in the ASGI scope's state
 BROWSER_KEY_BYTES = 24  # a browser's key: secrets.token_urlsafe of this many bytes (32 characters)
-# The path earlier builds scoped the cookie to, which every server on 127.0.0.1 received; a claim deletes one there.
-OLD_COOKIE_PATH = "/api/"
 # in thimble's home: [{hash, key, at}], the sha256 of each signed-in browser's cookie and key (claim)
 PAIRED_FILE = "paired.json"
 PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
@@ -144,8 +109,8 @@ ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message
                 " answer a permission request, change a permission mode): open it from the link `thimble-browser`"
                 " printed in your terminal, and click there")
 
-# A write to the local API (any method but GET/HEAD/OPTIONS) is either a token route (guarded: the plugin, the CLI, a
-# program's grant), which needs the hook proof, or an analyst route, which needs a signed-in browser's cookie (analyst).
+# A write to the local API (any method but GET/HEAD/OPTIONS) is either a token route (guarded: the plugin, the CLI),
+# which needs the hook proof, or an analyst route, which needs a signed-in browser's cookie (analyst).
 # A notebook kernel can reach this server on 127.0.0.1 but holds neither.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 WRITE_REFUSED = "open thimble from the link `thimble-browser` printed in your terminal, to make changes"
@@ -164,37 +129,11 @@ SHOT_TTL_S = 120  # a shot token's life: dev.SHOT_TIMEOUT_S (90 s) ends the head
 MEDIA_PATH = re.compile(r"/api/ws/([^/]+)/views/([^/]+)/media/([0-9a-f]{32})")
 
 _cache: tuple[tuple[str, int, int], dict] | None = None
-# the tokens of the programs thimble runs, by id: (the whole token, whether its grant allows a method and path)
-_agents: dict[str, tuple[str, Callable[[str, str], bool]]] = {}
-
-
-def grant(token_id: str, token: str, allows: Callable[[str, str], bool]) -> None:
-    """Accept the agent token `token` (`<token_id>.<secret>`) on the requests `allows(method, path)` lets through."""
-    _agents[token_id] = (token, allows)
-
-
-def revoke(token_id: str) -> None:
-    _agents.pop(token_id, None)
-
-
-def _token_for(headers: Headers, method: str, path: str) -> tuple[str, str]:
-    """(the token a request must prove, the agent's id or ''): server.json's, or the token of the agent the request
-    names when its grant allows the request, else ''."""
-    aid = headers.get(AGENT_HEADER, "")
-    if not aid:
-        return token(), ""
-    got = _agents.get(aid)
-    return (got[0], aid) if got is not None and got[1](method, path) else ("", aid)
-
-
-def agent_of(scope: dict) -> str:
-    """The id of the agent token a request was proven with, '' for any other request."""
-    return str((scope.get("state") or {}).get(AGENT_SCOPE) or "")
 
 
 def sign(token: str, role: str, nonce: str) -> str:
-    """The proof `role` gives for `nonce`: "server" on an answer, "hook" on an agent program's request (module note).
-    The request of a tool that read server.json proves request_proof."""
+    """The proof `role` gives for `nonce`: "server" on an answer (module note). The request of a tool that read
+    server.json proves request_proof."""
     return hmac.new(token.encode("utf-8"), f"{role}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
@@ -222,11 +161,8 @@ def headers(token: str, port: int, nonce: str | None = None) -> dict[str, str]:
 
 
 def guarded(method: str, path: str) -> bool:
-    """Whether a request needs the proof: a hook's, the shim's or the hooks module's route, a tool call, or a route only
-    the CLI calls (CLI_PATHS, CLI_WS_PATHS, CLI_WS_DELETE)."""
-    return (path in HOOK_PATHS or path in SHIM_PATHS or path.startswith(MODULE_PREFIX)
-            or (method == "POST" and path.startswith(TOOL_PREFIX)) or SESSION_HOOK_PATHS.fullmatch(path) is not None
-            or (method == "POST" and (path in CLI_PATHS or CLI_WS_PATHS.fullmatch(path) is not None))
+    """Whether a request needs the proof: a route only the CLI calls (CLI_PATHS, CLI_WS_PATHS, CLI_WS_DELETE)."""
+    return ((method == "POST" and (path in CLI_PATHS or CLI_WS_PATHS.fullmatch(path) is not None))
             or (method == "DELETE" and CLI_WS_DELETE.fullmatch(path) is not None))
 
 
@@ -302,23 +238,6 @@ def ensure_session_key() -> None:
     """Write <home>/SESSION_KEY when there is none, so the sessions' sandbox hides a file that is in place and the first
     sessions to start find one key."""
     _session_secret(True)
-
-
-def _session_mac(secret: bytes, c: str, key: str, nonce: str) -> str:
-    return hmac.new(secret, f"session\n{c}\n{key}\n{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def session_token(c: str, key: str) -> str:
-    """A new THIMBLE_SESSION_TOKEN for the session `key` of workspace `c` (module note): `<nonce>.<mac>`."""
-    nonce = secrets.token_hex(8)
-    return f"{nonce}.{_session_mac(_session_secret(True), c, key, nonce)}"
-
-
-def session_proven(c: str, key: str, token: str) -> bool:
-    """Whether `token` is one session_token gave for the session `key` of workspace `c`."""
-    nonce, _, mac = (token or "").partition(".")
-    secret = _session_secret(False)
-    return bool(secret and nonce and mac and key) and _same(mac, _session_mac(secret, c, key, nonce))
 
 
 def _same(a: str, b: str) -> bool:
@@ -451,8 +370,8 @@ def read_holder(scope: dict) -> str:
     if digest:
         return f"browser:{digest}"
     got = proven_by(scope)
-    if got is not None and not got[1]:
-        return f"token:{_sha(got[0])}"
+    if got is not None:
+        return f"token:{_sha(got)}"
     h = Headers(scope=scope)
     if shot_proven(h, scope.get("method", "")):
         return f"shot:{_sha(h.get(SHOT_HEADER, ''))}"
@@ -517,8 +436,7 @@ def _sha_hex(value: object) -> bool:
 
 def _entries() -> list[dict[str, str]]:
     """The signed-in browsers (module note), read from PAIRED_FILE at the first use for this home. An entry without the
-    sha256 of a key (an earlier build's, whose cookie was scoped to OLD_COOKIE_PATH) signs no browser in: that browser
-    signs in again with the link."""
+    sha256 of a key signs no browser in: that browser signs in again with the link."""
     global _paired, _paired_home
     where = str(home())
     if _paired is not None and _paired_home == where:
@@ -603,10 +521,8 @@ def signed_in_at(request: Request) -> str:
 
 
 def set_cookie(r: Response, value: str, key: str) -> Response:
-    """`r` with this server's cookie `value` (ui_cookie) scoped to the path of the browser key `key` (browser_path), and
-    the deletion of a cookie of that name an earlier build scoped to OLD_COOKIE_PATH."""
+    """`r` with this server's cookie `value` (ui_cookie) scoped to the path of the browser key `key` (browser_path)."""
     r.set_cookie(ui_cookie(), value, max_age=UI_COOKIE_AGE_S, path=browser_path(key), httponly=True, samesite="strict")
-    r.delete_cookie(ui_cookie(), path=OLD_COOKIE_PATH, httponly=True, samesite="strict")
     return r
 
 
@@ -686,18 +602,14 @@ def _own_port(scope: dict) -> int | None:
         return None
 
 
-def _check(scope: dict) -> tuple[str, str] | None:
-    """(the token, the agent's id or '') a request proves (module note): its nonce's time within PROOF_TTL_S of _wall,
-    its proof request_proof's for this server's port, and its nonce not taken before, which it then is; for an agent's
-    token, sign's "hook" proof of its nonce. None otherwise."""
+def _check(scope: dict) -> str | None:
+    """The token a request proves (module note): its nonce's time within PROOF_TTL_S of _wall, its proof
+    request_proof's for this server's port, and its nonce not taken before, which it then is. None otherwise."""
     h = Headers(scope=scope)
     nonce = h.get(NONCE_HEADER, "")
-    tok, aid = _token_for(h, scope.get("method", ""), scope.get("path", ""))
+    tok = token()
     if not tok or not nonce or len(nonce) > NONCE_MAX:
         return None
-    if aid:  # an agent program's token proves its request as docs/agents.md says (module note): the program is handed
-        # the address of the server that runs it, and the token stops working when its run ends
-        return (tok, aid) if _same(h.get(AUTH_HEADER, ""), sign(tok, "hook", nonce)) else None
     when = _nonce_time(nonce)
     port = _own_port(scope)
     if when is None or port is None:
@@ -711,10 +623,10 @@ def _check(scope: dict) -> tuple[str, str] | None:
         if nonce in _seen:
             return None
         _seen[nonce] = when + PROOF_TTL_S
-    return tok, aid
+    return tok
 
 
-def proven_by(scope: dict) -> tuple[str, str] | None:
+def proven_by(scope: dict) -> str | None:
     """_check's answer for the request `scope`, worked out once per request and kept in its state (PROOF_SCOPE), since
     a nonce is taken once and both a guard and a route may ask."""
     state = scope.setdefault("state", {})
@@ -725,7 +637,7 @@ def proven_by(scope: dict) -> tuple[str, str] | None:
 
 def proven(scope: dict) -> bool:
     """Whether the request `scope` carries a valid hook proof (proven_by): a local tool that read the token (the plugin,
-    the CLI), or an agent's token on a request its grant allows."""
+    the CLI)."""
     return proven_by(scope) is not None
 
 
@@ -747,10 +659,7 @@ class HookAuth:
                         "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
             await send({"type": "http.response.body", "body": body})
             return
-        tok, aid = got
-        proof = sign(tok, "server", Headers(scope=scope).get(NONCE_HEADER, ""))
-        if aid:
-            scope.setdefault("state", {})[AGENT_SCOPE] = aid
+        proof = sign(got, "server", Headers(scope=scope).get(NONCE_HEADER, ""))
 
         async def with_proof(message) -> None:
             if message["type"] == "http.response.start":
@@ -820,8 +729,8 @@ def read_still_allowed(scope: dict) -> Callable[[], bool] | None:
     """Whether a gated read may go on, as a check that asks again: None when nothing lets it through; otherwise a
     function that answers whether what let it through still does. That is a signed-in browser (analyst) until it is
     signed out (sign_out, unpair), a live shot token (shot_proven) until it expires or its shot ends, a view's media
-    route with that view's key (media_proven) while the key holds, and a hook proof (the plugin, the CLI; an agent's
-    token proves no read, as its grant allows none) always, since the server's next start ends the request anyway."""
+    route with that view's key (media_proven) while the key holds, and a hook proof (the plugin, the CLI) always,
+    since the server's next start ends the request anyway."""
     path, method = scope.get("path", ""), scope.get("method", "")
     h = Headers(scope=scope)
     digest = _cookie_hash(Request(scope))

@@ -1,8 +1,9 @@
-"""`set_layout`, main's tool, which lays the browser's main area out in one of the presets.
+"""`set_layout`, main's tool, which lays the browser's main area out in one of the presets, and `open_view`, which opens
+one view in Files.
 
 The server checks a call against the surfaces there are (Files, Canvas, Report, and each view as `view:<slug>`) and
-sends it as the stream's `layout` record, which an open page applies. A page that loads later replays the record without
-applying it, so a layout the analyst arranged since stays.
+sends it as the stream's `layout` record, or `open-view` record, which an open page applies. A page that loads later
+replays the record without applying it, so a layout the analyst arranged since stays.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ PRESETS = {"one": 1, "columns": 2, "rows": 2, "three": 3, "quadrants": 4}
 WORDS = {"one": "in one pane", "columns": "side by side", "rows": "one over the other",
          "three": "with the first large beside the others stacked", "quadrants": "in four panes"}
 BASE = ("files", "canvas", "report")
+OPEN_VIEW = "open-view"  # the stream's record that opens a view in Files (frontend lib/events.ts)
 
 
 def surfaces(c: str) -> list[tuple[str, str]]:
@@ -73,3 +75,22 @@ async def tool_set_layout(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err("set_layout: the layout could not be sent to the browser")
     listed = picked[0] if len(picked) == 1 else f"{', '.join(picked[:-1])} and {picked[-1]}"
     return tools.ok(tools.hint("set_layout-set", surfaces=listed, layout=WORDS[layout]))
+
+
+async def tool_open_view(ctx: Any, args: dict[str, Any]) -> Any:
+    """The `open_view` tool: a view opened in Files, sent to the browser as the stream's OPEN_VIEW record."""
+    from . import investigation  # noqa: PLC0415
+
+    raw = str(args.get("view") or "").strip()
+    have = await asyncio.to_thread(surfaces, ctx.c)
+    sid = _surface(raw, have) if raw else None
+    if sid is None or not sid.startswith("view:"):
+        names = ", ".join(s.removeprefix("view:") for s, _ in have if s.startswith("view:")) or "none"
+        return tools.err(f"open_view: there is no view {raw!r}; the views are {names}")
+    slug = sid.removeprefix("view:")
+    try:
+        investigation.emit(ctx.c, investigation.MAIN, {"type": OPEN_VIEW, "slug": slug})
+    except Exception:  # noqa: BLE001 — a page that misses the record stays as it is
+        log.warning("open_view: could not send the view for %s", ctx.c, exc_info=True)
+        return tools.err("open_view: the view could not be sent to the browser")
+    return tools.ok(tools.hint("open_view-view", view=slug))

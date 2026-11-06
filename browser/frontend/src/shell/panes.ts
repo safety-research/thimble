@@ -5,7 +5,6 @@
 
 export type SurfaceId = string
 export const BASE_SURFACES = ['files', 'canvas', 'report'] as const
-export type BaseSurface = (typeof BASE_SURFACES)[number]
 export type Dir = 'row' | 'col'
 export type Edge = 'left' | 'right' | 'top' | 'bottom'
 export type Zone = Edge | 'center'
@@ -217,17 +216,6 @@ export function preset(p: Panes, name: Preset, available: readonly SurfaceId[], 
 
 function unique<T>(xs: readonly T[]): T[] {
   return [...new Set(xs)]
-}
-
-/** The preset whose shape the layout has, whatever its ratios; null for a shape made by dragging. */
-export function presetOf(p: Panes): Preset | null {
-  const r = p.root
-  const isLeaf = (n: PaneNode) => n.kind === 'pane'
-  if (r.kind === 'pane') return 'one'
-  if (isLeaf(r.a) && isLeaf(r.b)) return r.dir === 'row' ? 'columns' : 'rows'
-  if (r.dir === 'row' && isLeaf(r.a) && r.b.kind === 'split' && r.b.dir === 'col' && isLeaf(r.b.a) && isLeaf(r.b.b)) return 'three'
-  if (r.dir === 'col' && r.a.kind === 'split' && r.b.kind === 'split' && r.a.dir === 'row' && r.b.dir === 'row' && [r.a.a, r.a.b, r.b.a, r.b.b].every(isLeaf)) return 'quadrants'
-  return null
 }
 
 // -------- geometry --------

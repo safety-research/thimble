@@ -136,7 +136,6 @@ def _event(raw: str, forks: bool = True) -> _Entry | None:
     body = (m.group(2) if m else str(raw or "")).strip()
     kind = attrs.pop("kind", "")
     attrs.pop("event", None)
-    attrs.pop("source", None)  # 0.5.0's tag (session.OLD_TAG)
     if kind in ("main", ""):
         return _Entry("[analyst]", body) if body else None
     if kind == events.THREAD:
@@ -231,11 +230,7 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
                 entries.append(_Entry(f"[notification {status}]" if status else "[notification]", result))
 
     def prompt(text: str, origin: str | None) -> None:
-        if origin == session.OLD_ORIGIN:  # an event in a transcript thimble 0.5.0 wrote
-            e = _event(text, forks)
-            if e is not None:
-                entries.append(e)
-        elif origin == "task-notification":
+        if origin == "task-notification":
             notification(text)
         elif origin in (None, "human"):
             # a command's tags in what the analyst typed, not in a paste, which may quote a transcript's record of one
@@ -252,7 +247,7 @@ def _entries(path: Path, forks: bool = True) -> list[_Entry]:
         if kind == "user":
             _results(rec, calls, hidden)
             text = session._user_text(rec)
-            if text is None or rec.get("isCompactSummary") or (rec.get("isMeta") and origin != session.OLD_ORIGIN):
+            if text is None or rec.get("isCompactSummary") or rec.get("isMeta"):
                 continue
             prompt(text, origin)
         elif kind == "attachment":
@@ -365,14 +360,10 @@ class _Part:
     oldest: Callable[[int], str] = lambda n: _hint("context-cut-oldest", n=n)
     level: int = 0
     dropped: set[int] = field(default_factory=set)
-    cut_line: str = ""  # a line added whenever the part is cut in any way (the orientation's, naming its ref)
-
-    def cut(self) -> bool:
-        return bool(self.level or self.dropped)
 
     def text(self) -> str:
         shown = [t for i, it in enumerate(self.items) if i not in self.dropped and (t := it.at(self.level))]
-        lead = self.cut_line if self.cut() and self.cut_line else self.oldest(len(self.dropped)) if self.dropped else ""
+        lead = self.oldest(len(self.dropped)) if self.dropped else ""
         return self.sep.join([lead, *shown] if lead else shown)
 
 
@@ -702,11 +693,10 @@ def canvas(c: str) -> str:
 
 
 def views(c: str) -> str:
-    """The corpus's own views, each with the files it claims and what it is for, then the proposals not built yet (one
-    an orientation from before 0.8.0 dropped, or a view proposal the analyst rejected, is not among them). The view proposal that waits
+    """The corpus's own views, each with the files it claims and what it is for, then the proposals not built yet (a
+    view proposal the analyst rejected is not among them). The view proposal that waits
     for the analyst's answer (views.open_offer) is listed as thimble's, so main leaves it to the analyst rather than
-    building it; a `suggested` row without `offered`, a 0.7.x orientation's viewer for a file type, is left out, and so
-    is the waiting view proposal while view proposals are off (views.propose_enabled), since the analyst then sees
+    building it; it is left out while view proposals are off (views.propose_enabled), since the analyst then sees
     none."""
     from . import views as views_mod  # noqa: PLC0415
 
@@ -801,7 +791,7 @@ def _fit(parts: list[_Part], budget: int, fixed: int) -> None:
         rest = size() - len(p.text())
         lengths = [len(it.at(p.level)) for it in p.items]
         body = sum(n + len(p.sep) for i, n in enumerate(lengths) if n and i not in p.dropped)
-        lead = len(p.cut_line or p.oldest(len(p.items))) + len(p.sep)
+        lead = len(p.oldest(len(p.items))) + len(p.sep)
         for i, it in enumerate(p.items):
             if rest + lead + body <= budget:
                 break
