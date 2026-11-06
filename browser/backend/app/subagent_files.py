@@ -50,10 +50,8 @@ UNSETTLED = "unsettled"  # subagents.json: the agents of a role whose own start 
 DONE_KEEP_S = 24 * 3600.0  # a request that ended is dropped after this long
 PLUGIN = "thimble"
 PREFIX = f"{PLUGIN}:"
-# thimble's seven roles: the agents that have a key, a chat and a run of their own. thimble:orient-helper is none of them:
-# any agent may start one (agent_check).
-ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "dev-ticket")
-HELPER = "orient-helper"
+# thimble's five roles: the agents that have a key, a chat and a run of their own
+ROLES = ("writer", "view-builder", "view-reviewer", "check", "dev-ticket")
 PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's module made ($.agent.spawn, $.tool.call)
 # the agent type of a thread's fork, which Claude Code tells not to start subagents (its fork boilerplate: "Do NOT spawn
 # subagents with the Agent tool"), so the server starts the agent of a fork's propose_view, file_dev_ticket,

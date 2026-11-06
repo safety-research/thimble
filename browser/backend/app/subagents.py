@@ -58,9 +58,6 @@ ROUTES = (CLICK, FOLLOW_ON, TYPED)
 # earlier builds may also hold not-launched, for a main that thimble's launcher had not started
 AUTO_MODE, NO_CALL, LIMIT, HOOK, EARLIER, NO_MODULE, ERROR = (
     "auto-mode", "no-call", "limit", "hook", "earlier-session", "no-module", "error")
-HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
-# in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
-AUTO_HANDBACK_WAIT_S = 30.0
 CALLER_WAIT_S = 2.0  # how long caller() waits for a transcript to hold a call the caller hook wrote no line for
 STOPPED_QUIT = "quit"  # `stopped_by` of a chat that main's quit stopped
 STOPPED_ANALYST = "analyst"
@@ -1143,48 +1140,6 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
         except Exception:  # noqa: BLE001 — the run has ended either way
             log.exception("%s: the %s's end handler failed", c, t.role)
     return True
-
-
-def children_running(state: dict[str, Any], agent_id: str) -> bool:
-    return any(isinstance(a, dict) and a.get("parent") == agent_id and a.get("status") in ("running", "waiting")
-               for a in files.registry(state).values())
-
-
-_waits: dict[tuple[str, str], asyncio.TimerHandle] = {}
-
-
-def stopped(c: str, agent_id: str, last_stop: float | None = None) -> None:
-    """A SubagentStop of a registered agent: its turn ended. With a child running it waits for it; otherwise the run
-    ends with that turn's answer (session.agent_answer) unless a hand-back follows within HANDBACK_WAIT_S
-    (AUTO_HANDBACK_WAIT_S in auto mode)."""
-    from . import session  # noqa: PLC0415
-
-    state = read(c)
-    a = files.registry(state).get(agent_id)
-    if not isinstance(a, dict) or a.get("status") not in ("running", "waiting"):
-        return
-    if children_running(state, agent_id):
-        with update(c) as st:
-            if isinstance(files.registry(st).get(agent_id), dict):
-                files.registry(st)[agent_id].update(status="waiting", waiting_since=files.now())
-        return
-    wait = AUTO_HANDBACK_WAIT_S if session.main_mode(c) == "auto" else HANDBACK_WAIT_S
-    k = int(a.get("run") or 0)
-
-    def check() -> None:
-        _waits.pop((c, agent_id), None)
-        now_a = agent(c, agent_id) or {}
-        if now_a.get("ended_run") == k or int(now_a.get("run") or 0) != k or children_running(read(c), agent_id):
-            return
-        run_ended(c, agent_id, "done", session.agent_answer(c, agent_id), source="turn")
-
-    old = _waits.pop((c, agent_id), None)
-    if old is not None:
-        old.cancel()
-    try:
-        _waits[(c, agent_id)] = asyncio.get_running_loop().call_later(wait, check)
-    except RuntimeError:  # no loop (a synchronous test): at once
-        check()
 
 
 def tell_main(c: str, kind: str, payload: dict[str, Any]) -> bool:

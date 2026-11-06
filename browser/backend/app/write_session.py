@@ -6,8 +6,7 @@ context, writers/<doc>/context.md, that holds the whole context (context.render,
 which it reads first; a context too large for one Read call is written as several files (read_parts), each small enough
 that Read returns it whole. One writer runs per document. Write in the browser is a click (write_route), which the
 runtime starts; main's `start_writing` starts it the same way (tool_start_writing), and a thread's fork's the server
-starts with the fork's call (tools._fork_start). Main hears a `written` browser event when a writer ends. A writer that
-answered the report pass of an orientation from before 0.8.0 carries `orient` and `orient_run` on its chat. A writer
+starts with the fork's call (tools._fork_start). Main hears a `written` browser event when a writer ends. A writer
 that was stopped is started again with Write again (subagents.again)."""
 from __future__ import annotations
 
@@ -29,9 +28,6 @@ ROLE = "writer"  # the agent chat's role, and its role among subagents.TYPES
 WRITTEN_KIND = "written"  # the event kind that tells main a writer ended (prompts/main.md)
 CONTEXT_CHARS = 600_000  # of the context file, about 150k tokens
 CONTEXT_FILE = "context.md"  # in its work folder: what it reads first, with context-2.md… when one file is too large
-# a new writer's chat fields of the orientation's report pass, which 0.8.0 took out: `orient` null says the writer is no
-# report pass, so the browser does not guess one from when it ran (frontend chat/model.ts orientWriters)
-NO_REPORT_PASS: dict[str, Any] = {"orient": None, "orient_run": 0}
 WORK_DIR = "writers"  # workspaces/<c>/writers/<doc>, a writer's own folder, where it may write
 SKILLS = ("thimble:shared",)  # shared.md, loaded before its first turn (U3)
 OWN_TOOLS = ("read_ref", "list_cards", "add_card", "edit_card", "delete_card", "screenshot", "write_document",
@@ -109,8 +105,7 @@ async def start(c: str, doc: str, request: str = "", after: str = "", *, route: 
     report_types.begin_write(c, doc, request, after)
     ans = await subagents.start_job(c, ROLE, key, task(t, request, after, paths), subagents.values_for(c, ROLE, values),
                                     route, description=f"writer: {doc}",
-                                    chat={"title": f"Write {doc}", "doc": doc, "brief": task_text(t, request, after),
-                                          **NO_REPORT_PASS},
+                                    chat={"title": f"Write {doc}", "doc": doc, "brief": task_text(t, request, after)},
                                     work=work_dir(c, doc), call=call)
     return ans
 

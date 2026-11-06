@@ -3801,12 +3801,8 @@ def _view_stopped(c: str, slug: str, chat: str | None = None) -> None:
 
 def _repairs_failed(c: str, slug: str, why: str, chat: str | None = None) -> None:
     """A proposal the analyst did not ask for whose build failed through its VIEW_REPAIRS repairs fails as a view the
-    analyst asked for does (_view_failed), no longer held: its chip, in the
-    views list, shows ✕ with why and Retry, which builds it again with its repairs. Nothing is chipped in main, since
-    the analyst never asked for it."""
-    from . import views  # noqa: PLC0415
-
-    views.update_proposal(c, slug, held=None)  # no longer held back from the views list (views.held_slugs)
+    analyst asked for does (_view_failed): its chip, in the views list, shows ✕ with why and Retry, which builds it
+    again with its repairs. Nothing is chipped in main, since the analyst never asked for it."""
     _view_failed(c, slug, why, chat)
 
 

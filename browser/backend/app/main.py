@@ -340,31 +340,27 @@ async def _lifespan(app: FastAPI):
 
 
 async def _startup() -> None:
-    """Cross-module wiring that needs every router imported. Never fails the start: a module that is absent or raises is
-    logged and skipped.
+    """Cross-module wiring that needs every router imported. Never fails the start: a step that raises is logged and
+    skipped.
 
     dev's restart bookkeeping runs now: a ticket left `running` by a restart is marked failed and a pending restart.json
     is announced. The announcement runs as a task, since it waits for the kernel reconnect in the routers' lifespans,
     which start after this returns.
     """
-    dev = sys.modules.get("app.dev")
-    if dev is not None:
-        try:
-            recover = getattr(dev, "_recover", None)
-            if recover is not None:
-                recover()
-            announce = getattr(dev, "announce_restart", None)
-            if announce is not None:
+    from . import dev  # noqa: PLC0415
 
-                async def announce_after_start() -> None:
-                    try:
-                        await announce()
-                    except Exception:
-                        log.exception("restart announcement failed")
+    try:
+        dev._recover()
 
-                asyncio.get_running_loop().create_task(announce_after_start(), name="dev-announce-restart")
-        except Exception:
-            log.exception("dev startup wiring failed")
+        async def announce_after_start() -> None:
+            try:
+                await dev.announce_restart()
+            except Exception:
+                log.exception("restart announcement failed")
+
+        asyncio.get_running_loop().create_task(announce_after_start(), name="dev-announce-restart")
+    except Exception:
+        log.exception("dev startup wiring failed")
     # a server that re-exec'd itself after a dev apply keeps its pid but runs the applied tree; server.json's
     # `source_fingerprint` must describe that tree, or the next `ensure` restarts it again for the same change
     try:
@@ -425,13 +421,7 @@ def create_app() -> FastAPI:
     app.add_middleware(BrowserPath)  # added last = outermost: /b/<key>/api/... goes on as /api/... (hook_auth)
 
     for name in ROUTER_MODULES:
-        try:
-            mod = importlib.import_module(f"app.{name}")
-        except ModuleNotFoundError as e:
-            if e.name == f"app.{name}":
-                log.warning("router module app.%s not present", name)
-                continue
-            raise
+        mod = importlib.import_module(f"app.{name}")
         router = getattr(mod, "router", None)
         if router is None:
             log.debug("app.%s has no `router` (listed for its shutdown hook)", name)

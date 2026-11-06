@@ -622,24 +622,8 @@ def with_call_line(name: str, args: dict[str, Any] | None, res: ToolResult) -> T
 # --------------------------------------------------------------------------- shared helpers
 
 
-def _optional(module: str, attr: str) -> Callable[..., Any] | None:
-    """`attr` of `app.<module>` when both exist, else None."""
-    try:
-        mod = importlib.import_module(f"app.{module}")
-    except ModuleNotFoundError as e:
-        if e.name in (f"app.{module}", module):
-            return None
-        raise
-    fn = getattr(mod, attr, None)
-    return fn if callable(fn) else None
-
-
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
-
-
-def _not_available(name: str, module: str, attr: str) -> ToolResult:
-    return err(f"{name} is not available yet: app.{module}.{attr} is not in this build")
 
 
 def _cell_id_of(raw: Any) -> str:
@@ -2201,16 +2185,13 @@ async def _shot_page(url: str, selector: str | None) -> ToolResult:
                    f"{', '.join(str(p) for p in sorted(allowed))})")
     url = urlunsplit((parts.scheme, f"[{host}]:{port}" if ":" in host else f"{host}:{port}", parts.path, parts.query,
                       parts.fragment))
-    run_shot = _optional("dev", "run_shot")
-    if run_shot is None:
-        return _not_available("screenshot", "dev", "run_shot")
-    from . import hook_auth  # noqa: PLC0415
+    from . import dev, hook_auth  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         out = Path(d) / "shot.png"
         tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
-            code = await _maybe_await(run_shot(url, out, selector, read_token=tok))
+            code = await _maybe_await(dev.run_shot(url, out, selector, read_token=tok))
         except headless.Missing:
             return err(headless.NO_SCREENSHOTS)
         finally:
@@ -2315,21 +2296,20 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     the page could not be shot or did not show the card, so the caller falls back."""
     from urllib.parse import urlencode
 
-    run_shot = _optional("dev", "run_shot")
-    if run_shot is None or headless.missing(headless.PAGES):
+    if headless.missing(headless.PAGES):
         return None
     url = f"{ui}/?{urlencode({'ws': c, 'ref': f'card:{cid}'})}"
     storage = {f"thimble:{c}:layout": json.dumps({"tab": "canvas", "chatOpen": False}),
                f"thimble:{c}:canvas-view": json.dumps({"x": 0, "y": 0, "scale": 1})}
-    from . import hook_auth  # noqa: PLC0415
+    from . import dev, hook_auth  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         png = Path(d) / "card.png"
         tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
-            code = await _maybe_await(run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]', viewport=CARD_SHOT_VIEWPORT,
-                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0,
-                                               read_token=tok))
+            code = await _maybe_await(dev.run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]',
+                                                   viewport=CARD_SHOT_VIEWPORT, scale=CARD_SHOT_SCALE, storage=storage,
+                                                   settle=True, wait_ms=0, read_token=tok))
         except headless.Missing:
             return None
         except Exception:  # noqa: BLE001 — a missing node is the fallback's case, not an error to the model
@@ -2410,14 +2390,13 @@ FIGURE_SHOT_WAIT_MS = 800  # after the page is quiet: the frame draws the figure
 async def _shot_page_file(cid: str, page_html: str) -> ToolResult:
     """A card's figure drawn on a page of its own (figure_page) in a temporary file and shot by its frame
     (dev.run_shot, the headless Chromium the ticket runner's page shots use), with every request refused."""
-    run_shot = _optional("dev", "run_shot")
-    if run_shot is None:
-        return _not_available("screenshot", "dev", "run_shot")
+    from . import dev  # noqa: PLC0415
+
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         page, png = Path(d) / "card.html", Path(d) / "card.png"
         page.write_text(page_html, "utf-8")
         try:
-            code = await _maybe_await(run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
+            code = await _maybe_await(dev.run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
         except headless.Missing:
             return err(headless.NO_SCREENSHOTS)
         if not png.is_file() or code not in (0, None):
@@ -2792,14 +2771,11 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if not fixes.problem():
         # a change to thimble's code is a fix of the person's thimble, which they ask for with /thimble-fix
         return ok(hint("file_dev_ticket-fix"))
-    fn = _optional("dev", "file_ticket")
-    if fn is None:
-        return _not_available("file_dev_ticket", "dev", "file_ticket")
     from . import dev  # noqa: PLC0415 — dev imports this module's callers
 
     source = ANALYST if ctx.actor == ANALYST else ctx.actor
-    rec = await _maybe_await(fn(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source, start=False,
-                                route="typed"))
+    rec = await _maybe_await(dev.file_ticket(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source,
+                                             start=False, route="typed"))
     label = dev._label(rec)
     # main's ticket: prepared, then the server starts its agent (dev.start_typed); a thread's fork's keeps no call of
     # the fork's (_fork_start)
