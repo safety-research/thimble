@@ -57,7 +57,7 @@ export function waitingChats(metas: Iterable<ChatMeta>, main?: Pick<ChatMeta, 'p
 }
 
 /** The chat that waits for the analyst on behalf of the chat `id`: `id` itself, else the chat under it that asked
- * first (a critique under the orientation, whose card and row stand for it); null when none waits. `main` is main's
+ * first (a subagent of one of thimble's agents, whose card and row stand for it); null when none waits. `main` is main's
  * meta, whose requests its session relays. Pure. */
 export function waitingAt(id: string | null | undefined, metas: Iterable<ChatMeta>, main?: Pick<ChatMeta, 'permissions'> | null): ChatMeta | null {
   if (!id) return null

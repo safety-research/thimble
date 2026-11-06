@@ -8,8 +8,7 @@
 // shimmers as in a check while thimble runs it again because a label it read changed. A card that does not fit on the
 // screen, while the card check reads it (`held`, backend card_fit.py), shows as one that still runs: its question and
 // the running line, not its content or its takeaway.
-import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
 import { CheckMark as SharedCheckMark } from '../components/CheckMark'
@@ -19,7 +18,7 @@ import { Mark } from '../components/Marks'
 import { Popover } from '../components/Menu'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
-import { placeTip, useTooltip } from '../components/Tooltip'
+import { useTooltip } from '../components/Tooltip'
 import { LabelSheet } from '../files/LabelCard'
 import { classesOf, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
 import { addAgentZone, tintElement } from '../lib/agentKey'

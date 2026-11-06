@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, made, on_fix, press, world  # noqa: E402, F401  (world is the fixture)
+from test_fixes import FX, made, world  # noqa: E402, F401  (world is the fixture)
 
 
 def test_nothing_thimble_writes_in_a_fixs_temp_folder_follows_a_link(world, monkeypatch, tmp_path):
@@ -33,15 +33,3 @@ def test_nothing_thimble_writes_in_a_fixs_temp_folder_follows_a_link(world, monk
     FX.not_now(r["id"])
     FX.redo(r["id"])
     assert outside.read_text() == "the person's own notes\n" and not (tmp / "earlier.patch").is_symlink()
-
-
-def test_a_link_left_where_a_merge_makes_its_folder_is_never_followed(world):
-    a = on_fix(world)
-    b = FX.new("a note")
-    (Path(b["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
-    FX.done(b["id"], "A note", "Adds a note.")
-    # the fixer of fix 1 left a link to the release checkout, another of git's folders, where a merge makes its own
-    (FX.tmp_dir(a["id"]) / "merge").symlink_to(FX.release_dir())
-    FX.merge([a["id"], b["id"]], press(a["id"]))
-    assert (FX.release_dir() / "plugin" / "bar" / "bar.tsx").read_text() == "const words = `coverage ${n}`\n"
-    assert FX.get(b["id"])["state"] == "merged"

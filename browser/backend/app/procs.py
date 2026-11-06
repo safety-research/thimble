@@ -1,8 +1,8 @@
 """Facts about processes, portably: the command line, the parent, the working directory, liveness, this user's pids.
 
 Linux answers from /proc; macOS has none, so every reader falls back to `ps` (POSIX options only) and `lsof -d cwd`.
-Imports nothing heavy, since cli.py runs per hook call. Every reader returns "unknown" (an empty list, None, False)
-rather than raising.
+Imports nothing heavy, since the command line (cli.py) imports it. Every reader returns "unknown" (an empty list, None,
+False) rather than raising.
 """
 from __future__ import annotations
 
@@ -236,17 +236,3 @@ def listener(port: int) -> int | None:
         if token.startswith("pid=") and token[4:].isdigit():
             return int(token[4:])
     return None
-
-
-def version_of(pid: object) -> str | None:
-    """The Claude Code version a `claude` process runs, read from its executable's path where the native installer
-    names the file after the version (`~/.local/share/claude/versions/2.1.282`); None when that path says nothing, the
-    process is gone, or there is no /proc."""
-    if not _valid(pid) or not HAVE_PROC:
-        return None
-    try:
-        name = Path(os.readlink(f"/proc/{pid}/exe")).name
-    except OSError:
-        return None
-    parts = name.split(".")
-    return name if len(parts) == 3 and all(p.isdigit() for p in parts) else None

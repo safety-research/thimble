@@ -70,8 +70,8 @@ NO_SIDE_WRITES = {"PYTHONDONTWRITEBYTECODE": "1", "GIT_OPTIONAL_LOCKS": "0"}
 # nor write it
 HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
-# the workspace's folder of every lock file its writers take (nofollow.lock_file: the stores' locks, ledger.locked and
-# calls_file; subagent_files.LOCK), which a kernel can neither read nor write: a lock file the kernel may read it may
+# the workspace's folder of every lock file its writers take (nofollow.lock_file: the stores' locks and ledger.locked;
+# subagent_files.LOCK), which a kernel can neither read nor write: a lock file the kernel may read it may
 # also open and flock, and a cell that held a lock made every writer of that store wait for it (the server on its event
 # loop) and then write without it. bwrap mounts an empty read-only tmpfs over the folder, srt denies it; the server
 # makes the folder before a kernel starts and never removes it, since a folder removed and made again would show
@@ -88,7 +88,7 @@ KERNEL_DIRS = (SCRATCH_DIR, TEMP_DIR, INDEXES_DIR)
 # the workspace's files and folders that no agent's command writes either, beside HIDDEN_FILES and LOCKS_DIR, where
 # one of the agent's write folders holds the workspace (runtime.protected):
 READ_ONLY_FILES = ("telemetry.jsonl", "viewed.jsonl")  # the telemetry log and the view log, which its export merges
-REGISTRY_DIR = "registry"  # the card types and extensions as the server found them (cardtypes.py, extensions.py)
+REGISTRY_DIR = "registry"  # the web rules the analyst kept (agent_session.py)
 VIEWS_DIR = "views"  # thimble's state of the views (views.state_dir): proposals, versions, reviews
 LOCAL_DIR = "extension"  # the workspace's local extension (views.local_dir), whose views the dev agent's builds write
 # what the plugin's --agent-check hook and the gate tools trust (subagent_files.DIR): the pending requests and the agent

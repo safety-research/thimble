@@ -9,7 +9,7 @@
 // then the files the answer links to. placeLines reads the lines an explainer's link points to, for the tray.
 import type { EngineInterface } from 'claude-code'
 
-import { messageOf, partOf, questionOf, setPart } from '../core/answers'
+import { messageOf, questionOf, setPart } from '../core/answers'
 import { textView } from '../core/answerview'
 import { rootHere, startDir } from '../core/env'
 import { modelWhy } from '../core/why.js'

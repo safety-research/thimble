@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-// A document's drafts in History (src/report/historyModel.ts historyRows, src/report/History.tsx PastDraft): the
-// analyst's own version from before the first write is Draft 1, by You; a past draft shown read-only has Restore, which
-// makes it the newest draft again, and the draft a Restore made says which draft it restored.
+// A document's drafts in History (src/report/History.tsx PastDraft): a past draft shown read-only has Restore, which
+// makes it the newest draft again and hands back the document.
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { docsApi } from '../../src/lib/api'
@@ -41,19 +40,6 @@ const history: DocHistory = {
   ],
 }
 
-describe('History rows', () => {
-  test("the analyst's version before the first write is Draft 1 by You, and a restored draft names the draft it restored", () => {
-    const rows = historyRows(history)
-    expect(rows.map((r) => [r.label, r.by])).toEqual([
-      ['Draft 3', 'You'],
-      ['Draft 2', 'Writer'],
-      ['Draft 1', 'You'],
-    ])
-    expect(rows[0].changes).toEqual(['Restored Draft 1'])
-    expect(rows[2].changes).toEqual(['First draft'])
-  })
-})
-
 describe('Restore on a past draft', () => {
   const doc = { id: 'report', type: 'report', title: 'My notes', generation: 1, sections: [{ id: 's1', heading: 'Notes', paragraphs: [], figures: [] }], comments: [] }
 
@@ -73,14 +59,5 @@ describe('Restore on a past draft', () => {
     await settle()
     expect(restore).toHaveBeenCalledWith('w-hist', 'report', 1, null)
     expect(onRestored).toHaveBeenCalledWith(restored)
-  })
-
-  test('an earlier save of a run restores by its number', async () => {
-    vi.spyOn(docsApi, 'revision').mockResolvedValue(doc as never)
-    const restore = vi.spyOn(docsApi, 'restore').mockResolvedValue(doc as never)
-    const el = await mount(<PastDraft ws="w-hist" slug="report" target={{ n: 2, rev: 1 }} rows={historyRows(history)} onClose={() => {}} onRestored={() => {}} />)
-    await settle()
-    await act(async () => el.querySelector<HTMLButtonElement>('button.wu-past-restore')!.click())
-    expect(restore).toHaveBeenCalledWith('w-hist', 'report', 2, 1)
   })
 })

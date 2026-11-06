@@ -18,7 +18,6 @@ import { FilesTab } from '../files/FilesTab'
 import { LabelEditorHost } from '../files/LabelEditor'
 import { useViews } from '../files/ViewsBar'
 import { ViewSurface } from '../files/ViewSurface'
-import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { setAskKey } from '../lib/platform'
@@ -27,7 +26,7 @@ import { reportHeld, showsCanvas, watchInput } from '../lib/follow'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
 import { refFromUrl, teleport } from '../lib/teleport'
-import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeStorage } from '../lib/workspace'
+import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
 import { tabSignals, useTabDots, writing } from './dots'
@@ -211,7 +210,7 @@ export function Shell({ ws }: { ws: string }) {
         open()
       }),
       bus.on('openRef', (e) => {
-        if (chatOpen.current || !(e.ref.startsWith('call:') || e.ref.startsWith('answer:'))) return
+        if (chatOpen.current || !e.ref.startsWith('answer:')) return
         holdForChat({ event: 'openRef', payload: e })
         open()
       }),
@@ -219,27 +218,11 @@ export function Shell({ ws }: { ws: string }) {
     return () => offs.forEach((off) => off())
   }, [patch])
   // a `?ref=` in the URL opens its element once the surfaces are mounted (their effects run before this one), as a
-  // click on its chip would, but still: a card it opens is neither selected nor flashed (refFromUrl). Without one, the
-  // first time this browser opens the workspace it opens at the view the workspace's row names (openingRef: a demo
-  // dataset's main view, an example's), as that row on the start page does
-  const [firstOpen] = useState(() => !openedBefore(ws))
+  // click on its chip would, but still: a card it opens is neither selected nor flashed (refFromUrl)
   useEffect(() => {
-    noteOpened(ws)
     const ref = refFromUrl()
-    if (ref) return teleport(ref, { still: true })
-    if (!firstOpen) return
-    let alive = true
-    api
-      .workspaces()
-      .then((rows) => {
-        const at = openingRef(rows, ws)
-        if (alive && at) teleport(at)
-      })
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [ws, firstOpen])
+    if (ref) teleport(ref, { still: true })
+  }, [ws])
   const gone = useSessionGone(ws)
   // the right sidebar (LabelsSidebar.tsx) on its Labels or its Comments section, or closed (null); it pushes the panes, or
   // the chat when it is the only thing open, rather than covering them

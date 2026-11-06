@@ -8,7 +8,7 @@ import { api } from './api'
 import { bus } from './bus'
 import { parseNotice } from './notices'
 import { openStream } from './sse'
-import type { ViewQuery, WsEvent } from './types'
+import type { WsEvent } from './types'
 
 let replaying = false
 
@@ -46,9 +46,6 @@ function fanOut(ev: WsEvent): void {
       return
     case 'cell':
       if (typeof rest.cell === 'string') bus.emit('cell', { notebook: String(rest.notebook ?? ''), cell: rest.cell, kind: String(rest.kind ?? 'ran') })
-      return
-    case 'orient':
-      bus.emit('orient', { ...rest, status: String(rest.status ?? '') })
       return
     case 'report':
       if (typeof rest.slug === 'string') bus.emit('report', { slug: rest.slug, status: String(rest.status ?? ''), span: typeof rest.span === 'string' ? rest.span : undefined })
@@ -97,9 +94,9 @@ function fanOut(ev: WsEvent): void {
       return
     }
     case 'open-view':
-      // a view main opened with open_view (backend cardtypes.tool_open_view); the history the stream replays is not
+      // a view main opened with open_view (backend panes.tool_open_view); the history the stream replays is not
       // opened again
-      if (!replaying && typeof rest.slug === 'string') bus.emit('openView', { slug: rest.slug, query: viewQuery(rest.query) })
+      if (!replaying && typeof rest.slug === 'string') bus.emit('openView', { slug: rest.slug })
       return
     case 'notice': {
       // a failure of main or of one of thimble's agents with its fix, or the end of one (backend notices.py): the open
@@ -121,14 +118,6 @@ function fanOut(ev: WsEvent): void {
     default:
       return
   }
-}
-
-/** A stream record's `query` as a view takes it: {card, title, args}, else null. */
-function viewQuery(q: unknown): ViewQuery | null {
-  if (!q || typeof q !== 'object') return null
-  const o = q as Record<string, unknown>
-  if (typeof o.card !== 'string' || !o.args || typeof o.args !== 'object') return null
-  return { card: o.card, title: typeof o.title === 'string' ? o.title : '', args: o.args as Record<string, unknown> }
 }
 
 interface Sub {

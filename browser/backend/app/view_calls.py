@@ -4,7 +4,7 @@ Each workspace has up to POOL_MAX kernels for readers, named `views`, `views-2`,
 A call goes to the kernel that last held its view's index (its index then stays in one kernel's memory) when that one
 is free. When it is busy, a call whose index pickle is at most SMALL_INDEX bytes may load it on another free kernel, or
 on a new one while the pool has room; a call whose index is larger, or still being built, waits for its own kernel. A
-call that needs no index (a card type's applies) runs on any free kernel. A call has no time limit. Cancelling the task
+call has no time limit. Cancelling the task
 that awaits it interrupts its kernel, which takes no other call until it is idle again (or, when the interrupt does not
 stop it within DRAIN_S, until it has been restarted).
 

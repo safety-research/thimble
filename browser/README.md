@@ -1,8 +1,8 @@
 # thimble's browser workbench
 
-The browser workbench is thimble 0.8's browser mode: a web page where you and Claude make sense of a folder of files
-together. The page has a chat, the folder's files with views built for them, a canvas of cards, labels, and a report.
-Claude answers in cards that cite every claim.
+The browser workbench is a web page where you and Claude make sense of a folder of files together. The page has a
+chat, the folder's files with views built for them, a canvas of cards, labels, and a report. Claude answers in cards
+that cite every claim.
 
 It runs on your machine. A small server listens on 127.0.0.1 and serves the page, and runs the chat and thimble's
 agents (side threads, the writers, the view builders, the report checks) itself, on one of three ways to reach Claude:
@@ -48,8 +48,7 @@ or in `THIMBLE_BROWSER_HOME`, apart from the terminal plugin's `~/.thimble`.
 |---|---|
 | `backend/` | the server (Python, uv): the workspace, the tools, the agents' sessions, the card harness (`backend/app`), and its tests (`backend/tests_public`) |
 | `frontend/` | the page (React and Vite); `npm run build` writes `frontend/dist`, which the server serves |
-| `plugin/` | 0.8's Claude Code plugin (its MCP shim, hooks, hooks module and skills), which the server no longer loads, and the worked examples of views (`plugin/viewers`) |
+| `plugin/viewers/` | the worked examples of views, which the view builder reads |
 | `prompts/` | the texts Claude reads: main's prompt, the shared guidance, the tools, the writer's, the labels' and the view builder's |
-| `extensions/` | the extensions thimble ships |
 | `docs/` | the view kit's guides, which the view builder reads, the config reference and the route table |
 | `scripts/thimble-browser` | the launcher: it rebuilds the page when it changed, then starts the server and opens the folder |

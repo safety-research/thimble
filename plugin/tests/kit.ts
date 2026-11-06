@@ -15,8 +15,7 @@
 // 10,000 waits), the engine lets a hook go once it held a wait past its own budget of 10 s, and an effect the test did
 // not answer throws (the kit's bottom hook), so no test waits on real time, a real process or the network. A test that
 // awaits what never comes still fails, with its name, after ENGINE_MS. That budget of 10 s is real time, so a mock that
-// stands for something that hangs holds each wait for a short part of the test only (in cards.test.ts the runner that
-// hangs prints a line each second).
+// stands for something that hangs holds each wait for a short part of the test only.
 import { test as kitTest, type TestBody, type TestOptions, type TestRest } from 'claude-code/testing'
 
 export const ENGINE_MS = 120_000

@@ -1,12 +1,11 @@
-// A --prompt label's reads in a session (labels/labels.ts): the `label` line Claude's command wrote in the change feed
-// starts the model's reads beside the session, the bar's busy line names the label while they run, Claude hears the
-// counts with the next prompt, and a call that failed shows the failure line in the person's words. The kernel and the
-// model are stand-ins; all data is made up. `claude plugin test plugin`.
+// Labels in a session (labels/): the `label` line Claude's command wrote in the change feed starts a --prompt label's
+// model reads beside the session, the bar's busy line names the label while they run, and Claude hears the counts with
+// the next prompt; the labels pane shows a table per label, opens a value and its examples, and a number key checks
+// one. The kernel and the model are stand-ins; all data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
 import { paneNow } from '../core/pane'
-import { rerunLabel } from '../labels/edit'
-import { drawLabels, labelEdit, openLabels } from '../labels/pane'
+import { drawLabels, openLabels } from '../labels/pane'
 import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
@@ -96,41 +95,6 @@ test('a label line starts the reads: the busy line names the label, and Claude h
   expect(told).toContain('The model finished reading the records of the label apology (1 call). apology: 2 of 2 records have a value (1 yes, 1 no).')
 })
 
-test("a label changed in the pane is applied again by Claude's command, its reads start, and Claude hears what changed", async () => {
-  const ran: string[][] = []
-  const state = new Map<string, unknown>()
-  let person = ''
-  let started = 0
-  const PERSON = '/made-up/th/events/person-s-edit.jsonl'
-  const $ = {
-    env: { get: async (name: string) => ({ THIMBLE_HOME: '/made-up/th' } as Any)[name] },
-    plugin: { root: '/made-up/plugin', name: 'thimble' },
-    session: { id: async () => 's-edit', cwd: async () => '/made-up/data', root: async () => '/made-up/data', messages: async () => [] },
-    fs: { exists: async () => false, stat: async (p: string) => (p === PERSON ? { kind: 'file', size: person.length } : { kind: 'other', size: 0 }), read: async (p: string) => (p === PERSON ? person : '') },
-    state: { get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }), set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } } },
-    ui: { invalidate: () => undefined, toast: () => undefined },
-    // the reads are asked for (labels.ts labelFromFeed), and wait: a moment later never comes
-    clock: { after: () => { started++; return { cancel() {} } } },
-    process: {
-      run: async (argv: string[]) => {
-        ran.push(argv)
-        const out = (o: unknown) => ({ exitCode: 0, stdout: typeof o === 'string' ? o : JSON.stringify(o), stderr: '' })
-        if (argv[0] === 'tail') return out(person.slice(Number(argv[2]!.slice(1)) - 1))
-        person += `${JSON.stringify({ t: 2, session: 'person-s-edit', root: '/made-up/data', kind: 'label', name: 'apology' })}\n`
-        return out({ name: 'apology', records: 2, valued: 0, waiting: 2, failed: 0, counts: {} })
-      },
-    },
-  } as Any
-  const label = { name: 'apology', kind: 'prompt', rule: 'The message apologizes.', values: ['yes', 'no'], in: 'chat.jsonl', model: null, limit: null, seed: 0 }
-  expect(await rerunLabel($, '/made-up/data', label, { model: 'opus' })).toBe(null)
-  const cmd = ran.find(a => a[0]!.endsWith('/bin/thimble'))!
-  expect(cmd.slice(1)).toEqual(['label', 'apology', '--in', 'chat.jsonl', '--prompt', 'The message apologizes.', '--values', 'yes,no', '--model', 'opus', '--json'])
-  // the line it wrote in the person's feed was read and acted on, as Claude's are: the reads were asked for
-  expect(started).toBe(1)
-  // Claude hears what changed with the next prompt
-  expect(JSON.stringify([...state.values()])).toContain('The analyst changed the model of the label apology in the labels pane and applied it again')
-})
-
 const HEAD = { name: 'sorry', kind: 'regex', rule: '(?i)sorry|apolog', values: ['yes', 'no'], in: 'chat.jsonl', records: 3, valued: 3, waiting: 0, failed: 0, checked: 0, agree: 0, disagree: 0, counts: { yes: 2, no: 1 } }
 
 /** The pane's elements as plain nodes, so a test reads the tree and presses its Buttons. */
@@ -139,7 +103,7 @@ const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArr
 const words = (n: Any): string => (n == null || n === false ? '' : typeof n === 'string' ? n : Array.isArray(n) ? n.map(words).join('') : n.props?.source ?? n.props?.label ?? words(n.props?.children))
 
 /** An engine for the pane alone: its state, and a `thimble` that answers as the kernel would for a made-up folder. */
-function paneEngine(ran: string[][], many = 0): Any {
+function paneEngine(ran: string[][]): Any {
   const state = new Map<string, unknown>()
   let checked = false
   return {
@@ -159,7 +123,6 @@ function paneEngine(ran: string[][], many = 0): Any {
         const l1 = { ref: 'chat.jsonl#L1', i: 0, value: 'yes', by: 'regex', words: "I'm sorry, I broke the build.", meta: 'wren', hit: { before: "I'm ", match: 'sorry', after: ', I broke the build.' } }
         const l3 = { ref: 'chat.jsonl#L3', i: 1, value: 'yes', by: 'regex', words: 'Apologies for the noise.', meta: 'moss' }
         const out = a.includes('--check') ? { ref: a[3], was: 'yes', now: a[4], ...head, checked: 1, agree: 0, changed: [{ ref: a[3], was: 'yes', now: a[4] }] }
-          : a.includes('--records') && many ? { label: head, value: a[3], at: Number(a[5]), total: many, records: Array.from({ length: Math.max(0, Math.min(Number(a[7]), many - Number(a[5]))) }, (_, i) => ({ ...l3, ref: `chat.jsonl#L${Number(a[5]) + i + 1}`, i: Number(a[5]) + i })) }
           : a.includes('--records') ? { label: head, value: a[3], at: 0, total: checked ? 1 : 2, records: checked ? [l3] : [l1, l3] }
             : [head, { ...HEAD, name: 'long', kind: 'code', rule: 'def label(unit):\n    return len(unit["text"]) > 30' }]
         if (a.includes('--check')) checked = true
@@ -169,16 +132,16 @@ function paneEngine(ran: string[][], many = 0): Any {
   }
 }
 
-/** The pane drawn at `W` columns: its nodes, and its rows as text (a key Button as Claude Code draws it: `j: next`). */
-async function drawn($: Any, W = 90, H = 40) {
-  const top = await drawLabels($, { props: { bodyColumns: W, scroll: { bodyRows: H } } }, (await paneNow($))?.args, ELS) as Any
+/** The pane drawn at 90 columns: its nodes, and its rows as text (a key Button as Claude Code draws it: `j: next`). */
+async function drawn($: Any) {
+  const top = await drawLabels($, { props: { bodyColumns: 90, scroll: { bodyRows: 40 } } }, (await paneNow($))?.args, ELS) as Any
   const tree = nodes(top)
   const shown = (n: Any): string => (n == null || n === false ? '' : typeof n === 'string' ? n : Array.isArray(n) ? n.map(shown).join('')
     : n.type === 'Button' && n.props.hotkey ? `${n.props.hotkey}: ${shown(n.props.children) || n.props.label}` : n.props?.source ?? shown(n.props?.children))
   const rows = tree.filter(n => /^(r\d+|head)$/.test(String(n.props?.key))).map(shown)
   const press = (hotkey: string) => tree.find(n => n.type === 'Button' && n.props.hotkey === hotkey).props.onPress()
   const keys = tree.filter(n => n.type === 'Button' && n.props.hotkey).map(n => n.props.hotkey)
-  return { top, tree, rows, press, keys }
+  return { tree, rows, press, keys }
 }
 
 test('the labels pane: a table per label; n opens the first value, j picks its first example, a number key checks it', async () => {
@@ -221,134 +184,4 @@ test('the labels pane: a table per label; n opens the first value, j picks its f
   expect(d.rows.some(r => /^ {2}no +▅+ +2 +67%$/.test(r))).toBe(true)
   // Claude hears the label's checks with the next prompt
   expect(Object.values((await $.state.get({ plugin: 'thimble', key: 'tell' })).value)).toEqual(['The analyst checked records of the label sorry in the labels pane. It now holds 1 check: 0 agree with the label and 1 changed a value: chat.jsonl#L1 (the label gave yes, the analyst says no). The checks count in place of the label\'s values; `thimble label sorry` prints the counts now.'])
-})
-
-test('the labels pane: d switches a label between its examples and its definition, esc and b go back to all the labels, a press opens a value and closes it', async () => {
-  const ran: string[][] = []
-  const $ = paneEngine(ran)
-  await openLabels($, { label: 'long' })
-  let d = await drawn($)
-  // opened on the label itself: all the labels stand under it on the trail, so esc goes back to them, never to it
-  expect((await paneNow($))?.trail?.at(-1)).toEqual({ kind: 'labels', args: {}, title: 'Labels' })
-  // a code label: no e (its code is no one line to edit), every key in the row above the input
-  expect(d.keys).toEqual(['d', 'p', 'n', 'k', 'j', 'b'])
-  expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'd').props.label).toBe('definition')
-  await d.press('d')
-  d = await drawn($)
-  // the definition: each field in a row, its name in a gray column, the code whole
-  expect(d.rows).toContain('kind     code')
-  expect(d.tree.find(n => n.type === 'Code').props.source).toBe('def label(unit):\n    return len(unit["text"]) > 30')
-  expect(d.rows).toContain('over     chat.jsonl')
-  expect(d.rows.some(r => /^ {9}3 records/.test(r))).toBe(true)
-  expect(d.keys).toEqual(['d', 'p', 'n', 'b'])
-  expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'd').props.label).toBe('examples')
-  // moving in the label keeps esc's way back to all the labels
-  expect((await paneNow($))?.trail).toEqual([{ kind: 'labels', args: {}, title: 'Labels' }])
-  await d.press('d')
-  d = await drawn($)
-  expect(d.rows.some(r => r.startsWith('examples · yes 2'))).toBe(true)
-  await d.press('b')
-  d = await drawn($)
-  expect((await paneNow($))?.args).toEqual({})
-  expect(d.keys).toEqual(['p', 'n', 'k', 'j'])
-  // a press on a value opens it; on the open value again, all the labels
-  const no = () => d.tree.find(n => n.type === 'Button' && String(n.props.key).endsWith(':v["sorry","no"]'))
-  await no().props.onPress()
-  expect((await paneNow($))?.args).toEqual({ label: 'sorry', value: 'no' })
-  d = await drawn($)
-  await d.press('b')
-  // p from all the labels: the last value of the last label
-  d = await drawn($)
-  await d.press('p')
-  expect((await paneNow($))?.args).toEqual({ label: 'long', value: 'no' })
-})
-
-test('the labels pane edits a field of the definition in its input bar: e the rule, ↵ applies the label again by the command Claude runs', async () => {
-  const ran: string[][] = []
-  const $ = paneEngine(ran)
-  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 500)
-  await openLabels($, { label: 'sorry', def: true })
-  let d = await drawn($)
-  expect(d.keys).toEqual(['e', 'd', 'p', 'n', 'b'])
-  expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'e').props.label).toBe('edit rule')
-  // the rule, the records it went over: a press each (a field's rows press it), no underline under the pointer
-  const fields = d.tree.filter(n => n.type === 'Button' && /:f\[/.test(String(n.props.key)))
-  expect(fields.map(n => String(n.props.key).replace(/^r\d+:/, ''))).toEqual(['f["rule"]', 'f["in"]'])
-  expect(fields.every(n => n.props.hover?.underline === false)).toBe(true)
-  await d.press('e')
-  const args = (await paneNow($))?.args
-  expect(args).toEqual({ label: 'sorry', value: 'yes', def: true, edit: 'rule' })
-  d = await drawn($)
-  // editing: the field marked, the keys ↵ and esc; the input bar holds the rule, named
-  expect(d.rows).toContain('rule     (?i)sorry|apolog   ← editing')
-  const said = (n: Any): string => (n == null ? '' : typeof n === 'string' ? n : Array.isArray(n) ? n.map(said).join('') : said(n.props?.children))
-  expect(said(d.tree.find(n => n.props?.key === 'keys'))).toBe('↵ rerun over the same 3 records · esc cancel')
-  const edit = await labelEdit($, args)
-  expect([edit?.name, edit?.value]).toEqual(['rule', '(?i)sorry|apolog'])
-  // ↵: back to the label, and the label applied again with the new rule, everything else as it was
-  await edit!.submit('(?i)sorry')
-  expect((await paneNow($))?.args).toEqual({ label: 'sorry', def: true })
-  expect(ran.find(a => a.includes('--regex'))).toEqual(['label', 'sorry', '--in', 'chat.jsonl', '--regex', '(?i)sorry', '--values', 'yes,no', '--json'])
-  // the same value again changes nothing
-  ran.length = 0
-  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 501)
-  await openLabels($, { label: 'sorry', def: true, edit: 'in' })
-  await (await labelEdit($, (await paneNow($))?.args))!.submit('chat.jsonl')
-  expect(ran.some(a => a.includes('--regex'))).toBe(false)
-})
-
-test('the labels pane keeps its key row in its rows with a long list of examples, wrapped keys and all', async () => {
-  const $ = paneEngine([], 60)
-  // a new generation of the labels, so no read of an earlier test stands for this folder's
-  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 1000)
-  await openLabels($, { label: 'long' })
-  for (const [W, H] of [[90, 40], [60, 24], [40, 26]]) {
-    const d = await drawn($, W, H)
-    // each child of the pane one row (the examples are cut to one row each), the keys' row wrapped at W, in the rows
-    // the pane has over the side thread's input (threads/pane.tsx rowsUnder: 5 with no conversation)
-    const kids = d.top.props.children as Any[]
-    const keyRow = kids.at(-1)
-    expect(keyRow.props.key).toBe('keys')
-    const keyWidth = (keyRow.props.children as Any[]).reduce((s: number, n: Any) => s + (n.type === 'Button' ? 3 + n.props.label.length : String(n.props.children).length), 0)
-    expect(kids.length - 1 + Math.ceil(keyWidth / W)).toBeLessThanOrEqual(Math.max(12, H - 5))
-    expect(d.keys.slice(-2)).toEqual(['j', 'b'])
-  }
-})
-
-test('the labels pane marks the words a code label matched, cut at words around them, and shows paths short', async () => {
-  const ran: string[][] = []
-  const $ = paneEngine(ran)
-  const tmp = '/made-up/scratch/R2/tmp/thimble/prs.jsonl'
-  const head = { ...HEAD, kind: 'code', rule: 'def label(u):\n    return "yes"', in: tmp }
-  const hit = { before: `…${'early words '.repeat(20)}rebased onto main (whatsnew `, match: 'conflict', after: ` resolved). ${'later words '.repeat(20)}` }
-  const recs = [
-    { ref: `${tmp}#L5`, i: 0, value: 'yes', by: 'code', words: 'the record from its start', hit },
-    { ref: 'runs/a/board.jsonl#L7', i: 1, value: 'yes', by: 'code', words: 'Nothing found here.', unmarked: 'the code matched “x” in text it changed; where is not known' },
-  ]
-  const run = $.process.run
-  $.process.run = async (argv: string[]) => (argv.includes('--records')
-    ? { exitCode: 0, stdout: JSON.stringify({ label: head, value: 'yes', at: 0, total: 2, records: recs }), stderr: '' }
-    : argv.includes('--json') && argv.length <= 4 ? { exitCode: 0, stdout: JSON.stringify([head]), stderr: '' } : run(argv))
-  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 98)
-  await openLabels($, { label: 'sorry' })
-  const W = 60
-  let d = await drawn($, W)
-  // the match, bold in the value's color, with whole words on each side and … only where cut, on one line
-  const mark = d.tree.find(n => n.type === 'Text' && n.props.bold && words(n) === 'conflict')
-  expect(mark.props.color).toBe('#5aa2e6')
-  const said = d.rows.find(r => r.includes('conflict'))!
-  expect(said).toMatch(/^ {2}line 5 {2}…[a-z]+ .*\(whatsnew conflict resolved\)\. later .*[a-z]…$/)
-  expect(said).not.toMatch(/…(arly|rly|ly|y|ords) /)
-  expect(said.length).toBeLessThanOrEqual(W)
-  // picked: its place, a temp file with … in its middle; the next one says why no words are marked
-  await d.press('j')
-  d = await drawn($, W)
-  expect(d.rows.some(r => /^ {10}\/made-up\/…\/thimble\/prs\.jsonl:5 +1: yes {2}2: no$/.test(r))).toBe(true)
-  await d.press('j')
-  d = await drawn($, W)
-  expect(d.rows.some(r => r.trim().startsWith('the code matched “x” in text it changed; where is'))).toBe(true)
-  // the definition: what the label went over, the temp file short
-  await d.press('d')
-  d = await drawn($, W)
-  expect(d.rows).toContain('over     /made-up/…/thimble/prs.jsonl')
 })

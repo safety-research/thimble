@@ -1,4 +1,4 @@
-"""Canvas groups and cells: storage, kernels, execution, bounded outputs, SSE.
+"""Canvas groups and cells: storage, kernels, execution, bounded outputs.
 
 A group is a notebook file, workspaces/<c>/notebooks/<id>.json, carrying tree fields (parent, kind, anchor, chat), its
 role and its cards. A card stands in a group only when someone put it there (a frame the analyst made, a sequence of
@@ -45,10 +45,9 @@ from typing import Any, Literal
 import zmq
 import zmq.asyncio
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import PlainTextResponse
 from jupyter_client import AsyncKernelClient
-from pydantic import BaseModel, Field
-from sse_starlette import EventSourceResponse, ServerSentEvent
+from pydantic import BaseModel
 
 from . import cite, config, frames, kernel_wrap, ledger, nofollow, page_fonts, procs, srt, view_calls
 from .ledger import atomic_write_text, read_json, write_json
@@ -140,60 +139,10 @@ def _drop_dangling(fd: int, name: str) -> None:
         pass
 
 
-def _unmirror(src: Path, fd: int, name: str) -> bool:
-    """Whether the real folder `name` in the mirror folder `fd` went, as one the per-file mirror of earlier versions
-    left for the corpus folder `src`: a folder for it and for each folder under it, holding nothing but a link to each
-    of their files. Such a folder goes, so that the corpus folder's own link can take its place; one that holds
-    anything else, such as a file a cell wrote or a folder the corpus does not hold, is the kernel's and stays as it
-    is. False at once unless both are folders, `name` one of its own and no link."""
-    if not os.path.isdir(src):
-        return False
-    try:
-        top = os.open(name, nofollow.DIR_FLAGS, dir_fd=fd)
-    except OSError:
-        return False
-    try:
-        for root, dirs, files, at in os.fwalk(".", dir_fd=top):  # the walk enters the real folders, not a link to one
-            here = src / os.path.relpath(root, ".")
-            linked = [d for d in dirs if stat.S_ISLNK(os.stat(d, dir_fd=at, follow_symlinks=False).st_mode)]
-            for entry in [*files, *linked]:
-                try:
-                    if os.readlink(entry, dir_fd=at) != str(here / entry):
-                        return False
-                except OSError:  # not a link: a file a cell wrote
-                    return False
-            if not all(os.path.isdir(here / d) for d in dirs if d not in linked):
-                return False  # before the walk enters it, so a deep tree a cell made is never walked
-    except OSError:
-        return False
-    finally:
-        os.close(top)
-    with contextlib.suppress(OSError):
-        nofollow.rmtree_at(fd, name)
-    try:
-        os.stat(name, dir_fd=fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return True
-    except OSError:
-        pass
-    return False
-
-
-def _cleared(src: Path, fd: int, name: str) -> bool:
-    """_unmirror, which never fails the mirror's pass, and so no kernel's start: whatever goes wrong in what the kernel
-    left there leaves the entry as it is."""
-    try:
-        return _unmirror(src, fd, name)
-    except Exception:  # noqa: BLE001
-        log.warning("scratch mirror: %s was left as it is", name, exc_info=True)
-        return False
-
-
 def _mirror_folder(src: Path, fd: int, names: list[str], links: frozenset[str]) -> None:
     """The mirror's links: a link in the mirror folder `fd` to each of `names` in `src` (`links`, the names that are
     links in the corpus, only while their target exists), re-pointed when it points elsewhere, and the links there whose
-    target is gone removed. A real entry under a corpus name is the kernel's and stays, unless it is a folder an earlier
-    version's mirror left there (_unmirror)."""
+    target is gone removed. A real entry under a corpus name is the kernel's and stays."""
     have: dict[str, bool] = {}  # name in the mirror -> whether it is a link
     with contextlib.suppress(OSError), os.scandir(fd) as it:
         for e in it:
@@ -203,7 +152,7 @@ def _mirror_folder(src: Path, fd: int, names: list[str], links: frozenset[str]) 
         if name in links and not os.path.exists(target):
             continue
         is_link = have.get(name)
-        if is_link is False and not _cleared(target, fd, name):
+        if is_link is False:
             continue  # a real entry the kernel made under a corpus name: left as it is
         if is_link:
             try:
@@ -230,8 +179,7 @@ def mirror_corpus(corpus: Path, scratch: Path) -> None:
     a corpus of a million files costs what one of ten does; what changes below an entry shows at once, and an entry
     added to the corpus folder or gone from it at the next pass. Seen from the cwd each folder is a link, which glob's
     `**` follows and os.walk and pathlib's rglob do not. Idempotent: entries the kernel created are left alone,
-    dangling links removed, links that point elsewhere re-pointed, and a folder the per-file mirror of earlier versions
-    left becomes its link (_unmirror). Blocking."""
+    dangling links removed and links that point elsewhere re-pointed. Blocking."""
     corpus = corpus.resolve()
     names: list[str] = []
     links: set[str] = set()
@@ -287,20 +235,17 @@ def _new_id() -> str:
     return secrets.token_hex(4)
 
 
-MAIN = "main"  # the id of the analyst's group in a workspace from before groups had random ids (notebooks_dir)
+MAIN = "main"  # the id of the analyst's group in a workspace from before groups had random ids
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 DEFAULT_TITLE = "Notebook"
 ANALYST_NOTEBOOK_TITLE = "Your work"  # the title `main` reads as (_title), from a workspace that had one
 UNNAMED_MAIN_TITLES = ("", DEFAULT_TITLE, "Your notebook")  # stored defaults of `main` the analyst never typed
 
 # A group's role: `exploration` is the orientation's deck, `analyst` the analyst's own group and every thread's;
-# `figures` and `finding` are read from stored workspaces. A stored `working` reads as `exploration`, and
-# migrate_scratch moves such groups out of the deck.
+# `figures` and `finding` are read from stored workspaces.
 ROLES = ("exploration", "finding", "analyst", "figures")
 DEFAULT_ROLE = "analyst"
-LEGACY_WORKING = "working"
 FIGURES_ROLE = "figures"
-LEGACY_FIGURES_TITLE = "Report figures"  # a figures group stored under role finding
 TERMINAL_CREATOR = "terminal"  # created_by of the terminal session's group and cells; the group runs on its own kernel
 # how a group lays out its children on the canvas: sequence a column, split a row, grid two columns; a loose group
 # draws no frame, its cards sit on the board at their own positions (the cards dragged out of every group)
@@ -313,7 +258,6 @@ CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline",
 RUNNABLE_KINDS = ("plot", "table", "code", "timeline", "diagram")  # carry code and outputs
 DATA_KINDS = ("example", "note", "label", "custom", "plan")  # carry a payload
 DEFAULT_KIND = "code"
-KEPT_ARGS = "kept_args"  # a card type's call arguments Keep set, which the card check gives back as they are
 TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's last run changed its outputs
 # while thimble runs a card again because labels it read changed (rerun_on_labels), those label ids; gone when the
 # run ends
@@ -338,26 +282,8 @@ def _ws(workspace: str) -> Path:
 
 
 def notebooks_dir(ws: Path) -> Path:
-    """workspaces/<c>/notebooks/, migrating a v0 notebook.json into notebooks/main.json when seen. Does not create the
-    directory, so reads never leave files behind."""
-    d = ws / "notebooks"
-    old = ws / "notebook.json"
-    if old.is_file() and not (d / f"{MAIN}.json").exists():
-        try:  # never through a link or a FIFO a card's code left there (nofollow); one is no notebook
-            data = json.loads(nofollow.read_text(old))
-        except OSError:
-            return d
-        except ValueError:
-            log.warning("%s is not valid JSON; migrating an empty main notebook and keeping it as notebook.json.bad", old)
-            data, bad = {}, True
-        else:
-            bad = False
-        cells = data.get("cells") if isinstance(data, dict) else None
-        nofollow.makedirs(d)
-        write_json(d / f"{MAIN}.json", _normalize(MAIN, {"title": ANALYST_NOTEBOOK_TITLE, "cells": cells or []}))
-        nofollow.rename(old, old.with_suffix(".json.bad")) if bad else nofollow.unlink(old)
-        log.info("migrated %s -> notebooks/%s.json", old, MAIN)
-    return d
+    """workspaces/<c>/notebooks/. Does not create the directory, so reads never leave files behind."""
+    return ws / "notebooks"
 
 
 def _nb_file(ws: Path, nb_id: str) -> Path:
@@ -665,7 +591,7 @@ def _normalize(nb_id: str, data: Any) -> dict:
     for c in cells:
         _normalize_cell(c, nb_id)
     role = data.get("role")
-    role = "exploration" if role == LEGACY_WORKING else role if role in ROLES else DEFAULT_ROLE
+    role = role if role in ROLES else DEFAULT_ROLE
     kind = data.get("kind")
     kind = kind if kind in GROUP_KINDS else DEFAULT_GROUP_KIND
     inv = data.get("investigation")
@@ -962,8 +888,7 @@ def outputs_key(ws: Path, outputs: list | None) -> str:
 
 def editing(ws: Path):
     """The lock of the workspace's groups (module note): ledger.locked on the notebooks folder, its lock file `.lock`
-    inside it, so `thimble-run`, which may write only that folder in main's sandbox, can take it. Held from the read of
-    a change to its write; never across an await."""
+    inside it. Held from the read of a change to its write; never across an await."""
     d = ws / "notebooks"
     nofollow.makedirs(d)
     return ledger.locked(d)
@@ -1245,10 +1170,8 @@ def with_slugs(ws: Path, cells: list[dict]) -> list[dict]:
 
 
 def is_figures(nb: dict | None) -> bool:
-    """Whether a group (a record or its row) holds a document's figures (FIGURES_ROLE), the legacy shape included."""
-    if not isinstance(nb, dict):
-        return False
-    return nb.get("role") == FIGURES_ROLE or (nb.get("role") == "finding" and str(nb.get("title") or "").strip() == LEGACY_FIGURES_TITLE)
+    """Whether a group (a record or its row) holds a document's figures (FIGURES_ROLE)."""
+    return isinstance(nb, dict) and nb.get("role") == FIGURES_ROLE
 
 
 def list_notebooks(ws: Path, *, figures: bool = True) -> list[dict]:
@@ -1289,32 +1212,14 @@ def tree_order(rows: list[dict]) -> list[dict]:
 
 
 def canvas(ws: Path) -> dict:
-    """The canvas: every group the browser shows in tree order, and every cell of those groups, each with its name. A
-    Scratch group (migrate_scratch) and its nested groups are left out with their cards, which still resolve by ref;
-    `hidden` lists their ids so a citation click can say where the card went."""
-    rows = tree_order(list_notebooks(ws, figures=False))
-    parent = {r["id"]: r.get("parent") for r in rows}
-    nbs = {r["id"]: read_notebook(ws, r["id"]) for r in rows}
-    scratch = {gid for gid, nb in nbs.items() if nb is not None and nb.get(SCRATCH_KEY) is True}
-
-    def hidden(gid: str) -> bool:
-        seen: set[str] = set()
-        g: str | None = gid
-        while g and g not in seen:
-            if g in scratch:
-                return True
-            seen.add(g)
-            g = parent.get(g)
-        return False
-
-    groups = [r for r in rows if not hidden(r["id"])]
+    """The canvas: every group the browser shows in tree order, and every cell of those groups, each with its name."""
+    groups = tree_order(list_notebooks(ws, figures=False))
     cells: list[dict] = []
     for g in groups:
-        nb = nbs.get(g["id"])
+        nb = read_notebook(ws, g["id"])
         if nb is not None:
             cells.extend(nb["cells"])
-    left_out = [str(c.get("id")) for r in rows if hidden(r["id"]) for c in (nbs.get(r["id"]) or {}).get("cells", [])]
-    return {"groups": groups, "cells": with_slugs(ws, cells), "hidden": left_out}
+    return {"groups": groups, "cells": with_slugs(ws, cells)}
 
 
 @_changes
@@ -1456,13 +1361,12 @@ def insert_cell(workspace: str, nb_id: str, cell: dict, after: str | None = None
 def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: str | None = None,
               takeaway: str | None = None, payload: dict | None = None, locked: bool | None = None,
               by: str | None = None, width: int | None = None, height: int | None = None,
-              starred: bool | None = None, kept_args: dict | None = None, **layout: Any) -> dict:
+              starred: bool | None = None, **layout: Any) -> dict:
     """Change the given fields of a cell and announce it: code on a runnable cell, a payload on a data cell (400
     otherwise). A change to code, payload, title or takeaway is an edit, recorded in `edited` with what it replaced
     (stamp_edit); a takeaway set here is the analyst's. `width`, `height`, `starred` and `pos` are layout, not edits.
-    `locked` is the analyst's lock, which no model's tool may get past; only the browser sends it. `kept_args` are the
-    arguments of a card type's call that Keep wrote with the code (cardtypes.keep_route); other new code drops them. 404
-    for an unknown cell."""
+    `locked` is the analyst's lock, which no model's tool may get past; only the browser sends it. 404 for an unknown
+    cell."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
@@ -1481,9 +1385,6 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     shown = shown_of(cell)  # the outputs new code replaces once it runs
     if code is not None and code != cell.get("code"):
         cell["code"] = code
-        cell.pop(KEPT_ARGS, None)
-    if kept_args:
-        cell[KEPT_ARGS] = kept_args
     if payload is not None:
         new = _payload_of(kind, payload)
         if new != cell.get("payload"):
@@ -1525,7 +1426,7 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
 
 # what a card of code carries beside its code that a card of another kind does not: its run and what the run read
 RUN_STATE = ("code", "previous_code", "outputs", "status", "exec_count", "started", "kernel", "timeout_s", "label_revs",
-             KEPT_ARGS, OUT_MEMO, TAKEAWAY_STALE, REGENERATING_FOR)
+             OUT_MEMO, TAKEAWAY_STALE, REGENERATING_FOR)
 
 
 @_changes
@@ -1787,7 +1688,6 @@ def restore_version(workspace: str, cell_id: str, entry: str, *, by: str | None 
         if (v.get("code") or "") != (cell.get("code") or ""):
             cell["previous_code"] = str(cell.get("code") or "")
             cell["code"] = str(v.get("code") or "")
-            cell.pop(KEPT_ARGS, None)
             cell["outputs"], cell["status"] = copy.deepcopy(v.get("outputs") or []), v.get("status") or "idle"
     if (v.get("title") or "") != (cell.get("title") or ""):
         cell["title"] = str(v.get("title") or "")
@@ -1893,13 +1793,6 @@ def _reject_data_run(cell: dict) -> None:
         raise HTTPException(400, f"a {cell.get('kind', DEFAULT_KIND)} card has no code to run")
 
 
-# ----------------------------------------------------------------------------------------------------------
-# SSE subscribers
-# ----------------------------------------------------------------------------------------------------------
-
-_subscribers: dict[tuple[str, str], set[asyncio.Queue]] = {}  # (workspace, notebook id) -> queues
-
-
 def _maker_role(workspace: str, by: str) -> str | None:
     """The role of the chat that made a card (`chat:<id>`, tools.Ctx.cell_author): main, thread, writer, ...; None for
     any other maker or a chat that is gone."""
@@ -1912,12 +1805,8 @@ def _maker_role(workspace: str, by: str) -> str | None:
 
 
 def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
-    """Announce a card change: the whole cell on its group's SSE, and one `cell {notebook, cell, kind}` record on the
-    workspace stream. `what` names the change (ran, note, edited, deleted). Off the event loop the workspace record is
-    skipped (investigation.emit is loop-only)."""
-    data = json.dumps(cell)
-    for q in _subscribers.get((workspace, cell.get("notebook", MAIN)), ()):
-        q.put_nowait(data)
+    """Announce a card change: one `cell {notebook, cell, kind}` record on the workspace stream. `what` names the change
+    (ran, note, edited, deleted). Off the event loop the record is skipped (investigation.emit is loop-only)."""
     cid = str(cell.get("id") or "")
     if not cid:
         return
@@ -1939,7 +1828,7 @@ def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
             if role:
                 rec["by_role"] = role
         investigation.emit(workspace, investigation.MAIN, rec)
-    except RuntimeError:  # no running loop: a worker thread; the group's SSE carried it
+    except RuntimeError:  # no running loop: a worker thread, whose record is skipped
         pass
     except Exception:  # noqa: BLE001
         log.debug("workspace cell record not written", exc_info=True)
@@ -3627,10 +3516,6 @@ async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: flo
     same request and kept in place of pandas' display, each table the code printed is kept as data beside its text
     (frames.attach_printed), and the labels the code read land on k.last_labels and k.last_label_revs. `extra_exprs`
     are more user expressions for the same request."""
-    from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
-
-    if cardtypes.CARD_CALL in code:
-        await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
     exprs[frames.PRINTED_EXPR_KEY] = frames.PRINTED_CAPTURE
@@ -3811,7 +3696,6 @@ def _edit_code(cell: dict, code: str, *, title: str | None = None, kind: str | N
     if code != cell.get("code"):
         cell["previous_code"] = str(cell.get("code") or "")
         cell["code"] = code
-        cell.pop(KEPT_ARGS, None)
     if title:
         cell["title"] = title
     if kind:
@@ -4094,7 +3978,6 @@ async def _run_code(
 # ----------------------------------------------------------------------------------------------------------
 
 CellKind = Literal["plot", "table", "code", "example", "note", "diagram", "timeline", "label", "custom", "plan"]
-RunnableKind = Literal["plot", "table", "code", "timeline", "diagram"]
 GroupKind = Literal["sequence", "split", "grid"]  # the loose group is made by move_cells alone
 Role = Literal["exploration", "finding", "analyst", "figures"]
 
@@ -4134,15 +4017,6 @@ class CellMove(BaseModel):
     pos: dict | None = None
 
 
-class RunBody(BaseModel):
-    code: str
-    kind: RunnableKind = "code"
-    title: str = ""
-    created_by: str = "user"
-    created_at_event: int | None = None
-    timeout_s: float | None = Field(default=None, gt=0)
-
-
 class NewNotebook(BaseModel):
     title: str | None = None
     parent: str | None = None
@@ -4164,173 +4038,18 @@ class NotebookMeta(BaseModel):
     order: int | None = None  # how many of its parent's cards come before it in the flow; null for after all of them
 
 
-# Routes are `async def` so everything (including _emit into subscriber queues) runs on the event loop thread.
+# Routes are `async def` so everything (including _emit's workspace record) runs on the event loop thread.
 
 
 @router.get("/ws/{c}/canvas")
 async def canvas_route(c: str) -> dict:
-    """The canvas as the browser shows it, the orientation's cards among them as it adds them. A Scratch group is marked
-    first (migrate_scratch), so canvas() leaves it out. `threads` gives the anchor of each thread that made a card
-    here (threads.anchors_of)."""
+    """The canvas as the browser shows it. `threads` gives the anchor of each thread that made a card here
+    (threads.anchors_of)."""
     from . import threads  # noqa: PLC0415 — threads' modules import this one
 
-    migrate_scratch(c)
-    migrate_writer_groups(c)
     out = canvas(_ws(c))
     out["threads"] = threads.anchors_of(c, out["cells"])
     return out
-
-
-# Scratch: a working group of role `working` in stored workspaces. Its cards are kept, since their ids are cited: on
-# open, each top-level `working` group moves to the root as SCRATCH_TITLE, role exploration, after every other root
-# group, marked SCRATCH_KEY, and groups nested in it become role exploration. canvas() leaves out a marked group and
-# everything in it; its cards stay in the files, so refs resolve. A root titled SCRATCH_TITLE with role exploration gets
-# the mark too. Runs once per workspace and process.
-SCRATCH_TITLE = "Orientation scratch"
-SCRATCH_KEY = "scratch"
-_scratch_migrated: set[str] = set()
-
-
-def migrate_scratch(c: str) -> list[str]:
-    """Move a Scratch group out of the deck and mark it (see above); the ids of the groups moved or marked."""
-    try:
-        ws = config.workspace_dir(c)
-    except (ValueError, HTTPException):
-        return []
-    if str(ws) in _scratch_migrated:  # by folder, so a workspace made again under the same name is looked at again
-        return []
-    _scratch_migrated.add(str(ws))
-    d = notebooks_dir(ws)
-    raw: dict[str, dict] = {}
-    marked: list[str] = []
-    for p in sorted(d.glob("*.json")) if d.is_dir() else ():
-        if not ID_RE.match(p.stem):
-            continue
-        try:  # never through a link or a FIFO a card's code left there (nofollow)
-            data = json.loads(nofollow.read_text(p))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        if data.get("role") == LEGACY_WORKING:
-            raw[p.stem] = data
-        elif (data.get("title") == SCRATCH_TITLE and not data.get("parent") and data.get("role") == "exploration"
-              and SCRATCH_KEY not in data):
-            marked.append(p.stem)
-    moved: list[str] = []
-    with editing(ws) if raw or marked else contextlib.nullcontext():
-        for gid, data in raw.items():
-            nb = read_notebook(ws, gid)
-            if nb is None:
-                continue
-            nb["role"] = "exploration"
-            if data.get("parent") not in raw:
-                nb.update(parent=None, title=SCRATCH_TITLE, kind=DEFAULT_GROUP_KIND, pos=None, order=None, ts=_created())
-                nb[SCRATCH_KEY] = True
-                moved.append(gid)
-            write_notebook(ws, nb)
-        for gid in marked:
-            nb = read_notebook(ws, gid)
-            if nb is not None:
-                nb[SCRATCH_KEY] = True
-                write_notebook(ws, nb)
-                moved.append(gid)
-    if moved:
-        log.info("%s: moved and marked the orientation's old Scratch, off the canvas (%s)", c, ", ".join(moved))
-    return moved
-
-
-# A writer's figures group stored inside the analyst's Your work moves to the root on the canvas's first read in a
-# process, when every card in it and in the groups under it was made by a writer and it has at least one. It keeps its
-# cards, title and subgroups. Groups with anyone else's card, and threads' groups, stay. A moved group is stamped with
-# its writer's THIMBLE_SESSION (unless a root group already carries it) and each move writes a `group-moved` history
-# line. What is moved no longer matches, so running it again moves nothing.
-_writer_groups_migrated: set[str] = set()
-
-
-def migrate_writer_groups(c: str) -> list[str]:
-    """Move writers' figures groups out of Your work (see above); the ids of the groups moved."""
-    from . import agents, canvas_history  # noqa: PLC0415 — agents imports this module
-
-    try:
-        ws = config.workspace_dir(c)
-    except (ValueError, HTTPException):
-        return []
-    if str(ws) in _writer_groups_migrated:  # by folder, as migrate_scratch
-        return []
-    _writer_groups_migrated.add(str(ws))
-    session_key = "session"  # tools.SESSION_KEY; tools imports this module lazily
-    rows = list_notebooks(ws, figures=False)
-    nbs = {r["id"]: read_notebook(ws, r["id"]) for r in rows}
-    kids: dict[str, list[str]] = {}
-    for gid, nb in nbs.items():
-        if nb is not None and nb.get("parent"):
-            kids.setdefault(str(nb["parent"]), []).append(gid)
-    writers: dict[str, str | None] = {}  # maker -> the writer's doc, None when the maker is not a writer's chat
-
-    def writer_doc(maker: Any) -> str | None:
-        key = str(maker or "")
-        if key not in writers:
-            meta = agents.meta_or_none(c, key[5:]) if key.startswith("chat:") and ID_RE.match(key[5:]) else None
-            writers[key] = str(meta.get("doc") or "report") if meta and meta.get("role") == "writer" else None
-        return writers[key]
-
-    def docs_of(gid: str, seen: set[str]) -> set[str] | None:
-        """The docs of the writers who made every card in group `gid` and under it; None when anyone else made one,
-        or the group or one under it is the analyst's or a thread's."""
-        if gid in seen:
-            return set()
-        seen.add(gid)
-        nb = nbs.get(gid)
-        if nb is None or nb.get("anchor") or nb.get("chat"):
-            return None
-        if nb.get("created_by") and writer_doc(nb["created_by"]) is None:
-            return None
-        out: set[str] = set()
-        for cell in nb.get("cells") or []:
-            d = writer_doc(cell.get("created_by"))
-            if d is None:
-                return None
-            out.add(d)
-        for k in kids.get(gid, []):
-            sub = docs_of(k, seen)
-            if sub is None:
-                return None
-            out |= sub
-        return out
-
-    stamped = {str(nb.get(session_key)) for nb in nbs.values() if nb is not None and not nb.get("parent") and nb.get(session_key)}
-    moved: list[str] = []
-    for root_id, root in nbs.items():
-        if (root is None or root.get("parent") or (root.get("role") or DEFAULT_ROLE) != "analyst" or root.get(session_key)
-                or root.get("kind") == LOOSE_KIND or root.get("anchor") or root.get("chat")):
-            continue
-        for gid in list(kids.get(root_id, [])):
-            docs = docs_of(gid, set())
-            if not docs:  # someone else's card in it, or no card at all
-                continue
-            with editing(ws):
-                nb = read_notebook(ws, gid)
-                if nb is None:
-                    continue
-                cards = [str(x.get("id")) for x in nb.get("cells") or []]
-                nb.update(parent=None, pos=None, order=None)
-                key = f"writer:{sorted(docs)[0]}" if len(docs) == 1 else None
-                if key and key not in stamped:
-                    nb[session_key] = key
-                    stamped.add(key)
-                write_notebook(ws, nb)
-            canvas_history.group_moved(c, gid, title=str(nb.get("title") or ""), by="migration", from_parent=root_id,
-                                       to_parent=None, cards=cards)
-            moved.append(gid)
-    if moved:
-        log.info("%s: moved an older writer's figures out of Your work to the root (%s)", c, ", ".join(moved))
-    return moved
-
-
-@router.get("/ws/{c}/notebooks")
-async def list_notebooks_route(c: str) -> list[dict]:
-    return list_notebooks(_ws(c), figures=False)
 
 
 def cell_names(ws: Path) -> list[dict]:
@@ -4367,11 +4086,6 @@ async def create_notebook_route(c: str, body: NewNotebook | None = None) -> dict
         raise HTTPException(400, "pos must be {x, y} numbers or null")
     return summary(create_notebook(ws, b.title, role=b.role or DEFAULT_ROLE, investigation=b.investigation, finding=b.finding,
                                    parent=b.parent, anchor=b.anchor, chat=b.chat, kind=b.kind, pos=b.pos, order=b.order))
-
-
-@router.get("/ws/{c}/notebooks/{nb}")
-async def get_notebook(c: str, nb: str) -> dict:
-    return load_notebook(c, nb)
 
 
 @router.put("/ws/{c}/notebooks/{nb}")
@@ -4466,18 +4180,6 @@ async def move_cells_route(c: str, body: CellMove) -> list[dict]:
     return move_cells(c, body.cells, body.group, **kw)
 
 
-@router.post("/ws/{c}/notebooks/{nb}/cells")
-async def create_cell(c: str, nb: str, body: NewCell) -> dict:
-    """A new cell in the group, at the end or after `after`. 400 for code on a data kind or a payload on a runnable one."""
-    load_notebook(c, nb)  # 404 before anything is made
-    try:
-        cell = new_cell(body.kind, body.created_by, body.title, nb, code=body.code, payload=body.payload,
-                        created_at_event=body.created_at_event)
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    return insert_cell(c, nb, cell, body.after)
-
-
 class NewLooseCell(NewCell):
     pos: dict | None = None  # where the card stands on the board; null for below what is drawn
 
@@ -4513,12 +4215,6 @@ def _edit_args(body: CellEdit) -> dict:
     return args
 
 
-@router.put("/ws/{c}/notebooks/{nb}/cells/{cell_id}")
-async def update_cell(c: str, nb: str, cell_id: str, body: CellEdit) -> dict:
-    _cell_in(c, nb, cell_id)
-    return _edited_route(c, cell_id, body)
-
-
 @router.put("/ws/{c}/cells/{cell_id}")
 async def update_cell_by_id(c: str, cell_id: str, body: CellEdit) -> dict:
     return _edited_route(c, cell_id, body)
@@ -4532,14 +4228,6 @@ def _edited_route(c: str, cell_id: str, body: CellEdit) -> dict:
 
         marks.card_written(c, cell_id)
     return out
-
-
-@router.get("/ws/{c}/cells/{cell_id}")
-async def get_cell_route(c: str, cell_id: str) -> dict:
-    cell = get_cell(c, cell_id)
-    if cell is None:
-        raise HTTPException(404, f"no such card: {cell_id}")
-    return cell
 
 
 @router.get("/ws/{c}/cells/{cell_id}/versions/{entry}")
@@ -4570,13 +4258,6 @@ async def restore_version_route(c: str, cell_id: str, entry: str) -> dict:
     return restore_version(c, cell_id, entry)
 
 
-@router.delete("/ws/{c}/notebooks/{nb}/cells/{cell_id}")
-async def delete_cell_route(c: str, nb: str, cell_id: str) -> dict:
-    _cell_in(c, nb, cell_id)
-    delete_cell(c, cell_id)
-    return {"ok": True}
-
-
 @router.delete("/ws/{c}/cells/{cell_id}")
 async def delete_cell_by_id(c: str, cell_id: str) -> dict:
     delete_cell(c, cell_id)
@@ -4594,11 +4275,6 @@ async def output_full(c: str, nb: str, cell_id: str, i: int) -> PlainTextRespons
     return PlainTextResponse(text)
 
 
-@router.post("/ws/{c}/notebooks/{nb}/cells/{cell_id}/run")
-async def run_cell(c: str, nb: str, cell_id: str) -> dict:
-    return await _run_cell(c, nb, cell_id)
-
-
 @router.post("/ws/{c}/cells/{cell_id}/run")
 async def run_cell_by_id(c: str, cell_id: str) -> dict:
     hit = find_cell(_ws(c), cell_id)
@@ -4607,37 +4283,9 @@ async def run_cell_by_id(c: str, cell_id: str) -> dict:
     return await _run_cell(c, hit[0], cell_id)
 
 
-# A regenerate that waits for a label's run goes on in the background, and the loop keeps only weak references to tasks,
-# so each is held here until it ends.
-_regenerating: set[asyncio.Task] = set()
-
-
-@router.post("/ws/{c}/cells/{cell_id}/regenerate")
-async def regenerate_cell(c: str, cell_id: str, response: Response) -> dict:
-    """Run a card again on its labels as they are now, then start the card check, which brings the takeaway up to date
-    while the automatic check is on. A card that gets no check keeps its takeaway; one whose outputs are unchanged is
-    not read again. Labels whose rows were made under another definition run first: the answer is then 202 with the
-    card and `waiting` (those label ids), and the card runs when their runs end. Otherwise the card as stored after its
-    run. 404 for no such card, 400 for one with no code."""
-    hit = find_cell(_ws(c), cell_id)
-    if hit is None:
-        raise HTTPException(404, f"no such card: {cell_id}")
-    if not runnable(hit[1]):
-        raise HTTPException(400, f"a {hit[1].get('kind', DEFAULT_KIND)} card has no code to run")
-    from . import concepts  # noqa: PLC0415 — concepts imports this module
-
-    waiting = await concepts.bring_current(c, [str(x) for x in hit[1].get("labels") or []])
-    if not waiting:
-        return await _regenerate(c, cell_id)
-    task = asyncio.get_running_loop().create_task(_regenerate_after(c, cell_id, waiting), name=f"thimble-regenerate-{cell_id}")
-    _regenerating.add(task)
-    task.add_done_callback(_regenerating.discard)
-    response.status_code = 202
-    return {**copy.deepcopy(hit[1]), "waiting": waiting}
-
-
 async def _regenerate(c: str, cell_id: str) -> dict:
-    """regenerate_cell's run and card check, wherever the card is now; the card as stored."""
+    """Run a card again, wherever it is now, then start the card check, which brings the takeaway up to date while the
+    automatic check is on; the card as stored. 404 for no such card."""
     hit = find_cell(_ws(c), cell_id)
     if hit is None:
         raise HTTPException(404, f"no such card: {cell_id}")
@@ -4648,161 +4296,3 @@ async def _regenerate(c: str, cell_id: str) -> dict:
         rec = checkstore.current(c, cell_id) or {}
         card_check.start(c, cell_id, str(rec.get("author") or card_check.MAIN))
     return stored
-
-
-async def _regenerate_after(c: str, cell_id: str, waiting: list[str]) -> None:
-    """The rest of a regenerate_cell that waited: the labels in `waiting` finish, then the card runs. A failed or
-    stopped label run leaves the card as it was, its tag still red. Never raises."""
-    from . import concepts  # noqa: PLC0415
-
-    try:
-        for cid in waiting:
-            try:
-                summary = await concepts.wait_apply(c, cid, float("inf"))
-            except HTTPException as e:
-                log.info("regenerate: card:%s stays as it was, since label %s did not run: %s", cell_id, cid, e.detail)
-                return
-            if summary.get("stopped"):
-                log.info("regenerate: card:%s stays as it was, since the run of label %s was stopped", cell_id, cid)
-                return
-        await _regenerate(c, cell_id)
-    except Exception:  # noqa: BLE001 — a background task: its failure is logged, the card stays as it was
-        log.exception("regenerate: card:%s failed", cell_id)
-
-
-@router.post("/ws/{c}/notebooks/{nb}/run")
-async def run(c: str, nb: str, body: RunBody) -> dict:
-    """Create a runnable cell in the group and run it; the cell as stored (bounded outputs)."""
-    load_notebook(c, nb)  # 404 before creating anything
-    stored, _ = await _run_code(c, body.code, body.created_by, body.title, notebook=nb, created_at_event=body.created_at_event,
-                                timeout_s=body.timeout_s, kind=body.kind)
-    return stored
-
-
-@router.post("/ws/{c}/notebook/restart")
-async def restart(c: str) -> dict:
-    """Restart the workspace's kernels, the shared one and every dedicated one. The next run starts a fresh kernel."""
-    _ws(c)  # validates the workspace
-    await shutdown_workspace(c)  # attached or only recorded
-    return {"ok": True}
-
-
-@router.get("/ws/{c}/notebooks/{nb}/events")
-async def events(c: str, nb: str) -> EventSourceResponse:
-    """The group's cell stream. `main` may be subscribed before it is materialized; any other group must exist."""
-    if nb != MAIN and not _nb_file(_ws(c), nb).is_file():
-        raise HTTPException(404, f"no such notebook: {nb}")
-    _nb_file(_ws(c), nb)
-    key = (c, nb)
-    q: asyncio.Queue = asyncio.Queue()
-    _subscribers.setdefault(key, set()).add(q)
-
-    async def gen():
-        try:
-            while True:
-                yield {"event": "cell", "data": await q.get()}
-        finally:
-            _subscribers.get(key, set()).discard(q)
-
-    return EventSourceResponse(
-        gen(), ping=15, ping_message_factory=lambda: ServerSentEvent(data="{}", event="ping")
-    )
-
-
-# ----------------------------------------------------------------------------------------------------------
-# .ipynb export
-# ----------------------------------------------------------------------------------------------------------
-
-_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-
-
-def _md_ipynb(cell_id: str, text: str, kind: str | None = None) -> dict:
-    return {"cell_type": "markdown", "id": cell_id, "metadata": {"thimble": {"kind": kind}} if kind else {}, "source": text}
-
-
-def _ipynb_outputs(outputs: list) -> list[dict]:
-    out: list[dict] = []
-    for b in outputs or []:
-        if not isinstance(b, dict):
-            continue
-        if "_stream" in b:
-            tp = b.get("text/plain")
-            text = "".join(map(str, tp)) if isinstance(tp, list) else str(tp or "")
-            out.append({"output_type": "stream", "name": str(b.get("_stream") or "stdout"), "text": text})
-            continue
-        err = b.get(ERROR_MIME)
-        if isinstance(err, dict):
-            out.append({"output_type": "error", "ename": str(err.get("ename") or "Error"),
-                        "evalue": str(err.get("evalue") or ""),
-                        "traceback": [str(t) for t in err.get("traceback") or []]})
-            continue
-        data = {k: v for k, v in b.items() if "/" in k}  # mime keys only; drops `truncated` and other private keys
-        if data:
-            out.append({"output_type": "display_data", "data": data, "metadata": {}})
-    return out
-
-
-def _data_ipynb(cell: dict) -> dict:
-    """A data cell for the export: a note as its markdown, an example as the list of its refs, a label as its concept,
-    a dataset as fenced JSON, a custom card as a raw HTML cell."""
-    kind = cell.get("kind", DEFAULT_KIND)
-    payload = cell.get("payload") or {}
-    if kind == "custom":
-        return {"cell_type": "raw", "id": cell["id"], "metadata": {"format": "text/html", "thimble": {"kind": kind}},
-                "source": str(payload.get("html") or "")}
-    if kind == "note":
-        body = str(payload.get("text") or "")
-    elif kind == "example":
-        body = "\n".join(f"- [[{r}]]" for r in payload.get("refs") or [])
-    elif kind == "label":
-        body = f"Label `{payload.get('concept') or ''}`"
-    elif kind == PLAN_KIND:
-        body = "\n".join(f"- {line}" for line in plan_lines(cell))
-    else:
-        body = "```json\n" + json.dumps(payload.get("dataset"), ensure_ascii=False, indent=1, default=str) + "\n```"
-    return _md_ipynb(cell["id"], body, kind)
-
-
-def to_ipynb(nb: dict) -> dict:
-    """The group as nbformat-4.5 JSON: each cell's question as a markdown heading, a runnable cell as code with its
-    outputs, a data cell by its kind (_data_ipynb), the takeaway as a markdown cell after it. Bounded stream outputs
-    export as stored, marker line included."""
-    cells: list[dict] = []
-    for cell in nb.get("cells") or []:
-        title = str(cell.get("title") or "").strip()
-        if title:
-            cells.append(_md_ipynb(f"{cell['id']}-q", f"### {title}"))
-        if runnable(cell):
-            cells.append({
-                "cell_type": "code", "id": cell["id"], "metadata": {"thimble": {"kind": cell.get("kind", DEFAULT_KIND)}},
-                "execution_count": cell.get("exec_count"),
-                "source": str(cell.get("code") or ""),
-                "outputs": _ipynb_outputs(cell.get("outputs") or []),
-            })
-        else:
-            cells.append(_data_ipynb(cell))
-        takeaway = str(cell.get("takeaway") or "").strip()
-        if takeaway:
-            cells.append(_md_ipynb(f"{cell['id']}-t", takeaway))
-    return {
-        "nbformat": 4,
-        "nbformat_minor": 5,
-        "metadata": {
-            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-            "language_info": {"name": "python"},
-            "thimble": {k: nb.get(k) for k in ("id", "title", "role", "kind", "parent", "anchor", "chat")},
-        },
-        "cells": cells,
-    }
-
-
-@router.get("/ws/{c}/notebooks/{nb}/ipynb")
-async def export_ipynb(c: str, nb: str) -> Response:
-    """Download the group as a .ipynb file. 404 for a group that does not exist."""
-    doc = load_notebook(c, nb)
-    name = _FILENAME_RE.sub("-", doc.get("title") or nb).strip("-.") or nb
-    return Response(
-        json.dumps(to_ipynb(doc), ensure_ascii=False, indent=1),
-        media_type="application/x-ipynb+json",
-        headers={"Content-Disposition": f'attachment; filename="{name}.ipynb"'},
-    )

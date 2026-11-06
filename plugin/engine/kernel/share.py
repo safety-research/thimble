@@ -2,11 +2,10 @@
 
 The draft is a title, what was wrong and how it was fixed (for a fix that failed, why it could not be done and what
 Claude tried; for a fix Claude still works on, that Claude still works on it and what it does so far), in plain words,
-with the thimble version and the mode. It is Claude's text when the plugin or the browser gives one (`--draft -`, the
-JSON fix-draft.md asks for), else the one given before for this fix, else the fix's own record: the person's words and
-what the fixer said the fix does. The privacy scan (privacy.py, as `thimble fix draft` runs it) takes the names and
-values of the person's folder and machine out of the draft first: out of the person's words and Claude's, while
-thimble's own headings and lines stay as they are.
+with the thimble version and the mode. It is a draft given to share(), else the one given before for this fix, else
+the fix's own record: the person's words and what the fixer said the fix does. The privacy scan (privacy.py) takes the
+names and values of the person's folder and machine out of the draft first: out of the person's words and Claude's,
+while thimble's own headings and lines stay as they are.
 
 The command prints GitHub's new-issue link with the title and the text in it; `--open` opens the link in the person's
 browser too. On GitHub's page the person reads the text, pastes a screenshot if they want and presses Submit. thimble
@@ -143,8 +142,8 @@ def _body(rec: dict[str, Any], d: dict[str, str], hold: Callable[[str], str] = s
 
 
 def _scan(text: str, st: Store | None, own: list[str] | None = None) -> tuple[list[dict[str, Any]], str]:
-    """The privacy scan of the draft, as `thimble fix draft` scans the words: every name from the person's folder goes,
-    even one that thimble's repository has. It reads only the person's words and Claude's: thimble's own text, held in
+    """The privacy scan of the draft's words: every name from the person's folder goes, even one that thimble's
+    repository has. It reads only the person's words and Claude's: thimble's own text, held in
     `own` already (FX._holder), stays as it is, so a folder named like one of thimble's words (fix) takes nothing out
     of it. (hits, the text with them taken out)"""
     base = FX.release().get("base") or "HEAD"
@@ -241,20 +240,13 @@ def lines(r: dict[str, Any]) -> list[str]:
 
 
 def cmd(a) -> int:
-    """thimble file issue ID [--json] [--open] [--draft -]: see cli.py FILE_HELP."""
-    from .cli import out_json, stdin_text  # noqa: PLC0415
+    """thimble file issue ID [--json] [--open]: see cli.py FILE_HELP."""
+    from .cli import out_json  # noqa: PLC0415
 
     try:
-        given = None
-        if a.draft == "-":
-            raw = stdin_text(5.0)
-            try:
-                given = json.loads(raw) if raw.strip() else None
-            except ValueError:
-                raise FX.FixError("--draft - reads one JSON object: {\"title\", \"wrong\", \"fixed\"}")
         root = os.environ.get("THIMBLE_ROOT")
         st = Store(root, session=os.environ.get("THIMBLE_CONVERSATION")) if root else None
-        r = share(a.id, given if isinstance(given, dict) else None, st, open_it=a.open)
+        r = share(a.id, None, st, open_it=a.open)
     except FX.FixError as e:
         print(f"thimble file issue: {e}", file=sys.stderr)
         return 1
@@ -326,8 +318,7 @@ def _where(diff: str, found: str, kind: str) -> list[str]:
 
 
 def _scan_code(diff: str, st: Store | None) -> list[dict[str, Any]]:
-    """The scan of the code as `thimble fix draft` scans a diff: the person's details in the lines the fix adds, and in
-    the names of the files it adds. Each hit with where it is ({kind, found, where: [...]}). Nothing is replaced: a
+    """The scan of the code: the person's details in the lines the fix adds, and in the names of the files it adds. Each hit with where it is ({kind, found, where: [...]}). Nothing is replaced: a
     change to code is no longer the fix the person tested."""
     base = FX.release().get("base") or "HEAD"
     held, _keep = FX._protect({"diff": diff}, FX._repo_paths(base, diff))

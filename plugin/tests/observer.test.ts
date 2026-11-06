@@ -1,15 +1,12 @@
 // The observer's look (observer/observer.ts): after main's turn answers, one fork of the conversation reads the answer
-// with the enabled lenses' sections; a long reply in the middle of a turn is read with the answer; nothing runs while
-// every feature it serves is off; its count of what the session read waits a few seconds at most, and none runs in the
-// home folder; a reply that cannot be read is tried once more, then said on the failure line. All data is made up.
-// `claude plugin test plugin`.
+// with the enabled lenses' sections, the message to read and the session's reads. All data is made up. `claude plugin
+// test plugin`.
 import { expect } from 'claude-code/testing'
 
-import { failLineNow } from '../bar/notice'
 import { registerAnswers, resetAnswers } from '../core/answers'
 import { registerTurn } from '../core/turn'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
-import { PRESET, setOptions } from '../settings/features.mjs'
+import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
 import { test } from './kit'
 
@@ -111,96 +108,3 @@ test("an answer gets one look: a fork of the conversation with the lenses' secti
   const log = JSON.parse(s.files.get('/made-up/.thimble/conversations/s-observer/observer.json')!).log
   expect(log.at(-1)).toMatchObject({ kind: 'look', turn: 1, fork: { lenses: { explain: 'lens-explain', heads: 'lens-heads', claims: 'lens-claims' } } })
 })
-
-test('with every feature it serves off, no look runs; one lens off has no section', async () => {
-  setOptions({ explain: false, details: false, claims: false })
-  const off = setup([READ])
-  await answered(off, { id: 't1', prompt: 'Why?', rows: ['Because.'] })
-  expect(off.forks.length).toBe(0)
-  setOptions({ claims: false })
-  const two = setup([READ])
-  await answered(two, { id: 't1', prompt: 'Why?', rows: ['Because.'] })
-  expect(two.forks[0]).not.toContain('lens-claims')
-  expect(two.forks[0]).toContain('REPLY {"glosses": [], "heads": null}')
-  setOptions({})
-})
-
-test('with Minimal on, the look after each reply reads the answer with the explain and heads lenses, not the claims', async () => {
-  setOptions({ minimal: true, ...PRESET })
-  try {
-    const s = setup([READ])
-    await answered(s, { id: 't1', prompt: 'Why did the build fail?', rows: ['The cache key changed, so every run fetched again.'] })
-    expect(s.forks.length).toBe(1)
-    expect(s.forks[0]).toContain('OBSERVER\nPROMPT lens-explain\n\nPROMPT lens-heads')
-    expect(s.forks[0]).not.toContain('PROMPT lens-claims')
-  } finally {
-    setOptions({})
-  }
-})
-
-test('a reply with a card is one answer: the words above and after the card are read in one look, a progress note before them is not', async () => {
-  setOptions({})
-  const s = setup([READ])
-  // the card the turn draws: its call, and the card it drew (cards/store.ts)
-  await s.$.state.set({ plugin: 'thimble', key: 'cardCall', id: 'tu-card-1' }, { id: 'c0a1b2c3d4' })
-  await s.$.state.set({ plugin: 'thimble', key: 'card', id: 'c0a1b2c3d4' }, { id: 'c0a1b2c3d4', version: 1, title: 'Builds by day', toolUseId: 'tu-card-1', turn: 't1', agentId: null, anchorRow: null, keys: [], read: '9 rows', columns: [], file: 'days.json', gen: 1, error: null, calls: { 'tu-card-1': { version: 1 } }, at: 1 })
-  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
-  await s.call('prompt.submit', { text: 'What happened in these logs?', origin: { kind: 'composer' } })
-  await s.call('turn.start', { text: 'What happened in these logs?', turnId: 't1' })
-  const rows = ['Reading the logs now.', 'These are the logs of a build farm: most nightly builds failed after one config change.', 'The card shows the failures start on the day of the change.']
-  for (const [k, text] of rows.entries()) {
-    if (k) await s.step('t1', k)
-    if (k === 2) await s.call('tool.call', { tool: 'mcp__thimble__card', tool_use_id: 'tu-card-1' }, async () => ({ result: 'drawn' }))
-    await s.call('session.append', { door: 'response', message: { type: 'assistant', content: [{ type: 'text', text }] } }, async () => ({ uuid: `t1-row-${k}` }))
-  }
-  await s.call('turn.complete', { turnId: 't1', reason: 'answer', answer: rows[2] }, async () => ({ text: '' }))
-  await settle()
-  await drainNow(s.$)
-  await settle()
-  for (let i = 0; i < 100 && !s.forks.length; i++) await settle()
-  expect(s.forks.length).toBe(1)
-  expect(s.forks[0]).toContain('These are the logs of a build farm')
-  expect(s.forks[0]).toContain('The card shows the failures start')
-  expect(s.forks[0]).not.toContain('Reading the logs now.')
-})
-
-test('in a session started in the home folder a look runs no `thimble coverage`, and its prompt says no folder is counted', async () => {
-  setOptions({})
-  const s = setup([READ])
-  const env: Record<string, string> = { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp', HOME: '/made-up/home', THIMBLE_START: '/made-up/home' }
-  s.$.env.get = async (k: string) => env[k]
-  await answered(s, { id: 't1', prompt: 'What is in these folders?', rows: ['Notes, photos and a few projects.'] })
-  expect(s.forks.length).toBe(1)
-  expect(s.ran.some(a => a.includes('coverage'))).toBe(false)
-  expect(s.forks[0]).toMatch(/READ .*home folder/)
-})
-
-test('a count of what the session read that runs past a few seconds is stopped, and the look goes on without it', async () => {
-  setOptions({})
-  const s = setup([READ])
-  const limits: number[] = []
-  const run = s.$.process.run
-  s.$.process.run = async (argv: string[], o: Any) => {
-    if (!argv.includes('coverage')) return run(argv, o)
-    limits.push(Number(o?.timeoutMs))
-    // Claude Code stops a run at its time limit, and says so
-    throw new Error(`thimble: $.process.run(${argv[0]}) aborted: still running after ${o?.timeoutMs} ms`)
-  }
-  await answered(s, { id: 't1', prompt: 'How many runs failed?', rows: ['Two runs failed, both on the p95 check.'] })
-  expect(limits.length).toBe(1)
-  expect(limits[0]).toBeLessThanOrEqual(10000)
-  expect(s.forks.length).toBe(1)
-  expect(s.forks[0]).toContain('READ ')
-  expect(s.forks[0]).not.toContain('Claude read 3 of 7 files.')
-})
-
-test("a reply that cannot be read is tried once more, then the failure line says what is missing and why", async () => {
-  setOptions({ claimsMode: 'auto' })
-  const s = setup([{ isAnswered: true, text: 'no json here' }, { isAnswered: true, text: 'still none' }])
-  await answered(s, { id: 't1', prompt: 'Why?', rows: ['Because.'] })
-  await new Promise(r => setTimeout(r, 20))
-  await settle()
-  expect(s.forks.length).toBe(2)
-  expect((await failLineNow(s.$))?.text).toBe("thimble could not add explainers, details, claims to Claude's last answer: its reply could not be read.")
-})
-

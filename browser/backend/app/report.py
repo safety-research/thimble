@@ -21,7 +21,6 @@ from .schemas import TAGS
 log = logging.getLogger("thimble.report")
 
 DOC_ID = "report"
-ROLES = ("data", "takeaways", "finding", "uncertainty", "unused", "caveats")
 TITLE_MAX_WORDS = 25
 FIXED: dict[str, str] = {
     "data": "What this data is and what we analyzed",
@@ -36,10 +35,6 @@ QUIET_PREFIX = "No source found"
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
-def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
 
 
 def _collapse(v: Any) -> str:
@@ -306,7 +301,6 @@ def _put_text(node: dict[str, Any], key: str, new: str, *, undo: bool = False, v
 # --------------------------------------------------------------------------- comments across generations
 
 CHECK_AUTHOR = "check"  # a report check's comment (checks.py), which names its check as `check`
-LEGACY_AUTHOR = "verifier"  # a verify agent's comment, read as its built-in check's (report_types.read_doc)
 RESOLUTION_SUPERSEDED = "superseded"
 SETTLED_STATUS = "dismissed"
 RESOLUTION_FIELDS = ("resolution", "superseded_by", "superseded_generation")

@@ -1,6 +1,6 @@
-"""A written document exported as a file: Markdown, HTML or PDF, and the formats a report type's export.py adds.
+"""A written document exported as a file: Markdown, HTML or PDF.
 
-Every format starts from one reading of the document (read_model): its title, lead, units (a report's sections), their
+Every format starts from one reading of the document (read_model): its title, units (a report's sections), their
 figures and the citations, numbered in order of first use;
 a card a sentence names as a noun is written as the card's title (report_types.card_nouns).
 Markdown writes the citations as footnotes; HTML is one self-contained file (fonts, pictures and styles inlined) with
@@ -9,36 +9,23 @@ the citations as numbered notes linked from the text; PDF is that HTML printed b
 The browser: the one thimble's config names (userconf.browser): the system's Chrome, Edge or Chromium, else Playwright's
 own Chromium when it is installed. Pictures of cards come from the card harness (render.py); without a browser a card is
 its title, its table or its text, and PDF is offered disabled with the reason.
-
-A report type an extension adds may ship export.py in its folder:
-
-    FORMATS = [{"id": "csv", "name": "CSV", "ext": "csv"}]   # adds to the four; an id among them replaces that one
-    def export(doc, fmt, ctx): ...                          # -> {"markdown"|"html"|"bytes": ..., "mime"?: ...}
-
-The server reads FORMATS without running the file. export() runs in the workspace's `exports` kernel, under the same
-wrap as cards; `ctx` has markdown(), html(), cite(ref) and figure(card). A returned html is printed when the format's
-ext is pdf, so a hook never drives the browser.
 """
 from __future__ import annotations
 
-import ast
 import asyncio
 import base64
 import contextlib
 import html as _html
-import json
 import logging
 import os
 import re
-import secrets
 from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from . import config, frames, headless, investigation, nofollow, refs, userconf
-from .ledger import atomic_write_text, unlinked
+from . import config, frames, headless, investigation, refs, userconf
 from .report import _collapse, plain_text
 
 log = logging.getLogger("thimble.exports")
@@ -49,16 +36,9 @@ FORMAT_INFO = {
     "html": {"name": "HTML", "ext": "html", "mime": "text/html; charset=utf-8"},
     "pdf": {"name": "PDF", "ext": "pdf", "mime": "application/pdf"},
 }
-MIME_BY_EXT = {"md": "text/markdown; charset=utf-8", "html": "text/html; charset=utf-8", "pdf": "application/pdf",
-               "mp4": "video/mp4", "webm": "video/webm", "csv": "text/csv; charset=utf-8", "json": "application/json",
-               "txt": "text/plain; charset=utf-8"}
 QUOTE_CHARS = 240  # of a cited record, in its note
 TEXT_CHARS = 1200  # of a card's text when it is shown without a picture
 TABLE_ROWS = 30
-KERNEL = "exports"
-EXPORT_PY = "export.py"
-HOOK_TIMEOUT_S = 120.0
-SENTINEL = "\x1ethimble-export:"
 _INLINE_RE = re.compile(r"\*\*(.+?)\*\*|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])|`([^`]+)`|\[([^\]]+)\]\((https?://[^)\s]+)\)")
 
 
@@ -139,38 +119,28 @@ def _figure(f: Any, notes: Notes) -> dict[str, Any] | None:
     from .report_types import card_nouns  # noqa: PLC0415
 
     raw_caption = str(f.get("caption") or "")
-    return {"card": cid, "caption": plain_text(card_nouns(raw_caption, notes.cites)), "role": f.get("role"),
+    return {"card": cid, "caption": plain_text(card_nouns(raw_caption, notes.cites)),
             "after": f.get("after_paragraph"), "notes": notes.of([f"card:{cid}", *refs.extract_refs(raw_caption)])}
 
 
-def read_model(c: str, doc: dict[str, Any], renderer: str) -> dict[str, Any]:
+def read_model(c: str, doc: dict[str, Any]) -> dict[str, Any]:
     """The document as every format reads it (module note)."""
     from . import report_types  # noqa: PLC0415
 
     notes = Notes(c)
     title = _collapse(doc.get("title")) or _collapse(doc.get("type")) or "Report"
-    lead = [_sentence(doc["answer"], notes)] if isinstance(doc.get("answer"), dict) else []
     claims = [_sentence(x, notes) for x in doc.get("claims") or [] if isinstance(x, dict)] if doc.get("html") else []
     units: list[dict[str, Any]] = []
-    lines: list[dict[str, Any]] = []
     for u in report_types.units(doc):
-        if isinstance(u.get("paragraphs"), list):
-            paras = [{"id": p.get("id"), "kind": p.get("kind") or "", "speaker": _collapse(p.get("speaker")),
-                      "sentences": [_sentence(x, notes) for x in p.get("sentences") or [] if isinstance(x, dict)]}
-                     for p in u["paragraphs"] if isinstance(p, dict)]
-        else:
-            paras = [{"id": None, "kind": "", "speaker": "",
-                      "sentences": [_sentence(x, notes) for x in report_types.unit_sentences(u)]}]
-        figs_raw = list(u.get("figures") or []) + ([u["figure"]] if isinstance(u.get("figure"), dict) else [])
-        figs = [f for f in (_figure(x, notes) for x in figs_raw) if f]
+        paras = [{"id": p.get("id"), "sentences": [_sentence(x, notes) for x in p.get("sentences") or [] if isinstance(x, dict)]}
+                 for p in u.get("paragraphs") or [] if isinstance(p, dict)]
+        figs = [f for f in (_figure(x, notes) for x in u.get("figures") or []) if f]
         units.append({"heading": _collapse(u.get("heading")), "level": report_types._level(u.get("level")),
-                      "tldr": report_types._is_tldr(u.get("heading")), "layout": u.get("layout") or "",
-                      "side": u.get("card") or "", "paragraphs": [p for p in paras if p["sentences"] or p["kind"] == "divider"],
-                      "figures": figs, "speaker_notes": plain_text(u["notes"]) if isinstance(u.get("notes"), str) else ""})
-    if renderer not in ("slides", "story"):
-        units.sort(key=lambda u: 0 if u["tldr"] else 1)
-    return {"title": title, "renderer": renderer, "lead": lead, "claims": claims, "units": units, "lines": lines,
-            "notes": notes.rows, "page_html": doc.get("html") if isinstance(doc.get("html"), str) else None}
+                      "tldr": report_types._is_tldr(u.get("heading")), "paragraphs": [p for p in paras if p["sentences"]],
+                      "figures": figs})
+    units.sort(key=lambda u: 0 if u["tldr"] else 1)
+    return {"title": title, "claims": claims, "units": units, "notes": notes.rows,
+            "page_html": doc.get("html") if isinstance(doc.get("html"), str) else None}
 
 
 # --------------------------------------------------------------------------- Markdown
@@ -183,38 +153,22 @@ def _md_sentence(s: dict[str, Any]) -> str:
 def to_markdown(m: dict[str, Any]) -> str:
     """The document as Markdown, each citation a footnote naming what it cites and quoting it."""
     out = [f"# {m['title']}", ""]
-    if m["lead"]:
-        out += [" ".join(_md_sentence(s) for s in m["lead"]), ""]
     for s in m["claims"]:
         out.append(f"- {_md_sentence(s)}")
     if m["claims"]:
         out.append("")
-    for k, u in enumerate(m["units"], 1):
-        if m["renderer"] == "slides":
-            out += [f"## {u['heading'] or f'Slide {k}'}", ""]
-        elif u["heading"]:
+    for u in m["units"]:
+        if u["heading"]:
             out += [f"{'#' * max(2, u['level'])} {u['heading']}", ""]
         for p in u["paragraphs"]:
-            if p["kind"] == "divider":
-                out += ["---", ""]
-                continue
             bullets = [s for s in p["sentences"] if s["bullet"]]
             if bullets and len(bullets) == len(p["sentences"]):
                 out += [f"- {_md_sentence(s)}" for s in bullets] + [""]
                 continue
-            text = " ".join(_md_sentence(s) for s in p["sentences"])
-            if p["kind"] == "quote":
-                text = "> " + text + (f"\n>\n> — {p['speaker']}" if p["speaker"] else "")
-            elif p["kind"] == "headline":
-                text = f"**{text}**"
-            elif p["kind"] == "callout":
-                text = "> " + text
-            out += [text, ""]
+            out += [" ".join(_md_sentence(s) for s in p["sentences"]), ""]
         for f in u["figures"]:
             if f["caption"]:
                 out += [f"*Figure: {f['caption']}*" + "".join(f"[^{n}]" for n in f["notes"]), ""]
-        if u["speaker_notes"]:
-            out += [f"*Notes: {u['speaker_notes']}*", ""]
     if m["notes"]:
         out += ["---", ""]
         for r in m["notes"]:
@@ -226,12 +180,6 @@ def to_markdown(m: dict[str, Any]) -> str:
 def _note_text(r: dict[str, Any]) -> str:
     what = r["label"] + (f" “{r['title']}”" if r["title"] else "")
     return what + (f": “{r['quote']}”" if r["quote"] else "")
-
-
-def _clock(t: float) -> str:
-    t = max(0.0, float(t or 0))
-    s = int(t)
-    return f"{s // 60}:{s % 60:02d}"
 
 
 # --------------------------------------------------------------------------- HTML
@@ -282,12 +230,6 @@ code{font-family:var(--font-mono);font-size:.88em;background:rgba(var(--ink-rgb)
 sup.cite{font-size:.68em;line-height:0;margin-left:1px;color:var(--ink-500)}
 sup.cite a{text-decoration:none;color:var(--ink-500);font-weight:500}
 sup.cite a:hover{color:var(--ink-900)}
-.lead{font-size:18px;color:var(--ink-900)}
-blockquote{margin:0 0 14px;padding:2px 0 2px 16px;border-left:2px solid var(--ink-300);color:var(--ink-700)}
-blockquote .who{display:block;margin-top:4px;font-size:14px;color:var(--ink-500)}
-.headline{font-size:22px;line-height:1.3;font-weight:600}
-.callout{background:var(--paper-1);border-radius:10px;padding:12px 16px}
-hr{border:0;border-top:1px solid rgba(var(--ink-rgb),.14);margin:24px 0}
 figure{margin:20px 0 24px;break-inside:avoid}
 figure img{display:block;max-width:100%;height:auto;border-radius:10px}
 figcaption{font-size:14px;color:var(--ink-500);margin-top:8px}
@@ -305,38 +247,6 @@ figcaption{font-size:14px;color:var(--ink-500);margin-top:8px}
 .notes q{color:var(--ink-500)}
 .meta{font-size:13px;color:var(--ink-500);margin:-12px 0 28px}
 @media print{html,body{background:#fff}main{padding:0 0 24px}a{text-decoration:none}}
-"""
-
-STORY_CSS = """
-main{max-width:1040px}
-section.story{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px;align-items:start;margin:0 0 56px}
-section.story.side-left .copy{order:2}
-section.story.side-full,section.story.side-none,section.story.plain{grid-template-columns:minmax(0,1fr)}
-section.story h2{margin-top:0}
-section.story figure{margin-top:4px}
-@media (max-width:760px){section.story{grid-template-columns:minmax(0,1fr)}}
-@media print{@page{size:A4 landscape;margin:14mm}section.story{break-before:page;margin:0}section.story:first-of-type{break-before:auto}}
-"""
-
-SLIDES_CSS = """
-main{max-width:1000px;padding-top:32px}
-.slide{position:relative;width:100%;aspect-ratio:16/9;background:var(--white);border-radius:12px;margin:0 0 28px;
-padding:44px 56px;display:flex;flex-direction:column;gap:14px;overflow:hidden;box-shadow:0 0 0 1px rgba(var(--ink-rgb),.08)}
-.slide h2{font-size:30px;margin:0}
-.slide.layout-title{justify-content:center}
-.slide.layout-title h2{font-size:40px}
-.slide .body{display:flex;gap:28px;flex:1;min-height:0}
-.slide .copy{flex:1;min-width:0;font-size:19px}
-.slide .figs{flex:1;min-width:0;display:grid;gap:12px;align-content:start}
-.slide .figs figure{margin:0}
-.slide .figs img{max-height:360px;width:auto;max-width:100%;object-fit:contain}
-.slide .num{position:absolute;right:20px;bottom:14px;font-size:12px;color:var(--ink-500)}
-.speaker{font-size:13px;color:var(--ink-500);margin:-16px 4px 28px}
-.slide .figs{overflow:hidden}.slide .figs figcaption{font-size:12px;margin-top:4px}
-.deck-title{font-size:15px;color:var(--ink-500);margin:0 0 16px}
-@media print{@page{size:13.333in 7.5in;margin:0}html,body{background:var(--white)}main{max-width:none;padding:0}
-.deck-title{display:none}.slide{width:13.333in;height:7.5in;aspect-ratio:auto;border-radius:0;box-shadow:none;margin:0;
-break-after:page;padding:.6in .8in}.slide .figs img{max-height:4.2in}.speaker{display:none}.notes{break-before:page;padding:.6in .8in;margin:0;border:0}}
 """
 
 
@@ -373,17 +283,10 @@ def _sentence_html(s: dict[str, Any]) -> str:
 
 
 def _para_html(p: dict[str, Any]) -> str:
-    if p["kind"] == "divider":
-        return "<hr>"
     bullets = [s for s in p["sentences"] if s["bullet"]]
     if bullets and len(bullets) == len(p["sentences"]):
         return "<ul>" + "".join(f"<li>{_sentence_html(s)}</li>" for s in bullets) + "</ul>"
-    text = " ".join(_sentence_html(s) for s in p["sentences"])
-    if p["kind"] == "quote":
-        return f"<blockquote>{text}" + (f'<span class="who">— {_esc(p["speaker"])}</span>' if p["speaker"] else "") + "</blockquote>"
-    if p["kind"] in ("headline", "callout"):
-        return f'<p class="{p["kind"]}">{text}</p>'
-    return f"<p>{text}</p>"
+    return f"<p>{' '.join(_sentence_html(s) for s in p['sentences'])}</p>"
 
 
 def _figure_html(f: dict[str, Any], pics: dict[str, dict[str, Any]]) -> str:
@@ -435,42 +338,16 @@ def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | 
     faces = font_faces() if faces is None else faces
     if m["page_html"] is not None:
         return _page_html(m, faces)
-    css, parts = BASE_CSS, []
-    lead = f'<p class="lead">{" ".join(_sentence_html(s) for s in m["lead"])}</p>' if m["lead"] else ""
-    if m["renderer"] == "slides":
-        css += SLIDES_CSS
-        parts.append(f'<p class="deck-title">{_esc(m["title"])}</p>')
-        for k, u in enumerate(m["units"], 1):
-            layout = u["layout"] or ("title" if k == 1 and not u["figures"] else "text")
-            copy = "".join(_para_html(p) for p in u["paragraphs"])
-            figs = "".join(_figure_html(f, pics) for f in u["figures"])
-            head = f"<h2>{inline_html(u['heading'])}</h2>" if u["heading"] else ""
-            body = f'<div class="body"><div class="copy">{copy}</div>' + (f'<div class="figs">{figs}</div>' if figs else "") + "</div>"
-            speaker = f'<p class="speaker">{inline_html(u["speaker_notes"])}</p>' if u["speaker_notes"] else ""
-            parts.append(f'<section class="slide layout-{_esc(layout)}">{head}{body}<span class="num">{k}</span></section>{speaker}')
-    elif m["renderer"] == "story":
-        css += STORY_CSS
-        parts.append(f"<h1>{inline_html(m['title'])}</h1>{lead}")
-        for u in m["units"]:
-            side = u["side"] if u["side"] in ("left", "right", "full", "none") else "right"
-            main_figs = [f for f in u["figures"] if f.get("role") in ("main", None)][:1] if side != "none" else []
-            rest = {**u, "figures": [f for f in u["figures"] if f not in main_figs]}
-            head = f"<h2>{inline_html(u['heading'])}</h2>" if u["heading"] else ""
-            aside = "".join(_figure_html(f, pics) for f in main_figs)
-            cls = f"side-{side}" if aside else "plain"
-            parts.append(f'<section class="story {cls}"><div class="copy">{head}{_unit_body(rest, pics)}</div>'
-                         + (f"<div>{aside}</div>" if aside else "") + "</section>")
-    else:
-        parts.append(f"<h1>{inline_html(m['title'])}</h1>{lead}")
-        if m["claims"]:
-            parts.append("<ul>" + "".join(f"<li>{_sentence_html(s)}</li>" for s in m["claims"]) + "</ul>")
-        for u in m["units"]:
-            if u["heading"]:
-                lvl = min(4, max(2, u["level"]))
-                parts.append(f"<h{lvl}>{inline_html(u['heading'])}</h{lvl}>")
-            parts.append(_unit_body(u, pics))
+    parts = [f"<h1>{inline_html(m['title'])}</h1>"]
+    if m["claims"]:
+        parts.append("<ul>" + "".join(f"<li>{_sentence_html(s)}</li>" for s in m["claims"]) + "</ul>")
+    for u in m["units"]:
+        if u["heading"]:
+            lvl = min(4, max(2, u["level"]))
+            parts.append(f"<h{lvl}>{inline_html(u['heading'])}</h{lvl}>")
+        parts.append(_unit_body(u, pics))
     parts.append(_notes_html(m))
-    return _document(m["title"], faces, css, "<main>" + "".join(parts) + "</main>")
+    return _document(m["title"], faces, BASE_CSS, "<main>" + "".join(parts) + "</main>")
 
 
 def _document(title: str, faces: str, css: str, body: str) -> str:
@@ -590,149 +467,30 @@ async def fonts_loaded(page: Any) -> bool:
         " return document.fonts.check('16px \"Hanken Grotesk\"') }"))
 
 
-async def print_pdf(html_text: str, renderer: str = "document") -> bytes:
-    """The HTML printed by the browser: A4 for a report, the story's landscape pages, a 16:9 page per slide."""
+async def print_pdf(html_text: str) -> bytes:
+    """The HTML printed by the browser, on A4 pages."""
     async with browser_page(1280, 900) as page:
         await page.set_content(html_text, wait_until="load")
         if not await fonts_loaded(page):
             log.warning("pdf export: Hanken Grotesk did not load; the fallback face is printed")
         await page.emulate_media(media="print")
-        opts: dict[str, Any] = {"print_background": True, "prefer_css_page_size": True}
-        if renderer not in ("slides", "story"):
-            opts.update(format="A4", margin={"top": "18mm", "bottom": "18mm", "left": "16mm", "right": "16mm"})
-        return await page.pdf(**opts)
+        return await page.pdf(print_background=True, prefer_css_page_size=True, format="A4",
+                              margin={"top": "18mm", "bottom": "18mm", "left": "16mm", "right": "16mm"})
 
 
 # --------------------------------------------------------------------------- formats
 
 
-def _extension_types(c: str) -> list[dict[str, Any]]:
-    from . import extensions  # noqa: PLC0415
-
-    try:
-        return extensions.report_types(c)
-    except Exception:  # noqa: BLE001 — a broken extension leaves the built-in formats
-        log.warning("exports: the extensions' report types could not be read", exc_info=True)
-        return []
-
-
-def hook_of(c: str, slug: str, *, source: bool = False) -> Path | None:
-    """The export.py of the extension report type document `slug` was made from, if it ships one: the workspace's copy,
-    which the exports kernel runs, or with `source` the file in the extension's folder in thimble's home, whose FORMATS
-    the server reads. None for thimble's own types, which keep their exports."""
-    from . import report_types  # noqa: PLC0415
-
-    if slug in report_types.BUILTIN_SLUGS:
-        return None
-    made_from = (report_types.read_type(c, slug) or {}).get("preset") or slug
-    for t in _extension_types(c):
-        if t.get("id") == made_from and t.get("export"):
-            p = Path(str(t["export_src" if source else "export"]))
-            return p if p.is_file() and not p.is_symlink() else None
-    return None
-
-
-def hook_formats(path: Path) -> list[dict[str, str]]:
-    """FORMATS of an export.py as literal values, read without running the file; [] when it has none or it is not a
-    literal list of {id, name, ext}."""
-    try:
-        tree = ast.parse(path.read_text("utf-8"))
-    except (OSError, SyntaxError, ValueError):
-        return []
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "FORMATS" for t in node.targets):
-            try:
-                val = ast.literal_eval(node.value)
-            except ValueError:
-                return []
-            out = []
-            for f in val if isinstance(val, list) else []:
-                if isinstance(f, dict) and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,30}", str(f.get("id") or "")):
-                    ext = re.sub(r"[^a-z0-9]", "", str(f.get("ext") or f["id"]).lower())[:8] or "txt"
-                    out.append({"id": str(f["id"]), "name": str(f.get("name") or f["id"])[:40], "ext": ext})
-            return out
-    return []
-
-
-def formats(c: str, slug: str, renderer: str) -> list[dict[str, Any]]:
-    """The formats the document offers, each {id, name, ext, ok, why?, hook?}: Markdown, HTML and PDF, a report type's
-    own added or in place of one, the ones the browser is missing for marked not ok."""
+def formats() -> list[dict[str, Any]]:
+    """The formats a document offers, each {id, name, ext, ok, why?}: Markdown, HTML and PDF, the ones the browser is
+    missing for marked not ok."""
     kind, why_off = browser()
     out: dict[str, dict[str, Any]] = {i: {"id": i, "name": FORMAT_INFO[i]["name"], "ext": FORMAT_INFO[i]["ext"], "ok": True}
                                       for i in ("markdown", "html", "pdf")}
-    hook = hook_of(c, slug, source=True)
-    for f in hook_formats(hook) if hook else []:
-        out[f["id"]] = {**f, "ok": True, "hook": True}
     for f in out.values():
         if f["ext"] == "pdf" and kind == "off":
             f.update(ok=False, why=f"Needs a browser: {why_off}")
     return list(out.values())
-
-
-# --------------------------------------------------------------------------- the hook
-
-
-def _scratch(c: str) -> Path:
-    """The workspace's folder for export files, outside the kernels' scratch mirror, where a corpus entry named
-    `exports` is a link; RuntimeError when a folder on its way is a symlink (ledger.unlinked)."""
-    d = config.workspace_dir(c) / "tmp" / "exports"
-    try:
-        unlinked(config.workspace_dir(c), d / "x")
-    except ValueError as e:
-        raise RuntimeError(f"the export folder cannot be written: {e}") from None
-    nofollow.makedirs(d)
-    return d
-
-
-async def run_hook(c: str, path: Path, doc: dict[str, Any], fmt: str, ctx: dict[str, Any]) -> dict[str, Any]:
-    """export() of `path` on the workspace's exports kernel with the document, the format and the context's values;
-    RuntimeError with the hook's error."""
-    from . import notebook  # noqa: PLC0415
-
-    tmp = _scratch(c)
-    tag = secrets.token_hex(6)
-    req, res = tmp / f"{tag}.in.json", tmp / f"{tag}.out.json"
-    atomic_write_text(req, json.dumps({"doc": doc, "fmt": fmt, "ctx": ctx}, ensure_ascii=False, default=str))
-    code = HOOK_SRC.format(req=str(req), res=str(res), path=str(path), sentinel=SENTINEL)
-    try:
-        outputs, _n, status = await notebook.execute_on(c, KERNEL, code, timeout_s=HOOK_TIMEOUT_S)
-        text = "".join(b.get("text/plain", "") for b in outputs if b.get("_stream") == "stdout")
-        if status != "ok" or SENTINEL not in text:
-            err = next((f"{e.get('ename', 'Error')}: {e.get('evalue', '')}" for b in outputs
-                        if isinstance(e := b.get("application/vnd.thimble.error+json"), dict)), "")
-            raise RuntimeError(err or "the export hook printed no result")
-        try:  # the kernel writes it in the workspace: read as nofollow reads it, never through a link
-            return json.loads(nofollow.read_text(res))
-        except nofollow.Linked:
-            raise RuntimeError("the export hook's result is a symlink") from None
-    finally:
-        for p in (req, res):
-            with contextlib.suppress(OSError):
-                nofollow.unlink(p)
-
-
-HOOK_SRC = """
-import base64 as _b64, json as _json, runpy as _runpy
-def _thimble_export():
-    req = _json.load(open({req!r}, encoding='utf-8'))
-    ctx = req['ctx']
-    class Ctx:
-        def markdown(self): return ctx['markdown']
-        def html(self): return ctx['html']
-        def cite(self, ref): return ctx['cites'].get(ref) or {{'label': ref, 'quote': ''}}
-        def figure(self, card): return ctx['figures'].get(str(card).removeprefix('card:'), '')
-    mod = _runpy.run_path({path!r}, run_name='thimble_export')
-    got = mod['export'](req['doc'], req['fmt'], Ctx())
-    if not isinstance(got, dict):
-        raise TypeError('export() must return a dict')
-    if isinstance(got.get('bytes'), (bytes, bytearray)):
-        got = dict(got, bytes=_b64.b64encode(got['bytes']).decode('ascii'), b64=True)
-    with open({res!r}, 'w', encoding='utf-8') as f:
-        _json.dump(got, f)
-    print({sentinel!r} + 'ok')
-_thimble_export()
-del _thimble_export
-"""
 
 
 # --------------------------------------------------------------------------- export
@@ -751,63 +509,26 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
     if doc is None:
         raise HTTPException(404, f"no {slug} yet")
-    t = report_types.read_type(c, slug) or {}
-    renderer = str(doc.get("renderer") or t.get("renderer") or "document")
-    offered = {f["id"]: f for f in await asyncio.to_thread(formats, c, slug, renderer)}
+    offered = {f["id"]: f for f in await asyncio.to_thread(formats)}
     f = offered.get(fmt)
     if f is None:
         raise HTTPException(404, f"{slug} has no export format {fmt!r}")
     if not f["ok"]:
         raise HTTPException(409, f["why"])
-    m = await asyncio.to_thread(read_model, c, doc, renderer)
+    m = await asyncio.to_thread(read_model, c, doc)
     name = lambda ext: _filename(m["title"], slug, ext)  # noqa: E731
-    if fmt == "markdown" and not f.get("hook"):
+    if fmt == "markdown":
         return to_markdown(m).encode("utf-8"), name("md"), FORMAT_INFO["markdown"]["mime"]
     kind, _why = browser()
     cards = [x["card"] for u in m["units"] for x in u["figures"]]
     pics, _ = await card_pictures(c, cards, draw=kind != "off")
-    if f.get("hook"):
-        return await _hooked(c, slug, doc, f, m, pics)
     html_text = await asyncio.to_thread(to_html, m, pics)
     if fmt == "html":
         return html_text.encode("utf-8"), name("html"), FORMAT_INFO["html"]["mime"]
     try:
-        return await print_pdf(html_text, renderer), name("pdf"), FORMAT_INFO["pdf"]["mime"]
+        return await print_pdf(html_text), name("pdf"), FORMAT_INFO["pdf"]["mime"]
     except RuntimeError as e:
         raise HTTPException(409, f"PDF needs a browser: {e}") from e
-
-
-async def _hooked(c: str, slug: str, doc: dict[str, Any], f: dict[str, Any], m: dict[str, Any],
-                  pics: dict[str, dict[str, Any]]) -> tuple[bytes, str, str]:
-    hook = hook_of(c, slug)
-    if hook is None:
-        raise HTTPException(404, f"{slug}'s export.py is gone")
-    faces = font_faces()
-    ctx = {"markdown": to_markdown(m), "html": to_html(m, pics, faces=faces),
-           "cites": {r["ref"]: {"label": r["label"], "quote": r["quote"], "n": r["n"]} for r in m["notes"]},
-           "figures": {cid: card_html(p) for cid, p in pics.items()}}
-    try:
-        got = await run_hook(c, hook, doc, f["id"], ctx)
-    except RuntimeError as e:
-        raise HTTPException(500, f"{slug}'s export.py failed: {e}") from e
-    ext = f["ext"]
-    name = _filename(m["title"], slug, ext)
-    mime = str(got.get("mime") or MIME_BY_EXT.get(ext, "application/octet-stream"))
-    if isinstance(got.get("html"), str):
-        if not re.search(r"<html[\s>]", got["html"], re.I):  # a fragment takes thimble's page, faces and styles
-            got["html"] = _document(m["title"], faces, BASE_CSS, f"<main>{got['html']}</main>")
-        if ext == "pdf":
-            try:
-                return await print_pdf(got["html"]), name, MIME_BY_EXT["pdf"]
-            except RuntimeError as e:
-                raise HTTPException(409, f"PDF needs a browser: {e}") from e
-        return got["html"].encode("utf-8"), name, mime if got.get("mime") else MIME_BY_EXT["html"]
-    if isinstance(got.get("markdown"), str):
-        return got["markdown"].encode("utf-8"), name, mime if got.get("mime") else MIME_BY_EXT["md"]
-    if isinstance(got.get("bytes"), str):
-        data = base64.b64decode(got["bytes"]) if got.get("b64") else got["bytes"].encode("utf-8")
-        return data, name, mime
-    raise HTTPException(500, f"{slug}'s export.py returned none of markdown, html or bytes")
 
 
 # --------------------------------------------------------------------------- routes
@@ -828,9 +549,7 @@ async def formats_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
 
     slug = _slug(c, inv_id, slug)
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
-    t = report_types.read_type(c, slug) or {}
-    renderer = str((doc or {}).get("renderer") or t.get("renderer") or "document")
-    return {"formats": await asyncio.to_thread(formats, c, slug, renderer) if doc else []}
+    return {"formats": await asyncio.to_thread(formats) if doc else []}
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}")

@@ -17,7 +17,6 @@
 //   seen/<conversation>.jsonl       what Claude's calls touched, for coverage (hooks/watch.ts)
 //   cache/<folder>/                 a folder's row counts, and what coverage reads of the labels: speed only
 //                                   (engine/kernel/store.py)
-//   folders/<folder>/labels/        the labels of thimble 0.10 and before, one set per folder: kept, never shown
 //   run/                            the card runner's socket (cards/ask.ts)
 //   tmp/                            the temp folder of a session that has no TMPDIR (core/home.ts tempDir)
 //

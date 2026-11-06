@@ -1,6 +1,6 @@
 """Whether the headless Chromium thimble drives can start: the card harness's (render.py, the backend's Playwright) and
-the pages' (a view's checks and review, the screenshot tool and a video's frames: scripts/view_shot.mjs and
-scripts/ui_shot.mjs, the frontend's Playwright). Which browser that is, the system's Chrome, Edge or Chromium or
+the pages' (a view's checks and review, and the screenshot tool: scripts/view_shot.mjs and scripts/ui_shot.mjs, the
+frontend's Playwright). Which browser that is, the system's Chrome, Edge or Chromium or
 Playwright's own, is thimble's config's `browser` (launch).
 
 A launch that fails because the browser or its system libraries are missing stays failed for the rest of the server

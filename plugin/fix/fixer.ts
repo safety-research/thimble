@@ -462,8 +462,3 @@ export async function recoverFixers($: Engine, working: Fix[]): Promise<void> {
     await fixerEnded($, { agentId: ids[0] ?? '', answer: '' }, f.id)
   }
 }
-
-/** The fixer could not be told apart (a reload lost it) or failed to start: the line says so. */
-export function fixerProblem($: Engine, text: string): void {
-  failNotice($, text)
-}

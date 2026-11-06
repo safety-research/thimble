@@ -89,7 +89,7 @@ import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
+import { squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
 import {
   aboutOf, around, back, base, canRepair, cardLabel, checkStatus, cutTitle, cutWords, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence,

@@ -21,7 +21,7 @@ Number formats match d3-format in the browser (lib/dataFrame.ts): whole numbers 
 decimals that give the largest absolute value three significant digits, trailing zeros dropped (`,.2~f`), with
 JavaScript's rounding and d3's minus sign.
 
-Only the standard library, since tools.py imports this module and the MCP shim imports tools.
+Only the standard library, since tools.py imports this module.
 """
 from __future__ import annotations
 
@@ -404,17 +404,3 @@ def frame_html(b: Any, around: str | None = None, window: int = 8) -> str:
     body = "".join(f"<tr><th>{esc(n)}</th>" + "".join(f"<td>{esc(v)}</td>" for v in r) + "</tr>"
                    for n, r in zip(names, cells))
     return f"<table><thead>{head}</thead><tbody>{body}</tbody></table>"
-
-
-def locate(b: Any, col: str, row: str) -> str | None:
-    """The value a ref's column and row name in a frame bundle, as the card shows it; None when the frame has no such
-    column or row, or the bundle holds no frame."""
-    f = frame_of(b)
-    if f is None:
-        return None
-    labels = row_labels(f)
-    lab = f.get("label")
-    if row not in labels or (col not in (f.get("view") or {}).get("columns", []) and col != lab):
-        return None
-    i = labels.index(row)
-    return show(f["rows"][i][f["columns"].index(col)], ((f.get("view") or {}).get("formats") or {}).get(col))

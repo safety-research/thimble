@@ -3,7 +3,7 @@
 // last FOLLOW_QUIET_MS, or the focus in a field outside the chat (the report's editor, a label's form). The chat's own
 // composer does not count: it keeps the focus after a message is sent, and the panes beside it can change without
 // touching what is typed there. A card the person made, and the history the stream replays on load, are never followed;
-// nor is a card a chat working in the background made (a writer's figure, an orientation's card), and while a writer
+// nor is a card a chat working in the background made (a writer's figure, a check's card), and while a writer
 // writes, or for AFTER_WRITER_MS after it ends, a Report the person has open stays open.
 import { isReplay } from './events'
 
@@ -17,7 +17,7 @@ export const AFTER_WRITER_MS = 60_000
 const PERSON = new Set(['user', 'analyst'])
 /** the roles of the chats that work in the background (the chat's `role`, the record's `by_role`): what they make is
  * not what the person is watching the chat for */
-const BACKGROUND = new Set(['writer', 'orient', 'check', 'dev', 'dev-ticket', 'labels'])
+const BACKGROUND = new Set(['writer', 'check', 'dev', 'dev-ticket', 'labels'])
 
 /** The card a stream event says Claude made: a `cell` record of a card created, by a maker other than the person and
  * other than a chat that works in the background (`by_role`). A record without a maker (a server from before `by`) is

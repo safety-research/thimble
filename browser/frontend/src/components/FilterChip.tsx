@@ -20,5 +20,3 @@ export function FilterChip({ concept, name, value, count, onClear, className }: 
     </Chip>
   )
 }
-
-export default FilterChip

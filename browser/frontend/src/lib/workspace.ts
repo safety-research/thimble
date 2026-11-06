@@ -1,6 +1,6 @@
 // The workspace the page shows: `?ws=<name>` in the URL, which /thimble prints. A URL without one, or with one this server
-// does not hold, is thimble's start page (shell/StartPage), which lists the server's workspaces (GET /workspaces) in
-// groups, as the top bar's switcher does (shell/WorkspaceList).
+// does not hold, is thimble's start page (shell/StartPage), which lists the server's workspaces (GET /workspaces), as
+// the top bar's switcher does (shell/WorkspaceList).
 import type { WorkspaceRow } from './types'
 
 const NAME_RE = /^[A-Za-z0-9._-]+$/
@@ -11,72 +11,20 @@ export function workspaceFromUrl(): string | null {
   return v && NAME_RE.test(v) ? v : null
 }
 
-export type WorkspaceKind = WorkspaceRow['kind']
-
-/** The start page's groups in order, with their titles. */
-export const WORKSPACE_GROUPS: readonly { kind: WorkspaceKind; title: string }[] = [
-  { kind: 'demo', title: 'Demo' },
-  { kind: 'example', title: 'Examples' },
-  { kind: 'folder', title: 'Your folders' },
-]
-
-/** `rows` in the start page's groups, in the order the server gave them; a group with no row is left out. Pure. */
-export function groupWorkspaces(rows: readonly WorkspaceRow[]): { kind: WorkspaceKind; title: string; rows: WorkspaceRow[] }[] {
-  return WORKSPACE_GROUPS.map((g) => ({ ...g, rows: rows.filter((r) => r.kind === g.kind) })).filter((g) => g.rows.length > 0)
+/** What a row of the start page and the switcher shows: the server's label, else the folder's own name or the
+ * workspace's name. Pure. */
+export function workspaceLabel(row: Pick<WorkspaceRow, 'name' | 'label' | 'folder'>): string {
+  return row.label || row.folder || row.name
 }
 
-/** What a row of the start page and the switcher shows: the server's label (a demo by its dataset's name, not its
- * workspace's demo-<dataset>), else a folder's own name, a demo's dataset or the workspace's name. Pure. */
-export function workspaceLabel(row: Pick<WorkspaceRow, 'name' | 'kind' | 'label' | 'folder' | 'dataset'>): string {
-  if (row.label) return row.label
-  if (row.kind === 'folder') return row.folder || row.name
-  if (row.kind === 'demo') return row.dataset || row.name
-  return row.name
-}
-
-/** The workspace that `name` was renamed to, by the rows' `renamed_from`, or null. Pure. */
-export function renamedTo(rows: readonly Pick<WorkspaceRow, 'name' | 'renamed_from'>[], name: string): string | null {
-  return rows.find((r) => r.name !== name && r.renamed_from?.includes(name))?.name ?? null
-}
-
-/** The address `search` and `hash` at `pathname` with its workspace `to` in place of the one it names, the rest kept
- * but a sign-in code (`p`, lib/api claimKey, which takes it out of the address itself) and an earlier version's key
- * (`k`). Pure. */
-export function withWorkspace(to: string, pathname: string, search: string, hash: string): string {
-  const q = new URLSearchParams(search)
-  q.set('ws', to)
-  const h = new URLSearchParams(hash.replace(/^#/, ''))
-  h.delete('p')
-  h.delete('k')
-  const rest = h.toString()
-  return `${pathname}?${q.toString()}${rest ? `#${rest}` : ''}`
-}
-
-/** The ref a workspace opens at, from the server's rows: the view its row names (a demo dataset's pre-cache's main view,
- * an example's view), else null. Pure. */
-export function openingRef(rows: readonly Pick<WorkspaceRow, 'name' | 'kind' | 'view'>[], ws: string): string | null {
-  const row = rows.find((r) => r.name === ws)
-  return row && row.kind !== 'folder' && row.view?.slug ? `view:${row.view.slug}` : null
-}
-
-/** Where a row of the start page goes: the page at `pathname` with its workspace, a demo dataset or an example opened at
- * its view (openingRef). It carries no sign-in code: a code works once, and the start page has spent it. Pure. */
-export function workspaceHref(row: Pick<WorkspaceRow, 'name' | 'kind' | 'view'>, pathname = '/'): string {
-  const q = new URLSearchParams({ ws: row.name })
-  const ref = openingRef([row], row.name)
-  if (ref) q.set('ref', ref)
-  return `${pathname}?${q.toString()}`
+/** Where a row of the start page goes: the page at `pathname` with its workspace. It carries no sign-in code: a code
+ * works once, and the start page has spent it. Pure. */
+export function workspaceHref(row: Pick<WorkspaceRow, 'name'>, pathname = '/'): string {
+  return `${pathname}?${new URLSearchParams({ ws: row.name }).toString()}`
 }
 
 /** A key in browser storage, per workspace. */
 export const storageKey = (ws: string, name: string): string => `thimble:${ws}:${name}`
-
-/** Whether this browser has opened workspace `ws` before (its `opened` key, which App's instance check clears with the
- * rest when the workspace is replaced). */
-export const openedBefore = (ws: string): boolean => readStorage<unknown>(storageKey(ws, 'opened'), false) === true
-
-/** Notes that this browser has opened workspace `ws`. */
-export const noteOpened = (ws: string): void => writeStorage(storageKey(ws, 'opened'), true)
 
 export function readStorage<T>(key: string, fallback: T): T {
   try {
@@ -176,25 +124,6 @@ export function syncInstance(ws: string, stamp: string | null): boolean {
     }
   }
   return cleared
-}
-
-/** Moves workspace `from`'s keys in this browser's storage (localStorage and this tab's sessionStorage) to workspace
- * `to`, after a rename: its layout and its other state follow it. A key `to` holds already is kept. */
-export function moveWorkspaceStorage(from: string, to: string): void {
-  const prefix = storageKey(from, '')
-  for (const get of [() => window.localStorage, () => window.sessionStorage]) {
-    try {
-      const store = get()
-      for (const k of workspaceKeys(from, storageKeys(store))) {
-        const dest = storageKey(to, k.slice(prefix.length))
-        const v = store.getItem(k)
-        if (v != null && store.getItem(dest) == null) store.setItem(dest, v)
-        store.removeItem(k)
-      }
-    } catch {
-      /* storage is a convenience */
-    }
-  }
 }
 
 /** The folder a corpus shows as: the path the analyst opened it by (`shown`, through a symlink), else its folder. */

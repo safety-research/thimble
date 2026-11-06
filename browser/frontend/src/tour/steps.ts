@@ -128,6 +128,9 @@ const viewsExample = (api: Api): Example => {
   const body = document.createElement('div')
   body.className = 'tour-ex-viewbody'
   body.style.background = api.groundOf(realBody())
+  // the example view (public/tour/timeline/): a Timeline over a made-up incident's records. view.html is the view pane
+  // with thimble's head (scope-head.js, mock.js) and the view's own page (page.html, data.js) in its frame; it is never
+  // registered as a view in any workspace
   const frame = document.createElement('iframe')
   frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=12`
   frame.title = 'Timeline (example)'

@@ -1,11 +1,11 @@
 """The ask before a big prompt label's run: the person says whether a model reads many records, as the terminal asks.
 
 A prompt label over more than SAMPLE units (the terminal's rule, plugin/engine/kernel/estimate.py, kept equal by a test)
-does not start on its own, whoever started it: main's apply_label, the label editor's Run, the Labels sidebar's Run
-again, or a card that brings a stale label up to date (concepts.bring_current). It waits as an ask, which the page shows
-above the chat's composer and in the label's detail in the Labels sidebar: what the run reads ("Read 14,591 records
-with Opus 5.5"), the choices Run all, Run on a sample of SAMPLE and Cancel, and under them the estimate, the model calls
-the run makes in batches of concepts.BATCH_ITEMS ("about 292 model calls").
+does not start on its own, whoever started it: main's apply_label, the label editor's Run, or the Labels sidebar's Run
+again. It waits as an ask, which the page shows above the chat's composer and in the label's detail in the Labels
+sidebar: what the run reads ("Read 14,591 records with Opus 5.5"), the choices Run all, Run on a sample of SAMPLE and
+Cancel, and under them the estimate, the model calls the run makes in batches of concepts.BATCH_ITEMS ("about 292 model
+calls").
 
 The person's choice (POST /ws/{c}/label-asks/{id}) starts the run over every unit (and this label, at this version and
 scope, need not ask again), over a sample, or not at all. When main asked for the run, it hears the choice as a quiet

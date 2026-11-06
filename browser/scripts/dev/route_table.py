@@ -6,10 +6,8 @@
 The table is read from the server's own routes (app.main.app.routes), so a new route shows up here, and
 backend/tests_public/test_route_auth.py fails until the table is written again. Each route takes one of:
 
-    token            the token in server.json, proven with each request (hook_auth.guarded): the plugin's hooks, its
-                     MCP shim, its hooks module and thimble's CLI
+    token            the token in server.json, proven with each request (hook_auth.guarded): thimble's CLI
     code             a link's one-time sign-in code, traded for the browser's cookie and its key (POST /api/ui/key)
-    agent token      the token of one run of an extension's program (the WebSocket)
     cookie           a signed-in browser's cookie (hook_auth.analyst): every other write
     cookie or token  a read (GET) of every other route (hook_auth.LocalReadGuard): a signed-in browser's cookie, or the
                      token proven as above (the CLI); a page screenshot carries a shot token instead
@@ -26,7 +24,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "docs" / "routes.md"
-CREDENTIALS = ("token", "code", "agent token", "cookie", "cookie or token", "media key", "none")
+CREDENTIALS = ("token", "code", "cookie", "cookie or token", "media key", "none")
 MEDIA_KEY_ROUTE = "/api/ws/{c}/views/{slug}/media/{key}"
 SKIPPED = ("HEAD", "OPTIONS")  # answered beside GET; never a write
 
@@ -39,12 +37,10 @@ def _app():
     return main.app
 
 
-def credential(method: str, path: str, websocket: bool = False) -> str:
+def credential(method: str, path: str) -> str:
     """The credential a request of `method` on the route `path` takes (module note)."""
     from app import hook_auth  # noqa: PLC0415
 
-    if websocket:
-        return "agent token"
     if hook_auth.guarded(method, path):
         return "token"
     if path == "/api/ui/key":
@@ -57,8 +53,8 @@ def credential(method: str, path: str, websocket: bool = False) -> str:
 
 
 def walk(routes, prefix: str = ""):
-    """(path, methods, endpoint, websocket) for each route in `routes`, with the routers FastAPI includes (each kept as
-    one entry of app.routes that holds its router and the prefix it was included with) walked into."""
+    """(path, methods, endpoint) for each route in `routes`, with the routers FastAPI includes (each kept as one entry of
+    app.routes that holds its router and the prefix it was included with) walked into."""
     from starlette.routing import Mount  # noqa: PLC0415
 
     for r in routes:
@@ -68,19 +64,15 @@ def walk(routes, prefix: str = ""):
             continue
         if isinstance(r, Mount) or not hasattr(r, "path"):
             continue
-        websocket = type(r).__name__ in ("WebSocketRoute", "APIWebSocketRoute")
-        yield prefix + r.path, set(getattr(r, "methods", None) or ()), getattr(r, "endpoint", None), websocket
+        yield prefix + r.path, set(getattr(r, "methods", None) or ()), getattr(r, "endpoint", None)
 
 
 def rows(app=None) -> list[tuple[str, str, str, str]]:
     """(method, path, module, credential) for every route of the server, sorted by path and method."""
     app = app or _app()
     out: list[tuple[str, str, str, str]] = []
-    for path, methods, endpoint, websocket in walk(app.routes):
+    for path, methods, endpoint in walk(app.routes):
         module = str(getattr(endpoint, "__module__", "") or "").removeprefix("app.")
-        if websocket:
-            out.append(("WS", path, module, credential("GET", path, websocket=True)))
-            continue
         kept = methods - set(SKIPPED) or methods
         for method in sorted(kept):
             out.append((method, path, module, credential(method, path)))
@@ -90,7 +82,7 @@ def rows(app=None) -> list[tuple[str, str, str, str]]:
 def render(table: list[tuple[str, str, str, str]]) -> str:
     """docs/routes.md for `table`."""
     counts = {c: sum(1 for row in table if row[3] == c) for c in CREDENTIALS}
-    writes = sum(1 for row in table if row[0] not in ("GET", "WS"))
+    writes = sum(1 for row in table if row[0] != "GET")
     lines = [
         "# Routes and their credentials",
         "",
@@ -100,10 +92,9 @@ def render(table: list[tuple[str, str, str, str]]) -> str:
         "Every request to the local API needs a credential (`backend/app/hook_auth.py`), except the two reads marked",
         "none:",
         "",
-        "- **token**: the token in `server.json`, proven with each request. The plugin's hooks, its MCP shim, its hooks",
-        "  module and thimble's CLI use these routes, and only these.",
+        "- **token**: the token in `server.json`, proven with each request. thimble's CLI uses these routes, and only",
+        "  these.",
         "- **code**: a link's one-time sign-in code, which the page trades for the browser's cookie and its key.",
-        "- **agent token**: the token of one run of an extension's program.",
         "- **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.",
         "- **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI",
         "  proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone",

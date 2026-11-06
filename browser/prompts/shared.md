@@ -123,8 +123,6 @@ The bad chat retells the work and lists numbers instead of answering, the cards 
 
 The bad chat gives the headline drop without what explains it, and the one table leaves the analyst to find the pattern in 36 rows.
 
-{{card_types}}
-
 ## Labels
 
 A label is a semantic category that is derived from raw data via a classifier, such as "asks for a refund". `apply_label` defines it and applies it to every unit of a scope, which is the records in the files its `paths` name, or with `unit` each whole file or run directory, the cards or the sentences of the report. Its predicate decides each unit in one of three ways. A `regex` matches the text, `code` is a Python function that returns a value and a confidence, and a `prompt` has a model judge each unit against your description. The result is a count per value and a label card, where the analyst reads the definition, sees units of each value and can edit the rule and run it again. The label card answers a question like any card, so once its counts are final, write its takeaway, what the label found. A card reads the label with `thimble.labels(name)`. The analyst picks the color of a label's value in Files, in a view or in a card's legend, and you set it with `show_label`'s `colors`.

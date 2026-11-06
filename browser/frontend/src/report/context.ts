@@ -13,8 +13,6 @@ export interface ReportCtx {
   submitPrompt: (blockId: string, request: string) => Promise<void>
 /** a card prompt's Enter (/card): the request posted to main; rejects when it did not land */
   submitCard: (blockId: string, request: string) => Promise<void>
-  /** the blocks stand locked (a story, a deck, a page's claims): a figure shows its caption as text and offers no picker */
-  readOnly?: boolean
 }
 
 const noEditor = () => Promise.reject(new Error('no editor'))

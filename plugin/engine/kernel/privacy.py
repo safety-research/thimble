@@ -1,4 +1,5 @@
-"""The privacy scan of a fix's draft: what `thimble fix draft` removes before the person reads the text it would send.
+"""The privacy scan of a fix's draft: what `thimble file issue` and `thimble file pr` remove before the person reads
+the text they would send.
 
 A plain module: the standard library only, no plugin imports, so the browser workbench can use the same file.
 

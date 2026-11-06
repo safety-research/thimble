@@ -129,11 +129,10 @@ def check_state(cell: dict) -> str:
 
 
 def canvas_cards(c: str) -> list[dict]:
-    """The cards the canvas draws, as the canvas route serves them (no Scratch),
-    each {id, kind, group, maker, check, starred, locked, text}."""
+    """The cards the canvas draws, as the canvas route serves them, each {id, kind, group, maker, check, starred, locked,
+    text}."""
     from . import agents, notebook
 
-    notebook.migrate_scratch(c)
     data = notebook.canvas(config.workspace_dir(c))
     chats = {str(m.get("id")): m for m in agents.list_chats(c)}
     loose = {g["id"] for g in data["groups"] if g.get("kind") == LOOSE_GROUP}
@@ -182,7 +181,7 @@ def canvas_view(c: str) -> dict | None:
 
 
 def describe(c: str, entry: dict) -> str:
-    """A filter in the chips' words: `claims a PR = yes; Kind · table; Group · Orientation; Text · "merge"`."""
+    """A filter in the chips' words: `claims a PR = yes; Kind · table; Group · Runs; Text · "merge"`."""
     from . import notebook
 
     ws = config.workspace_dir(c)

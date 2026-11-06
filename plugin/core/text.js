@@ -147,8 +147,7 @@ export function printable(s, spans) {
 // An error thimble quotes in a notice, a reason or a repair request (an exception's text, a fork's error or refusal) is
 // thimble's own words, never the records' nor the check's: each path of this machine in it is read where it leads and
 // named as the validator names a cited file (engine/kernel/evidence.py error_words, file_named), by its path from the
-// session's folder when it lies there, else by its name alone, never by where that folder lies. Both answer the cases
-// of plugin/tests/error_paths.json alike.
+// session's folder when it lies there, else by its name alone, never by where that folder lies.
 
 // a path in an error's text: one quoted whole (in straight or typographic quotes, backticks), which may hold spaces and
 // colons, else one in a run of the characters a path holds, not a URL, starting where the run does, right after a flag

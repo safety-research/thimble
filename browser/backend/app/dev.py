@@ -4,13 +4,13 @@ A ticket is one record of dev/tickets.jsonl (repo root, gitignored), numbered pe
 dev/tickets/<id>/shots/. Filing opens the ticket's thread (a chat of role dev) and lands a chip in main; tickets run one
 at a time, urgent first, and only in a development install (a git checkout of thimble: RELEASE_LINE).
 
-The ticket's agent. A code ticket is worked by a `thimble:dev-ticket`, a subagent of the analyst's Claude Code session
-(subagents.py), on Settings' dev row's model and effort. A ticket filed in the browser, Retry and Start are clicks: the
-server prepares the ticket, then starts its agent through thimble's plugin module. Main's file_dev_ticket prepares it
-and answers the exact Agent call, which main makes and auto mode judges (start_typed); a thread's fork's file_dev_ticket
-is prepared the same way, and main gets the call in a `start_agent` event (tools._ask_main), since a fork may not start
-subagents. While another ticket runs, main's ticket waits for the analyst's Start (`held`), since no ticket starts
-without a click or main's call. Preparing cuts a git worktree off the live branch (worktree_path, under worktrees_dir,
+The ticket's agent. A code ticket is worked by a `thimble:dev-ticket`, a subagent of main (subagents.py), on Settings'
+dev row's model and effort. A ticket filed in the browser, Retry and Start are clicks: the server prepares the ticket,
+then the runtime starts its agent (module_bridge). Main's file_dev_ticket prepares it and starts its agent the same way
+(start_typed); a thread's fork's file_dev_ticket is prepared the same way, and the server starts its agent with the
+fork's call (tools._fork_start). While another
+ticket runs, main's ticket waits for the analyst's Start (`held`), since no ticket starts without a click or main's
+call. Preparing cuts a git worktree off the live branch (worktree_path, under worktrees_dir,
 in thimble's home), takes the before shot, and
 opens the ticket's thread, which the agent's chat takes over (subagents.ensure_chat, `adopt`). The agent edits the
 worktree, checks its change with the `ticket_checks` tool as often as it wants, and calls `finish_ticket`, where the
@@ -18,11 +18,10 @@ server commits every change in the worktree to the ticket's branch and runs the 
 (ticket_tools.py). Its end (ticket_ended, _settle_ticket) is the backstop: an agent that ended without finish_ticket but
 left a change gets the gates once. A change that passed is put back as it passed, then the after shot, the analyst's
 Allow, a fast-forward of the live branch (rebasing once if it moved), a UI rebuild, and a restart when backend or plugin
-files changed, deferred while an orientation runs. Only a supervised server (`thimble server up`) restarts itself. Stop
-on the ticket stops its agent through the module; main's quit stops it with main, and it ends stopped with Retry.
+files changed. Stop on the ticket stops its agent, and it ends stopped with Retry.
 `revert_last_apply` is `thimble revert`.
 
-`thimble fix`. With the server down there is no workspace and no plugin module, so `thimble fix` (fix_offline) keeps
+`thimble fix`. With the server down there is no workspace and no runtime, so `thimble fix` (fix_offline) keeps
 the one `claude -p` run thimble still makes: a Claude Code session, one process per turn (Sessions), in a worktree,
 whose turns the server follows until each process ends; the gates run over what its branch changed, and a failure wakes
 the session with the output, up to MAX_ATTEMPTS turns (run_fix). It asks nobody while it works, so it keeps
@@ -34,39 +33,32 @@ agent running in main: the next server takes it up again from the registry (_rec
 while no server ran is settled then, and one whose agent ended without a pass, or whose preparation the restart cut
 short, ends stopped with Retry.
 
-View builds. A view proposal is built at once by a `thimble:view-builder`, a subagent of the analyst's Claude Code
-session (subagents.py), at most VIEW_POOL at once (queue_view); the others wait queued, and a start Claude Code refuses
-at its subagent limit goes back to the queue. A build is part of the start that asked for it: Build, Retry and a change
-asked for in the browser are clicks, and a repair, or the build of a proposal an orientation from before 0.8.0 left, is
-a follow-on start, each started through thimble's plugin module; main's propose_view gives main the exact Agent call
-(start_build), and a thread's fork's propose_view or file_dev_ticket on a view gives it to main in a `start_agent` event
-(tools._ask_main). The builder writes the view's three files in the view's folder, checks its draft with the
+View builds. A view proposal is built at once by a `thimble:view-builder`, a subagent of main (subagents.py), at most
+VIEW_POOL at once (queue_view); the others wait queued, and a start refused at the subagent limit goes back to the
+queue. A build is part of the start that asked for it: Build, Retry and a change asked for in the browser are clicks,
+and a repair is a follow-on start, each started by the runtime; main's propose_view starts it the same way
+(start_build), and a thread's fork's propose_view or file_dev_ticket on a view the server starts with the fork's call
+(tools._fork_start). The builder writes the view's three files in the view's folder, checks its draft with the
 `view_check` tool as often as it wants, and calls `finish_view`, where the server runs the gates of record and counts
 its attempts (view_tools.py). Its end (build_ended, _settle) is the backstop: a builder that ended without a pass gets
-the gate once; a proposal the analyst did not ask for, such as an orientation's from before 0.8.0, that still fails gets
-up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry, which the orientation's thread says
-(_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's
+the gate once; a proposal the analyst did not ask for that still fails gets up to VIEW_REPAIRS new builders started with
+what failed, and then fails with Retry (_repairs_failed); a view the analyst asked for fails with Retry at once. A change to a built view goes to the view's
 last builder as a message when it can still be reached in main's session, so it keeps its context, else to a new
 builder; a change that fails leaves the view as it was (views.end_revision). A pass starts the view's review
-(view_review.py). The orientation's Stop stops the builds of the views an orientation from before 0.8.0 proposed
-(stop_orientation_views); the Stop in a build's thread, or on its builder, ends the build failed with Retry
-(views.stop_build, _view_stopped). Main's quit ends every builder with main, and their views fail with MAIN_ENDED and
-Retry; nothing starts again by itself. Where an active extension runs the dev agent with a program (roles.py), that
-program builds the view instead, turn by turn (program_build), checked the same way.
+(view_review.py). The Stop in a build's thread, or on its builder, ends the build failed with Retry
+(views.stop_build, _view_stopped).
 
 Notices. A view whose build failed after the repairs it gets, a change to a view that failed, a build that did not
 start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
 notices.agent_key: Retry on a view; for a builder that stopped without passing the view's checks, what is wrong with
 the view in the analyst's words, Send to thimble-fix and Discard), since the analyst may be in another chat; a build
-that starts or passes, and a ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit
-and the analyst's Stop tell nothing. A builder's start probes the sandbox its commands run in, and where it can't
-start on this machine one notice says so, why and the fix, with a row in the build's thread; the next start where it
-starts clears it (_box_notice).
+that starts or passes, and a ticket that starts or is applied, clear it (_view_notice, _ticket_notice). The
+analyst's Stop tells nothing. A builder's start probes the sandbox its commands run in, and where it can't start on
+this machine one notice says so, why and the fix, with a row in the build's thread; the next start where it starts
+clears it (_box_notice).
 
-Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode, Bypass
-included, and ask as main does, in the analyst's terminal. Where the server runs its agents itself (runtime.py), no
-agent is asked anything: a view builder and its reviewer write the view's folder and their own folder (view_work_dir)
-alone, on either engine (runtime.agent_writes). thimble's own questions about its code stay on the ticket's card, in
+Permissions. The server runs its agents itself (runtime.py), and no agent is asked anything: a view builder and its
+reviewer write the view's folder and their own folder (view_work_dir) alone, on either engine (runtime.agent_writes). thimble's own questions about its code stay on the ticket's card, in
 every mode, Bypass included (CODE_TOOL): its chat hosts the ticket's key (agent_session.host) for them alone, and a
 question nobody answers within the card's wait (userconf.card_wait_s) is a no.
 
@@ -168,7 +160,7 @@ RESTART_WATCH_S = float(os.environ.get("THIMBLE_DEV_RESTART_WATCH_S", "") or 120
 BOOT_PREFIXES = ("backend/app/",)  # what the server imports when it starts
 # view builds running at once; 0 holds them queued (the tests' default)
 VIEW_POOL = max(0, int(os.environ.get("THIMBLE_VIEW_BUILDS", "3") or "3"))
-# set on `thimble fix`'s session so the plugin's watcher exits at once there (plugin/bin/.thimble-watch)
+# set on `thimble fix`'s session, which names it as thimble's own
 SESSION_ENV = "THIMBLE_SESSION"
 SESSION_KEY = "dev"  # the THIMBLE_SESSION of `thimble fix`'s session
 SOURCES = ("ui", "analyst", "terminal")
@@ -220,26 +212,19 @@ def pending_line(title: str) -> str:
 
 def kernels_kept(c: str) -> bool:
     """Whether this server's start reconnected a kernel of workspace `c` (notebook.LAST_RECONNECT)."""
-    try:
-        from . import notebook  # noqa: PLC0415
-    except Exception:  # noqa: BLE001
-        return False
-    rec = getattr(notebook, "LAST_RECONNECT", None)
+    from . import notebook  # noqa: PLC0415
+
+    rec = notebook.LAST_RECONNECT
     if not isinstance(rec, dict):
         return False
     return any(str(k).startswith(f"{c}/") for k in rec.get("reconnected") or [])
 
 
 async def _wait_kernels_reconnected() -> None:
+    from . import notebook  # noqa: PLC0415
+
     try:
-        from . import notebook  # noqa: PLC0415
-    except Exception:  # noqa: BLE001
-        return
-    wait = getattr(notebook, "wait_reconnect", None)
-    if wait is None:
-        return
-    try:
-        await wait()
+        await notebook.wait_reconnect()
     except Exception:  # noqa: BLE001
         log.debug("waiting for the kernel reconnect failed", exc_info=True)
 
@@ -607,12 +592,6 @@ def dev_session_name(workspace: str | None) -> str:
     """The name `thimble fix`'s session goes by: thimble:dev · <workspace>, or thimble:dev for a ticket of no workspace
     (config.session_name)."""
     return config.session_name("dev", workspace)
-
-
-def view_session_name(c: str, slug: str) -> str:
-    """The name a build an extension's program runs goes by for the analyst, as /thimble:agents lists it:
-    thimble:view-<slug> · <c>."""
-    return config.session_name(f"view-{slug}", c)
 
 
 # ----------------------------------------------------------------------------- git helpers (blocking; run in threads)
@@ -1494,13 +1473,12 @@ class Sessions:
         """The session's flags: its `models` ({model, effort, fast}, where None leaves one to the analyst's Claude Code
         settings), else the dev role's, `--add-dir` folders, the `fence` settings and thimble's config for the dev agent
         (dev_config). Its environment goes in the settings' `env` (config.session_env, without this server's THIMBLE_*
-        values): the fence's, `env`, its key as THIMBLE_SESSION with the token that proves it
-        (hook_auth.session_token), and no ceiling on --print's wait for its background work (agent_session.BG_WAIT_ENV).
+        values): the fence's, `env`, its key as THIMBLE_SESSION, and no ceiling on --print's wait for its background
+        work (agent_session.BG_WAIT_ENV).
         Nobody can answer its requests (module note, `thimble fix`), so it keeps UNHOSTED_TOOLS and gets no web tools.
         It gets no MCP server, since its task needs none of the analyst's, not the tools that schedule a later turn
         (agent_session.LATER_TOOLS), since its process ends with its turn, and, when fenced, not FENCED_OFF_TOOLS.
-        `name` is the session's name for the analyst (dev_session_name, view_session_name), which a `claude -p` session
-        does not take."""
+        `name` is the session's name for the analyst (dev_session_name), which a `claude -p` session does not take."""
         from . import agent_session  # noqa: PLC0415 — agent_session is large and this module otherwise needs none of it
 
         conf_models = models or config.models_for(workspace)["dev"]
@@ -1512,7 +1490,6 @@ class Sessions:
         mode = "default"
         settings = agent_session.with_home_shell(settings)
         own = {**(settings.get("env") or {}), **(env or {}), SESSION_ENV: SESSION_KEY,
-               hook_auth.SESSION_TOKEN_ENV: hook_auth.session_token(str(workspace or ""), SESSION_KEY),
                agent_session.BG_WAIT_ENV: agent_session.BG_WAIT_MS}
         settings["env"] = config.session_env(own, stack=False)
         allowed = ["--allowedTools", ",".join(UNHOSTED_TOOLS)]
@@ -2263,11 +2240,9 @@ def _failure(e: BaseException) -> tuple[str, str]:
 
 
 async def _prepare_and_start(run: Run, t: dict[str, Any], route: str, call: str | None = None) -> Any:
-    """A ticket's preparation and its agent's start: refused at once where no agent of thimble's can start
-    (subagents.refusal_before); the analyst's Allow first where the box can't run (CODE_QUESTION); the worktree and the
-    agent's own folder; the before shot, in the box or on the validation stack; then subagents.start_job, a click's
-    through main's module, main's typed start answering the exact Agent call. The start's Answer; TicketError (and its
-    kinds) when the ticket cannot go on."""
+    """A ticket's preparation and its agent's start: the analyst's Allow first where the box can't run (CODE_QUESTION);
+    the worktree and the agent's own folder; the before shot, in the box or on the validation stack; then
+    subagents.start_job. The start's Answer; TicketError (and its kinds) when the ticket cannot go on."""
     from . import subagents  # noqa: PLC0415
 
     tid, c = t["id"], str(t.get("workspace") or "")
@@ -2276,8 +2251,6 @@ async def _prepare_and_start(run: Run, t: dict[str, Any], route: str, call: str 
         raise TicketError(why)
     if not (c and t.get("chat")):
         raise NotAllowed(CODE_NOBODY)
-    if (before := subagents.refusal_before(c, click=route == subagents.CLICK)) is not None:
-        raise TicketError(before.reason)
     run.phase = "prep"
     _host_card(t)
     in_box = await asyncio.to_thread(ticket_box.works)
@@ -2313,8 +2286,6 @@ async def _prepare_and_start(run: Run, t: dict[str, Any], route: str, call: str 
     elif ans.started:
         run.agent = run.agent or ans.agent_id
         run.phase = "agent"
-    elif ans.refused and ans.get("request") is None:  # refused before a request was made (subagents.refusal_before)
-        raise TicketError(NOT_STARTED_LINE.format(reason=ans.reason or ans.kind))
     return ans
 
 
@@ -2337,8 +2308,8 @@ async def _launch_ticket(run: Run, t: dict[str, Any], route: str, call: str | No
 
 
 async def start_typed(t: dict[str, Any], call: str | None = None) -> Any:
-    """Main's file_dev_ticket: the ticket prepared, then the exact Agent call that starts its agent, as a typed start
-    (subagents.start_job), which auto mode judges as main makes it. While another ticket runs, the ticket waits for the
+    """Main's file_dev_ticket: the ticket prepared, then its agent started as a typed start (subagents.start_job),
+    which the server makes at once. While another ticket runs, the ticket waits for the
     analyst's Start on its card (`held`): {"held": True, "running": <its label>}. A ticket this server cannot run fails
     at once; a refusal is the Answer's."""
     from . import subagents  # noqa: PLC0415
@@ -2791,46 +2762,18 @@ def _start_run(t: dict[str, Any], route: str = "click") -> Run | None:
     return run
 
 
-_ticket_looks: dict[str, int] = {}  # workspace -> looks for main's module since a server's start (_start_next_if_idle)
-_ticket_retry: asyncio.TimerHandle | None = None
-
-
-def _start_next_if_idle(wait_module: bool = False) -> None:
-    """Start the next queued ticket when none runs. At a server's start (`wait_module`: _recover, the first request)
-    main's module has not said hello again yet, so a ticket of a workspace whose module is not live keeps its place and
-    the queue looks again after NO_MODULE_RETRY_S, up to NO_MODULE_LOOKS times; then it starts, and a module that is
-    still away refuses it with the reason. Otherwise a ticket filed, retried or started starts, or is refused, at once."""
-    global _ticket_retry
+def _start_next_if_idle() -> None:
+    """Start the next queued ticket when none runs: a ticket filed, retried or started starts, or is refused, at
+    once."""
     if _closing or _running() or not STACK_ENABLED:
         return
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         return  # no loop (the CLI): tickets wait for the server
-    from . import module_bridge  # noqa: PLC0415
-
-    waiting = False
     for t in _queued():
-        c = str(t.get("workspace") or "")
-        if (wait_module or c in _ticket_looks) and not module_bridge.live(c) \
-                and _ticket_looks.get(c, 0) < NO_MODULE_LOOKS:
-            waiting = True
-            continue
-        _ticket_looks.pop(c, None)
         if _start_run(t) is not None:
             return
-    if not waiting or (_ticket_retry is not None and not _ticket_retry.cancelled()):
-        return
-    for c in {str(t.get("workspace") or "") for t in _queued()}:
-        if not module_bridge.live(c):
-            _ticket_looks[c] = _ticket_looks.get(c, 0) + 1
-
-    def again() -> None:
-        global _ticket_retry
-        _ticket_retry = None
-        _start_next_if_idle()
-
-    _ticket_retry = loop.call_later(NO_MODULE_RETRY_S, again)
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -2899,7 +2842,7 @@ def _recover() -> None:
                 with contextlib.suppress(Exception):
                     remove_ticket_tree(rec)
                 _finish(rec, str(rec.get("result") or "")[:400] or None)
-    _start_next_if_idle(wait_module=True)  # main's module says hello to this server only after it is up
+    _start_next_if_idle()
 
 
 # view builds
@@ -2908,12 +2851,10 @@ def _recover() -> None:
 @dataclass
 class _Build:
     """A build of a view that holds a place in the pool (VIEW_POOL): its builder, a `thimble:view-builder` subagent of
-    main, by its agent id once it has one, the pending request of a typed start main has yet to make, or the task of
-    an extension's program that builds it (program_build)."""
+    main, by its agent id once it has one, or the pending request of a typed start main has yet to make."""
 
     agent: str | None = None
     request: str | None = None
-    task: asyncio.Task | None = None
     route: str = ""
 
 
@@ -2924,23 +2865,16 @@ _closing = False  # the server is shutting down: a build that ends starts no oth
 _settling: set[tuple[str, str]] = set()  # (workspace, slug) whose builder's end is being settled (_settled)
 _retry_handle: asyncio.TimerHandle | None = None
 LIMIT_RETRY_S = 30.0  # a start Claude Code refused at its subagent limit is tried again after this long, or at an end
-NO_MODULE_RETRY_S = 5.0  # a queued build waits for main's module this long between looks
-NO_MODULE_LOOKS = 24  # looks before the queue waits for the next listing or main session (about two minutes)
-_no_module_looks: dict[str, int] = {}
 # (workspace, slug) that recover_views queued again after a restart: it starts only in the main session that queued it
 _recovered: set[tuple[str, str]] = set()
 VIEW_STOPPED = "The build was stopped."  # a build the analyst stopped: its chat's end and its proposal's error
-# the builds of the views an orientation from before 0.8.0 proposed (stop_orientation_views)
-ORIENTATION_STOPPED = "the orientation was stopped"
 WORKSPACE_CLOSED = "the workspace was archived"  # the builds of a workspace that is archived or reset (stop_views)
 # why a view's build stopped that is no failure of it: a change, a replacement or a deletion that takes over
 TAKEN_OVER = ("revised", "replaced", "deleted", WORKSPACE_CLOSED)
 # the stage line of a repair: a build nobody asked for that ran out of attempts starts again with a new builder
 REPAIR_LINE = "the view did not pass, so a new builder builds it again from what failed (repair {n} of {of})"
 ORPHANED_LINE = "the build ended while thimble's server was not running"
-SHUTDOWN = "the server stopped"  # why a program's build was cancelled at shutdown: it is built again (recover_views)
 OLD_BUILD_LINE = "this build ran in an earlier version of thimble; Retry builds the view afresh"
-VIEW_PROGRAM_TOOLS = ("read_ref", "view_check")  # the thimble tools a dev program's view build may call (view_tools)
 
 
 def _builder() -> str:
@@ -2992,7 +2926,7 @@ def queue_view(c: str, slug: str, recovered: bool = False) -> None:
     that builder as a message (change_view), and Retry while it runs makes that builder's run the build. The proposal
     records main's session (`queued_in`), unless `recovered` (recover_views queued it again after a restart): a queued
     build starts only in that session (_same_main)."""
-    from . import module_bridge, views  # noqa: PLC0415
+    from . import views  # noqa: PLC0415
 
     key = (c, slug)
     b = _view_runs.get(key)
@@ -3010,30 +2944,35 @@ def queue_view(c: str, slug: str, recovered: bool = False) -> None:
         _recovered.add(key)
     else:
         _recovered.discard(key)
-        views.update_proposal(c, slug, queued_in=module_bridge.main_session(c) or None)
+        views.update_proposal(c, slug, queued_in=_main_sid(c) or None)
     if key not in _view_queue:
         _view_queue.append(key)
     _start_views()
 
 
-def _same_main(c: str, prop: dict[str, Any]) -> bool:
-    """Whether a queued build may start in main's session now: the session that queued it (`queued_in`) is main's, or
-    the one main moved to from it by /clear or /resume. A build queued before main's session was known starts in the
-    first one, unless a restart queued it again (_recovered), since then nothing shows which session asked for it."""
-    from . import module_bridge  # noqa: PLC0415
+def _main_sid(c: str) -> str:
+    """The session that is main in workspace `c` now (session.current), '' for none yet."""
+    from . import session  # noqa: PLC0415
 
+    lv = session.current(c)
+    return lv.sid if lv is not None else ""
+
+
+def _same_main(c: str, prop: dict[str, Any]) -> bool:
+    """Whether a queued build may start in main's session now: the session that queued it (`queued_in`) is main's. A
+    build queued before main's session was known starts in the first one, unless a restart queued it again
+    (_recovered), since then nothing shows which session asked for it."""
     was = str(prop.get("queued_in") or "")
     if not was:
         return (c, str(prop.get("slug") or "")) not in _recovered
-    return module_bridge.moved_to(c, was) == module_bridge.main_session(c)
+    return was == _main_sid(c)
 
 
 def _start_views() -> None:
-    """Start the queued builds the pool has room for, each through main's module (start_build); a workspace whose module
-    is not live keeps its builds queued and looks again after NO_MODULE_RETRY_S, NO_MODULE_LOOKS times."""
+    """Start the queued builds the pool has room for, each as the runtime starts an agent (start_build)."""
     if _closing:
         return
-    from . import module_bridge, views  # noqa: PLC0415
+    from . import views  # noqa: PLC0415
 
     try:
         asyncio.get_running_loop()
@@ -3042,7 +2981,6 @@ def _start_views() -> None:
         if loop is not None and loop.is_running() and not loop.is_closed():
             loop.call_soon_threadsafe(_start_views)
         return
-    waiting = False
     for key in list(_view_queue):
         if len(_view_runs) >= VIEW_POOL:
             break
@@ -3051,12 +2989,8 @@ def _start_views() -> None:
         if prop is None or prop.get("status") not in views.PENDING:
             _view_queue.remove(key)
             continue
-        if view_program(c) is None and not module_bridge.live(c):
-            waiting = True
-            continue
         _view_queue.remove(key)
-        _no_module_looks.pop(c, None)
-        if view_program(c) is None and not _same_main(c, prop):
+        if not _same_main(c, prop):
             # queued in a Claude Code session that has ended (its quit came while no server ran): Retry starts it here
             _recovered.discard(key)
             _view_failed(c, slug, MAIN_ENDED, prop.get("chat"))
@@ -3064,19 +2998,11 @@ def _start_views() -> None:
         _recovered.discard(key)
         _view_runs[key] = _Build(route=str(prop.get("route") or ""))
         asyncio.get_running_loop().create_task(_launch(c, slug), name=f"view-start:{c}:{slug}")
-    if waiting:
-        _retry_later(NO_MODULE_RETRY_S, looks=True)
 
 
-def _retry_later(delay: float, looks: bool = False) -> None:
+def _retry_later(delay: float) -> None:
     """Look at the queue again in `delay` seconds (once, however many ask)."""
     global _retry_handle
-    if looks:
-        cs = {c for c, _ in _view_queue}
-        for c in cs:
-            _no_module_looks[c] = _no_module_looks.get(c, 0) + 1
-        if cs and all(_no_module_looks.get(c, 0) > NO_MODULE_LOOKS for c in cs):
-            return
     if _retry_handle is not None and not _retry_handle.cancelled():
         return
     try:
@@ -3109,7 +3035,7 @@ async def _launch(c: str, slug: str) -> None:
             return  # build_refused put it back in the queue
     except Exception as e:  # noqa: BLE001
         log.exception("the build of %s/%s did not start", c, slug)
-        if _view_runs.get(key) is not None and not (_view_runs[key].agent or _view_runs[key].task):
+        if _view_runs.get(key) is not None and not _view_runs[key].agent:
             _view_runs.pop(key, None)
         _view_failed(c, slug, f"the build did not start: {type(e).__name__}: {e}"[:ERROR_CHARS])
         _start_views()
@@ -3287,8 +3213,8 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
     """Start a builder of the view `slug` (subagents.start_job, `thimble:view-builder`), its task build_task, with the
     run's model and effort: those given, else the proposal's, else Settings' dev row. A click or a follow-on start goes
     through main's module and answers what it did; a typed start (main's propose_view) answers the exact Agent call.
-    A typed start stops a builder of the view that runs, its draft kept. Where an extension's program builds views,
-    that program builds it instead (program_build). Where views cannot be built, it fails at once."""
+    A typed start stops a builder of the view that runs, its draft kept. Where views cannot be built, it fails at
+    once."""
     from . import subagents, views  # noqa: PLC0415
 
     key = (c, slug)
@@ -3296,10 +3222,6 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
     if prop is None:
         _view_runs.pop(key, None)
         return subagents.refusal(subagents.ERROR, f"no proposal {slug}")
-    if (part := view_program(c)) is not None:
-        b = _view_runs.setdefault(key, _Build(route=route))
-        b.task = asyncio.get_running_loop().create_task(_program_task(c, slug, part), name=f"view-program:{c}:{slug}")
-        return subagents.Answer({"program": part.extension})
     if why := await asyncio.to_thread(views.build_problem_for, c):
         _view_runs.pop(key, None)
         if prop.get("revision"):
@@ -3340,9 +3262,6 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
         else:
             views.update_proposal(c, slug, status="building", request=ans.get("request"))
             views._emit(c, slug, "building", chat=prop.get("chat"))
-    elif ans.refused and ans.get("request") is None:  # refused before a request was made (subagents.refusal_before)
-        build_refused(c, {"kind": "start", "key": _key(slug), "reason": ans.reason, "refused_kind": ans.kind,
-                          "route": route})
     return ans
 
 
@@ -3414,8 +3333,7 @@ def build_refused(c: str, req: dict[str, Any]) -> None:
         return
     prop = views.read_proposal(c, slug) or {}
     reason = str(req.get("reason") or kind)
-    refused = {"kind": kind, "reason": reason, "request": req.get("id"), "expired": bool(req.get("expired")) or None,
-               "at": _now()}
+    refused = {"kind": kind, "reason": reason, "request": req.get("id"), "at": _now()}
     if prop.get("revision"):
         views.end_revision(c, slug, reason, failed_change=str(prop.get("change") or ""))
         views.update_proposal(c, slug, refused=refused)
@@ -3540,7 +3458,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             return
         if a.get("stopped_by") == subagents.STOPPED_QUIT:
             _view_failed(c, slug, MAIN_ENDED, run.chat)
-        elif why in (ORIENTATION_STOPPED, "dismissed"):
+        elif why == "dismissed":
             if prop.get("revision"):
                 views.end_revision(c, slug)  # its builder has stopped, so nothing writes into the folder any more
         else:
@@ -3560,8 +3478,6 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         if status == "done" and await _feedback(c, slug, run, prop, lines):  # the whole report, as finish_view gives
             return
     if status == "done" and finish.get("result") != "stop" and subagents.ended_in_plan(c, run.agent_id, run.k):
-        if not prop.get("revision"):
-            views.update_proposal(c, slug, held=None)  # a held proposal shows in the views list, failed
         _view_failed(c, slug, subagents.plan_failed_line(view_tools.BUILDER), run.chat)
         return
     failure = (str(finish.get("report") or prop.get("last_report") or "")
@@ -3621,8 +3537,8 @@ async def _feedback(c: str, slug: str, run: Any, prop: dict[str, Any], report: s
 
 
 def stop_view(c: str, slug: str, why: str) -> bool:
-    """Take the build of `slug` out of the queue and stop its builder through main's module (subagents.stop), or its
-    program's task, which ends it as `why` says (_settle). Never blocks; the build leaves the pool at once so a
+    """Take the build of `slug` out of the queue and stop its builder through main's module (subagents.stop), which ends
+    it as `why` says (_settle). Never blocks; the build leaves the pool at once so a
     replacement under the same slug starts. Whether a running build was stopped."""
     from . import subagents  # noqa: PLC0415
 
@@ -3632,11 +3548,6 @@ def stop_view(c: str, slug: str, why: str) -> bool:
     b = _view_runs.pop(key, None)
     if b is None:
         return False
-    if b.task is not None and not b.task.done():
-        _view_stopping[(c, slug)] = why
-        b.task.cancel()
-        _start_views()
-        return True
     if b.agent:
         _view_stopping[(c, b.agent)] = why
         agent_id = b.agent
@@ -3656,34 +3567,6 @@ async def stop_views(c: str) -> None:
         _view_queue.remove(key)
     for cc, slug in [k for k in _view_runs if k[0] == c]:
         stop_view(cc, slug, WORKSPACE_CLOSED)
-
-
-def stop_orientation_views(c: str) -> list[str]:
-    """The analyst stopped the orientation: the builds of the views an orientation from before 0.8.0 proposed stop,
-    queued or running, and so do the reviews of those views, so none of their builds starts after the Stop. A new view
-    is dropped, and a change to a built view leaves the view as it was. Views and changes the analyst asked for go on.
-    The slugs stopped."""
-    from . import view_review, views  # noqa: PLC0415
-
-    stopped: list[str] = []
-    for p in views.list_proposals(c):
-        if not p.get("orientation") or p.get("asked"):
-            continue
-        slug = str(p["slug"])
-        reviewed = view_review.stop(c, slug)
-        if p.get("status") not in views.PENDING:
-            if reviewed:
-                stopped.append(slug)
-            continue
-        if p.get("revision"):
-            # a running build puts the view back itself once its builder has stopped (_settle)
-            if not stop_view(c, slug, ORIENTATION_STOPPED):
-                views.end_revision(c, slug)
-        else:
-            stop_view(c, slug, ORIENTATION_STOPPED)
-            views.drop(c, slug, ORIENTATION_STOPPED)
-        stopped.append(slug)
-    return stopped
 
 
 def recover_views(c: str) -> None:
@@ -3710,10 +3593,6 @@ def recover_views(c: str) -> None:
                     "pending", "claimed"):
                 _view_runs[key] = _Build(request=str(p["request"]), route=subagents.TYPED)
                 continue
-            if p.get("program") and not aid:  # a program's build the last server's shutdown cut short
-                views.update_proposal(c, slug, status="queued")
-                queue_view(c, slug, recovered=True)
-                continue
             _view_failed(c, slug, OLD_BUILD_LINE if p.get("session_id") and not aid else ORPHANED_LINE, p.get("chat"))
             continue
         if p.get("route") == subagents.TYPED:
@@ -3723,24 +3602,6 @@ def recover_views(c: str) -> None:
             _view_failed(c, slug, OLD_BUILD_LINE, p.get("chat"))
             continue
         queue_view(c, slug, recovered=True)
-
-
-def _view_chat(c: str, prop: dict[str, Any]) -> str | None:
-    """The chat of a build an extension's program runs (program_build), role dev with the view's slug on its meta: the
-    earlier run's, running again, else a new one. A view the analyst asked for is announced in main."""
-    chat = prop.get("chat")
-    asked = bool(prop.get("asked"))
-    title = f"view: {prop.get('name') or prop['slug']}"
-    meta = agents.meta_or_none(c, str(chat)) if chat else None
-    if meta is not None and meta.get("route") != "subagent":
-        agents.update_agent(c, str(chat), status="running", ts_end=None, result=None, **({"asked": True} if asked else {}))
-        return str(chat)
-    try:
-        return str(agents.new_agent(c, "dev", title, view=prop["slug"], announce=asked,
-                                    **({"asked": True} if asked else {}))["id"])
-    except HTTPException:
-        log.exception("no chat for the build of %s/%s", c, prop.get("slug"))
-        return None
 
 
 def _change_failed_chip(c: str, prop: dict[str, Any], why: str, *, checks: tuple[str, str] | None = None) -> None:
@@ -3924,8 +3785,7 @@ async def _box_notice(c: str, slug: str, chat: str | None) -> None:
 
 def _view_stopped(c: str, slug: str, chat: str | None = None) -> None:
     """A build the analyst stopped (views.stop_build, or Stop on its builder), once its builder has stopped: a new view
-    fails with VIEW_STOPPED, an orientation's as well as one the analyst asked for, and its chip's Retry goes on from its
-    draft; a change to a built view leaves the view as it was, with the change kept for Retry."""
+    fails with VIEW_STOPPED, and its chip's Retry goes on from its draft; a change to a built view leaves the view as it was, with the change kept for Retry."""
     from . import views  # noqa: PLC0415
 
     current = views.read_proposal(c, slug) or {}
@@ -3939,163 +3799,11 @@ def _view_stopped(c: str, slug: str, chat: str | None = None) -> None:
         _close_chat({"workspace": c, "chat": chat}, "stopped", VIEW_STOPPED)
 
 
-# the line an orientation's thread gets for a proposal of its own whose build failed through its repairs, and its view
-# chip there with Retry (chat/ViewChip), since the proposal's own chip may be far up the thread
-REPAIRS_FAILED_LINE = "The view {name} did not pass its checks after {repairs}, so it shows as failed: {why}"
-FAILED_WHY_CHARS = 240
-
-
 def _repairs_failed(c: str, slug: str, why: str, chat: str | None = None) -> None:
-    """A proposal the analyst did not ask for, such as an orientation's from before 0.8.0, whose build failed through
-    its VIEW_REPAIRS repairs fails as a view the analyst asked for does (_view_failed), no longer held: its chip, in the
-    views list, shows ✕ with why and Retry, which builds it again with its repairs. Nothing is chipped in main, since
-    the analyst never asked for it."""
-    from . import views  # noqa: PLC0415
-
-    views.update_proposal(c, slug, held=None)  # no longer held back from the views list (views.held_slugs)
+    """A proposal the analyst did not ask for whose build failed through its VIEW_REPAIRS repairs fails as a view the
+    analyst asked for does (_view_failed): its chip, in the views list, shows ✕ with why and Retry, which builds it
+    again with its repairs. Nothing is chipped in main, since the analyst never asked for it."""
     _view_failed(c, slug, why, chat)
-
-
-VIEW_FAILED_KIND = "view_failed"  # the chip kind of REPAIRS_FAILED_LINE in the orientation's thread
-
-
-# --------------------------------------------------------------------------- an extension's program builds the view
-
-
-def view_program(c: str) -> Any:
-    """The program an active extension runs the dev agent with (roles.py), which then builds the workspace's views
-    (program_build); None for thimble's own builders."""
-    from . import roles  # noqa: PLC0415
-
-    agent = roles.agent_for(c, "dev")
-    return agent.replacing if agent.code else None
-
-
-async def program_view_turn(c: str, slug: str, message: str, folders: list[Path], part: Any,
-                            rec: agents.Recorder | None) -> str:
-    """A turn of a view build taken by the dev agent's program (harness.run_in) in the build's chat: its input is the
-    view's proposal, its folder and the message a builder would get this turn (the build's task, then what the checks
-    found). It writes the view's files in its folder, which the build then checks as it checks a builder's work, and may
-    check them itself with view_check (VIEW_PROGRAM_TOOLS). What it returns is the turn's reply; RuntimeError when it
-    fails or may not start."""
-    from . import harness, views  # noqa: PLC0415
-
-    prop = views.read_proposal(c, slug) or {"slug": slug}
-    folder = folders[0] if folders else views.views_dir(c) / slug
-    job = harness.Job(c, "dev", view_key(slug), f"view: {prop.get('name') or slug}", {
-        "task": "view", "slug": slug, "name": str(prop.get("name") or slug),
-        "description": str(prop.get("description") or ""), "analyst_task": str(prop.get("task") or ""),
-        "scope": list(prop.get("claims") or []), "spec": views.layout_lines(prop), "change": str(prop.get("change") or ""),
-        "folder": str(folder), "corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
-        "message": message,
-    }, VIEW_PROGRAM_TOOLS, view_work_dir(c, slug), writes=(folder,))
-    try:
-        return await harness.run_in(job, part, rec)
-    except harness.HarnessError as e:
-        raise RuntimeError(str(e)) from e
-
-
-async def _program_task(c: str, slug: str, part: Any) -> None:
-    key = (c, slug)
-    try:
-        await program_build(c, slug, part)
-    except asyncio.CancelledError:
-        why = _view_stopping.pop(key, "")
-        if why == SHUTDOWN:
-            raise  # the proposal stays building, and the next server builds it again (recover_views)
-        if why == MAIN_ENDED:
-            _view_failed(c, slug, MAIN_ENDED)
-        elif why == ORIENTATION_STOPPED:
-            from . import views  # noqa: PLC0415
-
-            if (views.read_proposal(c, slug) or {}).get("revision"):
-                views.end_revision(c, slug)
-        elif why not in TAKEN_OVER:
-            _view_stopped(c, slug)
-    except Exception as e:  # noqa: BLE001
-        log.exception("the program's build of %s/%s crashed", c, slug)
-        _view_failed(c, slug, f"the build crashed: {type(e).__name__}: {e}"[:ERROR_CHARS])
-    finally:
-        b = _view_runs.get(key)
-        if b is not None and b.task is asyncio.current_task():
-            _view_runs.pop(key, None)
-        _start_views()
-
-
-async def program_build(c: str, slug: str, part: Any) -> None:
-    """A build an extension's program runs in place of thimble's builder: up to MAX_ATTEMPTS turns of the program
-    (program_view_turn), the gates of record after each and what failed sent back, then the view registered and its
-    review started, or the build's failure (VIEW_REPAIRS more tries for a proposal the analyst did not ask for)."""
-    from . import view_review, views  # noqa: PLC0415
-
-    prop = views.read_proposal(c, slug)
-    if prop is None:
-        return
-    folder = views.views_dir(c) / slug
-    views.ensure_local(config.workspace_dir(c))
-    nofollow.makedirs(folder)  # folders the program writes: made as nofollow makes them
-    nofollow.makedirs(view_work_dir(c, slug))
-    chat = _view_chat(c, prop)
-    prop = views.update_proposal(c, slug, status="building", error=None, chat=chat, agent_id=None,
-                                 program=getattr(part, "extension", None)) or prop
-    views._emit(c, slug, "building", chat=chat)
-    rec = agents.Recorder(c, chat) if chat else None
-    repairs = 0 if prop.get("asked") or prop.get("revision") else VIEW_REPAIRS
-    message = build_task(c, prop)
-    report: dict[str, Any] | None = None
-    result = ""
-    while True:
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            if rec is not None and attempt > 1:
-                Log(rec).stage(f"the program fixes what the checks found (attempt {attempt} of {MAX_ATTEMPTS})")
-            try:
-                result = await program_view_turn(c, slug, message, [folder], part, rec)
-            except RuntimeError as e:
-                result = str(e)
-                if rec is not None:
-                    Log(rec).error(result)
-                break
-            report = await views.gate(c, slug, views._kept_locators(c, slug))
-            gate_step(c, slug, report, chat=chat)
-            if report.get("ok") and not (prop.get("revision") and views.unchanged_since_built(c, slug)):
-                register_pass(c, slug, None)
-                work_files.after_run(c, view_work_dir(c, slug), "done")
-                if chat:
-                    _close_chat({"workspace": c, "chat": chat}, "done", result[:400] or None)
-                view_review.after_built(c, slug)
-                return
-            message = build_gates_prompt("\n".join(views.gate_lines(report)))
-        if not repairs:
-            break
-        repairs -= 1
-        failed = "\n".join(views.gate_lines(report)) if report is not None else result
-        if rec is not None:
-            Log(rec).stage(REPAIR_LINE.format(n=VIEW_REPAIRS - repairs, of=VIEW_REPAIRS))
-        message = f"{build_task(c, prop)}\n\n{repair_text(failed, VIEW_REPAIRS - repairs)}"
-    why = ((views.first_failure(report) if report is not None else "") or result or "the checks did not pass")[:ERROR_CHARS]
-    current = views.read_proposal(c, slug) or {}
-    if current.get("revision"):
-        views.end_revision(c, slug, why, failed_change=str(current.get("change") or ""))
-        if chat:
-            _close_chat({"workspace": c, "chat": chat}, "failed", why)
-        _change_failed_chip(c, current, why)
-        return
-    if not current.get("asked"):
-        _repairs_failed(c, slug, why, chat)
-        return
-    _view_failed(c, slug, why, chat)
-
-
-def running_builds(c: str) -> list[dict[str, Any]]:
-    """The builds an extension's program runs for workspace `c`, for the terminal's list of thimble's agents
-    (tray.agent_rows; the builders, reviewers and the code tickets' agents are subagents, which the registry lists):
-    {name, label, state, kind}."""
-    rows: list[dict[str, Any]] = []
-    for (cc, slug), b in _view_runs.items():
-        if cc == c and b.task is not None and not b.task.done():
-            rows.append({"name": view_session_name(c, slug), "label": f"view: {slug}", "state": "working",
-                         "kind": "build"})
-    return rows
 
 
 FIX_BODY = "thimble's server is down or unhealthy (thimble doctor, below)."
@@ -4128,20 +3836,11 @@ async def fix_offline(doctor: str, approve: Approve, title: str = "fix: thimble 
 
 
 async def shutdown() -> None:
-    """Lifespan shutdown: cancel the builds an extension's program runs, which stay building for recover_views, and the
-    running ticket's preparation or settling, which stays running for the next server (_recover); a `thimble fix` run
-    ends failed. thimble's own builders and the tickets' agents are subagents of main, which go on: the next server
-    takes them up again (recover_views, _recover)."""
+    """Lifespan shutdown: cancel the running ticket's preparation or settling, which stays running for the next server
+    (_recover); a `thimble fix` run ends failed. thimble's own builders and the tickets' agents stop with the server
+    (runtime.stop_all), and the next server settles what they left (recover_views, _recover)."""
     global _closing
     _closing = True
-    view_tasks = []
-    for key, r in _view_runs.items():
-        if r.task is not None and not r.task.done():
-            _view_stopping[key] = SHUTDOWN
-            r.task.cancel()
-            view_tasks.append(r.task)
-    if view_tasks:
-        await asyncio.gather(*view_tasks, return_exceptions=True)
     run = _current
     if run is None or run.status != "running":
         return
@@ -4216,8 +3915,8 @@ async def rebuild_ui(t: dict[str, Any] | None, *, reason: str = "ticket") -> str
 
 
 def agents_running() -> list[str]:
-    """Workspaces where an agent of the server's own runs that a restart would cut short. thimble's orientation, critic
-    and writers are subagents of the analyst's session, which a server restart leaves running (subagents.py), so none
+    """Workspaces where an agent of the server's own runs that a restart would cut short. thimble's writers, checks and
+    view builders are subagents of the analyst's session, which a server restart leaves running (subagents.py), so none
     is listed for them."""
     return []
 
@@ -4372,11 +4071,11 @@ async def _pending_poller() -> None:
     while _restart_pending is not None:
         await asyncio.sleep(2.0)
         if _restart_pending is not None and not agents_running():
-            await orient_ended(None)
+            await restart_when_idle()
             return
 
 
-async def orient_ended(c: str | None) -> None:
+async def restart_when_idle() -> None:
     """Fires a deferred restart once no job of the server's own runs that a restart would cut short
     (agents_running). The pending poller calls it."""
     global _restart_pending
@@ -4467,7 +4166,7 @@ async def _on_first_request() -> None:
     if not _announced:
         _recover()
         await announce_restart()
-        _start_next_if_idle(wait_module=True)
+        _start_next_if_idle()
 
 
 # ----------------------------------------------------------------------------- routes
@@ -4552,8 +4251,8 @@ def ticket_shot(tid: str, name: str) -> FileResponse:
 
 async def _stop_run(tid: str, why: str, *, error: str | None = None) -> str | None:
     """Stop this process's run of the ticket, which ends it `why` (stopped or dismissed, with `error`): its agent
-    through main's module (subagents.stop), whose end settles it; its preparation or its settling cancelled; main's
-    pending start refused. None once stopped, else why it was not: not running here, or the module's refusal."""
+    (subagents.stop), whose end settles it; its preparation or its settling cancelled; main's pending start refused.
+    None once stopped, else why it was not: not running here, or the runtime's refusal."""
     from . import subagents  # noqa: PLC0415
 
     run = _current
@@ -4577,67 +4276,12 @@ async def _stop_run(tid: str, why: str, *, error: str | None = None) -> str | No
     return "the ticket has nothing running"
 
 
-# why a build stopped when main's session ended (stop_workspace, and a builder close_running ended), its Retry's line
+# why a build stopped because main's session ended, its Retry's line
 MAIN_ENDED = "thimble stopped when its Claude Code session ended"
 
 
-def stop_workspace(c: str) -> int:
-    """Stop what runs for workspace `c` here, main's session having ended (agents.stop_all): its code ticket's
-    preparation or main's start of it that main never made, and the tickets queued behind it, which end `stopped` with
-    MAIN_ENDED (Retry runs each again), its queued builds and the builds an extension's program runs, which fail with MAIN_ENDED and Retry, and a typed
-    start main never made. Its builders, reviewers and the ticket's agent were subagents of main and ended with it:
-    subagents.close_running ends their runs, whose end handlers fail their views, and end the ticket, with MAIN_ENDED
-    and Retry. A ticket whose agent passed keeps waiting for the analyst's Allow. Nothing starts again by itself.
-    Returns how many were stopped."""
-    from . import subagents  # noqa: PLC0415
-
-    n = 0
-    run = _current
-    if run is not None and run.status == "running" and run.workspace == c and run.phase in ("prep", "start", "agent") \
-            and not run.agent:
-        run.stop_reason, run.why = "stopped", MAIN_ENDED
-        if run.task is not None and not run.task.done():
-            run.task.cancel()
-            n += 1
-        elif run.request:
-            subagents.refuse(c, run.request, MAIN_ENDED, subagents.HOOK)
-            n += 1
-    # the clicks still queued behind it end too, so no later session starts them by itself (Retry runs each again);
-    # main's ticket that waits for the analyst's Start keeps waiting for that click
-    for t in [t for t in _read() if t.get("status") == "queued" and t.get("workspace") == c and not t.get("held")]:
-        rec = _update(t["id"], status="stopped", error=MAIN_ENDED, ts_end=_now(), finished=True, runner=None) or t
-        _finish(rec, MAIN_ENDED)
-        n += 1
-    for key in [k for k in _view_queue if k[0] == c]:
-        _view_queue.remove(key)
-        _view_failed(*key, MAIN_ENDED)
-        n += 1
-    for key, b in [(k, b) for k, b in _view_runs.items() if k[0] == c]:
-        if b.task is not None and not b.task.done():
-            _view_runs.pop(key, None)
-            _view_stopping[key] = MAIN_ENDED
-            b.task.cancel()
-            n += 1
-        elif b.request and not b.agent:
-            _view_runs.pop(key, None)
-            subagents.refuse(c, b.request, MAIN_ENDED, subagents.HOOK)
-            n += 1
-    return n
-
-
-def workspaces_at_work() -> set[str]:
-    """The workspaces this server prepares or settles a code ticket for, runs a program's view build for, or has view
-    builds queued for."""
-    run = _current if _running() else None
-    busy = run is not None and run.task is not None and not run.task.done() and bool(run.workspace)
-    return ({c for c, _ in _view_queue} | {c for (c, _), b in _view_runs.items() if b.task is not None and not b.task.done()}
-            | ({str(run.workspace)} if busy and run is not None else set()))
-
-
 def resume_views(c: str) -> None:
-    """A session is main in workspace `c`: the builds a server restart left take their places again, and the queued
-    ones start once main's module answers (recover_views)."""
-    _no_module_looks.pop(c, None)
+    """A session is main in workspace `c`: the builds a server restart left take their places again (recover_views)."""
     recover_views(c)
     _start_views()
 
@@ -4736,13 +4380,6 @@ async def status() -> dict[str, Any]:
         "restart_pending": (_restart_pending or {}).get("title"),
         "last_apply": {"ts": la["ts"], "title": la["title"], "commit": la["commit"]} if la else None,
     }
-
-
-@router.post("/dev/restart", status_code=202)
-async def post_restart(request: Request) -> dict[str, Any]:
-    if not _is_loopback(request):
-        raise HTTPException(403, "restart is only available from localhost")
-    return {"status": await request_restart(None, reason="manual restart")}
 
 
 @router.post("/dev/announce")

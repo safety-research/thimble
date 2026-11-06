@@ -5,10 +5,7 @@ tokens, a whole-file Read gives only the file's first lines and an offset/limit 
 Korean, or a table of ids or numbers, runs to a token for every 0.9 to 1.5 characters, so it passes that cap well under
 40,000 characters. write cuts a text that one call cannot return at line ends (cut) into <name>.md, <name>-2.md… of at
 most READ_UNITS code units each, which Read returns whole whatever they hold, and the agent's prompt names them in order
-(named): a writer's context (write_session), a check's task file (checks) and the critic's brief (critique_session).
-window gives how many lines of a file too large to read whole one Read call returns whole wherever it starts, for the
-critic's transcript digest, which stays one file that the critic reads in windows and an extension's program gets
-whole."""
+(named): a writer's context (write_session) and a check's task file (checks)."""
 from __future__ import annotations
 
 import contextlib
@@ -25,7 +22,6 @@ from .ledger import write_under
 # Japanese, Korean, ids or numbers. At 3 bytes a code unit at most in UTF-8, 25,000 come to at most 75KB, under the
 # file-size cap.
 READ_UNITS = 25_000
-LINE_PREFIX_CHARS = 8  # what Read puts before each line it returns, its number and a tab; a window leaves room for it
 
 
 def units(text: str) -> int:
@@ -98,25 +94,3 @@ def named(written: list[Path], one: str, many: str) -> str:
     if len(written) == 1:
         return tools.hint(one, path=str(written[0]))
     return tools.hint(many, n=len(written), paths=", ".join(str(p) for p in written))
-
-
-def window(lines: list[str], limit: int | None = None) -> int:
-    """How many of a file's `lines` one Read call returns whole wherever it starts: every run of that many lines, each
-    with its line break and room for Read's line-number prefix (LINE_PREFIX_CHARS), is at most `limit` (READ_UNITS) code
-    units (units). All of them when the file fits, and at least 1."""
-    limit = READ_UNITS if limit is None else max(1, limit)
-    sizes = [units(x) + 1 + LINE_PREFIX_CHARS for x in lines]
-    n = len(sizes)
-    best, j, total = n, 0, 0
-    for i in range(n):
-        if j < i:
-            j, total = i, 0
-        while j < n and total + sizes[j] <= limit:
-            total += sizes[j]
-            j += 1
-        if j == n:  # a window from here reaches the end, which a shorter read past the end returns whole too
-            break
-        best = min(best, max(1, j - i))
-        if j > i:
-            total -= sizes[i]
-    return max(1, best)

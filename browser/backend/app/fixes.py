@@ -663,7 +663,7 @@ async def settle(fid: int, answer: str) -> None:
         # the checks build the page into the fix's temp folder, which its fixer writes too: what is there once they end
         # is their build (checks_page)
         await asyncio.to_thread(shutil.rmtree, checks_page(fid), True)
-        # the tests run for one fix at a time, and once more when they fail (the kernel's run_tests)
+        # the tests run for one fix at a time, and once more when they fail (the kernel's _run_tests)
         r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=2400, env=env)
         done = json.loads(r.out) if r.ok else {}
     except Exception as e:  # noqa: BLE001 — the end is told either way
@@ -1087,8 +1087,6 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
         return await redo(c, int(rec["id"]))
     if why := problem():
         raise HTTPException(409, why)
-    if not events.reachable(c):
-        raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     text = prompts.render(PROMPT, {"words": words, "fixes": fixes_context(await asyncio.to_thread(records))})
     said = f"{COMMAND} {words}"
     eid = secrets.token_hex(4)

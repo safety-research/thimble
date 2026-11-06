@@ -172,7 +172,7 @@ function turnItems(editor: AnyEditor, turn: (blockId: string, kind: BlockKind) =
   }))
 }
 
-function slashItems(editor: AnyEditor, ws: string, slug: string, chat: (blockId: string) => void, turn: (blockId: string, kind: BlockKind) => void): DefaultReactSuggestionItem[] {
+function slashItems(editor: AnyEditor, chat: (blockId: string) => void, turn: (blockId: string, kind: BlockKind) => void): DefaultReactSuggestionItem[] {
   // no shortcut badges: a gesture hint is helper text
   const defaults = getDefaultReactSlashMenuItems(editor)
     .filter((it) => KEEP.has(it.title))
@@ -854,7 +854,7 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     [flush],
   )
 
-  const items = useCallback(async (query: string) => filterSuggestionItems(slashItems(editor, ws, slug, (id) => void chatAbout(id), turnInto), query), [editor, ws, slug, chatAbout, turnInto])
+  const items = useCallback(async (query: string) => filterSuggestionItems(slashItems(editor, (id) => void chatAbout(id), turnInto), query), [editor, chatAbout, turnInto])
 
   // while anything is dragged (a block by its actions or a figure by its question line, a card from the sidebar), the
   // page takes the drag over a figure's frame too (report.css `.wu-zone[data-dragging]`, an attribute React leaves

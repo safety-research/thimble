@@ -1,20 +1,18 @@
-"""The analyst's own Claude Code settings, as far as thimble reads them: effort, ultracode, the statusline and the
-sandbox. thimble writes none of their files.
+"""The analyst's own Claude Code settings, as far as thimble reads them: effort, ultracode and the sandbox. thimble
+writes none of their files.
 
-Nothing here overrides a setting the analyst has; thimble's defaults apply only where the settings say nothing
-(names_effort), and then the launcher passes `--effort high` to main (main_effort_flag). The server runs the browser's
-main itself (runtime.py), at the effort Claude Code in a terminal runs main's model at: the analyst's own for that
-model, else Claude Code's default for it (session_effort).
+Nothing here overrides a setting the analyst has. The server runs the browser's main itself (runtime.py), at the
+effort Claude Code in a terminal runs main's model at: the analyst's own for that model, else Claude Code's default for
+it (session_effort).
 
 Claude Code reads, lowest first, the user's `settings.json` in its config dir, the project's `.claude/settings.json`
 and `.claude/settings.local.json`, and the managed settings file. `ultracode`, CLAUDE_CODE_EFFORT_LEVEL (in an `env`
 block or the environment), or an effort for main's model (`modelSettings.<model id>.effortLevel`, else a top-level
 `effortLevel` in the project, local or managed file) is the analyst's choice. Claude Code reads a top-level
-`effortLevel` in the user's own file only for LEGACY_EFFORT_MODELS; for later models thimble passes that level as
-main's `--effort` itself.
+`effortLevel` in the user's own file only for LEGACY_EFFORT_MODELS.
 
-The composer's effort and fast-mode choices for main are kept in the workspace's settings and applied at main's next
-launch (cli.launch_args), never written into the folder's Claude Code settings.
+The composer's effort and fast-mode choices for main are kept in the workspace's settings, never written into the
+folder's Claude Code settings.
 """
 from __future__ import annotations
 
@@ -33,7 +31,6 @@ log = logging.getLogger("thimble.cc_settings")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (`claude --effort`)
 ULTRACODE = "ultracode"  # the composer's choice beyond the levels: xhigh and a workflow for each message (main.md)
 ULTRACODE_EFFORT = "xhigh"  # the effort Claude Code runs ultracode at
-MAIN_DEFAULT_EFFORT = "high"  # the launcher's `--effort` for main when the analyst's settings and flags name none
 # Claude Code's default effort for a model, where it is not DEFAULT_EFFORT: its table of models' `default_effort`, as
 # Claude Code 2.1.312 has it. A session runs at it when no settings file, variable or flag names an effort.
 DEFAULT_EFFORTS = {"claude-opus-5-5": "medium", "claude-sonnet-5-5": "medium", "claude-haiku-5-5": "medium",
@@ -69,17 +66,6 @@ def sources(cwd: Path) -> list[Path]:
     """The settings files Claude Code reads for a session in `cwd`, lowest precedence first."""
     managed = MANAGED.get(sys.platform)
     return [config_dir() / "settings.json", cwd / PROJECT_SETTINGS, cwd / LOCAL_SETTINGS, *([managed] if managed else [])]
-
-
-def enabled_thimbles(cwd: Path) -> list[str]:
-    """The `thimble@*` keys `enabledPlugins` sets to true in the user's, the project's and the folder's local settings
-    for a session in `cwd` (sources without the managed tier, whose plugins a session's --settings cannot turn off)."""
-    on: dict[str, bool] = {}
-    for path in sources(cwd)[:3]:
-        plugins = _read(path).get("enabledPlugins")
-        if isinstance(plugins, dict):
-            on.update({str(k): v is True for k, v in plugins.items() if str(k).startswith("thimble@")})
-    return [k for k, v in on.items() if v]
 
 
 def analyst_tiers() -> list[dict[str, Any]]:
@@ -144,36 +130,6 @@ def _efforts(cwd: Path, environ: Mapping[str, str] | None = None,
     return named, by_env, ultracode, level, unread
 
 
-def settings_env(cwd: Path, name: str) -> str | None:
-    """The value the `env` blocks of the analyst's settings files give the variable `name` for a session in `cwd`: the
-    highest file's that sets it (sources), '' included; None when none sets it."""
-    found = None
-    for path in sources(cwd):
-        block = _read(path).get("env")
-        if isinstance(block, dict) and name in block and block[name] is not None:
-            found = str(block[name])
-    return found
-
-
-def names_effort(cwd: Path, environ: dict[str, str] | None = None) -> bool:
-    """Whether the analyst's own settings or environment choose an effort or ultracode for a session in `cwd` that
-    Claude Code runs at (module note: not the user file's top-level `effortLevel`, which it reads only for older models)."""
-    env = os.environ if environ is None else environ
-    if env.get(EFFORT_ENV, "").strip():
-        return True
-    named, _, ultracode, level, _ = _efforts(cwd, env)
-    return named or ultracode is True or level is not None
-
-
-def main_effort_flag(cwd: Path) -> str:
-    """The value the launcher passes to main as `--effort`: '' (no flag) when the analyst's settings name an effort
-    Claude Code runs at, else the user file's top-level `effortLevel` it leaves unread for main's model (module note),
-    else thimble's default."""
-    if names_effort(cwd):
-        return ""
-    return _efforts(cwd)[4] or MAIN_DEFAULT_EFFORT
-
-
 def level_of(choice: str) -> str:
     """The effort level a composer choice runs at: the level itself, or xhigh for ultracode. ValueError for anything
     else."""
@@ -207,19 +163,6 @@ def session_effort(cwd: Path, model: str) -> str:
     it: their own for that model (analyst_effort), else Claude Code's default for it (default_effort). The browser's
     main runs at it when the composer chose none (runtime.Space.spec_of), and the composer's chip shows it."""
     return analyst_effort(cwd, model=model) or default_effort(model)
-
-
-STATUSLINE_REFRESH_S = 2
-
-
-def own_statusline() -> dict[str, Any]:
-    """The statusLine of the analyst's own settings (analyst_tiers), the highest tier's that names a command; {} for
-    none. thimble-agents runs its command with a shell, so a corpus folder's settings never supply it."""
-    for tier in reversed(analyst_tiers()):
-        line = tier.get("statusLine")
-        if isinstance(line, dict) and isinstance(line.get("command"), str) and line["command"].strip():
-            return line
-    return {}
 
 
 # --------------------------------------------------------------------------- the sandbox
@@ -304,7 +247,7 @@ def env_denies(environ: Mapping[str, str] | None = None) -> list[dict[str, str]]
 
 
 def offline_sandbox(auto_allow: bool = False, network: bool = False, required: bool = False) -> dict[str, Any]:
-    """The `sandbox` settings of a session thimble fences (agent_session.fence, view builds): on, with no network unless
+    """The `sandbox` settings of a session thimble fences (dev.ticket_fence, runtime_cc, marks): on, with no network unless
     `network` (then the analyst's own sandbox settings say where it reaches), no command run outside it, and none of
     this process's ANTHROPIC_* variables in its commands' environment (env_denies); `auto_allow` lets a command that
     runs in it skip its permission request; `required` (sandbox.enforce) has Claude Code refuse to start the session
@@ -315,52 +258,6 @@ def offline_sandbox(auto_allow: bool = False, network: bool = False, required: b
     if denies:
         out["credentials"] = {"envVars": denies}
     return out if network else {**out, "network": {"deniedDomains": ["*"]}}
-
-
-def own_sandbox(cwd: Path) -> bool:
-    """Whether the analyst's own Claude Code sandbox is on for a session in `cwd`: `sandbox.enabled` of the last
-    settings file that sets it (sources)."""
-    on = False
-    for path in sources(cwd):
-        box = _read(path).get("sandbox")
-        if isinstance(box, dict) and isinstance(box.get("enabled"), bool):
-            on = box["enabled"]
-    return on
-
-
-def sandbox_excluded(cwd: Path) -> list[str]:
-    """The command names the analyst's settings for a session in `cwd` run outside the sandbox
-    (`sandbox.excludedCommands` of every settings file, each entry's first word, such as `docker` for `docker *`)."""
-    names: list[str] = []
-    for path in sources(cwd):
-        box = _read(path).get("sandbox")
-        for entry in (box.get("excludedCommands") if isinstance(box, dict) else None) or []:
-            word = entry.split()[0].split(":")[0] if isinstance(entry, str) and entry.split() else ""
-            if word and word not in names:
-                names.append(word)
-    return names
-
-
-def bash_ask_rules(cwd: Path) -> list[str]:
-    """The contents of the Bash ask rules the analyst's settings for a session in `cwd` hold (`permissions.ask` of every
-    settings file): `git push:*` for `Bash(git push:*)`, `*` for a bare `Bash`. sandbox_allow leaves a command that
-    matches one to the analyst's mode, since they asked to be asked about it."""
-    rules: list[str] = []
-    for path in sources(cwd):
-        perms = _read(path).get("permissions")
-        for entry in (perms.get("ask") if isinstance(perms, dict) else None) or []:
-            if not isinstance(entry, str):
-                continue
-            entry = entry.strip()
-            if entry == "Bash":
-                content = "*"
-            elif entry.startswith("Bash(") and entry.endswith(")"):
-                content = entry[len("Bash("):-1].strip() or "*"
-            else:
-                continue
-            if content not in rules:
-                rules.append(content)
-    return rules
 
 
 def sandbox_missing() -> list[str]:

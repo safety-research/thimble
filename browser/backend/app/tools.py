@@ -1,14 +1,12 @@
 """The one tool registry: the tools every thimble model calls.
 
 prompts/tools.md holds each tool's description and JSON input schema (one `## <tool>` section each, read fresh on
-every listing); REGISTRY holds the roles that get a tool and its handler as an import path resolved at call time. This
-module imports only config, prompts, cite and frames, so the stdio shim (plugin/bin/thimble-mcp) builds its tool list
-without loading the notebook or a kernel. The shim lists the tools (`list("analyst")`) and posts each call to
-`POST /api/tools/{name}`; its THIMBLE_SESSION (Ctx.session) says which session called: none for main, `orient`,
-`writer:<doc>`, `critique:orient` or `check:<id>:<doc>`. Tools whose machinery lives elsewhere run `tool_<name>(ctx,
-args)` in that module. Every result starts with the call as run (call_line); a card's result shows the first lines of
-each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The card tools also answer to the
-alias names of the cell tools and `cell:` refs (Spec.aliases, ARG_ALIASES, cite.CARD_PREFIXES)."""
+every listing); REGISTRY holds the roles that get a tool and its handler as an import path resolved at call time. The
+runtime gives each agent its tools (tool_sections) and runs each call (call); the session a call runs as (Ctx.session)
+says which agent called: none for main, `writer:<doc>`, `check:<id>:<doc>` and the like. Tools whose machinery lives
+elsewhere run `tool_<name>(ctx, args)` in that module. Every result starts with the call as run (call_line); a card's
+result shows the first lines of each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The
+card tools also answer to the alias names of the cell tools and `cell:` refs (Spec.aliases, cite.CARD_PREFIXES)."""
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +18,6 @@ import inspect
 import json
 import logging
 import re
-import secrets
 import tempfile
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -28,35 +25,30 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import HTTPException
 
 from . import cite, config, frames, headless, nofollow, prompts, read_parts
-from .kernel_thimble import CARD_MIME  # a card type's graphic, which counts as a chart and is read through its listing
 
 log = logging.getLogger("thimble.tools")
-router = APIRouter()
 
 SERVER_NAME = "thimble"  # workers see mcp__thimble__<tool>; the user's session mcp__plugin_thimble_thimble__<tool>
 TOOLS_PROMPT = "tools"  # prompts/tools.md: the `## <tool>` sections (description and schema) and the hint sections
 ANALYST = "analyst"
-# The key of each of thimble's agents (subagents.py), the session its calls run as: `orient`, or `writer:<doc>` since
-# two documents may be written at once (session_kind).
-ORIENT_SESSION = "orient"
+# The key of each of thimble's agents (subagents.py), the session its calls run as: `writer:<doc>`, since two documents
+# may be written at once (session_kind), and the kinds below.
 WRITER_SESSION = "writer"
-CRITIQUE_SESSION = "critique"  # `critique:orient`, the critic of the orientation's analysis (critique_session.py)
 CHECK_SESSION = "check"  # `check:<id>:<doc>`, a run of a report check on a document (checks.py)
 VIEW_SESSION = "view"  # `view:<slug>`, a build of a view (dev.py, view_tools.py)
 REVIEW_SESSION = "review"  # `review:<slug>`, a review of a built view (view_review.py, view_tools.py)
 TICKET_SESSION = "ticket"  # `ticket:<id>`, a code ticket's agent (dev.py, ticket_tools.py)
-MAIN_ONLY: "tuple[str | None, ...]" = (None,)  # Spec.sessions of a tool only main's shim lists (no THIMBLE_SESSION)
+MAIN_ONLY: "tuple[str | None, ...]" = (None,)  # Spec.sessions of a tool only main lists (no THIMBLE_SESSION)
 ROLES = (ANALYST,)  # the dev worker is a Claude Code session with its own tools (dev.py)
 ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
 # The callers whose cards answer the analyst as they wait: main and its threads. Their cards get
 # notebook.CHAT_EXEC_TIMEOUT when the card names no allowance (_default_timeout); the sessions in
 # FULL_TIME_SESSIONS keep notebook.EXEC_TIMEOUT.
 CHAT_ACTORS = (ANALYST,)
-FULL_TIME_SESSIONS = (ORIENT_SESSION, WRITER_SESSION)
+FULL_TIME_SESSIONS = (WRITER_SESSION,)
 TERMINAL = "terminal"  # created_by of the terminal session's cells (notebook.TERMINAL_CREATOR), never of a group
 MAIN_GROUP_AUTHOR = "main"  # created_by of a group main makes for a sequence of cards, at the root (_group_author)
 BROWSER_AUTHOR = "user"  # a browser chat's comments, labels and report requests: the analyst asking through their chat
@@ -103,7 +95,6 @@ EDIT_CELL_KINDS = ADD_CELL_KINDS
 # the kinds edit_card changes no card to or from: a label card is drawn from its label, and a plan holds a piece of work
 FIXED_KINDS = ("label", "plan")
 RUN_KINDS = ("plot", "table", "code", "timeline", "diagram")  # notebook.RUNNABLE_KINDS: the kinds that run `code`
-INSTRUCTIONS_HINT = "instructions"  # prompts/tools.md `## instructions`: the shim's MCP server instructions (instructions)
 SCREENSHOT_HOSTS = ("127.0.0.1", "localhost", "::1")  # a page screenshot is of thimble's own interface on this machine
 # a figure's own page (_shot_page_file): no network, inline script and style only, images from data: URLs; the figure
 # runs in a frame sandboxed to scripts alone, which reports its size to the page
@@ -155,17 +146,14 @@ def err(text: str) -> ToolResult:
 @dataclass(frozen=True)
 class Spec:
     """What is code about a tool: its name, the roles that get it, and its handler as `module:attr`, called as
-    `handler(ctx, args)`. `sessions` names the session kinds whose shims alone list it; `aliases` are alternative
-    names a
-    call still reaches but no listing shows; with `drop_stops`, a call whose request the caller drops is cancelled.
-    `makes_cards`: the call makes a card, which a call of a thread's fork makes for the thread (call, _as_fork)."""
+    `handler(ctx, args)`. `sessions` names the session kinds whose agents alone get it; `aliases` are alternative
+    names a call still reaches but no listing shows. `makes_cards`: the call makes a card, which a call of a thread's fork makes for the thread (call, _as_fork)."""
 
     name: str
     roles: tuple[str, ...]
     handler: str
     sessions: "tuple[str | None, ...]" = ()
     aliases: tuple[str, ...] = ()
-    drop_stops: bool = False
     makes_cards: bool = False
 
 
@@ -191,8 +179,8 @@ REGISTRY: dict[str, Spec] = {
         Spec("clear_filter", (ANALYST,), "app.filters:tool_clear_filter"),
         # the browser's panes, laid out in one of the presets (panes.py); main's, since it answers the analyst
         Spec("set_layout", (ANALYST,), "app.panes:tool_set_layout", sessions=MAIN_ONLY),
-        # a card of a card type opened as its view in Files, as the card's Open as view does (cardtypes.py); main's
-        Spec("open_view", (ANALYST,), "app.cardtypes:tool_open_view", sessions=MAIN_ONLY),
+        # a view opened in Files (panes.py); main's
+        Spec("open_view", (ANALYST,), "app.panes:tool_open_view", sessions=MAIN_ONLY),
         Spec("propose_view", (ANALYST,), _H + "propose_view"),
         Spec("write_document", (ANALYST,), "app.report_types:tool_write_document"),
         Spec("edit_document", (ANALYST,), "app.report_types:tool_edit_document"),
@@ -202,10 +190,6 @@ REGISTRY: dict[str, Spec] = {
         # a comment resolved or opened again, as the margin's ✓ does; main's, since a check's run only adds comments
         Spec("resolve_comment", (ANALYST,), "app.comments:tool_resolve_comment", sessions=MAIN_ONLY),
         Spec("reply_in_thread", (ANALYST,), "app.threads:tool_reply_in_thread"),
-        # a message typed in the terminal to a thread, sent as that thread's composer would (/thimble:ask); main's
-        Spec("message_thread", (ANALYST,), "app.threads:tool_message_thread", sessions=MAIN_ONLY),
-        # thimble's agents listed for the terminal (tray.py)
-        Spec("list_agents", (ANALYST,), "app.tray:tool_list_agents", sessions=MAIN_ONLY),
         # a thread renamed or deleted from the chat, as its row's menu does; main's, as the analyst asks it
         Spec("rename_thread", (ANALYST,), "app.threads:tool_rename_thread", sessions=MAIN_ONLY),
         Spec("delete_thread", (ANALYST,), "app.threads:tool_delete_thread", sessions=MAIN_ONLY),
@@ -220,28 +204,18 @@ REGISTRY: dict[str, Spec] = {
         # or a new fix, in their words, as the terminal's fix-thimble skill starts it
         Spec("fix_thimble", (ANALYST,), _H + "fix_thimble"),
         # a view's builder and reviewer check the view as often as they want, and finish once, where the server runs the
-        # gates of record (view_tools.py); a gate stops when its caller drops the call (the agent was stopped)
-        Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION),
-             drop_stops=True),
-        Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,), drop_stops=True),
-        Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,),
-             drop_stops=True),
-        Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,),
-             drop_stops=True),
+        # gates of record (view_tools.py); a gate stops when its agent is stopped
+        Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION)),
+        Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,)),
+        Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,)),
+        Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,)),
         # a code ticket's agent checks its change in the ticket's box as often as it wants, and finishes once, where the
         # server commits the change and runs the gates of record (ticket_tools.py)
-        Spec("ticket_checks", (ANALYST,), "app.ticket_tools:tool_ticket_checks", sessions=(TICKET_SESSION,),
-             drop_stops=True),
-        Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,),
-             drop_stops=True),
+        Spec("ticket_checks", (ANALYST,), "app.ticket_tools:tool_ticket_checks", sessions=(TICKET_SESSION,)),
+        Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,)),
     )
 }
 
-# Argument aliases: {tool: {alias: current argument}}. The handlers read both spellings; the shim adds the alias to a
-# tool's signature (unlisted) so a call by it passes the shim's validation.
-ARG_ALIASES: dict[str, dict[str, str]] = {"add_card": {"title": "question"},
-                                          "edit_card": {"cell": "card", "title": "question"},
-                                          "delete_card": {"cell": "card"}}
 # an alias of a tool -> its name (Spec.aliases)
 TOOL_ALIASES: dict[str, str] = {a: s.name for s in REGISTRY.values() for a in s.aliases}
 
@@ -354,19 +328,8 @@ def schema_of(name: str) -> dict[str, Any]:
     return tool_sections((name,))[name][1]
 
 
-# the hints that tell main to make the Agent call of a start, and the ones that say the start is made when the server
-# runs thimble's agents itself (runtime.py), which starts the agent with the tool's call
-RUNTIME_HINTS = {"start_job-subagent": "agent-started", "start_writing-subagent": "agent-started",
-                 "start_agent-fork": "agent-started-fork"}
-
-
 def hint(name: str, **values: Any) -> str:
     """A hint section of prompts/tools.md (`## card-errored` …) with its {placeholders} filled; '' when absent."""
-    if name in RUNTIME_HINTS:
-        from . import runtime  # noqa: PLC0415
-
-        if runtime.enabled():
-            name = RUNTIME_HINTS[name]
     body = descriptions().get(name, "")
     try:
         return body.format(**values) if body else ""
@@ -376,33 +339,16 @@ def hint(name: str, **values: Any) -> str:
 
 def session_kind(session: str | None) -> str | None:
     """The kind of a THIMBLE_SESSION: `writer` for `writer:<doc>`, the value itself for one without a colon, None for
-    main's shim, which sets none."""
+    main, which has none."""
     return str(session).split(":", 1)[0] or None if session else None
 
 
-def list(role: str = ANALYST, session: str | None = None,  # noqa: A001 — the contract names it `tools.list`
-         labels: bool = True) -> "builtins.list[dict[str, Any]]":
-    """[{name, description, input_schema}] for the tools the role may use in the session `session` (a THIMBLE_SESSION),
-    in registry order. A tool with `sessions` of its own is listed in those alone, but main's shim (no session) lists
-    them all, since thimble's agents are main's subagents and call through it: each agent's registration takes away
-    the tools that are not its own, and a call is refused when its caller may not make it (call_route). Without
-    `labels` (Labels off in the workspace's Settings), no label tool, and the others as they read then (sections)."""
-    from . import labels_off  # noqa: PLC0415
-
-    role_of(role)
-    kind = session_kind(session)
-    names = [s.name for s in REGISTRY.values() if role in s.roles and (kind is None or not s.sessions or kind in s.sessions)
-             and (labels or s.name not in labels_off.TOOLS)]
-    secs = tool_sections(names, labels)
-    return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
-
-
-PLUGIN_NAME = "thimble"  # the plugin's name (orientation.PLUGIN), the scope of its MCP server's tools
+PLUGIN_NAME = "thimble"  # the plugin's name (subagent_files.PLUGIN), the scope of its MCP server's tools
 WEB_TOOLS = ("WebFetch", "WebSearch")  # Claude Code's web tools, which an agent's `web: off` takes away
 
 
 def thimble_tool(name: str) -> str:
-    """A thimble tool's name as a subagent of main or a session thimble starts sees it, from the plugin's server."""
+    """A thimble tool's name as a subagent of main or a session thimble starts sees it, from thimble's MCP server."""
     return f"mcp__plugin_{PLUGIN_NAME}_{SERVER_NAME}__{name}"
 
 
@@ -438,7 +384,7 @@ class Ctx:
     # the chat (agents.py) a call comes from: its cards are stamped `created_by: chat:<id>`; None from the terminal's
     # shim, but the thread's for a call of a thread's fork that makes a card (_as_fork)
     chat: str | None = None
-    session: str | None = None  # the THIMBLE_SESSION of the shim that posted the call: None for main's, `orient`, `writer:<doc>`
+    session: str | None = None  # the THIMBLE_SESSION of the shim that posted the call: None for main's, `writer:<doc>`
     # the id Claude Code gave the call (MCP `_meta` "claudecode/toolUseId"), named by the `agent` record a call writes
     # into
     # main
@@ -491,15 +437,14 @@ def _own_root(r: dict) -> bool:
 # One of thimble's agents beside main (a writer, a report check) is not the analyst. A card it adds, and a group it
 # makes, carry its THIMBLE_SESSION under SESSION_KEY, so its work is told apart from the analyst's (the report's
 # Figures) and never goes into the analyst's groups. Workspaces from before keep the agents' own groups, stamped the
-# same way. The orientation is not one of them.
+# same way.
 SESSION_KEY = "session"
 
 
 def agent_session(session: str | None) -> bool:
     """Whether the session `session` names (a THIMBLE_SESSION) is one of thimble's agents beside main: every session
-    thimble runs except the orientation, and never main's shim (None)."""
-    kind = session_kind(session)
-    return kind is not None and kind != ORIENT_SESSION
+    thimble runs, and never main's shim (None)."""
+    return session_kind(session) is not None
 
 
 def session_chat(c: str, session: str | None) -> str | None:
@@ -552,11 +497,6 @@ def _analysts(ws: Path, nb_id: str) -> bool:
             and cur.get("kind") != notebook.LOOSE_KIND and _own_root(cur))
 
 
-def workspace_for_cwd(path: str | None) -> str | None:
-    """The corpus a directory belongs to (config.workspace_for_cwd), None for no path."""
-    return config.workspace_for_cwd(path) if path else None
-
-
 # --------------------------------------------------------------------------- calling
 
 
@@ -592,9 +532,8 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     if name in labels_off.TOOLS and not ledger.labels_on(c):
         # Labels is off in the workspace's Settings: no label is made, shown or deleted (labels_off.py)
         return with_call_line(name, args, err(labels_off.line()))
-    batch = None
-    # a session thimble started (the orientation, a writer) owns the steps its calls make (undo, sessions)
-    with undo.batching(batch), undo.acting_session(session):
+    # a session thimble started (a writer, a check) owns the steps its calls make (undo, sessions)
+    with undo.acting_session(session):
         ctx = Ctx(c, actor, notebook, terminal, anchor, chat, session, tool_use_id)
         # the thread a call of a thread's fork is for, found once (_as_fork): a card the call makes is the thread's
         # from the start, and the fork is told about the thread's cards
@@ -683,24 +622,8 @@ def with_call_line(name: str, args: dict[str, Any] | None, res: ToolResult) -> T
 # --------------------------------------------------------------------------- shared helpers
 
 
-def _optional(module: str, attr: str) -> Callable[..., Any] | None:
-    """`attr` of `app.<module>` when both exist, else None."""
-    try:
-        mod = importlib.import_module(f"app.{module}")
-    except ModuleNotFoundError as e:
-        if e.name in (f"app.{module}", module):
-            return None
-        raise
-    fn = getattr(mod, attr, None)
-    return fn if callable(fn) else None
-
-
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
-
-
-def _not_available(name: str, module: str, attr: str) -> ToolResult:
-    return err(f"{name} is not available yet: app.{module}.{attr} is not in this build")
 
 
 def _cell_id_of(raw: Any) -> str:
@@ -747,8 +670,6 @@ def _outputs_text(cell: dict, addressed: bool = False) -> tuple["builtins.list[s
                 extras.add("chart")
             elif mime in DRAWING_MIMES:
                 extras.add(DRAWING_MIMES[mime])
-            elif mime == CARD_MIME:
-                extras.add("chart")
         if any(k.startswith("image/") or "vega" in k for k in out):
             chart = cite.chart_table(out)
             rows = chart.text() if chart is not None else ""
@@ -837,7 +758,7 @@ def _format_cell_result(cell: dict, lines: int = RESULT_LINES) -> str:
     if body:
         out.append(body)
     if extras:
-        out.append(f"(rendered a chart/table; thimble shows it as [[card:{cid}]])")  # mode-neutral: both modes draw it
+        out.append(f"(rendered a chart/table; thimble shows it as [[card:{cid}]])")
     return "\n".join(out)
 
 
@@ -880,7 +801,7 @@ def _default_timeout(ctx: Ctx) -> float | None:
 
     if ctx.actor not in CHAT_ACTORS or session_kind(ctx.session) in FULL_TIME_SESSIONS:
         return None
-    return float(getattr(notebook, "CHAT_EXEC_TIMEOUT", 30.0))
+    return notebook.CHAT_EXEC_TIMEOUT
 
 
 def _first_clause(text: str, cap: int = LINE_LIMIT) -> str:
@@ -894,7 +815,7 @@ def _first_clause(text: str, cap: int = LINE_LIMIT) -> str:
 
 
 def _find_notebook(ws: Path, ref: str) -> dict | None:
-    """A group by id, path of titles (`Orientation / Final`, as add_card takes it; _group_at_path), exact title
+    """A group by id, path of titles (`Runs / Final`, as add_card takes it; _group_at_path), exact title
     (case-insensitive), title substring, or role name."""
     from . import notebook
 
@@ -922,9 +843,6 @@ def _find_notebook(ws: Path, ref: str) -> dict | None:
 # --------------------------------------------------------------------------- handlers: cells
 
 
-# The role a group made by title gets, by the title's last word: `Orientation` and the legacy `Final` are the
-# orientation's deck; anything else the analyst's.
-GROUP_ROLES_BY_TITLE = {"final": "exploration", "orientation": "exploration"}
 # How the canvas writes a group under another (canvas/layout.ts) and how a caller names one. The spaces are part of it:
 # a thread's group is titled `main/<slug>`, one title with a slash in it.
 GROUP_PATH_SEP = " / "
@@ -951,14 +869,8 @@ def _answer_request(ctx: "Ctx", request: str | None, cid: str) -> None:
         log.debug("card-request %s not announced off the event loop", request)
 
 
-def _role_by_title(title: str) -> str:
-    from . import notebook
-
-    return GROUP_ROLES_BY_TITLE.get(title.rsplit(" ", 1)[-1].casefold(), notebook.DEFAULT_ROLE)
-
-
 def group_path(ws: Path, path: str, *, created_by: str | None = None, made: "builtins.list[str] | None" = None) -> str:
-    """The group a path of titles names (`Orientation / Final`, _walk_path). Where the path names none, one group is
+    """The group a path of titles names (`Runs / Final`, _walk_path). Where the path names none, one group is
     made, under the deepest group the path names, with the rest of the path as its title, so a path never makes a
     chain of empty groups around one card, and the same path finds the group again. The name made is appended to
     `made`. Under the groups' lock, so two processes that look for one path make it once."""
@@ -969,8 +881,7 @@ def group_path(ws: Path, path: str, *, created_by: str | None = None, made: "bui
         hit, parent, rest = _walk_path(rows, path)
         if hit is not None:
             return str(hit["id"])
-        nb = notebook.create_notebook(ws, GROUP_PATH_SEP.join(rest), role=_role_by_title(rest[-1]), parent=parent,
-                                      created_by=created_by)
+        nb = notebook.create_notebook(ws, GROUP_PATH_SEP.join(rest), parent=parent, created_by=created_by)
         if made is not None:
             row = notebook.summary(nb)
             made.append(_group_name([*rows, row], row))
@@ -1015,7 +926,7 @@ NO_GROUP = "Cards in no group"  # the loose cards' heading, as list_cards and co
 
 def _group_name(rows: "builtins.list[dict]", row: dict) -> str:
     """A group's name as add_card and list_cards take it: its title after the titles of the groups above it, joined
-    by GROUP_PATH_SEP, so `Final` under `Orientation` reads `Orientation / Final`."""
+    by GROUP_PATH_SEP, so `Final` under `Runs` reads `Runs / Final`."""
     by_id = {str(r["id"]): r for r in rows}
     names, seen, cur = [], set(), row
     while cur is not None and str(cur["id"]) not in seen:
@@ -1053,7 +964,7 @@ def _group_id(ctx: Ctx, group: str, made: "builtins.list[str]") -> str:
         if row is not None:
             return notebook.loose_group(ctx.ws) if _analysts(ctx.ws, str(row["id"])) else str(row["id"])
         with notebook.editing(ctx.ws):
-            nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), created_by=_group_author(ctx))
+            nb = notebook.create_notebook(ctx.ws, group, created_by=_group_author(ctx))
             nb[SESSION_KEY] = str(ctx.session)
             notebook.write_notebook(ctx.ws, nb)
         made.append(group)
@@ -1063,7 +974,7 @@ def _group_id(ctx: Ctx, group: str, made: "builtins.list[str]") -> str:
     row = _find_notebook(ctx.ws, group)
     if row is not None:
         return str(row["id"])
-    nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), created_by=_group_author(ctx))
+    nb = notebook.create_notebook(ctx.ws, group, created_by=_group_author(ctx))
     made.append(group)
     return str(nb["id"])
 
@@ -1974,10 +1885,7 @@ def _payload_lines(kind: str, payload: dict, limit: int | None = CELL_READ_LIMIT
 
 async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """Anything citable, by its ref: a card or span (_read_cell), `type:<name>`, a whole document (`report:<slug>`),
-    `view:`
-    refs, an orientation call (`call:<chat>/<n>`), and every other ref through refs.resolve (_read_excerpt). A
-    value-ref
-    reads its ref."""
+    `view:` refs, and every other ref through refs.resolve (_read_excerpt). A value-ref reads its ref."""
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     if "|" in ref:  # a value-ref: the ref is the part after the bar
         ref = ref.split("|", 1)[1].strip()
@@ -1991,11 +1899,6 @@ async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return await _delegate("app.report_types:tool_read_ref", ctx, {**args, "ref": ref})
     if ref.startswith("view:"):
         return await _delegate("app.views:tool_read_ref", ctx, {**args, "ref": ref})
-    if ref.startswith("call:"):
-        from . import calls  # noqa: PLC0415
-
-        text, bad = calls.tool_read_ref(ctx.c, ref, READ_REF_UNITS)
-        return err(text) if bad else ok(text)
     return await _read_excerpt(ctx, ref)
 
 
@@ -2183,41 +2086,6 @@ async def _h_list_cards(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     return ok("\n".join(out).rstrip() or "(no groups yet)")
 
 
-def holdings(c: str) -> dict[str, Any]:
-    """What a workspace holds, for /thimble's resume line: the cards, labels, documents written and chats someone wrote
-    in;
-    `text` names the first three."""
-    from . import agents, concepts, investigation, notebook, report_types
-
-    ws = config.workspace_path(c)  # a read: validated, never created (report_types is asked only for a dir that exists)
-    cards = sum(int(r.get("n_cells") or 0) for r in notebook.list_notebooks(ws, figures=False))
-    labels = len(concepts.list_concepts(ws, trials=False))
-    docs = [t["slug"] for t in (report_types.list_types(c) if ws.is_dir() else [])
-            if report_types.doc_file(c, investigation.MAIN, t["slug"]).is_file()]
-    return {"workspace": c, "cards": cards, "labels": labels, "documents": docs, "chats": agents.held_chats(ws),
-            "text": ", ".join([_count("card", cards), _count("label", labels), _docs_phrase(docs)])}
-
-
-def _count(noun: str, n: int) -> str:
-    if n == 0:
-        return f"no {noun}s"
-    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
-
-
-def _docs_phrase(docs: "builtins.list[str]") -> str:
-    if not docs:
-        return "no documents"
-    if len(docs) == 1:
-        return f"document {docs[0]}"
-    return "documents " + ", ".join(docs[:-1]) + f" and {docs[-1]}"
-
-
-def instructions() -> str:
-    """The MCP server instructions the shim carries: the `## instructions` section of prompts/tools.md, a short pointer
-    (Claude Code cuts server instructions at 2 KB)."""
-    return hint(INSTRUCTIONS_HINT).strip()
-
-
 # --------------------------------------------------------------------------- handlers: labels
 
 
@@ -2307,16 +2175,13 @@ async def _shot_page(url: str, selector: str | None) -> ToolResult:
                    f"{', '.join(str(p) for p in sorted(allowed))})")
     url = urlunsplit((parts.scheme, f"[{host}]:{port}" if ":" in host else f"{host}:{port}", parts.path, parts.query,
                       parts.fragment))
-    run_shot = _optional("dev", "run_shot")
-    if run_shot is None:
-        return _not_available("screenshot", "dev", "run_shot")
-    from . import hook_auth  # noqa: PLC0415
+    from . import dev, hook_auth  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         out = Path(d) / "shot.png"
         tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
-            code = await _maybe_await(run_shot(url, out, selector, read_token=tok))
+            code = await _maybe_await(dev.run_shot(url, out, selector, read_token=tok))
         except headless.Missing:
             return err(headless.NO_SCREENSHOTS)
         finally:
@@ -2339,12 +2204,10 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     cell = notebook.get_cell(ctx.c, cid, full_outputs=True) if cid else None
     if cell is None:
         return err(f"screenshot: there is no card {cid or ref}")
-    if any(CARD_MIME in b for _, b in cite.iter_outputs(cell.get("outputs"))):
-        return await _shot_type_card(ctx, cid, cell)
     if cell.get(notebook.HELD):
         # held from the analyst until its measure or its check ends (card_fit), which the page draws as running: the
         # card harness draws it as the check sees it, where it can
-        shot = await _shot_type_card(ctx, cid, {k: v for k, v in cell.items() if k != notebook.HELD})
+        shot = await _shot_harness_card(ctx, cid, {k: v for k, v in cell.items() if k != notebook.HELD})
         if not shot.is_error:
             return shot
     ui = ui_base()
@@ -2384,9 +2247,8 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     return await _shot_page_file(cid, chart_page(spec))
 
 
-async def _shot_type_card(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
-    """A card of a card type drawn by the card harness (render.py) from the data the card stored, as the card check
-    sees it."""
+async def _shot_harness_card(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
+    """A card drawn by the card harness (render.py), as the card check sees it."""
     from . import render
 
     try:
@@ -2424,21 +2286,20 @@ async def _shot_card_in_ui(c: str, cid: str, ui: str) -> ToolResult | None:
     the page could not be shot or did not show the card, so the caller falls back."""
     from urllib.parse import urlencode
 
-    run_shot = _optional("dev", "run_shot")
-    if run_shot is None or headless.missing(headless.PAGES):
+    if headless.missing(headless.PAGES):
         return None
     url = f"{ui}/?{urlencode({'ws': c, 'ref': f'card:{cid}'})}"
     storage = {f"thimble:{c}:layout": json.dumps({"tab": "canvas", "chatOpen": False}),
                f"thimble:{c}:canvas-view": json.dumps({"x": 0, "y": 0, "scale": 1})}
-    from . import hook_auth  # noqa: PLC0415
+    from . import dev, hook_auth  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         png = Path(d) / "card.png"
         tok = hook_auth.mint_shot()  # the headless page holds no cookie: its reads of this server carry this token
         try:
-            code = await _maybe_await(run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]', viewport=CARD_SHOT_VIEWPORT,
-                                               scale=CARD_SHOT_SCALE, storage=storage, settle=True, wait_ms=0,
-                                               read_token=tok))
+            code = await _maybe_await(dev.run_shot(url, png, f'article.canvas-card[data-cell="{cid}"]',
+                                                   viewport=CARD_SHOT_VIEWPORT, scale=CARD_SHOT_SCALE, storage=storage,
+                                                   settle=True, wait_ms=0, read_token=tok))
         except headless.Missing:
             return None
         except Exception:  # noqa: BLE001 — a missing node is the fallback's case, not an error to the model
@@ -2519,14 +2380,13 @@ FIGURE_SHOT_WAIT_MS = 800  # after the page is quiet: the frame draws the figure
 async def _shot_page_file(cid: str, page_html: str) -> ToolResult:
     """A card's figure drawn on a page of its own (figure_page) in a temporary file and shot by its frame
     (dev.run_shot, the headless Chromium the ticket runner's page shots use), with every request refused."""
-    run_shot = _optional("dev", "run_shot")
-    if run_shot is None:
-        return _not_available("screenshot", "dev", "run_shot")
+    from . import dev  # noqa: PLC0415
+
     with tempfile.TemporaryDirectory(prefix="thimble-shot-") as d:
         page, png = Path(d) / "card.html", Path(d) / "card.png"
         page.write_text(page_html, "utf-8")
         try:
-            code = await _maybe_await(run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
+            code = await _maybe_await(dev.run_shot(page.as_uri(), png, "#fig", offline=True, wait_ms=FIGURE_SHOT_WAIT_MS))
         except headless.Missing:
             return err(headless.NO_SCREENSHOTS)
         if not png.is_file() or code not in (0, None):
@@ -2547,8 +2407,8 @@ def _chip(c: str, kind: str, text: str, **fields: Any) -> None:
 
 async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """Define a category and apply it over one scope's units (concepts.apply_scoped): the label is a card (in `group`,
-    else loose on the canvas) and, when `filter` is true, the scope's filter. The orientation's labels get no card. A
-    changed label names the cards that read it before (`## apply_label-stale`)."""
+    else loose on the canvas) and, when `filter` is true, the scope's filter. A changed label names the cards that read
+    it before (`## apply_label-stale`)."""
     from . import concepts
 
     scope = str(args.get("scope") or "files").strip().lower()
@@ -2588,11 +2448,10 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if prior is not None and concepts.SCOPE_OF_UNIT.get(prior["unit"]) != scope:
         return err(hint("apply_label-other-scope", label=prior["name"], ref=f"concept:{prior['id']}",
                         scope=concepts.SCOPE_OF_UNIT.get(prior["unit"]), new=scope))
-    orienting = session_kind(ctx.session) == ORIENT_SESSION
     group = str(args.get("group") or "").strip()
     # a label's card stands loose unless the call names its group, as any card does, and a thread's fork's label and
     # its card are the thread's (call); a card the label has already stays where it is (concepts.label_card)
-    target = None if orienting else _group_id(ctx, group, []) if group else default_group(ctx)
+    target = _group_id(ctx, group, []) if group else default_group(ctx)
     question = _question(args.get("question")) or None
     within = args.get("within") or None
     if isinstance(within, str):
@@ -2600,7 +2459,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
-                                    card=not orienting, within=within, show=bool(args.get("show")),
+                                    within=within, show=bool(args.get("show")),
                                     unit=LABEL_UNITS.get(unit_arg))
     if s.get("asked"):
         # a big prompt label waits for the analyst's choice in the page (concepts.ask_first, label_asks.py)
@@ -2612,7 +2471,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if s.get("cell"):
             line += f" The label's card is [[card:{s['cell']}]]."
         return ok(line)
-    if s.get("partial") and not orienting and ctx.session is None:
+    if s.get("partial") and ctx.session is None:
         concepts.tell_when_done(ctx.c, str(s["concept"]))
     # the counts as thimble.labels() and the label's panel read the rows: each record the analyst set to another value
     # counted under that value (live check term-fix5, new quirk 5: a fork took the one row a verdict moved for a bug)
@@ -2648,7 +2507,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         line += " " + hint("apply_label-unchanged")
     if s.get("partial"):
         line += (" The run goes on in the background, and a label_done event comes when it finishes."
-                 if not orienting and ctx.session is None else
+                 if ctx.session is None else
                  " The run goes on in the background; the counts are final when its card stops spinning.")
     if s.get("cell"):
         line += f" The label's card is [[card:{s['cell']}]]."
@@ -2733,13 +2592,11 @@ async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """A proposal for a view: what the analyst sees in it (`description`), what they do with it (`task`) and the files
     it reads (`claims`), which a `thimble:view-builder` builds at once (views.propose, dev.start_build), reading those
-    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row. Since
-    0.8.0 the orientation proposes no views (it does not have this tool); thimble's own view proposals wait for the
-    analyst's Accept (views.offer). A claim that matches no corpus file is refused, naming real paths near it; where
-    views cannot be built the proposal fails at once. A proposal from main's shim is one the analyst asked for: its result is
-    the exact Agent call that starts its builder, which main makes (`## start_job-subagent`), and the browser opens the
-    view once built. A thread's fork's proposal is built the same way, by main's Agent call on a `start_agent` event
-    (_ask_main), since the fork may not make it."""
+    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row.
+    thimble's own view proposals wait for the analyst's Accept (views.offer). A claim that matches no corpus file is
+    refused, naming real paths near it; where views cannot be built the proposal fails at once. A proposal of main's is
+    one the analyst asked for: the server starts its builder (`## agent-started`), and the browser opens the view once
+    built. A thread's fork's proposal is built when the server starts its builder with the fork's call (_fork_start)."""
     from . import views
 
     claims = args.get("claims")
@@ -2756,13 +2613,8 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         near = " ".join(hint("propose_view-near", claim=g, paths=", ".join(p)) for g, p in unmatched.items() if p)
         return err(" ".join(hint("propose_view-unmatched", claims=", ".join(unmatched), near=near).split()))
     typed = ctx.session is None  # main's own call: the build is main's Agent call
-    fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: main makes that Agent call (_ask_main)
+    fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: the server starts it (_fork_start)
     values = {k: str(args[k]) for k in ("model", "effort") if args.get(k)}
-    if typed:
-        from . import subagents  # noqa: PLC0415
-
-        if (before := subagents.refusal_before(ctx.c)) is not None:
-            return err(before.reason or f"propose_view: {before.kind}")
     prop = await _maybe_await(views.propose(ctx.c, name=str(args["name"]).strip(),
                                             description=str(args["description"]).strip(), claims=claims,
                                             task=str(args["task"]).strip(), proposed_by=ctx.created_by,
@@ -2777,7 +2629,7 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=prop.get("slug"), why=why))
     if fork is not None:
         what = f"the view {prop.get('name')} (view:{prop.get('slug')})"
-        return await _fork_build(ctx, str(prop["slug"]), what, fork, values)
+        return await _fork_build(ctx, str(prop["slug"]), what, values)
     if typed:
         return await _typed_build(ctx, str(prop["slug"]), values)
     if prop.get("revised"):  # a view built under this name is changed in place (views.revise)
@@ -2786,16 +2638,14 @@ async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 
 async def _typed_build(ctx: Ctx, slug: str, values: dict[str, str] | None = None) -> ToolResult:
-    """The build of the view `slug` main asked for: its pending start and the exact Agent call main makes
-    (`## start_job-subagent`), or the refusal (dev.start_build)."""
+    """The build of the view `slug` main asked for: the server starts its builder (`## agent-started`), or the refusal
+    (dev.start_build)."""
     from . import dev  # noqa: PLC0415
 
     ans = await dev.start_build(ctx.c, slug, "typed", values or None, call=ctx.tool_use_id)
-    if ans.get("program"):
-        return ok(hint("view-changing", view=slug, slug=slug))
     if ans.refused or "input" not in ans:
         return err(ans.reason or f"propose_view: {ans.kind}")
-    return ok(hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
+    return ok(hint("agent-started"))
 
 
 async def _fork_of(ctx: Ctx, *, wait: bool = True) -> dict[str, Any] | None:
@@ -2841,87 +2691,36 @@ def _with_anchor(body: str, thread: dict[str, Any]) -> str:
     return f"{body}\n\n{hint('ticket-from-thread', thread=title, anchor=chr(10).join(lines))}"
 
 
-async def _fork_build(ctx: Ctx, slug: str, what: str, thread: dict[str, Any],
-                      values: dict[str, str] | None = None) -> ToolResult:
-    """The build of the view `slug` a thread's fork asked for: a typed start, as main's own (_typed_build), whose Agent
-    call main makes on a `start_agent` event (_ask_main)."""
+async def _fork_build(ctx: Ctx, slug: str, what: str, values: dict[str, str] | None = None) -> ToolResult:
+    """The build of the view `slug` a thread's fork asked for: a typed start, as main's own (_typed_build), which the
+    server starts with the fork's call (_fork_start)."""
     from . import dev  # noqa: PLC0415
 
     ans = await dev.start_build(ctx.c, slug, "typed", values or None)
-    if ans.get("program"):
-        return ok(hint("view-changing", view=slug, slug=slug))
-    return await _ask_main(ctx, ans, what=what, thread=thread, view=slug)
+    return await _fork_start(ctx, ans, what=what)
 
 
-DEV_AGENT = "the dev agent"  # the agent main starts for a thread's fork's ticket or view (_ask_main)
+DEV_AGENT = "the dev agent"  # the agent thimble starts for a thread's fork's ticket or view (_fork_start)
+# why a typed start a thread's fork asked for did not start where Claude Code runs main, which does not let a fork
+# start subagents
+FORK_NO_START = "{agent} did not start: a thread's fork cannot start thimble's agents in this session"
 
 
-async def _ask_main(ctx: Ctx, ans: Any, *, what: str, thread: dict[str, Any], agent: str = DEV_AGENT,
-                    view: str | None = None) -> ToolResult:
-    """A typed start a thread's fork asked for, by its start_orientation, propose_view, file_dev_ticket, start_writing
-    or run_check. Claude Code does not let a fork start subagents, so main makes the Agent call: the request keeps the
-    id of a `start_agent` event (subagents.ask_main), which carries the exact call and names what was filed (`what`),
-    the agent main starts (`agent`), the view and the thread's anchor, and wakes main as any event does, so main starts
-    the agent with no step of the analyst's, judged by auto mode as main's own start is. A start for the same agent that
-    main has not made yet is replaced by this one. The fork is told to say in one line in the thread that it is filed
-    and main is starting the agent (`## start_agent-fork`). A refused start, or a session that does not listen, is an
-    error result."""
-    from . import runtime, subagents  # noqa: PLC0415
+async def _fork_start(ctx: Ctx, ans: Any, *, what: str, agent: str = DEV_AGENT) -> ToolResult:
+    """A typed start a thread's fork asked for, by its propose_view, file_dev_ticket, start_writing or run_check, which
+    the server starts with the fork's call (runtime.py), so the analyst has nothing to do. The fork is told to say in
+    one line in the thread that it is filed and the agent runs (`## agent-started-fork`). A refused start is an error
+    result, and so is one where Claude Code runs main, which does not let a fork start subagents: its request is
+    refused."""
+    from . import subagents  # noqa: PLC0415
 
     if ans.refused or "input" not in ans:
         return err(ans.reason or f"{agent} did not start: {ans.kind}")
-    if runtime.enabled() and ans.started:  # the server started it with the fork's call (runtime.py)
-        return ok(hint("start_agent-fork", what=what, agent=agent))
-    rid, event_id = str(ans["request"]), secrets.token_hex(4)
-    ask = {"what": what, "agent": agent, "thread": str(thread.get("title") or "") or None, "view": view,
-           "anchor": thread.get("anchor")}
-    subagents.ask_main(ctx.c, rid, event_id, ask=ask, **({"from_thread": thread["id"]} if thread.get("id") else {}))
-    try:
-        _post_start_agent(ctx.c, event_id, ask, ans["input"])
-    except HTTPException as e:
-        subagents.refuse(ctx.c, rid, _detail_text(e.detail), subagents.NO_CALL)
-        return err(f"{agent} did not start: {_detail_text(e.detail)}")
-    return ok(hint("start_agent-fork", what=what, agent=agent))
-
-
-def _post_start_agent(c: str, event_id: str, ask: dict[str, Any], inp: dict[str, Any]) -> None:
-    """The `start_agent` event `event_id`: the exact Agent call `inp` main makes (`## start_agent-event`), and as its
-    attributes what was filed, the view and the thread with its anchor (`ask`, as _ask_main gives it). Its body is
-    never cut (events.build_note). HTTPException when no session listens."""
-    from . import events  # noqa: PLC0415
-
-    name, agent = str(ask.get("thread") or ""), str(ask.get("agent") or DEV_AGENT)
-    text = hint("start_agent-event", thread=f"the thread {name}" if name else "a side thread", what=ask.get("what"),
-                agent=agent, input=json.dumps(inp, ensure_ascii=False))
-    payload = {"text": text, "filed": ask.get("what"), "view": ask.get("view"), "from_thread": name or None,
-               "anchor": ask.get("anchor")}
-    events.post(c, events.START_AGENT, payload, event_id=event_id,
-                line=events.terminal_line(events.START_AGENT, "", {**payload, "agent": agent}))
-
-
-def ask_main_again(c: str, rid: str, call: str) -> bool:
-    """R3 for a start a `start_agent` event asked main for (session._no_call): main's turn that got the event `call`
-    ended without the Agent call. That happens when the event came in the same turn as the end-the-turn note of an
-    earlier start (`## agent-launched`), and main ended the turn as the note says. The event is posted once more, under
-    a new id that the request keeps (subagents.ask_again), so main gets it in a turn of its own; a turn that misses it
-    again refuses the start. False when it could not be posted (the request keeps no `ask`, or no session listens), and
-    the caller refuses the start as before; True when it was posted, or when the request moved on meanwhile (claimed,
-    replaced, or posted again by another process), so nothing is refused."""
-    from . import subagents  # noqa: PLC0415
-
-    event_id = secrets.token_hex(4)
-    r = subagents.ask_again(c, rid, call, event_id)
-    if r is None:
-        return True
-    if not isinstance(r.get("ask"), dict) or not r.get("input"):
-        return False
-    try:
-        _post_start_agent(c, event_id, r["ask"], r["input"])
-    except HTTPException as e:
-        log.info("%s: the start %s main missed was not asked for again: %s", c, rid, _detail_text(e.detail))
-        return False
-    log.info("%s: main's turn ended without the start %s; it is asked for again in the event %s", c, rid, event_id)
-    return True
+    if not ans.started:
+        why = FORK_NO_START.format(agent=agent)
+        subagents.refuse(ctx.c, str(ans["request"]), why, subagents.NO_CALL)
+        return err(why)
+    return ok(hint("agent-started-fork", what=what, agent=agent))
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
@@ -2932,7 +2731,7 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if not body:
         return err("file_dev_ticket: `body` is required")
     typed = ctx.session is None  # main's own call: the change is main's Agent call
-    fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: main makes that Agent call (_ask_main)
+    fork = await _fork_of(ctx) if typed else None  # a thread's fork's call: the server starts it (_fork_start)
     if fork:
         body = _with_anchor(body, fork)
     if view := " ".join(str(args.get("view") or "").split()):
@@ -2953,7 +2752,7 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             return ok(hint("propose_view-cannot-build", view=prop.get("name"), slug=slug, why=why))
         if fork is not None:
             what = f"the change to the view {prop.get('name') or slug} (view:{slug})"
-            return await _fork_build(ctx, slug, what, fork)
+            return await _fork_build(ctx, slug, what)
         if typed:
             return await _typed_build(ctx, slug)
         return ok(hint("view-changing", view=prop.get("name"), slug=slug))
@@ -2962,26 +2761,22 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if not fixes.problem():
         # a change to thimble's code is a fix of the person's thimble, which they ask for with /thimble-fix
         return ok(hint("file_dev_ticket-fix"))
-    fn = _optional("dev", "file_ticket")
-    if fn is None:
-        return _not_available("file_dev_ticket", "dev", "file_ticket")
     from . import dev  # noqa: PLC0415 — dev imports this module's callers
 
     source = ANALYST if ctx.actor == ANALYST else ctx.actor
-    rec = await _maybe_await(fn(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source, start=False,
-                                route="typed"))
+    rec = await _maybe_await(dev.file_ticket(ctx.c, title, body, urgent=bool(args.get("urgent")), source=source,
+                                             start=False, route="typed"))
     label = dev._label(rec)
-    # main's ticket: prepared, then the exact Agent call that starts its agent, which auto mode judges (dev.start_typed);
-    # a thread's fork's, whose Agent call main makes (_ask_main), keeps no call of the fork's
+    # main's ticket: prepared, then the server starts its agent (dev.start_typed); a thread's fork's keeps no call of
+    # the fork's (_fork_start)
     ans = await dev.start_typed(rec, call=None if fork is not None else ctx.tool_use_id)
     if ans.get("held"):
         return ok(hint("file_dev_ticket-waits", label=label, running=str(ans.get("running") or "another ticket")))
     if ans.refused or "input" not in ans:
         return ok(hint("file_dev_ticket-cannot-run", label=label, why=ans.reason or str(ans.kind or "")))
     if fork is not None:
-        return await _ask_main(ctx, ans, what=f"{label}: {title}", thread=fork)
-    return ok(hint("file_dev_ticket-start", label=label, title=title,
-                   start=hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False))))
+        return await _fork_start(ctx, ans, what=f"{label}: {title}")
+    return ok(hint("file_dev_ticket-start", label=label, title=title, start=hint("agent-started")))
 
 
 
@@ -3003,101 +2798,17 @@ async def _h_fix_thimble(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return ok(hint("fix_thimble-round" + ("-on" if rec.get("change") else ""), fix=name))
     return ok(hint("fix_thimble-new", fix=name))
 
-# --------------------------------------------------------------------------- HTTP
+# --------------------------------------------------------------------------- callers
 
 
-class CallBody(BaseModel):
-    args: dict[str, Any] = {}
-    actor: str = ANALYST
-    cwd: str | None = None  # the caller's directory (the shim's THIMBLE_CWD); mapped to a workspace
-    workspace: str | None = None  # or the workspace by name
-    notebook: str | None = None
-    session: str | None = None  # the shim's THIMBLE_SESSION: `orient`, `writer:<doc>` or `critique:orient`
-    session_token: str | None = None  # the shim's THIMBLE_SESSION_TOKEN, which proves `session` (hook_auth)
-    tool_use_id: str | None = None  # Claude Code's id of the call (Ctx.tool_use_id)
-
-
-@router.get("/tools")
-async def list_route(role: str = ANALYST) -> "builtins.list[dict[str, Any]]":
-    try:
-        return list(role)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-def _workspace_of(cwd: str | None, workspace: str | None) -> str:
-    c = workspace or workspace_for_cwd(cwd)
-    if not c:
-        raise HTTPException(400, f"{cwd or '(no cwd)'} is not inside a corpus thimble knows; say /thimble to register it")
-    try:
-        config.workspace_path(c)  # validated, not created: these are GETs
-    except ValueError as e:
-        raise HTTPException(404, str(e))
-    return c
-
-
-@router.get("/tools/holdings")
-async def holdings_route(cwd: str | None = None, workspace: str | None = None) -> dict[str, Any]:
-    """{workspace, cards, labels, documents, chats, text}: what the workspace holds, for /thimble's resume line."""
-    c = _workspace_of(cwd, workspace)
-    return await asyncio.to_thread(holdings, c)
-
-
-@router.post("/tools/{name}")
-async def call_route(name: str, body: CallBody, request: Request) -> dict[str, Any]:
-    """Run one tool for the shim: {content, is_error}. 404 for a tool the registry does not have, 400 when the caller's
-    directory belongs to no corpus; everything else the model should read is an is_error result, never an HTTP error.
-    A tool marked drop_stops is cancelled when the shim drops the request (until_dropped). The call runs as the session
-    it names only with a token that proves it (hook_auth.session_proven): without one it runs as the analyst's, unless
-    it comes from a workspace's own folder, and with a wrong one it does not run. A call through main's shim runs as
-    the agent of thimble's that made it (_as_caller)."""
-    if not known(name):
-        raise HTTPException(404, f"no such tool: {name}")
-    from . import harness, hook_auth  # noqa: PLC0415 — harness imports agent_session's helpers lazily
-
-    agent = hook_auth.agent_of(request.scope)
-    run = harness.by_token(agent) if agent else None
-    if agent and run is None:
-        raise HTTPException(401, "the agent's token has ended")
-    if run is not None:  # a program's call runs as its role's session, in its workspace and its thread (harness.py)
-        return await harness.tool_call(run, {"name": name, "args": body.args})
-    # a session thimble starts in its workspace's own folder (the orientation's, which runs in its work folder so the
-    # corpus folder can be denied to Bash whole) reaches its workspace from that folder, before any corpus that holds it
-    session = body.session or None
-    folder = config.workspace_for_folder(body.cwd) if session else None
-    if folder and not body.session_token:  # a session there without a token, as one an earlier thimble started
-        return err(hint("session-unproven", tool=name)).as_dict()
-    c = body.workspace or folder or workspace_for_cwd(body.cwd)
-    if not c:
-        raise HTTPException(400, f"{body.cwd or '(no cwd)'} is not inside a corpus thimble knows; say /thimble to register it")
-    if session and not hook_auth.session_proven(c, session, body.session_token or ""):
-        if body.session_token:
-            return err(hint("session-unproven", tool=name)).as_dict()
-        log.info("a call of %s names the session %s without its token; it runs as the analyst's", name, session)
-        session = None
-    if session is None:  # main's shim: main's own call, or one of thimble's agents', told apart by its caller
-        refused, session = await _as_caller(c, name, body.tool_use_id or None)
-        if refused:
-            return err(refused).as_dict()
-    work = call(c, name, body.args, actor=body.actor, notebook=body.notebook, session=session,
-                tool_use_id=body.tool_use_id or None)
-    if REGISTRY[canonical(name)].drop_stops:
-        res = await until_dropped(request.receive, work, name)
-        return (res or err(f"{name} was stopped: its caller dropped the call")).as_dict()
-    return (await work).as_dict()
-
-
-# the start tools, whose result is an Agent call for the caller to make: a thread's fork may not make one, since
-# Claude Code tells its forks not to start subagents; another subagent of main's makes the call itself
-# (subagents.typed_caller). A fork's start_orientation, propose_view, file_dev_ticket, start_writing and run_check,
-# which start the orientation, a view's builder, a code ticket's agent, a writer or a check's runs, run as main's
-# calls, and main makes their Agent call (_ask_main), so a request the analyst makes in a thread reaches its agent with
-# no step of theirs.
+# A thread's fork's propose_view, file_dev_ticket, start_writing and run_check, which start a view's builder, a code
+# ticket's agent, a writer or a check's runs, run as main's calls, and the server starts their agent with the fork's
+# call (_fork_start), so a request the analyst makes in a thread reaches its agent with no step of theirs.
 async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
-    """(why the call is refused, '' when it runs; the session it runs as) for a call through main's shim: the key of the
-    agent of thimble's that made it (subagents.caller, from the caller hook's line, else the transcript that holds the
-    call), or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`. A thread's fork's call runs as main's own (_fork_of)."""
+    """(why the call is refused, '' when it runs; the session it runs as) for a call the runtime runs: the key of the
+    agent of thimble's that made it (subagents.caller, from its caller line, else the transcript that holds the call),
+    or None for main's own. A call its caller may not make is refused (subagents.allowed). A thread's fork's call runs
+    as main's own (_fork_of)."""
     from . import subagents  # noqa: PLC0415 — it imports this module
 
     canon = canonical(name)

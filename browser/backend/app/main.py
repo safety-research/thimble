@@ -7,7 +7,6 @@ import contextlib
 import importlib
 import logging
 import os
-import shutil
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -141,29 +140,21 @@ for _name in ("uvicorn.access", "thimble.timing"):
 
 ROUTER_MODULES = [
     # storage and the corpus
-    "corpus", "transcripts", "source_keys", "source_events", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
-    "card_libs", "extensions",
-    # the agent engine (main, threads, background agents) and the tools they call
-    "agents", "tools", "plans", "jobs", "verify", "fixes",
+    "corpus", "transcripts", "source_keys", "source_events", "pdfs", "ledger", "investigation", "notebook", "concepts", "views",
+    "card_libs",
+    # the agent engine (main, threads, background agents)
+    "agents", "plans", "jobs", "verify", "fixes",
     # documents, and the report checks that comment on them (their runs shut down with the server); the citation
     # checks' Repair
     "report_types", "exports", "checks", "canvas_comments", "marks",
-    # the developer agent, telemetry, the workspace export, the problem report, Share on a fix
-    "dev", "telemetry", "export", "feedback_routes", "fix_share",
+    # the developer agent, telemetry, the workspace export, the problem report
+    "dev", "telemetry", "export", "feedback_routes",
     # undo and redo over the workspace's cards and documents
     "undo",
-    # browser events to the analyst's Claude Code session, and the mirror of its transcript (listed for its shutdown)
+    # browser events to main, and the mirror of its transcript (listed for its shutdown)
     "events", "session",
-    # the plugin's hooks module in main's session, which starts, messages and stops thimble's subagents on a click
-    "module_bridge",
-    # thimble's agents as subagents of main (their hooks' routes, Start it), the permission requests of an extension's
-    # programs and a code ticket's own questions (shut down with the server), and the orientation's calls, stored whole
-    # and citable
-    "subagents", "agent_session", "calls", "write_session",
-    # the programs an extension runs a role with (an Agent SDK program or a command), and their sessions
-    "harness",
-    # the orientation's, its critic's and the writers' tray entries in the analyst's terminal
-    "tray",
+    # thimble's agents (Start it) and a code ticket's own questions (shut down with the server)
+    "subagents", "agent_session", "write_session",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
     # where the check's records and fixes are kept (the Undo of a fix); a card drawn taller than the canvas shows,
     # which its author is told
@@ -188,11 +179,9 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("THIMBLE_ALLOWED_HOSTS", "127
 # Request timing: a request slower than this many ms is logged at WARNING, every other one at DEBUG. Every response
 # carries `Server-Timing: app;dur=<ms>`, so the browser's Network panel shows the backend's own time.
 SLOW_REQUEST_MS = float(os.environ.get("THIMBLE_SLOW_MS", "300"))
-# the watcher's long polls (events.py), the hooks module's (module_bridge.py, whose hello may wait for a rekey) and
 # thimble-browser's wait for a browser that wants a link (ui_link_wanted), slow by design: logged at DEBUG like a fast
 # request
-LONG_POLLS = ("/api/events/pull", "/api/events/permission", "/api/module/next", "/api/module/hello",
-              "/api/ui/link-wanted")
+LONG_POLLS = ("/api/ui/link-wanted",)
 LINK_TICK_S = 0.25  # how often GET /api/ui/link-wanted looks whether a browser wants a link
 timing_log = logging.getLogger("thimble.timing")
 
@@ -223,28 +212,6 @@ class RequestTiming:
             await send(message)
 
         await self.app(scope, receive, send_timed)
-
-
-class OldEventRoutes:
-    """Pure ASGI middleware, outermost: a request on a route thimble 0.5.0 named for Claude Code channels, which a
-    session started before the update still calls, goes on as its new route (events.OLD_PATHS), so every check and the
-    router see the new path. Each such route is logged once."""
-
-    def __init__(self, app) -> None:
-        self.app = app
-        self.seen: set[str] = set()
-
-    async def __call__(self, scope, receive, send) -> None:
-        from . import events  # noqa: PLC0415
-
-        new = events.OLD_PATHS.get(scope.get("path", "")) if scope["type"] == "http" else None
-        if new is not None:
-            if scope["path"] not in self.seen:
-                self.seen.add(scope["path"])
-                log.info("%s answers as %s: a Claude Code session started before the update to thimble 0.6.0 calls "
-                         "it; restarting that session loads the new plugin", scope["path"], new)
-            scope = {**scope, "path": new, "raw_path": new.encode("latin-1")}
-        await self.app(scope, receive, send)
 
 
 class CompleteStreams:
@@ -339,51 +306,14 @@ async def _lifespan(app: FastAPI):
         from . import cli
 
         cli.ensure_home()
-        st = cli.read_state()
-        if st and not st.get("token"):  # a record an older supervisor wrote: the hooks' token (hook_auth.py)
-            cli.write_state(st)
         hook_auth.ensure_session_key()
         config.private_dir(config.WORKSPACES_DIR)
     except Exception:
         log.exception("making thimble's home and workspaces private failed")
-    # the extensions thimble ships added: those it ships on, on its first run (extensions.ship)
-    try:
-        from . import extensions
-
-        for name in extensions.ship():
-            log.info("extension %s added, renamed or updated from thimble's own", name)
-    except Exception:
-        log.exception("adding the extensions thimble ships failed")
-    # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
-    try:
-        config.migrate_registry()
-    except Exception:
-        log.exception("bringing the install tree's registry records into %s failed", config.DATA_DIR)
     from . import userconf
 
     if why := userconf.problem():
         log.warning("%s; no agent starts until it is fixed", why)
-    # what older versions left in Claude Code's files and in the workspaces, taken out once: the keys they wrote into
-    # folders' settings.local.json (claude_changes.cleanup), each workspace's own Claude Code config dir, and the
-    # records of their per-file scratch mirrors in thimble's home (a mirror itself goes at its kernel's next start,
-    # notebook.mirror_corpus)
-    try:
-        from . import claude_changes, cli
-
-        for line in claude_changes.cleanup():
-            log.info("%s", line)
-        for old in config.WORKSPACES_DIR.glob("*/.claude-config"):
-            shutil.rmtree(old, ignore_errors=True)
-        shutil.rmtree(cli.home() / "mirrors", ignore_errors=True)
-    except Exception:
-        log.exception("removing what an older thimble left failed")
-    # the views an older thimble kept in a workspace's views/ moved into its local extension, once
-    try:
-        from . import views
-
-        views.migrate_workspaces()
-    except Exception:
-        log.exception("moving the workspaces' views into their local extensions failed")
     # the short temp folders of workspaces deleted by hand or while no server ran (runtime_cc.sweep_workspace_tmps)
     try:
         from . import runtime_cc
@@ -410,31 +340,27 @@ async def _lifespan(app: FastAPI):
 
 
 async def _startup() -> None:
-    """Cross-module wiring that needs every router imported. Never fails the start: a module that is absent or raises is
-    logged and skipped.
+    """Cross-module wiring that needs every router imported. Never fails the start: a step that raises is logged and
+    skipped.
 
     dev's restart bookkeeping runs now: a ticket left `running` by a restart is marked failed and a pending restart.json
     is announced. The announcement runs as a task, since it waits for the kernel reconnect in the routers' lifespans,
     which start after this returns.
     """
-    dev = sys.modules.get("app.dev")
-    if dev is not None:
-        try:
-            recover = getattr(dev, "_recover", None)
-            if recover is not None:
-                recover()
-            announce = getattr(dev, "announce_restart", None)
-            if announce is not None:
+    from . import dev  # noqa: PLC0415
 
-                async def announce_after_start() -> None:
-                    try:
-                        await announce()
-                    except Exception:
-                        log.exception("restart announcement failed")
+    try:
+        dev._recover()
 
-                asyncio.get_running_loop().create_task(announce_after_start(), name="dev-announce-restart")
-        except Exception:
-            log.exception("dev startup wiring failed")
+        async def announce_after_start() -> None:
+            try:
+                await dev.announce_restart()
+            except Exception:
+                log.exception("restart announcement failed")
+
+        asyncio.get_running_loop().create_task(announce_after_start(), name="dev-announce-restart")
+    except Exception:
+        log.exception("dev startup wiring failed")
     # a server that re-exec'd itself after a dev apply keeps its pid but runs the applied tree; server.json's
     # `source_fingerprint` must describe that tree, or the next `ensure` restarts it again for the same change
     try:
@@ -448,15 +374,12 @@ async def _startup() -> None:
 
 # what a new sign-in of a browser shows (signed_in), in each workspace whose main may act for it, at {at} (HH:MM)
 SIGNED_IN_NOTICE = "A browser signed in to thimble at {at}. If it was not you, click Sign it out."
-SIGNED_IN_LINE = ("thimble: a browser signed in to thimble at {at}. If it was not you, click Sign it out on its notice in "
-                  "thimble's page.")
 
 
 def signed_in(ws: object, browser: str) -> None:
-    """A browser signed in with a link's code (hook_auth.claim): each workspace it may act in hears of it twice, as a
-    notice with Sign it out (sign-in:<browser>) and as a line under main's next reply in its terminal
-    (session.tell_terminal), which the browser cannot hide. The workspaces are the one the link named, when it is
-    registered, and each whose main this server follows. The browser that signed in shows no notice of its own sign-in
+    """A browser signed in with a link's code (hook_auth.claim): each workspace it may act in hears of it as a notice
+    with Sign it out (sign-in:<browser>). The workspaces are the one the link named, when it is registered, and each
+    whose main this server follows. The browser that signed in shows no notice of its own sign-in
     or of one before it (its id and when it signed in, GET /api/ui/paired); a browser signed in before it shows this
     one."""
     from . import notices, session  # noqa: PLC0415
@@ -474,7 +397,6 @@ def signed_in(ws: object, browser: str) -> None:
     for c in places:
         notices.post(c, kind="sign-in", key=f"sign-in:{browser}", text=SIGNED_IN_NOTICE.format(at=at),
                      action={"label": "Sign it out", "do": "sign-out", "slug": browser})
-        session.tell_terminal(c, SIGNED_IN_LINE.format(at=at))
     log.warning("a browser signed in to thimble (%s)", name or "the start page")
 
 
@@ -496,17 +418,10 @@ def create_app() -> FastAPI:
     app.add_middleware(SecurityHeaders)  # outside the two checks, so their refusals carry the headers too
     app.add_middleware(RequestTiming)  # times the whole stack
     app.add_middleware(CompleteStreams)  # sees every response's last message
-    app.add_middleware(OldEventRoutes)  # the checks see the new path
     app.add_middleware(BrowserPath)  # added last = outermost: /b/<key>/api/... goes on as /api/... (hook_auth)
 
     for name in ROUTER_MODULES:
-        try:
-            mod = importlib.import_module(f"app.{name}")
-        except ModuleNotFoundError as e:
-            if e.name == f"app.{name}":
-                log.warning("router module app.%s not present", name)
-                continue
-            raise
+        mod = importlib.import_module(f"app.{name}")
         router = getattr(mod, "router", None)
         if router is None:
             log.debug("app.%s has no `router` (listed for its shutdown hook)", name)

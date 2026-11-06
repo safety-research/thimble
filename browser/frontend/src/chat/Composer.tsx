@@ -1,8 +1,8 @@
 // The chat's composer: the shared composer (components/Composer) with main's model line at its foot (ModelLine): its
 // model as a menu (`models`, `onModel`), its effort and its fast mode, which main's next turn runs with
 // (events.model_route, events.effort_route, events.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
-// (`chip`, RoleChip). A thread whose run the browser can stop (main's turn, a side thread's fork, the orientation, a
-// writer, a check's run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the composer
+// (`chip`, RoleChip). A thread whose run the browser can stop (main's turn, a side thread's fork, a writer, a check's
+// run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the composer
 // carries its Stop, beside the send square once text is typed (ComposerFrame), as Esc is in Claude Code. Each thread
 // keeps its own draft. Text offered
 // from outside the chat (chat/pending offerDraft: a failed fix's Ask Claude, a failed view's Send to thimble-fix)

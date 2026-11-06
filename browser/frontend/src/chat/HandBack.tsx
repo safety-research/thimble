@@ -1,4 +1,4 @@
-// The end of an orientation's or a writer's thread that sent its summary to main at its end (its SubagentHandback
+// The end of a writer's thread that sent its summary to main at its end (its SubagentHandback
 // call): one quiet line, `Summary sent to main`, with the summary folded under it. A side thread's answer never goes to
 // main from the browser: main gets only each fork's closing `↳` line.
 import { useState } from 'react'
@@ -8,7 +8,7 @@ import { Note } from './Notes'
 
 export const SUMMARY_SENT = 'Summary sent to main'
 
-/** The end of an orientation's or a writer's thread that sent its summary to main (ChatPanel orientMessages): one
+/** The end of a writer's thread that sent its summary to main (ChatPanel sessionMessages): one
  * quiet line, which a click opens on the summary as the thread's message, and folds again. `anchor` is the summary's
  * data-anchor, so a ⌘-click on it starts a thread there. */
 export function HandedBack({ text, anchor }: { text: string; anchor?: string }) {

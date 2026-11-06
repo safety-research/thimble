@@ -43,8 +43,6 @@ can hold several chats of main (a workspace from before sessions, or the registe
 makes one main, and main's conversation (convs/main-<sid>.<engine>.json) and its transcript are that chat's again.
 runtime/main.json names the chat that is main now; chats_in lists them. When the workspace's folder goes (moved aside
 or deleted, ledger), forget drops its runtime, so the next ensure reads the folder in its place.
-
-THIMBLE_RUNTIME=off turns this off (0.8's own tests); it is on otherwise.
 """
 from __future__ import annotations
 
@@ -68,7 +66,6 @@ from . import nofollow  # standard library only
 
 log = logging.getLogger("thimble.runtime")
 
-ENV = "THIMBLE_RUNTIME"
 DIR = "runtime"
 MAIN = "main"
 FORK_TYPE = "fork"
@@ -94,10 +91,6 @@ REWOUND = ("Rewound to before your message. Claude no longer sees it or anything
            "stay as they are.")
 
 
-def enabled() -> bool:
-    return os.environ.get(ENV, "on").strip().lower() not in ("off", "0", "no", "false")
-
-
 def engine() -> str:
     """'api' (an API key or WIF), 'cc' (Claude Code sign-in), or '' before a choice."""
     from . import claude_access  # noqa: PLC0415
@@ -117,7 +110,7 @@ def network() -> str:
 
 def uses_api() -> bool:
     """Whether model calls go to the Messages API from this process (model.structured)."""
-    return enabled() and engine() != "cc"
+    return engine() != "cc"
 
 
 def shell_temp(c: str) -> Path:
@@ -622,7 +615,7 @@ class Space:
             # main and its thread forks write the corpus, as Claude Code does in its folder, unless the analyst turned
             # "Claude can edit files in this folder" off in Settings (ledger.corpus_edits)
             edits: bool | None = ledger.corpus_edits(self.c)
-            system = events.session_prompt(str(self.corpus), terminal=False, edits=edits)
+            system = events.session_prompt(str(self.corpus), edits=edits)
             names = [s.name for s in tools.REGISTRY.values()
                      if tools.ANALYST in s.roles and (not s.sessions or None in s.sessions)
                      and (labels or s.name not in labels_off.TOOLS)]
@@ -792,8 +785,8 @@ def chats_in(d: Path) -> list[dict[str, Any]]:
 
 def open_chat(c: str, chat: str) -> bool:
     """Space.switch from a request's thread (the register route): `chat` is "new" or a chat's id. Waits for the switch;
-    False when the runtime is off or did not change chats. ValueError for an unknown id."""
-    if not enabled() or _loop is None or not _loop.is_running():
+    False when the server's loop is not running or it did not change chats. ValueError for an unknown id."""
+    if _loop is None or not _loop.is_running():
         return False
 
     async def go() -> bool:
@@ -857,8 +850,8 @@ async def forget(c: str) -> None:
 
 
 def ensure_soon(c: str) -> None:
-    """ensure(c) on the server's loop, from any thread; nothing when the runtime is off."""
-    if not enabled() or _loop is None or not _loop.is_running():
+    """ensure(c) on the server's loop, from any thread; nothing when the loop is not running."""
+    if _loop is None or not _loop.is_running():
         return
 
     def go() -> None:
@@ -1054,17 +1047,16 @@ async def abort_main(c: str) -> bool:
 def after_stop(c: str) -> None:
     """The analyst's Stop of main is told (agents.interrupt_route: the stopped turn ended in main's chat, with its
     note), or a rewind is done (rewind_main): what waited for the stopped turn, such as a message the analyst sent
-    while it ran (after a rewind, what it did not take back), is main's next turn. Nothing when the runtime is off or
-    nothing waits."""
-    sp = _spaces.get(c) if enabled() else None
+    while it ran (after a rewind, what it did not take back), is main's next turn. Nothing when nothing waits."""
+    sp = _spaces.get(c)
     if sp is not None and sp.main.queue and not sp.main.running:
         sp.main.task = _spawn_task(_main_loop(sp), f"main:{c}")
 
 
 def unread(c: str) -> list[dict[str, str]]:
     """The analyst's messages that came while main's turn ran and that main has not read yet, oldest first, for main's
-    chat (agents._main_state): {event, text}. Empty when the runtime is off."""
-    sp = _spaces.get(c) if enabled() else None
+    chat (agents._main_state): {event, text}."""
+    sp = _spaces.get(c)
     if sp is None:
         return []
     out = []
@@ -1416,10 +1408,8 @@ def _ended(conv: Conv, status: str, report: str) -> None:
 
 
 async def module_op(c: str, op: str, args: dict[str, Any]) -> dict[str, Any]:
-    """What thimble's plugin module did in main's session (module_bridge.request), done here: an Answer."""
+    """An op module_bridge.request asks for, done here: an Answer."""
     sp = ensure(c)
-    if op == "register":
-        return {"ok": True}
     if op == "spawn":
         return _spawn_agent(sp, args)
     if op == "send":
@@ -1530,12 +1520,11 @@ async def _lifespan(app: Any):
 
     global _loop
     _loop = asyncio.get_running_loop()
-    if enabled():
-        log.info("%s", start_line())
-        for p in sorted(config.WORKSPACES_DIR.glob(f"*/{DIR}/main.json")):
-            with contextlib.suppress(Exception):
-                ensure(p.parent.parent.name)
-        _loop.run_in_executor(None, llm.warm)  # so the first message does not wait for the SDK's import
+    log.info("%s", start_line())
+    for p in sorted(config.WORKSPACES_DIR.glob(f"*/{DIR}/main.json")):
+        with contextlib.suppress(Exception):
+            ensure(p.parent.parent.name)
+    _loop.run_in_executor(None, llm.warm)  # so the first message does not wait for the SDK's import
     yield
     # this router is included last, so its lifespan ends first, while the mirror and the modules still run
     await stop_all()

@@ -1,163 +1,63 @@
 // @vitest-environment jsdom
-// The view proposal above the chat's composer (src/chat/ProposalCard.tsx): the oldest open proposal (a `suggested` row
-// with `offered`), with its name and what it shows in view, never behind a click, and not the task it names; Accept and
-// Reject are clicks of their own routes, each tracked; a click in the first ARM_MS does nothing; an Accept that cannot
-// start says why under the buttons; Don't ask again turns view proposals off, and Settings' View proposals switch turns
-// them on again.
+// The view proposal above the chat's composer (src/chat/ProposalCard.tsx): the oldest open proposal, with its name and
+// what it shows; Accept and Reject are clicks of their own routes, and Reject hides the card at once.
 import { act } from 'react'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { ARM_MS } from '../../src/chat/PermissionCard.tsx'
-import { openOffer, PROPOSAL_HEAD, PROPOSALS_OFF_LINE, ProposalCard } from '../../src/chat/ProposalCard.tsx'
-import { bus } from '../../src/lib/bus.ts'
+import { ProposalCard } from '../../src/chat/ProposalCard.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
-import { track } from '../../src/lib/telemetry.ts'
 import type { Proposal } from '../../src/lib/types.ts'
-import { PROPOSE_LABEL, SettingsPopover } from '../../src/shell/SettingsPopover.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-vi.mock('../../src/lib/telemetry.ts', async (orig) => ({ ...(await orig<typeof import('../../src/lib/telemetry.ts')>()), track: vi.fn() }))
+const PROPOSAL = { slug: 'agent-timeline', name: 'agent timeline', description: 'What agent-timeline shows.', task: 'compare how the agents coordinated', claims: ['agents/*.jsonl'], status: 'suggested', offered: { at: '2026-10-14T10:00:00Z', after: 'main' } } as unknown as Proposal
+let proposals: Proposal[] = []
+let sent: string[] = []
 
-const row = (slug: string, at: string | null, extra: Partial<Proposal> = {}): Proposal =>
-  ({ slug, name: slug.replace(/-/g, ' '), description: `What ${slug} shows.`, task: 'compare how the agents coordinated', claims: ['agents/*.jsonl'], status: 'suggested', ...(at ? { offered: { at, after: 'main' } } : {}), ...extra }) as Proposal
-
-describe('which proposal shows, and its line', () => {
-  test('the oldest suggested row with `offered`; a row without it (an older version) or one answered never shows', () => {
-    const rows = [row('legacy', null), row('later', '2026-10-14T10:05:00Z'), row('first', '2026-10-14T10:00:00Z'), row('built', '2026-10-14T08:00:00Z', { status: 'built' })]
-    expect(openOffer(rows)?.slug).toBe('first')
-    expect(openOffer([row('legacy', null)])).toBeNull()
-    expect(openOffer(null)).toBeNull()
+beforeEach(() => {
+  proposals = [PROPOSAL]
+  sent = []
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+    const method = init.method ?? 'GET'
+    const u = String(url)
+    const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } })
+    if (method !== 'GET') sent.push(`${method} ${u}`)
+    if (u.endsWith('/views/proposals')) return json(proposals)
+    if (u.endsWith('/settings')) return json({ models: {}, propose_views: true })
+    if (u.endsWith('/accept')) return json({ ...proposals[0], status: 'queued' })
+    if (u.endsWith('/reject')) {
+      proposals = proposals.map((p) => ({ ...p, status: 'dropped' as const, answer: 'rejected' as const }))
+      return json(proposals[0])
+    }
+    return json({ detail: 'not found' }, 404)
   })
-
+})
+afterEach(() => {
+  unmountAll()
+  vi.unstubAllGlobals()
 })
 
-describe('the card', () => {
-  let proposals: Proposal[] = []
-  let settings: Record<string, unknown> = {}
-  let sent: { method: string; url: string; body: unknown }[] = []
-  let toasts: string[] = []
-  let off: () => void = () => undefined
+/** The card in workspace `ws` (one per mount, as the proposals store is kept per workspace), once it takes clicks. */
+async function card(ws: string) {
+  invalidateSettings(ws)
+  const el = await mount(<ProposalCard ws={ws} />)
+  await settle()
+  await settle()
+  await act(async () => new Promise((r) => setTimeout(r, ARM_MS + 30)))
+  return el
+}
 
-  beforeEach(() => {
-    proposals = [row('agent-timeline', '2026-10-14T10:00:00Z')]
-    settings = { models: {}, propose_views: true }
-    sent = []
-    toasts = []
-    off = bus.on('toast', (t) => void toasts.push(t.text))
-    vi.mocked(track).mockClear()
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
-      const method = init.method ?? 'GET'
-      const u = String(url)
-      const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'content-type': 'application/json' } })
-      if (method !== 'GET') sent.push({ method, url: u, body: init.body ? JSON.parse(String(init.body)) : null })
-      if (u.endsWith('/views/proposals')) return json(proposals)
-      if (u.endsWith('/settings') && method === 'PUT') {
-        settings = { ...settings, ...(JSON.parse(String(init.body)) as object) }
-        return json(settings)
-      }
-      if (u.endsWith('/settings')) return json(settings)
-      if (u.endsWith('/accept')) return json({ ...proposals[0], status: 'queued' })
-      if (u.endsWith('/reject')) {
-        proposals = proposals.map((p) => ({ ...p, status: 'dropped' as const, answer: 'rejected' as const }))
-        return json(proposals[0])
-      }
-      return json({ detail: 'not found' }, 404)
-    })
-  })
-  afterEach(() => {
-    off()
-    unmountAll()
-    vi.unstubAllGlobals()
-  })
-
-  /** The card in workspace `ws` (one per test, as the proposals store is kept per workspace), armed when `armed`. */
-  async function card(ws: string, armed = true) {
-    invalidateSettings(ws)
-    const el = await mount(<ProposalCard ws={ws} />)
-    await settle()
-    await settle()
-    if (armed) await act(async () => new Promise((r) => setTimeout(r, ARM_MS + 30)))
-    return el
-  }
-  const click = (el: HTMLElement, sel: string) => act(async () => el.querySelector<HTMLButtonElement>(sel)!.click())
-
-  test('the head, the name in bold and what it shows are in view, with Accept, Reject and Don’t ask again, and no task', async () => {
-    const el = await card('pc-look', false)
-    const c = el.querySelector('.chat-offer')!
-    expect(c.getAttribute('aria-label')).toBe(PROPOSAL_HEAD)
-    expect(c.querySelector('.chat-offer-head')?.textContent).toBe('View proposal')
-    expect(c.querySelector('b.chat-offer-name')?.textContent).toBe('agent timeline')
-    expect(c.querySelector('.chat-offer-desc')?.textContent?.trim()).toBe('What agent-timeline shows.')
-    expect(c.querySelector('.chat-offer-files')).toBeNull()
-    expect(c.textContent).not.toMatch(/task|compare how the agents coordinated/i)
-    expect([...c.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Accept', 'Reject', 'Don’t ask again'])
-    expect(c.textContent).not.toMatch(/offer/i)
-    expect(document.activeElement).toBe(document.body)
-  })
-
-  test('Accept posts accept and Reject posts reject, each tracked; Reject hides the card at once', async () => {
-    let el = await card('pc-accept')
-    await click(el, '.chat-offer-accept')
-    await settle()
-    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST /api/ws/pc-accept/views/proposals/agent-timeline/accept'])
-    expect(track).toHaveBeenCalledWith('view-build', { target: 'view:agent-timeline', detail: { offer: true } })
-    unmountAll()
-    sent = []
-    el = await card('pc-reject')
-    await click(el, '.chat-offer-reject')
-    expect(el.querySelector('.chat-offer')).toBeNull()
-    await settle()
-    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST /api/ws/pc-reject/views/proposals/agent-timeline/reject'])
-    expect(track).toHaveBeenCalledWith('view-dismiss', { target: 'view:agent-timeline', detail: { offer: true } })
-  })
-
-  test("Don't ask again turns view proposals off, and Settings' View proposals switch turns them on: the proposal is back", async () => {
-    const el = await card('pc-off')
-    await click(el, '.chat-offer-off')
-    await settle()
-    expect(sent).toEqual([{ method: 'PUT', url: '/api/ws/pc-off/settings', body: { propose_views: false } }])
-    expect(toasts).toEqual([PROPOSALS_OFF_LINE])
-    expect(PROPOSALS_OFF_LINE).toBe('View proposals are off. Settings turns them on again.')
-    expect(el.querySelector('.chat-offer')).toBeNull()
-    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
-    await mount(<SettingsPopover ws="pc-off" anchor={anchor} open onClose={() => undefined} />)
-    await settle()
-    await settle()
-    const line = document.querySelector<HTMLElement>('[data-setting="propose-views"]')!
-    expect(line.querySelector('.settings-name')?.textContent).toBe(PROPOSE_LABEL)
-    const sw = () => line.querySelector<HTMLButtonElement>('[role="switch"]')!
-    expect(sw().getAttribute('aria-checked')).toBe('false')
-    await act(async () => sw().click())
-    await settle()
-    await settle()
-    expect(sent.at(-1)).toEqual({ method: 'PUT', url: '/api/ws/pc-off/settings', body: { propose_views: null } })
-    expect(sw().getAttribute('aria-checked')).toBe('true')
-    expect(el.querySelector('.chat-offer')).not.toBeNull()
-  })
-
-  test('a click in the first ARM_MS after the proposal shows does nothing', async () => {
-    const el = await card('pc-arm', false)
-    await click(el, '.chat-offer-accept')
-    await click(el, '.chat-offer-reject')
-    await click(el, '.chat-offer-off')
-    await settle()
-    expect(sent).toEqual([])
-    expect(el.querySelector('.chat-offer')).not.toBeNull()
-  })
-
-  test('an Accept the server refuses keeps the proposal and says the reason and the fix under the buttons', async () => {
-    const reason = 'Leave plan mode (shift+tab), then Accept.'
-    const el = await card('pc-refuse-now')
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
-      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
-      if (String(url).endsWith('/accept') && init.method === 'POST') return json({ ...proposals[0], refused: { kind: 'plan', reason } })
-      return String(url).endsWith('/views/proposals') ? json(proposals) : json(settings)
-    })
-    await click(el, '.chat-offer-accept')
-    await settle()
-    expect(el.querySelector('.chat-offer')).not.toBeNull()
-    expect(el.querySelector('.chat-offer-refused')?.textContent).toBe(reason)
-  })
-
+test('a view proposal shows its name and what it shows; Accept asks for the view, and Reject hides the card at once', async () => {
+  let el = await card('pc-accept')
+  expect(el.querySelector('.chat-offer-name')?.textContent).toBe('agent timeline')
+  expect(el.querySelector('.chat-offer-desc')?.textContent?.trim()).toBe('What agent-timeline shows.')
+  await act(async () => el.querySelector<HTMLButtonElement>('.chat-offer-accept')!.click())
+  await settle()
+  expect(sent).toEqual(['POST /api/ws/pc-accept/views/proposals/agent-timeline/accept'])
+  unmountAll()
+  sent = []
+  el = await card('pc-reject')
+  await act(async () => el.querySelector<HTMLButtonElement>('.chat-offer-reject')!.click())
+  expect(el.querySelector('.chat-offer')).toBeNull()
+  await settle()
+  expect(sent).toEqual(['POST /api/ws/pc-reject/views/proposals/agent-timeline/reject'])
 })

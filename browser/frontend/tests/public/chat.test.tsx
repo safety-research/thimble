@@ -1,0 +1,195 @@
+// @vitest-environment jsdom
+// The chat as the analyst uses it (src/chat/ChatPanel.tsx, useChat.ts, Rows.tsx), over a stand-in server that answers
+// the routes the panel calls as the server does: a question goes to main, and the answer shows with the card it made
+// and its citation as the check found it; while main works, a message waits for main and Stop ends the turn; a rewind
+// takes a message back; a side thread says it is starting, then that it works, and ends on its answer.
+import { act } from 'react'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
+import { bus } from '../../src/lib/bus.ts'
+import type { ChatMeta, ChatRecord } from '../../src/lib/types.ts'
+import { mount, settle, unmountAll } from './mount.tsx'
+
+const T = '2026-10-15T10:00:00+00:00'
+const ATTACHED = { session: 's1', cwd: '/corpus', at: T, model: 'claude-opus-5-5' }
+const P = 'mcp__plugin_thimble_thimble__'
+const REWOUND = 'Rewound to before your message. Claude no longer sees it or anything after it; files and cards it changed stay as they are.'
+
+/** What the stand-in server holds: each chat's meta and log. */
+let chats: Record<string, { meta: ChatMeta; events: ChatRecord[] }>
+/** What the page sent the server, each request that changes state. */
+let posted: { url: string; body: unknown }[]
+
+const main = (extra: Record<string, unknown> = {}) =>
+  ({ id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: false, attached: ATTACHED, unread: [], ...extra }) as unknown as ChatMeta
+
+/** What the server answers, and does, for a request. */
+function answer(u: string, init?: RequestInit): unknown {
+  const body = init?.body ? JSON.parse(String(init.body)) : null
+  const chat = Object.keys(chats).find((id) => u.endsWith(`/chats/${id}`))
+  if (chat) return chats[chat]
+  if (u.endsWith('/events') && init?.method === 'POST') {
+    // idle, main takes the message as its next turn, and its log holds it
+    if (!chats.main.meta.running) chats.main.events.push({ type: 'user', ts: T, text: body.payload.text, by: 'browser' })
+    return { id: 'e2', kind: 'main', delivered: 1 }
+  }
+  if (u.endsWith('/interrupt')) return { stopped: true }
+  if (u.endsWith('/chats/main/rewind')) {
+    // the rewind's line in main's log, and the words it gives back
+    const words = (chats.main.events.find((r) => (r as { event?: string }).event === body.event) as { text: string }).text
+    chats.main.events.push({ type: 'chip', kind: 'rewind', text: REWOUND, event: body.event, words } as unknown as ChatRecord)
+    return { text: words, event: body.event }
+  }
+  if (/\/chats(\?|$)/.test(u)) return Object.values(chats).map((c) => c.meta)
+  if (/\/(proposals|notices|views)(\?|$)/.test(u)) return []
+  return {}
+}
+
+beforeEach(() => {
+  chats = { main: { meta: main(), events: [] } }
+  posted = []
+  localStorage.clear()
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  Element.prototype.scrollIntoView = () => undefined // jsdom lays nothing out
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    const u = String(url)
+    if (init?.method && init.method !== 'GET' && !u.includes('/telemetry')) posted.push({ url: u, body: init.body ? JSON.parse(String(init.body)) : null })
+    return new Response(JSON.stringify(answer(u, init)), { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+})
+afterEach(() => {
+  unmountAll()
+  vi.unstubAllGlobals()
+  delete (Element.prototype as Partial<Element>).scrollIntoView
+})
+
+/** A chat read again, as on the stream's `chat` record. */
+async function reread(chat = 'main') {
+  await act(async () => bus.emit('chat', { chat }))
+  await act(async () => new Promise((r) => setTimeout(r, 200)))
+}
+const box = (el: HTMLElement) => el.querySelector<HTMLTextAreaElement>('.chat-composer textarea')!
+async function type(el: HTMLElement, text: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box(el), text)
+    box(el).dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+/** The square buttons at the composer's end, by name: Send, Stop main, Stop the thread. */
+const squares = (el: HTMLElement) => [...el.querySelectorAll<HTMLButtonElement>('.chat-composer button.composer-send')]
+const square = (el: HTMLElement, name: string) => squares(el).find((b) => b.getAttribute('aria-label') === name)!
+const click = (b: HTMLElement) => act(async () => b.click())
+/** The analyst's messages main's log holds, as the chat draws them. */
+const messages = (el: HTMLElement) => [...el.querySelectorAll('.chat-user:not(.chat-pending) .chat-message')].map((m) => m.textContent)
+/** The line behind the composer that says the chat works. */
+const strip = (el: HTMLElement) => el.querySelector('.chat-strip-title')?.textContent ?? null
+
+test('a question goes to main, and the answer shows with the card it made and its citation as the check found it', async () => {
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  await type(el, 'How many runs failed?')
+  await click(square(el, 'Send'))
+  await settle()
+  expect(posted).toEqual([{ url: '/api/ws/mini/events', body: { kind: 'main', payload: { text: 'How many runs failed?' } } }])
+  expect(messages(el)).toEqual(['How many runs failed?'])
+
+  chats.main.events.push(
+    ...([
+      { type: 'tool_use', id: 't1', name: `${P}add_card`, input: { kind: 'table', question: 'Runs by outcome', code: 'df' } },
+      { type: 'tool_result', id: 't1', summary: 'card:abcd1234\n2 rows', cell_id: 'abcd1234' },
+      { type: 'text', delta: '[12 of the 40](#) runs failed.' },
+      { type: 'done', turn: 'aaaa1111' },
+      { type: 'marks', turn: 'aaaa1111', items: [{ n: 1, piece: 0, k: 0, words: '12 of the 40', sentence: '', status: 'verified', shown: '12 of the 40' }] },
+    ] as unknown as ChatRecord[]),
+  )
+  await reread()
+  expect(el.querySelector('.refchip[data-ref="card:abcd1234"]')).not.toBeNull()
+  const mark = el.querySelector('.chat-text .mark')
+  expect([mark?.getAttribute('data-mark-look'), mark?.textContent]).toEqual(['verified', '12 of the 40'])
+})
+
+test('while main works, a message sent waits until main reads it, and Stop main ends the turn', async () => {
+  chats.main = { meta: main({ running: true }), events: [{ type: 'user', text: 'Count the runs per agent.', by: 'browser' }, { type: 'tool_use', id: 't1', name: `${P}list_cards`, input: { group: 'all' } }] }
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  expect(strip(el)).toBe('Working')
+  expect(squares(el).map((b) => b.getAttribute('aria-label'))).toEqual(['Stop main'])
+  // the server keeps the message for main's next step
+  await type(el, 'And how many files are there?')
+  chats.main.meta = main({ running: true, unread: [{ event: 'e2', text: 'And how many files are there?' }] })
+  await click(square(el, 'Send'))
+  await settle()
+  expect(posted.map((p) => p.url)).toEqual(['/api/ws/mini/events'])
+  const tail = el.querySelector('.chat-flow')!.lastElementChild!
+  expect(tail.matches('.chat-pending')).toBe(true)
+  expect(tail.textContent).toContain('And how many files are there?')
+  expect(messages(el)).toEqual(['Count the runs per agent.'])
+
+  await click(square(el, 'Stop main'))
+  await settle()
+  expect(posted.map((p) => p.url)).toEqual(['/api/ws/mini/events', '/api/ws/mini/chats/main/interrupt'])
+  // the turn ended, and main read the message as its next: the log holds it, and the square is Send again
+  chats.main = {
+    meta: main(),
+    events: [...chats.main.events, { type: 'done' }, { type: 'user', text: 'And how many files are there?', by: 'browser', event: 'e2' }, { type: 'text', delta: 'There are 12 files.' }, { type: 'done' }] as ChatRecord[],
+  }
+  await reread()
+  expect(strip(el)).toBeNull()
+  expect(el.querySelector('.chat-pending')).toBeNull()
+  expect(messages(el)).toEqual(['Count the runs per agent.', 'And how many files are there?'])
+  expect(squares(el).map((b) => b.getAttribute('aria-label'))).toEqual(['Send'])
+})
+
+test('Rewind asks under the message first, then takes it and what came after back, its words in the box again', async () => {
+  chats.main.events = [
+    { type: 'user', ts: T, text: 'How many runs failed?', by: 'browser', event: 'e1' },
+    { type: 'text', delta: 'Twelve of the forty.' },
+    { type: 'done' },
+    { type: 'user', ts: T, text: 'Was it the config change?', by: 'browser', event: 'e2' },
+    { type: 'text', delta: 'Yes, every failure came after it.' },
+    { type: 'done' },
+  ] as ChatRecord[]
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  await click(el.querySelectorAll<HTMLButtonElement>('.chat-user button.chat-rewind')[1])
+  const ask = el.querySelector('.chat-user[data-event="e2"] .chat-rewind-ask')!
+  expect(posted).toEqual([])
+  await click([...ask.querySelectorAll('button')].find((b) => b.textContent === 'Rewind')!)
+  await settle()
+  expect(posted).toEqual([{ url: '/api/ws/mini/chats/main/rewind', body: { event: 'e2' } }])
+  await reread()
+  expect(messages(el)).toEqual(['How many runs failed?'])
+  expect(el.querySelector('[data-chip="rewind"]')?.textContent).toBe(REWOUND)
+  expect(box(el).value).toBe('Was it the config change?')
+})
+
+test('a side thread says it is starting while its question waits for its fork, then that it works, and ends on its answer', async () => {
+  const question: ChatRecord = { type: 'user', ts: T, text: 'Why did agent-05 push three times?', by: 'browser' }
+  const thread = (extra: Record<string, unknown>) =>
+    ({ id: 'th1', kind: 'thread', role: 'thread', title: 'push-retries', created_at: T, parent: 'main', anchor: 'agents/agent-05.jsonl#L12', anchor_text: 'git push', running: true, ...extra }) as unknown as ChatMeta
+  // main's short turn takes the question to the thread's fork; the thread names main nowhere
+  chats.main = { meta: main({ running: true }), events: [{ type: 'done', ts: '2026-10-15T09:59:00+00:00' }] as ChatRecord[] }
+  chats.th1 = { meta: thread({}), events: [question] }
+  localStorage.setItem('thimble:mini:thread-current', JSON.stringify('th1'))
+  const el = await mount(<ChatPanel ws="mini" />)
+  await settle()
+  await settle()
+  expect(el.querySelector('.chat')?.getAttribute('data-thread-kind')).toBe('thread')
+  expect(strip(el)).toBe('Starting this thread…')
+
+  chats.main.meta = main()
+  chats.th1.meta = thread({ fork: { agent_id: 'afork1' } })
+  await reread('th1')
+  expect(strip(el)).toBe('Working')
+
+  chats.th1 = {
+    meta: thread({ fork: { agent_id: 'afork1' }, running: false }),
+    events: [question, { type: 'text', delta: 'It retried after two timeouts of the remote.', reply: true, by: 'terminal' }, { type: 'done', result: null }] as ChatRecord[],
+  }
+  await reread('th1')
+  expect(strip(el)).toBeNull()
+  expect(el.querySelector('.chat-flow')?.textContent).toContain('It retried after two timeouts of the remote.')
+  // nothing under the answer sends it to main
+  expect(el.querySelector('.chat-hand-back')).toBeNull()
+  expect(posted).toEqual([])
+})

@@ -5,8 +5,6 @@ import { TipButton } from '../components/Tooltip'
 
 const PATHS = {
   report: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
-  slides: 'M3 4h18v12H3zM12 16v4M8 20h8',
-  story: 'M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 19V5M8 7h7M8 11h5',
   page: 'M4 4h16v16H4zM4 9h16M9 9v11',
   bars: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   table: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14',

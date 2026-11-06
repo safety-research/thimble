@@ -1,6 +1,6 @@
 """model.structured: one structured call on a model, whose answer is the input of one output tool. Its callers are the
-labels classifier (concepts.classify_structured), the label draft, view fit, the card check, view review, the viewer
-suggestion and a program's `ask` (harness.ask), each at its role's model, effort and speed (config.call_settings).
+labels classifier (concepts.classify_structured), the label draft, the card check, view review and the viewer
+suggestion, each at its role's model, effort and speed (config.call_settings).
 
 Each call is an Agent SDK session on the user's own `claude` (sdk.build) whose one in-process MCP tool's schema is the
 output schema. It returns a CallResult status (ok, refused, rate_limited, truncated, no_tool_call, timeout, error) and

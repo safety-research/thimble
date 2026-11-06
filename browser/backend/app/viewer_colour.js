@@ -340,7 +340,7 @@
   // ---------------------------------------------------------------- what a label's values mean
   // A label's definition, asked of thimble with a fetch the server answers itself (views.kit_answer): {id, name, kind,
   // text, spec, scope, unit, labeled, values: [{name, highlight, n, meaning}]}, or null when thimble does not know it (an
-  // older thimble, a card's frame, the checks' test label). A chip of a label's value says what the value means.
+  // older thimble, the checks' test label). A chip of a label's value says what the value means.
   var defs = {}
   function definition(id) {
     var d = defs[id]
@@ -3789,8 +3789,7 @@
   // keeps its record by its data-thimble-card and stamps the cards on the page again from their records (cards), and
   // `color: false` gives it none. `active` marks the chosen card,
   // `act: false` a card a click does nothing on, and `attrs` ({name: value}) gives it more attributes, such as a key the
-  // page's click reads; a `class` there is added to the card's own. (thimble.card is a card type's stored data, in a
-  // card's frame: viewer_bridge.js.)
+  // page's click reads; a `class` there is added to the card's own.
   function hasPart(v) {
     return v != null && v !== '' && v !== false
   }

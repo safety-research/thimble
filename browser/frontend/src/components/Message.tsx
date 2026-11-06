@@ -14,5 +14,3 @@ export function UserMessage({ className, children, ref, ...rest }: UserMessagePr
     </p>
   )
 }
-
-export default UserMessage

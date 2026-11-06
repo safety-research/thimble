@@ -1,10 +1,10 @@
-// A start of one of thimble's agents that did not happen, as one card wherever the agent would have shown: the
-// orientation's in main, a writer's on its document, a view build's on its chip, a check's on its row. It names the
-// agent, says why on one line in the words of whoever refused (Claude Code's auto mode, main's own reply, Claude Code's
-// subagent limit, thimble's own check, or no hooks module), shows the request in full (the text the agent would get,
-// its role, model and effort) since main may have written it, and offers the kind's buttons (refusalActions): Start it
-// (a click through thimble's plugin: the analyst's own approval, which auto mode does not judge), Try again and
-// Dismiss. Every button is a click, which the server takes only with the analyst's cookie (403 otherwise).
+// A start of one of thimble's agents that did not happen, as one card wherever the agent would have shown: a writer's
+// on its document, a view build's on its chip, a check's on its row. It names the agent, says why on one line in the
+// words of whoever refused (Claude Code's auto mode, main's own reply, Claude Code's subagent limit, thimble's own
+// check, or no hooks module), shows the request in full (the text the agent would get, its role, model and effort)
+// since main may have written it, and offers the kind's buttons (refusalActions): Start it (a click through thimble's
+// plugin: the analyst's own approval, which auto mode does not judge), Try again and Dismiss. Every button is a click,
+// which the server takes only with the analyst's cookie (403 otherwise).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -19,13 +19,12 @@ import { useChatMetas } from './waiting'
 /** The buttons a refused start offers, by its kind (plan section 2, "A start that does not happen"). */
 export type RefusedAction = 'start-it' | 'try-again' | 'dismiss'
 
-/** The kind's buttons: Start it for a typed start auto mode refused or main did not make; Try again
- * at Claude Code's subagent limit and for a click thimble's module did not answer in time; Dismiss always. Never Try
- * again on an auto-mode refusal, whose text tells main not to pursue it again. Pure. */
-export function refusalActions(kind: RefusalKind | null | undefined, expired = false): RefusedAction[] {
+/** The kind's buttons: Start it for a typed start auto mode refused or main did not make; Try again at Claude Code's
+ * subagent limit; Dismiss always. Never Try again on an auto-mode refusal, whose text tells main not to pursue it
+ * again. Pure. */
+export function refusalActions(kind: RefusalKind | null | undefined): RefusedAction[] {
   if (kind === 'auto-mode' || kind === 'no-call') return ['start-it', 'dismiss']
   if (kind === 'limit') return ['try-again', 'dismiss']
-  if (kind === 'no-module' && expired) return ['try-again', 'dismiss']
   return ['dismiss']
 }
 
@@ -63,11 +62,8 @@ export function firstLines(text: string, n = 2): string {
     .join(' ')
 }
 
-/** The text when thimble's module held the long poll and did not answer a click in time. */
-export const NO_ANSWER_LINE = "Your Claude Code session's thimble module did not answer."
-
 /** The line that says why, by kind, with the reason as Claude Code or thimble gave it. Pure. */
-export function refusalLine(r: Pick<Refusal, 'kind' | 'reason' | 'expired'>): string {
+export function refusalLine(r: Pick<Refusal, 'kind' | 'reason'>): string {
   const reason = (r.reason ?? '').trim()
   const dot = (s: string) => (/[.!?â€¦]$/.test(s) ? s : `${s}.`)
   switch (r.kind) {
@@ -78,11 +74,11 @@ export function refusalLine(r: Pick<Refusal, 'kind' | 'reason' | 'expired'>): st
     case 'limit': {
       const n = /\b(\d+)\b/.exec(reason)?.[1]
       return n
-        ? `Claude Code runs at most ${n} subagents at once in this session, and that many are running (thread forks and the subagents of running agents, the orientation's own and its critic, count too). Start it again when some finish, or raise \`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS\` and restart.`
+        ? `Claude Code runs at most ${n} subagents at once in this session, and that many are running (thread forks and the subagents of running agents count too). Start it again when some finish, or raise \`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS\` and restart.`
         : dot(reason || 'Claude Code runs as many subagents as it allows at once in this session')
     }
     case 'no-module':
-      return r.expired ? NO_ANSWER_LINE : dot(reason || "thimble's agents can't start in this session: Claude Code's hooks modules are off")
+      return dot(reason || "thimble's agents can't start in this session: Claude Code's hooks modules are off")
     default:
       return dot(reason || 'It was refused')
   }
@@ -93,9 +89,7 @@ export const PERMISSIONS_LINE = 'Or approve it in your terminal: /permissions â†
 
 /** A role's name as the request's line names it. */
 const ROLE_WORDS: Readonly<Record<string, string>> = {
-  orientation: 'thimble:orientation',
   writer: 'thimble:writer',
-  critic: 'thimble:critic',
   'view-builder': 'thimble:view-builder',
   'view-reviewer': 'thimble:view-reviewer',
   check: 'thimble:check',
@@ -111,14 +105,14 @@ export function requestLine(r: Pick<SubagentRequest, 'role' | 'input' | 'values'
 
 /** What a Start it or Try again answered, as a toast when it did not start; true when it started. */
 function answered(what: string, a: StartAnswer): boolean {
-  if (a.agentId || a.program) return true
-  bus.emit('toast', { text: `${refusedTitle(what)}: ${refusalLine({ kind: a.kind ?? 'error', reason: a.reason ?? '', expired: a.expired })}`, kind: 'error' })
+  if (a.agentId) return true
+  bus.emit('toast', { text: `${refusedTitle(what)}: ${refusalLine({ kind: a.kind ?? 'error', reason: a.reason ?? '' })}`, kind: 'error' })
   return false
 }
 
 export function RefusedCard({ ws, what, refusal, text, onDismiss, onStarted, className = '' }: {
   ws: string
-  /** the agent, as the head names it: "the orientation", "the report's writer", "the view Posts" */
+  /** the agent, as the head names it: "the report's writer", "the view Posts" */
   what: string
   refusal: Refusal
   /** the request as the analyst or main wrote it, when the record keeps it apart from the full task */
@@ -130,7 +124,7 @@ export function RefusedCard({ ws, what, refusal, text, onDismiss, onStarted, cla
   const rid = refusal.request ?? null
   const [req, setReq] = useState<SubagentRequest | null>(null)
   const [busy, setBusy] = useState<RefusedAction | null>(null)
-  const actions = refusalActions(refusal.kind, !!refusal.expired).filter((a) => (a === 'dismiss' ? !!onDismiss : !!rid))
+  const actions = refusalActions(refusal.kind).filter((a) => (a === 'dismiss' ? !!onDismiss : !!rid))
   // at Claude Code's subagent limit, Try again waits until the chats count a free slot
   const limited = refusal.kind === 'limit'
   const metas = useChatMetas(ws, limited)

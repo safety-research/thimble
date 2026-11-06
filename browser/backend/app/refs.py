@@ -36,9 +36,6 @@
                                   subsection is. A locator shaped like the line grammar (`L` alone or `L<digit>…`) that
                                   the line rules refused stays an error, so a mistyped line ref is caught and repaired
                                   rather than read as the file.
-    call:<chat>/<n>               a tool call of the orientation whose agent chat is <chat>, with its input and its whole
-                                  output (calls.py)
-    call:<chat>/<n>#L<a>[-L<b>]   lines <a> to <b> (1-based, inclusive) of that call's output, the range form files have
     view:<slug>                   a view (views.py): its name and what it is for
     view:<slug>/<key>             a unit only that view defines, such as one wiki page's whole thread spread over many
                                   lines of a file; the key is the view's own text and may hold any character but
@@ -49,8 +46,7 @@ grammar and resolves as the file's own, then the view's reader supplies the exce
 file's own excerpt is the whole record with every field (views.enrich_file_ref). resolve_base is the resolution without
 that step, for the check that compares a view's excerpt with the records it cites.
 
-`chat:<id>[#<n>]` is parsed, and `#<n>` is a message anchor, not resolvable. Only an orientation's chat resolves, to its
-transcript's digest, and `chat:<id>#L<a>-L<b>` to lines of the digest.
+`chat:<id>[#<n>]` is parsed, and `#<n>` is a message anchor, not resolvable.
 
 A span written without its card id (`@out0#L15`, `#count/total`) is not a ref: parse_ref raises (bare_span_cause) and
 resolve answers 400; cite.qualify_bare_spans adds the id before storage. A file's line cited through the card that shows
@@ -81,7 +77,6 @@ _CELL_TD = re.compile(r"^" + cite.CARD_RE + r"([A-Za-z0-9_-]+)#([^/]+)/(.+)$")
 _CELL_LINE = re.compile(r"^" + cite.CARD_RE + r"([A-Za-z0-9_-]+)@out(\d+)#L(\d+)(?:-L(\d+))?$")  # group 4: the range end, when a range
 _CELL_STEP = re.compile(r"^" + cite.CARD_RE + r"([A-Za-z0-9_-]+)#step-(\d+)$")  # a plan card's step, numbered from 1
 _CHAT = re.compile(r"^chat:([A-Za-z0-9_-]+)(?:#(\d+))?$")
-_CHAT_LINES = re.compile(r"^chat:([A-Za-z0-9_-]+)#L(\d+)(?:-L(\d+))?$")  # lines of an orientation's digest
 _CONCEPT = re.compile(r"^concept:([A-Za-z0-9_-]+)(?:/(.+))?$")
 _REPORT = re.compile(r"^report:([A-Za-z0-9_-]+)(?:#(p?[A-Za-z0-9_-]+))?$")  # a document, one of its paragraphs (p<pid>) or a sentence or heading
 # a view (views.SLUG_RE), or one unit it defines; frontend lib/refs.ts parses the same form
@@ -143,18 +138,6 @@ def parse_ref(ref: str) -> dict[str, Any]:
         return out
     if m := _CHAT.match(ref):
         return {"kind": "chat", "chat_id": m[1], "event_index": int(m[2]) if m[2] else None}
-    if m := _CHAT_LINES.match(ref):
-        out = {"kind": "chat", "chat_id": m[1], "event_index": None, "line": int(m[2])}
-        if m[3]:
-            out["end_line"] = int(m[3])
-        return out
-    if ref.startswith("call:"):
-        from . import calls  # noqa: PLC0415 — calls imports refs lazily too
-
-        hit = calls.parse_ref(ref)
-        if hit is None:
-            raise ValueError(f"not a ref: {ref!r} (a call is call:<chat>/<n>, and its lines call:<chat>/<n>#L<a>-L<b>)")
-        return hit
     if m := _CONCEPT.match(ref):
         value = cite.decode_label(m[2].strip()) if m[2] and m[2].strip() else None
         return {"kind": "concept", "concept_id": m[1], **({"value": value} if value else {})}
@@ -226,13 +209,7 @@ def format_ref(p: dict[str, Any]) -> str:
             return f"card:{p['cell_id']}@out{p['out']}#L{p['line']}" + (f"-L{p['end_line']}" if p.get("end_line") is not None else "")
         return f"card:{p['cell_id']}" + (f"@{p['exec']}" if p.get("exec") is not None else "")
     if k == "chat":
-        if p.get("line") is not None:
-            return f"chat:{p['chat_id']}#L{p['line']}" + (f"-L{p['end_line']}" if p.get("end_line") is not None else "")
         return f"chat:{p['chat_id']}" + (f"#{p['event_index']}" if p.get("event_index") is not None else "")
-    if k == "call":
-        from . import calls  # noqa: PLC0415
-
-        return calls.ref(p["chat_id"], p["n"], p.get("line"), p.get("end_line"))
     if k == "concept":
         return f"concept:{p['concept_id']}" + (f"/{p['value']}" if p.get("value") else "")
     if k == "view":
@@ -449,10 +426,6 @@ def resolve_base(corpus_dir: Path, ref: str) -> dict[str, Any]:
         return concepts.resolve_concept_ref(corpus_dir, ref)
     if kind == "report":
         return _resolve_report(corpus_dir, p, ref)
-    if kind == "call":
-        from . import calls  # noqa: PLC0415
-
-        return calls.resolve(_workspace_of(corpus_dir), p, ref.strip())
     if kind in ("table", "row"):
         return _resolve_database(corpus_dir, p, ref)
     if kind == "page":
@@ -464,12 +437,6 @@ def resolve_base(corpus_dir: Path, ref: str) -> dict[str, Any]:
     if kind == "path":
         return _resolve_path(corpus_dir, p, ref)
     raise RefError(f"ref has no resolvable location: {ref!r}", 404)
-
-
-def _workspace_of(corpus_dir: Path | str) -> str:
-    """The workspace a resolve is for: its corpus folder's registered name, or the name itself when a caller passes
-    one."""
-    return config.workspace_for_corpus_dir(corpus_dir) if isinstance(corpus_dir, Path) else str(corpus_dir)
 
 
 def _utf16_len(text: str) -> int:
@@ -634,8 +601,7 @@ def _locate(corpus_dir: Path, rel: str) -> tuple[Path, str]:
         raise RefError(str(e), 400)
     if path.exists():
         return path, rel
-    root_for = getattr(config, "corpus_root_for_dir", None)
-    root = root_for(corpus_dir) if callable(root_for) else None
+    root = config.corpus_root_for_dir(corpus_dir)
     if root is None:
         return path, rel
     try:
@@ -1031,7 +997,7 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
 
     # the workspace is the corpus's registered name, not the directory's basename
     ws = config.WORKSPACES_DIR / config.workspace_for_corpus_dir(corpus_dir)
-    # every notebook, the orientation's working one included, since the orientation cites the cards it made there
+    # every notebook, not only the canvas's, since a ref names a card wherever it is
     hit = notebook.find_cell(ws, p["cell_id"]) if ws.is_dir() else None
     if hit is None:
         raise RefError(f"no card {p['cell_id']!r}", 404)

@@ -5,10 +5,8 @@
 // postMessage calls:
 //   open {locator, quote?} page to frame: show this place (window.thimble.onOpen); with quote {record, text}, a passage
 //                          inside that record, which the bridge highlights and scrolls to (the view shows the record).
-//                          In a card's frame its target is {ref, pick}, pick to open the record in full; in a view,
-//                          `query` is {card, title, args} of the card it was opened from, or null. With no ref, `path`
-//                          is the file the view opened on, and `picked` holds when the analyst chose it (Open in)
-//                          rather than thimble opening the view on its first file
+//                          With no ref, `path` is the file the view opened on, and `picked` holds when the analyst
+//                          chose it (Open in) rather than thimble opening the view on its first file
 //   quoted {found}         frame to page: whether the quoted passage showed in the page
 //   fetch {id, query, progress, key}
 //                          frame to page, answered by result {id, data} from reader.records (window.thimble.fetch), with
@@ -23,16 +21,6 @@
 //                          page's corner, with a Cancel button, after WAIT_SHOWN_MS
 //   cite {ref, text, ...}  frame to page: a ⌘-click on an element with data-anchor, or on any other part of the view
 //                          (its legend, a control, the empty page), asked about as the view itself, `view:<slug>`
-//   wheel {deltaX, deltaY, deltaMode, ctrlKey, metaKey, x, y}
-//                          frame to page, in a card's frame: a wheel turn the page did not take, and every pinch or ⌘
-//                          turn, which the page turns again on the frame, so the canvas pans or zooms
-//   init {mode, data, args, width, card, key}
-//                          page to frame, in a card's frame (cardtypes.py): what the card stored, which the page draws
-//                          with no fetch (window.thimble.onInit); mode is card, full or render, `card` its id, and `key`
-//                          names what it stored, the same key when only the mode or the width changed
-//   setQuery {patch}       frame to page, in a card's frame: the card's call's arguments the analyst's reshaping would
-//                          change, {} for none, which Keep writes into the call (window.thimble.setQuery); in a view
-//                          opened from a card, null when the page dropped the card's arguments
 //   navigate {ref, browser?}
 //                          frame to page: open another place, in this view or anywhere in thimble, a file ref with
 //                          `browser` in the File browser (window.thimble.navigate)
@@ -40,7 +28,6 @@
 //                          cannot scroll to itself (window.thimble.reveal)
 //   size {height}          frame to page: the document's height, for a frame that sizes to its content, or the height a
 //                          page says it needs (window.thimble.size), after which the document's own height is not sent
-//   settled                frame to page: a card's page has drawn what `init` brought (window.thimble.settled)
 //   anchors {refs, seq, seen}
 //                          frame to page: the data-anchor values that appeared since the last report, `seq` how many
 //                          have been reported in all, and `seen` those of the anchored elements in the frame's viewport
@@ -60,9 +47,7 @@
 //                          colours a label's value can take. Each replaces the last; window.thimble.onLabels hears all
 //                          but the marks, which window.thimble.markOf reads and window.thimble.onMarks hears. A colour
 //                          that is a CSS variable, var(--label-3), is resolved here to the colour it stands for, so a
-//                          canvas can draw every colour the page is given. In a card's
-//                          frame the elements whose records the filter drops are dimmed, never hidden, and the page's
-//                          own filtering is left alone
+//                          canvas can draw every colour the page is given
 //   key {key}              page to frame, once the frame is ready: the key every labelCall carries, which only this
 //                          bridge sees (it stops the message before the view's own listeners)
 //   labelCall {id, key, op, args}
@@ -115,9 +100,6 @@
   // `open`; and whether the side panel closed since then with nothing picked after, so a newer version opens on none
   var picked = null
   var sideClosed = false
-  var cardMode = !!(window.__thimbleView && window.__thimbleView.card)
-  var init = null
-  var initFns = []
   var markFns = []
   // the view kit's own controls (viewer_colour.js): what they hear of the labels, which is not the page's onLabels and
   // so leaves the label filter to thimble, and the Color by choice that the marks are drawn by (colourHook)
@@ -383,8 +365,6 @@
   window.thimble = {
     /** the view this page belongs to: {slug, name}, for the view:<slug>/<key> refs it writes */
     view: window.__thimbleView || null,
-    /** in a card's frame, what the card stored ({mode, data, args, width, card}) once `init` arrived; null in a view */
-    card: null,
     /** fn(place) runs for every `open`, and at once with the last one when it arrived before the view registered */
     onOpen: function (fn) {
       openers.push(fn)
@@ -498,18 +478,6 @@
     cite: function (ref, text, element, el) {
       post({ type: P + 'cite', ref: String(ref), text: String(text || ''), element: String(element || ''), rect: el ? rectOf(el) : null })
     },
-    /** fn({mode, data, args, width, card}) runs with what a card stored, in a card's frame only: at once when it has
-     *  arrived, and again when the card is drawn anew */
-    onInit: function (fn) {
-      initFns.push(fn)
-      if (init) {
-        try {
-          fn(init)
-        } catch (e) {
-          report(e)
-        }
-      }
-    },
     /** the mark of the labels the page is given on one record or unit ref, {bar, names, values, spans, keep?}, or null:
      *  `bar` the color of the first label that highlights it, `values` [{id, label, value, color}] each label that
      *  does with its value; every color one a canvas can draw (rgb(), or a hex) */
@@ -520,19 +488,10 @@
     onMarks: function (fn) {
       markFns.push(fn)
     },
-    /** the height the page needs, in px; thimble fits the frame to it within the card's range */
+    /** the height the page needs, in px, sent in place of the document's own height */
     size: function (height) {
       ownSize = true
       post({ type: P + 'size', height: Number(height) || 0 })
-    },
-    /** a card's page has drawn what it was given, so its picture can be taken */
-    settled: function () {
-      post({ type: P + 'settled' })
-    },
-    /** the card's call's arguments the analyst's reshaping in the page would change ({} for none), in a card's frame;
-     *  in a view opened from a card, setQuery(null) says the page dropped the card's arguments */
-    setQuery: function (patch) {
-      post({ type: P + 'setQuery', patch: patch && typeof patch === 'object' ? patch : cardMode ? {} : null })
     },
     /** open another place: a view ref, a file ref or any other ref thimble knows; with {browser: true} a file ref opens
      *  in the File browser, as the file shows there, rather than in a view */
@@ -626,16 +585,6 @@
           report(err)
         }
       } else showWait()
-    } else if (d.type === P + 'init') {
-      init = { mode: String(d.mode || 'card'), data: d.data, args: d.args || {}, width: Number(d.width) || 0, card: d.card ? String(d.card) : null, key: String(d.key || '') }
-      window.thimble.card = init
-      for (var n = 0; n < initFns.length; n++) {
-        try {
-          initFns[n](init)
-        } catch (err) {
-          report(err)
-        }
-      }
     } else if (d.type === P + 'labels') {
       var marksChanged = takeMarks(d.marks)
       filter = d.filter && typeof d.filter === 'object' ? d.filter : null
@@ -776,7 +725,7 @@
     var el = t && t.closest ? t.closest('[data-anchor]') : null
     if (el) return { el: el, ref: el.getAttribute('data-anchor') }
     var slug = window.thimble.view && window.thimble.view.slug
-    var own = cardMode ? (init && init.card ? 'card:' + init.card : null) : slug ? 'view:' + slug : null
+    var own = slug ? 'view:' + slug : null
     if (!own || !t || t.nodeType !== 1) return null
     return { el: t === document.body ? document.documentElement : t, ref: own }
   }
@@ -854,35 +803,6 @@
     },
     true,
   )
-  // In a card's frame, a wheel turn the page did not take is the canvas's, as over any other card (wheel): none of the
-  // page's own handlers took it, and nothing under the pointer, nor the page itself, scrolls further that way. A pinch
-  // (ctrl) or a ⌘ turn always goes, and the browser does not also zoom or scroll here. The page turns it again on the
-  // frame (files/ViewerFrame wheelOver), so the canvas pans or zooms.
-  function scrollsFurther(t, dx, dy) {
-    var across = Math.abs(dx) > Math.abs(dy)
-    var d = across ? dx : dy
-    function room(el) {
-      if (across) return d > 0 ? el.scrollLeft + el.clientWidth < el.scrollWidth - 1 : el.scrollLeft > 0
-      return d > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0
-    }
-    for (var el = t && t.nodeType === 1 ? t : null; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
-      var o = getComputedStyle(el)[across ? 'overflowX' : 'overflowY']
-      if ((o === 'auto' || o === 'scroll') && room(el)) return true
-    }
-    return !!document.scrollingElement && room(document.scrollingElement)
-  }
-  if (cardMode)
-    addEventListener(
-      'wheel',
-      function (e) {
-        if (e.defaultPrevented) return
-        var zoom = e.ctrlKey || e.metaKey
-        if (!zoom && scrollsFurther(e.target, e.deltaX, e.deltaY)) return
-        if (zoom) e.preventDefault()
-        post({ type: P + 'wheel', deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode, ctrlKey: e.ctrlKey, metaKey: e.metaKey, x: e.clientX, y: e.clientY })
-      },
-      { passive: false },
-    )
   // The labels the analyst turns on, drawn over the records the view shows: every data-anchor that appears is reported
   // (anchors), and the page answers with the marks of those records (labels). A marked element gets data-thimble-label
   // and a bar in the first label's colour along its left edge, drawn as a box-shadow added to the view's own
@@ -989,13 +909,13 @@
   }
   // With a label filter on, a page that does not filter its own records (it registered no onLabels) has every
   // anchored element hidden whose ref the filter does not keep and that holds no kept element: an HTML element leaves
-  // the layout, and an SVG shape is dimmed, since removing it would break the drawing. A card's page, whose records its
-  // code chose, has them all dimmed instead. The place the page was opened at stays, since the analyst asked for it.
+  // the layout, and an SVG shape is dimmed, since removing it would break the drawing. The place the page was opened at
+  // stays, since the analyst asked for it.
   // Whether anything is dropped. Only the attributes that change are written, since every write makes the browser work
   // out the element's style again.
   var dropped = []
   function dropping() {
-    return !!filter && (cardMode || !labelFns.length)
+    return !!filter && !labelFns.length
   }
   function drop() {
     if (!dropping()) {
@@ -1016,7 +936,7 @@
     var now = []
     for (var k = 0; k < els.length; k++) {
       if (keep.has(els[k])) continue
-      set(els[k], 'data-thimble-drop', cardMode || els[k] instanceof SVGElement ? 'dim' : 'hide')
+      set(els[k], 'data-thimble-drop', els[k] instanceof SVGElement ? 'dim' : 'hide')
       now.push(els[k])
     }
     var still = new Set(now)
@@ -1048,7 +968,7 @@
       }
     }
     if (n && (unsent.length || answered !== sentN)) n = null
-    var self = !!filter && !cardMode && labelFns.length > 0
+    var self = !!filter && labelFns.length > 0
     var key = n + ':' + self
     if (key === hiddenKey) return
     hiddenKey = key

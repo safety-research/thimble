@@ -6,10 +6,9 @@ fails when this file is not current. Do not edit it by hand.
 Every request to the local API needs a credential (`backend/app/hook_auth.py`), except the two reads marked
 none:
 
-- **token**: the token in `server.json`, proven with each request. The plugin's hooks, its MCP shim, its hooks
-  module and thimble's CLI use these routes, and only these.
+- **token**: the token in `server.json`, proven with each request. thimble's CLI uses these routes, and only
+  these.
 - **code**: a link's one-time sign-in code, which the page trades for the browser's cookie and its key.
-- **agent token**: the token of one run of an extension's program.
 - **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.
 - **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI
   proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone
@@ -25,16 +24,12 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-282 routes, 166 of them writes: 35 token, 1 code, 1 agent token, 135 cookie, 107 cookie or token, 1 media key, 2 none.
+200 routes, 110 of them writes: 9 token, 1 code, 100 cookie, 87 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
-| WS | `/api/agent/claude` | harness | agent token |
-| POST | `/api/agents` | tray | token |
-| POST | `/api/bg/agent-check` | subagents | token |
 | GET | `/api/claude-access` | claude_access | cookie or token |
 | PUT | `/api/claude-access` | claude_access | cookie |
-| POST | `/api/claude-access/check` | claude_access | cookie |
 | GET | `/api/corpora` | corpus | cookie or token |
 | POST | `/api/corpora/register` | corpus | token |
 | GET | `/api/corpora/{c}/csv-rows` | corpus | cookie or token |
@@ -61,7 +56,6 @@ knows the key.
 | GET | `/api/corpora/{c}/sources/kinds` | corpus | cookie or token |
 | GET | `/api/corpora/{c}/sources/stamps` | corpus | cookie or token |
 | POST | `/api/dev/announce` | dev | token |
-| POST | `/api/dev/restart` | dev | cookie |
 | POST | `/api/dev/revert` | dev | token |
 | GET | `/api/dev/status` | dev | cookie or token |
 | GET | `/api/dev/tickets` | dev | cookie or token |
@@ -72,42 +66,17 @@ knows the key.
 | GET | `/api/dev/tickets/{tid}/shots/{name}` | dev | cookie or token |
 | POST | `/api/dev/tickets/{tid}/start` | dev | cookie |
 | POST | `/api/dev/tickets/{tid}/stop` | dev | cookie |
-| GET | `/api/events` | events | token |
-| POST | `/api/events/ack` | events | token |
-| POST | `/api/events/held` | events | token |
-| GET | `/api/events/main` | events | cookie or token |
-| POST | `/api/events/mode` | events | token |
-| POST | `/api/events/permission` | events | token |
-| GET | `/api/events/pull` | events | token |
 | GET | `/api/events/sessions` | events | cookie or token |
-| POST | `/api/extensions/refresh` | extensions | token |
 | GET | `/api/feedback/download` | feedback_routes | cookie or token |
 | POST | `/api/feedback/reveal` | feedback_routes | cookie |
 | GET | `/api/fixes` | fixes | cookie or token |
 | POST | `/api/fixes/{fid}/apply` | fixes | cookie |
 | POST | `/api/fixes/{fid}/dismiss` | fixes | cookie |
-| POST | `/api/fixes/{fid}/share` | fix_share | cookie |
 | GET | `/api/fixes/{fid}/tried` | fixes | cookie or token |
 | POST | `/api/fixes/{fid}/undo` | fixes | cookie |
 | GET | `/api/health` | main | none |
 | GET | `/api/jobs` | jobs | cookie or token |
-| POST | `/api/module/ended` | module_bridge | token |
-| POST | `/api/module/hello` | module_bridge | token |
-| POST | `/api/module/mode` | module_bridge | token |
-| GET | `/api/module/next` | module_bridge | token |
-| POST | `/api/module/result` | module_bridge | token |
-| GET | `/api/module/roles` | module_bridge | token |
-| GET | `/api/module/state` | module_bridge | token |
 | GET | `/api/render/status` | render | cookie or token |
-| POST | `/api/subagents/caller` | subagents | token |
-| POST | `/api/subagents/denied` | subagents | token |
-| POST | `/api/subagents/end` | subagents | token |
-| POST | `/api/subagents/rekey` | subagents | token |
-| POST | `/api/subagents/started` | subagents | token |
-| POST | `/api/subagents/stopped` | subagents | token |
-| GET | `/api/tools` | tools | cookie or token |
-| GET | `/api/tools/holdings` | tools | cookie or token |
-| POST | `/api/tools/{name}` | tools | token |
 | GET | `/api/tour` | tour | cookie or token |
 | POST | `/api/tour/seen` | tour | cookie |
 | POST | `/api/ui/key` | main | code |
@@ -121,35 +90,22 @@ knows the key.
 | DELETE | `/api/ws/{c}` | ledger | token |
 | GET | `/api/ws/{c}/answer-comments` | checks | cookie or token |
 | POST | `/api/ws/{c}/answer-comments/{cid}/dismiss` | checks | cookie |
-| POST | `/api/ws/{c}/answer-comments/{cid}/reopen` | checks | cookie |
 | POST | `/api/ws/{c}/archive` | ledger | token |
 | GET | `/api/ws/{c}/archives` | ledger | cookie or token |
-| POST | `/api/ws/{c}/calls/ref` | calls | token |
-| GET | `/api/ws/{c}/calls/{chat}` | calls | cookie or token |
-| GET | `/api/ws/{c}/calls/{chat}/{n}` | calls | cookie or token |
 | GET | `/api/ws/{c}/canvas` | notebook | cookie or token |
 | GET | `/api/ws/{c}/canvas/comments` | canvas_comments | cookie or token |
-| POST | `/api/ws/{c}/canvas/comments/{cid}/reopen` | canvas_comments | cookie |
 | POST | `/api/ws/{c}/canvas/comments/{cid}/resolve` | canvas_comments | cookie |
 | GET | `/api/ws/{c}/card-checks` | card_check | cookie or token |
 | POST | `/api/ws/{c}/card-checks/stop` | card_check | cookie |
 | GET | `/api/ws/{c}/card-libs` | card_libs | cookie or token |
 | POST | `/api/ws/{c}/cards/{cell_id}/plan-edit/clear` | plans | cookie |
 | GET | `/api/ws/{c}/cards/{cell_id}/plan-runs` | plans | cookie or token |
-| GET | `/api/ws/{c}/cardtypes/{name}/frame` | cardtypes | cookie or token |
-| POST | `/api/ws/{c}/cardtypes/{name}/records` | cardtypes | cookie |
 | POST | `/api/ws/{c}/cells` | notebook | cookie |
 | POST | `/api/ws/{c}/cells/move` | notebook | cookie |
 | GET | `/api/ws/{c}/cells/names` | notebook | cookie or token |
 | DELETE | `/api/ws/{c}/cells/{cell_id}` | notebook | cookie |
-| GET | `/api/ws/{c}/cells/{cell_id}` | notebook | cookie or token |
 | PUT | `/api/ws/{c}/cells/{cell_id}` | notebook | cookie |
-| POST | `/api/ws/{c}/cells/{cell_id}/as-view` | cardtypes | cookie |
-| POST | `/api/ws/{c}/cells/{cell_id}/keep` | cardtypes | cookie |
-| POST | `/api/ws/{c}/cells/{cell_id}/regenerate` | notebook | cookie |
-| POST | `/api/ws/{c}/cells/{cell_id}/relink` | verify | cookie |
 | POST | `/api/ws/{c}/cells/{cell_id}/run` | notebook | cookie |
-| GET | `/api/ws/{c}/cells/{cell_id}/verification` | verify | cookie or token |
 | GET | `/api/ws/{c}/cells/{cell_id}/versions/{entry}` | notebook | cookie or token |
 | POST | `/api/ws/{c}/cells/{cell_id}/versions/{entry}/restore` | notebook | cookie |
 | POST | `/api/ws/{c}/cells/{cid}/check` | card_check | cookie |
@@ -179,21 +135,12 @@ knows the key.
 | GET | `/api/ws/{c}/concepts/{concept_id}` | concepts | cookie or token |
 | PUT | `/api/ws/{c}/concepts/{concept_id}` | concepts | cookie |
 | POST | `/api/ws/{c}/concepts/{concept_id}/apply` | concepts | cookie |
-| POST | `/api/ws/{c}/concepts/{concept_id}/apply/cancel` | concepts | cookie |
-| GET | `/api/ws/{c}/concepts/{concept_id}/apply/runs` | concepts | cookie or token |
 | GET | `/api/ws/{c}/concepts/{concept_id}/coverage` | concepts | cookie or token |
-| GET | `/api/ws/{c}/concepts/{concept_id}/events` | concepts | cookie or token |
-| GET | `/api/ws/{c}/concepts/{concept_id}/labels` | concepts | cookie or token |
 | POST | `/api/ws/{c}/concepts/{concept_id}/labels` | concepts | cookie |
 | GET | `/api/ws/{c}/concepts/{concept_id}/rows` | concepts | cookie or token |
 | GET | `/api/ws/{c}/events` | investigation | cookie or token |
 | POST | `/api/ws/{c}/events` | events | cookie |
 | GET | `/api/ws/{c}/export` | export | cookie or token |
-| GET | `/api/ws/{c}/extensions` | extensions | cookie or token |
-| PUT | `/api/ws/{c}/extensions/{name}` | extensions | cookie |
-| POST | `/api/ws/{c}/extensions/{name}/add` | extensions | cookie |
-| POST | `/api/ws/{c}/extensions/{name}/orientation` | extensions | cookie |
-| PUT | `/api/ws/{c}/extensions/{name}/views/{slug}` | extensions | cookie |
 | POST | `/api/ws/{c}/feedback` | feedback_routes | cookie |
 | GET | `/api/ws/{c}/filters` | concepts | cookie or token |
 | PUT | `/api/ws/{c}/filters` | concepts | cookie |
@@ -208,23 +155,12 @@ knows the key.
 | PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/blocks` | report_types | cookie |
 | POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/comments` | report_types | cookie |
 | POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/dismiss` | report_types | cookie |
-| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/reopen` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/deck` | report_types | cookie |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/export` | report_types | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}` | exports | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/exports` | exports | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame` | report_types | cookie or token |
-| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections` | report_types | cookie |
-| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections/{sid}/figures` | report_types | cookie |
-| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections/{sid}/paragraphs` | report_types | cookie |
-| DELETE | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/units/{uid}` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/units/{uid}` | report_types | cookie |
 | PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/html` | report_types | cookie |
 | PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/locks/{block}` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/sentences/{sid}` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/story` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/title` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/units/{uid}` | report_types | cookie |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions` | report_types | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}` | report_types | cookie or token |
 | POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}/restore` | report_types | cookie |
@@ -240,39 +176,23 @@ knows the key.
 | GET | `/api/ws/{c}/labels/ruler` | concepts | cookie or token |
 | POST | `/api/ws/{c}/marks/repair` | marks | cookie |
 | GET | `/api/ws/{c}/media` | views | cookie or token |
-| POST | `/api/ws/{c}/notebook/restart` | notebook | cookie |
-| GET | `/api/ws/{c}/notebooks` | notebook | cookie or token |
 | POST | `/api/ws/{c}/notebooks` | notebook | cookie |
 | DELETE | `/api/ws/{c}/notebooks/{nb}` | notebook | cookie |
-| GET | `/api/ws/{c}/notebooks/{nb}` | notebook | cookie or token |
 | PUT | `/api/ws/{c}/notebooks/{nb}` | notebook | cookie |
-| POST | `/api/ws/{c}/notebooks/{nb}/cells` | notebook | cookie |
-| DELETE | `/api/ws/{c}/notebooks/{nb}/cells/{cell_id}` | notebook | cookie |
-| PUT | `/api/ws/{c}/notebooks/{nb}/cells/{cell_id}` | notebook | cookie |
 | GET | `/api/ws/{c}/notebooks/{nb}/cells/{cell_id}/outputs/{i}/full` | notebook | cookie or token |
-| POST | `/api/ws/{c}/notebooks/{nb}/cells/{cell_id}/relink` | verify | cookie |
-| POST | `/api/ws/{c}/notebooks/{nb}/cells/{cell_id}/run` | notebook | cookie |
-| GET | `/api/ws/{c}/notebooks/{nb}/events` | notebook | cookie or token |
-| GET | `/api/ws/{c}/notebooks/{nb}/ipynb` | notebook | cookie or token |
-| POST | `/api/ws/{c}/notebooks/{nb}/run` | notebook | cookie |
 | GET | `/api/ws/{c}/notices` | notices | cookie or token |
 | POST | `/api/ws/{c}/notices/{notice_id}/dismiss` | notices | cookie |
 | POST | `/api/ws/{c}/permission` | events | cookie |
 | POST | `/api/ws/{c}/redo` | undo | cookie |
 | PUT | `/api/ws/{c}/render/theme` | render | cookie |
-| GET | `/api/ws/{c}/report-types` | report_types | cookie or token |
-| POST | `/api/ws/{c}/report-types` | report_types | cookie |
 | POST | `/api/ws/{c}/report-types/new` | report_types | cookie |
 | GET | `/api/ws/{c}/report-types/presets` | report_types | cookie or token |
 | DELETE | `/api/ws/{c}/report-types/{slug}` | report_types | cookie |
-| GET | `/api/ws/{c}/report-types/{slug}` | report_types | cookie or token |
 | PUT | `/api/ws/{c}/report-types/{slug}` | report_types | cookie |
 | POST | `/api/ws/{c}/restore` | ledger | token |
-| POST | `/api/ws/{c}/session` | events | token |
 | PUT | `/api/ws/{c}/session/effort` | events | cookie |
 | PUT | `/api/ws/{c}/session/fast` | events | cookie |
 | PUT | `/api/ws/{c}/session/model` | events | cookie |
-| POST | `/api/ws/{c}/sessions/permission` | agent_session | token |
 | GET | `/api/ws/{c}/settings` | ledger | cookie or token |
 | PUT | `/api/ws/{c}/settings` | ledger | cookie |
 | POST | `/api/ws/{c}/subagents/again` | subagents | cookie |
@@ -284,7 +204,6 @@ knows the key.
 | POST | `/api/ws/{c}/undo` | undo | cookie |
 | GET | `/api/ws/{c}/views` | views | cookie or token |
 | GET | `/api/ws/{c}/views/proposals` | views | cookie or token |
-| DELETE | `/api/ws/{c}/views/proposals/{slug}` | views | cookie |
 | POST | `/api/ws/{c}/views/proposals/{slug}/accept` | views | cookie |
 | POST | `/api/ws/{c}/views/proposals/{slug}/discard` | views | cookie |
 | POST | `/api/ws/{c}/views/proposals/{slug}/message` | views | cookie |
@@ -293,9 +212,7 @@ knows the key.
 | POST | `/api/ws/{c}/views/proposals/{slug}/stop` | views | cookie |
 | POST | `/api/ws/{c}/views/propose-now` | views | cookie |
 | POST | `/api/ws/{c}/views/suggest` | views | cookie |
-| GET | `/api/ws/{c}/views/suggestions` | views | cookie or token |
 | DELETE | `/api/ws/{c}/views/{slug}` | views | cookie |
-| GET | `/api/ws/{c}/views/{slug}` | views | cookie or token |
 | POST | `/api/ws/{c}/views/{slug}/build` | views | cookie |
 | GET | `/api/ws/{c}/views/{slug}/calls/{call}` | views | cookie or token |
 | POST | `/api/ws/{c}/views/{slug}/calls/{call}/cancel` | views | cookie |

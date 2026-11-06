@@ -5,19 +5,15 @@
 // of a whole card, which is the card's chip with its name, as the chips under a step's Cards are. The links toggle
 // hides every citation (lib/links). Hovering shows the evidence in a label: the excerpt with the record's facts and the
 // cited words highlighted; for a table cell (`card:<id>#<col>/<row>`) the table around it, or in place when the table is
-// drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) the
-// cited lines of its output under what it points at in plain words (lib/calls, chat/model callTarget). A click, on the
-// citation or on the chip that heads its label, teleports to the ref's surface (lib/teleport); a ⌘-click asks about it.
+// drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it. A click, on the citation or on the
+// chip that heads its label, teleports to the ref's surface (lib/teleport); a ⌘-click asks about it.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { openCited } from '../lib/citeTargets'
-import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../lib/calls'
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
-import { callDetail, callFile, callTarget } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
-import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
+import { cardPartLabel, cellSpanLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
@@ -35,28 +31,21 @@ import { FACT_KINDS, markFacts, markValue, recordFacts, type RecordFact } from '
 import { quoteParts, type QuotePart } from '../canvas/quotes'
 
 /** The seven things a chip can point to, by the ref's kind; a record (a row of a file) is its file. */
-const KIND_ICON: Record<string, IconName> = { cell: 'cell', group: 'group', concept: 'label', chat: 'thread', call: 'terminal', row: 'file', table: 'file', report: 'report', view: 'view' }
-const INTERNAL = new Set(['cell', 'group', 'concept', 'report', 'view', 'call'])
+const KIND_ICON: Record<string, IconName> = { cell: 'cell', group: 'group', concept: 'label', chat: 'thread', row: 'file', table: 'file', report: 'report', view: 'view' }
+const INTERNAL = new Set(['cell', 'group', 'concept', 'report', 'view'])
 /** The refs a chip names by a name in words (a label, a canvas group, a view, a thread, a document), set in the body
- * face, as is a call named by what it did; a card's id, a file, its lines and a call's file stay in mono. */
+ * face; a card's id, a file and its lines stay in mono. */
 const NAME_KINDS = new Set(['concept', 'group', 'view', 'chat', 'report'])
 export const kindIcon = (kind?: string): IconName => (kind && KIND_ICON[kind]) || 'file'
-/** A ref's glyph: for a ref into a file (a whole file, its lines, rows, pages or records), and for a call that read or
- * wrote one, the glyph of the file's type, as the Files tree draws it; else its kind's. */
+/** A ref's glyph: for a ref into a file (a whole file, its lines, rows, pages or records), the glyph of the file's
+ * type, as the Files tree draws it; else its kind's. */
 export function refIcon(ref: string): IconName {
   const p = parseRef(ref)
-  if (p?.kind === 'call') {
-    const w = callWords(p.chat, p.n)
-    const file = w ? callFile(w.name, w.input) : ''
-    if (file) return glyphOf(file)
-  }
   return p && 'path' in p && p.path ? glyphOf(p.path) : kindIcon(p?.kind)
 }
 /** A ref's chip tone: the evidence chip for the data, the accent chip for what the agent made (lib/refs
  * isEvidenceRef). */
 export const refTone = (ref: string): ChipTone => (isEvidenceRef(ref) ? 'evidence' : 'accent')
-
-export { decodeLabel }
 
 /** True where a standalone citation is its target's glyph alone, its name in the hover, so a long name does not crowd
  * the text: chat replies, inside a card's content wherever the card is drawn, and a report's text. A cited number stays
@@ -67,7 +56,7 @@ export const GlyphCites = createContext(false)
  * records of the example card a takeaway is on, so files of one name read apart as the card's addresses do. */
 export const ShownTogether = createContext<readonly string[]>([])
 
-const ID_TOKEN = /\b(cell|concept|chat|group|report|view|call)[:]([A-Za-z0-9_-]{4,})(?:\/\d+)?(?:#[A-Za-z0-9_@.-]*)?/g
+const ID_TOKEN = /\b(cell|concept|chat|group|report|view)[:]([A-Za-z0-9_-]{4,})(?:#[A-Za-z0-9_@.-]*)?/g
 /** An id-looking `kind:<id>` replaced by its kind word, so a chip never shows a hash. */
 export function scrubIds(s: string): string {
   return s.replace(ID_TOKEN, '$1')
@@ -92,12 +81,6 @@ export function compactLabel(ref: string, among?: readonly string[]): string {
  * a file's told apart from the files shown with it (`among`, ShownTogether). */
 export function chipLabel(ref: string, home?: string | null, ws = '', among?: readonly string[]): string {
   const p = parseRef(ref)
-  if (p?.kind === 'call') {
-    // what the call points at in plain words, once a thread or a read registered it; its step number until then
-    const w = callWords(p.chat, p.n)
-    const line = w ? callTarget(w.name, w.input, p.n, ws) : `step ${p.n}`
-    return p.line != null ? `${line} · ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}` : line
-  }
   if (p?.kind === 'cell') {
     const name = cellLabel(p.cellId) ?? 'card'
     return cardPartLabel(p, name, home === p.cellId) ?? name + (p.exec != null ? `@${p.exec}` : '')
@@ -106,14 +89,12 @@ export function chipLabel(ref: string, home?: string | null, ws = '', among?: re
   return compactLabel(ref, among)
 }
 
-/** Ask for the name a ref's chip shows when it is not known yet: a card's, a label's, a call's (lib/calls registers it
- * with its read from the store). */
+/** Ask for the name a ref's chip shows when it is not known yet: a card's, a label's. */
 export function ensureRefName(ws: string, ref: string): void {
   const p = parseRef(ref)
   if (!ws || !p) return
   if (p.kind === 'cell' && !hasCellName(p.cellId)) void ensureCellName(ws, p.cellId)
   if (p.kind === 'concept' && !hasConceptName(p.conceptId)) void ensureConceptName(ws, p.conceptId)
-  if (p.kind === 'call' && !callWords(p.chat, p.n)) void fetchCall(ws, p.chat, p.n).catch(() => undefined)
 }
 
 /** A ref's chip name (chipLabel), redrawn when the name it shows becomes known. */
@@ -121,7 +102,7 @@ export function useRefLabel(ref: string, workspace?: string): string {
   const ws = workspace ?? workspaceFromUrl() ?? ''
   useEffect(() => ensureRefName(ws, ref), [ws, ref])
   const name = () => chipLabel(ref, null, ws)
-  return useSyncExternalStore(onNames, name, name)
+  return useSyncExternalStore(onCellNames, name, name)
 }
 
 /** Where inside its cell or view a ref points, for the hover label: an output's lines, a view's record key. A table's
@@ -143,39 +124,6 @@ export function whereOf(r: ResolvedRef): string | undefined {
     return (r.refs.length > 1 ? `${first} and ${r.refs.length - 1} more` : first) + deleted
   }
   return undefined
-}
-
-/** Whether a call ref names the file its call read or wrote, which the chip sets in mono; a call not registered yet
- * shows its step number in words. */
-const wordsFile = (p: { chat: string; n: number }): boolean => {
-  const w = callWords(p.chat, p.n)
-  return !!w && !!callFile(w.name, w.input)
-}
-
-/** The subscription that redraws a chip when a name it shows becomes known: a card's, a label's, a call's chip line. */
-const onNames = (fn: () => void): (() => void) => {
-  const a = onCellNames(fn)
-  const b = onCallWords(fn)
-  return () => {
-    a()
-    b()
-  }
-}
-
-/** the lines of a call's output its hover shows around the cited ones, and for a whole call from its start */
-const CALL_CONTEXT = 2
-const CALL_HEAD_LINES = 8
-
-/** The lines a call's hover shows: the cited lines with CALL_CONTEXT lines on each side, marked, or the output's first
- * CALL_HEAD_LINES lines for the whole call; null when a cited line is not in the output. Pure. */
-export function callWindow(text: string, line?: number, endLine?: number): { lines: string[]; from: number; to: number } | null {
-  const all = outputLines(text)
-  if (line == null) return { lines: all.slice(0, CALL_HEAD_LINES), from: -1, to: -2 }
-  const end = endLine ?? line
-  if (line < 1 || line > all.length) return null
-  const lo = Math.max(1, line - CALL_CONTEXT)
-  const hi = Math.min(all.length, end + CALL_CONTEXT)
-  return { lines: all.slice(lo - 1, hi), from: line - lo, to: Math.min(end, all.length) - lo }
 }
 
 /** the label waits this long for the pointer to settle, then arrives in --dur-fast */
@@ -307,7 +255,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   useLayoutEffect(() => setHome(chipEl.current?.closest<HTMLElement>('[data-cite-home]')?.dataset.citeHome ?? null), [])
   const among = useContext(ShownTogether)
   const name = () => chipLabel(ref, home, ws, among)
-  const label = useSyncExternalStore(onNames, name, name)
+  const label = useSyncExternalStore(onCellNames, name, name)
   const parsed = parseRef(ref)
   const unresolved = !parsed && !broken
   const wholeCell = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null ? parsed.cellId : null
@@ -329,7 +277,6 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const wholeCard = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null && parsed.step == null
   const iconOnly = !asText && !broken && !!cite && !wholeCard && (glyphCites || parsed?.kind === 'cell')
 
-  const call = parsed?.kind === 'call' ? parsed : null
   useEffect(() => ensureRefName(ws, ref), [ws, ref])
   useEffect(
     () => () => {
@@ -409,22 +356,6 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     }
     setPop({ state: 'loading', rect })
     const seq = ++reqSeq.current
-    if (parsed.kind === 'call') {
-      // a call: its chip line over the cited lines of its whole output, the value marked, never its number in words
-      try {
-        const c = await fetchCall(ws, parsed.chat, parsed.n)
-        if (seq !== reqSeq.current) return
-        const lines = callWindow(callOutput(c), parsed.line, parsed.endLine)
-        if (!lines) return setPop({ state: 'error', rect, message: 'This line is not in the call\'s output' })
-        // an inline citation's head, and a glyph alone's, already names what the call points at; a chip's name may be
-        // cut short; a shell call's command shows under either
-        const where = callDetail(c.name, c.input, ws) ?? (asText || iconOnly ? undefined : callTarget(c.name, c.input, parsed.n, ws))
-        return setPop({ state: 'ok', rect, excerpt: '', kind: 'call', where, lines })
-      } catch (err) {
-        if (seq !== reqSeq.current) return
-        return setPop({ state: 'error', rect, message: 'Could not load this call', detail: (err as Error).message || undefined })
-      }
-    }
     try {
       const r = await api.resolveRef(ws, ref)
       resolved.current = { ref, r }
@@ -462,12 +393,10 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const onEnter = () => {
     cancelHide()
     window.clearTimeout(showTimer.current)
-    if (home) bus.emit('citeHover', { card: home, ref })
     if (pointing()) return
     showTimer.current = window.setTimeout(() => void open(), HOVER_DELAY_MS)
   }
   const onLeave = () => {
-    if (home) bus.emit('citeHover', { card: home, ref: null })
     window.clearTimeout(showTimer.current)
     reqSeq.current++
     unmark()
@@ -485,7 +414,6 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     setPop(null)
     unmark()
     if (unresolved) return
-    if (home && openCited(home, ref)) return
     void clickTarget().then((to) => teleport(to))
   }
 
@@ -519,7 +447,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
           {shownValue(value ?? '')}
         </span>
       ) : (
-        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={(kind && NAME_KINDS.has(kind)) || (call && !wordsFile(call)) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
+        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={kind && NAME_KINDS.has(kind) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
           {iconOnly ? null : label}
         </Chip>
       )}
@@ -693,5 +621,3 @@ function CellPreview({ ws, cell, fitWidth }: { ws: string; cell: Cell; fitWidth?
     </div>
   )
 }
-
-export default RefChip

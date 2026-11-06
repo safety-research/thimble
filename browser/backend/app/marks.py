@@ -511,7 +511,7 @@ def card_written(c: str, cid: str | None) -> None:
     if not cid:
         return
     try:
-        from . import card_check, notebook, runtime, session  # noqa: PLC0415
+        from . import card_check, notebook, session  # noqa: PLC0415
 
         cell = notebook.get_cell(c, cid)
         if not cell or cell.get("status") == "running" or "](#)" not in str(cell.get("takeaway") or ""):
@@ -525,9 +525,7 @@ def card_written(c: str, cid: str | None) -> None:
         if lv is None:
             return  # no main to fork: main's next reply checks it
         # the fork resumes main at its last finished turn; the runtime's forks take main's conversation as it stands
-        cut = lv.last_cut or ("" if runtime.enabled() else None)
-        if cut is None:
-            return
+        cut = lv.last_cut or ""
         main = {"sid": lv.sid, "cwd": lv.cwd, "config": lv.config, "config_known": lv.config_known,
                 "transcript_path": lv.transcript_path, "model": lv.model, "effort": lv.effort,
                 "context_tokens": lv.context_tokens}
@@ -958,15 +956,14 @@ CLEARED = ("status", "was", "reason", "failedBy", "evidence", "note", "narrowed"
 
 def _main_now(c: str) -> tuple[dict[str, Any], str] | str:
     """What a fork of main needs, at main's last finished turn: (main, cut), or why there is none (card_written's)."""
-    from . import runtime, session  # noqa: PLC0415
+    from . import session  # noqa: PLC0415
 
     lv = session.current(c)
-    cut = (lv.last_cut or ("" if runtime.enabled() else None)) if lv is not None else None
-    if lv is None or cut is None:
+    if lv is None:
         return "main has no finished turn to check from yet"
     return ({"sid": lv.sid, "cwd": lv.cwd, "config": lv.config, "config_known": lv.config_known,
              "transcript_path": lv.transcript_path, "model": lv.model, "effort": lv.effort,
-             "context_tokens": lv.context_tokens}, cut)
+             "context_tokens": lv.context_tokens}, lv.last_cut or "")
 
 
 async def repair(c: str, turn: str | None = None, n: int | None = None, card: str | None = None, k: int | None = None,
@@ -1128,35 +1125,32 @@ def allowed_call(name: str, args: dict[str, Any]) -> bool:
 
 
 async def run_fork(c: str, main: dict[str, Any], cut: str | None, prompt: str) -> dict[str, Any]:
-    """One fork of main at `cut` with the checker's prompt: {answer, calls, error}. On the runtime that the person's
-    way to reach Claude chose (runtime.py): the Messages API in this process for an API key or WIF (no `claude`
-    process), their Claude Code session's fork for a Claude Code sign-in; 0.8's `claude -p` fork when the runtime is
-    off."""
+    """One fork of main at `cut` with the checker's prompt: {answer, calls, error}, on the way to reach Claude the
+    person chose (runtime.py): the Messages API in this process for an API key or WIF (no `claude` process), their
+    Claude Code session's fork for a Claude Code sign-in."""
     from . import cc_settings, runtime, runtime_api, runtime_cc  # noqa: PLC0415
 
     model_id, effort = _model(c, main, prompt)
-    box = False
-    if runtime.enabled():
-        kind = runtime.engine()
-        if kind == "api":
-            try:
-                out = await asyncio.wait_for(runtime_api.fork_stream(c, prompt, model=model_id, effort=effort,
-                                                                     allow=allowed_call), FORK_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                return {"error": "it took too long"}
-            except Exception as e:  # noqa: BLE001 — the check says it stopped, in words
-                from . import llm  # noqa: PLC0415
+    kind = runtime.engine()
+    if kind == "api":
+        try:
+            out = await asyncio.wait_for(runtime_api.fork_stream(c, prompt, model=model_id, effort=effort,
+                                                                 allow=allowed_call), FORK_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            return {"error": "it took too long"}
+        except Exception as e:  # noqa: BLE001 — the check says it stopped, in words
+            from . import llm  # noqa: PLC0415
 
-                return {"error": llm.failure(e)}
-            return parse_stream(out)
-        sid = runtime_api.cc_main_session(c) if kind == "cc" else None
-        if not sid:
-            return {"error": "thimble cannot reach Claude yet" if not kind else "main has no Claude Code session yet"}
-        main, cut = {**main, "sid": sid, "config_known": False}, runtime_api.cc_main_cut(c)
-        # the fork's python runs in Claude Code's sandbox where it can, as main's Bash does on Claude Code sign-in (in a
-        # short TMPDIR of its own), so it never reads the ANTHROPIC_* variables Claude Code signs in with; the sandbox's
-        # .claude/.cc-writes/ in the corpus goes when the last session there ends (runtime_cc._tidy)
-        box = cc_settings.sandbox_ok()
+            return {"error": llm.failure(e)}
+        return parse_stream(out)
+    sid = runtime_api.cc_main_session(c) if kind == "cc" else None
+    if not sid:
+        return {"error": "thimble cannot reach Claude yet" if not kind else "main has no Claude Code session yet"}
+    main, cut = {**main, "sid": sid, "config_known": False}, runtime_api.cc_main_cut(c)
+    # the fork's python runs in Claude Code's sandbox where it can, as main's Bash does on Claude Code sign-in (in a
+    # short TMPDIR of its own), so it never reads the ANTHROPIC_* variables Claude Code signs in with; the sandbox's
+    # .claude/.cc-writes/ in the corpus goes when the last session there ends (runtime_cc._tidy)
+    box = cc_settings.sandbox_ok()
     cwd = Path(main.get("cwd") or config.corpus_dir(c))
     tmp = runtime_cc.short_tmp() if box else None
     env = {**_env(main), **({"TMPDIR": str(tmp), "CLAUDE_CODE_TMPDIR": str(tmp)} if tmp else {})}

@@ -12,8 +12,8 @@
 // then waits until the --selector match is drawn: no part of it still drawing (a `data-settled="false"` body, a chart
 // with no svg yet: the card harness's test, frontend/src/render.tsx settled), the page's fonts loaded, and its box and
 // content unchanged for 100 ms, at most 5 s; and the png shows every CSS animation and transition at its end, so a
-// highlight fading out is not half there. A match that holds a frame drawing itself (a custom card, an html output, a
-// card type's page: `iframe[data-shot]`) draws inside the frame's own page, which that wait cannot watch, and may
+// highlight fading out is not half there. A match that holds a frame drawing itself (a custom card or an html output:
+// `iframe[data-shot]`) draws inside the frame's own page, which that wait cannot watch, and may
 // animate there: it is shot again until its picture stays the same for 1.2 s, at most 8 s (waitStill), and the png
 // shows its animations as they play. Then --wait ms (default 500) to settle, then the png: the element's bounding
 // box padded by 24 px when --selector is given and found, else the full viewport. --highlight outlines the --selector

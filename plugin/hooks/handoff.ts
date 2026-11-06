@@ -33,8 +33,8 @@ const STILL_LOOKS = 15
 // the variables a request carries, as engine/kernel/handoff.py CARRIED has them: which session and which folder the
 // command is for. Each one the request has not is empty for the run, as the command had it unset
 export const CARRIED = ['THIMBLE_SESSION', 'THIMBLE_CONVERSATION', 'THIMBLE_START', 'THIMBLE_ROOT'] as const
-// a request's files, by their ending (.code: an earlier version's)
-const ENDS = ['.live', '.part', '.ask', '.took', '.out', '.err', '.code', '.done']
+// a request's files, by their ending
+const ENDS = ['.live', '.part', '.ask', '.took', '.out', '.err', '.done']
 // the shell that runs one: the rename takes it, so a command that took it back first, or a second load of the plugin,
 // leaves it alone; `took` tells this module that its own shell took it. Then the shell becomes the command, so that
 // stopping the run stops the command; a folder that is gone is said in its output
