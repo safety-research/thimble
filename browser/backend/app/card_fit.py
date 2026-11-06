@@ -108,7 +108,7 @@ def holds_here(c: str) -> bool:
 
 def holder(c: str, name: str, session: str | None, tool_use_id: str | None) -> dict[str, str]:
     """Who makes the version an add_card or edit_card call stores, as the card's held record names it: `author`, the
-    session of one of thimble's agents the call runs as (tools.Ctx.session, such as `orient` or `writer:<doc>`, its
+    session of one of thimble's agents the call runs as (tools.Ctx.session, such as `writer:<doc>`, its
     descendants' calls too), or `agent`, the subagent of main's that made the call, such as a thread's fork (its line in
     callers.jsonl, subagent_files.find_caller). {} for main's own call, for any other tool, and where no card is
     held."""

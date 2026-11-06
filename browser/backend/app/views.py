@@ -85,9 +85,8 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 # index as the views kernel pickled it and the bytes build_index read of each claimed file, by fingerprint
 INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
-# a view ticket's status on its proposal row; `dropped` is the proposal of an orientation from before 0.8.0 left out
-# when the analyst stopped the orientation before its view was built, or a view proposal the analyst rejected
-# (answer_offer, its `answer`).
+# a view ticket's status on its proposal row; `dropped` is a view proposal the analyst rejected (answer_offer, its
+# `answer`).
 # `suggested` with an `offered` object is a view proposal thimble shows the analyst (offer), after a turn (proposer.py)
 # or for a file type opened in the File browser (suggest), which builds only once the analyst accepts it (accept).
 STATUSES = ("queued", "building", "built", "failed", "dropped", "suggested")
@@ -699,8 +698,7 @@ def list_views(c: str) -> list[dict[str, Any]]:
 
 
 def _own_views(c: str) -> list[dict[str, Any]]:
-    """The workspace's own views as read_built reads them, those switched off kept (list_proposals settles its rows
-    against them)."""
+    """The workspace's own views as read_built reads them (list_proposals settles its rows against them)."""
     return [v for s in _view_dirs(c) if (v := read_built(c, s)) is not None]
 
 
@@ -3208,7 +3206,7 @@ def build_problem_for(c: str) -> str:
 
 def build_problem() -> str:
     """Why a view cannot be built and checked on this machine, '' when it can: the checks need Node 20+ and the
-    frontend's packages. The line reaches the orientation and main too, so it names what is missing and no command
+    frontend's packages. The line reaches main too, so it names what is missing and no command
     (`thimble doctor --verbose` names them)."""
     version = ""
     if node := shutil.which("node"):  # the one shoot runs

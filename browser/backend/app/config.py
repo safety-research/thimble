@@ -530,7 +530,7 @@ def _shortened(part: str, n: int) -> str:
 def session_name(role: str, workspace: str | None) -> str:
     """The name a Claude Code session thimble starts goes by: main's (`claude -n`), as `claude agents`, the /resume
     picker and SendMessage's `to` know it, and each agent's in the agent tray: `thimble:<role> · <workspace>`,
-    such as `thimble:main · logs-2` or `thimble:writer-story · logs-2`, since those lists hold the sessions of every
+    such as `thimble:main · logs-2` or `thimble:dev · logs-2`, since those lists hold the sessions of every
     folder, so two workspaces must not share a name; `thimble:<role>` alone for a session of no workspace (`thimble fix`'s code ticket). A name is at most
     SESSION_NAME_MAX characters: a longer one shortens its workspace first, down to SESSION_PART_MIN characters, then its
     role (_shortened), so distinct roles and workspaces keep distinct names."""
@@ -866,8 +866,8 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev", "suggest", "refusal")
 ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
     "subagents": {"model": "", "effort": "", "fast": False},  # '' is the orientation's model and effort (models_for)
-    "critic": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/critic.md's frontmatter
-    "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's
+    "critic": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},
+    "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's frontmatter
     "checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False},  # under prompts/check.md's
     "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
     "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone

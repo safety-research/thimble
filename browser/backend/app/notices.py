@@ -10,7 +10,7 @@ The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, 
 action, ts}: `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command,
 such as /login or `thimble server restart`); `details` is the whole of it when `text` had to be shortened (TEXT_CHARS,
 or a failure's words cut by gist), which the page shows on Show more, else None; `agent` names the agent in a few words
-("Orientation", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to; `action`
+("Citation check", "View build: Agent Network"); `chat` is the agent's own chat, which the strip's Open goes to; `action`
 is the button, one object {label, do, slug?, text?} or a list of them, `do` one of ACTIONS:
 
   proposals-retry  POST /api/ws/{c}/views/propose-now (proposer.run_now)

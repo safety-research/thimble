@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A view's page loaded headless, for a view's checks, its review and the screenshot tool (backend/app/views.py
-// shoot_states), and a video's film for the frames the writer looks at (backend/app/video.py), in the headless Chromium
-// of the frontend's Playwright (frontend/node_modules, which scripts/install.sh installs).
+// shoot_states), in the headless Chromium of the frontend's Playwright (frontend/node_modules, which scripts/install.sh
+// installs).
 //   node scripts/view_shot.mjs --frame <html> --states <json> [--viewport <w>x<h>] [--media <url>]
 // --states names a JSON list of states, [{out, open, actions?, viewport?}], each loaded on a fresh page of one browser,
 // PAGES_AT_ONCE at a time:

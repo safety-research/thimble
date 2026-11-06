@@ -997,7 +997,7 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
 
     # the workspace is the corpus's registered name, not the directory's basename
     ws = config.WORKSPACES_DIR / config.workspace_for_corpus_dir(corpus_dir)
-    # every notebook, the orientation's working one included, since the orientation cites the cards it made there
+    # every notebook, not only the canvas's, since a ref names a card wherever it is
     hit = notebook.find_cell(ws, p["cell_id"]) if ws.is_dir() else None
     if hit is None:
         raise RefError(f"no card {p['cell_id']!r}", 404)

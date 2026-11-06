@@ -696,8 +696,7 @@ def views(c: str) -> str:
     """The corpus's own views, each with the files it claims and what it is for, then the proposals not built yet (a
     view proposal the analyst rejected is not among them). The view proposal that waits
     for the analyst's answer (views.open_offer) is listed as thimble's, so main leaves it to the analyst rather than
-    building it; a `suggested` row without `offered`, a 0.7.x orientation's viewer for a file type, is left out, and so
-    is the waiting view proposal while view proposals are off (views.propose_enabled), since the analyst then sees
+    building it; it is left out while view proposals are off (views.propose_enabled), since the analyst then sees
     none."""
     from . import views as views_mod  # noqa: PLC0415
 

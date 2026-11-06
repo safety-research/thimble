@@ -89,8 +89,8 @@ def unlinked(base: Path, path: Path) -> Path:
 def write_under(base: Path, path: Path, text: str) -> None:
     """`text` written to `path` under `base` by the server: its folders made, each opened from `base` without following
     a link, and a symlink at `path` itself replaced rather than followed (nofollow.replace). For a file thimble writes
-    into a folder that its agents' Bash or a kernel can write (a check's task file, a writer's context file, the
-    critic's brief and digest), where a planted link would have the server, which no sandbox holds, write outside it.
+    into a folder that its agents' Bash or a kernel can write (a check's task file, a writer's context file), where a
+    planted link would have the server, which no sandbox holds, write outside it.
     OSError for a link (nofollow.Linked) or a path outside `base`."""
     try:
         nofollow.replace(path, text.encode("utf-8"), root=base, make=True)
@@ -455,8 +455,8 @@ def get_settings(c: str) -> dict[str, Any]:
 # (ASK_KEY), which only the analyst's browser may change (hook_auth.analyst). The models, the permission modes, the web
 # switches, the View proposals switch and the ask key are written to thimble's config (userconf.save), the rest to the
 # workspace's settings.json.
-# Every other key is the server's own or the analyst's to edit in the file (kernel_wrap, orient_instructions), since a
-# kernel cell or a session's command can reach the route on loopback.
+# Every other key is the server's own or the analyst's to edit in the file (kernel_wrap), since a kernel cell or a
+# session's command can reach the route on loopback.
 WEB_KEY = "web"  # {row: "off" | None}: a subagent of main kept off WebFetch and WebSearch, or back on main's rule
 WEB_ROWS = {"critic": "critic", "writer": "writer", "checks": "checks"}  # the web switches' rows, by thimble's config's agent
 # true, false or null: thimble's config's `views.propose`, whether thimble shows view proposals
@@ -495,10 +495,10 @@ def web_patch(rows: Any) -> dict[str, Any]:
 
 @router.put("/ws/{c}/settings")
 def put_settings_route(c: str, request: Request, settings: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """put_settings for the browser, which may change PUT_KEYS only (RETIRED_KEYS among them are dropped); 400 names any
-    other key, why a permission mode cannot be chosen, a PROPOSE_KEY that is not true, false or null, or an ASK_KEY that
-    is not one of userconf.ASK_KEYS or null, and 403 refuses a change of permission modes, web switches, PROPOSE_KEY or
-    ASK_KEY from anything but the analyst's browser."""
+    """put_settings for the browser, which may change PUT_KEYS only; 400 names any other key, why a permission mode
+    cannot be chosen, a PROPOSE_KEY that is not true, false or null, or an ASK_KEY that is not one of userconf.ASK_KEYS
+    or null, and 403 refuses a change of permission modes, web switches, PROPOSE_KEY or ASK_KEY from anything but the
+    analyst's browser."""
     from . import hook_auth, modes  # noqa: PLC0415 — modes imports this module
 
     refused = sorted(set(settings) - PUT_KEYS)

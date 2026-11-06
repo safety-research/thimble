@@ -402,8 +402,8 @@ def code_project(folder: Path) -> None:
 
 def earlier_orientation_proposal(c: str, name: str, description: str, claims: list[str], arrangement: str = "") -> str:
     """A proposal as an orientation from before 0.8.0 stored it (views.propose with `orientation`, which 0.8.0 took out),
-    for the tests of what thimble still does with such a row: `orientation` and `held`, a follow-on start, announced as
-    queued (views._emit marks it held) and its build queued. Its slug."""
+    for the tests of what thimble still does with such a row: one the analyst did not ask for, a follow-on start,
+    announced as queued and its build queued. Its slug."""
     from app import views  # noqa: PLC0415
 
     name = views.title_case(name)

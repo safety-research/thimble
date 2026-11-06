@@ -33,7 +33,7 @@ same way (tool_run_check), and a thread's fork's run the server starts with the 
 The analyst's own edits start nothing: each shown check's run records how many passages changed since it checked them
 (`stale`, mark_stale), and Run is one click.
 
-The cache: a passage (paragraph, heading, slide, beat or free sentence) is fingerprinted by the sentence_key of its
+The cache: a passage (paragraph, heading or free sentence) is fingerprinted by the sentence_key of its
 words. A run covers only passages whose fingerprint its check has not seen on that document; a run that ends `done`
 supersedes the check's earlier open comments on those passages and records their fingerprints in `seen`. Main hears
 `checked {check, doc, status, comments}` when a run run_check started ends with no agent of main's; a run that ran as main's subagent says nothing more, since its hand-back already tells main, which
