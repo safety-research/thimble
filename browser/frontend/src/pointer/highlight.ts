@@ -2,8 +2,9 @@
 // (pointer.css). A region is the target's box with an accent ring and radius; a word is its box in --accent-tint; several
 // lines of text draw a piece per visible line in --accent-wash. Over a word body[data-pointer-text] is set, so the
 // pointer becomes the accent I-beam. A click holds the highlight until the box closes or its question is sent. While
-// held it stays on its target, each frame: it moves with the target when the canvas pans or zooms or the target's card
-// is laid out again, and fades when the target is gone (the card drawn anew) or changed.
+// it shows, held or following the pointer, it stays on its target, each frame: it moves with the target when the canvas
+// pans or zooms (a ⌘ scroll zooms it under a still pointer) or the target's card is laid out again, and fades when the
+// target is gone (the card drawn anew) or changed.
 import { linePieces, toBox, unionBox, type Box } from './anchors'
 
 // a box is a region drawn at a rect: inside a view's sandboxed frame, which the page cannot reach, or a part of a card
@@ -150,6 +151,7 @@ function hide(): void {
 /** The highlight leaves its target and fades where it stands; a held highlight stays. */
 function clear(): void {
   if (held) return
+  stopFollowing()
   target = null
   shown = false
   painted = ''
@@ -160,12 +162,17 @@ function clear(): void {
 const nextFrame = (fn: () => void): number => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : window.setTimeout(fn, 16))
 const cancelFrame = (id: number): void => (typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame(id) : window.clearTimeout(id))
 
-/** Each frame while held, the highlight goes where its target is now (module note). */
+/** Each frame while it has a target, held or not, the highlight goes where its target is now (module note). */
 function follow(): void {
   frame = null
-  if (!held || !target) return
+  if (!target) return
   paint(true, true)
   frame = nextFrame(follow)
+}
+
+/** Start following the target each frame, unless that already runs. */
+function track(): void {
+  if (frame == null && target) frame = nextFrame(follow)
 }
 
 function stopFollowing(): void {
@@ -180,6 +187,7 @@ export const highlight = {
     const jump = !shown
     target = { kind: 'region', el }
     paint(jump)
+    track()
   },
   /** a region at a rect, in page coordinates: an element inside a view's frame as the frame reported it, or a part of
    * a card smaller than its element, carried along with `el`, the element it was drawn in */
@@ -188,6 +196,7 @@ export const highlight = {
     const jump = !shown
     target = el ? { kind: 'box', rect, el, from: toBox(el.getBoundingClientRect()) } : { kind: 'box', rect }
     paint(jump)
+    track()
   },
   /** the text under the pointer: a word in the tint, or a range's lines in the wash */
   text(range: Range): void {
@@ -195,6 +204,7 @@ export const highlight = {
     const jump = !shown
     target = { kind: 'text', range: range.cloneRange() }
     paint(jump)
+    track()
   },
   clear,
   /** a click: the highlight stops following the pointer until released, stays on its target, and the pointer is the
@@ -202,8 +212,7 @@ export const highlight = {
   hold(): void {
     held = !!target
     syncText()
-    stopFollowing()
-    if (held) frame = nextFrame(follow)
+    track()
   },
   /** a new pick while one is held: the highlight lets go of the old target where it stands, so the new one morphs from it */
   retarget(): void {
