@@ -11,7 +11,7 @@ import pytest
 from app import concepts, label_asks
 from tests_public.test_concepts import CORPUS, _create, api, app, fake_classify  # noqa: F401 — fixtures
 
-pytestmark = pytest.mark.usefixtures("workspaces_tmp")
+pytestmark = pytest.mark.usefixtures("claude_code_sign_in", "workspaces_tmp")
 
 
 @pytest.fixture(autouse=True)

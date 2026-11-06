@@ -20,7 +20,7 @@ import { refreshProposals } from '../lib/proposals'
 import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
-import type { ViewQuery, ViewReview } from '../lib/types'
+import type { ViewReview } from '../lib/types'
 import { openLabelEditor } from './LabelEditor'
 import { ViewFailed } from './Reader'
 import { useFilesFilter, type FilesLabels } from './useLabels'
@@ -45,13 +45,9 @@ interface Props {
   onMode?: (title: string) => void
   /** the labels that mark the view's files, which its page lists first */
   first?: ReadonlySet<string>
-  /** the card the view was opened from and its arguments (a card type's Open as view) */
-  query?: ViewQuery
-  /** the view dropped them */
-  onClearQuery?: () => void
 }
 
-export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMissing, labels, onMode, first, query, onClearQuery }: Props) {
+export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMissing, labels, onMode, first }: Props) {
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
@@ -108,7 +104,7 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
       {residueOpen && <ResidueList notes={notes} onPick={openFile} />}
       <div className="view-pane-body">
         {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => openFile(targetRef && refPath(targetRef) === path ? targetRef : path) : undefined} />}
-        <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
+        <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} className="view-pane-frame" />
       </div>
     </div>
   )

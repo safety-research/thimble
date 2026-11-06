@@ -237,8 +237,7 @@ def test_the_card_wait_is_ten_minutes_unless_the_file_in_thimble_s_home_sets_it_
 
 
 def test_a_wrapped_kernel_can_neither_read_nor_write_the_workspace_s_config(tmp_path):
-    """...and reads the card types and extensions the server found, in the registry folder, and the workspace's views,
-    which main's prompt is made from, without writing them: bwrap binds the workspace read-only, and over it the
+    """...and reads the workspace's views, which main's prompt is made from, without writing them: bwrap binds the workspace read-only, and over it the
     kernel's own folders alone writable."""
     from app import kernel_wrap
 

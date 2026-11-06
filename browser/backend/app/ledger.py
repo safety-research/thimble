@@ -142,8 +142,7 @@ def append_jsonl(path: Path, obj: Any) -> None:
 
 # --------------------------------------------------------------------------- locks between processes
 #
-# A store that more than one process writes (in terminal mode the MCP shim, `thimble-run` in main's Bash, the hooks'
-# backend calls and `thimble act`; in browser mode the server and the hooks) is changed under locked(): an flock on the
+# A store that more than one process writes (the server and the hooks) is changed under locked(): an flock on the
 # store's lock file (lock_file: a workspace's in its locks folder, which no kernel sees, so no card's code can hold
 # one), then a read of the store as it is now, then an atomic replace or an append. The lock is re-entrant in one
 # thread, so a store function that calls another under the same lock does not wait on itself. Never await while holding
@@ -406,40 +405,32 @@ def stored_settings(c: str) -> dict[str, Any]:
 
 def with_features(stored: dict[str, Any], c: str | None = None) -> dict[str, Any]:
     """The effective settings: SETTINGS_DEFAULTS under `stored` less RETIRED_KEYS, `models` as config.models_for resolves
-    them from thimble's config with a row per agent of the active extensions (extensions.agent_models), the permission
-    modes the config sets (modes.rows), `disabled_modes`, those the analyst's Claude Code settings turn off,
-    `config_error`, the config's error or ''; `config_ignored`, the keys its files hold that this build reads and ignores
-    (userconf.ignored); `agents`, agent_rows; `tasks`, task_rows; `card_wait`, the minutes a code ticket's question on its
-    card waits (userconf.card_wait_s); PROPOSE_KEY, whether thimble shows view proposals (userconf.propose_views);
+    them from thimble's config, the permission modes the config sets (modes.rows), `disabled_modes`, those the analyst's
+    Claude Code settings turn off, `config_error`, the config's error or ''; `config_ignored`, the keys its files hold
+    that this build reads and ignores (userconf.ignored); `agents`, agent_rows; `card_wait`, the minutes a code ticket's
+    question on its card waits (userconf.card_wait_s); PROPOSE_KEY, whether thimble shows view proposals (userconf.propose_views);
     ASK_KEY, the key held with a click to ask in the browser (userconf.ask_key); EDITS_KEY, whether main may write the
     corpus (corpus_edits); LABELS_KEY, whether Claude makes labels (labels_on)."""
-    from . import extensions, modes, userconf  # noqa: PLC0415 — they import this module
+    from . import modes, userconf  # noqa: PLC0415 — they import this module
 
     kept = {k: v for k, v in stored.items() if k not in RETIRED_KEYS and k != modes.SETTING}
-    models = {**config.models_for(c), **extensions.agent_models(c)}
-    return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: models, modes.SETTING: modes.rows(c) if c else {},
-            "disabled_modes": sorted(modes.disabled()), "config_error": userconf.problem(c),
-            "config_ignored": userconf.ignored(c), "agents": agent_rows(c), "tasks": task_rows(c),
+    return {**SETTINGS_DEFAULTS, **kept, config.MODELS_KEY: config.models_for(c),
+            modes.SETTING: modes.rows(c) if c else {}, "disabled_modes": sorted(modes.disabled()),
+            "config_error": userconf.problem(c), "config_ignored": userconf.ignored(c), "agents": agent_rows(c),
             "card_wait": round(userconf.card_wait_s() / 60, 2), PROPOSE_KEY: userconf.propose_views(c),
             ASK_KEY: userconf.ask_key(), EDITS_KEY: corpus_edits(c), LABELS_KEY: labels_on(c)}
 
 
 def agent_rows(c: str | None) -> dict[str, Any]:
-    """Who runs each agent thimble starts and what it may do. `main`'s row: thimble's rules for main and its agents (web,
-    data), where their shell's network reaches (`network`: "ask" on Claude Code sign-in, where a host the analyst's
-    Claude Code settings do not allow asks first, host_asks; "on" with an API key or WIF, any host) and the extensions
-    that add to main's prompt; and `dev`'s, the fence `thimble fix` and an extension's program
-    that runs the dev agent keep (its sandbox, whether the sandbox can run here, its network, web tools and edits). Each other agent's row
-    (orient, writer, critic, checks) names its role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command,
-    with the extensions that add to its prompt and a conflict) and its own `web`, "off" or main's. `labels` and
-    `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first one an
-    extension runs) and the settings a program of those tasks runs under, with the sandbox always on and no web."""
-    from . import roles, runtime, tasks, userconf  # noqa: PLC0415
+    """What each agent thimble starts may do. `main`'s row: thimble's rules for main and its agents (web, data) and where
+    their shell's network reaches (`network`: "ask" on Claude Code sign-in, where a host the analyst's Claude Code
+    settings do not allow asks first, host_asks; "on" with an API key or WIF, any host); and `dev`'s, the fence `thimble
+    fix` keeps (its sandbox, whether the sandbox can run here, its network, web tools and edits). Each other agent's row
+    (writer, critic, checks, orient) has its own `web`, "off" or main's, and the CLAUDE.md files it reads (`memory`)."""
+    from . import runtime, userconf  # noqa: PLC0415
 
     conf = userconf.load_or_defaults(c)[0]
     runs = conf["sandbox"]["use"] != "never" and userconf.sandbox_runs()
-    by_role = {r["role"]: r for r in roles.public(c)}
-    blank = {"way": "thimble", "extension": "", "additions": [], "conflict": []}
 
     def fence(agent: str) -> dict[str, Any]:
         mine = userconf.agent_conf(conf, agent)
@@ -448,41 +439,14 @@ def agent_rows(c: str | None) -> dict[str, Any]:
                 "web": mine.get("web") or "ask", "data": mine.get("data") or "ask", "config": f"agents.{agent}"}
 
     main = fence("orientation")
-    out: dict[str, Any] = {"main": {"additions": by_role["main"]["additions"], "web": main["web"], "data": main["data"],
-                                    "network": runtime.network(), "config": main["config"]}}
+    out: dict[str, Any] = {"main": {"web": main["web"], "data": main["data"], "network": runtime.network(),
+                                    "config": main["config"]}}
     for agent in userconf.SUBAGENT_ROLES:
-        role = by_role.get(agent) or blank
-        out[userconf.ROLES[agent]] = {"way": role["way"], "extension": role["extension"],
-                                      "additions": role["additions"], "conflict": role["conflict"],
-                                      "web": userconf.agent_conf(conf, agent)["web"], "config": f"agents.{agent}",
+        out[userconf.ROLES[agent]] = {"web": userconf.agent_conf(conf, agent)["web"], "config": f"agents.{agent}",
                                       "memory": userconf.agent_conf(conf, agent).get("memory") or "inherit"}
     for agent, row in userconf.MODE_ROWS.items():
-        role = by_role.get(agent) or blank
-        out[row] = {"way": role["way"], "extension": role["extension"], "additions": role["additions"],
-                    "conflict": role["conflict"], **fence(agent)}
-    by_task = task_rows(c)
-    for agent in userconf.CALLS:
-        mine = conf["agents"][agent]
-        own = [t for t in by_task if t["task"] in tasks.TASKS and tasks.TASKS[t["task"]].agent == agent]
-        lead = next((t for t in own if t["way"] != "thimble" or t["conflict"]), None)
-        added = list(dict.fromkeys(e for t in own for e in t["additions"]))
-        out[agent] = {"way": lead["way"] if lead else "thimble", "extension": lead["extension"] if lead else "",
-                      "additions": added, "conflict": lead["conflict"] if lead else [], "sandbox": "on",
-                      "sandbox_runs": runs, "network": mine.get("network", "on"), "web": "off",
-                      "data": mine.get("data", "ask"), "config": f"agents.{agent}", "tasks": [t["task"] for t in own]}
+        out[row] = fence(agent)
     return out
-
-
-def task_rows(c: str | None) -> list[dict[str, Any]]:
-    """Who runs each of thimble's seven tasks (tasks.public): thimble's own, or an extension's prompt, Agent SDK program
-    or command, with the extensions that add to its prompt and those that all replace it."""
-    from . import tasks  # noqa: PLC0415
-
-    try:
-        return tasks.public(c)
-    except Exception:  # noqa: BLE001 — Settings still shows when an extension's task cannot be read
-        log.exception("%s: the tasks' rows could not be read", c)
-        return []
 
 
 @router.get("/ws/{c}/settings")
@@ -596,15 +560,12 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
                                 else None)
     for name, conf in web_patch(settings.get(WEB_KEY) or {}).get("agents", {}).items():
         patch.setdefault("agents", {}).setdefault(name, {}).update(conf)
-    roles_changed = bool(patch)
     if PROPOSE_KEY in settings:
         patch.setdefault("views", {})["propose"] = settings[PROPOSE_KEY]
     if ASK_KEY in settings:
         patch["askKey"] = settings[ASK_KEY]
     if patch:
         userconf.save(c, patch)
-        if roles_changed:
-            push_roles(c)
     if isinstance(settings.get(modes.SETTING), dict):  # a Bypass row takes effect only as the analyst's choice here
         modes.choose(settings[modes.SETTING])
     settings = {k: v for k, v in settings.items() if k not in (modes.SETTING, WEB_KEY, PROPOSE_KEY, ASK_KEY)}
@@ -629,18 +590,6 @@ def put_settings(c: str, settings: dict[str, Any]) -> dict[str, Any]:
         rewrite_text(path, json.dumps(merged, indent=2, ensure_ascii=False))  # in place: kernels' hide of it holds
     runtime.settings_changed(c)
     return with_features(merged, c)
-
-
-def push_roles(c: str) -> None:
-    """Have main's hooks module register thimble's agent types again with the values Settings now name
-    (module_bridge.push_roles), so the next start of each runs on them. Never raises: a module that is not running
-    registers them at its next session's start."""
-    try:
-        from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
-
-        module_bridge.push_roles(c)
-    except Exception:  # noqa: BLE001 — the save stands; the module registers the roles when it next starts
-        log.warning("%s: the agent types were not registered again after a Settings save", c, exc_info=True)
 
 
 # --------------------------------------------------------------------------- reset and archive

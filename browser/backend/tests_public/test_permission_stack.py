@@ -1,6 +1,6 @@
 """Several permission requests on the card at once (agent_session, permissions): requests from different agents and from
 one agent at the same moment each get the answer given to them; no request waits for good; and a request nothing waits
-on any more leaves the card, whether its hook went away, a previous server left it, or its wait ended before the answer.
+on any more leaves the card, whether a previous server left it, or its wait ended before the answer.
 The sessions are hosted ones (agent_session.host), as the dev agent's are, so no process runs."""
 from __future__ import annotations
 
@@ -30,11 +30,12 @@ def _agent(key: str, role: str = "dev", title: str = "view: Posts") -> str:
     return chat
 
 
-def _body(key: str, tag: str, tool: str = "Bash") -> agent_session.PermissionRequestBody:
+def _ask(key: str, tag: str, tool: str = "Bash") -> "asyncio.Future":
+    """A request of the session `key` with Claude Code's suggestion for it, as the card's "don't ask again"."""
     inp = {"command": f"echo {tag}", "description": f"Say {tag}"} if tool == "Bash" else {"file_path": f"/tmp/{tag}"}
     sugg = [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": f"echo {tag}:*"}], "behavior": "allow",
              "destination": "session"}]
-    return agent_session.PermissionRequestBody(session=key, tool_name=tool, tool_input=inp, suggestions=sugg)
+    return asyncio.ensure_future(agent_session.ask(CORPUS, key, tool, inp, suggestions=sugg))
 
 
 async def _pending(chat: str, n: int) -> list[dict]:
@@ -46,20 +47,10 @@ async def _pending(chat: str, n: int) -> list[dict]:
     raise AssertionError(f"fewer than {n} requests on chat {chat}")
 
 
-class Hook:
-    """The request of a permission hook as the route takes it, which goes away when `gone` is set."""
-
-    def __init__(self) -> None:
-        self.gone = False
-
-    async def is_disconnected(self) -> bool:
-        return self.gone
-
-
 async def test_requests_from_different_agents_at_once_each_get_the_answer_given_to_them():
     keys = ["view:a", "view:b", "view:c", "orient", "critique:orient"]
     chats = {k: _agent(k, title=f"view: {k}") for k in keys}
-    calls = {k: asyncio.ensure_future(agent_session.hook_request(CORPUS, _body(k, k))) for k in keys}
+    calls = {k: _ask(k, k) for k in keys}
     entries = {k: (await _pending(chats[k], 1))[0] for k in keys}
     assert all(not c.done() for c in calls.values()), "every one waits for the analyst"
     plan = {"orient": (True, False), "view:a": (False, False), "critique:orient": (True, True), "view:c": (True, False),
@@ -76,7 +67,7 @@ async def test_requests_from_different_agents_at_once_each_get_the_answer_given_
 async def test_requests_from_one_agent_at_once_are_all_on_its_card_and_each_answer_reaches_its_own():
     chat = _agent("view:a")
     tags = ["one", "two", "three", "four"]
-    calls = {t: asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("view:a", t))) for t in tags}
+    calls = {t: _ask("view:a", t) for t in tags}
     ps = await _pending(chat, 4)
     by_tag = {json.loads(p["input"])["command"].split()[-1]: p["id"] for p in ps}
     assert sorted(by_tag) == sorted(tags), "none dropped"
@@ -111,7 +102,7 @@ async def test_a_request_is_declined_unanswered_after_the_card_wait_rather_than_
     chat = _agent("orient", role="orient", title="Orientation")
     waits = _Waits()
     monkeypatch.setattr(agent_session, "asyncio", waits)
-    call = asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("orient", "venv")))
+    call = _ask("orient", "venv")
     [p] = await _pending(chat, 1)
     assert p["wait_s"] == 0.24
     got = await asyncio.wait_for(call, 60)
@@ -124,25 +115,6 @@ async def test_a_request_is_declined_unanswered_after_the_card_wait_rather_than_
     assert p["expired"], "it stays on the card, declined, until dismissed"
     assert agent_session.answer(CORPUS, chat, p["id"], False)
     assert agents.read_meta(CORPUS, chat)["permissions"] == []
-
-
-async def test_a_request_whose_hook_went_away_leaves_the_card(monkeypatch):
-    monkeypatch.setattr(agent_session, "HOOK_POLL_S", 0.02)
-    chat = _agent("view:a")
-    hook = Hook()
-    call = asyncio.ensure_future(agent_session.permission_request_route(CORPUS, _body("view:a", "gone"), hook))
-    other = asyncio.ensure_future(agent_session.permission_request_route(CORPUS, _body("view:a", "stays"), Hook()))
-    await _pending(chat, 2)
-    hook.gone = True
-    assert await asyncio.wait_for(call, 5) == {"behavior": "deny", "message": agent_session.GONE_LINE}
-    [left] = agents.read_meta(CORPUS, chat)["permissions"]
-    assert "stays" in left["input"], "only the request whose hook went away left"
-    log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
-    [asked] = [r for r in log if r["event"] == "asked" and "gone" in r.get("input", "")]
-    assert [r["answer"] for r in log if r.get("id") == asked["id"] and r["event"] == "answered"] == [
-        agent_session.NOBODY_WAITS], "the permission log says how it ended"
-    assert agent_session.answer(CORPUS, chat, left["id"], True)
-    assert (await asyncio.wait_for(other, 5))["behavior"] == "allow"
 
 
 async def test_a_request_a_previous_server_left_waiting_is_taken_off_at_start_and_by_an_answer(analyst):
@@ -164,35 +136,11 @@ async def test_a_request_a_previous_server_left_waiting_is_taken_off_at_start_an
     assert {r["id"] for r in log if r.get("answer") == agent_session.NOBODY_WAITS} == {"o1", "r0", "r1", "r2"}
 
 
-async def test_main_s_relayed_request_stays_at_start_for_events_py_to_answer_or_drop():
-    from app import events
-
-    events._hold(CORPUS, "main-1", "Bash", "ls", "{}")
-    await agent_session.recover()
-    assert [p["id"] for p in agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]] == ["main-1"]
-    events._drop(CORPUS, {"main-1"})
-
-
 async def test_a_request_asked_while_the_server_starts_stays_on_the_card():
     chat = _agent("view:a")
-    call = asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("view:a", "early")))
+    call = _ask("view:a", "early")
     [p] = await _pending(chat, 1)
     await agent_session.recover()
     assert [q["id"] for q in agents.read_meta(CORPUS, chat)["permissions"]] == [p["id"]]
     agent_session.answer(CORPUS, chat, p["id"], True)
     assert (await asyncio.wait_for(call, 5))["behavior"] == "allow"
-
-
-async def test_main_s_relayed_request_asked_after_a_session_s_is_stamped_after_it():
-    from datetime import datetime
-
-    from app import events
-
-    chat = _agent("view:a")
-    call = asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("view:a", "first")))
-    [first] = await _pending(chat, 1)
-    events._hold(CORPUS, "main-1", "Bash", "ls", "{}")
-    [later] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
-    assert datetime.fromisoformat(later["since"]) >= datetime.fromisoformat(first["since"]), "the card lists it second"
-    agent_session.answer(CORPUS, chat, first["id"], True)
-    await asyncio.wait_for(call, 5)

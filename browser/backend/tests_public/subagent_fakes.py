@@ -1,6 +1,5 @@
-"""Stand-ins for what other lanes of the subagent change own, for the tests of thimble's agents as subagents
-(subagents.py): the plugin module's bridge (app.module_bridge) and the hint sections prompts/tools.md gains for them.
-Each is a fixture a test asks for by name."""
+"""Stand-ins for the tests of thimble's agents (subagents.py): the bridge to the runtime (app.module_bridge) and the hint
+sections of prompts/tools.md they read. Each is a fixture a test asks for by name."""
 from __future__ import annotations
 
 import sys
@@ -12,23 +11,16 @@ import pytest
 # the hints the subagent paths name (prompts/tools.md), each with its placeholders, so a test reads what was filled in
 HINTS = {
     "start_orientation-subagent": "AGENT CALL {input}",
-    "start_writing-subagent": "AGENT CALL {input}",
-    "start_job-subagent": "AGENT CALL {input}",
     "critique-subagent": "AGENT CALL {input}",
     "orient-subagent-prompt": "{request_id}\nREQUEST {request}",
     "orient-subagent-message": "SEND TO {agent}\n{text}",
-    "agent-check-exact": "MAKE THE CALL EXACTLY",
-    "agent-check-message": "ONLY WHEN THE ANALYST ASKS",
-    "start-plan-mode": "PLAN MODE",
     "writer-context-file": "READ {path} FIRST",
     "writer-context-files": "READ {n} FILES {paths} FIRST",
     "critic-brief-file": "READ {path} FIRST",
     "critic-brief-files": "READ {n} FILES {paths} FIRST",
     "check-task-files": "READ {n} FILES {paths} FIRST",
-    "start-refused-no-module": "NO MODULE: {reason}",
     "orient-continue-earlier-session": "EARLIER SESSION: {session}",
     "orient-continue-earlier-version": "EARLIER VERSION",
-    "module-started-note": "STARTED {role} {agent} {what}",
     "main-stopped-note": "MAIN STOPPED",
     "thread-stopped-note": "THREAD STOPPED {thread} {agent_id}",
     "follow-up-ran-on": "RAN ON {model} {effort}",
@@ -39,32 +31,14 @@ HINTS = {
 
 
 class FakeBridge:
-    """app.module_bridge as lane M names it: live, why_not, request (async, answering each op), push_roles, main_session
-    (`main`) and moved_to (through `moved`). `answers` are what the next requests answer, in order; without one a spawn
-    answers a new agent id and a send or stop {agentId}. Each request is kept in `calls` as (op, args)."""
+    """app.module_bridge's request (async, answering each op), with no runtime behind it. `answers` are what the next
+    requests answer, in order; without one a spawn answers a new agent id and a send or stop {agentId}. Each request is
+    kept in `calls` as (op, args)."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.answers: list[Any] = []
-        self.is_live = True
-        self.reason = ""
         self.n = 0
-        self.main = "main-session"
-        self.moved: dict[str, str] = {}
-
-    def main_session(self, c: str) -> str:
-        return self.main
-
-    def moved_to(self, c: str, sid: str) -> str:
-        while sid in self.moved:
-            sid = self.moved[sid]
-        return sid
-
-    def live(self, c: str) -> bool:
-        return self.is_live
-
-    def why_not(self, c: str) -> str:
-        return self.reason
 
     async def request(self, c: str, op: str, **args: Any) -> Any:
         self.calls.append((op, args))
@@ -74,9 +48,6 @@ class FakeBridge:
         if op == "spawn":
             return {"agentId": f"a{self.n:016x}"}
         return {"agentId": args.get("agent")}
-
-    def push_roles(self, c: str) -> None:
-        self.calls.append(("push_roles", {}))
 
     def ops(self, op: str) -> list[dict[str, Any]]:
         return [a for o, a in self.calls if o == op]
@@ -90,12 +61,7 @@ def bridge(monkeypatch) -> FakeBridge:
 
     fake = FakeBridge()
     mod = types.ModuleType("app.module_bridge")
-    for name in ("live", "why_not", "request", "push_roles", "main_session", "moved_to"):
-        setattr(mod, name, getattr(fake, name))
-    # the reason subagents.refusal_before compares why_not's with, while a session attached moments ago may still connect
-    from app import module_bridge as real  # noqa: PLC0415
-
-    mod.NOT_LOADED = real.NOT_LOADED
+    mod.request = fake.request
     monkeypatch.setitem(sys.modules, "app.module_bridge", mod)
     # `from . import module_bridge` reads the package's attribute first, which the real bridge sets once any test has
     # imported it, so the fake replaces that too

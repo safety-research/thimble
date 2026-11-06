@@ -1,8 +1,8 @@
 """No agent thimble starts leaves anything in the corpus folder. thimble's own agents are subagents of main, which run in
 main's permission mode and write in work folders outside the corpus (subagents.write_dirs). Claude Code's
 Bash sandbox makes a folder of its own in the folder a sandboxed command starts in, so every `claude -p` session thimble
-starts itself (a code ticket's, an extension's program's) runs in a folder of its own with the corpus added, and each of
-its Bash commands starts there again: a `cd` into the corpus does not carry over to the next command
+starts itself (a code ticket's) runs in a folder of its own with the corpus added, and each of its Bash commands starts
+there again: a `cd` into the corpus does not carry over to the next command
 (agent_session.HOME_SHELL_ENV).
 
 The tests marked live run sandboxed Bash commands, on the user's own `claude`, in those sessions as thimble starts them,
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from app import (agent_session, cc_settings, checks, config, dev, harness, kernel_wrap, notebook, roles, srt, userconf, views, write_session)
+from app import cc_settings, checks, config, dev, kernel_wrap, notebook, srt, views
 from conftest import code_project
 
 CORPUS = "copy"
@@ -48,14 +48,6 @@ def snapshot(root: Path) -> dict[str, tuple[int, int]]:
     return out
 
 
-def _settings(argv: list[str]) -> dict:
-    return json.loads(argv[argv.index("--settings") + 1])
-
-
-def _added(argv: list[str]) -> list[str]:
-    return [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
-
-
 def test_each_job_s_own_folder_is_one_main_s_fence_lets_it_write_and_its_task_names_it(corpus):
     """A view builder, a view reviewer and a check's run are subagents of main inside main's fence: each one's own folder
     lies under a folder main's Bash may write (subagents.write_dirs), and so does the view's folder; a build's task
@@ -73,17 +65,6 @@ def test_each_job_s_own_folder_is_one_main_s_fence_lets_it_write_and_its_task_na
     task = dev.build_task(CORPUS, views.read_proposal(CORPUS, slug))
     assert str(work) in task and str(folder) in task
     assert str(corpus) in view_tools.builder_definition(CORPUS)["prompt"]
-
-
-def test_a_program_s_session_runs_in_the_role_s_work_folder(corpus, tmp_path, monkeypatch):
-    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
-    part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
-    work = write_session.work_dir(CORPUS, "report")
-    job = harness.Job(CORPUS, "writer", "writer:report", "Write", {}, ("list_cards",), work)
-    run = harness.Run(job, part, userconf.session(CORPUS, "writer", sandbox=True), "t", "t.s")
-    argv, folder, _env = harness.claude_argv(run, ["-p"])
-    assert folder == work and str(corpus) in _added(argv)
-    assert _settings(argv)["env"][agent_session.HOME_SHELL_ENV] == "1"
 
 
 # --------------------------------------------------------------------------- live: sandboxed Bash in each session
@@ -181,17 +162,6 @@ def test_live_a_view_build_s_sandboxed_bash_leaves_the_corpus_as_it_was(corpus):
     _bash_in([config.CLAUDE_BIN, *flags], work, dict(os.environ), corpus)
 
 
-def test_live_a_program_s_session_s_sandboxed_bash_leaves_the_corpus_as_it_was(corpus, tmp_path):
-    if why := _live_ok():
-        pytest.skip(why)
-    part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
-    job = harness.Job(CORPUS, "writer", "writer:report", "Write", {}, ("list_cards",),
-                      write_session.work_dir(CORPUS, "report"))
-    run = harness.Run(job, part, userconf.session(CORPUS, "writer", sandbox=True), "t", "t.s")
-    argv, folder, env = harness.claude_argv(run, ["-p"])
-    _bash_in(argv, folder, env, corpus)
-
-
 def _kernel_wraps() -> str:
     """The kernel's sandbox where one runs here, else ''."""
     node, package = srt.node(), srt.package(config.REPO_ROOT)
@@ -239,15 +209,3 @@ async def test_card_code_that_may_write_the_corpus_runs_git_and_imports_its_code
     assert "rows 3" in json.dumps(cell["outputs"]), cell["outputs"]
     after = snapshot(corpus)
     assert after == before, sorted(k for k in {*before, *after} if before.get(k) != after.get(k))
-
-
-def test_a_program_and_a_fenced_session_get_what_keeps_their_commands_from_writing_beside_what_they_read(
-        corpus, tmp_path):
-    """An extension's program, and the Claude Code session one starts, may write the corpus (`data` "allow"), and
-    their commands write no cache beside what they read there either (kernel_wrap.NO_SIDE_WRITES)."""
-    part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
-    job = harness.Job(CORPUS, "writer", "writer:report", "Write", {}, ("list_cards",),
-                      write_session.work_dir(CORPUS, "report"))
-    run = harness.Run(job, part, userconf.session(CORPUS, "writer", sandbox=True), "t", "t.s")
-    for env in (harness.program_env(run), agent_session.fence_env(tmp_path / "work")):
-        assert (env.get("PYTHONDONTWRITEBYTECODE"), env.get("GIT_OPTIONAL_LOCKS")) == ("1", "0")

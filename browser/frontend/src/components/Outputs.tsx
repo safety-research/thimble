@@ -61,9 +61,6 @@ export const DRAWING_MIMES: Record<string, 'diagram' | 'timeline'> = {
   'application/vnd.thimble.timeline+json': 'timeline',
 }
 export const isDrawing = (mime: string) => Object.prototype.hasOwnProperty.call(DRAWING_MIMES, mime)
-/** A card type's graphic (backend cardtypes.py), which a card draws in the type's frame (canvas/TypeCard) and any other
- * place shows as its listing. */
-export const CARD_MIME = 'application/vnd.thimble.card+json'
 // raster images: a PNG, and a JPEG, GIF or WebP a card displays as it is (IPython's Image of a photo or a screen grab)
 const RASTER = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const PRIORITY: (string | ((mime: string) => boolean))[] = [isDrawing, FRAME_MIME, 'image/svg+xml', ...RASTER, isVegaLite, 'text/html', 'text/markdown', 'application/json', 'text/plain']
@@ -149,7 +146,7 @@ export function pickMime(b: MimeBundle): string | null {
 type ArtifactKind = 'chart' | 'table' | 'error' | 'shell' | 'other'
 const isChart = (b: MimeBundle) => {
   const m = pickMime(b)
-  return (!!m && (m.startsWith('image/') || isVegaLite(m) || isDrawing(m))) || (!!b && typeof b === 'object' && CARD_MIME in b)
+  return !!m && (m.startsWith('image/') || isVegaLite(m) || isDrawing(m))
 }
 const isTable = (b: MimeBundle) => pickMime(b) === FRAME_MIME || (pickMime(b) === 'text/html' && /<table\b/i.test(asText(b['text/html'])))
 
@@ -172,7 +169,7 @@ export function primaryArtifact(outputs: MimeBundle[] | undefined): { bundle: Mi
 export type FigureKind = 'chart' | 'table' | 'timeline' | 'diagram' | 'custom'
 
 /** What a card draws that a document can show as a figure: a timeline or a diagram, from its code's drawing or from its
- * dataset; a chart (an image, a Vega-Lite spec or a card type's graphic); a table; a custom card's page. Null for a card
+ * dataset; a chart (an image or a Vega-Lite spec); a table; a custom card's page. Null for a card
  * that draws none: a note, an example, a label, or code that only printed (backend material.figure_kind). */
 export function figureKind(cell: Pick<Cell, 'kind' | 'code' | 'payload' | 'outputs'>): FigureKind | null {
   const payload = (cell.payload ?? {}) as Record<string, unknown>

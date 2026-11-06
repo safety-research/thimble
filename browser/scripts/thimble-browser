@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# thimble-browser: starts thimble's browser workbench (thimble 0.8's browser mode) on a folder of files. thimble's
+# thimble-browser: starts thimble's browser workbench on a folder of files. thimble's
 # install (scripts/install.sh) builds it in ~/.thimble/fixes/live/browser and puts a launcher for it on PATH. Here it
 # builds the page again when its sources are newer than the build, then starts the server on 127.0.0.1, opens the folder
 # as a workspace and prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and

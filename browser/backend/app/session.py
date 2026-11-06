@@ -1,15 +1,9 @@
-"""The mirror: the analyst's Claude Code session is the workspace's `main`, and the browser shows its transcript.
+"""The mirror: main's transcript is the workspace's `main` chat, and the browser shows it.
 
-A session attaches when its MCP shim subscribes naming it (events.subscribe) or when `/thimble` names it
-(`POST /api/ws/{c}/session`); its transcript is found under the config dir its shim reported (find_transcript). One
-session is main per workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and each subagent's place,
-so a restarted server reads on where it stopped. The shim's subscription is the session's liveness: with no
-subscriber for GRACE_S the session detaches. /clear and /resume switch sessions in the same process, and main follows
-the new id by pid (_follow). When Claude Code moves the session into a background job, its transcript ends with a
-`continued-in` record naming the job's session, which copied the conversation and runs in its own process: main follows
-it there (_continue), and the session it left, parked in its old process, is never main again by its shim (_parked).
-When main's session ends and none takes over, everything thimble runs for the workspace stops (agents.stop_all), and
-once no workspace has a main session the server stops itself (cli.stop_self).
+The server runs main itself and attaches main's transcript here (runtime.py, attach). One session is main per
+workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and each subagent's place, so a restarted
+server reads on where it stopped. When a transcript ends with a `continued-in` record naming another session, which
+copied the conversation, main follows it there (_continue).
 
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
 or local commands such as /model), browser events, task notifications, peer messages, tool calls and results, text,
@@ -31,12 +25,11 @@ ancestor. The ends of their runs come from their hand-back (the SubagentHandback
 hand-back in main's), a task notification, or the hooks' and the module's turn ends (subagents.run_ended, stopped,
 ended); a message from main or the analyst to one that finished starts its next run (subagents.run_again). For a typed
 start or follow-up the mirror watches main's call (R2: its result) and main's turn (R3: the turn in which main called
-the start tool, or got the `start_agent` event that carries a thread's fork's start, ends without the call), and refuses
-the request when it did not happen; a start_agent event a turn missed is posted once more first (_ask_again). A Workflow
-call is one agent chat whose members are the run's agent transcripts.
+the start tool ends without the call), and refuses the request when it did not happen. A Workflow call is one agent chat
+whose members are the run's agent transcripts.
 
-Main ends a turn with nothing for the analyst without text, or with END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat
-shows END_TOKEN, nor a line that opens with TERMINAL_ONLY."""
+Main ends a turn with nothing for the analyst with END_TOKEN; no chat shows END_TOKEN, nor a line that opens with
+TERMINAL_ONLY."""
 from __future__ import annotations
 
 import asyncio
@@ -52,7 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, cc_settings, cite, config, marks, modes, nofollow, terminal_tools, threads, userconf
+from . import agents, cc_settings, cite, config, marks, modes, nofollow, threads, userconf
 from . import subagent_files as sfiles
 from .events import TAG as EVENT_TAG
 from .ledger import atomic_write_text
@@ -99,7 +92,6 @@ AGENT_FILE_RE = re.compile(r"^agent-([A-Za-z0-9_-]+)\.jsonl$")
 META_WAIT_SCANS = 4  # scans a subagent file without its meta json waits before it is adopted untitled
 SUB_QUIET_S = 1.0  # a foreground subagent whose result is in is finished once its file has been quiet this long
 TAIL_BUSY_S, TAIL_IDLE_S = 0.5, 1.0
-GRACE_S = 10.0  # a workspace with no subscriber for this long has no session
 SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 RECORD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")  # a transcript record's uuid, as a turn's cut
 # a transcript thimble 0.5.0 wrote holds its events as `<channel source="plugin:thimble:thimble" …>`: as records of
@@ -260,8 +252,8 @@ class Sub:
         # this Sub writes is numbered in the orientation's sequence, its record carries `n`, and each result is stored
         # whole
         self.calls: Any = None
-        # when main left the session this one's agent is carried into (/clear, /resume): the records its file there
-        # holds from before then were read while that session was main's, and are skipped (_carry, rekeyed)
+        # when main left the session this one's agent is carried into: the records its file there holds from before
+        # then were read while that session was main's, and are skipped
         self.skip_before: float | None = None
 
 
@@ -285,14 +277,13 @@ class Live:
         self.turn_open = False
         self.fresh = False  # the turn has had no assistant record yet: another opening record still counts
         # the open turn answers the analyst: opened by a line they typed or their message from the browser, not by a
-        # thread question from the browser or the terminal's /thimble:ask (the thread's fork answers it), a task
-        # notification, a Monitor's re-arm or a start_agent event (proposer.turn_ended)
+        # thread question from the browser (the thread's fork answers it), a task notification or a Monitor's re-arm
+        # (proposer.turn_ended)
         self.turn_analyst = False
         self.last_cut: str | None = None  # the uuid of main's last turn_duration record, where a fork of it resumes
         self.context_tokens = 0  # the tokens main's last reply read: input, cache read and cache written (_note_model)
         self.api_failed = False  # a request of the open turn ended in Claude Code's API error line (_main_api_error)
         self.turn_threads: list[str] = []  # the threads whose events reached the turn (_release_threads)
-        self.handed: list[str] = []  # the threads whose events main got in a tool's result (handed)
         self.forked: set[str] = set()  # the threads the turn forked or sent a follow-up to
         self.sends: dict[str, str] = {}  # tool_use id of main's SendMessage to a thread's fork -> the thread
         self.wrote = False  # the turn wrote something to main
@@ -304,11 +295,9 @@ class Live:
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
         # ran, since a hook (thimble's --agent-check) or auto mode may refuse it
         self.relays: dict[str, tuple] = {}
-        # relays a pass of the mirror in terminal mode handed on as [agent id, input], until their Subs are known
+        # relays an earlier pass of the mirror handed on as [agent id, input], until their Subs are known
         self.pending_relays: dict[str, list] = {}
         self.after_start = False  # main's last call was a start of thimble's or its tool: a bare `Bash true` next is hidden
-        self.last_tool: str | None = None  # the name of main's last tool call (_nudged)
-        self.last_failed = False  # that call's result was an error, such as a hook's refusal (_nudged)
         # the promptId of the local command whose caveat was read last ('' when the record has none), whose command
         # line is not the analyst's line to main (module note, the table); None once another line was read
         self.local_prompt: str | None = None
@@ -350,18 +339,11 @@ class Live:
 _live: dict[str, Live] = {}  # by workspace: the one session that is main
 _expected: set[str] = set()  # ids of browser events events.post logged when it posted them
 _event_threads: dict[str, str] = {}  # a thread event's id -> its thread
-_grace: dict[str, asyncio.TimerHandle] = {}  # workspace -> the pending detach after its last subscriber left
-_sweep_task: asyncio.Task | None = None
-_came_back: set[str] = set()  # workspaces where main's own shim subscribed since this server started (sweep skips them)
 # ids of calls that did not run and are made again, a call auto mode refused and the analyst then allowed, or one a
 # mode switch answered (agent_session, auto mode and mode switch): an error result of one shows as not run, not failed
 _not_run: dict[str, None] = {}
 NOT_RUN_KEEP = 2_000
-_shim_pids: dict[tuple[str, str], int] = {}  # (workspace, session) -> the `claude` pid its shim reported (main_pid)
-_shim_configs: dict[tuple[str, str], str] = {}  # (workspace, session) -> the CLAUDE_CONFIG_DIR its shim reported ("": unset)
-_modes: dict[str, tuple[str, str]] = {}  # workspace -> (main's session, the permission mode its hooks reported: note_mode)
-SHIM_PIDS_KEPT = 256  # _shim_pids and _shim_configs keep the newest this many
-STAMP_LINES = 200  # _began_since looks this far into a transcript for its first record with a timestamp
+_modes: dict[str, tuple[str, str]] = {}  # workspace -> (main's session, its permission mode as kept: _kept_mode)
 CURSOR_CALLS = 200  # the cursor keeps the names of main's newest this many tool calls, for results that come later
 TURN_TEXT_KEPT = 4_000  # chars of main's last text in the turn the cursor keeps (R3's reason)
 SUBS_KEY = "subs"  # sessions.json: each followed subagent transcript's place, by its path (_sub_places)
@@ -540,10 +522,9 @@ def _turn_state(lv: Live) -> dict:
             "seen": [k for k in lv.seen if k.split(":", 1)[-1] in names],
             "watch_calls": [i for i in lv.watch_calls if i in names], "sends": lv.sends,
             "turn_threads": lv.turn_threads, "forked": sorted(lv.forked),
-            # R2 and R3 (module note), which a pass of the mirror in terminal mode hands to the next
+            # R2 and R3 (module note), which a pass of the mirror hands to the next
             "thimble_calls": lv.thimble_calls, "turn_calls": sorted(lv.turn_calls)[-CURSOR_CALLS:],
-            "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "turn_texts": lv.turn_texts, "after_start": lv.after_start, "last_tool": lv.last_tool,
-            "last_failed": lv.last_failed,
+            "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "turn_texts": lv.turn_texts, "after_start": lv.after_start,
             "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id},
             # the proposer's (proposer.turn_ended): a turn's first line and its end are often read by different passes
             "turn_analyst": lv.turn_analyst, "last_cut": lv.last_cut, "context_tokens": lv.context_tokens,
@@ -566,8 +547,6 @@ def _take_turn(lv: Live, cur: dict) -> None:
     lv.turn_text = str(cur.get("turn_text") or "")
     lv.turn_texts = [str(t) for t in cur.get("turn_texts") or [] if isinstance(t, str)]
     lv.after_start = bool(cur.get("after_start"))
-    lv.last_tool = str(cur.get("last_tool") or "") or None
-    lv.last_failed = bool(cur.get("last_failed"))
     lv.turn_analyst = bool(cur.get("turn_analyst"))
     lv.api_failed = bool(cur.get("api_failed"))
     lv.last_cut = str(cur.get("last_cut") or "") or None
@@ -628,52 +607,20 @@ def attached_workspaces() -> list[str]:
     return list(_live)
 
 
-def tell_terminal(c: str, line: str) -> bool:
-    """`line` for main's terminal in workspace `c`: appended to <home>/links/<main's session>, which main's Stop hook shows
-    under main's next reply (plugin/bin/.thimble-watch link_lines), as a note after the link /thimble left there, or after
-    an empty first line in a file this makes (readable by its owner alone). False when no main is attached or the line
-    was not written."""
-    lv = _live.get(c)
-    name = "".join(ch for ch in (lv.sid if lv is not None else "") if ch.isalnum() or ch in "-_")
-    if not name or not line.strip():
-        return False
-    d = userconf.global_file().parent / userconf.LINKS_DIR
-    try:
-        config.private_dir(d)
-        path = d / name
-        try:
-            held = path.read_bytes()
-        except FileNotFoundError:
-            held = None
-        lead = "\n" if held is None or (held and not held.endswith(b"\n")) else ""
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(lead + " ".join(line.split()))
-    except OSError as e:
-        log.warning("%s: a line for main's terminal was not left: %s", c, e)
-        return False
-    return True
-
-
 def current(c: str) -> Live | None:
     """The session that is main in workspace `c`: the one this server follows."""
     return _live.get(c)
 
 
 def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: int | None = None,
-           config_dir: str | None = None, *, follow: bool = False, after: str | None = None,
-           effort: str | None = None) -> Live | None:
+           config_dir: str | None = None, *, effort: str | None = None) -> Live | None:
     """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR ("" for
-    unset, None for what its shim reported); `follow` says the session runs in the process of the one it replaces
-    (_follow); `attached.after` names the previous main when it still runs in another process. `attached.settings_effort`
-    is the effort main runs at while the composer chose none, for the composer's chip: `effort`, which the server's
-    runtime gives (runtime.Space.attach), else the analyst's own (cc_settings.analyst_effort)."""
+    unset, None for not known). `attached.settings_effort` is the effort main runs at while the composer chose none, for
+    the composer's chip: `effort`, which the server's runtime gives (runtime.Space.attach), else the analyst's own
+    (cc_settings.analyst_effort)."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
         return None
-    # `/thimble` names neither; the session's shim reported both when it subscribed
-    pid = pid or _shim_pids.get((c, sid))
-    config_dir = _shim_configs.get((c, sid)) if config_dir is None else config_dir
     cur = _live.get(c)
     if cur is not None and cur.sid == sid:
         if pid:
@@ -684,12 +631,9 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
             _persist(cur)
         if transcript_path and not cur.transcript_path:
             cur.transcript_path = transcript_path
-        _cancel_grace(c)
         _ensure_tail(cur)
         return cur
     if cur is not None:
-        if after is None and not follow and _runs_elsewhere(c, cur, pid):
-            after = cur.sid
         detach(c, cur.sid, "replaced")
     meta = agents.ensure_main(c)
     held = meta.get("attached") or {}
@@ -714,8 +658,8 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     if not restored:
         _modes.pop(c, None)  # a session that ended and is resumed may run in another mode than it last reported
         own = effort or (cc_settings.analyst_effort(Path(lv.cwd)) if lv.cwd else None)
-        meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since, **({"settings_effort": own} if own else {}),
-                            **({"after": after} if after else {})}
+        meta["attached"] = {"session": sid, "cwd": lv.cwd, "since": lv.since,
+                            **({"settings_effort": own} if own else {})}
         meta["ended"] = None
         agents.write_meta(c, meta)
         agents.notify(c, agents.MAIN_ID)
@@ -725,7 +669,6 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         kept = _kept_mode(c, sid)
         if kept:
             _modes[c] = (sid, kept)
-        # the notice stays as main's meta has it, since the kept mode may be one note_plan only guessed
         now = ({**held, "permission_mode": kept} if kept else
                {k: v for k, v in held.items() if k not in ("permission_mode", MANUAL_KEY)})
         if effort:  # the effort main runs at now, which the analyst's settings may have changed while no server ran
@@ -736,7 +679,6 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         if held.get(MANUAL_KEY) and not now.get(MANUAL_KEY):
             _clear_manual(c)
     _persist(lv, keep_subs=restored or bool(lv.subs))
-    _cancel_grace(c)
     _ensure_tail(lv)
     with contextlib.suppress(Exception):
         from . import subagents  # noqa: PLC0415
@@ -756,35 +698,16 @@ def _kept_modes() -> dict[str, Any]:
 
 
 def _kept_mode(c: str, sid: str) -> str | None:
-    """The mode main's hooks last reported for session `sid` of workspace `c`, as userconf.main_modes_file keeps it
-    ({workspace: {session, mode}}); None when it keeps none for that session."""
+    """The mode userconf.main_modes_file keeps for session `sid` of workspace `c` ({workspace: {session, mode}}); None
+    when it keeps none for that session."""
     rec = _kept_modes().get(c)
     if not isinstance(rec, dict) or rec.get("session") != sid or rec.get("mode") not in modes.CLAUDE_MODES:
         return None
     return str(rec["mode"])
 
 
-def _keep_mode(c: str, sid: str, mode: str) -> None:
-    kept = _kept_modes()
-    if kept.get(c) == {"session": sid, "mode": mode}:
-        return
-    kept[c] = {"session": sid, "mode": mode}
-    try:
-        config.private_dir(userconf.main_modes_file().parent)
-        atomic_write_text(userconf.main_modes_file(), json.dumps(kept, indent=1))
-    except OSError as e:
-        log.warning("%s: main's permission mode was not kept in %s: %s", c, userconf.main_modes_file(), e)
-
-
-MANUAL_KEY = "manual"  # in main's meta's `attached`: what kind of Manual-mode notice shows (modes.manual_hint)
-TOLD_KEY = "manual_told"  # in main's meta's `attached`: main's terminal said once that the session runs in Manual mode
+MANUAL_KEY = "manual"  # in main's meta's `attached`: the Manual-mode notice an earlier build showed
 MANUAL_NOTICE_KEY = "manual-mode"  # the notices' key and kind of the Manual-mode notice (notices.py)
-
-
-def _post_manual(c: str, mode: str) -> None:
-    from . import notices  # noqa: PLC0415
-
-    notices.post(c, kind=MANUAL_NOTICE_KEY, key=MANUAL_NOTICE_KEY, text=modes.manual_notice(mode))
 
 
 def _clear_manual(c: str) -> None:
@@ -793,88 +716,11 @@ def _clear_manual(c: str) -> None:
     notices.clear(c, MANUAL_NOTICE_KEY)
 
 
-def _with_mode(held: dict[str, Any], mode: str, guessed: bool = False) -> dict[str, Any]:
-    """Main's meta's `attached` with `mode` as main's permission mode and MANUAL_KEY as modes.manual_hint gives it for
-    that mode (none outside Manual mode); a `guessed` mode leaves MANUAL_KEY as it was."""
-    out = {**held, "permission_mode": mode}
-    if guessed:
-        return out
-    out.pop(MANUAL_KEY, None)
-    hint = modes.manual_hint(mode)
-    return {**out, MANUAL_KEY: hint} if hint else out
-
-
-def note_mode(c: str, sid: str | None, mode: str, *, tell: bool = False, guessed: bool = False) -> str:
-    """Main's hooks report the permission mode Claude Code runs the session `sid` in: when `sid` is main, this server
-    keeps it (main_mode), in thimble's home too (userconf.main_modes_file) so that a restarted server under the same
-    session follows it until main reports again, the mode each agent's row follows until the analyst sets it
-    (modes.py), and main's meta shows it (`attached.permission_mode`), with what the Manual-mode notice says while it is
-    Manual mode (`attached.manual`, modes.manual_hint), unless the mode is only `guessed` (note_plan). The notice
-    `manual-mode` (notices.py, modes.manual_notice) shows when that hint comes or changes, and goes when it goes.
-
-    With `tell` (a report of main's hooks, events.mode_route), the first report of Manual mode in the session returns
-    the line main's terminal then shows (modes.manual_line), and `attached.manual_told` records that it showed, so it
-    shows once per session; '' otherwise."""
-    lv = _live.get(c)
-    if lv is None or not sid or lv.sid != sid or mode not in modes.CLAUDE_MODES:
-        return ""
-    _modes[c] = (sid, mode)
-    _keep_mode(c, sid, mode)
-    meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
-    held = meta.get("attached") or {}
-    if held.get("session") != sid:
-        return ""
-    now = _with_mode(held, mode, guessed)
-    line = modes.manual_line(mode) if tell and not guessed and not held.get(TOLD_KEY) else ""
-    if line:
-        now[TOLD_KEY] = True
-    if now != held:
-        meta["attached"] = now
-        agents.write_meta(c, meta)
-        agents.notify(c, agents.MAIN_ID)
-    before, after = held.get(MANUAL_KEY), now.get(MANUAL_KEY)
-    if after and after != before:
-        _post_manual(c, mode)
-    elif before and not after and not guessed:
-        _clear_manual(c)
-    return line
-
-
-_before_plan: dict[str, str] = {}  # workspace -> main's mode before thimble's module saw it go into plan mode
-
-
-def note_plan(c: str, sid: str | None, plan: bool) -> None:
-    """thimble's module saw main's session go into plan mode, or out of it, while main was idle (it asks Claude Code's
-    permission decision every few seconds, module_bridge.mode_route): the mode becomes plan, or goes back to the one
-    before (default when none was known), until main's hooks report the mode at its next turn (live check L21: a
-    shift+tab while main was idle reached thimble only at main's next turn, so held checks waited and the browser showed
-    the old mode). The mode it goes back to is a guess, since a shift+tab out of plan mode, or the plan's approval, may
-    pick another, so it shows no Manual-mode notice."""
-    cur = main_mode(c)
-    if plan and cur != "plan":
-        if cur:
-            _before_plan[c] = cur
-        note_mode(c, sid, "plan")
-    elif not plan and cur == "plan":
-        note_mode(c, sid, _before_plan.pop(c, "") or "default", guessed=True)
-
-
 def main_mode(c: str) -> str | None:
-    """The permission mode main's hooks last reported (note_mode), by Claude Code's name, to this server or, for the
-    session it restarted under, to the one before it; None before the first report."""
+    """Main's permission mode by Claude Code's name, as kept for the session this server restarted under (_kept_mode);
+    None when none is kept."""
     lv, got = _live.get(c), _modes.get(c)
     return got[1] if lv is not None and got is not None and got[0] == lv.sid else None
-
-
-def _runs_elsewhere(c: str, cur: Live, pid: int | None) -> bool:
-    """Whether session `cur` still runs in a `claude` process other than `pid`'s: its shim is subscribed, and the two
-    pids, where both are known, differ."""
-    from . import events  # noqa: PLC0415
-
-    if cur.sid not in events.subscribed_sessions(c):
-        return False
-    own = cur.pid or _shim_pids.get((c, cur.sid))
-    return not (pid and own and pid == own)
 
 
 def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
@@ -894,8 +740,8 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             lv.subs.append(sub)
         elif (meta.get("kind") == agents.KIND_THREAD and fork.get("tool_use_id") and fork.get("session") == lv.sid
               and not fork.get("ended") and not threads.settled(lv.c, str(meta["id"]))):
-            # its Agent call was read and its file not yet found (terminal mode reads each in its own process): the
-            # file, which names the thread by its question only, joins the thread by the call's tool_use id
+            # its Agent call was read and its file not yet found: the file, which names the thread by its question
+            # only, joins the thread by the call's tool_use id
             lv.subs.append(Sub(lv.c, str(meta["id"]), fork.get("tool_use_id"), None, thread=True))
         # a chat of one of thimble's agents (route subagent), its role's or a descendant's step, is followed to its end
         # as any other subagent is, its runs ended through subagents.run_ended
@@ -992,119 +838,17 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
     return True
 
 
-def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: str | None = None) -> None:
-    """A shim subscribed, naming its session's `claude` pid and CLAUDE_CONFIG_DIR. Only /thimble makes a session main,
-    so a subscription attaches only the current (or last) main, or a new session in main's own `claude` process
-    (`pid`), which main follows (_follow). Main's transcript is read first, so a session main continues in is main
-    before its subscription is weighed (_continue, _moved_main)."""
-    for table, value in ((_shim_pids, pid), (_shim_configs, config_dir)):
-        if sid and value is not None:
-            table.pop((c, sid), None)
-            table[(c, sid)] = value
-            while len(table) > SHIM_PIDS_KEPT:
-                table.pop(next(iter(table)))
-    lv = _live.get(c) or (_moved_main(c, sid) if sid else None)
-    if sid and lv is not None and lv.sid != sid:
-        _read_now(lv)
-    if not sid:
-        return
-    held = ((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session")
-    cur = _live.get(c)
-    old = None
-    if sid not in (held, cur.sid if cur is not None else None):
-        if not pid or pid != main_pid(c):
-            return
-        old = cur.sid if cur is not None else held
-    _cancel_grace(c)
-    _came_back.add(c)
-    if old:
-        _follow(c, str(old), str(sid), cwd, pid)
-    else:
-        attach(c, sid, cwd, None, pid)
-
-
-def _moved_main(c: str, sid: str) -> Live | None:
-    """After a restart, before main's own shim came back: the session main's meta names, attached again when its
-    transcript ends with a continued-in record naming `sid`, so that its first read follows it (_continue)."""
-    held = ((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session")
-    rec = sessions(c).get(str(held)) if held else None
-    if not rec or rec.get("ended") or (_continued_in(rec.get("transcript_path")) or ("",))[0] != sid:
-        return None
-    return attach(c, held, str(rec.get("cwd") or ""), rec.get("transcript_path"))
-
-
-def main_pid(c: str) -> int | None:
-    """The pid of the `claude` process main's session runs in: what its shim reported, else (after a restart, before
-    that shim came back) what sessions.json recorded for the session main's meta names."""
-    cur = _live.get(c)
-    if cur is not None:
-        return cur.pid or _shim_pids.get((c, cur.sid))
-    held = ((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session")
-    rec = sessions(c).get(str(held)) if held else None
-    if not rec or rec.get("ended"):
-        return None
-    with contextlib.suppress(TypeError, ValueError):
-        return int(rec.get("pid") or 0) or None
-    return None
-
-
-def may_follow(c: str, sid: str, pid: int | None) -> bool:
-    """Whether a watcher of non-main session `sid` waits rather than stops: it runs in main's process and is a session
-    main will follow (a new /clear session, or one /resume brought back), or main's transcript, read now, made it main
-    (_continue)."""
-    if not pid:
-        return False
-    cur = _live.get(c)
-    if pid != main_pid(c):
-        if cur is not None:
-            _read_now(cur)
-        now = _live.get(c)
-        return now is not None and now.sid == sid
-    state = _read_state(_sessions_dir(cur.config_dir if cur is not None else None) / f"{pid}.json")
-    return sid not in sessions(c) or state.get("sessionId") == sid
-
-
-def _follow(c: str, old: str, new: str, cwd: str, pid: int | None, config_dir: str | None = None) -> None:
-    """Main's `claude` process runs a new session (/clear, /resume): it becomes main in place of `old`, keeps the known
-    Monitor tasks, and takes the events queued for `old` (events.move_events)."""
-    from . import events  # noqa: PLC0415
-
-    cur = _live.get(c)
-    tasks = set(cur.watch_tasks) if cur is not None and cur.sid == old else set()
-    since = cur.since if cur is not None and cur.sid == old else (sessions(c).get(old) or {}).get("since")
-    if config_dir is None and cur is not None and cur.config_known:
-        config_dir = cur.config or ""  # the same `claude` process: the same config dir
-    # thimble's agents run on in the new session (U1, V2), so detach ends none of them: they are carried over and read
-    # on in the new session's folder from its start (rekeyed)
-    carried = [s for s in cur.subs if not s.done and (s.thimble or s.root)] if cur is not None and cur.sid == old else []
-    if cur is not None:
-        cur.subs = [s for s in cur.subs if s not in carried]
-    lv = attach(c, new, cwd, None, pid, config_dir, follow=True)  # detaches `old` as replaced when it is attached
-    if lv is None:
-        return
-    _carry(lv, carried, _left_at(c, old))
-    if cur is None:
-        _mark_ended(c, old, "replaced")
-    # a transcript /clear started holds only this session, so read it from its start and nothing typed before the shim
-    # reported the new id is lost; a session /resume brought back is read from its end
-    if _began_since(lv.transcript_path, since):
-        lv.offset = 0
-    lv.watch_tasks |= tasks
-    events.move_events(c, old, new)
-    log.info("%s: session %s follows %s in the same process (pid %s)", c, new, old, pid)
-
-
 def _continue(lv: Live) -> None:
     """Main's session continues in the session its continued-in record names (`lv.continued`): Claude Code moved it into
     a background job, whose session copied the conversation into a transcript beside this one's and runs in its own
-    process. That session becomes main in this one's place, by the pid its shim reported (attach), read from its
-    transcript's start without the records it copied (_copied), with the turn in progress, main's subagents and threads'
-    forks still at work (threads.fork_moved) and the events queued for this one (events.move_events). This one ends as
-    CONTINUED: thimble's agents go on, and its shim, in the parked process, does not make it main again (_parked)."""
+    process. That session becomes main in this one's place (attach), read from its transcript's start without the
+    records it copied (_copied), with the turn in progress, main's subagents and threads' forks still at work
+    (threads.fork_moved) and the events queued for this one (events.move_events). This one ends as CONTINUED: thimble's
+    agents go on."""
     from . import events  # noqa: PLC0415
 
     c, (new, at) = lv.c, lv.continued
-    config_dir = _shim_configs.get((c, new), (lv.config or "") if lv.config_known else None)
+    config_dir = (lv.config or "") if lv.config_known else None
     carried = [s for s in lv.subs if not s.done]  # the job runs them on, so detach ends none of them
     lv.subs = [s for s in lv.subs if s not in carried]
     for tid in {s.chat for s in carried if s.thread} | threads.awaiting_in(c, lv.sid):
@@ -1132,55 +876,6 @@ def _continue(lv: Live) -> None:
     log.info("%s: session %s continues in session %s (pid %s)", c, lv.sid, new, nv.pid)
 
 
-def disconnected(c: str, sid: str | None) -> None:
-    """A shim's subscription ended: when none of main's is left after GRACE_S, the session is gone."""
-    from . import events  # noqa: PLC0415
-
-    def mains() -> bool:
-        lv = _live.get(c)
-        return events.listening(c, lv.sid if lv is not None else None)
-
-    if mains():
-        return
-    _cancel_grace(c)
-
-    def check() -> None:
-        _grace.pop(c, None)
-        if _shutting_down():
-            return  # stopping ends every subscription at once; the session's shim comes back to the next server
-        lv = _live.get(c)
-        if not mains() and lv is not None and (sid is None or lv.sid == sid):
-            detach(c, lv.sid, "ended")
-            _hand_back(c, lv.sid)
-            if _live.get(c) is None:  # no session took over as main: the analyst quit, so thimble's agents stop too
-                _stop_agents(c)
-
-    try:
-        _grace[c] = asyncio.get_running_loop().call_later(GRACE_S, check)
-    except RuntimeError:
-        check()
-
-
-def _stop_agents(c: str) -> None:
-    """Main's session ended and none took over: every agent of the workspace stops (agents.stop_all), so nothing works
-    on after the analyst quit, and the server stops when no workspace has a main session (_stop_server). A /clear or
-    /resume in the same process is no end (the session follows), nor is a session replaced by another that runs
-    (_hand_back)."""
-    async def run() -> None:
-        stopped = await agents.stop_all(c)
-        if stopped:
-            log.info("%s: main's session ended; stopped %s", c, ", ".join(stopped))
-        if _live.get(c) is not None:  # a session became main while the agents stopped
-            _resume_work(c)
-        elif not _live:
-            await _stop_server()
-
-    try:
-        asyncio.get_running_loop().create_task(run(), name=f"stop-agents:{c}")
-    except RuntimeError:  # no loop (a test's synchronous call): nothing runs to stop
-        pass
-
-
 def _resume_work(c: str) -> None:
     """A session is main in workspace `c`: the view builds a server restart left are attached again (dev.resume_views).
     Nothing main's quit stopped starts again by itself."""
@@ -1193,91 +888,19 @@ def _resume_work(c: str) -> None:
             log.exception("%s: the work left waiting did not go on", c)
 
 
-STOP_AFTER_S = 3.0  # after main's end, how long the server waits before it stops itself (_stop_server)
-
-
-async def _stop_server() -> None:
-    """No workspace has a main session: what still runs in any workspace stops as main's end stops it, the kernels end,
-    and the server stops itself (cli.stop_self), STOP_AFTER_S later, so a page that is open reads main's end and shows
-    the session-gone card before its stream closes (live check L10), and a session that attaches meanwhile keeps it."""
-    from . import cli, notebook  # noqa: PLC0415
-
-    for c in sorted(agents.at_work()):
-        with contextlib.suppress(Exception):
-            await agents.stop_all(c)
-    await asyncio.sleep(STOP_AFTER_S)
-    if _live or _shutting_down():
-        return
-    with contextlib.suppress(Exception):
-        await notebook.shutdown_all()
-    log.info("no workspace has a main session any more; the server stops")
-    await asyncio.to_thread(cli.stop_self)
-
-
-def may_return(c: str, sid: str) -> bool:
-    """Whether session `sid` is main again when main's session ends (_hand_back): another session replaced it, its shim
-    is still subscribed, and it is not parked (_parked)."""
-    from . import events  # noqa: PLC0415
-
-    return ((sessions(c).get(sid) or {}).get("reason") == "replaced" and sid in events.subscribed_sessions(c)
-            and not _parked(c, sid))
-
-
-def _parked(c: str, sid: str) -> bool:
-    """Whether session `sid` ended by continuing in another session and has not gone on since: its transcript ends with
-    the continued-in record (_continued_in). Its process waits parked, and its shim's subscription makes it main neither
-    by claiming main (connected) nor when main ends (may_return)."""
-    rec = sessions(c).get(sid) or {}
-    return bool(rec.get("ended")) and _continued_in(rec.get("transcript_path")) is not None
-
-
-def _hand_back(c: str, gone: str) -> None:
-    """Main's session `gone` ended while a session it replaced still runs: the most recently replaced one is main again,
-    by the pid its shim reported, and its dormant watcher takes the next event."""
-    from . import events  # noqa: PLC0415
-
-    recs = sessions(c)
-    live = [s for s in dict.fromkeys(events.subscribed_sessions(c)) if s and s != gone and may_return(c, s)]
-    if not live:
-        return
-    back = max(live, key=lambda s: str(recs[s].get("ended") or ""))
-    rec = recs[back]
-    pid = _shim_pids.get((c, back))
-    if attach(c, back, str(rec.get("cwd") or ""), rec.get("transcript_path"), pid, after=gone) is not None:
-        log.info("%s: session %s ended; main is session %s again, which it had replaced", c, gone, back)
-
-
-def _cancel_grace(c: str) -> None:
-    h = _grace.pop(c, None)
-    if h is not None:
-        h.cancel()
-
-
 def expect(c: str, event_id: str, *, thread: str | None = None) -> None:
     """events.post logged event `event_id` as it posted it, or the server's main logs it where it reads it
     (runtime.Space.said_line): the mirror skips its record, and main runs until the turn ends. A thread's event is
-    remembered with its thread (thread_for); when the server runs main (runtime.py), it starts the thread's fork and no
-    turn of main's (runtime.deliver), so main does not run for it."""
-    from . import runtime  # noqa: PLC0415
-
+    remembered with its thread (thread_for); the server starts the thread's fork and no turn of main's
+    (runtime.deliver), so main does not run for it."""
     _expected.add(event_id)
     if thread:
         _event_threads[event_id] = thread
-    if not (thread and runtime.enabled()):
+    else:
         agents.set_running(c, agents.MAIN_ID, True)
     lv = _live.get(c)
     if lv is not None:
         lv.wake.set()
-
-
-def handed(c: str, event_id: str, thread: str) -> None:
-    """A thread's event main got in a tool's result (events.hand): main's turn counts it as an event that reached it
-    (_browser_event), and until the turn ends a turn the tail opens late keeps it."""
-    _event_threads[event_id] = thread
-    lv = _live.get(c)
-    if lv is not None:
-        lv.turn_threads.append(thread)
-        lv.handed.append(thread)
 
 
 def push_event(c: str, kind: str, text: str, **meta: Any) -> bool:
@@ -1347,7 +970,7 @@ def _open_turn(lv: Live) -> None:
     """A record that starts main's turn: the analyst's line, an event, a task notification. Several before the first
     assistant record open the same turn."""
     if not lv.turn_open or not lv.fresh:
-        lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
+        lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, [], set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since, lv.turn_texts = set(), "", _now(), []
         lv.turn_analyst = lv.api_failed = False
@@ -1361,14 +984,14 @@ def _release_threads(lv: Live) -> None:
     for tid in dict.fromkeys(lv.turn_threads):
         if tid not in lv.forked:
             threads.released(lv.c, tid)
-    lv.turn_threads, lv.forked, lv.handed = [], set(), []
+    lv.turn_threads, lv.forked = [], set()
 
 
 def _end_turn(lv: Live, cut: str | None = None) -> None:
     """Main's turn ended: at its turn_duration record, whose uuid is `cut`, or (no cut) when a later record shows that a
     turn never got one."""
     _release_threads(lv)
-    again = _no_call(lv)
+    _no_call(lv)
     _asked(lv, False)  # a relayed prompt the terminal answered before the tail saw the wait
     if lv.flagged and not lv.answered:
         _stopped(lv, SAFETY_STOP_TEXT)
@@ -1380,7 +1003,6 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     was_open = lv.turn_open
     lv.turn_open = lv.fresh = lv.wrote = False
     agents.set_running(lv.c, agents.MAIN_ID, False)
-    _ask_again(lv, again)
     if was_open:
         _fixes_turn(lv)
         _cards_shown(lv)
@@ -1475,43 +1097,22 @@ def _proposer_turn(lv: Live, cut: str | None) -> None:
         log.exception("%s: the view proposer did not hear of main's turn end", lv.c)
 
 
-def _no_call(lv: Live) -> list[tuple[str, str, str]]:
-    """R3 (module note): the turn in which main called a start tool, or message_orientation, or got the `start_agent`
-    event of a thread's fork's start (subagents.ask_main), ended, and the request that call or event stands for was
-    never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's last text in the turn
-    (its first two lines) as the reason. A start_agent event's start is refused only when it was asked for again once
-    already, or the turn was stopped; otherwise it is left pending and returned as (request, event, reason), for
-    _ask_again once the turn has ended."""
+def _no_call(lv: Live) -> None:
+    """R3 (module note): the turn in which main called a start tool, or message_orientation, ended, and the request that
+    call stands for was never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's
+    last text in the turn (its first two lines) as the reason."""
     if not lv.turn_calls:
-        return []
+        return
     from . import subagents  # noqa: PLC0415
 
     try:
         reqs = subagents.read(lv.c).get("requests") or {}
     except Exception:  # noqa: BLE001 — a workspace whose files cannot be read refuses nothing
-        return []
+        return
     said = "\n".join([ln for ln in lv.turn_text.strip().splitlines() if ln.strip()][:2])
-    again: list[tuple[str, str, str]] = []
     for rid, r in list(reqs.items()):
         if (isinstance(r, dict) and r.get("route") == subagents.TYPED and r.get("state") == "pending"
                 and r.get("call") in lv.turn_calls and not r.get("caller_role") and not r.get("caller_agent")):
-            if r.get("via_main") and r.get("ask") and not r.get("asked_again") and not lv.stop_noted:
-                again.append((rid, str(r["call"]), said))
-                continue
-            subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
-    return again
-
-
-def _ask_again(lv: Live, again: list[tuple[str, str, str]]) -> None:
-    """The starts _no_call left for a second event: each start_agent event main's turn missed is posted once more
-    (tools.ask_main_again), since the event may have come in the same turn as the end-the-turn note of an earlier start
-    (`## agent-launched`). A start whose event could not be posted is refused as _no_call refuses."""
-    if not again:
-        return
-    from . import subagents, tools  # noqa: PLC0415
-
-    for rid, call, said in again:
-        if not tools.ask_main_again(lv.c, rid, call):
             subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
 
 
@@ -1587,8 +1188,7 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
         lv.turn_analyst = True
     if kind == "thread" and thread:
         lv.turn_threads.append(thread)
-    if event_id:  # a start_agent event's start is refused when this turn ends without its Agent call (R3, _no_call)
-        lv.turn_calls.add(event_id)
+    if event_id:
         _fixes_read(lv, event_id)
     if event_id and event_id in _expected:
         _expected.discard(event_id)
@@ -1596,18 +1196,6 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
     if kind == "main" or not kind:
         lv.wrote = True
         agents.mirror(lv.c, "user", by=BROWSER, text=body.strip(), event=event_id or None)
-
-
-def _nudged(lv: Live) -> None:
-    """Claude Code asked main for a visible reply after a turn with no text: when the turn's last call was a tool the
-    session's terminal_tools.ENV names, and it did not fail, Claude Code does not act on it (terminal_tools.nudged)."""
-    from . import procs  # noqa: PLC0415
-
-    if lv.last_failed:
-        return  # Claude Code asks for a reply after a failed or refused call whatever ENV names
-    with contextlib.suppress(Exception):
-        if terminal_tools.nudged(procs.environ(lv.pid), lv.last_tool):
-            log.warning("%s: session %s was asked for a reply after %s", lv.c, lv.sid, lv.last_tool)
 
 
 def _command_line(text: str) -> str | None:
@@ -1777,7 +1365,6 @@ def _text(lv: Live, text: str, **extra: Any) -> None:
 
 def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
     lv.tool_names[tool_use_id] = name
-    lv.last_tool, lv.last_failed = name, False
     lv.turn_calls.add(tool_use_id)
     if f"use:{tool_use_id}" in lv.seen:
         return
@@ -1864,8 +1451,6 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         return
     lv.seen.add(f"result:{tool_use_id}")
     name = lv.tool_names.get(tool_use_id, "")
-    if is_error and name == lv.last_tool:
-        lv.last_failed = True
     if tool_use_id in lv.watch_calls:
         m = MONITOR_TASK_RE.search(response_text(content))
         if m:
@@ -1881,7 +1466,7 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         lv.forked.discard(tid)
         threads.fork_lost(lv.c, tid)
     relay = lv.relays.pop(tool_use_id, None)
-    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read (terminal mode)
+    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read
         agent_id, inp = lv.pending_relays.pop(tool_use_id)
         held = _sub_by(lv, agent_id=str(agent_id or ""))
         relay = (held, inp if isinstance(inp, dict) else {}) if held is not None else None
@@ -2022,7 +1607,7 @@ def _request_of(lv: Live, tool_use_id: str, name: str, inp: dict) -> str | None:
         return hit
     want = str(inp.get(key) or "")
     # never one another call claimed: a later call with the same text may have claimed it before this pass read the
-    # denied call's result (terminal mode reads in passes)
+    # denied call's result
     found = [rid for rid, r in reqs.items() if isinstance(r, dict) and r.get("kind") == kind and r.get("route") == subagents.TYPED
              and r.get("state") in ("pending", "claimed") and not r.get("claimed_by")
              and str((r.get("input") or {}).get(key) or "") == want]
@@ -2051,23 +1636,6 @@ def _thimble_sub(lv: Live, chat: str, agent_id: str, tool_use_id: str | None, ch
         if root.get("role") == "orientation" and root.get("chat"):
             sub.calls = calls.Numbering(lv.c, str(root["chat"]), agent=agent_id)
     return sub
-
-
-def _carry(lv: Live, carried: "list[Sub]", left: float | None = None) -> None:
-    """Thimble's agents carried from the session main left (/clear, /resume) into `lv`: the chats attach found for them
-    go, and each is read on in the new session's folder from its start (U1: the file there continues the old one),
-    without what that file held from before main left at `left` (_after_move)."""
-    if not carried:
-        return
-    chats = {s.chat for s in carried}
-    for sub in [s for s in lv.subs if s.chat in chats and not s.thread]:
-        lv.subs.remove(sub)
-        if sub.path is not None:
-            lv.sub_paths.discard(str(sub.path))
-    for sub in carried:
-        sub.path, sub.offset, sub.buf, sub.skip_before = None, 0, b"", left
-    lv.subs += carried
-    lv.wake.set()
 
 
 def expect_agent(c: str, agent_id: str, chat: str, chat_role: str) -> None:
@@ -2108,21 +1676,6 @@ def _own_sub(lv: Live, agent_id: str) -> Sub:
     sub = Sub(lv.c, chat, None, agent_id, role=role)
     sub.own_prompts = True
     return sub
-
-
-def rekeyed(c: str, old: str, new: str, moved: "list[str]") -> None:
-    """--rekey moved thimble's agents `moved` from main's session `old` to `new` (subagents.rekey): each is read on in
-    the new session's folder from offset 0, as the continuation of its file in the old one (U1, V2). Main's own move
-    (_follow) carries them the same way, whichever comes first."""
-    lv = _live.get(c)
-    if lv is None or lv.sid != new:
-        return
-    left = _left_at(c, old)
-    for sub in lv.subs:
-        if sub.agent_id in moved and sub.path is not None and lv.sid not in str(sub.path):
-            lv.sub_paths.discard(str(sub.path))
-            sub.path, sub.offset, sub.buf, sub.skip_before = None, 0, b"", left
-    lv.wake.set()
 
 
 def api_error_of(rec: dict) -> str | None:
@@ -2316,18 +1869,6 @@ def agent_answer(c: str, agent_id: str) -> str | None:
     return sub.last_text
 
 
-def main_quit(c: str, sid: str) -> None:
-    """Main's SessionEnd hook said it quit (subagents.end_route): main detaches now and the workspace's jobs stop at
-    once (_stop_agents), without the grace a lost subscription waits."""
-    lv = _live.get(c)
-    if lv is None or (sid and lv.sid != sid):
-        return
-    _cancel_grace(c)
-    detach(c, lv.sid, "ended")
-    if _live.get(c) is None:
-        _stop_agents(c)
-
-
 # --------------------------------------------------------------------------- subagents
 
 
@@ -2359,7 +1900,7 @@ def _sub_by(lv: Live, *, tool_use_id: str | None = None, agent_id: str | None = 
 
 def _fork_runs(lv: Live, thread_id: str, tool_use_id: str | None) -> bool:
     """Whether the thread has a fork in this session that another Agent call started and that has not ended, so a
-    second call for it (fork_check refuses it) is not recorded as its fork before it shows that it started one."""
+    second call for it is not recorded as its fork before it shows that it started one."""
     fork = (agents.meta_or_none(lv.c, thread_id) or {}).get("fork") or {}
     return bool(fork.get("agent_id") and not fork.get("ended") and fork.get("session") == lv.sid
                 and fork.get("tool_use_id") not in (None, tool_use_id))
@@ -2369,11 +1910,8 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
            prompt: Any = None, parent: str | None = None) -> Sub:
     """The Sub for an Agent call, made on its first sighting (the tool_use, or the file's meta json) and completed by
     the later one. A `thread:<id>` description joins the thread's chat; an agent of thimble's, or a descendant of one,
-    goes to its chat (_spawn_thimble); any other is a new agent chat in main. The thread of a call the agent-check hook
-    recorded as a thread's fork is known by that record whatever the description says (_recorded_fork), and a plain
-    agent chat made for the call before the mirror knew its thread becomes the thread's (_into_thread)."""
-    if tool_use_id and not thread_for(lv.c, title):
-        title = _recorded_fork(lv, tool_use_id) or title
+    goes to its chat (_spawn_thimble); any other is a new agent chat in main. A plain agent chat made for the call
+    before the mirror knew its thread becomes the thread's (_into_thread)."""
     sub = _sub_by(lv, tool_use_id=tool_use_id) or _sub_by(lv, agent_id=agent_id)
     if sub is not None and _stray(sub) and (tid := thread_for(lv.c, title)):
         _into_thread(lv, sub, tid)
@@ -2411,20 +1949,6 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
     elif fields and not sub.thimble and not sub.root:
         agents.update_agent(lv.c, sub.chat, **fields)
     return sub
-
-
-def _recorded_fork(lv: Live, tool_use_id: str | None) -> str | None:
-    """The `thread:<name>` of a thread of this workspace that the agent-check hook recorded the Agent call `tool_use_id`
-    as forking (subagent_files.fork_call_ref), else None."""
-    if not tool_use_id:
-        return None
-    from . import subagents  # noqa: PLC0415 — subagents imports this module
-
-    try:
-        ref = sfiles.fork_call_ref(subagents.read(lv.c), tool_use_id)
-    except Exception:  # noqa: BLE001 — an unreadable record names no thread
-        return None
-    return ref if ref and thread_for(lv.c, ref) else None
 
 
 FORK_CALL_SCAN_BYTES = 262_144  # of a fork's transcript, read for its own copy of the Agent call (_file_fork_ref)
@@ -2527,8 +2051,7 @@ def _agent_result(lv: Live, sub: Sub, content: Any, is_error: bool) -> None:
     its last text moments later)."""
     text = response_text(content)
     if is_error and sub.thread and REFUSED_RE.match(text):
-        # a hook denied the call, so it started no fork (fork_check: the thread's fork runs already): the thread is its
-        # own fork's to end
+        # a hook denied the call, so it started no fork: the thread is its own fork's to end
         sub.done = True
         lv.subs.remove(sub)
         threads.fork_finished(lv.c, sub.chat, "failed", tool_use_id=sub.tool_use_id, refused=True)
@@ -2699,14 +2222,13 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
         lv.sub_paths.add(key)
         use = str(meta.get("toolUseId") or "") or None
         followed = _sub_by(lv, tool_use_id=use) or _sub_by(lv, agent_id=agent_id)
-        # a fork's file names its thread by its description; when thimble-term gave the call the thread's question as
-        # its description (threads.fork_ref), by the agent-check hook's record of the call, the call as the fork's file
-        # holds it, or the name main gave it
+        # a fork's file names its thread by its description; when its description is the thread's question
+        # (threads.fork_ref), by the call as the fork's file holds it, or the name main gave it
         title = str(meta.get("description") or "")
         if not thread_for(lv.c, title):
             fork = meta.get("isFork") or meta.get("agentType") == sfiles.FORK_TYPE
             named = f"thread:{meta['name']}" if fork and meta.get("name") else None
-            title = next((r for r in (_recorded_fork(lv, use), _file_fork_ref(path, use) if fork else None, named)
+            title = next((r for r in (_file_fork_ref(path, use) if fork else None, named)
                           if r and thread_for(lv.c, r)), title)
         sub = _spawn(lv, use, agent_id, title, meta.get("agentType"),
                      parent=str(meta.get("parentAgentId") or "") or None)
@@ -2885,19 +2407,6 @@ def _after_move(sub: Sub, lines: list[bytes]) -> list[bytes]:
     return []
 
 
-def _left_at(c: str, old: str) -> float | None:
-    """When main left its session `old` (/clear, /resume): the time its SessionEnd hook recorded (subagents.json
-    `main_end`), else None. Claude Code writes an agent's records into the new session's folder only after it."""
-    from . import subagents  # noqa: PLC0415 — subagents imports this module
-
-    try:
-        end = subagents.read(c).get("main_end") or {}
-    except Exception:  # noqa: BLE001
-        return None
-    at = end.get("at") if isinstance(end, dict) and end.get("session") == old else None
-    return float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else None
-
-
 def _results(sub: Sub, lines: list[bytes]) -> list[tuple[tuple[str, str], float]]:
     """The calls whose results lines of a subagent's transcript hold (_results_in)."""
     return _results_in(sub.call_keys, lines)
@@ -3030,26 +2539,6 @@ def _call_holder(lv: Live, tool_use_id: str, needle: bytes, read: dict[str, int]
     return None
 
 
-def running_agents(c: str) -> list[dict[str, Any]]:
-    """The agents of main's session that run now, for the terminal's list of thimble's agents (tray.agent_rows):
-    each thread's fork by its fork name and main's other subagents, {name, state, kind}."""
-    lv = _live.get(c)
-    out: list[dict[str, Any]] = []
-    for sub in list(lv.subs) if lv is not None else []:
-        if sub.done or sub.owner is not None:
-            continue
-        meta = agents.meta_or_none(c, sub.chat) or {}
-        if sub.thread:
-            name = f"fork {meta.get(threads.FORK_NAME_KEY) or meta.get('title') or sub.chat}"
-        elif sub.of_main:
-            name = str(meta.get("title") or "subagent")
-        else:
-            continue
-        waiting = sub.agent_id is not None and sub.agent_id in _events().asking(c)
-        out.append({"name": name, "state": "waiting for a permission prompt" if waiting else "working", "kind": "subagent"})
-    return out
-
-
 def _events() -> Any:
     from . import events  # noqa: PLC0415 — as elsewhere here: events imports session lazily too
 
@@ -3063,27 +2552,6 @@ def _stamp(line: bytes | str | dict) -> float:
         return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp() if ts else 0.0
     except (ValueError, TypeError, AttributeError):
         return 0.0
-
-
-def _began_since(path: str | None, since: str | None) -> bool:
-    """Whether the transcript at `path` began no earlier than `since` (an ISO time), judged by its first timestamped
-    record.
-    True when there is no such record, no file, or `since` is unknown."""
-    try:
-        start = datetime.fromisoformat(str(since).replace("Z", "+00:00")).timestamp() if since else None
-    except ValueError:
-        start = None
-    if start is None or not path:
-        return True
-    try:
-        with nofollow.reader(path) as f:  # a transcript, read as _tail_main reads one
-            for _, line in zip(range(STAMP_LINES), f):
-                stamp = _stamp(line)
-                if stamp:
-                    return stamp >= start
-    except OSError:
-        pass
-    return True
 
 
 def _take_copied(lv: Live) -> None:
@@ -3372,8 +2840,6 @@ def translate(lv: Live, line: bytes | str) -> None:
         elif rec.get("isMeta"):
             if LOCAL_CAVEAT in text:
                 lv.local_prompt = str(rec.get("promptId") or "")
-            elif text.startswith(terminal_tools.NUDGE):
-                _nudged(lv)
             return
         elif origin == "human" or origin is None:
             command = _command_line(text)
@@ -3727,39 +3193,6 @@ def _ensure_tail(lv: Live) -> None:
 # --------------------------------------------------------------------------- the startup sweep
 
 
-def sweep() -> list[str]:
-    """Detach every recorded main session in a workspace where no shim is subscribed and main's own has not subscribed
-    since
-    this server started. Never while the server is stopping, when every workspace looks unsubscribed. Returns the
-    session
-    ids detached."""
-    from . import events  # noqa: PLC0415
-
-    if _shutting_down():
-        return []
-    gone: list[str] = []
-    for path in sorted(config.WORKSPACES_DIR.glob("*/sessions.json")):
-        c = path.parent.name
-        if c in _came_back or events.listening(c):
-            continue
-        try:
-            held = (agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}
-        except Exception:  # noqa: BLE001 — a workspace whose corpus is gone
-            continue
-        sid = held.get("session")
-        if not sid:
-            continue
-        try:
-            if c in _live:
-                detach(c, str(sid), "ended")
-            else:
-                detach(c, str(sid), "stale")
-            gone.append(str(sid))
-        except Exception:  # noqa: BLE001
-            log.debug("%s: could not detach %s", c, sid, exc_info=True)
-    return gone
-
-
 def _shutting_down() -> bool:
     """Whether the server has begun to stop: uvicorn's `should_exit`, set on SIGTERM before connections close, is the
     same
@@ -3774,33 +3207,10 @@ def _shutting_down() -> bool:
     return AppStatus.should_exit is True
 
 
-async def _sweep_later() -> None:
-    await asyncio.sleep(GRACE_S * 3)
-    try:
-        sweep()
-    except Exception:  # noqa: BLE001
-        log.exception("session sweep failed")
-
-
-def start_sweep() -> None:
-    global _sweep_task
-    if _sweep_task is None or _sweep_task.done():
-        _sweep_task = asyncio.get_running_loop().create_task(_sweep_later(), name="session-sweep")
-
-
 async def shutdown() -> None:
-    global _sweep_task
     for lv in list(_live.values()):
         if lv.task is not None:
             lv.task.cancel()
-    for h in list(_grace.values()):
-        h.cancel()
-    _grace.clear()
-    if _sweep_task is not None:
-        _sweep_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await _sweep_task
-        _sweep_task = None
     from . import proposer  # noqa: PLC0415 — proposer imports context, which imports this module
 
     await proposer.shutdown()

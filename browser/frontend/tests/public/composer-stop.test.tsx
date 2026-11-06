@@ -169,13 +169,13 @@ describe('the Stop sent', () => {
     const t = toasts()
     answer({ stopped: false })
     expect(await stopSession('mini', 'o1', 'orient')).toBe(false)
-    answer({ stopped: false, kind: 'no-module', reason: "Claude Code did not load thimble's hooks module" })
+    answer({ stopped: false, kind: 'error', reason: 'the request timed out' })
     expect(await stopSession('mini', 'o1', 'orient')).toBe(false)
     answer({ detail: 'down' }, 500)
     expect(await stopRun('mini', session, () => undefined)).toBe(false)
     expect(t.seen.map((x) => x.kind)).toEqual(['error', 'error', 'error'])
     expect(t.seen[0].text).toMatch(/^Could not stop it/)
-    expect(t.seen[1].text).toBe("thimble could not stop it: Claude Code did not load thimble's hooks module. Stop it in your terminal: ↓ to it in the agent tray, Enter, then Esc.")
+    expect(t.seen[1].text).toBe('thimble could not stop it: the request timed out. Stop it in your terminal: ↓ to it in the agent tray, Enter, then Esc.')
     expect(t.seen[2].text).toMatch(/^thimble could not stop it: 500 down/)
     t.off()
   })
@@ -202,16 +202,13 @@ describe('the Stop sent', () => {
     t.off()
   })
 
-  test("without thimble's module in main's session, main's Stop says to press Esc in the terminal; another failure says why", async () => {
+  test("main's Stop that thimble could not pass on says why and how to stop main", async () => {
     const t = toasts()
-    answer({ stopped: false, kind: 'no-module', reason: "Claude Code did not load thimble's hooks module" })
-    expect(await stopSession('mini', 'main', 'main')).toBe(false)
     answer({ stopped: false, kind: 'error', reason: 'the request timed out.' })
     expect(await stopSession('mini', 'main', 'main')).toBe(false)
     answer({ detail: 'down' }, 500)
     expect(await stopSession('mini', 'main', 'main')).toBe(false)
     expect(t.seen).toEqual([
-      { text: 'To stop main, press Esc in your Claude Code terminal.' },
       { text: 'thimble could not stop main: the request timed out. To stop main, press Esc in your Claude Code terminal.', kind: 'error' },
       { text: 'thimble could not stop main: 500 down. To stop main, press Esc in your Claude Code terminal.', kind: 'error' },
     ])

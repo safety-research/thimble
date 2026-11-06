@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from app import config, extensions, views
+from app import config, views
 
 CORPUS, OTHER = "boards", "notes"
 READER = """
@@ -73,7 +73,7 @@ def _propose(c: str, slug: str = "posts") -> None:
 
 def test_a_view_built_for_a_workspace_is_its_local_extension_and_no_other_workspace_s(corpora):
     """A view's files go to the local extension's views/ beside a manifest that names the workspace, thimble's state of
-    it stays in views/, Settings lists it under the workspace, and another workspace has none of it."""
+    it stays in views/, and another workspace has none of it."""
     _propose(CORPUS)
     v = _write(CORPUS)
     ws = config.workspace_dir(CORPUS)
@@ -84,25 +84,7 @@ def test_a_view_built_for_a_workspace_is_its_local_extension_and_no_other_worksp
     assert (ws / "views" / "proposals.json").is_file() and (ws / "views" / ".versions" / "posts" / v["version"]).is_dir()
     assert not (ws / "views" / "posts").exists()
     assert views.list_proposals(CORPUS)[0]["status"] == "built"
-    row = {"slug": "posts", "name": "Posts", "description": "each post", "file_viewer": False, "on": True}
-    assert views.local_extension(CORPUS) == {"name": CORPUS, "views": [row]}
-    assert views.read_built(OTHER, "posts") is None and views.local_extension(OTHER)["views"] == []
-    got = asyncio.run(extensions.list_route(CORPUS))
-    assert got["local"]["views"] == [row]
-
-
-def test_a_view_an_extension_installed_is_not_the_workspace_s_own(corpora, tmp_path):
-    """A view installed from an extension's folder keeps its place in Settings under that extension, not under the
-    workspace."""
-    src = tmp_path / "ext-view"
-    src.mkdir()
-    (src / "view.json").write_text(json.dumps({"name": "Tally", "claims": ["board.jsonl"], "unit": "file"}))
-    (src / "reader.py").write_text(READER)
-    (src / "view.html").write_text("<p>tally</p>")
-    views.install_viewer(CORPUS, "tally", src, ["board.jsonl"], description="", proposed_by="analyst",
-                         orientation=False, extension="tally")
-    assert views.read_built(CORPUS, "tally")["unit"] == "file"
-    assert views.local_extension(CORPUS)["views"] == []
+    assert views.read_built(OTHER, "posts") is None
 
 
 def test_unit_places_a_view_in_the_file_browser_or_the_views_bar(corpora):
@@ -115,8 +97,6 @@ def test_unit_places_a_view_in_the_file_browser_or_the_views_bar(corpora):
     _write(CORPUS, "posts", unit="file")
     v = views.read_built(CORPUS, "posts")
     assert v["unit"] == "file" and views._public(v, CORPUS)["file_type"]
-    assert views.local_extension(CORPUS)["views"] == [{"slug": "posts", "name": "Posts", "description": "each post",
-                                                       "file_viewer": True, "on": True}]
 
 
 def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corpora, tmp_path):
@@ -167,27 +147,10 @@ def test_a_view_hidden_before_shows_like_any_other_and_nothing_hides_one(corpora
     assert "one post" in views.forms_text(CORPUS)
     assert [p for p in asyncio.run(views.list_proposals_route(CORPUS)) if "off" in p] == []
     assert views.open_offer(CORPUS)["slug"] == "timeline"
-    assert views.local_extension(CORPUS)["views"] == [{"slug": "posts", "name": "Posts", "description": "each post",
-                                                       "file_viewer": False, "on": True}]
     paths = {getattr(r, "path", "") for r in views.router.routes}
     assert "/ws/{c}/views/{slug}" in paths, "the views' own routes"
     assert "/ws/{c}/views/{slug}/on" not in paths and "/ws/{c}/views/local" not in paths
     assert views._check_slug("local") == "local"
-
-
-def test_a_view_hidden_before_makes_its_card_type(corpora):
-    """A workspace view that makes a card type makes it whether or not an earlier version hid the view."""
-    from app import cardtypes
-
-    _propose(CORPUS)
-    v = _write(CORPUS)
-    d = Path(v["dir"])
-    (d / "card.py").write_text("def card(index, args):\n    return index\n")
-    (d / "view.json").write_text(json.dumps({**json.loads((d / "view.json").read_text()), "card": {"use": "a post"}}))
-    views.mark_built(CORPUS, "posts")
-    _hidden_before(CORPUS, "posts")
-    assert "posts" in asyncio.run(cardtypes.refresh(CORPUS, warm=False))
-    assert "posts" in cardtypes.read_registry(CORPUS)
 
 
 def test_a_file_viewer_s_extension_glob_names_the_files_at_the_corpus_root_too(corpora):

@@ -26,7 +26,7 @@ let posted: string[]
 beforeEach(() => {
   posted = []
   others = []
-  main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED, module: true, unread: [] } as unknown as ChatMeta
+  main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED, unread: [] } as unknown as ChatMeta
   events = [
     { type: 'user', text: FIRST, by: 'browser' },
     { type: 'tool_use', id: 't1', name: 'mcp__plugin_thimble_thimble__list_cards', input: { group: 'all' } },

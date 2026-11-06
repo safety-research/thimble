@@ -20,7 +20,6 @@ SWITCH = "Claude can edit files in this folder"
 
 @pytest.fixture()
 def space(monkeypatch, workspaces_tmp, data_tmp):
-    monkeypatch.setenv("THIMBLE_RUNTIME", "on")
     config.workspace_dir(CORPUS)
     runtime._spaces.clear()
     yield runtime.ensure(CORPUS)

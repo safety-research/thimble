@@ -44,7 +44,7 @@ check CI runs, and `scripts/check.sh STEP` one of them.
 - A change to a text the plugin's model reads is an edit of its one file (`plugin/prompts/<text>.md`), and follows
   CONTRIBUTING.md, "Changing what the model reads": change the cause in the text, never add a rule against the
   symptom.
-- The browser workbench (`browser/`, thimble 0.8's browser mode) keeps its own texts in `browser/prompts/`; from
+- The browser workbench (`browser/`) keeps its own texts in `browser/prompts/`; from
   `plugin/` it reads only what it runs as the terminal does: the citation checker and the look at each answer.
   `scripts/check.sh parity` checks that they render and name only what its code has.
 - In the plugin, Claude's card views run only in the card runner (`plugin/cards/runner.mjs`), which runs only in

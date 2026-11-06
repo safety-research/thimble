@@ -1,13 +1,12 @@
 // The picture a ⌘-click sends with a thread (src/pointer/capture.ts capturePng) holds what a card draws in a sandboxed
 // frame, which the page cannot read and html-to-image drew as an empty box: a custom card's page (canvas/DataViz
-// CustomFrame), a scripted output's (components/Outputs HtmlFrame) and a card type's (files/ViewerFrame) each draw
-// themselves (src/lib/frameShot.ts). On the real board at its opening zoom, under the app's own content security
-// policy, in a browser that reports a Mac: a ⌘-click on each card's top row asks about the card, and the PNG its thread
-// is sent shows, where the card shows them, a block of one color in the frame's markup and a block a script painted on
-// a canvas or set by its style, an image the frame's page loads by URL (which the frame cannot read, and a picture
-// cannot load), and a control the card shows under the frame (Keep), which stays where it is rather than move up into
-// the frame's place. On a screen of 2 device pixels per CSS pixel, as a Retina display is, the page in the picture is
-// laid out for the frame, as on screen: its vw and vh units and its width media queries read the frame's size.
+// CustomFrame) and a scripted output's (components/Outputs HtmlFrame) each draw themselves (src/lib/frameShot.ts). On
+// the real board at its opening zoom, under the app's own content security policy, in a browser that reports a Mac: a
+// ⌘-click on each card's top row asks about the card, and the PNG its thread is sent shows, where the card shows them,
+// a block of one color in the frame's markup and a block a script painted on a canvas or set by its style, and an image
+// the frame's page loads by URL (which the frame cannot read, and a picture cannot load). On a screen of 2 device pixels
+// per CSS pixel, as a Retina display is, the page in the picture is laid out for the frame, as on screen: its vw and vh
+// units and its width media queries read the frame's size.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -34,15 +33,9 @@ const CUSTOM =
   '<div id="pink"></div><canvas id="green" width="160" height="50"></canvas>' +
   "<script>const g = document.getElementById('green').getContext('2d'); g.fillStyle = '#20a040'; g.fillRect(0, 0, 160, 50)</script>"
 const SCRIPTED = "<div id=\"blue\" style=\"width:160px;height:50px\"></div><script>document.getElementById('blue').style.background = '#2050d0'</script>"
-const TYPE_PAGE = '<!doctype html><html><head></head><body style="margin:0"><div id="violet" style="margin:12px;width:160px;height:50px;background:#7030c0"></div></body></html>'
-// a card type's page that, once drawn, asks for another query, as a page the analyst reshaped does: the card shows Keep
-// and Undo under it
-const ASKS_PAGE =
-  '<!doctype html><html><head></head><body style="margin:0"><div id="asks" style="margin:12px;width:160px;height:50px;background:#7030c0"></div>' +
-  "<script>setTimeout(() => parent.postMessage({ type: 'thimble:setQuery', patch: { min: 3 } }, '*'), 200)</script></body></html>"
 const PICTURE = '<style>body{margin:0;padding:12px}</style><img id="pic" src="/pic.png" style="width:160px;height:50px">'
-// a card type's page laid out for its frame, as a page that fills its card is: a green block placed at 60vw, a block
-// blue in a frame narrower than 900px and red in a wider one, and a violet footer at the bottom of a body 100vh high
+// a custom card's page laid out for its frame: a green block placed at 60vw, a block blue in a frame narrower than 900px
+// and red in a wider one, and a violet footer at the bottom of a body 100vh high
 const FILLS_PAGE =
   '<!doctype html><html><head><style>body{margin:0;height:100vh;display:flex;flex-direction:column}' +
   '#right{margin:12px 0 0 60vw;width:20vw;height:30px;background:#20a040}' +
@@ -55,15 +48,13 @@ const CANVAS = {
   cells: [
     { id: 'c1', notebook: 'g', kind: 'custom', title: 'Which nights failed?', takeaway: 'Two blocks.', created_by: 'model', ts: T, payload: { html: CUSTOM, height: 150 } },
     { id: 'h1', notebook: 'g', kind: 'plot', title: 'How did the runs go?', takeaway: 'One block.', created_by: 'model', ts: T, code: 'show()', status: 'ok', outputs: [{ 'text/html': SCRIPTED }] },
-    { id: 'k1', notebook: 'g', kind: 'plot', title: 'Which runs were slow?', takeaway: 'One block.', created_by: 'model', ts: T, code: 'thimble.card("demo")', status: 'ok', outputs: [{ 'application/vnd.thimble.card+json': { type: 'demo', data: {}, size: [80, 200], labels: [] }, 'text/plain': 'run 1' }] },
     { id: 'p1', notebook: 'g', kind: 'custom', title: 'Which run looked wrong?', takeaway: 'Its picture.', created_by: 'model', ts: T, payload: { html: PICTURE, height: 90 } },
-    { id: 'k2', notebook: 'g', kind: 'plot', title: 'Which runs were reshaped?', takeaway: 'One block.', created_by: 'model', ts: T, code: 'thimble.card("asks")', status: 'ok', outputs: [{ 'application/vnd.thimble.card+json': { type: 'asks', data: {}, size: [80, 200], labels: [] }, 'text/plain': 'run 1' }] },
   ],
 }
 // the card whose page fills its frame (FILLS_PAGE), on a board of its own
 const FILLS = {
   ...CANVAS,
-  cells: [{ id: 'f1', notebook: 'g', kind: 'plot', title: 'How full was each night?', takeaway: 'Three blocks.', created_by: 'model', ts: T, code: 'thimble.card("fills")', status: 'ok', outputs: [{ 'application/vnd.thimble.card+json': { type: 'fills', data: {}, size: [160, 300], labels: [] }, 'text/plain': 'run 1' }] }],
+  cells: [{ id: 'f1', notebook: 'g', kind: 'custom', title: 'How full was each night?', takeaway: 'Three blocks.', created_by: 'model', ts: T, payload: { html: FILLS_PAGE, height: 300 } }],
 }
 
 /** A page of the board `canvas` at `scale` device pixels per CSS pixel (a Retina display's is 2), its cards drawn. */
@@ -82,9 +73,6 @@ async function board(canvas: typeof CANVAS, scale: number): Promise<Page> {
     if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: css })
     if (p === '/bundle.js') return route.fulfill({ status: 200, contentType: 'text/javascript', body: js })
     if (p === '/api/ws/w/canvas') return json(canvas)
-    if (p === '/api/ws/w/cardtypes/demo/frame') return route.fulfill({ status: 200, contentType: 'text/html', body: TYPE_PAGE })
-    if (p === '/api/ws/w/cardtypes/asks/frame') return route.fulfill({ status: 200, contentType: 'text/html', body: ASKS_PAGE })
-    if (p === '/api/ws/w/cardtypes/fills/frame') return route.fulfill({ status: 200, contentType: 'text/html', body: FILLS_PAGE })
     if (p === '/pic.png') return route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from(RED_PNG, 'base64') })
     if (p === '/api/ws/w/canvas/comments') return json({ comments: [] })
     if (p === '/api/ws/w/chats' && req.method() === 'POST') {
@@ -102,15 +90,12 @@ async function board(canvas: typeof CANVAS, scale: number): Promise<Page> {
     })
   })
   await tab.goto(`${ORIGIN}/`)
-  // each card drawn: a custom card's frame sized to its page, a scripted output loaded, a card type's frame there, and
-  // Keep shown under the page that asks for another query
+  // each card drawn: a custom card's frame sized to its page, and a scripted output loaded
   const drawn: Record<string, string> = {
     c1: '.canvas-card-frame[data-settled="true"]',
     h1: 'iframe.outputs-iframe[data-settled="true"]',
-    k1: 'iframe.viewer-frame',
     p1: '.canvas-card-frame[data-settled="true"]',
-    k2: '.bcell-type-actions button:has-text("Keep")',
-    f1: 'iframe.viewer-frame',
+    f1: '.canvas-card-frame[data-settled="true"]',
   }
   for (const c of canvas.cells) await tab.waitForSelector(`[data-cell="${c.id}"] ${drawn[c.id]}`)
   await tab.waitForTimeout(500)
@@ -214,31 +199,10 @@ test("the picture of a card with a scripted output holds the output's page", asy
   assert.ok(near(blue, BLUE), `the output's block is drawn: ${blue}`)
 })
 
-test("the picture of a card type's card holds the type's page", async () => {
-  const { png, card } = await asked('k1')
-  const violet = await colorAt(png, card, await middleOf('k1', 'violet'))
-  assert.ok(near(violet, VIOLET), `the page's block is drawn: ${violet}`)
-})
-
 test("the picture holds an image the frame's page loads by URL", async () => {
   const { png, card } = await asked('p1')
   const red = await colorAt(png, card, await middleOf('p1', 'pic'))
   assert.ok(near(red, RED), `the image is drawn: ${red}`)
-})
-
-test('a control the card shows under its frame stays where the card shows it, beside the frame drawn in its place', async () => {
-  const keep = await page.evaluate(() => {
-    const b = Array.from(document.querySelectorAll<HTMLElement>('[data-cell="k2"] .bcell-type-actions button')).find((e) => e.innerText.includes('Keep'))!
-    return b.getBoundingClientRect().toJSON()
-  })
-  // the button's own color, by its left edge, clear of its icon and its word
-  const at = { x: Math.round(keep.left + 3), y: Math.round(keep.top + keep.height / 2) }
-  const want = await screenColor(at)
-  const { png, card } = await asked('k2')
-  const got = await colorAt(png, card, at)
-  assert.ok(near(got, want), `Keep is drawn where the card shows it: ${got}, on screen ${want}`)
-  const violet = await colorAt(png, card, await middleOf('k2', 'asks'))
-  assert.ok(near(violet, VIOLET), `the page's block is drawn: ${violet}`)
 })
 
 test("at 1 and at 2 device pixels per CSS pixel, the picture lays the frame's page out as the screen does: a block placed in vw, a color a width media query sets, a footer at the bottom of a body 100vh high", async () => {

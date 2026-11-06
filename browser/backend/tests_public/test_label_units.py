@@ -16,6 +16,9 @@ import pytest
 from app import concepts, config, notebook, tools
 from app import model as model_mod
 
+# model calls go through Claude Code, which the tests fake (conftest claude_code_sign_in)
+pytestmark = pytest.mark.usefixtures("claude_code_sign_in")
+
 CORPUS = "mini"
 FILES = ["agents/agent-01.jsonl", "agents/agent-02.jsonl", "agents/agent-03.jsonl"]
 

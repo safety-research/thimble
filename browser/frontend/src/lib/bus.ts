@@ -1,5 +1,5 @@
 // The page's typed event bus: the workspace stream fans out here, and the surfaces talk to each other through it.
-import type { FilterScope, Notice, ViewQuery, WsEvent } from './types'
+import type { FilterScope, Notice, WsEvent } from './types'
 
 export type Tab = 'files' | 'canvas' | 'report'
 
@@ -65,10 +65,9 @@ export type Events = {
   /** open the Labels sidebar (shell/LabelsSidebar.tsx), on one label's detail when `id` names one */
   openLabels: { id?: string | null }
   /** a ref Files places in a view, opened in the pane that shows that view on its own (files/ViewSurface) */
-  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; query?: ViewQuery; picked?: boolean }
-  /** open a view with a card's arguments (a card type's Open as view, canvas/TypeCard, or main's open_view), or with
-   * none (null), in Files or in its own pane */
-  openView: { slug: string; query: ViewQuery | null }
+  openInView: { slug: string; path: string; ref?: string; quote?: { record: string; text: string; span: string }; picked?: boolean }
+  /** open a view (main's open_view), in Files or in its own pane */
+  openView: { slug: string }
   /** show the file at `path` in the File browser's mode `mode` (files/Reader pickKey), such as a file viewer's */
   fileMode: { path: string; mode: string }
   /** Open in on a file's panel: the file in the view `slug`, or in the File browser for null, kept as the view the
@@ -98,9 +97,6 @@ export type Events = {
   pointHover: { rect: DOMRect | null }
   /** a box of a frame's page to bring into view (a frame's `reveal`): the canvas pans to it when the frame is on it */
   revealBox: { rect: DOMRect; frame: HTMLIFrameElement }
-  /** a citation in a card's text is hovered (`ref`) or left (null), so a card that draws records can show the one it
-   * names */
-  citeHover: { card: string; ref: string | null }
   /** ⌘ went down or up: a view's frame shows the ⌘ arrow (`cursor`, a CSS cursor value) while it is held */
   cmdHeld: { on: boolean; cursor: string }
   /** run the product tour again (the composer's /tour) */

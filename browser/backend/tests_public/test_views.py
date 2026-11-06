@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 from conftest import Listener
 
-from app import config, dev, extension_manifest, headless, tools, userconf, views
+from app import config, dev, headless, tools, userconf, views
 
 CORPUS = "boards"
 POSTS = [  # (thread, author, time, body); line n of board.jsonl is POSTS[n-1]
@@ -744,60 +744,13 @@ async def test_the_review_s_pictures_take_each_state_in_its_pane_with_its_label_
     monkeypatch.setattr(view_review.headless, "missing", lambda what: False)
     more = [{"state": "filtered", "why": "the filter"}, {"state": "control", "controls": ["Day"], "why": "days"},
             {"state": "control", "why": "names no control"}]
-    paths, records, reading = await view_review.pictures(CORPUS, "threads", "a1", more)
-    assert reading == "", "no extension's program replaces the view-review task"
+    paths, records = await view_review.pictures(CORPUS, "threads", "a1", more)
     assert taken == [["plain", "filtered", "plain"]]
     assert asked == [(views.PANE_SIZE, None), (views.PANE_NARROW, None), (views.PANE_SIZE, ["Day"])]
     assert f"the overview filtered to the test label, {views.PANE_NARROW[0]} px wide, asked for: the filter" in paths
     assert "the overview after clicking nothing" in paths, "the stub clicked nothing"
     assert "board.jsonl#L1" in records
     assert views.read_proposal(CORPUS, "threads")["review"]["shots"] == 3
-
-
-async def test_a_program_that_replaces_the_view_review_task_reads_the_reviewer_s_pictures(ws, bound, monkeypatch):
-    """An extension's program that replaces the view-review task gets each view_pictures call's pictures as the task's
-    input (docs/agents.md), and the reviewer gets the problems it found to fix; a program that fails ends the review
-    failed with why, and the reviewer is told to end."""
-    import types  # noqa: PLC0415
-
-    from app import model, tasks, view_review  # noqa: PLC0415
-
-    monkeypatch.setattr(views, "_queue", lambda c, slug: None)
-    views.propose(CORPUS, "Threads", "The posts by thread.", ["board.jsonl"], "Unit: a post", asked=True)
-    views.mark_built(CORPUS, "threads")
-
-    async def shoot_states(c, slug, states, **k):
-        for st in states:
-            Path(st["out"]).parent.mkdir(parents=True, exist_ok=True)
-            Path(st["out"]).write_bytes(b"png")
-        return [{"ok": True, "errors": [], "fonts": True, "png": str(st["out"]), "answers": []} for st in states]
-
-    monkeypatch.setattr(views, "shoot_states", shoot_states)
-    monkeypatch.setattr(view_review.headless, "missing", lambda what: False)
-    monkeypatch.setattr(tasks, "program", lambda c, task: types.SimpleNamespace(extension="vote") if task == "view-review"
-                        else None)
-    inputs: list[dict] = []
-    answer = model.CallResult(status="ok", output={"problems": ["picture 1: the header covers the first post"]})
-
-    async def call(c, task, inp, schema=None, **k):
-        inputs.append(inp)
-        return answer
-
-    monkeypatch.setattr(tasks, "call", call)
-    paths, _, reading = await view_review.pictures(CORPUS, "threads", "a1", [])
-    [inp] = inputs
-    assert inp["view"]["slug"] == "threads" and inp["ask"] is False
-    assert [p["path"] for p in inp["pictures"]] == [paths.split(" ", 2)[1]]
-    assert "vote's program" in reading and "- picture 1: the header covers the first post" in reading
-    answer = model.CallResult(status="error", detail="it crashed")
-    stopped: list[str] = []
-    from app import view_tools  # noqa: PLC0415
-
-    monkeypatch.setattr(view_tools, "stop_after_grace", lambda c, key, agent_id: stopped.append(agent_id))
-    with pytest.raises(view_review.NoPictures, match="vote's program .* failed: it crashed"):
-        await view_review.pictures(CORPUS, "threads", "a1", [{"state": "narrow", "why": "the width"}])
-    review = views.read_proposal(CORPUS, "threads")["review"]
-    assert review["state"] == "failed" and review["finished"] and "it crashed" in review["note"] and stopped == ["a1"]
 
 
 async def test_a_deleted_proposal_or_view_takes_its_build_folder_and_the_analyst_may_ask_for_it_again(ws, monkeypatch):
@@ -1074,15 +1027,17 @@ BROKEN = {
 }
 
 
-def test_every_worked_example_s_view_json_is_in_the_schema_s_form():
-    """The examples teach view.json as the dev agent's prompt does: they follow the extension schema and use none of the
-    older names thimble still reads."""
+# the names of view.json that earlier views used, which no worked example teaches
+OLD_VIEW_NAMES = {"claims", "derived", "declares", "why", "card", "applies", "show", "reports", "examples", "version",
+                  "built"}
+
+
+def test_every_worked_example_s_view_json_is_in_the_form_the_dev_agent_writes():
+    """The examples teach view.json as the dev agent's prompt does: they name the files they cover (`scope`) and their
+    records, and use none of the older names thimble still reads."""
     for name in EXAMPLES:
-        text = (_example_dir(name) / "view.json").read_text("utf-8")
-        raw = json.loads(text)
-        assert not extension_manifest._validate(raw, text, f"{name}/view.json", "view"), name
-        old = {k for k, v in extension_manifest.schema()["$defs"]["view"]["properties"].items() if v.get("deprecated")}
-        assert not old & set(raw), (name, old & set(raw))
+        raw = json.loads((_example_dir(name) / "view.json").read_text("utf-8"))
+        assert not OLD_VIEW_NAMES & set(raw), (name, OLD_VIEW_NAMES & set(raw))
         assert raw.get("scope") and raw.get("records"), name
 
 

@@ -1,7 +1,7 @@
 // The chart style, in one place: the --viz-* tokens (styles/tokens.css), read from the document when a chart is built
 // (the fallbacks are the Warm paper's with the default accent). Every chart thimble draws takes them: the Vega-Lite
 // theme here, matplotlib's defaults (backend/app/matplotlibrc, whose colors an inlined figure maps back to the tokens,
-// lib/svg), the timeline and the diagram (styles/canvas.css), and the frames of custom cards and card types, which get
+// lib/svg), the timeline and the diagram (styles/canvas.css), and the frames of custom cards and views, which get
 // them as CSS variables (lib/frame CHART_TOKENS).
 //
 // Colors by the job they do: one series takes --viz-1; nominal groups take --viz-1 to --viz-7 in order, and past seven

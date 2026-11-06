@@ -24,8 +24,6 @@ from app import cli, config, procs
 SECRET = "sk-ant-test-secret-never-written"  # gitleaks:allow  a fake key asserting nothing writes it
 BACKEND = Path(__file__).resolve().parents[1]
 
-pytestmark = pytest.mark.usefixtures("named_sessions")
-
 
 class FakeSpawn:
     """Records spawns; the first backend spawn flips `up` after `delay` so health probes start succeeding, and is the
@@ -161,69 +159,6 @@ def _healthy_no_process(monkeypatch):
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
     monkeypatch.setattr(cli, "listening", lambda p: False)
     cli.write_state({"port": 8300, "url": "http://127.0.0.1:5300", "env": {}})
-
-
-def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, capsys, tmp_path):
-    _healthy_no_process(monkeypatch)
-    posted = []  # the registrations; the holdings GET under the URL is answered 404 (an older server) and not recorded
-
-    def request(m, u, b=None, timeout=5.0):
-        if m != "POST":
-            return 404, {"detail": "Not Found"}
-        if u.endswith("/precached/context"):  # no workspace here was installed from a pre-cache
-            return 200, {"text": ""}
-        posted.append((u, b))
-        if u.endswith("/api/ui/pair"):  # a server that makes no sign-in codes
-            return 404, {"detail": "Not Found"}
-        return 201, {"name": Path(b["path"]).name}
-
-    monkeypatch.setattr(cli, "_request", request)
-    rc = cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9"])
-    # what the skill puts in the model's context holds no link: the session's Stop hook shows the link it left, with a
-    # sign-in code it gets as it shows it, so the file holds none
-    assert rc == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
-    assert (home / "links" / "s9").read_text() == "http://127.0.0.1:5300/?ws=mini"
-    assert "ui_key" not in json.loads((home / "server.json").read_text())
-    posted.clear()  # the session's name and the like, told to the server
-    folder = tmp_path / "calls"
-    folder.mkdir()
-    assert cli.main(["ensure", "--cwd", str(folder), "--session", "s9"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE]
-    assert (home / "links" / "s9").read_text() == "http://127.0.0.1:5300/?ws=calls"
-    assert posted[0] == ("http://127.0.0.1:8300/api/corpora/register", {"path": str(folder), "exact": True})
-    posted.clear()
-    (tmp_path / "cc").mkdir()
-    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
-    assert cli.main(["ensure", "--cwd", str(folder), "--session", "s8"]) == 0
-    url, note, mark = capsys.readouterr().out.splitlines()
-    assert url == "thimble: http://127.0.0.1:5300/?ws=calls", "no hook to show it"
-    assert note == cli.MONITOR_NOTE and mark.startswith(cli.MONITOR_MARK), "main's Monitor brings the browser's events"
-    posted.clear()
-    assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up read by a program"
-    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/"]
-    assert posted == [], "no code minted"
-    monkeypatch.setattr(cli, "to_terminal", lambda: True)
-    assert cli.main(["up", "--cwd", str(folder)]) == 0, "a bare up from a shell"
-    # the server gave no code: the plain link, and why it opens read-only
-    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/",
-                                                    cli.NO_CODE_LINE.format(log=cli.log_path())]
-    assert posted == [("http://127.0.0.1:8300/api/ui/pair", {})], "the code is minted at the API, not at Vite"
-
-    def minting(m, u, b=None, timeout=5.0):
-        if u.endswith("/api/ui/pair"):
-            posted.append((u, b))
-            return 200, {"code": f"c{len(posted)}", "expires_s": 300}
-        return request(m, u, b, timeout)
-
-    monkeypatch.setattr(cli, "_request", minting)
-    posted.clear()
-    assert cli.main(["up", "--cwd", str(folder)]) == 0
-    assert capsys.readouterr().out.splitlines() == ["thimble: http://127.0.0.1:5300/#p=c1"]
-    assert cli.ui_url("calls", pair=True) == "http://127.0.0.1:5300/?ws=calls#p=c2"
-    assert posted[-1] == ("http://127.0.0.1:8300/api/ui/pair", {"ws": "calls"})
-    assert cli.ui_url("calls") == "http://127.0.0.1:5300/?ws=calls" and len(posted) == 2, "no code unless asked"
-    assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
 
 
 def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monkeypatch, capsys):
@@ -406,13 +341,12 @@ def test_the_doctor_a_model_reads_names_no_install_command_even_when_the_log_doe
     assert text.count(cli.LOG_LINE_LEFT_OUT) == 4, "three in the tail, one in the errors"
 
 
-DEV_LINES = ("turn endings:", "source changed since start:", "validation stack:", "last apply:", "dev tickets:",
-             "last ticket error:")
+DEV_LINES = ("source changed since start:", "validation stack:", "last apply:", "dev tickets:", "last ticket error:")
 
 
 def test_doctor_prints_the_developer_s_lines_only_in_a_development_install(home, monkeypatch, fake_claude):
-    """The turn endings, the source changed since start, the validation stack, the last apply and the dev tickets are a
-    developer's lines, so a release install's doctor leaves them out and a git clone's prints them."""
+    """The source changed since start, the validation stack, the last apply and the dev tickets are a developer's
+    lines, so a release install's doctor leaves them out and a git clone's prints them."""
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     monkeypatch.setattr(cli, "listening", lambda p: False)
     monkeypatch.setattr(cli, "is_git_checkout", lambda: False)
@@ -427,7 +361,7 @@ def test_doctor_prints_the_developer_s_lines_only_in_a_development_install(home,
 
 def test_fix_and_revert_run_only_in_a_development_install(home, monkeypatch, capsys):
     """`thimble fix` and `thimble revert` change thimble's own code, which a release install cannot: each says so and
-    exits 1 before it asks or touches anything, and /thimble fix says the same to the session."""
+    exits 1 before it asks or touches anything."""
     monkeypatch.setattr(cli, "is_git_checkout", lambda: False)
     touched: list[str] = []
     for name in ("healthy", "fix", "revert", "fix_refusal", "restart"):
@@ -436,8 +370,6 @@ def test_fix_and_revert_run_only_in_a_development_install(home, monkeypatch, cap
     assert capsys.readouterr().out.strip() == cli.DEV_ONLY_LINES["fix"]
     assert cli.main(["revert"]) == 1
     assert capsys.readouterr().out.strip() == cli.DEV_ONLY_LINES["revert"]
-    assert cli._action(type("A", (), {"action": "fix"})(), True, "http://127.0.0.1:1") == 0
-    assert capsys.readouterr().out.strip() == cli.DEV_ONLY_LINES["fix"]
     assert touched == []
 
 
@@ -493,30 +425,27 @@ def _uvicorns_on(p: int) -> list[int]:
 # each step is a subprocess with a time limit of its own, so the test cannot hang; its time is a server's start, which a
 # machine its parallel runs keep busy makes several times longer
 @pytest.mark.timeout(300)
-def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, data, tmp_path, fake_claude):
+def test_a_detached_browser_start_starts_the_server_once_and_stop_ends_it(home, data, tmp_path, fake_claude):
     try:  # in this process, which runs the same Python on the same tree, rather than in a new one
         import app.main  # noqa: F401, PLC0415
     except Exception as e:  # noqa: BLE001
         pytest.skip(f"app.main does not import in this tree: {type(e).__name__}: {e}"[:300])
     port = _free_port()
-    # a session the launcher started, with the plugin's hooks on, so /thimble prints the URL alone
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port),
            "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws"), "THIMBLE_START_WAIT_S": "100",
            "THIMBLE_HEALTH_TIMEOUT_S": "100"}
     env.pop("THIMBLE_DEV", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
-    cmd = [sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(data / "mini"), "--session", "it-1"]
+    cmd = [sys.executable, "-m", "app.cli", "browser", "--cwd", str(data / "mini"), "--detach"]
     pid = None
     try:
         t0 = time.monotonic()
         out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
         first = time.monotonic() - t0
         lines = out.stdout.splitlines()
-        # the link's line alone: the workspace holds nothing from an earlier run, so there is nothing to resume
         st = json.loads((home / "server.json").read_text())
-        assert out.returncode == 0 and lines == [cli.LINK_LINE], out
-        assert (home / "links" / "it-1").read_text() == f"http://127.0.0.1:{port}/?ws=mini", "no code in the file"
+        assert out.returncode == 0 and lines[0] == f"thimble browser: http://127.0.0.1:{port}/?ws=mini", out
         assert "ui_key" not in st
         pid = st["pid"]
         assert cli.pid_alive(pid) and st["port"] == port and st["env"]["data_dir"] == str(data)
@@ -553,39 +482,37 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
                 os.kill(q, 9)
 
 
-def test_up_refuses_home_and_root_and_starts_nothing(home, data, monkeypatch, capsys, tmp_path):
+def test_the_browser_refuses_home_and_root_and_starts_nothing(home, data, monkeypatch, capsys, tmp_path):
     started = []
     monkeypatch.setattr(cli, "ensure_running", lambda wait: started.append(1) or True)
     monkeypatch.setattr(cli, "_request", lambda *a, **k: (500, {}))
     for folder in (Path.home(), Path("/"), Path("~")):
         assert cli.refused(folder) is True
-        assert cli.main(["up", "--cwd", str(folder), "--session", "s1"]) == 0
+        assert cli.main(["browser", "--cwd", str(folder), "--detach"]) == 1
         line = capsys.readouterr().out.splitlines()
-        assert line == [cli.REFUSED_LINE.format(path=folder)] and "http://" not in line[0], folder
+        assert len(line) == 1 and "is not a folder to open as a workspace" in line[0] and "http://" not in line[0], folder
     assert started == [] and not cli.server_json().exists()
     assert cli.refused(data / "mini") is False and cli.refused(tmp_path) is False
 
 
 def test_the_doctor_s_sandbox_line_follows_the_config(monkeypatch):
-    """`thimble fix` and extension programs run their Bash in Claude Code's sandbox where it runs; sandbox.use "never"
-    turns it off. Without it they run as they are, `thimble fix` asking first and a program posting a notice, unless
-    sandbox.enforce refuses them."""
+    """`thimble fix` runs its Bash in Claude Code's sandbox where it runs; sandbox.use "never" turns it off. Without it
+    it runs as it is, asking first, unless sandbox.enforce refuses it."""
     from app import cc_settings, userconf
 
     conf = {"sandbox": {"use": "when-available", "enforce": False}}
     monkeypatch.setattr(userconf, "load_or_defaults", lambda c=None: (conf, ""))
     monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: [])
-    assert cli.sandbox_lines()[0].startswith("  bash sandbox (thimble fix and extension programs): runs; ")
+    assert cli.sandbox_lines()[0].startswith("  bash sandbox (thimble fix): runs; ")
     assert ".cc-writes" not in cli.sandbox_lines()[0] and "fence" not in cli.sandbox_lines()[0]
     conf["sandbox"]["use"] = "never"
-    assert cli.sandbox_lines() == ["  bash sandbox (thimble fix and extension programs): off in thimble's config "
-                                   "(sandbox.use \"never\"); they run without it (thimble fix asks you first; an "
-                                   "extension program's notice says so)"]
+    assert cli.sandbox_lines() == ["  bash sandbox (thimble fix): off in thimble's config (sandbox.use \"never\"); "
+                                   "it runs without it and asks you first"]
     conf["sandbox"] = {"use": "when-available", "enforce": True}
     monkeypatch.setattr(cc_settings, "sandbox_missing", lambda: ["bubblewrap"])
     monkeypatch.setattr(cc_settings, "sandbox_setup", lambda: ([], ""))
-    assert cli.sandbox_lines() == ["  bash sandbox (thimble fix and extension programs): off, missing bubblewrap; "
-                                   "thimble's config (sandbox.enforce) refuses to start them without it"]
+    assert cli.sandbox_lines() == ["  bash sandbox (thimble fix): off, missing bubblewrap; "
+                                   "thimble's config (sandbox.enforce) refuses to start it without it"]
 
 
 def test_requests_to_thimble_s_own_server_skip_the_shell_s_proxy(home, monkeypatch):

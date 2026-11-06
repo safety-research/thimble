@@ -1,7 +1,7 @@
 # Charts on a card
 
-A plot card draws a common chart with one call, `thimble.chart(kind, data, **options)`, beside `thimble.diagram`,
-`thimble.timeline` and `thimble.card`. The card's code gives the data in the shape the kind takes and writes no plotting
+A plot card draws a common chart with one call, `thimble.chart(kind, data, **options)`, beside `thimble.diagram` and
+`thimble.timeline`. The card's code gives the data in the shape the kind takes and writes no plotting
 code and no style:
 
 ```python

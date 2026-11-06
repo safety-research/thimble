@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from app import agents, config, events, session, subagents
-from app import subagent_files as sf
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
 CORPUS = "mini"
@@ -150,98 +149,6 @@ def _api_error(text: str = SAFEGUARD) -> dict:
     return {"type": "assistant", "isApiErrorMessage": True, "error": "invalid_request",
             "message": {"role": "assistant", "model": "<synthetic>", "stop_reason": "refusal",
                         "content": [{"type": "text", "text": text}]}}
-
-
-def test_a_failed_turn_end_with_no_text_says_so():
-    """The module's turn end for an API error or a refusal that brought no text and no transcript line: the run's report
-    says Claude Code gave none, rather than nothing."""
-    assert subagents.NO_ERROR_TEXT.format(reason="error") == "Claude Code ended the run (error) and gave no error text"
-
-
-async def test_a_typed_start_s_agent_call_is_no_row_and_its_agent_takes_up_the_claimed_request(bridge, project, ended):
-    lv = _attach(project)
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "write it", {"model": "m", "effort": "e"},
-                                    subagents.TYPED, description="writer: report", chat={"title": "Write report"})
-    inp = ans["input"]
-    with subagents.update(CORPUS) as state:
-        assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_w1", "tool_input": inp}) is None
-    main = Path(lv.transcript_path)
-    _write(main, _human("Write the report."), _assistant(_use("toolu_w1", "Agent", inp)),
-           _result("toolu_w1", "Async agent launched successfully.\nagentId: a00000000000000w1"))
-    session.tail_once(lv)
-    assert not [r for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1])
-                if r.get("type") in ("tool_use", "tool_result") and r.get("id") == "toolu_w1"], "no row in main"
-    path = _agent_file(project, "a00000000000000w1", agentType="thimble:writer", toolUseId="toolu_w1")
-    _write(path, _assistant({"type": "text", "text": "Writing."}))
-    session.tail_once(lv)
-    a = subagents.agent(CORPUS, "a00000000000000w1")
-    assert a["key"] == "writer:report" and a["chat"] and a["plugin_started"] is False
-    assert agents.read_meta(CORPUS, a["chat"])["started_by"] == "typed"
-
-
-@pytest.mark.parametrize("text,kind", [
-    ("[Auto-Mode Bypass] Starting an agent to do what was refused.", "auto-mode"),
-    ("Cannot launch: 20 concurrent subagents are already running (the limit is 20).", "limit"),
-    ("Agent type 'thimble:writer' not found. Available agents: general-purpose", "no-module"),
-    ("PreToolUse:Agent hook error: MAKE THE CALL EXACTLY", "hook"),
-])
-async def test_r2_main_s_agent_call_that_fails_refuses_its_request_with_the_kind_of_its_error(bridge, project, ended,
-                                                                                            text, kind):
-    lv = _attach(project)
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED)
-    _write(Path(lv.transcript_path), _human("write"), _assistant(_use("toolu_r2", "Agent", ans["input"])),
-           _result("toolu_r2", text, error=True))
-    session.tail_once(lv)
-    r = subagents.request(CORPUS, ans["request"])
-    assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", kind, text)
-    assert ended[-1] == ("refused", "writer", kind, text)
-
-
-async def test_r2_a_subagent_s_agent_call_for_a_typed_start_that_fails_refuses_its_request(bridge, project, ended):
-    """U5: a subagent of main's that is no agent of thimble's (a thread's fork; here main's own general-purpose
-    subagent) called start_writing and made the Agent call itself; Claude Code's error for it refuses the request with
-    the kind of its error, as for main's call, so the browser never waits on Starting…"""
-    lv = _attach(project)
-    gp = "a0000000000000gp1"
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_gp_tool", gp, "general-purpose")
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED, call="toolu_gp_tool")
-    assert subagents.request(CORPUS, ans["request"])["caller_agent"] == gp
-    _write(Path(lv.transcript_path), _human("have a helper start the writer"),
-           _assistant(_use("toolu_gp", "Agent", {"subagent_type": "general-purpose", "description": "helper",
-                                                 "prompt": "start the writer"})),
-           _result("toolu_gp", f"Async agent launched successfully.\nagentId: {gp}"))
-    session.tail_once(lv)
-    path = _agent_file(project, gp, agentType="general-purpose", toolUseId="toolu_gp")
-    text = "Cannot launch: 20 concurrent subagents are already running (the limit is 20)."
-    _write(path, _assistant(_use("toolu_gp_tool", "mcp__plugin_thimble_thimble__start_writing", {"doc": "report"})),
-           _result("toolu_gp_tool", "AGENT CALL"), _assistant(_use("toolu_gp_agent", "Agent", ans["input"])),
-           _result("toolu_gp_agent", text, error=True))
-    session.tail_once(lv)
-    session.tail_once(lv)
-    r = subagents.request(CORPUS, ans["request"])
-    assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "limit", text)
-    assert ended[-1] == ("refused", "writer", "limit", text)
-
-
-async def test_r3_a_turn_that_called_the_start_tool_and_ended_without_the_call_refuses_it_quoting_main(bridge, project,
-                                                                                                    ended):
-    lv = _attach(project)
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED, call="toolu_tool")
-    claimed = await subagents.start_job(CORPUS, "writer", "writer:story", "w2", {}, subagents.TYPED, call="toolu_tool2")
-    with subagents.update(CORPUS) as state:
-        sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_a2", "tool_input": claimed["input"]})
-    reply = "Auto mode told me not to pursue that outcome again.\nI won't start it.\nAnything else?"
-    _write(Path(lv.transcript_path), _human("write"),
-           _assistant(_use("toolu_tool", "mcp__plugin_thimble_thimble__start_writing", {"doc": "report"})),
-           _result("toolu_tool", "AGENT CALL {...}"),
-           _assistant(_use("toolu_tool2", "mcp__plugin_thimble_thimble__start_writing", {"doc": "story"})),
-           _result("toolu_tool2", "AGENT CALL {...}"),
-           _assistant({"type": "text", "text": reply}), END)
-    session.tail_once(lv)
-    r = subagents.request(CORPUS, ans["request"])
-    assert (r["state"], r["refused_kind"], r["reason"]) == ("refused", "no-call", "Auto mode told me not to pursue "
-                                                            "that outcome again.\nI won't start it.")
-    assert subagents.request(CORPUS, claimed["request"])["state"] == "claimed", "main made that call"
 
 
 async def test_main_s_empty_bash_true_after_a_start_is_no_row(bridge, project):

@@ -1,4 +1,4 @@
-"""A written document exported as a file: Markdown, HTML or PDF, and the formats a report type's export.py adds.
+"""A written document exported as a file: Markdown, HTML or PDF.
 
 Every format starts from one reading of the document (read_model): its title, lead, units (a report's sections), their
 figures and the citations, numbered in order of first use;
@@ -9,36 +9,23 @@ the citations as numbered notes linked from the text; PDF is that HTML printed b
 The browser: the one thimble's config names (userconf.browser): the system's Chrome, Edge or Chromium, else Playwright's
 own Chromium when it is installed. Pictures of cards come from the card harness (render.py); without a browser a card is
 its title, its table or its text, and PDF is offered disabled with the reason.
-
-A report type an extension adds may ship export.py in its folder:
-
-    FORMATS = [{"id": "csv", "name": "CSV", "ext": "csv"}]   # adds to the four; an id among them replaces that one
-    def export(doc, fmt, ctx): ...                          # -> {"markdown"|"html"|"bytes": ..., "mime"?: ...}
-
-The server reads FORMATS without running the file. export() runs in the workspace's `exports` kernel, under the same
-wrap as cards; `ctx` has markdown(), html(), cite(ref) and figure(card). A returned html is printed when the format's
-ext is pdf, so a hook never drives the browser.
 """
 from __future__ import annotations
 
-import ast
 import asyncio
 import base64
 import contextlib
 import html as _html
-import json
 import logging
 import os
 import re
-import secrets
 from pathlib import Path
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
-from . import config, frames, headless, investigation, nofollow, refs, userconf
-from .ledger import atomic_write_text, unlinked
+from . import config, frames, headless, investigation, refs, userconf
 from .report import _collapse, plain_text
 
 log = logging.getLogger("thimble.exports")
@@ -49,16 +36,9 @@ FORMAT_INFO = {
     "html": {"name": "HTML", "ext": "html", "mime": "text/html; charset=utf-8"},
     "pdf": {"name": "PDF", "ext": "pdf", "mime": "application/pdf"},
 }
-MIME_BY_EXT = {"md": "text/markdown; charset=utf-8", "html": "text/html; charset=utf-8", "pdf": "application/pdf",
-               "mp4": "video/mp4", "webm": "video/webm", "csv": "text/csv; charset=utf-8", "json": "application/json",
-               "txt": "text/plain; charset=utf-8"}
 QUOTE_CHARS = 240  # of a cited record, in its note
 TEXT_CHARS = 1200  # of a card's text when it is shown without a picture
 TABLE_ROWS = 30
-KERNEL = "exports"
-EXPORT_PY = "export.py"
-HOOK_TIMEOUT_S = 120.0
-SENTINEL = "\x1ethimble-export:"
 _INLINE_RE = re.compile(r"\*\*(.+?)\*\*|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])|`([^`]+)`|\[([^\]]+)\]\((https?://[^)\s]+)\)")
 
 
@@ -606,133 +586,16 @@ async def print_pdf(html_text: str, renderer: str = "document") -> bytes:
 # --------------------------------------------------------------------------- formats
 
 
-def _extension_types(c: str) -> list[dict[str, Any]]:
-    from . import extensions  # noqa: PLC0415
-
-    try:
-        return extensions.report_types(c)
-    except Exception:  # noqa: BLE001 — a broken extension leaves the built-in formats
-        log.warning("exports: the extensions' report types could not be read", exc_info=True)
-        return []
-
-
-def hook_of(c: str, slug: str, *, source: bool = False) -> Path | None:
-    """The export.py of the extension report type document `slug` was made from, if it ships one: the workspace's copy,
-    which the exports kernel runs, or with `source` the file in the extension's folder in thimble's home, whose FORMATS
-    the server reads. None for thimble's own types, which keep their exports."""
-    from . import report_types  # noqa: PLC0415
-
-    if slug in report_types.BUILTIN_SLUGS:
-        return None
-    made_from = (report_types.read_type(c, slug) or {}).get("preset") or slug
-    for t in _extension_types(c):
-        if t.get("id") == made_from and t.get("export"):
-            p = Path(str(t["export_src" if source else "export"]))
-            return p if p.is_file() and not p.is_symlink() else None
-    return None
-
-
-def hook_formats(path: Path) -> list[dict[str, str]]:
-    """FORMATS of an export.py as literal values, read without running the file; [] when it has none or it is not a
-    literal list of {id, name, ext}."""
-    try:
-        tree = ast.parse(path.read_text("utf-8"))
-    except (OSError, SyntaxError, ValueError):
-        return []
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "FORMATS" for t in node.targets):
-            try:
-                val = ast.literal_eval(node.value)
-            except ValueError:
-                return []
-            out = []
-            for f in val if isinstance(val, list) else []:
-                if isinstance(f, dict) and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,30}", str(f.get("id") or "")):
-                    ext = re.sub(r"[^a-z0-9]", "", str(f.get("ext") or f["id"]).lower())[:8] or "txt"
-                    out.append({"id": str(f["id"]), "name": str(f.get("name") or f["id"])[:40], "ext": ext})
-            return out
-    return []
-
-
-def formats(c: str, slug: str, renderer: str) -> list[dict[str, Any]]:
-    """The formats the document offers, each {id, name, ext, ok, why?, hook?}: Markdown, HTML and PDF, a report type's
-    own added or in place of one, the ones the browser is missing for marked not ok."""
+def formats() -> list[dict[str, Any]]:
+    """The formats a document offers, each {id, name, ext, ok, why?}: Markdown, HTML and PDF, the ones the browser is
+    missing for marked not ok."""
     kind, why_off = browser()
     out: dict[str, dict[str, Any]] = {i: {"id": i, "name": FORMAT_INFO[i]["name"], "ext": FORMAT_INFO[i]["ext"], "ok": True}
                                       for i in ("markdown", "html", "pdf")}
-    hook = hook_of(c, slug, source=True)
-    for f in hook_formats(hook) if hook else []:
-        out[f["id"]] = {**f, "ok": True, "hook": True}
     for f in out.values():
         if f["ext"] == "pdf" and kind == "off":
             f.update(ok=False, why=f"Needs a browser: {why_off}")
     return list(out.values())
-
-
-# --------------------------------------------------------------------------- the hook
-
-
-def _scratch(c: str) -> Path:
-    """The workspace's folder for export files, outside the kernels' scratch mirror, where a corpus entry named
-    `exports` is a link; RuntimeError when a folder on its way is a symlink (ledger.unlinked)."""
-    d = config.workspace_dir(c) / "tmp" / "exports"
-    try:
-        unlinked(config.workspace_dir(c), d / "x")
-    except ValueError as e:
-        raise RuntimeError(f"the export folder cannot be written: {e}") from None
-    nofollow.makedirs(d)
-    return d
-
-
-async def run_hook(c: str, path: Path, doc: dict[str, Any], fmt: str, ctx: dict[str, Any]) -> dict[str, Any]:
-    """export() of `path` on the workspace's exports kernel with the document, the format and the context's values;
-    RuntimeError with the hook's error."""
-    from . import notebook  # noqa: PLC0415
-
-    tmp = _scratch(c)
-    tag = secrets.token_hex(6)
-    req, res = tmp / f"{tag}.in.json", tmp / f"{tag}.out.json"
-    atomic_write_text(req, json.dumps({"doc": doc, "fmt": fmt, "ctx": ctx}, ensure_ascii=False, default=str))
-    code = HOOK_SRC.format(req=str(req), res=str(res), path=str(path), sentinel=SENTINEL)
-    try:
-        outputs, _n, status = await notebook.execute_on(c, KERNEL, code, timeout_s=HOOK_TIMEOUT_S)
-        text = "".join(b.get("text/plain", "") for b in outputs if b.get("_stream") == "stdout")
-        if status != "ok" or SENTINEL not in text:
-            err = next((f"{e.get('ename', 'Error')}: {e.get('evalue', '')}" for b in outputs
-                        if isinstance(e := b.get("application/vnd.thimble.error+json"), dict)), "")
-            raise RuntimeError(err or "the export hook printed no result")
-        try:  # the kernel writes it in the workspace: read as nofollow reads it, never through a link
-            return json.loads(nofollow.read_text(res))
-        except nofollow.Linked:
-            raise RuntimeError("the export hook's result is a symlink") from None
-    finally:
-        for p in (req, res):
-            with contextlib.suppress(OSError):
-                nofollow.unlink(p)
-
-
-HOOK_SRC = """
-import base64 as _b64, json as _json, runpy as _runpy
-def _thimble_export():
-    req = _json.load(open({req!r}, encoding='utf-8'))
-    ctx = req['ctx']
-    class Ctx:
-        def markdown(self): return ctx['markdown']
-        def html(self): return ctx['html']
-        def cite(self, ref): return ctx['cites'].get(ref) or {{'label': ref, 'quote': ''}}
-        def figure(self, card): return ctx['figures'].get(str(card).removeprefix('card:'), '')
-    mod = _runpy.run_path({path!r}, run_name='thimble_export')
-    got = mod['export'](req['doc'], req['fmt'], Ctx())
-    if not isinstance(got, dict):
-        raise TypeError('export() must return a dict')
-    if isinstance(got.get('bytes'), (bytes, bytearray)):
-        got = dict(got, bytes=_b64.b64encode(got['bytes']).decode('ascii'), b64=True)
-    with open({res!r}, 'w', encoding='utf-8') as f:
-        _json.dump(got, f)
-    print({sentinel!r} + 'ok')
-_thimble_export()
-del _thimble_export
-"""
 
 
 # --------------------------------------------------------------------------- export
@@ -753,7 +616,7 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
         raise HTTPException(404, f"no {slug} yet")
     t = report_types.read_type(c, slug) or {}
     renderer = str(doc.get("renderer") or t.get("renderer") or "document")
-    offered = {f["id"]: f for f in await asyncio.to_thread(formats, c, slug, renderer)}
+    offered = {f["id"]: f for f in await asyncio.to_thread(formats)}
     f = offered.get(fmt)
     if f is None:
         raise HTTPException(404, f"{slug} has no export format {fmt!r}")
@@ -761,13 +624,11 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
         raise HTTPException(409, f["why"])
     m = await asyncio.to_thread(read_model, c, doc, renderer)
     name = lambda ext: _filename(m["title"], slug, ext)  # noqa: E731
-    if fmt == "markdown" and not f.get("hook"):
+    if fmt == "markdown":
         return to_markdown(m).encode("utf-8"), name("md"), FORMAT_INFO["markdown"]["mime"]
     kind, _why = browser()
     cards = [x["card"] for u in m["units"] for x in u["figures"]]
     pics, _ = await card_pictures(c, cards, draw=kind != "off")
-    if f.get("hook"):
-        return await _hooked(c, slug, doc, f, m, pics)
     html_text = await asyncio.to_thread(to_html, m, pics)
     if fmt == "html":
         return html_text.encode("utf-8"), name("html"), FORMAT_INFO["html"]["mime"]
@@ -775,39 +636,6 @@ async def export(c: str, inv_id: str, slug: str, fmt: str) -> tuple[bytes, str, 
         return await print_pdf(html_text, renderer), name("pdf"), FORMAT_INFO["pdf"]["mime"]
     except RuntimeError as e:
         raise HTTPException(409, f"PDF needs a browser: {e}") from e
-
-
-async def _hooked(c: str, slug: str, doc: dict[str, Any], f: dict[str, Any], m: dict[str, Any],
-                  pics: dict[str, dict[str, Any]]) -> tuple[bytes, str, str]:
-    hook = hook_of(c, slug)
-    if hook is None:
-        raise HTTPException(404, f"{slug}'s export.py is gone")
-    faces = font_faces()
-    ctx = {"markdown": to_markdown(m), "html": to_html(m, pics, faces=faces),
-           "cites": {r["ref"]: {"label": r["label"], "quote": r["quote"], "n": r["n"]} for r in m["notes"]},
-           "figures": {cid: card_html(p) for cid, p in pics.items()}}
-    try:
-        got = await run_hook(c, hook, doc, f["id"], ctx)
-    except RuntimeError as e:
-        raise HTTPException(500, f"{slug}'s export.py failed: {e}") from e
-    ext = f["ext"]
-    name = _filename(m["title"], slug, ext)
-    mime = str(got.get("mime") or MIME_BY_EXT.get(ext, "application/octet-stream"))
-    if isinstance(got.get("html"), str):
-        if not re.search(r"<html[\s>]", got["html"], re.I):  # a fragment takes thimble's page, faces and styles
-            got["html"] = _document(m["title"], faces, BASE_CSS, f"<main>{got['html']}</main>")
-        if ext == "pdf":
-            try:
-                return await print_pdf(got["html"]), name, MIME_BY_EXT["pdf"]
-            except RuntimeError as e:
-                raise HTTPException(409, f"PDF needs a browser: {e}") from e
-        return got["html"].encode("utf-8"), name, mime if got.get("mime") else MIME_BY_EXT["html"]
-    if isinstance(got.get("markdown"), str):
-        return got["markdown"].encode("utf-8"), name, mime if got.get("mime") else MIME_BY_EXT["md"]
-    if isinstance(got.get("bytes"), str):
-        data = base64.b64decode(got["bytes"]) if got.get("b64") else got["bytes"].encode("utf-8")
-        return data, name, mime
-    raise HTTPException(500, f"{slug}'s export.py returned none of markdown, html or bytes")
 
 
 # --------------------------------------------------------------------------- routes
@@ -828,9 +656,7 @@ async def formats_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
 
     slug = _slug(c, inv_id, slug)
     doc = await asyncio.to_thread(report_types.read_doc, c, inv_id, slug)
-    t = report_types.read_type(c, slug) or {}
-    renderer = str((doc or {}).get("renderer") or t.get("renderer") or "document")
-    return {"formats": await asyncio.to_thread(formats, c, slug, renderer) if doc else []}
+    return {"formats": await asyncio.to_thread(formats) if doc else []}
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}")

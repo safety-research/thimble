@@ -1,6 +1,6 @@
 // The chart style as each renderer takes it (src/lib/vizTheme): the Vega-Lite theme draws one series in the first series
 // color, never ink, groups in the series, amounts in the accent's ramps and notes in ink, at the chart sizes; a timeline
-// colors its lanes' dots by the series; and the frames of custom cards and card types get the style as CSS variables, and
+// colors its lanes' dots by the series; and the frames of custom cards get the style as CSS variables, and
 // a view's page every token of the theme that the view kit's styles, its docs and the worked examples name.
 import { readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -91,7 +91,7 @@ test("a timeline's lanes take the series in the order they first appear, and the
   expect([...lanes.values()]).toEqual([...VIZ_SERIES.map((s) => `var(${s})`), 'var(--viz-other)'])
 })
 
-test("a custom card's frame and a card type's or view's page get the chart style as CSS variables", () => {
+test("a custom card's frame and a view's page get the chart style as CSS variables", () => {
   for (const name of [...VIZ_SERIES, ...VIZ_SEQ, ...VIZ_DIV, '--viz-other', '--viz-highlight', '--viz-font', '--viz-font-label', '--viz-size', '--viz-bar-radius', '--label-1', '--label-none']) expect(CHART_TOKENS).toContain(name)
   for (const name of CHART_TOKENS) {
     expect(FRAME_TOKENS, name).toContain(name)

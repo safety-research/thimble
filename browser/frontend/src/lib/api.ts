@@ -2,7 +2,6 @@
 import type { FixStatus, FixTried } from '../chat/fix'
 import type {
   CanvasResponse,
-  Extensions,
   Cell,
   CardVersion,
   CellName,
@@ -49,7 +48,6 @@ import type {
   View,
   ViewSuggestion,
   ViewOpen,
-  ViewQuery,
   ViewProblems,
   ViewShown,
   WorkspaceRow,
@@ -232,7 +230,7 @@ export async function checkSignedIn(): Promise<void> {
  * concurrency limit, `no-module`, `error`; start-it and again answer the raw Answer). Pure. */
 export function startAnswer<T extends object>(raw: T): T & StartAnswer {
   const a = { ...(raw as Record<string, unknown>) }
-  if (a.agentId || a.program || a.kind) return a as T & StartAnswer
+  if (a.agentId || a.kind) return a as T & StartAnswer
   const keys: [string, string][] = [['deny', 'hook'], ['limit', 'limit'], ['no-module', 'no-module'], ['no_module', 'no-module'], ['error', a.gone ? 'earlier-session' : 'error']]
   for (const [key, kind] of keys) {
     if (key in a) return { ...a, kind, reason: typeof a.reason === 'string' && a.reason ? a.reason : String(a[key] ?? '') } as T & StartAnswer
@@ -631,26 +629,6 @@ export const api = {
   /** the libraries a custom card names (`libs`, comma-separated) as inline elements for its frame's head (backend
    * card_libs.libs_route) */
   cardLibs: (c: string, libs: string) => j<{ head: string; problems: string[] }>(`${ws(c)}/card-libs${q({ libs })}`),
-  /** a card type's page as a card's frame loads it (backend cardtypes.frame_route) */
-  cardTypeFrame: async (c: string, type: string): Promise<string> => {
-    const res = await fetch(`${ws(c)}/cardtypes/${enc(type)}/frame`)
-    if (!res.ok) throw await failed(res)
-    return res.text()
-  },
-  /** reader.records(index, query) for a card's page, under the labels the card names */
-  cardTypeRecords: (c: string, type: string, card: string, query: unknown) =>
-    heavy(() => j<{ data: unknown }>(`${ws(c)}/cardtypes/${enc(type)}/records`, { method: 'POST', body: JSON.stringify({ query, card }) })),
-  /** Keep: a card type's card with its call's arguments changed by `patch`, run again and checked (backend
-   * cardtypes.keep_route); the card as stored */
-  keepCard: (c: string, card: string, patch: Record<string, unknown>) =>
-    j<{ cell: Cell; written: string[] }>(`${ws(c)}/cells/${enc(card)}/keep`, { method: 'POST', body: JSON.stringify({ patch }) }),
-  /** whether Keep can write `patch` into the card's call: the arguments its code computed that it would write out, or
-   * the error it would give */
-  keepCheck: (c: string, card: string, patch: Record<string, unknown>) =>
-    j<{ cell: null; written: string[] }>(`${ws(c)}/cells/${enc(card)}/keep`, { method: 'POST', body: JSON.stringify({ patch, dry: true }) }),
-  /** Open as view: the view of a card's type made ready, with the card's labels on, and the card and arguments it opens
-   * with */
-  cardAsView: (c: string, card: string) => j<{ slug: string; query: ViewQuery }>(`${ws(c)}/cells/${enc(card)}/as-view`, { method: 'POST' }),
   // ---- orientation ----
   /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
   orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
@@ -711,15 +689,6 @@ export const api = {
   // ---- settings ----
   settings: (c: string) => j<Settings>(`${ws(c)}/settings`),
   putSettings: (c: string, patch: SettingsPatch) => j<Settings>(`${ws(c)}/settings`, { method: 'PUT', body: JSON.stringify(patch) }),
-  /** the extensions added, found again for this workspace (backend extensions.list_route) */
-  extensions: (c: string) => j<Extensions>(`${ws(c)}/extensions`),
-  /** this workspace's switch of one extension; the analyst's browser alone may turn it */
-  switchExtension: (c: string, name: string, on: boolean) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
-  /** adds an extension thimble ships, as `thimble extension add <name>` does */
-  addExtension: (c: string, name: string) => j<Extensions>(`${ws(c)}/extensions/${enc(name)}/add`, { method: 'POST' }),
-  /** this workspace's switch of one extension's view, which overrides the check on whether it fits */
-  switchExtensionView: (c: string, name: string, slug: string, on: boolean) =>
-    j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
   /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
   reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
 }

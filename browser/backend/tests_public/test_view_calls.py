@@ -234,45 +234,6 @@ async def test_a_slow_call_holds_up_no_other_view_and_has_no_time_limit(ws, kern
     assert all(t >= view_calls.NO_LIMIT_S for _, t in kernels.ran), "no call has a time limit"
 
 
-APPLIES = """
-def applies(paths):
-    return {"claims": list(paths), "found": len(paths)}
-
-
-def build_index(paths):
-    return []
-
-
-def records(index, query):
-    return None
-
-
-def resolve(index, locator):
-    return None
-"""
-
-
-async def test_a_call_that_needs_no_index_runs_beside_a_busy_kernel(ws, kernels, tmp_path, monkeypatch):
-    monkeypatch.setattr(view_calls, "SPARE_AFTER_S", 600.0)  # no spare kernel beside the busy one
-    reader = tmp_path / "reader.py"
-    reader.write_text(APPLIES)
-    req = {"slug": "builtin-tally", "reader": str(reader), "fp": "applies", "paths": [], "cache": None,
-           "thimble": str(views.KERNEL_THIMBLE)}
-    assert (await views._call(CORPUS, req, "applies", ["a.jsonl"]))["found"] == 1
-    gate = tmp_path / "gate"
-    slow = await _slow_call(gate)
-    try:
-        assert [w.busy for w in view_calls._pools[CORPUS]] == [True], "the slow call holds the kernel applies ran on"
-        try:
-            found = await asyncio.wait_for(views._call(CORPUS, req, "applies", ["a.jsonl", "b.jsonl"]), 60)
-        except TimeoutError:
-            pytest.fail("applies waited for the slow call")
-        assert found["found"] == 2 and not slow.done(), "applies did not wait for the slow call"
-    finally:
-        gate.touch()
-    await slow
-
-
 async def test_a_page_s_cancel_that_comes_before_its_call_refuses_the_call(ws, kernels):
     from app.main import app  # noqa: PLC0415
 

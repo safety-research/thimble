@@ -16,7 +16,7 @@ import { mount, settle, unmountAll } from './mount.tsx'
 const T = '2026-10-15T10:00:00+00:00'
 const LATER = '2026-10-15T10:00:05+00:00'
 const ATTACHED = { session: 's1', cwd: '/corpus', at: T, model: 'claude-opus-5-5' }
-const MAIN = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED, module: true, unread: [] } as unknown as ChatMeta
+const MAIN = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED, unread: [] } as unknown as ChatMeta
 const THREAD = { id: 'th1', kind: 'thread', role: 'thread', title: 'push-retries', created_at: T, parent: 'main', anchor: null, anchor_text: null, running: true, fork: { agent_id: 'afork1' } } as unknown as ChatMeta
 /** a subagent of main's own (an Agent call of main's), which the tree does not list */
 const SUB = { id: 'sa1', kind: 'agent', role: 'subagent', title: 'Explore the runs', created_at: LATER, parent: 'main', status: 'running', agent_id: 'asub1', session: 's1' } as unknown as ChatMeta

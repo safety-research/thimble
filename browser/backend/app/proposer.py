@@ -4,13 +4,13 @@ writes it (views.offer).
 
 When it runs (trigger): at the end of a turn of main that answered the analyst (session.turn_analyst: a line they typed,
 their message from the browser), at the cut of that turn's turn_duration record (turn_ended); when a side thread's fork
-answered (session._finish_sub), not at the end of main's turn that handed the thread's question, from the browser or
-from /thimble:ask in the terminal, to that fork; and once when the first run of an orientation ends done
+answered (session._finish_sub), not at the end of main's turn that handed the thread's question from the browser to
+that fork; and once when the first run of an orientation ends done
 (orient_session). Each trigger merges into the workspace's pending job (JOB_FILE's `job`: the reasons, main's session
-and its cut), so a later pass of the mirror in terminal mode, or a restarted server, runs it. One loop per workspace
-(_loop) waits DEBOUNCE_MAIN_S after a main turn, else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an
-orientation's end merges with main's `↳` turn), and runs the job once main is idle; a main turn still open leaves it
-pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job.
+and its cut), so a restarted server runs it. One loop per workspace (_loop) waits DEBOUNCE_MAIN_S after a main turn,
+else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an orientation's end merges with main's `↳` turn),
+and runs the job once main is idle; a main turn still open leaves it pending until that turn ends. A running fork is
+never cancelled; a trigger that comes meanwhile is the next job.
 
 The gate (due): view proposals are on (views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
 Claude can be reached the way chosen (claude_access.problem; the chat's card says what is missing, so no notice
@@ -164,8 +164,8 @@ def trigger(c: str, after: str, *, cut: str | None = None, sid: str | None = Non
 
 def turn_ended(c: str, *, sid: str, analyst: bool, cut: str | None) -> None:
     """A turn of main ended (session._end_turn) at the turn_duration record `cut`. A turn that answered the analyst
-    (`analyst`) triggers the proposer; any other turn (a task notification, a Monitor's re-arm, a start_agent event)
-    starts a job that waited for main to be idle."""
+    (`analyst`) triggers the proposer; any other turn (a task notification, a Monitor's re-arm) starts a job that
+    waited for main to be idle."""
     if analyst and cut:
         trigger(c, MAIN, cut=cut, sid=sid)
     elif pending(c) is not None:
@@ -253,11 +253,11 @@ def due(c: str, lv: Any, job: dict[str, Any]) -> tuple[str | None, str]:
     """(the cut to fork main at, '') when the job may run now, else (None, why not): view proposals off, Claude cannot
     be reached the way chosen (the chat's own card says how to fix it, so no notice repeats it), no main, main
     answering, no cut, a card waiting, or views that cannot be built here."""
-    from . import claude_access, runtime  # noqa: PLC0415
+    from . import claude_access  # noqa: PLC0415
 
     if not enabled(c):
         return None, "View proposals are off."
-    if runtime.enabled() and (p := claude_access.problem()):
+    if p := claude_access.problem():
         return None, p["what"]
     if lv is None or not getattr(lv, "transcript_path", None):
         return None, "No Claude Code session is attached to thimble."
@@ -369,7 +369,7 @@ def _now_section(c: str, after: list[str]) -> str:
 def assemble(c: str, job: dict[str, Any]) -> str:
     """The fork's message (module note): the proposer prompt, the threads, the orientation, the views the analyst has
     and what just happened (job's `after`)."""
-    parts = [prompts.load(PROMPT, "browser").strip(), _threads_section(c), _views_section(c),
+    parts = [prompts.load(PROMPT).strip(), _threads_section(c), _views_section(c),
              _now_section(c, list(job.get("after") or []))]
     return "\n\n".join(p for p in parts if p) + "\n"
 
@@ -571,33 +571,32 @@ def _kill(proc: asyncio.subprocess.Process) -> None:
 
 async def _fork(lv: Any, cut: str, prompt: str, model_id: str, effort: str, speed: str) -> dict[str, Any]:
     """Run the fork (_argv) with the prompt on stdin: {code, stdout, stderr, timed_out, seconds}. Tests replace it.
-    On the runtime the person's way to reach Claude chose (runtime.py): for an API key or WIF the fork runs on the
-    Messages API in this process with no tools (runtime_api.fork_stream), and no `claude` starts; for a Claude Code
-    sign-in it forks main's Claude Code session."""
+    On the way to reach Claude the person chose (runtime.py): for an API key or WIF the fork runs on the Messages API in
+    this process with no tools (runtime_api.fork_stream), and no `claude` starts; for a Claude Code sign-in it forks
+    main's Claude Code session."""
     from . import runtime, runtime_api  # noqa: PLC0415
 
-    if runtime.enabled():
-        kind = runtime.engine()
-        if kind == "api":
-            t0 = time.monotonic()
-            res: dict[str, Any] = {"code": 0, "stdout": "", "stderr": "", "timed_out": False}
-            try:
-                res["stdout"] = await asyncio.wait_for(
-                    runtime_api.fork_stream(lv.c, prompt, model=model_id, effort=effort), FORK_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                res["timed_out"] = True
-            except Exception as e:  # noqa: BLE001 — the run's error line says why, in words
-                from . import llm  # noqa: PLC0415
+    kind = runtime.engine()
+    if kind == "api":
+        t0 = time.monotonic()
+        res: dict[str, Any] = {"code": 0, "stdout": "", "stderr": "", "timed_out": False}
+        try:
+            res["stdout"] = await asyncio.wait_for(
+                runtime_api.fork_stream(lv.c, prompt, model=model_id, effort=effort), FORK_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            res["timed_out"] = True
+        except Exception as e:  # noqa: BLE001 — the run's error line says why, in words
+            from . import llm  # noqa: PLC0415
 
-                res.update(code=1, stderr=llm.failure(e))
-            res["seconds"] = round(time.monotonic() - t0, 1)
-            return res
-        sid = runtime_api.cc_main_session(lv.c) if kind == "cc" else None
-        if not sid:
-            return {"code": 1, "stdout": "", "stderr": "thimble cannot reach Claude yet", "timed_out": False,
-                    "seconds": 0.0}
-        cut = runtime_api.cc_main_cut(lv.c)
-        lv = SimpleNamespace(sid=sid, cwd=lv.cwd, config=None, config_known=False, c=lv.c)
+            res.update(code=1, stderr=llm.failure(e))
+        res["seconds"] = round(time.monotonic() - t0, 1)
+        return res
+    sid = runtime_api.cc_main_session(lv.c) if kind == "cc" else None
+    if not sid:
+        return {"code": 1, "stdout": "", "stderr": "thimble cannot reach Claude yet", "timed_out": False,
+                "seconds": 0.0}
+    cut = runtime_api.cc_main_cut(lv.c)
+    lv = SimpleNamespace(sid=sid, cwd=lv.cwd, config=None, config_known=False, c=lv.c)
     argv = _argv(lv, cut, model_id, effort, speed)
     cap = capture.begin("view-propose", model=model_id, effort=effort, speed=speed, path="fork")
     cap.fenced("Command", [a if a else '""' for a in argv])

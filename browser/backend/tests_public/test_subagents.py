@@ -108,30 +108,25 @@ async def test_a_click_start_writes_the_request_then_spawns_through_the_module(b
     # $.agent.spawn's own text at CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS of the plugin's spawns (2.1.291, live check L19)
     ({"error": "HooksError: thimble: $.agent.spawn refused: 2 spawns are running at once"}, "limit"),
     ({"error": "something else"}, "error"),
-    ("no-module", "no-module"),
 ])
 async def test_each_answer_of_the_module_ends_the_request_with_its_kind(bridge, models, answer, kind):
     bridge.answers.append(answer)
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
     assert ans.kind == kind
     r = subagents.request(CORPUS, ans["request"])
-    assert r["refused_kind"] == kind and r["state"] == ("expired" if kind == "no-module" else "refused")
+    assert r["refused_kind"] == kind and r["state"] == "refused"
 
 
 @pytest.mark.parametrize("route", [subagents.CLICK, subagents.TYPED])
 async def test_a_start_makes_its_agent_s_work_folder_which_main_s_sandbox_cannot(bridge, models, route, tmp_path):
     """Main's sandbox lets Bash write in a work folder but not in the workspace around it, so the agent could not make
-    a missing folder itself (live check L16: orient/work was missing). Start it makes it again; a folder outside the
-    workspace is not made."""
+    a missing folder itself (live check L16: orient/work was missing). A folder outside the workspace is not made."""
     ws = config.workspace_dir(CORPUS)
     work = ws / "writers" / "report"
     assert not work.exists()
     ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, route, work=work)
     assert work.is_dir() and not ans.refused
     work.rmdir()
-    if route == subagents.TYPED:
-        subagents.refuse(CORPUS, ans["request"], "[Credential Exploration]", subagents.AUTO_MODE)
-        assert (await subagents.start_it(CORPUS, ans["request"])).started and work.is_dir()
     outside = tmp_path / "elsewhere"
     await subagents.start_job(CORPUS, "writer", "writer:other", "w", {}, route, work=outside)
     assert not outside.exists()
@@ -140,7 +135,7 @@ async def test_a_start_makes_its_agent_s_work_folder_which_main_s_sandbox_cannot
 # --------------------------------------------------------------------------- follow-ups and stops
 
 
-async def test_a_browser_follow_up_sends_through_the_module_with_the_run_s_values(bridge, models):
+async def test_a_browser_follow_up_sends_with_the_run_s_values(bridge, models):
     started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {"model": "m", "effort": "max"},
                                         subagents.CLICK)
     ans = await subagents.send(CORPUS, started.agent_id, "and April?")
@@ -150,12 +145,9 @@ async def test_a_browser_follow_up_sends_through_the_module_with_the_run_s_value
     assert send["values"] == {"model": "m", "effort": "max"}, "the module registers the run's own values first (V1)"
     bridge.answers.append({"error": "the agent belongs to another session", "gone": True})
     assert (await subagents.send(CORPUS, started.agent_id, "and May?")).kind == "earlier-session"
-    bridge.is_live = False
-    refused = await subagents.send(CORPUS, started.agent_id, "again")
-    assert refused.kind == "no-module"
 
 
-async def test_a_stop_goes_through_the_module_and_one_of_an_ended_agent_counts_as_done(bridge, models):
+async def test_a_stop_of_an_ended_agent_counts_as_done(bridge, models):
     started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
     assert not (await subagents.stop(CORPUS, started.agent_id)).refused
     bridge.answers.append({"error": "Task a1 is not running"})
@@ -163,8 +155,6 @@ async def test_a_stop_goes_through_the_module_and_one_of_an_ended_agent_counts_a
     assert not done.refused and done.get("done")
     bridge.answers.append({"error": "the agent had ended", "gone": True})
     assert (await subagents.stop(CORPUS, started.agent_id)).get("done"), "module_bridge's `gone`"
-    bridge.is_live = False
-    assert (await subagents.stop(CORPUS, started.agent_id)).kind == "no-module"
 
 
 # --------------------------------------------------------------------------- runs and ends
@@ -232,13 +222,3 @@ def test_the_click_routes_are_the_ones_the_module_is_reached_by():
         assert "analyst_only(" in inspect.getsource(fn), fn.__name__
 
 
-def test_a_second_fork_of_a_thread_is_refused_while_the_first_runs(monkeypatch):
-    from app import session
-
-    monkeypatch.setattr(session, "thread_for", lambda c, d: "t1")
-    assert subagents.fork_check(CORPUS, {"subagent_type": "fork", "description": "thread:t1"}) is None
-    assert subagents.fork_check(CORPUS, {"subagent_type": "fork", "description": "thread:t1"})
-    subagents.fork_ended(CORPUS, "t1")
-    assert subagents.fork_check(CORPUS, {"subagent_type": "fork", "description": "thread:t1"}, "toolu_f3") is None
-    assert subagents.files.fork_call_ref(subagents.read(CORPUS), "toolu_f3") == "thread:t1", \
-        "the call let through is kept by its tool_use id, by which the mirror knows the fork's thread"

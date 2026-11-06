@@ -32,7 +32,7 @@ import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
 import { RefText } from './markdown'
-import { MAIN_ESC_LINE, NO_STOP_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, mainStopFailedLine, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
+import { MAIN_ESC_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, mainStopFailedLine, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
 
 const REFETCH_DEBOUNCE_MS = 150
 /** The roles of thimble's agents whose card lists their own subagents as steps and carries Stop: the orientation, a
@@ -231,7 +231,7 @@ export interface AgentCardProps {
 /** The browser's Stop of one of thimble's agents (the orientation, a writer, a check's run), of main's turn or of a side
  * thread's fork: its chat is interrupted (backend agents.interrupt_route), which stops it through thimble's plugin. A
  * Stop that found it ended already counts as done; one thimble could not pass on says how to stop it in the terminal,
- * for main with Esc (MAIN_ESC_LINE, which is all it says when thimble's module does not run in main's session). The
+ * for main with Esc (MAIN_ESC_LINE). The
  * analyst's own subagent of main, which only main can stop, is asked of main, and a toast says so. Resolves true when
  * the stop went through, was done already or was asked of main, false otherwise. */
 export function stopSession(ws: string, chat: string, role: string): Promise<boolean> {
@@ -243,7 +243,7 @@ export function stopSession(ws: string, chat: string, role: string): Promise<boo
     .then((r) => {
       if (r.stopped) return (r.done && bus.emit('toast', { text: STOP_DONE_LINE }), true)
       if (r.asked === 'main') return (bus.emit('toast', { text: 'Asked main to stop it.' }), true)
-      if (r.kind) return (bus.emit('toast', failed(r.kind === 'no-module' && main ? '' : (r.reason ?? ''))), false)
+      if (r.kind) return (bus.emit('toast', failed(r.reason ?? '')), false)
       // the server answers `stopped: false` when it runs nothing for this chat, which would otherwise look as if Stop
       // had worked
       return (bus.emit('toast', { text: 'Could not stop it: thimble runs nothing for it.', kind: 'error' }), false)
@@ -276,23 +276,21 @@ function WriteAgain({ ws, request }: { ws: string; request: string }) {
 }
 
 /** What a subagent's card says under its steps, or null when it says nothing: that the orientation waits for its critic
- * (`paused`), why it stopped (`stopped`), Write again on a writer that main's quit stopped
- * (`again`, its request), and, while thimble's module is not in main's session, how to stop it in the terminal
- * (`noStop`). Nothing else says where the terminal shows the agent, in any state. Pure. */
-export function subagentNotes(meta: ChatMeta | null, running: boolean, noModule = false, back = false): { paused: boolean; stopped: string; again: string | null; noStop: boolean } | null {
+ * (`paused`), why it stopped (`stopped`), and Write again on a writer that main's quit stopped (`again`, its request).
+ * Nothing else says where the terminal shows the agent, in any state. Pure. */
+export function subagentNotes(meta: ChatMeta | null, running: boolean, back = false): { paused: boolean; stopped: string; again: string | null } | null {
   if (!isSubagent(meta)) return null
   const n = {
     paused: running && meta?.paused === 'critique',
     stopped: stoppedLine(meta, back && meta?.continue === 'here'),
     again: (meta?.role === 'writer' && meta.stopped_by === 'quit' && !running && meta.request) || null,
-    noStop: running && noModule,
   }
-  return n.paused || n.stopped || n.again || n.noStop ? n : null
+  return n.paused || n.stopped || n.again ? n : null
 }
 
 /** The notes of a subagent's card (subagentNotes), drawn; nothing when there are none. */
-export function SubagentNotes({ ws, meta, running, noModule = false, back = false }: { ws: string; meta: ChatMeta | null; running: boolean; noModule?: boolean; back?: boolean }) {
-  const n = subagentNotes(meta, running, noModule, back)
+export function SubagentNotes({ ws, meta, running, back = false }: { ws: string; meta: ChatMeta | null; running: boolean; back?: boolean }) {
+  const n = subagentNotes(meta, running, back)
   if (!n) return null
   return (
     <div className="chat-sub-notes" data-paused={meta?.paused ?? undefined}>
@@ -304,7 +302,6 @@ export function SubagentNotes({ ws, meta, running, noModule = false, back = fals
       )}
       {n.stopped && <p className="chat-sub-stopped" data-by={meta?.stopped_by ?? undefined}>{n.stopped}</p>}
       {n.again && <WriteAgain ws={ws} request={n.again} />}
-      {n.noStop && <p className="chat-sub-nostop">{NO_STOP_LINE}</p>}
     </div>
   )
 }
@@ -454,8 +451,6 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
   const followUp = !!scoped && scoped.k > 0
   const tools = useMemo(() => rows.filter((r) => r.kind === 'tool'), [rows])
   const { metas, main } = useContext(ThreadsContext)
-  // without thimble's module in main's session the browser cannot stop it (Q7): the terminal does
-  const noModule = main?.module === false
   const own = SESSION_ROLES.has(role)
   const steps = useMemo(
     () => (own ? sessionSteps(rows, metas ?? new Map(), running, (id) => openThread(id, 'step')) : toolSteps(tools, running, { plain: true })),
@@ -467,7 +462,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     void stopSession(ws, chat, role).finally(() => setStopping(false))
   }
   // what the card says of the agent besides its steps: its wait for its critic, why it stopped
-  const notes = own && !followUp && subagentNotes(meta, running, noModule, !!main?.attached) ? <SubagentNotes ws={ws} meta={meta} running={running} noModule={noModule} back={!!main?.attached} /> : null
+  const notes = own && !followUp && subagentNotes(meta, running, !!main?.attached) ? <SubagentNotes ws={ws} meta={meta} running={running} back={!!main?.attached} /> : null
   // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)
   const waitingFor = useMemo(() => {
     if (!running) return null
@@ -540,7 +535,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
           </>
         ) : undefined
       }
-      stop={own && running && stopHere && !noModule ? { onStop: stop, busy: stopping, className: 'chat-task-stop' } : undefined}
+      stop={own && running && stopHere ? { onStop: stop, busy: stopping, className: 'chat-task-stop' } : undefined}
       open={shownOpen}
       onToggle={(o) => {
         if (o) track('agent-row-expand', { target: `chat:${chat}`, detail: { role } })

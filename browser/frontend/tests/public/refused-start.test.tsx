@@ -32,7 +32,6 @@ describe('the reason and the buttons, by kind', () => {
     expect(refusalActions('auto-mode')).toEqual(['start-it', 'dismiss'])
     expect(refusalActions('no-call')).toEqual(['start-it', 'dismiss'])
     expect(refusalActions('limit')).toEqual(['try-again', 'dismiss'])
-    expect(refusalActions('no-module', true)).toEqual(['try-again', 'dismiss'])
     for (const k of ['no-module', 'not-launched', 'hook', 'earlier-session', 'error']) expect(refusalActions(k)).toEqual(['dismiss'])
   })
 

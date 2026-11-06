@@ -19,7 +19,7 @@ import pytest
 from conftest import earlier_orientation_proposal
 from fastapi.testclient import TestClient
 
-from app import agents, config, dev, prompts, session, subagents, tools, view_review, view_tools, views
+from app import agents, config, dev, session, subagents, tools, view_review, view_tools, views
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -167,7 +167,7 @@ async def test_a_design_the_analyst_asked_main_for_reaches_the_builder_and_the_r
                                                     "claims": ["board.jsonl"]},
                            tool_use_id="toolu_main2")
     assert not res.is_error, res.text
-    builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
+    builder = bridge.ops("spawn")[-1]["prompt"]
     slug = next(p["slug"] for p in views.list_proposals(CORPUS))
     reviewer = view_review.task(CORPUS, _prop(slug))
     for prompt in (builder, reviewer):
@@ -211,7 +211,7 @@ async def test_propose_view_takes_a_description_a_task_and_claims_and_the_builde
     assert (row["description"], row["task"], row["arrangement"]) == (
         "The posts by thread.", "Find the threads where an agent asks for help.", "")
     assert "why" not in row and "spec" not in row
-    builder = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])["prompt"]
+    builder = bridge.ops("spawn")[-1]["prompt"]
     assert "- What the analyst sees: The posts by thread." in builder
     assert "- What the analyst wants to accomplish: Find the threads where an agent asks for help." in builder
     assert "- The files it reads: board.jsonl" in builder
@@ -238,27 +238,23 @@ def test_a_viewer_for_a_file_type_keeps_its_arrangement_for_the_builder(board, m
     assert e.value.status_code == 400 and "`description`" in str(e.value.detail)
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_proposal_asks_for(board, mode):
-    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles say so in both modes, and each reaches
-    # its agent's registered prompt as the module registers it (subagents.roles)
-    with prompts.rendering(mode):
-        roles = subagents.roles(CORPUS)
+def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_proposal_asks_for(board):
+    # prompts/dev-view.md's "A good view" and prompts/view-review.md's principles say so, and each reaches its agent's
+    # registered prompt as the module registers it (subagents.roles)
+    roles = subagents.roles(CORPUS)
     builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
     ask = "When the proposal asks for a visual design"
     assert ask in builder and "build that design" in builder
     assert ask in reviewer and "keep that design" in reviewer
 
 
-@pytest.mark.parametrize("mode", prompts.MODES)
-def test_the_builder_and_the_reviewer_use_color_for_the_task_hold_back_the_detail_panel_and_mirror_the_data(board, mode):
-    # prompts/dev-view.md's "A good view", in both modes: color one encoding at a time, Color by on the task's field (or
+def test_the_builder_and_the_reviewer_use_color_for_the_task_hold_back_the_detail_panel_and_mirror_the_data(board):
+    # prompts/dev-view.md's "A good view": color one encoding at a time, Color by on the task's field (or
     # a few of its values), never categories in shades of gray; the detail panel closed, or one short line until a click
     # (the side panel's `empty`); a first screen in the chosen form, not a table of raw records; the data's structure
     # mirrored, a network among the forms; and the units the data repeats compared before their details.
     # prompts/view-review.md's clear problems keep the detail panel's rule
-    with prompts.rendering(mode):
-        roles = subagents.roles(CORPUS)
+    roles = subagents.roles(CORPUS)
     builder, reviewer = roles["view-builder"]["prompt"], roles["view-reviewer"]["prompt"]
     assert "one encoding at a time" in builder and "shades of gray" in builder and "take a hue" in builder
     assert "detail panel stays closed" in builder and "Click a session" in builder
@@ -290,10 +286,6 @@ async def test_a_start_refused_otherwise_fails_the_view_with_its_refusal_and_sta
     assert ans.kind == "hook"
     prop = _prop(slug)
     assert prop["status"] == "failed" and prop["refused"]["kind"] == "hook" and prop["refused"]["request"]
-    bridge.is_live, bridge.reason = False, "THIMBLE_NO_MODULE is set"
-    slug2 = _propose("Threads", asked=True)
-    ans = await dev.start_build(CORPUS, slug2, subagents.CLICK)
-    assert ans.kind == "no-module" and _prop(slug2)["refused"]["kind"] == "no-module"
 
 
 # --------------------------------------------------------------------------- the sandbox of a build's commands
@@ -609,7 +601,7 @@ async def test_a_reviewer_a_change_stopped_leaves_the_folder_to_the_change_s_bui
     assert _prop(slug)["review"]["note"] == view_review.CHANGED_NOTE
 
 
-async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(board, bridge, gates):
+async def test_the_analyst_s_stop_ends_a_build_failed_with_retry(board, bridge, gates):
     slug = _propose(asked=True)
     agent = await _started(slug)
     assert views.stop_build(CORPUS, slug) == {"ok": True}
@@ -618,15 +610,6 @@ async def test_the_analyst_s_stop_and_main_s_quit_end_a_build_failed_with_retry(
     subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
     await _until(lambda: _prop(slug).get("status") == "failed", "the stopped build never failed")
     assert _prop(slug)["error"] == dev.VIEW_STOPPED
-
-    other = _propose("Threads", asked=True)
-    await _started(other)
-    subagents.close_running(CORPUS)
-    await _until(lambda: _prop(other).get("status") == "failed", "main's quit left the build running")
-    assert _prop(other)["error"] == dev.MAIN_ENDED and _prop(other)["stopped_by"] == "quit", "its chip says why"
-    assert "stopped_by" not in _prop(slug), "the analyst's Stop is no quit"
-    views.retry(CORPUS, other)
-    assert "stopped_by" not in _prop(other), "Retry clears it"
 
 
 # --------------------------------------------------------------------------- changes
@@ -794,20 +777,15 @@ async def test_a_message_s_run_that_changes_the_view_without_finish_view_is_gate
     assert _prop(slug)["status"] == "built" and not _prop(slug).get("changed"), "a later message is no build round"
 
 
-@pytest.mark.parametrize("end", ["quit", "error"])
-async def test_main_s_quit_and_an_error_end_a_message_s_run_that_changed_the_view_as_they_end_a_change(
-        board, bridge, gates, monkeypatch, end):
+async def test_an_error_ends_a_message_s_run_that_changed_the_view_as_it_ends_a_change(board, bridge, gates,
+                                                                                         monkeypatch):
     slug = _propose(asked=True)
-    agent = await _answer_changes(slug, "<p>v2</p>" if end == "quit" else "<p>FAIL v2</p>", bridge, monkeypatch)
-    if end == "quit":
-        subagents.close_running(CORPUS)
-    else:
-        subagents.run_ended(CORPUS, agent, "failed", "API Error: 500", source="notification")
+    agent = await _answer_changes(slug, "<p>FAIL v2</p>", bridge, monkeypatch)
+    subagents.run_ended(CORPUS, agent, "failed", "API Error: 500", source="notification")
     p = await _settled_end(slug)
     assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>", "the view is as it was"
     assert p["status"] == "built" and not p.get("revision") and p.get("failed_change") == "Make the lanes taller."
-    assert p.get("error") == (dev.MAIN_ENDED if end == "quit" else "problem: the page says FAIL")
-    assert p.get("stopped_by") == ("quit" if end == "quit" else None)
+    assert p.get("error") == "problem: the page says FAIL" and p.get("stopped_by") is None
 
 
 @pytest.mark.parametrize("html", [None, "<p>v2</p>"])
@@ -854,26 +832,6 @@ async def test_two_messages_before_the_builder_s_run_starts_reach_it_once_each(b
     assert texts.count("Why is run 3 missing?") == 1 and texts.count("And where is run 4?") == 1
     assert _prop(slug)["change"] == "Why is run 3 missing?\n\nAnd where is run 4?"
     assert not _prop(slug).get("message"), "nothing is left to send"
-
-
-async def test_an_extension_s_program_builds_the_view_turn_by_turn_in_place_of_a_builder(board, bridge, gates, heard,
-                                                                                         monkeypatch):
-    turns: list[str] = []
-    part = type("Part", (), {"extension": "builder"})()
-
-    async def turn(c, slug, message, folders, p, rec):
-        turns.append(message)
-        _draft(slug, "<p>FAIL</p>" if len(turns) == 1 else "<p>fixed</p>")
-        return "wrote it"
-
-    monkeypatch.setattr(dev, "view_program", lambda c: part)
-    monkeypatch.setattr(dev, "program_view_turn", turn)
-    slug = _propose(asked=True)
-    ans = await dev.start_build(CORPUS, slug, subagents.CLICK)
-    assert ans.get("program") == "builder" and not bridge.ops("spawn")
-    await _until(lambda: _prop(slug).get("status") == "built", "the program's build never passed")
-    assert len(turns) == 2 and "problem: the page says FAIL" in turns[1], "what failed goes back to the program"
-    assert [k for k, _ in heard] == ["view"] and (CORPUS, slug) not in dev._view_runs
 
 
 # --------------------------------------------------------------------------- the review
@@ -1022,7 +980,7 @@ async def test_a_build_s_pass_starts_its_review_as_a_follow_on_start(board, brid
 
 def test_a_view_s_builds_and_reviews_take_the_tree_s_names_which_find_each_one(board):
     """Live check L25: a view's two builds and two reviews were four threads all called dev/wiki-page-history. The
-    names the browser's tree gives them (threads.view_names) find each one, as /thimble:ask and rename_thread look."""
+    names the browser's tree gives them (threads.view_names) find each one, as rename_thread looks."""
     from app import threads
 
     made = [agents.new_agent(CORPUS, "dev", title, view="posts", **({"review": True} if title.startswith("review") else {}))
@@ -1062,13 +1020,12 @@ def test_every_job_click_route_refuses_the_server_s_token_without_the_analyst_s_
     assert not bridge.calls, "the module is never asked"
 
 
-def test_the_finish_tools_stop_their_gate_when_their_caller_drops_the_call_and_main_lists_none_of_them_as_its_own():
-    """A finish tool blocks while its gate runs and is cancelled when Claude Code closes the call of a stopped agent
-    (tools.Spec.drop_stops, call_route's until_dropped, V6); each names only the job sessions that may call it."""
+def test_main_lists_none_of_the_finish_tools_as_its_own():
+    """Each finish tool names only the job sessions that may call it."""
     for name, kinds in (("view_check", ("view", "review")), ("finish_view", ("view",)),
                         ("view_pictures", ("review",)), ("finish_review", ("review",))):
         spec = tools.REGISTRY[name]
-        assert spec.drop_stops and spec.sessions == kinds, name
+        assert spec.sessions == kinds, name
     assert all(n in tools.tool_sections() for n in ("view_check", "finish_view", "view_pictures", "finish_review"))
 
 

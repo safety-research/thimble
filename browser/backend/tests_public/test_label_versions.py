@@ -17,6 +17,9 @@ from test_marks import CORPUS, SID, _answer, _fresh, _log, _main_at, _seed_card,
 
 from app import cite, config, label_versions, marks
 
+# model calls go through Claude Code, which the tests fake (conftest claude_code_sign_in)
+pytestmark = pytest.mark.usefixtures("claude_code_sign_in")
+
 NAME = "claims a PR"
 TITLE = f"label {NAME}"  # the label's heading in the checker's file, as the terminal titles its labels
 
@@ -610,6 +613,6 @@ def test_a_count_of_a_label_s_values_reads_the_version_the_words_could_read(_fre
     assert by[1]["evidence"]["count"] == "2 of 2 rows with records 2 besides the row all that sums them up", by[1]
     assert [(by[n]["status"], by[n]["reason"]) for n in (2, 3, 4)] == [
         ("failed", "The card's table has 0 rows with records 2, not 2."),
-        ("failed", f"The card has no version {_newest(kid)['v']}."),  # made after the words, while the check ran
+        ("failed", f"The card's version {_newest(kid)['v']} was made after these words were written."),  # while the check ran
         ("failed", "The card's table has 2 rows besides the row all that sums them up, not 3.")], by
     assert f"card:{cid}@v{trial['v']}@out0\ta table of 3 rows: value, records, share\n" in listed[0], listed[0]

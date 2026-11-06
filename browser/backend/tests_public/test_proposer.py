@@ -14,7 +14,10 @@ from typing import Any
 
 import pytest
 
-from app import agents, config, notices, proposer, session, views
+from app import agents, claude_access, config, notices, proposer, runtime_api, session, views
+
+# model calls go through Claude Code, which the tests fake (conftest claude_code_sign_in)
+pytestmark = pytest.mark.usefixtures("claude_code_sign_in")
 
 CORPUS = "mini"
 SID = "a0b0c0d0-0000-4000-8000-0000000000a1"
@@ -179,15 +182,15 @@ async def test_an_analyst_s_turn_end_runs_one_fork_at_its_cut_and_shows_the_card
 
 
 async def test_turns_that_did_not_answer_the_analyst_run_nothing(cwd, tmp_path, cards, forks):
-    """A task notification's turn, a Monitor's re-arm and a start_agent event's turn are no analyst's turn."""
+    """A task notification's turn, a Monitor's re-arm and a rerun event's turn are no analyst's turn."""
     lv, p = _attach(cwd, tmp_path)
     note = ("<task-notification>\n<task-id>x1</task-id>\n<status>completed</status>\n<result>done</result>\n"
             "</task-notification>")
     _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
                     _assistant(_say("The agent is done.")), _end("cut-n")])
-    event = '<thimble-event kind="start_agent" event="ev1">Start the writer.</thimble-event>'
+    event = '<thimble-event kind="rerun" event="ev1">thimble ran a card again.</thimble-event>'
     _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": event}},
-                    _assistant(_say("Starting it.")), _end("cut-s")])
+                    _assistant(_say("Its takeaway holds.")), _end("cut-s")])
     await _settle()
     assert forks == [] and proposer.pending(CORPUS) is None
 
@@ -297,7 +300,7 @@ async def test_view_proposals_off_keep_no_job(cwd, tmp_path, cards, forks, monke
 
 async def test_no_fork_and_no_notice_while_claude_cannot_be_reached(cwd, tmp_path, cards, forks, monkeypatch):
     # the chat's own card says what is missing (runtime._access_record); the proposer repeats nothing
-    monkeypatch.setenv("THIMBLE_RUNTIME", "on")
+    claude_access.access_path().unlink()
     lv, p = _attach(cwd, tmp_path)
     _append(p, lv, _turn("Who replies?", "cut-1"))
     await _settle()
@@ -473,6 +476,8 @@ def test_the_fork_s_environment_has_main_s_config_dir_and_none_of_thimble_s(monk
 
 async def test_a_fork_that_cannot_start_fails_with_its_reason(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "CLI_PATH", str(tmp_path / "no-claude"))
+    monkeypatch.setattr(runtime_api, "cc_main_session", lambda c: SID)
+    monkeypatch.setattr(runtime_api, "cc_main_cut", lambda c: None)
     got = await proposer._fork(_lv(cwd=str(tmp_path)), "cut", "prompt", "claude-opus-5-5", "medium", "standard")
     assert got["code"] is None and "could not start" in got["stderr"]
     assert proposer.error_line(proposer.read_stream(""), got["stderr"], None).startswith("Claude Code could not start")
@@ -505,7 +510,7 @@ def test_the_turn_s_cut_and_who_opened_it_are_kept_and_survive_a_pass(cwd, tmp_p
         "role": "assistant", "model": "claude-opus-5-5", "usage": usage, "content": [_say("A and B.")]}}])
     assert lv.turn_analyst and lv.context_tokens == 42_003
     kept = session._turn_state(lv)
-    other = session.Live(CORPUS, SID, cwd, str(p), None)  # the next pass of the mirror in terminal mode
+    other = session.Live(CORPUS, SID, cwd, str(p), None)  # the next pass of the mirror
     session._take_turn(other, kept)
     assert other.turn_analyst and other.context_tokens == 42_003
     _append(p, lv, [_end("cut-9")])

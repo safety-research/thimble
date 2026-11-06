@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A file viewer's label controls in the File browser's reader (src/files/Reader.tsx ReaderViewer): a file viewer shows
 // only as a mode of the reader, so its page's label calls (labelCalls.ts) do what the Labels pane does there, as a view
-// in the views bar (ViewPane) and a card (TypeCard) do: `on` turns a label on, and focuses it, or off.
+// in the views bar (ViewPane) does: `on` turns a label on, and focuses it, or off.
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { ViewLabelActions } from '../../src/files/labelCalls.ts'
 import type { FilesLabels } from '../../src/files/useLabels.ts'

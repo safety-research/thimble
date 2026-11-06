@@ -19,13 +19,12 @@ import { useChatMetas } from './waiting'
 /** The buttons a refused start offers, by its kind (plan section 2, "A start that does not happen"). */
 export type RefusedAction = 'start-it' | 'try-again' | 'dismiss'
 
-/** The kind's buttons: Start it for a typed start auto mode refused or main did not make; Try again
- * at Claude Code's subagent limit and for a click thimble's module did not answer in time; Dismiss always. Never Try
- * again on an auto-mode refusal, whose text tells main not to pursue it again. Pure. */
-export function refusalActions(kind: RefusalKind | null | undefined, expired = false): RefusedAction[] {
+/** The kind's buttons: Start it for a typed start auto mode refused or main did not make; Try again at Claude Code's
+ * subagent limit; Dismiss always. Never Try again on an auto-mode refusal, whose text tells main not to pursue it
+ * again. Pure. */
+export function refusalActions(kind: RefusalKind | null | undefined): RefusedAction[] {
   if (kind === 'auto-mode' || kind === 'no-call') return ['start-it', 'dismiss']
   if (kind === 'limit') return ['try-again', 'dismiss']
-  if (kind === 'no-module' && expired) return ['try-again', 'dismiss']
   return ['dismiss']
 }
 
@@ -63,11 +62,8 @@ export function firstLines(text: string, n = 2): string {
     .join(' ')
 }
 
-/** The text when thimble's module held the long poll and did not answer a click in time. */
-export const NO_ANSWER_LINE = "Your Claude Code session's thimble module did not answer."
-
 /** The line that says why, by kind, with the reason as Claude Code or thimble gave it. Pure. */
-export function refusalLine(r: Pick<Refusal, 'kind' | 'reason' | 'expired'>): string {
+export function refusalLine(r: Pick<Refusal, 'kind' | 'reason'>): string {
   const reason = (r.reason ?? '').trim()
   const dot = (s: string) => (/[.!?…]$/.test(s) ? s : `${s}.`)
   switch (r.kind) {
@@ -82,7 +78,7 @@ export function refusalLine(r: Pick<Refusal, 'kind' | 'reason' | 'expired'>): st
         : dot(reason || 'Claude Code runs as many subagents as it allows at once in this session')
     }
     case 'no-module':
-      return r.expired ? NO_ANSWER_LINE : dot(reason || "thimble's agents can't start in this session: Claude Code's hooks modules are off")
+      return dot(reason || "thimble's agents can't start in this session: Claude Code's hooks modules are off")
     default:
       return dot(reason || 'It was refused')
   }
@@ -111,8 +107,8 @@ export function requestLine(r: Pick<SubagentRequest, 'role' | 'input' | 'values'
 
 /** What a Start it or Try again answered, as a toast when it did not start; true when it started. */
 function answered(what: string, a: StartAnswer): boolean {
-  if (a.agentId || a.program) return true
-  bus.emit('toast', { text: `${refusedTitle(what)}: ${refusalLine({ kind: a.kind ?? 'error', reason: a.reason ?? '', expired: a.expired })}`, kind: 'error' })
+  if (a.agentId) return true
+  bus.emit('toast', { text: `${refusedTitle(what)}: ${refusalLine({ kind: a.kind ?? 'error', reason: a.reason ?? '' })}`, kind: 'error' })
   return false
 }
 
@@ -130,7 +126,7 @@ export function RefusedCard({ ws, what, refusal, text, onDismiss, onStarted, cla
   const rid = refusal.request ?? null
   const [req, setReq] = useState<SubagentRequest | null>(null)
   const [busy, setBusy] = useState<RefusedAction | null>(null)
-  const actions = refusalActions(refusal.kind, !!refusal.expired).filter((a) => (a === 'dismiss' ? !!onDismiss : !!rid))
+  const actions = refusalActions(refusal.kind).filter((a) => (a === 'dismiss' ? !!onDismiss : !!rid))
   // at Claude Code's subagent limit, Try again waits until the chats count a free slot
   const limited = refusal.kind === 'limit'
   const metas = useChatMetas(ws, limited)

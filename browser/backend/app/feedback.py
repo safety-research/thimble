@@ -209,12 +209,12 @@ def workspace_for(cwd: Path) -> tuple[str, Path] | None:
 
 def repo_slug(root: Path) -> str:
     """The `owner/name` of the GitHub repo releases and issues live on: RELEASE.json's `repo` in a release install, else
-    the `repository` URL of plugin/.claude-plugin/plugin.json."""
+    the `repository` URL of the terminal plugin's manifest beside the workbench (plugin/.claude-plugin/plugin.json)."""
     rel = _read_json(root / "RELEASE.json")
     slug = str(rel.get("repo") or "").strip() if isinstance(rel, dict) else ""
     if slug:
         return slug
-    plugin = _read_json(root / "plugin" / ".claude-plugin" / "plugin.json")
+    plugin = _read_json(root.parent / "plugin" / ".claude-plugin" / "plugin.json")
     url = str(plugin.get("repository") or "").strip() if isinstance(plugin, dict) else ""
     return re.sub(r"^(?:https?://)?(?:www\.)?github\.com/", "", url).removesuffix(".git").strip("/")
 

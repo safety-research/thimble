@@ -146,18 +146,4 @@ describe('the card', () => {
     expect(el.querySelector('.chat-offer')).not.toBeNull()
   })
 
-  test('an Accept the server refuses keeps the proposal and says the reason and the fix under the buttons', async () => {
-    const reason = 'Leave plan mode (shift+tab), then Accept.'
-    const el = await card('pc-refuse-now')
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
-      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
-      if (String(url).endsWith('/accept') && init.method === 'POST') return json({ ...proposals[0], refused: { kind: 'plan', reason } })
-      return String(url).endsWith('/views/proposals') ? json(proposals) : json(settings)
-    })
-    await click(el, '.chat-offer-accept')
-    await settle()
-    expect(el.querySelector('.chat-offer')).not.toBeNull()
-    expect(el.querySelector('.chat-offer-refused')?.textContent).toBe(reason)
-  })
-
 })

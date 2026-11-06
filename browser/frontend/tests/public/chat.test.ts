@@ -88,17 +88,14 @@ test('the chat names a group whole, as the call named it: a path of titles, or a
   expect(deckCards(deck)).toBe(2)
 })
 
-test('an extension\'s orientation instructions lead its follow-up as a line naming the extension', () => {
-  const [row] = foldRecords(records([{ type: 'user', text: 'Read every record in `*.jsonl`.', by: 'extension', extension: 'swarm-orient', run: 1 }]))
-  expect(leadText(row as UserRow)).toBe('swarm-orient added: its orientation instructions')
+test('a follow-up leads with its message', () => {
   expect(leadText({ kind: 'user', index: 0, text: ' Count them. ', by: 'browser' })).toBe('Count them.')
 })
 
 describe('tool names', () => {
-  test("the chat recognizes the plugin's MCP server by the prefix Claude Code gives its tools", () => {
-    const plugin = JSON.parse(readFileSync(path.join(ROOT, 'plugin/.claude-plugin/plugin.json'), 'utf8')) as { name: string }
-    const mcp = JSON.parse(readFileSync(path.join(ROOT, 'plugin/.mcp.json'), 'utf8')) as { mcpServers: Record<string, unknown> }
-    for (const server of Object.keys(mcp.mcpServers)) expect(MCP_PREFIXES).toContain(`mcp__plugin_${plugin.name}_${server}__`)
+  test("the chat recognizes thimble's tools by the prefix Claude Code gives the runtime's MCP server", () => {
+    const server = /^SERVER = "([^"]+)"/m.exec(readFileSync(path.join(ROOT, 'backend/app/runtime_cc.py'), 'utf8'))?.[1]
+    expect(MCP_PREFIXES).toContain(`mcp__${server}__`)
   })
 })
 

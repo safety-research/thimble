@@ -141,10 +141,10 @@ for _name in ("uvicorn.access", "thimble.timing"):
 
 ROUTER_MODULES = [
     # storage and the corpus
-    "corpus", "transcripts", "source_keys", "source_events", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
-    "card_libs", "extensions",
-    # the agent engine (main, threads, background agents) and the tools they call
-    "agents", "tools", "plans", "jobs", "verify", "fixes",
+    "corpus", "transcripts", "source_keys", "source_events", "pdfs", "ledger", "investigation", "notebook", "concepts", "views",
+    "card_libs",
+    # the agent engine (main, threads, background agents)
+    "agents", "plans", "jobs", "verify", "fixes",
     # documents, and the report checks that comment on them (their runs shut down with the server); the citation
     # checks' Repair
     "report_types", "exports", "checks", "canvas_comments", "marks",
@@ -152,18 +152,11 @@ ROUTER_MODULES = [
     "dev", "telemetry", "export", "feedback_routes", "fix_share",
     # undo and redo over the workspace's cards and documents
     "undo",
-    # browser events to the analyst's Claude Code session, and the mirror of its transcript (listed for its shutdown)
+    # browser events to main, and the mirror of its transcript (listed for its shutdown)
     "events", "session",
-    # the plugin's hooks module in main's session, which starts, messages and stops thimble's subagents on a click
-    "module_bridge",
-    # thimble's agents as subagents of main (their hooks' routes, Start it), the permission requests of an extension's
-    # programs and a code ticket's own questions (shut down with the server), and the orientation's calls, stored whole
-    # and citable
+    # thimble's agents (Start it), a code ticket's own questions (shut down with the server), and the orientation's
+    # calls, stored whole and citable
     "subagents", "agent_session", "calls", "write_session",
-    # the programs an extension runs a role with (an Agent SDK program or a command), and their sessions
-    "harness",
-    # the orientation's, its critic's and the writers' tray entries in the analyst's terminal
-    "tray",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
     # where the check's records and fixes are kept (the Undo of a fix); a card drawn taller than the canvas shows,
     # which its author is told
@@ -188,11 +181,9 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get("THIMBLE_ALLOWED_HOSTS", "127
 # Request timing: a request slower than this many ms is logged at WARNING, every other one at DEBUG. Every response
 # carries `Server-Timing: app;dur=<ms>`, so the browser's Network panel shows the backend's own time.
 SLOW_REQUEST_MS = float(os.environ.get("THIMBLE_SLOW_MS", "300"))
-# the watcher's long polls (events.py), the hooks module's (module_bridge.py, whose hello may wait for a rekey) and
 # thimble-browser's wait for a browser that wants a link (ui_link_wanted), slow by design: logged at DEBUG like a fast
 # request
-LONG_POLLS = ("/api/events/pull", "/api/events/permission", "/api/module/next", "/api/module/hello",
-              "/api/ui/link-wanted")
+LONG_POLLS = ("/api/ui/link-wanted",)
 LINK_TICK_S = 0.25  # how often GET /api/ui/link-wanted looks whether a browser wants a link
 timing_log = logging.getLogger("thimble.timing")
 
@@ -346,14 +337,6 @@ async def _lifespan(app: FastAPI):
         config.private_dir(config.WORKSPACES_DIR)
     except Exception:
         log.exception("making thimble's home and workspaces private failed")
-    # the extensions thimble ships added: those it ships on, on its first run (extensions.ship)
-    try:
-        from . import extensions
-
-        for name in extensions.ship():
-            log.info("extension %s added, renamed or updated from thimble's own", name)
-    except Exception:
-        log.exception("adding the extensions thimble ships failed")
     # the records an install tree's data/ holds are brought into the registry once (config.migrate_registry)
     try:
         config.migrate_registry()
@@ -448,15 +431,12 @@ async def _startup() -> None:
 
 # what a new sign-in of a browser shows (signed_in), in each workspace whose main may act for it, at {at} (HH:MM)
 SIGNED_IN_NOTICE = "A browser signed in to thimble at {at}. If it was not you, click Sign it out."
-SIGNED_IN_LINE = ("thimble: a browser signed in to thimble at {at}. If it was not you, click Sign it out on its notice in "
-                  "thimble's page.")
 
 
 def signed_in(ws: object, browser: str) -> None:
-    """A browser signed in with a link's code (hook_auth.claim): each workspace it may act in hears of it twice, as a
-    notice with Sign it out (sign-in:<browser>) and as a line under main's next reply in its terminal
-    (session.tell_terminal), which the browser cannot hide. The workspaces are the one the link named, when it is
-    registered, and each whose main this server follows. The browser that signed in shows no notice of its own sign-in
+    """A browser signed in with a link's code (hook_auth.claim): each workspace it may act in hears of it as a notice
+    with Sign it out (sign-in:<browser>). The workspaces are the one the link named, when it is registered, and each
+    whose main this server follows. The browser that signed in shows no notice of its own sign-in
     or of one before it (its id and when it signed in, GET /api/ui/paired); a browser signed in before it shows this
     one."""
     from . import notices, session  # noqa: PLC0415
@@ -474,7 +454,6 @@ def signed_in(ws: object, browser: str) -> None:
     for c in places:
         notices.post(c, kind="sign-in", key=f"sign-in:{browser}", text=SIGNED_IN_NOTICE.format(at=at),
                      action={"label": "Sign it out", "do": "sign-out", "slug": browser})
-        session.tell_terminal(c, SIGNED_IN_LINE.format(at=at))
     log.warning("a browser signed in to thimble (%s)", name or "the start page")
 
 

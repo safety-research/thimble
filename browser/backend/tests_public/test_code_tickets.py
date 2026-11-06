@@ -27,7 +27,7 @@ from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, Listener, _record_paired, ca
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app import agent_session, agents, config, dev, events, hook_auth, ledger, modes, session, subagents, ticket_box, tools
+from app import agent_session, agents, config, dev, hook_auth, ledger, modes, session, subagents, ticket_box, tools
 from app import subagent_files as sf
 from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 
@@ -152,10 +152,6 @@ async def test_a_click_prepares_the_ticket_and_starts_its_agent_through_the_modu
         "subagent", agent, "thimble:dev-ticket", t["id"]), "the agent's chat is the ticket's thread"
     assert subagents.agent(CORPUS, agent)["key"] == dev.ticket_key(t["id"]) and t["in_box"] is True
     assert dev._current is not None and dev._current.agent == agent
-    from app import tray
-
-    [row] = [r for r in tray.subagent_rows(CORPUS) if r["role"] == "dev-ticket"]
-    assert (row["name"], row["label"]) == ("thimble:dev-ticket", f"code ticket: #{t['n']} Bigger font")
 
 
 async def test_the_agent_checks_finishes_and_the_analyst_s_allow_applies_the_change_that_passed(ticketing):
@@ -284,26 +280,20 @@ async def test_a_ticket_main_s_plan_mode_held_at_its_end_fails_saying_why_with_r
     assert len(bridge.ops("spawn")) == 1, "nothing starts again by itself"
 
 
-async def test_main_s_file_dev_ticket_prepares_the_ticket_and_gives_the_exact_agent_call(ticketing, bridge):
-    """Main's file_dev_ticket prepares the ticket, then answers the exact Agent call, which thimble's hook lets through
-    and auto mode judges as main makes it; the agent it starts takes the ticket's thread. A second ticket main files while
-    one runs waits for the analyst's Start on its card, which starts it through the module once the first ends."""
+async def test_main_s_file_dev_ticket_prepares_the_ticket_and_the_server_starts_its_agent(ticketing, bridge):
+    """Main's file_dev_ticket prepares the ticket, and the server starts its agent, which takes the ticket's thread. A
+    second ticket main files while one runs waits for the analyst's Start on its card, which starts it once the first
+    ends."""
     res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Bigger font", "body": "the labels are small"},
                            tool_use_id="toolu_main1")
-    assert not res.is_error and "\nFiled ticket #1: Bigger font. AGENT CALL " in res.text, res.text
-    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
-    assert inp["subagent_type"] == "thimble:dev-ticket" and "model" not in inp
-    assert not bridge.ops("spawn"), "main makes the call, not the module"
+    assert not res.is_error and "\nFiled ticket #1: Bigger font." in res.text and "AGENT CALL" not in res.text, res.text
+    [spawn] = bridge.ops("spawn")
+    assert spawn["role"] == "dev-ticket"
     [t] = [x for x in dev._read() if x["title"] == "Bigger font"]
     assert t["status"] == "running" and Path(t["worktree"]).is_dir() and t["route"] == "typed"
-    rid = sf.REQUEST_RE.search(inp["prompt"].split("\n", 1)[0]).group(0)
-    assert t["request"] == rid and subagents.request(CORPUS, rid)["route"] == subagents.TYPED
-    with subagents.update(CORPUS) as state:
-        assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_x", "tool_input": inp}) is None
-        sf.register(state, {"agent_id": "a0000000000000ticket", "agent_type": "thimble:dev-ticket", "session_id": "s"})
-    subagents.ensure_chat(CORPUS, "a0000000000000ticket")
-    assert dev._get(t["id"])["agent_id"] == "a0000000000000ticket"
-    assert agents.read_meta(CORPUS, t["chat"])["agent_id"] == "a0000000000000ticket"
+    assert subagents.request(CORPUS, spawn["request"]).get("typed") is True
+    assert dev._get(t["id"])["agent_id"] == "a0000000000000001"
+    assert agents.read_meta(CORPUS, t["chat"])["agent_id"] == "a0000000000000001"
 
     res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Wider pane", "body": "the pane is narrow"},
                            tool_use_id="toolu_main2")
@@ -315,17 +305,18 @@ async def test_main_s_file_dev_ticket_prepares_the_ticket_and_gives_the_exact_ag
     assert e.value.status_code == 403, "Start is the analyst's click"
     await dev.start_ticket(w["id"], _click())
     assert dev._get(w["id"])["status"] == "queued" and not dev._get(w["id"])["held"], "it waits for the running one"
-    subagents.run_ended(CORPUS, "a0000000000000ticket", "done", "nothing to do", source="handback")
+    subagents.run_ended(CORPUS, "a0000000000000001", "done", "nothing to do", source="handback")
     await _until(lambda: (dev._get(w["id"]) or {}).get("agent_id"), "the waiting ticket did not start")
     assert bridge.ops("spawn")[-1]["route"] == subagents.CLICK
 
 
-async def test_a_fork_s_ticket_is_prepared_and_main_starts_its_agent_on_an_event_naming_its_thread(ticketing, bridge):
+async def test_a_fork_s_ticket_is_prepared_and_the_server_starts_its_agent_with_the_fork_s_call(ticketing, bridge,
+                                                                                               monkeypatch):
     """A thread's fork may not start subagents, so its file_dev_ticket no longer sends the analyst to Report a problem:
-    the ticket is prepared as main's is, with the thread's anchor in its body, and main gets a start_agent event that
-    names the ticket and the anchor and carries the exact Agent call, which main makes with no step of the analyst's.
-    The fork is told to say in one line that it is filed. A second ticket while the first runs waits for Start, and
-    main is asked for nothing more."""
+    where the server runs thimble's agents, the ticket is prepared as main's is, with the thread's anchor in its body,
+    and the server starts its agent with the fork's call, with no step of the analyst's and no event to main. The fork
+    is told to say in one line that it is filed. A second ticket while the first runs waits for Start, and starts
+    nothing."""
     meta = agents.new_thread(CORPUS, "card:c1", "Agent 3", "the agents chart", surface="canvas",
                              selector="svg g.bar:nth-child(3)")
     q = Listener(CORPUS)
@@ -336,28 +327,20 @@ async def test_a_fork_s_ticket_is_prepared_and_main_starts_its_agent_on_an_event
         res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Bigger font", "body": "the labels are small"},
                                tool_use_id="toolu_fork1")
         assert not res.is_error, res.text
-        assert res.text.endswith(tools.hint("start_agent-fork", what="ticket #1: Bigger font", agent=tools.DEV_AGENT))
-        assert "main is starting the dev agent" in res.text and "working on it" not in res.text, \
-            "the fork says only what happened: it is filed and main is starting the dev agent"
+        assert res.text.endswith(tools.hint("agent-started-fork", what="ticket #1: Bigger font", agent=tools.DEV_AGENT))
+        assert "the dev agent is running" in res.text and "working on it" not in res.text, \
+            "the fork says only what happened: it is filed and the dev agent runs"
         assert "AGENT CALL" not in res.text and "Report a problem" not in res.text
-        assert not bridge.ops("spawn"), "main makes the call, not the module"
+        [spawn] = bridge.ops("spawn")
+        assert spawn["role"] == "dev-ticket" and "svg g.bar:nth-child(3)" in spawn["prompt"]
         [t] = [x for x in dev._read() if x["title"] == "Bigger font"]
         assert t["status"] == "running" and Path(t["worktree"]).is_dir() and t["route"] == "typed"
         assert "the labels are small" in t["body"] and "- selector: svg g.bar:nth-child(3)" in t["body"]
         assert "- ref: card:c1" in t["body"] and "the agents chart" in t["body"]
-        note = q.get_nowait()
-        assert note["meta"]["kind"] == events.START_AGENT
-        assert (note["meta"]["filed"], note["meta"]["anchor"], note["meta"]["from_thread"]) == (
-            "ticket #1: Bigger font", "card:c1", "the agents chart")
-        inp = json.loads(next(ln for ln in note["content"].splitlines() if ln.startswith("{")))
-        assert inp["subagent_type"] == "thimble:dev-ticket" and "svg g.bar:nth-child(3)" in inp["prompt"]
-        rid = sf.REQUEST_RE.search(inp["prompt"].split("\n", 1)[0]).group(0)
-        req = subagents.request(CORPUS, rid)
-        assert t["request"] == rid and (req["route"], req["call"], req["via_main"]) == (
-            subagents.TYPED, note["meta"]["event"], True)
-        assert not req.get("caller_agent"), "main's Agent call claims it, not the fork's"
-        with subagents.update(CORPUS) as state:
-            assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_main_x", "tool_input": inp}) is None
+        req = subagents.request(CORPUS, spawn["request"])
+        assert (req["key"], req.get("typed"), t["agent_id"]) == (f"ticket:{t['id']}", True, "a0000000000000001")
+        assert not req.get("call") and not req.get("caller_agent"), "no call of the fork's claims it"
+        assert q.empty(), "main is asked for nothing"
 
         sf.add_caller(ws, "toolu_fork2", "fork1", sf.FORK_TYPE)
         res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Wider pane", "body": "the pane is narrow"},
@@ -365,15 +348,14 @@ async def test_a_fork_s_ticket_is_prepared_and_main_starts_its_agent_on_an_event
         assert "one at a time" in res.text and "Start on its card" in res.text
         [w] = [x for x in dev._read() if x["title"] == "Wider pane"]
         assert (w["status"], w["held"]) == ("queued", True)
-        assert q.empty(), "a held ticket asks main for no start"
+        assert len(bridge.ops("spawn")) == 1 and q.empty(), "a held ticket starts nothing"
     finally:
         q.close()
 
 
-async def test_stop_stops_the_agent_through_the_module_and_main_s_quit_stops_it_with_retry(ticketing, bridge):
-    """Stop on a running ticket stops its agent through main's module, and its end leaves the ticket stopped with its
-    branch and no worktree; main's quit stops a ticket's agent with main, and the ticket says so (MAIN_ENDED). Retry
-    runs it again in a new thread."""
+async def test_stop_stops_the_agent_and_retry_runs_it_again(ticketing, bridge):
+    """Stop on a running ticket stops its agent, and its end leaves the ticket stopped with its branch and no worktree.
+    Retry runs it again in a new thread."""
     t, agent = await _clicked_ticket()
     assert (await dev.stop_ticket(t["id"], _click()))["ok"]
     assert bridge.ops("stop")[-1]["agent"] == agent
@@ -383,11 +365,7 @@ async def test_stop_stops_the_agent_through_the_module_and_main_s_quit_stops_it_
     old_chat = dev._get(t["id"])["chat"]
     await dev.retry_ticket(t["id"], _click())
     await _until(lambda: dev._get(t["id"])["agent_id"] not in (None, agent), "Retry did not start a new agent")
-    new_agent = dev._get(t["id"])["agent_id"]
     assert dev._get(t["id"])["chat"] != old_chat
-    subagents.close_running(CORPUS)
-    await _until(lambda: dev._get(t["id"])["status"] == "stopped", "main's quit did not stop the ticket")
-    assert dev._get(t["id"])["error"] == dev.MAIN_ENDED and subagents.agent(CORPUS, new_agent)["status"] == "stopped"
 
 
 async def test_a_restarted_server_takes_up_the_running_agent_and_asks_again_for_a_change_that_passed(ticketing):
@@ -419,29 +397,13 @@ async def test_a_restarted_server_takes_up_the_running_agent_and_asks_again_for_
     assert (dev._get(orphan["id"])["status"], dev._get(orphan["id"])["error"]) == ("stopped", dev.TICKET_CUT_SHORT)
 
 
-async def test_a_queued_ticket_waits_for_main_s_module_after_a_restart_and_main_s_quit_ends_it(ticketing, bridge,
-                                                                                               monkeypatch):
-    """A ticket queued behind one whose apply restarted the server keeps its place until main's module says hello to
-    the new server, then starts through it, rather than failing at once as if hooks modules were off. Main's quit ends
-    the tickets still queued, so no later session starts them by itself; main's ticket that waits for Start keeps
-    waiting for that click."""
-    monkeypatch.setattr(dev, "NO_MODULE_RETRY_S", 0.02)
+async def test_a_queued_ticket_starts_after_a_restart(ticketing, bridge):
+    """A ticket queued behind one whose apply restarted the server starts on the new server."""
     q = dev.file_ticket(CORPUS, "Queued", "x", start=False)
-    bridge.is_live = False  # the server restarted, and the module has not said hello yet
     dev._current = None
     dev._recover()
-    await asyncio.sleep(0.1)
-    assert dev._get(q["id"])["status"] == "queued" and not bridge.ops("spawn")
-    bridge.is_live = True
-    await _until(lambda: (dev._get(q["id"]) or {}).get("agent_id"), "the queued ticket did not start once the module was back")
+    await _until(lambda: (dev._get(q["id"]) or {}).get("agent_id"), "the queued ticket did not start after the restart")
     assert bridge.ops("spawn")[-1]["route"] == subagents.CLICK
-    behind = dev.file_ticket(CORPUS, "Behind it", "y")
-    held = dev.file_ticket(CORPUS, "Main's", "z", start=False, route="typed")
-    dev._update(held["id"], held=True)
-    assert dev._get(behind["id"])["status"] == "queued"
-    dev.stop_workspace(CORPUS)
-    assert (dev._get(behind["id"])["status"], dev._get(behind["id"])["error"]) == ("stopped", dev.MAIN_ENDED)
-    assert dev._get(held["id"])["status"] == "queued" and dev._get(held["id"])["held"]
 
 
 async def test_a_release_install_registers_no_ticket_agent_and_main_hears_why(ticketing, tmp_path, monkeypatch):

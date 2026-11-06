@@ -328,8 +328,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     track('ui-click', { target: `ui:report-write`, detail: { slug: s } })
     try {
       const a = await api.write(ws, s)
-      if (a.agentId || a.program) setGenerating((g) => ({ ...g, [s]: true }))
-      else if (a.kind) noteRefusal(s, { kind: a.kind, reason: a.reason ?? '', request: a.request ?? null, expired: a.expired })
+      if (a.agentId) setGenerating((g) => ({ ...g, [s]: true }))
+      else if (a.kind) noteRefusal(s, { kind: a.kind, reason: a.reason ?? '', request: a.request ?? null })
     } catch (e) {
       bus.emit('toast', { text: `Could not ask for the ${s}. ${(e as Error).message}`, kind: 'error' })
     } finally {

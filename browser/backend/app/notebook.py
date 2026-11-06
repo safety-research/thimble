@@ -313,7 +313,6 @@ CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline",
 RUNNABLE_KINDS = ("plot", "table", "code", "timeline", "diagram")  # carry code and outputs
 DATA_KINDS = ("example", "note", "label", "custom", "plan")  # carry a payload
 DEFAULT_KIND = "code"
-KEPT_ARGS = "kept_args"  # a card type's call arguments Keep set, which the card check gives back as they are
 TAKEAWAY_STALE = "takeaway_stale"  # the takeaway was written before the card's last run changed its outputs
 # while thimble runs a card again because labels it read changed (rerun_on_labels), those label ids; gone when the
 # run ends
@@ -962,8 +961,7 @@ def outputs_key(ws: Path, outputs: list | None) -> str:
 
 def editing(ws: Path):
     """The lock of the workspace's groups (module note): ledger.locked on the notebooks folder, its lock file `.lock`
-    inside it, so `thimble-run`, which may write only that folder in main's sandbox, can take it. Held from the read of
-    a change to its write; never across an await."""
+    inside it. Held from the read of a change to its write; never across an await."""
     d = ws / "notebooks"
     nofollow.makedirs(d)
     return ledger.locked(d)
@@ -1456,13 +1454,12 @@ def insert_cell(workspace: str, nb_id: str, cell: dict, after: str | None = None
 def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: str | None = None,
               takeaway: str | None = None, payload: dict | None = None, locked: bool | None = None,
               by: str | None = None, width: int | None = None, height: int | None = None,
-              starred: bool | None = None, kept_args: dict | None = None, **layout: Any) -> dict:
+              starred: bool | None = None, **layout: Any) -> dict:
     """Change the given fields of a cell and announce it: code on a runnable cell, a payload on a data cell (400
     otherwise). A change to code, payload, title or takeaway is an edit, recorded in `edited` with what it replaced
     (stamp_edit); a takeaway set here is the analyst's. `width`, `height`, `starred` and `pos` are layout, not edits.
-    `locked` is the analyst's lock, which no model's tool may get past; only the browser sends it. `kept_args` are the
-    arguments of a card type's call that Keep wrote with the code (cardtypes.keep_route); other new code drops them. 404
-    for an unknown cell."""
+    `locked` is the analyst's lock, which no model's tool may get past; only the browser sends it. 404 for an unknown
+    cell."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
@@ -1481,9 +1478,6 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
     shown = shown_of(cell)  # the outputs new code replaces once it runs
     if code is not None and code != cell.get("code"):
         cell["code"] = code
-        cell.pop(KEPT_ARGS, None)
-    if kept_args:
-        cell[KEPT_ARGS] = kept_args
     if payload is not None:
         new = _payload_of(kind, payload)
         if new != cell.get("payload"):
@@ -1525,7 +1519,7 @@ def edit_cell(workspace: str, cell_id: str, *, code: str | None = None, title: s
 
 # what a card of code carries beside its code that a card of another kind does not: its run and what the run read
 RUN_STATE = ("code", "previous_code", "outputs", "status", "exec_count", "started", "kernel", "timeout_s", "label_revs",
-             KEPT_ARGS, OUT_MEMO, TAKEAWAY_STALE, REGENERATING_FOR)
+             OUT_MEMO, TAKEAWAY_STALE, REGENERATING_FOR)
 
 
 @_changes
@@ -1787,7 +1781,6 @@ def restore_version(workspace: str, cell_id: str, entry: str, *, by: str | None 
         if (v.get("code") or "") != (cell.get("code") or ""):
             cell["previous_code"] = str(cell.get("code") or "")
             cell["code"] = str(v.get("code") or "")
-            cell.pop(KEPT_ARGS, None)
             cell["outputs"], cell["status"] = copy.deepcopy(v.get("outputs") or []), v.get("status") or "idle"
     if (v.get("title") or "") != (cell.get("title") or ""):
         cell["title"] = str(v.get("title") or "")
@@ -3627,10 +3620,6 @@ async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: flo
     same request and kept in place of pandas' display, each table the code printed is kept as data beside its text
     (frames.attach_printed), and the labels the code read land on k.last_labels and k.last_label_revs. `extra_exprs`
     are more user expressions for the same request."""
-    from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
-
-    if cardtypes.CARD_CALL in code:
-        await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
     exprs[frames.PRINTED_EXPR_KEY] = frames.PRINTED_CAPTURE
@@ -3811,7 +3800,6 @@ def _edit_code(cell: dict, code: str, *, title: str | None = None, kind: str | N
     if code != cell.get("code"):
         cell["previous_code"] = str(cell.get("code") or "")
         cell["code"] = code
-        cell.pop(KEPT_ARGS, None)
     if title:
         cell["title"] = title
     if kind:

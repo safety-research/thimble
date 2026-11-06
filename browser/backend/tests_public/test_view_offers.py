@@ -15,10 +15,9 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app import config, context, events, ledger, userconf, views
+from app import config, context, ledger, userconf, views
 
 CORPUS = "offers"
-CLICK_REFUSED = views.click_refused  # the real one, which the corpus fixture replaces
 READER = '''
 def build_index(paths):
     return {}
@@ -35,9 +34,8 @@ def resolve(index, locator):
 
 @pytest.fixture()
 def corpus(tmp_path, monkeypatch, workspaces_tmp) -> SimpleNamespace:
-    """A corpus of a board and a trace file, where views can be built (build_problem), a session listens (reachable)
-    and no build or click starts anything (_queue, click_refused). The `view` events go to the list the fixture returns,
-    as (slug, status, extra)."""
+    """A corpus of a board and a trace file, where views can be built (build_problem) and no build starts anything
+    (_queue). The `view` events go to the list the fixture returns, as (slug, status, extra)."""
     d = tmp_path / "data" / CORPUS
     d.mkdir(parents=True)
     (d / "manifest.json").write_text(json.dumps({"name": CORPUS}))
@@ -46,8 +44,6 @@ def corpus(tmp_path, monkeypatch, workspaces_tmp) -> SimpleNamespace:
     monkeypatch.setattr(config, "DATA_DIR", d.parent.resolve())
     monkeypatch.setattr(views, "build_problem", lambda: "")
     monkeypatch.setattr(views, "_queue", lambda c, slug: queued.append(slug))
-    monkeypatch.setattr(views, "click_refused", lambda c, slug: None)
-    monkeypatch.setattr(events, "reachable", lambda c: True)
     monkeypatch.delenv(views.PROPOSE_ENV, raising=False)
     queued: list[str] = []
     sent: list[tuple[str, str, dict]] = []
@@ -132,24 +128,6 @@ def test_accept_stamps_the_answer_and_queues_the_build_as_one_the_analyst_asked_
         views.accept(CORPUS, row["slug"])
     assert e.value.status_code == 409
     assert e.value.detail == "the view proposal 'Posts' is no longer waiting for an answer", "the card's toast"
-
-
-def test_an_accept_that_cannot_start_a_builder_comes_back_refused_and_the_view_proposal_still_waits(corpus,
-                                                                                                    monkeypatch):
-    """Accept refused at once (no hooks module, main not started by `thimble`): the card shows the reason and its fix
-    under its buttons (`refused.reason`), and the view proposal waits for the analyst's next answer."""
-    from app import subagents
-
-    reason = "Claude Code's hooks modules are off in this session: turn them on, then Accept."
-    monkeypatch.setattr(views, "click_refused", CLICK_REFUSED)
-    monkeypatch.setattr(subagents, "refusal_before", lambda c, click=False: subagents.refusal("no-module", reason))
-    row, _ = _offer()
-    got = views.accept(CORPUS, row["slug"])
-    assert got["status"] == "suggested" and got["refused"]["reason"] == reason and "answer" not in got
-    assert corpus.queued == [] and views.open_offer(CORPUS)["slug"] == row["slug"]
-    monkeypatch.setattr(subagents, "refusal_before", lambda c, click=False: None)
-    got = views.accept(CORPUS, row["slug"])
-    assert (got["status"], got["answer"], got.get("refused")) == ("queued", "accepted", None)
 
 
 async def test_reject_is_the_analyst_s_click_and_drops_the_view_proposal_with_its_answer(corpus, analyst):
@@ -247,7 +225,7 @@ def test_main_s_proposal_under_a_waiting_view_proposal_s_name_replaces_it_and_bu
 
 
 def _viewer_call(answer: dict, calls: list):
-    async def call(c, task, inp, schema=None):
+    async def call(c, inp):
         calls.append(inp["suffix"])
         return SimpleNamespace(status="ok", output=answer)
 
@@ -255,11 +233,9 @@ def _viewer_call(answer: dict, calls: list):
 
 
 async def test_the_file_type_proposal_makes_no_call_while_view_proposals_are_off_or_one_waits(corpus, monkeypatch):
-    from app import tasks
-
     calls: list[str] = []
     answer = {"help": True, "name": "trace steps", "why": "Traces read as steps.", "arrangement": "One row per step."}
-    monkeypatch.setattr(tasks, "call", _viewer_call(answer, calls))
+    monkeypatch.setattr(views, "file_viewer_task", _viewer_call(answer, calls))
     monkeypatch.setenv(views.PROPOSE_ENV, "off")
     assert await views.suggest(CORPUS, "run.trace") is None and calls == []
     monkeypatch.delenv(views.PROPOSE_ENV)
@@ -283,11 +259,9 @@ async def test_the_file_type_proposal_makes_no_call_while_view_proposals_are_off
 
 
 async def test_a_file_type_proposal_that_cannot_be_written_keeps_no_answer(corpus, monkeypatch):
-    from app import tasks
-
     calls: list[str] = []
     answer = {"help": True, "name": "Posts", "why": "Traces read as steps.", "arrangement": "One row per step."}
-    monkeypatch.setattr(tasks, "call", _viewer_call(answer, calls))
+    monkeypatch.setattr(views, "file_viewer_task", _viewer_call(answer, calls))
     views.answer_offer(CORPUS, _offer()[0]["slug"], "rejected")
     assert await views.suggest(CORPUS, "run.trace") is None and calls == [".trace"]
     assert views.suggestions(CORPUS) == {} and views.open_offer(CORPUS) is None, "the name was taken"
@@ -364,19 +338,18 @@ def _fake_notices(monkeypatch) -> list[tuple]:
 
 
 def _calls_answering(monkeypatch, results: list) -> list[str]:
-    """tasks.call answering the file-viewer call with each of `results` in turn: a CallResult, or an exception raised."""
-    from app import tasks
-
+    """views.file_viewer_task answering the file-viewer call with each of `results` in turn: a CallResult, or an
+    exception raised."""
     calls: list[str] = []
 
-    async def call(c, task, inp, schema=None):
+    async def call(c, inp):
         calls.append(inp["suffix"])
         got = results.pop(0)
         if isinstance(got, BaseException):
             raise got
         return got
 
-    monkeypatch.setattr(tasks, "call", call)
+    monkeypatch.setattr(views, "file_viewer_task", call)
     return calls
 
 
@@ -465,12 +438,11 @@ async def test_a_file_type_check_that_times_out_or_raises_is_told_too(corpus, mo
     told = _fake_notices(monkeypatch)
     monkeypatch.setattr(views, "_suggest_failed", {})
     monkeypatch.setattr(views, "SUGGEST_TIMEOUT_S", 0.05)
-    from app import tasks
 
-    async def slow(c, task, inp, schema=None):
+    async def slow(c, inp):
         await asyncio.sleep(5)
 
-    monkeypatch.setattr(tasks, "call", slow)
+    monkeypatch.setattr(views, "file_viewer_task", slow)
     assert await views.suggest(CORPUS, "run.trace") is None
     assert told[-1][2]["text"].startswith("Couldn't check for a view proposal for .trace files: Claude didn't answer")
     _calls_answering(monkeypatch, [RuntimeError("the claude CLI was not found " + "x" * 300)])

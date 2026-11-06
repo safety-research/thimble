@@ -27,7 +27,7 @@ beforeEach(() => {
   localStorage.clear()
   localStorage.setItem('thimble:mini:thread-current', JSON.stringify('th1'))
   // main's short turn that starts the fork runs; the thread runs, its question not yet with a fork
-  main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED, module: true } as unknown as ChatMeta
+  main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED } as unknown as ChatMeta
   thread = { id: 'th1', kind: 'thread', role: 'thread', title: 'push-retries', created_at: T, parent: 'main', anchor: 'agents/agent-05.jsonl#L12', anchor_text: 'git push', running: true } as unknown as ChatMeta
   mainEvents = [{ type: 'done', ts: '2026-10-15T09:59:00+00:00' }]
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })

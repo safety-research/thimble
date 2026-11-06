@@ -1,8 +1,8 @@
 """Chats: main, its threads and the background agents, stored and served. No model runs here.
 
-Main is the analyst's Claude Code session, which the browser mirrors (session.py). A thread is born from a ⌘-click or
-⌘-drag, carries its anchor, and runs as a fork of main (threads.py). An agent chat is background work with a `status`,
-started through `start_agent`.
+Main is the conversation the server runs (runtime.py), which the browser mirrors (session.py). A thread is born from a
+⌘-click or ⌘-drag, carries its anchor, and runs as a fork of main (threads.py). An agent chat is background work with a
+`status`, started through `start_agent`.
 
 Storage: `workspaces/<c>/chats/<id>.meta.json` and `<id>.jsonl`, append-only, a record's line index its id. Records:
 `user`, `text`, `tool_use`, `tool_result`, `done`, `error`, `chip` (an act with no reply, appended to main) and `agent`
@@ -108,8 +108,7 @@ def write_meta(c: str, meta: dict) -> None:
 
 def change_meta(c: str, chat_id: str, change: Callable[[dict], Any]) -> dict:
     """Read the chat's meta, pass it to `change`, which changes it in place, and write it, all under the meta's lock:
-    the mirror, the tools and `thimble act` change metas from more than one process in terminal mode. 404 for a chat
-    that does not exist."""
+    the mirror and the tools both change metas. 404 for a chat that does not exist."""
     meta_path, _ = paths(c, chat_id)
     with ledger.locked(meta_path):
         meta = read_meta(c, chat_id)
@@ -145,7 +144,7 @@ def _defaults(meta: dict) -> dict:
 
 def append(log_path: Path, record: dict) -> None:
     """Append one record to a chat's log under the log's lock, since a record's line index is its id and more than one
-    process appends in terminal mode (the mirror, the tools)."""
+    writer appends (the mirror, the tools)."""
     with ledger.locked(log_path):
         ledger.heal_tail(log_path)
         ledger.append_jsonl(log_path, record)
@@ -821,11 +820,11 @@ async def instance_route(c: str) -> dict:
 
 
 def _main_state(c: str) -> dict:
-    """What main's meta adds for the browser: `module` and `module_why` (module_bridge.main_meta), which a refused start
-    reads, and `unread`, the analyst's messages that wait for main's running turn (runtime.unread)."""
-    from . import module_bridge, runtime  # noqa: PLC0415 — module_bridge imports the session modules
+    """What main's meta adds for the browser: `unread`, the analyst's messages that wait for main's running turn
+    (runtime.unread)."""
+    from . import runtime  # noqa: PLC0415
 
-    return {**module_bridge.main_meta(c), "unread": runtime.unread(c)}
+    return {"unread": runtime.unread(c)}
 
 
 @router.get("/ws/{c}/chats/main")
@@ -840,14 +839,10 @@ async def main_route(c: str) -> Response:
 
 @router.post("/ws/{c}/chats", status_code=201)
 async def create_route(c: str, body: NewThread) -> dict:
-    """A new thread. With `text` the question goes out as the thread's first event in the same call, and when no
-    session listens nothing is made (409, events.post's message), so the browser keeps the draft and no thread is left
-    empty."""
+    """A new thread. With `text` the question goes out as the thread's first event in the same call."""
     from . import events, threads  # noqa: PLC0415 — both import this module
 
     text = (body.text or "").strip()
-    if text and not events.reachable(c):
-        raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     meta = new_thread(c, body.anchor, body.anchor_text, body.title, surface=body.surface, element=body.element,
                       selector=body.selector, image=body.image, parent=body.parent, comment=body.comment)
     if not text:
@@ -869,9 +864,9 @@ async def get_route(c: str, chat_id: str) -> Response:
     if chat_id == MAIN_ID:
         from . import runtime  # noqa: PLC0415
 
-        if runtime.enabled():  # the server runs main (runtime.py): attached before the page reads it
-            with contextlib.suppress(ValueError):  # a workspace with no folder answers as before
-                runtime.ensure(c)
+        # main attached before the page reads it; a workspace with no folder answers as before
+        with contextlib.suppress(ValueError):
+            runtime.ensure(c)
     meta = ensure_main(c) if chat_id == MAIN_ID else read_meta(c, chat_id)
     _, log_path = paths(c, chat_id)
     meta["running"] = _running(c, chat_id)
@@ -1018,7 +1013,7 @@ def discard_chat(c: str, chat_id: str, role: str = "") -> None:
     log.info("%s: chat %s (%s) deleted", c, chat_id, role or "?")
     try:
         investigation.emit(c, investigation.MAIN, {"type": "chat", "chat": chat_id, "deleted": True})
-    except Exception:  # noqa: BLE001 — off the event loop (a pass of terminal mode's mirror), no page listens
+    except Exception:  # noqa: BLE001 — off the event loop, no page listens
         log.debug("chat deletion for %s/%s not emitted", c, chat_id, exc_info=True)
 
 
@@ -1047,9 +1042,6 @@ class RewindBody(BaseModel):
     event: str  # the event id of the analyst's message main goes back to before (its `user` record's `event`)
 
 
-REWIND_OFF = "Rewind needs the server to run main (the runtime is off)."
-
-
 @router.post("/ws/{c}/chats/main/rewind")
 async def rewind_route(c: str, body: RewindBody, request: Request) -> dict:
     """Rewind main to before one of the analyst's messages (runtime.rewind_main), a click, so the analyst's cookie (403
@@ -1058,8 +1050,6 @@ async def rewind_route(c: str, body: RewindBody, request: Request) -> dict:
     from . import runtime, subagents  # noqa: PLC0415 — both import this module
 
     subagents.analyst_only(request)
-    if not runtime.enabled():
-        raise HTTPException(409, REWIND_OFF)
     try:
         return await runtime.rewind_main(c, body.event)
     except runtime.RewindRefused as e:
@@ -1070,13 +1060,12 @@ async def rewind_route(c: str, body: RewindBody, request: Request) -> dict:
 async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
     """Stop: one of thimble's agents, any role's chat (route subagent), through the module (subagents.stop, TaskStop),
     which is a click, so the analyst's cookie (403 without it); a stop of an agent that had ended counts as done
-    ({stopped, done}); without the module {stopped: false, kind: no-module}, and the card says to press Esc in the
-    agent's view. Main's running turn ends through the module as Esc ends it (subagents.stop_main, `$.turn.abort`), and
-    the mirror ends the turn (session.turn_stopped); when the server runs main, a message the analyst sent while the
-    turn ran is main's next turn then (runtime.after_stop). A side thread's fork stops as an agent does
-    (subagents.stop_fork, TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has none. Both
-    are clicks too, and each that stopped something tells main so, in a line no chat shows. A server task stops as
-    before; the analyst's own subagent of main is main's to stop, so main is asked to."""
+    ({stopped, done}). Main's running turn ends through the module as Esc ends it (subagents.stop_main,
+    `$.turn.abort`), and the mirror ends the turn (session.turn_stopped); when the server runs main, a message the
+    analyst sent while the turn ran is main's next turn then (runtime.after_stop). A side thread's fork stops as an
+    agent does (subagents.stop_fork, TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has
+    none. Both are clicks too, and each that stopped something tells main so, in a line no chat shows. A server task
+    stops as before; the analyst's own subagent of main is main's to stop, so main is asked to."""
     if chat_id == MAIN_ID:
         from . import runtime, session, subagents  # noqa: PLC0415 — each imports this module
 
@@ -1121,44 +1110,6 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
                      line=events.terminal_line(events.MAIN, f"Stop {title}", {}))
         return {"stopped": False, "asked": "main"}
     return {"stopped": False}
-
-
-async def stop_all(c: str) -> list[str]:
-    """Stop everything thimble runs for workspace `c`, main's session having ended with none taking over
-    (session.disconnected, or main's SessionEnd hook), so nothing works on after the analyst quit: its report checks and
-    card checks, its dev ticket and view builds (dev.stop_workspace), its label runs (concepts.stop_workspace), the
-    chats of thimble's agents, which died with main (subagents.close_running), its server tasks and its kernels.
-    Returns what it stopped, for the log."""
-    from . import card_check, checks, concepts, dev, notebook, subagents  # noqa: PLC0415 — each imports this module
-
-    stopped: list[str] = []
-    steps: list[tuple[str, Callable[[str], int]]] = [("report check", checks.stop_workspace),
-                                                     ("card check", card_check.stop_workspace), ("dev build", dev.stop_workspace),
-                                                     ("label run", concepts.stop_workspace)]
-    for what, fn in steps:
-        try:
-            stopped += [what] * fn(c)
-        except Exception:  # noqa: BLE001 — one part that will not stop leaves the others to stop
-            log.warning("%s: could not stop the %ss", c, what, exc_info=True)
-    try:
-        stopped += [f"agent {a}" for a in subagents.close_running(c, subagents.STOPPED_QUIT)]
-    except Exception:  # noqa: BLE001
-        log.warning("%s: thimble's agents' chats were not closed", c, exc_info=True)
-    for cc, chat in [k for k in _agent_tasks if k[0] == c]:
-        if await stop_agent(cc, chat):
-            stopped.append(str((meta_or_none(c, chat) or {}).get("title") or chat))
-    try:
-        await notebook.shutdown_workspace(c)
-    except Exception:  # noqa: BLE001
-        log.warning("%s: could not stop the kernels", c, exc_info=True)
-    return stopped
-
-
-def at_work() -> set[str]:
-    """The workspaces where this server runs something stop_all stops."""
-    from . import concepts, dev  # noqa: PLC0415
-
-    return {c for c, _ in _agent_tasks} | dev.workspaces_at_work() | concepts.workspaces_at_work()
 
 
 # --------------------------------------------------------------------------- text helpers other modules import

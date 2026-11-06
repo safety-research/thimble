@@ -194,7 +194,6 @@ def runtime_on(monkeypatch):
     """The server's own runtime on (runtime.py), in workspace `mini`, as test_runtime's `on` fixture has it."""
     from app import runtime
 
-    monkeypatch.setenv("THIMBLE_RUNTIME", "on")
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     runtime._spaces.clear()
     yield runtime
@@ -260,12 +259,12 @@ def mirror(tmp_path, monkeypatch):
     project.mkdir(parents=True)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude))
     monkeypatch.setattr(config, "_served_config", None)
-    for table in (session._live, session._shim_pids, session._shim_configs, events._subs):
+    for table in (session._live, events._subs):
         table.clear()
     transcript = project / f"{SID}.jsonl"
     transcript.write_text(_human("hello"))
     yield transcript
-    for table in (session._live, session._shim_pids, session._shim_configs, events._subs):
+    for table in (session._live, events._subs):
         table.clear()
 
 

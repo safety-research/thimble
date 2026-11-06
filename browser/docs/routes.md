@@ -6,10 +6,9 @@ fails when this file is not current. Do not edit it by hand.
 Every request to the local API needs a credential (`backend/app/hook_auth.py`), except the two reads marked
 none:
 
-- **token**: the token in `server.json`, proven with each request. The plugin's hooks, its MCP shim, its hooks
-  module and thimble's CLI use these routes, and only these.
+- **token**: the token in `server.json`, proven with each request. thimble's CLI uses these routes, and only
+  these.
 - **code**: a link's one-time sign-in code, which the page trades for the browser's cookie and its key.
-- **agent token**: the token of one run of an extension's program.
 - **cookie**: a signed-in browser's cookie. Everything the analyst does in thimble.
 - **cookie or token**: a read, which needs a signed-in browser's cookie or the token, proven as above (the CLI
   proves it with every request). A screenshot of the page carries a shot token instead, good for reads alone
@@ -25,13 +24,10 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-282 routes, 166 of them writes: 35 token, 1 code, 1 agent token, 135 cookie, 107 cookie or token, 1 media key, 2 none.
+244 routes, 139 of them writes: 10 token, 1 code, 128 cookie, 102 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
-| WS | `/api/agent/claude` | harness | agent token |
-| POST | `/api/agents` | tray | token |
-| POST | `/api/bg/agent-check` | subagents | token |
 | GET | `/api/claude-access` | claude_access | cookie or token |
 | PUT | `/api/claude-access` | claude_access | cookie |
 | POST | `/api/claude-access/check` | claude_access | cookie |
@@ -72,15 +68,7 @@ knows the key.
 | GET | `/api/dev/tickets/{tid}/shots/{name}` | dev | cookie or token |
 | POST | `/api/dev/tickets/{tid}/start` | dev | cookie |
 | POST | `/api/dev/tickets/{tid}/stop` | dev | cookie |
-| GET | `/api/events` | events | token |
-| POST | `/api/events/ack` | events | token |
-| POST | `/api/events/held` | events | token |
-| GET | `/api/events/main` | events | cookie or token |
-| POST | `/api/events/mode` | events | token |
-| POST | `/api/events/permission` | events | token |
-| GET | `/api/events/pull` | events | token |
 | GET | `/api/events/sessions` | events | cookie or token |
-| POST | `/api/extensions/refresh` | extensions | token |
 | GET | `/api/feedback/download` | feedback_routes | cookie or token |
 | POST | `/api/feedback/reveal` | feedback_routes | cookie |
 | GET | `/api/fixes` | fixes | cookie or token |
@@ -91,23 +79,7 @@ knows the key.
 | POST | `/api/fixes/{fid}/undo` | fixes | cookie |
 | GET | `/api/health` | main | none |
 | GET | `/api/jobs` | jobs | cookie or token |
-| POST | `/api/module/ended` | module_bridge | token |
-| POST | `/api/module/hello` | module_bridge | token |
-| POST | `/api/module/mode` | module_bridge | token |
-| GET | `/api/module/next` | module_bridge | token |
-| POST | `/api/module/result` | module_bridge | token |
-| GET | `/api/module/roles` | module_bridge | token |
-| GET | `/api/module/state` | module_bridge | token |
 | GET | `/api/render/status` | render | cookie or token |
-| POST | `/api/subagents/caller` | subagents | token |
-| POST | `/api/subagents/denied` | subagents | token |
-| POST | `/api/subagents/end` | subagents | token |
-| POST | `/api/subagents/rekey` | subagents | token |
-| POST | `/api/subagents/started` | subagents | token |
-| POST | `/api/subagents/stopped` | subagents | token |
-| GET | `/api/tools` | tools | cookie or token |
-| GET | `/api/tools/holdings` | tools | cookie or token |
-| POST | `/api/tools/{name}` | tools | token |
 | GET | `/api/tour` | tour | cookie or token |
 | POST | `/api/tour/seen` | tour | cookie |
 | POST | `/api/ui/key` | main | code |
@@ -136,16 +108,12 @@ knows the key.
 | GET | `/api/ws/{c}/card-libs` | card_libs | cookie or token |
 | POST | `/api/ws/{c}/cards/{cell_id}/plan-edit/clear` | plans | cookie |
 | GET | `/api/ws/{c}/cards/{cell_id}/plan-runs` | plans | cookie or token |
-| GET | `/api/ws/{c}/cardtypes/{name}/frame` | cardtypes | cookie or token |
-| POST | `/api/ws/{c}/cardtypes/{name}/records` | cardtypes | cookie |
 | POST | `/api/ws/{c}/cells` | notebook | cookie |
 | POST | `/api/ws/{c}/cells/move` | notebook | cookie |
 | GET | `/api/ws/{c}/cells/names` | notebook | cookie or token |
 | DELETE | `/api/ws/{c}/cells/{cell_id}` | notebook | cookie |
 | GET | `/api/ws/{c}/cells/{cell_id}` | notebook | cookie or token |
 | PUT | `/api/ws/{c}/cells/{cell_id}` | notebook | cookie |
-| POST | `/api/ws/{c}/cells/{cell_id}/as-view` | cardtypes | cookie |
-| POST | `/api/ws/{c}/cells/{cell_id}/keep` | cardtypes | cookie |
 | POST | `/api/ws/{c}/cells/{cell_id}/regenerate` | notebook | cookie |
 | POST | `/api/ws/{c}/cells/{cell_id}/relink` | verify | cookie |
 | POST | `/api/ws/{c}/cells/{cell_id}/run` | notebook | cookie |
@@ -189,11 +157,6 @@ knows the key.
 | GET | `/api/ws/{c}/events` | investigation | cookie or token |
 | POST | `/api/ws/{c}/events` | events | cookie |
 | GET | `/api/ws/{c}/export` | export | cookie or token |
-| GET | `/api/ws/{c}/extensions` | extensions | cookie or token |
-| PUT | `/api/ws/{c}/extensions/{name}` | extensions | cookie |
-| POST | `/api/ws/{c}/extensions/{name}/add` | extensions | cookie |
-| POST | `/api/ws/{c}/extensions/{name}/orientation` | extensions | cookie |
-| PUT | `/api/ws/{c}/extensions/{name}/views/{slug}` | extensions | cookie |
 | POST | `/api/ws/{c}/feedback` | feedback_routes | cookie |
 | GET | `/api/ws/{c}/filters` | concepts | cookie or token |
 | PUT | `/api/ws/{c}/filters` | concepts | cookie |
@@ -268,11 +231,9 @@ knows the key.
 | GET | `/api/ws/{c}/report-types/{slug}` | report_types | cookie or token |
 | PUT | `/api/ws/{c}/report-types/{slug}` | report_types | cookie |
 | POST | `/api/ws/{c}/restore` | ledger | token |
-| POST | `/api/ws/{c}/session` | events | token |
 | PUT | `/api/ws/{c}/session/effort` | events | cookie |
 | PUT | `/api/ws/{c}/session/fast` | events | cookie |
 | PUT | `/api/ws/{c}/session/model` | events | cookie |
-| POST | `/api/ws/{c}/sessions/permission` | agent_session | token |
 | GET | `/api/ws/{c}/settings` | ledger | cookie or token |
 | PUT | `/api/ws/{c}/settings` | ledger | cookie |
 | POST | `/api/ws/{c}/subagents/again` | subagents | cookie |

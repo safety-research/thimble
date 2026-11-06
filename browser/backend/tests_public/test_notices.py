@@ -251,16 +251,14 @@ def test_an_agent_is_named_by_its_role_and_its_run_s_title():
     assert notices.who("", "") == ("Agent", "The agent")
 
 
-def test_a_dismissal_of_the_manual_mode_or_a_no_box_notice_holds_for_the_workspace_and_no_other_does():
-    """REMEMBERED: the analyst's x on `manual-mode` or on `no-box:<extension>` is kept in the workspace's
-    notices-dismissed.json, so a later post under that key writes nothing; another key's dismissal holds only for that
-    notice, and a clear (the failure fixed) remembers nothing."""
-    for key in ("manual-mode", "no-box:video"):
-        n = notices.post(CORPUS, kind="x", key=key, text="Shown once.")
-        assert notices.dismiss(CORPUS, n["id"]) and notices.dismissed(CORPUS, key)
-        assert notices.post(CORPUS, kind="x", key=key, text="Shown again?") is None
-        assert notices.open_notices(CORPUS) == []
-    assert notices.post(CORPUS, kind="sandbox", key="no-box:other", text="Another extension.") is not None
+def test_a_dismissal_of_the_manual_mode_notice_holds_for_the_workspace_and_no_other_does():
+    """REMEMBERED: the analyst's x on `manual-mode` is kept in the workspace's notices-dismissed.json, so a later post
+    under that key writes nothing; another key's dismissal holds only for that notice, and a clear (the failure fixed)
+    remembers nothing."""
+    n = notices.post(CORPUS, kind="x", key="manual-mode", text="Shown once.")
+    assert notices.dismiss(CORPUS, n["id"]) and notices.dismissed(CORPUS, "manual-mode")
+    assert notices.post(CORPUS, kind="x", key="manual-mode", text="Shown again?") is None
+    assert notices.open_notices(CORPUS) == []
     for key in ("agent:orientation", "manual-mode-x", "no-box", "setup:no-box:x"):
         n = notices.post(CORPUS, kind="x", key=key, text="A failure.")
         assert notices.dismiss(CORPUS, n["id"]) and not notices.dismissed(CORPUS, key), key
@@ -268,7 +266,7 @@ def test_a_dismissal_of_the_manual_mode_or_a_no_box_notice_holds_for_the_workspa
     from app import config
 
     kept = (config.workspace_path(CORPUS) / notices.DISMISSED_FILE).read_text()
-    assert set(__import__("json").loads(kept)) == {"manual-mode", "no-box:video"}
+    assert set(__import__("json").loads(kept)) == {"manual-mode"}
 
 
 def test_a_sign_in_notice_carries_sign_it_out():
@@ -277,12 +275,3 @@ def test_a_sign_in_notice_carries_sign_it_out():
     assert n["action"] == {"label": "Sign it out", "do": "sign-out", "slug": "0123456789ab"}
 
 
-def test_setup_text_writes_the_words_from_the_key_and_knows_no_other_key():
-    from app import cli
-
-    for name in cli.UNSET_VARS:
-        text = notices.setup_text(f"env:{name}")
-        assert text.startswith(f"Your shell sets {name}, so thimble's agents") and "In your terminal:" in text
-    assert notices.setup_text("proxy") == notices.SETUP_TEXTS["proxy"] and "NO_PROXY" in notices.setup_text("proxy")
-    for key in ("env:PATH", "env:", "proxy:x", "Click here to sign in", "", None):
-        assert notices.setup_text(key) == "", key

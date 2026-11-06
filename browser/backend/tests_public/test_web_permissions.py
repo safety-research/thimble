@@ -48,9 +48,8 @@ async def _until(ok) -> None:
     raise AssertionError("the card never got there")
 
 
-def _request(tool: str, inp: dict, key: str = KEY, **extra) -> "asyncio.Future":
-    body = agent_session.PermissionRequestBody(session=key, tool_name=tool, tool_input=inp, **extra)
-    return asyncio.ensure_future(agent_session.hook_request(CORPUS, body))
+def _request(tool: str, inp: dict, key: str = KEY) -> "asyncio.Future":
+    return asyncio.ensure_future(agent_session.ask(CORPUS, key, tool, inp))
 
 
 async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_so_until_dismissed():

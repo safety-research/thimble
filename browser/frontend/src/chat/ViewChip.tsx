@@ -158,7 +158,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
     }
   }
   const after = (what: string) => (a: StartAnswer & Partial<Proposal>) => {
-    if (a.kind && !a.agentId) bus.emit('toast', { text: `${what} ${name} didn't start: ${refusalLine({ kind: a.kind, reason: a.reason ?? '', expired: a.expired })}`, kind: 'error' })
+    if (a.kind && !a.agentId) bus.emit('toast', { text: `${what} ${name} didn't start: ${refusalLine({ kind: a.kind, reason: a.reason ?? '' })}`, kind: 'error' })
     return refreshProposals(ws)
   }
   // Retry and Try again: a new builder through thimble's plugin, with the Build menu's values
@@ -183,7 +183,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
       .catch((e: Error) => bus.emit('toast', { text: `Could not start ${name}. ${e.message}`, kind: 'error' }))
       .finally(() => setRetrying(false))
   }
-  const actions = refused ? refusalActions(p!.refused!.kind, !!p!.refused!.expired) : []
+  const actions = refused ? refusalActions(p!.refused!.kind) : []
   const clickable = status === 'suggested' ? false : pending || failed ? !!p?.chat : !!key
   const why = failedWhy(p)
   return (

@@ -12,7 +12,7 @@ from app import config, ledger, notebook
 
 BACKEND = Path(__file__).resolve().parents[1]
 
-# a process that adds `n` note cards to one group of a workspace folder, as thimble-run and the shim each write cards
+# a process that adds `n` note cards to one group of a workspace folder, as each writer of cards does
 ADDER = """
 import asyncio, sys
 sys.path.insert(0, {backend!r})
@@ -67,14 +67,14 @@ def test_a_run_saves_into_the_group_as_another_process_left_it(workspaces_tmp: P
 
 
 def test_a_run_keeps_the_chat_another_process_credited_its_card_to(workspaces_tmp: Path) -> None:
-    """_merge_cell: while a subagent's card runs (thimble-run), the mirror's process credits the card to the subagent's
+    """_merge_cell: while a subagent's card runs, the mirror's process credits the card to the subagent's
     chat (agents.claim_cell); the run's save keeps that credit and its edits' authors, and writes its own state (live
     check T13: an orientation's cards were left credited to main's `terminal`)."""
     ws = config.workspace_dir("mini")
     nb = notebook.create_notebook(ws, "Orientation")
     first = notebook.insert_cell("mini", nb["id"], notebook.new_cell("code", notebook.TERMINAL_CREATOR, "q", nb["id"],
                                                                      code="1"))
-    held = json.loads(json.dumps(notebook.read_notebook(ws, nb["id"])))  # what thimble-run held while the code ran
+    held = json.loads(json.dumps(notebook.read_notebook(ws, nb["id"])))  # what the run held while the code ran
     data = json.loads(notebook._nb_file(ws, nb["id"]).read_text())
     data["cells"][0]["created_by"] = "chat:abc12345"  # the mirror's claim, from another process
     data["cells"][0]["edited"] = [{"by": "chat:abc12345", "ts": "2026-10-06T21:17:00+00:00"}]

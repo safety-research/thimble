@@ -21,6 +21,9 @@ from fastapi import FastAPI
 from app import concepts, config, kernel_thimble, labels_store, records, refs, views
 from mini_corpus import write_forge_db
 
+# model calls go through Claude Code, which the tests fake (conftest claude_code_sign_in)
+pytestmark = pytest.mark.usefixtures("claude_code_sign_in")
+
 CORPUS = "records"
 PAGES = ["Section 1. Overview of the harbor line", "Section 2. Crew rest. Average rest between shifts: 10.4 hours",
          "Section 3. Fuel and delays"]

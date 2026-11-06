@@ -17,7 +17,7 @@ import { RefEditor } from '../canvas/RefEditor'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { Chip } from '../components/Chip'
-import { CARD_MIME, chartLabels, figureKind, isVegaLite, Output, outIndex, pickMime, primaryArtifact } from '../components/Outputs'
+import { chartLabels, figureKind, isVegaLite, Output, outIndex, pickMime, primaryArtifact } from '../components/Outputs'
 import { GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
@@ -309,8 +309,7 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
   }, [box])
 
   const art = cell ? primaryArtifact(cell.outputs) : null
-  // a card type's graphic is drawn in the type's frame by the card's own body (CardFigure), and elsewhere is its listing
-  const shown = art && art.kind !== 'error' && !(CARD_MIME in art.bundle) ? art.bundle : null
+  const shown = art && art.kind !== 'error' ? art.bundle : null
   // a bare figure stands in a box its page scales it to fit (a slide's, a scene's)
   const wide = !bare && shown && width < FIGURE_CHART_MIN && isVegaLite(pickMime(shown) ?? '') ? FIGURE_CHART_MIN : undefined
   const body = pending ? (
@@ -325,7 +324,7 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
     <FigureOutput table={art?.kind === 'table'} wide={wide} out={outIndex(cell?.outputs, shown)}>
       <Output bundle={shown} fitWidth={wide ?? width} maxLines={30} maxRows={FIGURE_TABLE_ROWS} labels={chartLabels(cell?.labels, concepts)} />
     </FigureOutput>
-  ) : cell && (!art || CARD_MIME in art.bundle) && width > 0 ? (
+  ) : cell && !art && width > 0 ? (
     <CardFigure ws={ws} cell={cell} width={width} />
   ) : null
   if (bare) {
@@ -394,9 +393,8 @@ function keepFromEditor(el: HTMLElement | null) {
   el?.addEventListener('mousedown', (e) => e.stopPropagation())
 }
 
-/** A card without a run to show, or a card type's graphic, drawn by the canvas's own body for its kind (canvas/bodies
- * CardBody), so a note, an example, a label, a timeline, a custom card or a card type's card reads in the report as it
- * does on the board. */
+/** A card without a run to show, drawn by the canvas's own body for its kind (canvas/bodies CardBody), so a note, an
+ * example, a label, a timeline or a custom card reads in the report as it does on the board. */
 function CardFigure({ ws, cell, width }: { ws: string; cell: Cell; width: number }) {
   const board = useContext(CanvasContext)
   const ctx = useMemo(() => ({ ...board, ws }), [board, ws])

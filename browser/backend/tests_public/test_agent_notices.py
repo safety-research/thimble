@@ -15,6 +15,9 @@ from app import agents, card_check, checks, concepts, config, dev, notices, suba
 from app import model as model_mod
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
+# model calls go through Claude Code, which the tests fake (conftest claude_code_sign_in)
+pytestmark = pytest.mark.usefixtures("claude_code_sign_in")
+
 CORPUS = "mini"
 BLOCK = "API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com/legal/aup)."
 SAFEGUARDS = "Claude's safeguards stopped its request; rephrase or narrow the request and try again"

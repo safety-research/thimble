@@ -14,7 +14,7 @@ let posted: string[] = []
 
 beforeEach(() => {
   posted = []
-  const main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: false, attached: ATTACHED, module: true } as unknown as ChatMeta
+  const main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: false, attached: ATTACHED } as unknown as ChatMeta
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const u = String(url)

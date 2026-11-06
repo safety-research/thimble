@@ -32,7 +32,7 @@ List a group's cards, one line each with its id, kind, question and the start of
 
 ## add_card
 
-Add a card, with its question and its content in one call. {{if:browser}}thimble runs the code and returns `card:<id>` and the start of each output.{{end}}{{if:terminal}}thimble returns `card:<id>` and a command that runs the code. Run it with Bash, and it prints the start of each output.{{end}} Give its takeaway here, or with `edit_card` once you have read the output.
+Add a card, with its question and its content in one call. thimble runs the code and returns `card:<id>` and the start of each output. Give its takeaway here, or with `edit_card` once you have read the output.
 
 ```json
 {
@@ -40,7 +40,7 @@ Add a card, with its question and its content in one call. {{if:browser}}thimble
   "properties": {
     "question": {"type": "string", "description": "The one question the card answers."},
     "kind": {"type": "string", "enum": ["example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan"], "description": "table, code, diagram, plot and timeline run `code`. A code card shows the code itself, with what it prints under it, and the others show only what the code makes. example quotes `refs`, note shows `text`, custom `html`, plan `steps`. Default code."},
-    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in thimble.chart(kind, df) after import thimble when a kind fits, else in an Altair or matplotlib chart, its colors left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). thimble.chart takes the DataFrame's columns in the kind's order, named as the axes: bar (category, value[, group]), line (x, y[, series]), area (x, y[, series]), scatter (x, y[, group]), dots (x, row[, group]), box (value, group), histogram (value[, group]), density (value[, group]), violin (value, group), ecdf (value[, group]), range (item, before, after[, group]) or heatmap (x, y, value), and label=<label> draws a label's values in its colors; interval=(lo, hi) on bar, dots or line names the columns of each value's low and high ends; panels=True draws each group in a panel of its own; fit=\"linear\" or \"smooth\" on scatter adds a trend line. thimble.chart(..., show=False) returns the chart as an Altair chart to layer your own marks on, such as a few events called out above a daily bar chart, colored with thimble.theme.accent, .ink, .muted, .pale or .series[i]. Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, color a label's values with thimble.colors(label, values), a {value: color} dict. A plot can also be a card type's graphic, thimble.card(type, labels=[...], **args), from the card types under Cards."},
+    "code": {"type": "string", "description": "Python run in the corpus root. A table ends in a DataFrame of a few short columns indexed by what names each row, a plot in thimble.chart(kind, df) after import thimble when a kind fits, else in an Altair or matplotlib chart, its colors left to thimble's theme, and after import thimble a diagram in thimble.diagram(nodes, edges), each edge a (source, target, label), and a timeline in thimble.timeline(events), each event a (time, label). thimble.chart takes the DataFrame's columns in the kind's order, named as the axes: bar (category, value[, group]), line (x, y[, series]), area (x, y[, series]), scatter (x, y[, group]), dots (x, row[, group]), box (value, group), histogram (value[, group]), density (value[, group]), violin (value, group), ecdf (value[, group]), range (item, before, after[, group]) or heatmap (x, y, value), and label=<label> draws a label's values in its colors; interval=(lo, hi) on bar, dots or line names the columns of each value's low and high ends; panels=True draws each group in a panel of its own; fit=\"linear\" or \"smooth\" on scatter adds a trend line. thimble.chart(..., show=False) returns the chart as an Altair chart to layer your own marks on, such as a few events called out above a daily bar chart, colored with thimble.theme.accent, .ink, .muted, .pale or .series[i]. Name nodes, edges and events in a few words, their numbers computed, as in f\"revisions.jsonl: {len(R):,} saves\"; an edge label over 36 characters becomes a numbered note under the diagram. In matplotlib, color a label's values with thimble.colors(label, values), a {value: color} dict."},
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] }, "description": "The records an example card quotes, each under the name of its file and its place. Each is a ref, a moment of a video as <path>#t=<m:ss>, or {ref, quote} to highlight a passage of a long record, quoted exactly. Give one item per passage: the passages of one record show in that record, highlighted."},
     "text": {"type": "string", "description": "The markdown a note card shows."},
     "html": {"type": "string", "description": "The page a custom card shows, for what no other kind can show: one question answered on one screen, about 690 px wide and 800 px tall in its card. The card shows its question above the page and its takeaway under it, so the page starts with its content and does not say the answer again. Its frame has thimble's card stylesheet, which gives plain HTML, such as a table, a list or a paragraph, thimble's type and the paper's colors. So write it without colors, borders or fonts of your own, and the analyst reads the data and not the page. Scripts run, the network does not. A chart in it takes thimble's chart style from CSS variables: `--viz-1` to `--viz-7` for series in order, `--viz-seq-1` to `--viz-seq-5` for an amount, `--viz-other` for the rest, `--viz-font`, `--viz-size` and `--viz-bar-radius` for the corners at a bar's end. Scripts also have thimble.colors.series, thimble.colors.seq and thimble.vegaConfig, the config of thimble's own Vega-Lite charts."},
@@ -204,7 +204,7 @@ Clear a scope's whole filter, so all its cards, records or sentences show again.
 
 ## set_layout
 
-{{if:browser}}Lay out the browser's main area, right of the chat, as panes that each show one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. The analyst can also drag the panes into place.{{end}}{{if:terminal}}Open thimble's panel in the terminal on surfaces, each in a pane: `files`, `canvas` for the cards, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report.{{end}}
+Lay out the browser's main area, right of the chat, as panes that each show one surface: `files`, `canvas`, `report`, or a view on its own as `view:<slug>`. Call it when the analyst asks to see surfaces together, such as the files beside the report. The analyst can also drag the panes into place.
 
 ```json
 {
@@ -219,15 +219,15 @@ Clear a scope's whole filter, so all its cards, records or sentences show again.
 
 ## open_view
 
-Open a card of a card type as its view in Files, as the card's Open as view does: the card's labels turn on and its arguments choose the view's records, which follow the labels live. Call it when the analyst asks to see such a card as a view, or with `view` to open a view with no card's arguments.
+Open a view in Files. Call it when the analyst asks to see a view.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "card": {"type": "string", "description": "The card, card:<id>."},
-    "view": {"type": "string", "description": "A view's slug or name, opened with no card's arguments, in place of `card`."}
-  }
+    "view": {"type": "string", "description": "A view's slug or name."}
+  },
+  "required": ["view"]
 }
 ```
 
@@ -332,32 +332,6 @@ Post the reply the analyst reads in a thread.
 }
 ```
 
-## message_thread
-
-Send a message the analyst typed in this terminal to a thread, as that thread's own composer sends it: a side thread's follow-up, or with no message its unanswered questions asked again, whose `thread` event, with the thread's anchor, comes back in the result for you to handle at once; a follow-up for the orientation; or a change to a view for the view's build thread. thimble shows the message in that thread. Call it for /thimble:ask.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "thread": {"type": "string", "description": "The thread's name or id as the thread list shows it, such as main/why-the-spike, orient or dev/board."},
-    "message": {"type": "string", "description": "The analyst's message, word for word. Leave it out to ask a side thread's unanswered questions again."}
-  },
-  "required": ["thread"]
-}
-```
-
-## list_agents
-
-List thimble's agents, the subagents of this session that thimble started, with what each is doing and its thread. Claude Code's agent tray lists the same subagents. Call it for /thimble:agents.
-
-```json
-{
-  "type": "object",
-  "properties": {}
-}
-```
-
 ## rename_thread
 
 Rename a thread in thimble's thread list, when the analyst asks you to.
@@ -389,7 +363,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## screenshot
 
-{{if:browser}}Get a picture of what the analyst sees in the browser, such as a card as thimble draws it.{{end}}{{if:terminal}}Get a picture of a card as thimble draws it. In terminal mode it takes no other picture.{{end}} It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
+Get a picture of what the analyst sees in the browser, such as a card as thimble draws it. It is slow, so use it only when the look matters, such as when the analyst asks you to fix how something appears.
 
 ```json
 {
@@ -442,7 +416,7 @@ Run a report check over the written documents or the cards, a question asked of 
 
 ## stop_check
 
-Turn a report check off, {{if:browser}}as the switch in the Comments pane does, {{end}}which hides its {{if:browser}}tints and {{end}}comments and stops its runs. Its comments are kept, and `run_check` turns it on again.{{if:terminal}} The terminal has no switch for a check, so the analyst asks you to turn one on or off.{{end}}
+Turn a report check off, as the switch in the Comments pane does, which hides its tints and comments and stops its runs. Its comments are kept, and `run_check` turns it on again.
 
 ```json
 {
@@ -487,14 +461,14 @@ Start the fix the person asks for with /thimble-fix. A copy of you changes thimb
 
 ## view_check
 
-Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get {{if:browser}}a picture of the page as it opens, whose path Read opens{{end}}{{if:terminal}}the view as it opens, drawn as text as the panel shows it{{end}}.
+Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get a picture of the page as it opens, whose path Read opens.
 
 ```json
 {
   "type": "object",
   "properties": {
     "locators": {"type": "array", "items": {"type": "string"}, "description": "Refs to check beside the sampled lines, such as `<path>#L<n>` or `view:<slug>/<key>`."},
-    "picture": {"type": "boolean", "description": "{{if:browser}}Also take a picture of the page as it opens, 1048 px wide with no label on.{{end}}{{if:terminal}}Also draw the view as text as it opens, 120 columns wide with no label on.{{end}}"}
+    "picture": {"type": "boolean", "description": "Also take a picture of the page as it opens, 1048 px wide with no label on."}
   }
 }
 ```
@@ -527,33 +501,6 @@ Take pictures of the view you review, whose paths Read opens. The first call giv
         "properties": {
           "state": {"type": "string", "enum": ["control", "labels", "filtered", "detail", "open", "narrow", "wide"]},
           "controls": {"type": "array", "maxItems": 3, "items": {"type": "string"}, "description": "For `control`: the controls to click in turn, by their text, such as `Color by: State`, `State` and `Approval`, which color by Approval in place of State."},
-          "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
-          "why": {"type": "string", "description": "What you want to check in it, in a few words."}
-        },
-        "required": ["state", "why"]
-      }
-    }
-  }
-}
-```
-
-## view_pictures@terminal
-
-Draw the view you review as text, as thimble's panel shows it. The first call gives the view as it opens, 120 columns wide; ask for other states in `states`, up to four more.
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "states": {
-      "type": "array",
-      "maxItems": 4,
-      "description": "States to see beside the overview: `control`, the view after the keys in `controls`, pressed in turn; `detail`, the place the first citation opens; `open`, the place a citation of `ref` opens, a record `<path>#L<n>` or a unit from the records; `wide`, the view as it opens 200 columns wide.",
-      "items": {
-        "type": "object",
-        "properties": {
-          "state": {"type": "string", "enum": ["control", "detail", "open", "wide"]},
-          "controls": {"type": "array", "maxItems": 8, "items": {"type": "string"}, "description": "For `control`: the keys to press in turn, such as `down`, `return` or `c`, or `click:<words>` for a click on the control that shows those words."},
           "ref": {"type": "string", "description": "For `open`: the ref whose place to see."},
           "why": {"type": "string", "description": "What you want to check in it, in a few words."}
         },
@@ -599,10 +546,6 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
   "properties": {}
 }
 ```
-
-## instructions
-
-These tools act on thimble, the analyst's workspace for this corpus beside this session: a chat, the corpus's files, cards and a report, which thimble shows {{if:browser}}in the browser{{end}}{{if:terminal}}in the terminal{{end}}. A session that opened thimble, with /thimble or the `thimble` command, and each thimble subagent, also has thimble's full instructions. If yours has none, thimble cannot reach this session yet, so tell the analyst to type /thimble.
 
 ## card-errored
 
@@ -768,13 +711,9 @@ Files shows the label turned on with that value highlighted, and its views keep 
 
 thimble shows {surfaces} {layout}.
 
-## open_view-card
-
-Opened {card} as the {view} view in Files, with its labels on and its arguments choosing the records.
-
 ## open_view-view
 
-Opened the {view} view in Files, with no card's arguments.
+Opened the {view} view in Files.
 
 ## clear_filter-cleared
 
@@ -854,7 +793,7 @@ screenshot cannot take this picture in terminal mode. There it draws only a card
 
 ## propose_view-proposed
 
-Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in {{if:browser}}Files{{end}}{{if:terminal}}thimble's panel in the terminal{{end}} when its checks pass.
+Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building it now, and it opens in Files when its checks pass.
 
 ## propose_view-unmatched
 
@@ -894,7 +833,7 @@ Filed {label}, but it cannot run here, so it failed at once: {why} Tell the anal
 
 ## file_dev_ticket-waits
 
-Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card{{if:browser}} in the browser{{end}}. Tell the analyst in one line.
+Filed {label}. {running} runs now, and code tickets run one at a time, so this one waits until the analyst starts it with Start on its card in the browser. Tell the analyst in one line.
 
 ## file_dev_ticket-start
 
@@ -1009,28 +948,6 @@ The pictures, which Read opens:
 The records they show:
 
 {records}
-
-## view-pictures@terminal
-
-The pictures, each the view drawn as text as the panel shows it:
-
-{paths}
-
-The records they show:
-
-{records}
-
-## view-review-program
-
-{extension}'s program reviews views in this workspace in place of your own reading of the pictures. It read these pictures and found these problems:
-
-{problems}
-
-Fix these problems, and only these. When it found none, call `finish_review` with nothing revised.
-
-## view-review-program-failed
-
-{extension}'s program reviews views in this workspace in place of your own reading of the pictures, and it failed: {why}. Change nothing, and end with one line that says so.
 
 ## view-no-forms
 
@@ -1156,78 +1073,10 @@ In {file}, no card names `{value}`, a value of `{field}` in {count} of {sampled}
 
 No check found anything.
 
-## start_job-subagent
-
-Start it now as a subagent of this session, with one Agent call whose input is exactly this:
-
-{input}
-
-Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
-
-## subagent-request
-
-[thimble request {request_id}]
-
-## agent-check-exact
-
-thimble starts its agents, and passes messages on to them, only with the call its tool gave: make the call again exactly as the result of start_orientation, start_writing, propose_view, run_check or message_orientation gave it, with nothing changed, or make none if the analyst did not ask for it.
-
-## agent-check-message
-
-thimble's agents continue only when the analyst asks. If they asked, call message_orientation and send what it gives; otherwise ask them first.
-
-## start-plan-mode
-
-Your Claude Code session is in plan mode, where thimble's agents would have to ask you before every card and every edit, so none of them starts or takes a message there. Switch out of plan mode first (shift+tab in your terminal).
-
-## start_agent-fork
-
-Filed {what}. Main is starting {agent}, and the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and main is starting {agent}.
-
-## start_agent-event
-
-The fork of {thread} filed {what}. A fork cannot start subagents, so start {agent} for it now as a subagent of this session, with one Agent call whose input is exactly this:
-
-{input}
-
-Change nothing in it, since thimble lets only this call through. The call needs no words before or after it: the analyst sees it, and the fork told them in the thread.
-
 ## ticket-from-thread
 
 The analyst asked for this in the side thread {thread}, which they opened on this:
 {anchor}
-
-## start-refused-no-module
-
-thimble's agents can't start in this session: {reason}. Main, its threads, cards and labels still work. Once that is fixed, restart Claude Code in this folder (`claude -c`) and type /thimble, or run `thimble -c`.
-
-## start-refused-connecting
-
-thimble's plugin is still connecting to this session, so thimble's agents can't start yet. Try again in a few seconds.
-
-## module-deny-private
-
-thimble refused this call, since it keeps its token files (server.json, session.key, paired.json and the links folder in thimble's home) out of reach of the file tools of its sessions. Do the task without them.
-
-## module-deny-records
-
-thimble refused this edit, since only thimble writes its records (its chats, checks, views, notices, the trusted folder, the orientation's run file and the permission modes it keeps in its home). Make the change with thimble's tools, or ask the analyst to make it in thimble's Settings.
-
-## module-deny-data
-
-thimble refused this edit, since thimble's config turns edits of the corpus off (agents.orientation.data is "off"). Leave the corpus as it is, and tell the analyst when the task needs an edit.
-
-## module-deny-web
-
-thimble refused this call, since thimble's config turns the web tools off (agents.orientation.web is "off").
-
-## module-started-note
-
-thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. Its report goes to the analyst in thimble, so when it hands back, reply in one short line, and do nothing about it unless the analyst asks.
-
-## module-started-note@terminal
-
-thimble: the analyst started thimble's {role} for {what} {how}, as your subagent {agent}. When it hands back, reply as your prompt says for a hand-back, and do nothing more about it unless the analyst asks.
 
 ## follow-up-ran-on
 
@@ -1237,10 +1086,6 @@ This message ran on {model} · {effort}, the role's current settings.
 
 A writer of {doc} is running already. Tell the analyst so in one line.
 
-## start_writing-repeated
-
-The writer of {doc} is running already, and thimble shows it, so this turn needs nothing more.
-
 ## agent-started
 
 thimble started it, and it runs in the background while the analyst sees it in the chat. End the turn now, with no words and no other call, unless the analyst asked for more in this turn.
@@ -1248,22 +1093,6 @@ thimble started it, and it runs in the background while the analyst sees it in t
 ## agent-started-fork
 
 Filed {what}, and thimble started {agent}; the analyst has nothing to do. Tell the analyst in one line in the thread that it is filed and {agent} is running.
-
-## agent-launched
-
-{who} runs in the background, and the analyst sees it. End the turn now, with no words and no other call, unless the analyst asked for more in this turn. One short sentence is fine when it tells the analyst something thimble does not show. Do not make this call again.
-
-## start_writing-subagent
-
-Start the writer now as a subagent of this session, with one Agent call whose input is exactly this:
-
-{input}
-
-Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
-
-## start_writing-program
-
-An extension's program writes {doc}. The program has started, and thimble shows it, so this turn needs no words from you unless it has something else for the analyst. Its last message reaches you as a `written` event.
 
 ## writer-context-file
 
@@ -1635,44 +1464,6 @@ This workspace was installed from a pre-cache: its orientation ran in advance on
 
 This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), as a subagent of the exporter's Claude Code session, so `message_orientation` cannot reach it, though its thread shows every step it took. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
 
-## thimble-terminal-home
-
-thimble: this session runs in terminal mode, so thimble shows this workspace here in the terminal and starts no server. To switch to browser mode, quit, run `thimble mode browser` and start `thimble` again.
-
-## agents-none
-
-No agent of thimble's runs now.
-
-## agents-print
-
-Print the text below in a code block, as it is, and add nothing else.
-
-{text}
-
-## message_thread-event
-
-thimble shows the message in the thread {thread}. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
-
-{event}
-
-## message_thread-again
-
-The analyst asks the thread {thread} its questions again. Handle the thread's event now, as its bullet in your prompt says, and end the turn on that call, with no text after it: the terminal shows the call, and the thread shows the answer.
-
-{event}
-
-## message_thread-queued
-
-The message is in the thread {thread}, which waits for the fork you started for it and gets the message once that fork is known, so this turn needs no words from you.
-
-## message_thread-empty
-
-{thread} takes no empty message. Pass what the analyst wrote as `message`.
-
-## message_thread-main
-
-{thread} takes no messages of its own: its composer sends them to you. Do what the message asks yourself.
-
 ## stop-subagent
 
 The analyst pressed Stop on {title}, your subagent `{agent_id}`, in thimble. Stop it with TaskStop.
@@ -1717,21 +1508,9 @@ thimble's server restarted while your session ran, which stopped it, and it has 
 
 It could not be resumed: {why}
 
-## session-scratch
-
-Your own scratch folder is {folder}. Put the files you make for your own work there, such as a script or an intermediate result, rather than in $TMPDIR or /tmp, which the session's other agents share.
-
-## work-budget
-
-The session's work folder {folder} now holds {size}, more than {budget}. Delete the extracts and copies there that you no longer need, and read the corpus in place rather than copying it.
-
 ## session-mode-switching
 
 This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
-
-## session-unproven
-
-`{tool}` did not run: thimble could not confirm that this call came from the session it names. Stop here and tell the analyst, who can start this session again from thimble.
 
 ## call-ref
 

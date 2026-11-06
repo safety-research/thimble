@@ -39,35 +39,6 @@ def test_a_post_from_another_origin_is_refused_before_it_reaches_the_route(app_p
     assert r.status_code == 403
 
 
-def test_the_plugin_s_routes_refuse_a_web_page_on_a_get_too(app_prod, monkeypatch):
-    """The shim's subscription is a GET that attaches the session it names (events.subscribe): no browser request
-    may reach it, not even the app's own page (an <img> in markdown a model wrote sends Sec-Fetch-Site: same-origin and
-    no Origin). The shim and the hooks send no Origin and no Sec-Fetch-* header, and pass."""
-    from app import events, session
-
-    attached = []
-    monkeypatch.setattr(config, "workspace_for_cwd", lambda cwd: "mini")
-    monkeypatch.setattr(session, "connected", lambda *a, **k: attached.append(a))
-    monkeypatch.setattr(session, "main_pid", lambda c: 4242)
-    c = TestClient(app_prod)
-    q = "cwd=/corpus&session=evil&pid=1&delivery=hook"
-    for headers in ({"Origin": "https://evil.example"}, {"Origin": "null"}, {"Origin": "http://127.0.0.1:1"},
-                    {"Origin": "http://testserver"}, {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"},
-                    {"Sec-Fetch-Site": "none"}, {"Sec-Fetch-Site": "same-origin"}, {"Sec-Fetch-Dest": "image"},
-                    {"Sec-Fetch-Mode": "no-cors"}):
-        # the subscription last: were it served, its stream would not end
-        for path in ("/api/events/main?cwd=/corpus&pid=4242", f"/api/events/pull?{q}&wait=0", f"/api/events?{q}"):
-            r = c.get(path, headers=headers)
-            assert r.status_code == 403, (path, headers)
-    assert not attached and not events._subs.get("mini")
-    # the hooks' curl: no Origin, no Sec-Fetch-Site
-    assert c.get("/api/events/main?cwd=/corpus&pid=4242").json() == {"workspace": "mini", "main": True}
-    assert c.post("/api/events/ack", json={"cwd": "/corpus", "id": "x"},
-                  headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}).status_code == 403
-    # a read elsewhere is still never refused
-    assert c.get("/api/health", headers={"Sec-Fetch-Site": "same-site"}).status_code == 200
-
-
 def test_a_json_route_refuses_a_body_without_a_json_content_type(app_prod):
     """The second defence behind the Origin check (pyproject's fastapi>=0.132): a no-cors fetch or a form can send a
     body with no Content-Type or a text one, and a JSON route does not read it."""
@@ -199,72 +170,3 @@ def test_two_servers_on_one_machine_keep_their_own_cookies(app_prod, monkeypatch
     assert c.put(page + THEME_PATH, json=THEME).status_code == 403
     c.cookies.set("thimble-ui-8300", mine)
     assert c.put(page + THEME_PATH, json=THEME).status_code == 200
-
-
-# the write routes 0.4.0 added: extensions, card types and a card's Keep and Open as view
-EXTENSION_WRITES = [
-    ("PUT", "/api/ws/mini/extensions/video", {"on": False}),
-    ("PUT", "/api/ws/mini/extensions/video/views/none", {"on": False}),
-    ("POST", "/api/ws/mini/extensions/video/orientation", {"run": False}),
-    ("POST", "/api/extensions/refresh", {}),
-    ("POST", "/api/ws/mini/cardtypes/none/records", {"query": None}),
-    ("POST", "/api/ws/mini/cells/none/keep", {"patch": {}, "dry": True}),
-    ("POST", "/api/ws/mini/cells/none/as-view", None),
-]
-
-
-@pytest.mark.real_write_guard
-@pytest.mark.parametrize(("method", "path", "body"), EXTENSION_WRITES)
-def test_the_extension_routes_take_writes_from_the_browser_or_from_the_cli_alone(app_prod, plugin_headers, method, path,
-                                                                                body):
-    """Each write route of extensions and card types refuses a caller with neither a signed-in browser's cookie nor the
-    token, as card code is, even with a same-origin Origin. The browser's cookie reaches each analyst route, and the
-    CLI's proof reaches /api/extensions/refresh, its token route, alone; neither reaches the other's."""
-    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
-
-    from app import hook_auth
-
-    _record_paired(UI_COOKIE_VALUE)
-    c = TestClient(app_prod, base_url="http://testserver")
-
-    def detail(base: str = "", **kw):
-        r = c.request(method, base + path, json=body, **kw)
-        return r.status_code, (r.json() if r.headers.get("content-type") == "application/json" else {}).get("detail")
-
-    token_route = hook_auth.guarded(method, path)
-    assert detail(headers={"Origin": "http://testserver"})[0] == (401 if token_route else 403)
-    by_token = detail(headers=plugin_headers())
-    assert by_token[0] not in (401, 403) if token_route else by_token == (403, hook_auth.WRITE_REFUSED)
-    c.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
-    by_cookie = detail(f"/b/{UI_KEY_VALUE}")  # the page asks under its key's path (hook_auth.browser_path)
-    assert by_cookie[0] == 401 if token_route else by_cookie[1] != hook_auth.WRITE_REFUSED
-
-
-@pytest.mark.real_write_guard
-def test_thimble_extension_tells_the_server_with_the_token(app_prod, plugin_headers, monkeypatch):
-    """`thimble extension add` and `remove` post /api/extensions/refresh through cli._request, which proves the token, so
-    the guard lets the change through."""
-    import io
-    import urllib.error
-    import urllib.request
-
-    from app import cli
-
-    plugin_headers()  # records the token in server.json
-    c = TestClient(app_prod, base_url="http://testserver")
-    seen = []
-
-    class Answer(io.BytesIO):
-        status = 200
-
-    def urlopen(req, timeout=None):
-        r = c.request(req.get_method(), req.full_url, content=req.data,  # the whole URL: its port is in the proof
-                      headers=dict(req.header_items()))
-        seen.append(r.status_code)
-        if r.status_code >= 400:
-            raise urllib.error.HTTPError(req.full_url, r.status_code, "", {}, io.BytesIO(r.content))
-        return Answer(r.content)
-
-    monkeypatch.setattr(cli.config.LOOPBACK, "open", urlopen)  # the CLI's loopback opener, which skips any proxy
-    status, body = cli._request("POST", "http://127.0.0.1:8300/api/extensions/refresh", {})
-    assert (status, seen) == (200, [200]) and "workspaces" in body

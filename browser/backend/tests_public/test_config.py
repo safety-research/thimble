@@ -78,15 +78,15 @@ def test_a_claude_thimble_starts_gets_the_sign_in_environment_of_the_analysts_se
     assert {k: launched.get(k) for k in sign_in} == {k: env[k] for k in sign_in}, "what every `claude` thimble runs gets"
 
 
-def test_not_logged_in_names_the_login_and_where_the_other_ways_are(monkeypatch):
-    """thimble has no login of its own: the alert names `claude auth login` and points to INSTALL.md's Authentication
-    section for the other ways, and nothing longer."""
-    monkeypatch.delenv("THIMBLE_SKIP_KEY", raising=False)
+def test_the_alert_says_what_keeps_the_way_to_reach_claude_from_working(monkeypatch):
+    """The alert when a model call cannot run says what keeps the way to reach Claude the person chose from working
+    (claude_access.problem_line), and nothing once it works."""
+    from app import claude_access
+
     monkeypatch.setattr(config, "CLI_PATH", "/bin/claude")
-    said = config.auth_problem({"loggedIn": False})
-    assert said == ("Claude Code is not logged in (`claude auth status`): log in with `claude auth login` (INSTALL.md, "
-                    "Authentication, has more ways), then try again")
-    assert config.auth_problem({"loggedIn": True}) == ""
+    assert config.auth_problem() == claude_access.problem_line() != ""
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    assert config.auth_problem() == ""
 
 
 # --------------------------------------------------------------------------- corpus registration

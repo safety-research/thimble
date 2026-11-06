@@ -17,10 +17,7 @@ stale. A stored copy under an id its built-in had before (FORMER_IDS: Important 
 know, now Heads up) is renamed to the id now when the checks are read (_migrate), and a comment that names a former id
 reads as naming the id now, written so on the store's next write. A former built-in (RETIRED: `verified`, before 0.7.0,
 and `unverified`, Unverifiable) is listed only where the workspace stored it, as any stored check is, so its comments
-stay readable there; it never runs again, and no new check takes its id. An active
-extension's report checks, checks/<slug>/check.json (its name and colour)
-and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, read from the extension until
-first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
+stay readable there; it never runs again, and no new check takes its id. A run is a `thimble:check`, a subagent of main
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
 work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
 (context.render) and then the document, the check's prompt and the passages it covers (a run of Heads up or Explainers,
@@ -29,21 +26,20 @@ the answer it checks rests on, and a digest of what the check already said, dige
 call is written as task.md, task-2.md… (read_parts), each small enough that Read returns it whole. Its prompt names that
 file or those files in order (`## check-task-file`, `## check-task-files`). It comments with add_comment and hands back
 one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
-analyst's Stop ends it (through thimble's plugin module, subagents.stop). A check made or changed (its name, prompt,
+analyst's Stop ends it (subagents.stop). A check made or changed (its name, prompt,
 colour, shown or covers) emits `checks` on the stream, so every list of the checks, the top bar's Comments, the
 canvas's and the Comments pane beside the slides, the story and a page, in any tab, reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
-(_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check gives main the
-exact Agent call (tool_run_check), and a thread's fork's gives it to main in a `start_agent` event (tools._ask_main).
+(_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check starts it the
+same way (tool_run_check), and a thread's fork's run the server starts with the fork's call (tools._fork_start).
 The analyst's own edits start nothing: each shown check's run records how many passages changed since it checked them
 (`stale`, mark_stale), and Run is one click.
 
 The cache: a passage (paragraph, heading, slide, beat or free sentence) is fingerprinted by the sentence_key of its
 words. A run covers only passages whose fingerprint its check has not seen on that document; a run that ends `done`
 supersedes the check's earlier open comments on those passages and records their fingerprints in `seen`. Main hears
-`checked {check, doc, status, comments}` when a run run_check started ends with no agent of main's, such as an
-extension's program; a run that ran as main's subagent says nothing more, since its hand-back already tells main, which
+`checked {check, doc, status, comments}` when a run run_check started ends with no agent of main's; a run that ran as main's subagent says nothing more, since its hand-back already tells main, which
 answers it in one line.
 
 The cards. A check `covers` the documents, the cards or both (COVERS; the built-ins say so in their frontmatter, a new
@@ -66,7 +62,7 @@ Explainers over answers is no agent: it is the terminal's look at those answers 
 shared by the two checks' runs, so the chat marks an answer as the terminal does; one whose prompt the analyst changed
 runs as its agent.
 
-Notices. A run that ends failed (its agent's API error, a start that did not happen, a program's error) is told in the
+Notices. A run that ends failed (its agent's API error, or a start that did not happen) is told in the
 foreground with Open on its chat, since the analyst may be in another chat (notices.post, under the run's key); its
 next start and a run that ends done clear it (_notice).
 """
@@ -211,34 +207,6 @@ def builtin(cid: str) -> dict[str, Any] | None:
             "covers": covers_of(front.get("covers")), "created_by": "thimble", "ts": "", "version": 1, "runs": {}}
 
 
-def from_extensions(c: str) -> dict[str, dict[str, Any]]:
-    """{id: check} of the report checks of the active extensions in workspace `c`, each off and never run, by
-    `<extension>-<slug>`; one whose check.md is empty or missing is left out."""
-    from . import extensions  # noqa: PLC0415 — extensions imports the views module
-
-    out: dict[str, dict[str, Any]] = {}
-    for e in extensions.active(c):
-        for k in e.get("checks") or []:
-            slug = str(k.get("slug") or "") if isinstance(k, dict) else ""
-            cid = f"{e['name']}-{slug}"
-            folder = Path(str(e["src"])) / "checks" / slug
-            try:
-                prompt = (folder / "check.md").read_text("utf-8").strip()[:PROMPT_CHARS]
-            except OSError:
-                prompt = ""
-            raw = read_json(folder / "check.json", {})
-            raw = raw if isinstance(raw, dict) else {}
-            colour = raw.get("color", raw.get("colour"))  # `colour`, the British spelling, is its alias
-            colour = int(colour) if isinstance(colour, (int, str)) and str(colour).isdigit() else None
-            if not slug or not prompt or not ID_RE.match(cid) or cid in BUILTINS:
-                continue
-            out[cid] = {"id": cid, "name": _collapse(raw.get("name") or slug)[:NAME_CHARS], "prompt": prompt,
-                        "colour": colour if colour in COLOURS else NEW_COLOURS[len(out) % len(NEW_COLOURS)], "shown": False,
-                        "builtin": True, "covers": covers_of(raw.get("covers")), "created_by": str(e["name"]), "ts": "",
-                        "version": 1, "runs": {}}
-    return out
-
-
 def _words_key(text: Any) -> str:
     return hashlib.sha1(_collapse(text).encode("utf-8")).hexdigest()
 
@@ -317,8 +285,8 @@ def _migrate(d: Path) -> None:
 
 
 def read(c: str, cid: str) -> dict[str, Any] | None:
-    """The check `cid` (a former id as its id now): its workspace file, else the built-in of that id, else an active
-    extension's; None when none exists."""
+    """The check `cid` (a former id as its id now): its workspace file, else the built-in of that id; None when none
+    exists."""
     cid = current_id(cid)
     _migrate(_dir(c))
     stored = read_json(_path(c, cid), None)
@@ -329,19 +297,16 @@ def read(c: str, cid: str) -> dict[str, Any] | None:
             stored["covers"] = (builtin(cid) or {}).get("covers") or list(DEFAULT_COVERS)
         stored["covers"] = covers_of(stored["covers"])
         return _as_now(stored, before_cards=before_cards)
-    return builtin(cid) or from_extensions(c).get(cid)
+    return builtin(cid)
 
 
 def list_checks(c: str) -> list[dict[str, Any]]:
-    """Every check, the built-ins first in their order, then the active extensions' checks, then the others in the
-    order they were made."""
+    """Every check, the built-ins first in their order, then the others in the order they were made."""
     out = [x for cid in BUILTINS if (x := read(c, cid)) is not None]
-    theirs = from_extensions(c)
-    out += [x for cid in theirs if (x := read(c, cid)) is not None]
     d = _dir(c)
     others = []
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
-        if p.stem in BUILTINS or p.stem in theirs or p.stem in FORMER_IDS:
+        if p.stem in BUILTINS or p.stem in FORMER_IDS:
             continue
         x = read(c, p.stem) if p.stem in RETIRED else read_json(p, None)
         if isinstance(x, dict) and x.get("id") == p.stem:
@@ -599,7 +564,7 @@ def target_name(doc: str) -> str:
 @dataclass
 class _Active:
     """A run of a check on a document while it goes: queued for a place (MAX_SESSIONS), started (its pending request,
-    then its agent, a `thimble:check` subagent of main), or an extension's program's job."""
+    then its agent, a `thimble:check` subagent of main)."""
 
     c: str
     check: str
@@ -614,7 +579,6 @@ class _Active:
     agent: str | None = None  # its agent, once it started
     answer: Any = None  # the start's answer: for a typed start the exact Agent call main makes
     task: asyncio.Task | None = None
-    program: bool = False  # an extension's program runs the checks task (tasks.program), in harness.py
     comments: int = 0
     ended: bool = False
 
@@ -644,47 +608,9 @@ def running(c: str, cid: str, doc: str) -> bool:
     return _current(c, cid, doc) is not None
 
 
-def _terminal(c: str) -> bool:
-    from . import subagent_files  # noqa: PLC0415
-
-    try:
-        return subagent_files.terminal(config.workspace_dir(c))
-    except (OSError, ValueError):
-        return False
-
-
 def _current(c: str, cid: str, doc: str) -> _Active | None:
-    """The run of check `cid` on `doc` that goes. In browser mode the server holds every run (_active). In terminal mode
-    the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on) is not the
-    one that hears its agent start and end (a hook's process) or takes its comments (the shim), so the check's file
-    decides: a run it records `running` that this process does not hold is taken up from the record, as recover takes
-    up a previous server's, and a run this process holds that the file records ended, or replaced, is let go."""
-    act = _active.get((c, cid, doc))
-    if not _terminal(c):
-        return act
-    rec = ((read(c, cid) or {}).get("runs") or {}).get(doc)
-    live = isinstance(rec, dict) and rec.get("status") == "running" and bool(rec.get("run"))
-    if act is not None and not act.ended and (not live or rec.get("run") != act.run):
-        under_way = act.task is not None and not act.task.done()  # a start this process has under way
-        unsaved = not act.agent and not act.request and act.task is None  # one start_run makes before its record
-        if not under_way and not unsaved:
-            _active.pop((c, cid, doc), None)
-            if act in _queue:
-                _queue.remove(act)
-            act = None
-    if act is None and live:
-        act = _Active(c, cid, doc, str(rec["run"]), bool(rec.get("notify")), list(rec.get("covered") or []),
-                      list(rec.get("fps") or []), agent=str(rec.get("agent_id") or "") or None,
-                      comments=int(rec.get("comments") or 0))
-        _active[(c, cid, doc)] = act
-    return act
-
-
-def _prune(c: str | None = None) -> None:
-    """In terminal mode, let go of the runs this process holds that another process ended (_current)."""
-    for (cc, cid, doc) in list(_active):
-        if c is None or cc == c:
-            _current(cc, cid, doc)
+    """The run of check `cid` on `doc` that goes: the server holds every run (_active)."""
+    return _active.get((c, cid, doc))
 
 
 def recover(root: Path | None = None) -> list[str]:
@@ -745,14 +671,14 @@ router.lifespan_context = _lifespan
 
 def agent_definition() -> tuple[str, dict[str, Any]]:
     """(name, definition) of the check agent, from prompts/check.md (cli.agent_definition)."""
-    from . import cli  # noqa: PLC0415 — cli is large, and the definition's shape is the launcher's
+    from . import cli  # noqa: PLC0415 — cli is large
 
     return cli.agent_definition(AGENT)
 
 
 def definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:check` for workspace `c` (subagents.roles adds its model, effort and `background`):
-    check.md's body and its frontmatter's description, as the config or the active extensions change it, and the
+    check.md's body and its frontmatter's description, as the config changes it, and the
     thimble tools that are not a check's taken away."""
     with prompts.custom(userconf.prompt_files(c, "checks")):
         _, agent = agent_definition()
@@ -965,10 +891,9 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
 
 
 def _places() -> int:
-    """The runs holding a place: started, or starting; in terminal mode not one another process ended (_prune)."""
-    _prune()
+    """The runs holding a place: started, or starting."""
     return sum(1 for a in _active.values() if not a.ended and a not in _queue
-               and (a.agent or a.request or (a.task is not None and not a.task.done()) or a.program))
+               and (a.agent or a.request or (a.task is not None and not a.task.done())))
 
 
 async def _wait_out_of_plan(act: _Active) -> None:
@@ -1050,9 +975,9 @@ async def _go(act: _Active) -> None:
 
 async def _launch(act: _Active) -> None:
     """Write the run's task file (first_message), then start its agent (subagents.start_job, `thimble:check`) on
-    Settings' checks row, as its route says; or the run as an extension's program of the checks task (_program); or,
-    for Heads up and Explainers over Claude's answers, the terminal's look (_looked)."""
-    from . import subagents, tasks  # noqa: PLC0415 — tasks reads the extensions
+    Settings' checks row, as its route says; or, for Heads up and Explainers over Claude's answers, the terminal's look
+    (_looked)."""
+    from . import subagents  # noqa: PLC0415
 
     c = act.c
     check = read(c, act.check)
@@ -1060,15 +985,11 @@ async def _launch(act: _Active) -> None:
         _finish(act, "failed", f"no check {act.check}")
         return
     cover = [p for p in passages_of(c, act.doc) if p["ref"] in set(act.covered)]
-    part = tasks.program(c, "checks")
-    if part is None and act.doc == ANSWERS and _is_lens(check):
+    if act.doc == ANSWERS and _is_lens(check):
         await _looked(act, cover)
         return
     text = await asyncio.to_thread(first_message, c, check, act.doc, cover)
     if act.ended:
-        return
-    if part is not None:
-        await _program(act, check, cover, text, part)
         return
     work = work_dir(c, act.check, act.doc)
     paths = await asyncio.to_thread(_write_task, c, work / TASK_FILE, text)
@@ -1087,8 +1008,6 @@ async def _launch(act: _Active) -> None:
         work=work, call=act.call)
     act.answer = ans
     if ans.refused:
-        if ans.get("request") is None:  # refused before a request was made (subagents.refusal_before)
-            _refused(act, ans.kind or subagents.ERROR, ans.reason, None)
         return  # a request refused went through subagent_refused
     if not act.agent:  # a typed start's request, until its agent starts (subagent_started)
         act.request = str(ans.get("request") or "") or None
@@ -1178,11 +1097,10 @@ def subagent_refused(c: str, req: dict[str, Any]) -> None:
     act = _of_session(c, str(req.get("key") or ""))
     if act is None or (act.request and req.get("id") and act.request != req.get("id")):
         return
-    _refused(act, str(req.get("refused_kind") or "error"), str(req.get("reason") or ""), req.get("id"),
-             expired=bool(req.get("expired")))
+    _refused(act, str(req.get("refused_kind") or "error"), str(req.get("reason") or ""), req.get("id"))
 
 
-def _refused(act: _Active, kind: str, reason: str, rid: Any, expired: bool = False) -> None:
+def _refused(act: _Active, kind: str, reason: str, rid: Any) -> None:
     from . import subagents  # noqa: PLC0415
 
     if kind == subagents.LIMIT and act.route != subagents.TYPED:
@@ -1195,71 +1113,9 @@ def _refused(act: _Active, kind: str, reason: str, rid: Any, expired: bool = Fal
     check = read(act.c, act.check)
     rec = ((check or {}).get("runs") or {}).get(act.doc)
     if check is not None and isinstance(rec, dict) and rec.get("run") == act.run:
-        rec["refused"] = {"kind": kind, "reason": reason, "request": rid, "expired": expired or None, "at": _now()}
+        rec["refused"] = {"kind": kind, "reason": reason, "request": rid, "at": _now()}
         save(act.c, check)
     _finish(act, "failed", reason)
-
-
-async def _program(act: _Active, check: dict[str, Any], cover: list[dict[str, Any]], prompt: str, part: Any) -> None:
-    """The run as an extension's program of the checks task, in an agent chat of its own; it comments through
-    add_comment as the run's session, and what it returns is the run's summary. It runs until it ends or is stopped."""
-    from . import harness  # noqa: PLC0415
-
-    c = act.c
-    job = harness.task_job(c, "checks", check_input(check, act.doc, cover, prompt), key=session_key(act.check, act.doc),
-                           title=str(check["name"]), work=work_dir(c, act.check, act.doc), chat_role=ROLE,
-                           fields={"check": act.check, "doc": act.doc, "run_id": act.run})
-    done: asyncio.Future = asyncio.get_running_loop().create_future()
-
-    def ended(run: harness.Run, status: str, summary: str) -> None:
-        _finish(act, status, summary)
-        if not done.done():
-            done.set_result(status)
-
-    try:
-        run = harness.start(job, part, on_end=ended)
-    except RuntimeError as e:
-        _finish(act, "failed", str(e))
-        return
-    act.program = True
-    _chat(act, run.chat)
-    try:
-        await asyncio.shield(done)
-    except asyncio.CancelledError:
-        if not act.ended:
-            with contextlib.suppress(Exception):
-                await harness.stop(c, session_key(act.check, act.doc))
-        raise
-
-
-def check_input(check: dict[str, Any], doc: str, cover: list[dict[str, Any]], context: str) -> dict[str, Any]:
-    """The checks task's input (tasks.py): the check (its id, name and prompt), the document, the passages the run
-    covers ({ref, kind, anchor}, the id a comment on the whole passage goes on) and the run's task file's text, which
-    holds the document and the context engine's part."""
-    return {"check": {"id": str(check["id"]), "name": str(check["name"]), "prompt": str(check.get("prompt") or "").strip()},
-            "doc": doc, "passages": [{"ref": p["ref"], "kind": p["kind"], "anchor": p["anchor"]} for p in cover],
-            "context": context}
-
-
-async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, program: Any = None) -> Any:
-    """thimble's own checks task (tasks.py), lent to a program that runs it: a Claude Code session as the check agent
-    (prompts/check.md) on the input's `context`, run as the program's run (harness.session_call), which comments
-    with add_comment as thimble's own run does, on Settings' checks row. A model.CallResult whose output is the
-    session's last reply."""
-    from . import harness, model as model_mod, subagents  # noqa: PLC0415
-
-    if program is None:
-        return model_mod.CallResult(status="error", detail="the checks task runs only in a program's run")
-    with prompts.custom(userconf.prompt_files(c, "checks")):
-        _, agent = agent_definition()
-    values = subagents.values_for(c, ROLE, {"model": model} if model else None)
-    payload = {"prompt": str(inp.get("context") or ""), "system": str(agent.get("prompt") or ""),
-               "model": values["model"], "effort": values["effort"]}
-    try:
-        reply = await harness.session_call(program, payload)
-    except harness.HarnessError as e:
-        return model_mod.CallResult(status="error", detail=str(e))
-    return model_mod.CallResult(status="ok", output=reply)
 
 
 def _doc(c: str, doc: str) -> dict[str, Any] | None:
@@ -1268,15 +1124,6 @@ def _doc(c: str, doc: str) -> dict[str, Any] | None:
     if doc in (CANVAS, ANSWERS):
         return None
     return report_types.read_doc(c, investigation.MAIN, doc)
-
-
-def _chat(act: _Active, chat: str) -> None:
-    check = read(act.c, act.check)
-    rec = ((check or {}).get("runs") or {}).get(act.doc)
-    if check is not None and rec is not None and rec.get("run") == act.run:
-        rec["chat"] = chat
-        save(act.c, check)
-    _stream(act.c, act.check, act.doc, "running", act.run, chat)
 
 
 def _finish(act: _Active, status: str, summary: str) -> None:
@@ -1303,8 +1150,7 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         doc = _doc(c, act.doc)
         canvas = act.doc == CANVAS
         answers = act.doc == ANSWERS
-        # the run's comments as the document (or the cards' store) holds them: in terminal mode the shim takes them, in
-        # another process
+        # the run's comments as the document (or the cards' store) holds them
         act.comments = max(act.comments, canvas_comments.count(c, act.check, act.run) if canvas else
                            answer_comments.count(c, act.check, act.run) if answers else
                            sum(1 for cm in (doc or {}).get("comments") or []
@@ -1379,9 +1225,9 @@ def _notice(act: _Active, check: dict[str, Any] | None, status: str, summary: st
 
 
 async def stop(act: _Active) -> None:
-    """Stop a run: its agent through main's module (subagents.stop), whose end ends the run stopped; its program; a
-    typed start main has yet to make, which thimble's hook denies from now on; or its place in the queue."""
-    from . import harness, subagents  # noqa: PLC0415
+    """Stop a run: its agent through main's module (subagents.stop), whose end ends the run stopped; a typed start main
+    has yet to make, which thimble's hook denies from now on; or its place in the queue."""
+    from . import subagents  # noqa: PLC0415
 
     if act.ended:
         return
@@ -1389,8 +1235,6 @@ async def stop(act: _Active) -> None:
         ans = await subagents.stop(act.c, act.agent)
         if not ans.refused and not ans.get("done"):
             return  # the agent's end (subagent_ended) ends the run
-    elif act.program:
-        await harness.stop(act.c, session_key(act.check, act.doc))
     elif act.request:
         subagents.refuse(act.c, act.request, "the run was stopped", subagents.HOOK)
     elif act.task is not None and not act.task.done():
@@ -1596,14 +1440,9 @@ def _plural(k: int, noun: str) -> str:
 
 
 async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `run_check` tool, main's: the check made or changed and turned on, and for each written document a run whose
-    agent main starts with the exact Agent call the result gives (`## start_job-subagent`), as a typed start. A thread's
-    fork's call starts each run the same way, by main's Agent call on a `start_agent` event of its own
-    (tools._ask_main), since the fork may not make it."""
-    import json  # noqa: PLC0415
-
-    from . import subagents  # noqa: PLC0415
-
+    """The `run_check` tool, main's: the check made or changed and turned on, and for each written document a run, which
+    the server starts as a typed start. A thread's fork's call starts each run with the fork's call
+    (tools._fork_start)."""
     fork = await tools._fork_of(ctx) if ctx.session is None else None
     name = _collapse(args.get("name"))
     instructions = str(args.get("instructions") or "").strip()
@@ -1639,11 +1478,9 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
     written = _written(ctx.c)
     places = [d for d in targets_of(ctx.c, check) if on is None or (d == CANVAS) == (on == "cards")]
     targets = [d for d in (docs or dict.fromkeys(places)) if d in written or (d == CANVAS and covers(check, "cards"))]
-    if targets and (before := subagents.refusal_before(ctx.c)) is not None:
-        return tools.err(before.reason or f"run_check: {before.kind}")
     lines, refused = [], []
     for doc in targets:
-        # a fork's run keeps no call of the fork's: main's Agent call claims it (tools._ask_main)
+        # a fork's run keeps no call of the fork's: the server starts it (tools._fork_start)
         rec = await start_run(ctx.c, check["id"], doc, passages_=docs.get(doc) if docs else None, force=True, notify=True,
                               route=TYPED, call=None if fork is not None else ctx.tool_use_id)
         if rec is None:
@@ -1653,13 +1490,13 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
             refused.append(getattr(ans, "reason", "") or str(rec.get("summary") or "") or "it did not start")
             continue
         if fork is not None:
-            res = await tools._ask_main(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
-                                        thread=fork, agent="the check")
+            res = await tools._fork_start(ctx, ans, what=f"a run of the check {check['name']} on {target_name(doc)}",
+                                          agent="the check")
             (refused if res.is_error else lines).append(res.text)
             continue
         lines.append(tools.hint("run_check-started", check=check["name"], how=how, doc=target_name(doc),
                                 passages=_plural(len(rec["covered"]), "passage")))
-        lines.append(tools.hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False)))
+        lines.append(tools.hint("agent-started"))
     if lines:
         return tools.ok("\n\n".join(lines))
     if refused:
@@ -1961,31 +1798,9 @@ async def answer_comment_reopen_route(c: str, cid: str) -> dict[str, Any]:
     return await asyncio.to_thread(answer_comments.set_status, c, cid, "open")
 
 
-def stop_workspace(c: str) -> int:
-    """Main's session ended in workspace `c` (agents.stop_all): its queued runs and its programs' runs stop, and a typed
-    start main never made ends. Its runs' agents were subagents of main and ended with it: subagents.close_running ends
-    them, and their runs end `stopped`, their passages stale (Run starts them again). How many runs it stopped here."""
-    from . import subagents  # noqa: PLC0415
-
-    for t, cc in list(_tasks.items()):
-        if cc == c:
-            t.cancel()
-    n = 0
-    for act in [a for (cc, _, _), a in list(_active.items()) if cc == c]:
-        if act.agent:
-            continue
-        if act.request:
-            subagents.refuse(c, act.request, "your Claude Code session ended", subagents.HOOK)
-        if act.task is not None and not act.task.done():
-            act.task.cancel()
-        _finish(act, "stopped", "")
-        n += 1
-    return n
-
-
 async def shutdown() -> None:
-    """The server is going down: the starts waiting are dropped and the programs' runs stop. The runs' agents are
-    subagents of main, which go on: the next server takes them up again (recover)."""
+    """The server is going down: the starts waiting are dropped. The runs' agents stop with the server
+    (runtime.stop_all), and the next server settles what they left (recover)."""
     for act in list(_active.values()):
         if act.task is not None and not act.task.done():
             act.task.cancel()

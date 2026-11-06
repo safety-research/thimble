@@ -168,7 +168,7 @@ views = local / "views"
 said = [json.loads((views / "posts" / "view.json").read_text())["accepts"][0]["means"]]
 forged = {"name": "x", "claims": ["board.jsonl"], "accepts": [{"form": "L<n>", "means": "WRITTEN-BY-A-CARD"}], "built": "x"}
 for path in (views / "posts" / "view.json", views / "planted" / "view.json", local / "extension.json",
-             state / "proposals.json", registry / "card_types.json", registry / "extensions.json"):
+             state / "proposals.json", registry / "web_rules.json"):
     try:
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(forged))
@@ -189,21 +189,20 @@ print(*said)
 async def test_card_code_reads_the_views_but_can_t_change_the_forms_main_s_prompt_lists(wrap, monkeypatch, workspaces_tmp):
     """In the wrapped kernel a card's code reads a view's view.json in the workspace's local extension but can neither
     change it, plant a view, rewrite the extension's manifest or the proposals, nor move either folder away, so nothing
-    it writes reaches the citation forms of main's prompt, nor rewrite the card types and extensions of the registry
-    folder; the views kernel still reads the reader and keeps its index and the bytes it read outside the views."""
+    it writes reaches the citation forms of main's prompt, nor rewrite the kept web rules of the registry folder; the
+    views kernel still reads the reader and keeps its index and the bytes it read outside the views."""
     if not _wrap_works(wrap):
         pytest.skip(f"{wrap} can't sandbox a process here")
     monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
     views.write_view("mini", "posts", name="Posts", description="", claims=["board.jsonl"],
                      accepts=[{"form": "L<n>", "means": "one post"}], reader=READER, html="<p>posts</p>")
     registry = config.registry_dir("mini")
-    for name in ("card_types.json", "extensions.json"):
-        (registry / name).write_text("{}\n")
+    (registry / "web_rules.json").write_text("{}\n")
     try:
         cell = await notebook.run_code("mini", CARD, "main")
         said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
-        assert said == ["one", "post", *["refused"] * 6, "kept", "kept"], said
-        assert all((registry / name).read_text() == "{}\n" for name in ("card_types.json", "extensions.json"))
+        assert said == ["one", "post", *["refused"] * 5, "kept", "kept"], said
+        assert (registry / "web_rules.json").read_text() == "{}\n"
         prompt = events.session_prompt(str(config.corpus_dir("mini")))
         assert "one post (Posts)" in views.forms_text("mini") and "one post" in prompt and "WRITTEN-BY-A-CARD" not in prompt
         assert await views.reader_call("mini", "posts", "records") == 8
@@ -322,7 +321,7 @@ TRUSTED_CELL = """
 import json, os, pathlib
 trusted = pathlib.Path.cwd().parent / "trusted"
 said = []
-for name in ("subagents.json", "callers.jsonl", "launch.json", "planted.json"):
+for name in ("subagents.json", "callers.jsonl", "planted.json"):
     try:
         with open(trusted / name, "a") as f:
             f.write(json.dumps({"requests": {"req_0000000001": {"state": "pending", "route": "click"}}}))
@@ -339,12 +338,12 @@ print(*said)
 
 
 @pytest.mark.parametrize("wrap", ["srt", "bwrap"])
-async def test_card_code_can_t_write_the_files_the_hooks_trust_after_the_server_replaced_them(wrap, monkeypatch,
-                                                                                             workspaces_tmp):
-    """subagents.json, callers.jsonl and launch.json stay read-only to a card's code while the server and the hooks
-    replace them whole (a new file renamed over each). Linux takes a bind off a file that another mount namespace renames
-    a file over, so binding each file read-only held only until the first write after the kernel started, and a cell
-    could then write a pending click into subagents.json; the kernel binds their folder read-only instead."""
+async def test_card_code_can_t_write_the_trusted_files_after_the_server_replaced_them(wrap, monkeypatch,
+                                                                                      workspaces_tmp):
+    """subagents.json and callers.jsonl stay read-only to a card's code while the server replaces them whole (a new file
+    renamed over each). Linux takes a bind off a file that another mount namespace renames a file over, so binding each
+    file read-only held only until the first write after the kernel started, and a cell could then write a pending click
+    into subagents.json; the kernel binds their folder read-only instead."""
     from app import subagent_files
 
     if not _wrap_works(wrap):
@@ -361,7 +360,7 @@ async def test_card_code_can_t_write_the_files_the_hooks_trust_after_the_server_
         subagent_files.trim_callers(ws)
         cell = await notebook.run_code("mini", TRUSTED_CELL, "main")
         said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
-        assert said == ["refused"] * 4 + ["kept"], said
+        assert said == ["refused"] * 3 + ["kept"], said
         assert "req_0000000001" not in subagent_files.state_path(ws).read_text()
         assert not (subagent_files.trusted_dir(ws) / "planted.json").exists()
     finally:

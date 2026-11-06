@@ -17,8 +17,6 @@ import pytest
 from app import cli
 from test_cli import _free_port, _started
 
-pytestmark = pytest.mark.usefixtures("named_sessions")
-
 
 def _stop_all(*ps: subprocess.Popen) -> None:
     for p in ps:

@@ -370,8 +370,7 @@ def test_unpair_with_the_token_signs_every_browser_out_and_signout_with_a_cookie
     assert _claim("x", new_cookie, new_key)[0].status_code == 204
 
 
-def test_a_new_sign_in_shows_a_notice_in_the_named_and_the_attached_workspace_and_a_line_in_main_s_terminal(
-        client, monkeypatch, tmp_path):
+def test_a_new_sign_in_shows_a_notice_in_the_named_and_the_attached_workspace(client, monkeypatch, tmp_path):
     from app import config
 
     other_corpus = config.DATA_DIR / "other"
@@ -389,31 +388,21 @@ def test_a_new_sign_in_shows_a_notice_in_the_named_and_the_attached_workspace_an
         assert n["kind"] == "sign-in" and n["action"] == {"label": "Sign it out", "do": "sign-out", "slug": browser}
         assert re.fullmatch(r"A browser signed in to thimble at \d\d:\d\d\. If it was not you, click Sign it out\.",
                             n["text"]), n["text"]
-    line = (hook_auth.home() / "links" / SID).read_text()
-    assert re.fullmatch(r"\nthimble: a browser signed in to thimble at \d\d:\d\d\. If it was not you, click Sign it out "
-                        r"on its notice in thimble's page\.", line), line
-    assert not (hook_auth.home() / "links" / "other").exists()
     another = TestClient(client.app, base_url="http://testserver")
     r = another.post("/api/ui/key", json={"code": hook_auth.mint(), "ws": "no-such-workspace"})
     assert r.status_code == 200, "a link of no registered workspace still signs in, and tells the attached main"
-    assert line != (hook_auth.home() / "links" / SID).read_text()
+    assert len([n for n in notices.open_notices(CORPUS) if n["kind"] == "sign-in"]) == 2
 
 
 def test_the_sign_in_texts_name_only_commands_this_version_has():
-    """The sign-in notice, its line in main's terminal and the line in place of the link name none of 0.8's commands
-    (`thimble up`, `thimble unpair`): a command they name is one thimble-browser --help lists, the line in place of
-    the link points to the terminal where thimble-browser runs, which prints a new sign-in link for a browser that
-    is not signed in, and a browser is signed out with Sign it out on its sign-in notice."""
+    """The sign-in notice names none of 0.8's commands (`thimble up`, `thimble unpair`): a command it names is one
+    thimble-browser --help lists, and a browser is signed out with Sign it out on its sign-in notice."""
     from pathlib import Path
 
-    from app import cli
-
     usage = "\n".join((Path(__file__).resolve().parents[2] / "scripts" / "thimble-browser").read_text().splitlines()[1:21])
-    for text in (main.SIGNED_IN_NOTICE, main.SIGNED_IN_LINE, cli.LINK_LINE):
-        for command in re.findall(r"`([^`]+)`", text):
-            assert command.startswith("thimble-browser") and command in usage, (command, text)
-    assert "in the terminal where `thimble-browser` runs" in cli.LINK_LINE
-    assert "click Sign it out" in main.SIGNED_IN_NOTICE and "click Sign it out" in main.SIGNED_IN_LINE
+    for command in re.findall(r"`([^`]+)`", main.SIGNED_IN_NOTICE):
+        assert command.startswith("thimble-browser") and command in usage, (command, main.SIGNED_IN_NOTICE)
+    assert "click Sign it out" in main.SIGNED_IN_NOTICE
 
 
 @pytest.mark.real_read_guard

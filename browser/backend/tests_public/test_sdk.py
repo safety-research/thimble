@@ -21,8 +21,8 @@ def test_a_call_takes_the_users_auth_but_not_their_memory_effort_or_mode(tmp_pat
 
 
 def test_a_call_at_ultracode_runs_at_xhigh_with_ultracode_off(tmp_path):
-    """The orientation role's effort, ultracode, reaches a call through harness.ask; the call runs at ultracode's level
-    and asks the CLI for no effort it does not take."""
+    """The orientation role's effort, ultracode, reaches a call; the call runs at ultracode's level and asks the CLI for
+    no effort it does not take."""
     opts = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system="s", model="claude-opus-5-5", effort="ultracode",
                      env=None, speed="standard")
     assert opts.effort == "xhigh"

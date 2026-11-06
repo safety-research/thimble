@@ -18,6 +18,9 @@ from conftest import Listener
 
 from app import concepts, config, notebook
 
+# model calls go through Claude Code, which the tests fake (conftest claude_code_sign_in)
+pytestmark = pytest.mark.usefixtures("claude_code_sign_in")
+
 CORPUS = "relay"
 
 

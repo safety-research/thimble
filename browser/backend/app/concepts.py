@@ -556,9 +556,8 @@ _building_answers: dict[Path, dict] = {}  # {path: rows} the jsonl answered whil
 
 
 class _StoreLock:
-    """A labels file's lock: this process's threads wait on an RLock, then the process takes ledger.locked on the file,
-    since in terminal mode `thimble-run` (a code label's rows), `thimble act` (a verdict) and the shim (a prompt label's
-    rows) append to one labels file from three processes. Re-entrant, as the RLock it replaces."""
+    """A labels file's lock: this process's threads wait on an RLock, then the process takes ledger.locked on the file.
+    Re-entrant, as the RLock it replaces."""
 
     def __init__(self, p: Path) -> None:
         self.p = p
@@ -1917,8 +1916,8 @@ PARENT_WATCH_S = 1.0  # how often a scan worker looks whether the process that m
 
 def _watch_parent(parent: int) -> None:
     """A scan worker's initializer: the worker ends once the process that made its pool has gone. That process ends
-    its workers when it can (_pool_shutdown); the terminal mode's shim is ended by a signal as Claude Code quits, and a
-    worker it leaves waits on its queue for good (live check T9)."""
+    its workers when it can (_pool_shutdown); one ended by a signal cannot, and a worker it leaves waits on its queue
+    for good (live check T9)."""
 
     def watch() -> None:
         while True:
@@ -2066,7 +2065,7 @@ def few_shot_examples(ws: Path, concept: dict, corpus_dir: Path | None = None, l
 
 
 def label_input(concept: dict, items: list[tuple[str, str]], comment: bool = True) -> dict:
-    """The labels task's input (tasks.py) for one batch of (ref, text) items: the label's name, unit, definition (''
+    """The labels task's input (labels_task) for one batch of (ref, text) items: the label's name, unit, definition (''
     for none), values, marks, the analyst's examples (few_shot_examples, attached by run_apply for the run) and whether
     a one-line rationale is asked for; then the items, numbered from 1."""
     return {"label": {"name": str(concept["name"]), "unit": str(concept["unit"]), "definition": definition_text(concept),
@@ -2120,7 +2119,7 @@ def labels_tool(label: dict) -> Any:
 
 async def labels_task(c: str, inp: dict, *, model: str | None = None,
                       on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
-    """thimble's own labels task (tasks.py): one classifier batch through model.structured (never raises; read the
+    """The labels task: one classifier batch through model.structured (never raises; read the
     CallResult's status), on `model` when given, else the label's own model, else the labels role's. A batch longer than
     a 200k-token window holds, a whole file read as far as the model's context holds (whole_read_chars), runs on the
     model's 1M-token window, which Claude Code opens with `[1m]` (config.long_context), and so does its refusal rerun."""
@@ -2152,15 +2151,12 @@ async def labels_task(c: str, inp: dict, *, model: str | None = None,
 
 async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]], comment: bool = True,
                               on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
-    """One classifier batch as the labels task (tasks.call: an extension's program, else labels_task, on the concept's
-    `model` when it names one); never raises, read the CallResult's status. `on_retry` hears each retry
-    model.structured waits for."""
-    from . import tasks  # noqa: PLC0415
-
+    """One classifier batch as the labels task (labels_task, on the concept's `model` when it names one); never raises,
+    read the CallResult's status. `on_retry` hears each retry model.structured waits for."""
     inp = label_input(concept, items, comment)
     if concept.get("model"):
         inp["label"]["model"] = str(concept["model"])
-    return await tasks.call(c, "labels", inp, schema=labels_tool(inp["label"]).input_schema, on_retry=on_retry)
+    return await labels_task(c, inp, on_retry=on_retry)
 
 
 def parse_labels(output: dict | None, concept: dict, n_items: int, comment: bool = True) -> dict[int, dict]:
@@ -3572,16 +3568,6 @@ def _stop_apply(key: tuple[str, str]) -> asyncio.Task | None:
     else:
         task.get_loop().call_soon_threadsafe(task.cancel)
     return task
-
-
-def stop_workspace(c: str) -> int:
-    """End every apply running for workspace `c` (agents.stop_all), keeping its run records. Returns how many ran."""
-    return sum(_stop_apply(key) is not None for key in [k for k in list(_tasks) if k[0] == c])
-
-
-def workspaces_at_work() -> set[str]:
-    """The workspaces with an apply running."""
-    return {k[0] for k, task in list(_tasks.items()) if not task.done()}
 
 
 def _partial_record(c: str, concept_id: str) -> dict:
@@ -5500,16 +5486,15 @@ def draft_of(output: dict | None, paths: list[str]) -> dict:
 
 
 async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
-    """thimble's own label-draft task (tasks.py): from the analyst's `description` and the `records` of the files the
-    label would apply to (sample_records), one structured call of the labels role, on `model` when given, whose output
-    is a label definition (draft_tool). Never raises; read the CallResult's status."""
-    from . import model as model_mod, prompts, tasks  # noqa: PLC0415
+    """The label-draft task: from the analyst's `description` and the `records` of the files the label would apply to
+    (sample_records), one structured call of the labels role, on `model` when given, whose output is a label definition
+    (draft_tool). Never raises; read the CallResult's status."""
+    from . import model as model_mod  # noqa: PLC0415
 
     records = inp.get("records") if isinstance(inp.get("records"), dict) else {}
     slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines")}
-    with prompts.custom(tasks.files(c, "labels")):
-        prompt = labels_part("draft", description=str(inp.get("description") or ""),
-                             records=labels_part("records", **slots) if slots["lines"] else "")
+    prompt = labels_part("draft", description=str(inp.get("description") or ""),
+                         records=labels_part("records", **slots) if slots["lines"] else "")
     role = labels_model(c)
     with capture.scope("concepts draft", keep=True):
         return await model_mod.structured(prompt, tool=draft_tool(), model=model or role["model"],
@@ -5518,13 +5503,8 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
 
 
 def _call_failed(call: Any) -> HTTPException:
-    """A labels call that gave no output, as the error the bar shows: 429 at capacity, else 502 with its detail, which
-    names the extension's program when one ran the task (tasks.call)."""
-    from . import tasks  # noqa: PLC0415
-
+    """A labels call that gave no output, as the error the bar shows: 429 at capacity, else 502 with its detail."""
     status = 429 if call.status == "rate_limited" else 502
-    if tasks.by_program(call):
-        return HTTPException(status, f"{call.model_requested} gave no label: {call.detail or 'no detail'}")
     return HTTPException(status, f"the labels model gave no label ({call.status}): {call.detail or 'no detail'}")
 
 
@@ -5541,10 +5521,7 @@ async def draft_route(c: str, body: DraftBody) -> dict:
         records = await asyncio.to_thread(sample_records, c, body.paths)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    from . import tasks  # noqa: PLC0415
-
-    call = await tasks.call(c, "label-draft", {"description": text, "paths": list(body.paths), "records": records},
-                            schema=draft_tool().input_schema)
+    call = await draft_task(c, {"description": text, "paths": list(body.paths), "records": records})
     if call.status != "ok":
         raise _call_failed(call)
     return draft_of(call.output, body.paths)

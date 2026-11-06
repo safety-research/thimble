@@ -9,7 +9,7 @@
 #              ripgrep)
 #   python     pytest over plugin/ (the kernel)
 #
-#   the browser workbench (browser/, thimble 0.8's browser mode):
+#   the browser workbench (browser/):
 #   parity     the texts both modes read and the browser's prompts: each mode reads a text both read the same, and no
 #              other text a model reads copies one; what each mode's models read is as its fingerprints say; the
 #              browser's prompts render and name only the hints the code has, and the API's names are American

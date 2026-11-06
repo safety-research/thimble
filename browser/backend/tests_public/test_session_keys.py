@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import agent_session, cc_settings, claude_access, config, dev, marks, runtime_api, runtime_cc
+from app import cc_settings, claude_access, config, dev, marks, runtime_api, runtime_cc
 
 FAKE_KEY = "-".join(("sk", "ant", "made", "up", "key", "for", "tests"))  # built, so no scanner takes it for a key
 DENIED = [{"name": "ANTHROPIC_API_KEY", "mode": "deny"}, {"name": "ANTHROPIC_BASE_URL", "mode": "deny"}]
@@ -37,16 +37,14 @@ def key(monkeypatch):
 
 
 def test_every_session_thimble_fences_runs_its_commands_without_the_anthropic_variables(key, tmp_path, monkeypatch):
-    """runtime_cc's sessions, a program's sessions (agent_session.fence) and a dev ticket's (dev.ticket_fence) take
-    their sandbox from cc_settings.offline_sandbox; a name Claude Code would refuse in its settings is left out."""
+    """runtime_cc's sessions and a dev ticket's (dev.ticket_fence) take their sandbox from cc_settings.offline_sandbox;
+    a name Claude Code would refuse in its settings is left out."""
     monkeypatch.setenv("ANTHROPIC_NOT.A-NAME", "x")
     box = cc_settings.offline_sandbox()
     assert box["credentials"] == {"envVars": DENIED}
     spec = SimpleNamespace(model="claude-opus-5-5", effort="high", cwd=tmp_path, write_roots=[], private=[],
                            no_write=[])
     assert runtime_cc.settings(spec, True, tmp_path / "t")["sandbox"]["credentials"] == {"envVars": DENIED}
-    fenced = agent_session.fence(tmp_path / "corpus", tmp_path / "work", sandbox=True, data="ask")
-    assert fenced["sandbox"]["credentials"] == {"envVars": DENIED}
 
 
 def test_with_no_anthropic_variable_the_sandbox_settings_name_none(monkeypatch):
@@ -79,7 +77,6 @@ async def test_the_checker_s_fork_runs_python_in_the_sandbox_on_claude_code_sign
     while its own environment keeps them to sign in; it gets a short TMPDIR of its own, which goes when it ends, as does
     the .claude/.cc-writes/ the sandbox makes in the corpus. Where the sandbox can't run, the fork runs as before."""
     monkeypatch.setenv("THIMBLE_SANDBOX", sandbox)
-    monkeypatch.setenv("THIMBLE_RUNTIME", "on")
     claude_access.save(claude_access.CLAUDE_CODE, consent=True)
     monkeypatch.setattr(runtime_api, "cc_main_session", lambda c: "sid-of-main")
     monkeypatch.setattr(marks, "_model", lambda c, main, prompt: ("claude-opus-5-5", "low"))

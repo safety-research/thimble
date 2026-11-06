@@ -29,19 +29,12 @@ export function ViewSurface({ ws, view }: { ws: string; view: BuiltView; active:
   const quoteMissing = useCallback(() => {
     if (at?.quote) bus.emit('openRef', { ref: at.quote.span, browser: true })
   }, [at])
-  // the view dropped the arguments of the card it was opened from
-  const clearQuery = useCallback(() => {
-    if (!at?.query) return
-    const next = { ...at, query: undefined }
-    places.set(key, next)
-    setAt(next)
-  }, [at, key])
   const path = at?.path ?? view.first_file ?? null
   const side = useViewSide(ws, view, labels)
   return (
     <div className="view-surface files-body is-view">
       {side.side}
-      <ViewPane ws={ws} view={view} path={path} picked={!!at?.picked} targetRef={at?.ref} quote={at?.quote} query={at?.query} onClearQuery={clearQuery} onQuoteMissing={quoteMissing} labels={labels} first={side.first} />
+      <ViewPane ws={ws} view={view} path={path} picked={!!at?.picked} targetRef={at?.ref} quote={at?.quote} onQuoteMissing={quoteMissing} labels={labels} first={side.first} />
       {side.card}
     </div>
   )

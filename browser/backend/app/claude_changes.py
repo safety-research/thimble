@@ -1,34 +1,20 @@
-"""The places earlier versions of thimble changed Claude Code's files, which are the user's, and how `thimble uninstall`
-puts them back.
-
-- Trust. Up to 0.5.0, thimble's agents ran as Claude Code background sessions, which start only in a folder Claude Code
-  trusts, so install.sh asked whether to trust thimble's folder and, on a yes, added it to Claude Code's global config
-  (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), recording the answer in thimble's home (TRUST_FILE). From
-  0.6.0 the agents run as `claude -p` sessions, which need no trust, so nothing asks or writes it any more. `thimble
-  uninstall` takes back the entries an earlier install added, an older version's per-folder ones (OLD_TRUST) included
-  (untrust).
-- Older versions wrote statusLine, CLAUDE_CODE_EFFORT_LEVEL and CLAUDE_CODE_DISABLE_FAST_MODE into folders'
-  .claude/settings.local.json and recorded them in thimble's home. cleanup removes each key that still holds thimble's
-  value, and the records with it, so it runs once.
-
-Standard library only, so `thimble uninstall` runs this file with any Python 3.
+"""The keys earlier versions of thimble wrote into Claude Code's files, which are the user's, and how the server puts
+them back: older versions wrote statusLine, CLAUDE_CODE_EFFORT_LEVEL and CLAUDE_CODE_DISABLE_FAST_MODE into folders'
+.claude/settings.local.json and recorded them in thimble's home. cleanup removes each key that still holds thimble's
+value, and the records with it, so it runs once.
 """
 from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
-TRUST_FILE = "trust.json"  # in thimble's home, written by 0.5.0 and earlier: {folder, config, answer: yes | no, added}
-TRUST_KEY = "hasTrustDialogAccepted"
 # the records of the keys older versions wrote: file in thimble's home -> the key in a folder's settings.local.json
 # (None: statusLine, recorded as {ours, previous})
 OLD_RECORDS = {"effort-overrides.json": "CLAUDE_CODE_EFFORT_LEVEL", "fast-overrides.json": "CLAUDE_CODE_DISABLE_FAST_MODE",
                "statusline-overrides.json": None}
-OLD_TRUST = "trusted-folders.json"  # an older version's per-folder trust entries: {folder: {config, ...}}
 LOCAL_SETTINGS = Path(".claude") / "settings.local.json"
 
 
@@ -61,49 +47,6 @@ def _write(path: Path, data: dict[str, Any]) -> None:
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
-
-
-# --------------------------------------------------------------------------- trust
-
-
-def global_config() -> Path:
-    """Claude Code's global config, which keeps the folders it trusts."""
-    value = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(value).expanduser() / ".claude.json" if value else Path.home() / ".claude.json"
-
-
-def _set_trust(folder: Path, config: Path, on: bool) -> None:
-    """Set (or take back) `folder`'s trust in `config`, read again right before the write so that what Claude Code
-    saved meanwhile is kept. A taken-back entry that holds nothing else goes; one that holds no trust is left alone."""
-    data = json.loads(config.read_text("utf-8")) if config.is_file() else {}
-    if not isinstance(data, dict) or not isinstance(data.setdefault("projects", {}), dict):
-        raise ValueError(f"{config} does not hold Claude Code's config")
-    projects = data["projects"]
-    entry = projects.get(str(folder)) if isinstance(projects.get(str(folder)), dict) else {}
-    if on:
-        projects[str(folder)] = {**entry, TRUST_KEY: True}
-    else:
-        if TRUST_KEY not in entry:
-            return
-        del entry[TRUST_KEY]
-        if entry:
-            projects[str(folder)] = entry
-        else:
-            projects.pop(str(folder), None)
-    _write(config, data)
-
-
-def untrust() -> list[str]:
-    """Take back the trust entries an earlier install added (module note), then their records; a line for each.
-    OSError or ValueError, with the records kept, when Claude Code's config cannot be read or written."""
-    rec = _read(home() / TRUST_FILE)
-    grants = [(rec["folder"], rec["config"])] if rec.get("added") and rec.get("folder") and rec.get("config") else []
-    grants += [(f, g["config"]) for f, g in _read(home() / OLD_TRUST).items() if isinstance(g, dict) and g.get("config")]
-    for folder, config in grants:
-        _set_trust(Path(folder), Path(config), False)
-    for name in (TRUST_FILE, OLD_TRUST):
-        (home() / name).unlink(missing_ok=True)
-    return [f"trust of {folder} taken back in {config}" for folder, config in grants]
 
 
 # --------------------------------------------------------------------------- the keys older versions wrote
@@ -154,23 +97,3 @@ def cleanup() -> list[str]:
         else:
             (home() / name).unlink(missing_ok=True)
     return done
-
-
-if __name__ == "__main__":
-    args = sys.argv[1:]
-    if args == ["undo"]:
-        failed = False
-        for step in (cleanup, untrust):
-            try:
-                for ln in step():
-                    print(f"  {ln}")
-            except (OSError, ValueError) as e:
-                print(f"  could not put back what thimble changed in Claude Code's files: {e}", file=sys.stderr)
-                failed = True
-        if any((home() / name).exists() for name in OLD_RECORDS):
-            print("  some folders' .claude/settings.local.json could not be written", file=sys.stderr)
-            failed = True
-        sys.exit(1 if failed else 0)
-    else:
-        print("usage: claude_changes.py undo", file=sys.stderr)
-        sys.exit(2)

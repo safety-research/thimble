@@ -9,9 +9,7 @@ and what it takes. No agent session starts while the config has one (session); t
 show it. The models and efforts are read leniently (load_or_defaults), so the pages still show.
 
 Earlier builds kept the agents' models and permission modes in the workspace's settings.json. migrate moves them into
-that workspace's override the first time the workspace's config is read, so each workspace runs as it did. The settings
-of an extension thimble renamed (RENAMED_EXTENSIONS) are read under its new name, and written so when a file is
-rewritten (rename_extensions).
+that workspace's override the first time the workspace's config is read, so each workspace runs as it did.
 
 Edits of the config. An agent's edit of these files (config_files) goes to the analyst in every permission mode, as an
 edit of the corpus does with `data` at "ask" (Session.verdict, ask_cause `config`), so the analyst sees on the card what
@@ -19,25 +17,19 @@ an agent would change in its own permissions and decides; a session nobody answe
 (main_modes_file), which only thimble writes, stays denied.
 
 One fence for main and its agents. thimble's agents are subagents of main and run in main's permission mode; thimble
-adds no rule, working directory or sandbox to main's session, only the hooks module's denies (module_rules). So the
-orientation's `web`, `network` and `data` are main's keys, which every agent shares; the other agents keep only `web:
-off`, which keeps that one agent off the web tools. Code tickets' agents are subagents of main too. The dev agent alone
-keeps its own permission mode, fast mode and fence keys, for `thimble fix` and an extension's program that runs the dev
-agent, which stay jobs of the server.
+adds no rule, working directory or sandbox to main's session. So the orientation's `web`, `network` and `data` are
+main's keys, which every agent shares; the other agents keep only `web: off`, which keeps that one agent off the web
+tools. Code tickets' agents are subagents of main too. The dev agent alone
+keeps its own permission mode, fast mode and fence keys, for `thimble fix`, which stays a job of the server.
 Installs follow Claude Code's permission mode: thimble adds no rule for them. The web tools do too at `web` "ask":
 Manual asks for them as Claude Code does, and auto mode's classifier judges them. An `ask` rule would also ask in auto
 mode, since Claude Code obeys an explicit ask rule there (live check: the checks asked three times for the web in auto
 mode). The keys earlier builds read for this,
-`installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
-(IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
-from the Settings pane leaves them in the file. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
-again on, which `off` turns off) are classifier rows.
-
-Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
-it runs in a box of its own and keeps its power. So it takes its agent's own `env`, `sandbox`, `network` and `data`
-(PROGRAM_KEYS; agent_conf with `program`), which thimble's own agent of that role does not read, since it shares main's
-fence. Where the agent sets none of them, as for the dev agent and the classifiers, the program's network and sandbox
-are on, its edits of the corpus ask, and it gets no variable of the server's.
+`installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's, and the
+`env`, `sandbox`, `network` and `data` of an agent that shares main's fence or makes one model call (IGNORED_KEYS),
+are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save from the
+Settings pane leaves them in the file. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a
+refused classifier call runs again on, which `off` turns off) are classifier rows.
 """
 from __future__ import annotations
 
@@ -53,29 +45,27 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import config, permission_hook, sandbox_allow
+from . import config, sandbox_allow
 
 log = logging.getLogger("thimble.userconf")
 
 FILE = "config.json"
 AGENTS = ("orientation", "critic", "writer", "checks", "dev", "labels", "cardCheck", "suggest", "refusal")
-CALLS = ("labels", "cardCheck")  # one model call each, with no tools, unless an extension's program runs their tasks
+CALLS = ("labels", "cardCheck")  # one model call each, with no tools
 # each agent's role among config.MODEL_ROLES
 ROLES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "checks", "dev": "dev",
          "labels": "labels", "cardCheck": "verify", "suggest": "suggest", "refusal": "refusal"}
-# each agent's row among modes.AGENTS: the dev agent's alone, for an extension's program that runs it; every other agent,
-# code tickets' among them, runs in main's mode (module note, one fence)
+# each agent's row among modes.AGENTS: the dev agent's alone; every other agent, code tickets' among them, runs in main's
+# mode (module note, one fence)
 MODE_ROWS = {"dev": "dev"}
 SUBAGENT_ROLES = ("orientation", "critic", "writer", "checks")  # the agents that run as subagents of main
 # the keys of each agent that earlier builds read and this one reads and ignores (module note, one fence)
 IGNORED_KEYS: dict[str, tuple[str, ...]] = {
-    **{a: ("fast", "permissionMode") for a in ("orientation", "critic", "writer", "checks")},
+    "orientation": ("fast", "permissionMode"),
+    **{a: ("fast", "permissionMode", "env", "sandbox", "network", "data") for a in ("critic", "writer", "checks")},
+    **{a: ("env", "network", "data") for a in CALLS},
 }
 IGNORED_TOP = ("installs",)  # top-level keys read and ignored
-# the keys of an agent that runs as a subagent of main which only an extension's program running the agent reads (module
-# note, extensions' programs), and what the program gets where the agent sets none (null in DEFAULTS)
-PROGRAM_KEYS = ("env", "sandbox", "network", "data")
-PROGRAM_DEFAULTS = {"env": [], "sandbox": "on", "network": "on", "data": "ask"}
 # the prompt file under prompts/ that an agent's `prompt` replaces
 PROMPT_FILES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "check", "dev": "dev",
                 "labels": "labels", "cardCheck": "card-check"}
@@ -90,9 +80,9 @@ AGENT_SANDBOX = ("on", "off")
 DATA = ("ask", "allow", "off")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 # `cardWait`: the minutes a permission card waits for the analyst before an unanswered request is declined
-# (card_wait_s), at most half the permission hook's own timeout, so the hook is never ended first
+# (card_wait_s), at most half a day
 CARD_WAIT_MINUTES = 10
-CARD_WAIT_MAX = permission_hook.TIMEOUT // 120
+CARD_WAIT_MAX = 720
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
 MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
 SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
@@ -114,10 +104,8 @@ def _session_agent(web: str, network: str = "on") -> dict[str, Any]:
 
 def _subagent(web: str | None) -> dict[str, Any]:
     """An agent that runs as a subagent of main (module note, one fence): its model and effort, `web` ("off", or null
-    for main's), its CLAUDE.md files (`memory`) and its prompt, and PROGRAM_KEYS for an extension's program that runs it
-    (module note, extensions' programs)."""
-    return {"model": None, "effort": None, "web": web, "memory": "inherit", "prompt": None,
-            **{k: None for k in PROGRAM_KEYS}}
+    for main's), its CLAUDE.md files (`memory`) and its prompt."""
+    return {"model": None, "effort": None, "web": web, "memory": "inherit", "prompt": None}
 
 
 DEFAULTS: dict[str, Any] = {
@@ -125,7 +113,6 @@ DEFAULTS: dict[str, Any] = {
     "browser": None,
     "cardWait": CARD_WAIT_MINUTES,
     "askKey": None,
-    "extensions": {},
     "agents": {
         # the orientation's web, network and data are main's fence's (module note, one fence); subagentModel and
         # subagentEffort are thimble:orient-helper's, the type of the orientation's own subagents
@@ -135,9 +122,7 @@ DEFAULTS: dict[str, Any] = {
         "writer": _subagent(None),
         "checks": _subagent(None),
         "dev": _session_agent("off"),  # its `fast` is `thimble fix`'s (config.FAST_OF_TICKETS)
-        # `network`, `data` and `env` reach only an extension's program that runs one of their tasks (harness.py)
-        **{a: {"model": None, "effort": None, "fast": None, "network": "on", "data": "ask", "env": [], "prompt": None}
-           for a in CALLS},
+        **{a: {"model": None, "effort": None, "fast": None, "prompt": None} for a in CALLS},
         "suggest": {"model": None, "effort": None, "fast": None},
         "refusal": {"model": None, "effort": None, "off": None},
     },
@@ -148,20 +133,11 @@ DEFAULTS: dict[str, Any] = {
 # `agents.cardCheck.auto`: whether the card check reads each new card by itself (card_check.auto); null is on
 DEFAULTS["agents"]["cardCheck"]["auto"] = None
 
-# An extension's agent, `agents."<extension>:<agent>"` (extensions.agent_definitions), runs as a subagent of the
-# orientation's session, under that session's sandbox, installs rules, permission mode, fast mode and memory. Its web
-# and network can only take away what the orientation's allow.
-EXTENSION_AGENT_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}:[a-z0-9][a-z0-9-]{0,39}$")
-EXTENSION_AGENT: dict[str, Any] = {"model": None, "effort": None, "web": "off", "network": "on", "prompt": None}
-EXTENSION_KEYS = ("enabled",)  # of `extensions.<name>`
-EXTENSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
-# the extensions thimble ships under a new name, by their old name: a config's settings of an old name are the new one's
-RENAMED_EXTENSIONS = {"swarm": "swarm-orient"}
 
 def private_paths() -> list[str]:
-    """The files the hooks module keeps from file tools, and an extension program's box from the program: the local
-    API's token, the key the sessions' tokens are signed with, and the hashes of the browsers signed in
-    (hook_auth.PAIRED_FILE)."""
+    """The files a session thimble starts may not read or edit (private_rules, Session.settings): the local API's token,
+    the key the sessions' tokens are signed with, the hashes of the browsers signed in (hook_auth.PAIRED_FILE), and how
+    the workbench reaches Claude."""
     return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON, "claude-access.json",
                                                           "anthropic-api-key")]
 
@@ -190,8 +166,8 @@ def main_modes_file() -> Path:
 
 def bypass_file() -> Path:
     """$THIMBLE_HOME/bypass.json, {"rows": [row], "at": iso}: the rows the analyst chose Bypass for in Settings, which
-    only modes.choose writes (from the settings PUT, which only the analyst's browser may make). The hooks module keeps
-    file tools from editing it (module_rules), and server jobs' settings deny it (Session.settings)."""
+    only modes.choose writes (from the settings PUT, which only the analyst's browser may make). Server jobs' settings
+    deny file tools any edit of it (Session.settings)."""
     return global_file().parent / BYPASS_JSON
 
 
@@ -208,63 +184,7 @@ LINKED_FILE = ("thimble's config {path} is a link or has another name in the wor
                "it, so thimble does not read it; replace it with a plain file")
 
 
-def renamed_extensions() -> dict[str, str]:
-    """RENAMED_EXTENSIONS less each old name that an extension of the analyst's own still has (extensions.foreign)."""
-    from . import extensions  # noqa: PLC0415 — extensions imports this module
-
-    return {old: new for old, new in RENAMED_EXTENSIONS.items() if not extensions.foreign(old)}
-
-
-def _renamed(data: dict[str, Any]) -> dict[str, Any]:
-    """A file's object with the settings of each renamed extension (renamed_extensions) under its new name,
-    `extensions.<old>` and `agents."<old>:<agent>"`; where the new name has a setting of its own, that one stays."""
-    exts, agents = data.get("extensions"), data.get("agents")
-    named = [*(exts if isinstance(exts, dict) else ()), *(k.partition(":")[0] for k in
-                                                          (agents if isinstance(agents, dict) else ()))]
-    if not any(n in RENAMED_EXTENSIONS for n in named) or not (names := renamed_extensions()):
-        return data
-
-    def rename(obj: dict[str, Any], new_key: Callable[[str], str]) -> dict[str, Any]:
-        return {new_key(k): v for k, v in obj.items() if new_key(k) == k or new_key(k) not in obj}
-
-    def agent_key(k: str) -> str:
-        ext, sep, agent = k.partition(":")
-        return f"{names[ext]}:{agent}" if sep and ext in names else k
-
-    out = dict(data)
-    if isinstance(exts, dict):
-        out["extensions"] = rename(exts, lambda k: names.get(k, k))
-    if isinstance(agents, dict):
-        out["agents"] = rename(agents, agent_key)
-    return out
-
-
 def _raw(path: Path) -> dict[str, Any]:
-    """The file's object (_written) with each renamed extension's settings under its new name (_renamed)."""
-    return _renamed(_written(path))
-
-
-def rename_extensions(path: Path) -> bool:
-    """Write the config file at `path` with each renamed extension's settings under its new name (_renamed); True when
-    it changed. A file that cannot be read or written is left as it is, and _raw still reads it under the new names."""
-    with _lock:
-        try:
-            data = _written(path)
-        except ConfigError:
-            return False
-        got = _renamed(data)
-        if got == data:
-            return False
-        try:
-            _write(path, got)
-        except OSError as e:
-            log.warning("thimble's config %s keeps the old names of renamed extensions: %s", path, e)
-            return False
-    log.info("thimble's config %s: the settings of renamed extensions are under their new names", path)
-    return True
-
-
-def _written(path: Path) -> dict[str, Any]:
     """The file's object as written, {} when there is none; ConfigError when it cannot be read or is not an object, or
     is a workspace's file that another name can change (config.linked)."""
     if path.parent.parent == config.WORKSPACES_DIR and config.linked(path):
@@ -345,7 +265,7 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "askKey", "extensions", "agents", "views"))
+    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "askKey", "agents", "views"))
     if "browser" in data:
         if scope != "global":
             out.append("browser is set for the whole machine, in the config in thimble's home, not per workspace")
@@ -373,30 +293,17 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
     if "views" in data and keys("views", data["views"], tuple(DEFAULTS["views"])):
         if "propose" in data["views"] and not isinstance(data["views"]["propose"], (bool, type(None))):
             out.append(f"views.propose is {json.dumps(data['views']['propose'])}; it takes true, false or null")
-    exts = data.get("extensions")
-    if "extensions" in data:
-        if scope != "global":
-            out.append("extensions are switched off for every workspace in the config in thimble's home; Settings "
-                       "switches one off for a single workspace")
-        elif keys("extensions", exts, (), EXTENSION_NAME_RE, "the names of extensions (lower-case letters, digits and "
-                  "hyphens)"):
-            for name, conf in exts.items():
-                if EXTENSION_NAME_RE.match(name) and keys(f"extensions.{name}", conf, EXTENSION_KEYS):
-                    if conf.get("enabled") is not None and not isinstance(conf["enabled"], bool):
-                        out.append(f"extensions.{name}.enabled is {json.dumps(conf['enabled'])}; it takes true, false "
-                                   f"or null")
     agents = data.get("agents")
-    if "agents" in data and keys("agents", agents, AGENTS, EXTENSION_AGENT_RE, ', or an extension\'s agent as '
-                                 '"<extension>:<agent>"'):
+    if "agents" in data and keys("agents", agents, AGENTS):
         for name, conf in agents.items():
-            if name in AGENTS or EXTENSION_AGENT_RE.match(name):
+            if name in AGENTS:
                 out.extend(_agent_problems(name, conf, base))
     return out
 
 
 def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
     where = f"agents.{name}"
-    known = tuple(DEFAULTS["agents"][name] if name in AGENTS else EXTENSION_AGENT)
+    known = tuple(DEFAULTS["agents"][name])
     if not isinstance(conf, dict):
         return [f"{where} must be an object"]
     out: list[str] = []
@@ -405,11 +312,8 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
         if k in IGNORED_KEYS.get(name, ()):
             continue  # read and ignored (module note, one fence)
         if k not in known:
-            extra = (f"; {name} runs one model call with no tools, or an extension's program, so it takes only "
-                     f"{', '.join(known)}" if name in CALLS
-                     else f"; it takes {', '.join(known)}" if name in AGENTS else
-                     f"; an extension's agent runs in the orientation's session, whose permission mode, fast mode and "
-                     f"memory it shares, so it takes only {', '.join(known)}")
+            extra = (f"; {name} runs one model call with no tools, so it takes only {', '.join(known)}" if name in CALLS
+                     else f"; it takes {', '.join(known)}")
             out.append(f"{at} is not a setting{extra}")
         elif v is None:
             continue
@@ -547,26 +451,6 @@ def home_as_tilde(text: str) -> str:
     return text.replace(home + os.sep, "~" + os.sep) if home else text
 
 
-def extension_agent(conf: dict[str, Any], key: str) -> dict[str, Any]:
-    """The settings of the extension agent `key` ("<extension>:<agent>") in a loaded config: EXTENSION_AGENT under what
-    the config sets, a null at its default."""
-    got = (conf.get("agents") or {}).get(key)
-    got = got if isinstance(got, dict) else {}
-    return {k: v if got.get(k) is None else got[k] for k, v in EXTENSION_AGENT.items()}
-
-
-def extensions_off() -> set[str] | None:
-    """The extensions the file in thimble's home switches off (`extensions.<name>.enabled: false`), read even when
-    another key of the file has an error; None when the file cannot be read, so no extension can be known to be on."""
-    try:
-        exts = _raw(global_file()).get("extensions")
-    except ConfigError:
-        return None
-    if not isinstance(exts, dict):
-        return set()
-    return {n for n, e in exts.items() if isinstance(e, dict) and e.get("enabled") is False}
-
-
 # --------------------------------------------------------------------------- writing, for the Settings pane
 
 _MISSING = object()
@@ -598,17 +482,6 @@ def _put(d: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
             d[k] = {}
         d = d[k]
     d[path[-1]] = value
-
-
-def set_extension_enabled(name: str, on: bool) -> None:
-    """`thimble extension on | off <name>`: `extensions.<name>.enabled: false` in the file in thimble's home for off,
-    the key taken out for on, since an added extension is on. ConfigError when the file cannot be read."""
-    with _lock:
-        data = _raw(global_file())
-        before = copy.deepcopy(data)
-        _put(data, ("extensions", name, "enabled"), _MISSING if on else False)
-        if data != before:
-            _write(global_file(), data)
 
 
 def leaves(patch: dict[str, Any], at: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
@@ -711,8 +584,8 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
     """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?, off?}} (main's left
     out, '' for back to the default; `subagents` is thimble:orient-helper's row, the orientation's subagentModel and
-    subagentEffort; `fast` only for an agent that takes it, `off` only for the refusal row; an extension's agent,
-    "<ext>:<name>", takes its model and effort only) and `rows` {row of modes.AGENTS: mode, None for main's}, `views`
+    subagentEffort; `fast` only for an agent that takes it, `off` only for the refusal row) and `rows` {row of
+    modes.AGENTS: mode, None for main's}, `views`
     being the dev agent's row of earlier builds. A row of an agent that runs in main's mode now, which an earlier tab may
     send, is left out (modes.IGNORED_ROWS)."""
     from . import modes  # noqa: PLC0415 — modes imports this module
@@ -728,13 +601,8 @@ def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> di
                     agents.setdefault("orientation", {})[key] = str(conf[k] or "").strip() or None
             continue
         name = by_role.get(role)
-        if name is None and EXTENSION_AGENT_RE.match(role):
-            for k in ("model", "effort"):
-                if k in conf:
-                    agents.setdefault(role, {})[k] = str(conf[k] or "").strip() or None
-            continue
         if name is None:
-            raise ConfigError(f"no role {role!r}; one of {', '.join(by_role)}, or an extension's agent")
+            raise ConfigError(f"no role {role!r}; one of {', '.join(by_role)}")
         for k in ("model", "effort", "fast", "off"):
             if k in conf and k in DEFAULTS["agents"][name]:
                 v = conf[k]
@@ -747,13 +615,11 @@ def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> di
 
 
 def migrate(c: str) -> bool:
-    """Bring workspace `c`'s config up to date: each renamed extension's settings in its override under the new name
-    (rename_extensions), and an earlier build's models and permission modes moved into it (_move_settings). True when
-    something moved."""
+    """Bring workspace `c`'s config up to date: an earlier build's models and permission modes moved into its override
+    (_move_settings). True when something moved."""
     if not config._valid_name(c):
         return False
-    renamed = rename_extensions(workspace_file(c))
-    return _move_settings(c) or renamed
+    return _move_settings(c)
 
 
 def _move_settings(c: str) -> bool:
@@ -966,33 +832,29 @@ NO_SANDBOX_WHY = {
 }
 
 
-def agent_conf(conf: dict[str, Any], agent: str, *, program: bool = False) -> dict[str, Any]:
+def agent_conf(conf: dict[str, Any], agent: str) -> dict[str, Any]:
     """The settings a session of `agent` runs with, from a loaded config: an agent that runs as a subagent of main takes
     main's fence's `network`, `data` and `web` (the orientation's), and its own `web` only when that is "off" (module
-    note, one fence); the dev agent and the classifiers keep their own. With `program`, for an extension's program that
-    runs the agent, the agent's own PROGRAM_KEYS, each PROGRAM_DEFAULTS' where it sets none (module note, extensions'
-    programs)."""
+    note, one fence); the dev agent and the classifiers keep their own."""
     mine = dict(conf["agents"][agent])
     if agent not in SUBAGENT_ROLES:
         return mine
-    own = {k: copy.deepcopy(mine[k]) if mine.get(k) is not None else copy.deepcopy(v) for k, v in PROGRAM_DEFAULTS.items()}
     main = conf["agents"]["orientation"]
     own_web = mine.get("web")
     mine.update(network=main.get("network") or "on", data=main.get("data") or "ask",
                 web="off" if own_web == "off" else main.get("web") or "ask")
-    return {**mine, **own} if program else mine
+    return mine
 
 
-def session(c: str | None, agent: str, *, sandbox: bool = True, program: bool = False) -> Session:
+def session(c: str | None, agent: str, *, sandbox: bool = True) -> Session:
     """What the config asks of a session of `agent` in workspace `c` (agent_conf); `sandbox` False for a session the
-    caller runs outside the sandbox, `program` for an extension's program that runs the agent or one of its tasks
-    (module note, extensions' programs). The dev agent, or a program, runs outside the sandbox when its own `sandbox` is
-    "off". ConfigError when the config has an error, or requires the sandbox (`sandbox.enforce`, off by default) and the
-    session of an agent whose sandbox is on would run outside it (NO_SANDBOX)."""
+    caller runs outside the sandbox. The dev agent runs outside the sandbox when its own `sandbox` is "off". ConfigError
+    when the config has an error, or requires the sandbox (`sandbox.enforce`, off by default) and the session of an
+    agent whose sandbox is on would run outside it (NO_SANDBOX)."""
     conf = load(c)
     box = conf["sandbox"]
-    mine = agent_conf(conf, agent, program=program)
-    if (program or agent not in SUBAGENT_ROLES) and mine.get("sandbox") == "off":
+    mine = agent_conf(conf, agent)
+    if agent not in SUBAGENT_ROLES and mine.get("sandbox") == "off":
         return Session(c, agent, mine, False)
     runs = box["use"] != "never" and sandbox_runs()
     if box["enforce"] and sandbox and not runs and box["use"] != "never":
@@ -1005,122 +867,29 @@ def session(c: str | None, agent: str, *, sandbox: bool = True, program: bool = 
     return Session(c, agent, mine, sandbox and runs, enforced=bool(box["enforce"]))
 
 
-# --------------------------------------------------------------------------- the hooks module's rules
-
-
 def config_files(c: str | None) -> list[Path]:
     """thimble's config files, whose edits ask (module note, edits of the config): the one in thimble's home and the
     workspace's."""
     return [global_file(), *([workspace_file(c)] if c else [])]
 
 
-LINKS_DIR = "links"  # under thimble's home: the dashboard link, with no code, and notes for main's terminal (cli.LINKS_DIR)
-# the workspace's files and folders main and its agents may not edit, since thimble keeps its records there: the checks,
-# the chats, the extensions' state, the run record, the folder of the files the hooks trust (trusted/: subagents.json,
-# callers.jsonl, launch.json), the views' state (proposals with their attempt counts, the versions readers are served),
-# and the open notices and those the analyst dismissed (notices.py)
-STATE_PATHS = ("checks/**", "chats/**", "extensions/**", "extension/extension.json", "orient/run.json", "trusted/**",
-               "views/**", "notices.json", "notices-dismissed.json")
-TICKET_FILES = ("tickets.jsonl", "applies.jsonl")  # in a development install's dev folder: the code tickets' records
-
-
-def dev_files() -> list[Path]:
-    """The code tickets' records main may not edit in a development install (dev.DEV_DIR's rule, which this module does
-    not import), which hold the change their checks passed; none in an installed copy."""
-    if config.git_dir() is None:
-        return []
-    folder = Path(os.environ.get("THIMBLE_DEV_DIR") or config.REPO_ROOT / "dev")
-    return [folder / name for name in TICKET_FILES]
-
-
-def checkout_git() -> list[Path]:
-    """The live checkout's git folder in a development install, which main and its subagents may not edit: only
-    thimble's server commits to a code ticket's branch and moves the live branch (dev.commit_worktree); none in an
-    installed copy."""
-    git = config.git_dir()
-    return [git] if git is not None else []
-
-
-def _spellings(*paths: Path | str) -> list[str]:
-    """Each path as spelled and as its realpath, in order and without repeats."""
-    out: list[str] = []
-    for p in paths:
-        for s in (str(p), os.path.realpath(p)):
-            if s not in out:
-                out.append(s)
-    return out
-
-
 def main_web_off(c: str | None) -> bool:
     """Whether Settings has main's web off: the orientation's `web` in thimble's config, which is main's fence's (module
-    note, one fence), as Settings' row for main shows it (ledger.agent_rows). Then the hooks module refuses WebFetch and
-    WebSearch to the analyst's own session (module_rules), the server's runtime gives its main neither
-    (runtime.Runtime.spec_of), and main's prompt names neither (events.network_words). A config with an error gives the
-    defaults'."""
+    note, one fence), as Settings' row for main shows it (ledger.agent_rows). Then the server's runtime gives its main
+    neither WebFetch nor WebSearch (runtime.Space.spec_of), and main's prompt names neither (events.network_words). A
+    config with an error gives the defaults'."""
     return agent_conf(load_or_defaults(c)[0], "orientation").get("web") == "off"
-
-
-def module_rules(c: str) -> dict[str, Any]:
-    """What the hooks module refuses the file tools and the web tools of main and its agents in workspace `c`
-    (plugin/hooks/thimble.ts, `refusal`), which GET /api/module/roles and roles.json carry:
-        private   the token files (private_paths) and the links folder, which no file tool reads or edits
-        records   the workspace's records (STATE_PATHS), main's kept mode, the Bypass choice (bypass_file), the code
-                  tickets' records (dev_files) and the live checkout's git folder (checkout_git), which no edit tool
-                  changes
-        corpus    the corpus folder's realpath when the orientation's `data` is "off", which no edit tool changes; else
-                  None
-        web_off   whether the orientation's `web` is "off", which refuses WebFetch and WebSearch
-        reasons   what a refusal of each kind says (private, records, data, web: prompts/tools.md's module-deny-* hints)
-    Each path is listed as spelled and as its realpath, since the module compares the call's path both ways. A config
-    with an error gives the defaults' rules."""
-    from . import tools  # noqa: PLC0415 — tools imports much of the server
-
-    conf = agent_conf(load_or_defaults(c)[0], "orientation")
-    ws = config.WORKSPACES_DIR / c
-    records = [ws / p.removesuffix("/**") for p in STATE_PATHS]
-    records += [main_modes_file(), bypass_file(), *dev_files(), *checkout_git()]
-    corpus = None
-    if conf["data"] == "off":
-        try:
-            corpus = os.path.realpath(config.corpus_dir(c))
-        except (OSError, ValueError, KeyError):
-            corpus = None
-    return {
-        "private": _spellings(*private_paths(), global_file().parent / LINKS_DIR),
-        "records": _spellings(*records),
-        "corpus": corpus,
-        "web_off": conf["web"] == "off",
-        "reasons": {"private": tools.hint("module-deny-private"), "records": tools.hint("module-deny-records"),
-                    "data": tools.hint("module-deny-data"), "web": tools.hint("module-deny-web")},
-    }
 
 
 # --------------------------------------------------------------------------- prompts
 
 
-# the agents whose prompt file is a task's (tasks.TASK_PROMPTS), which the active extensions' tasks change
-TASK_AGENTS = ("labels", "cardCheck", "checks")
-
-
 def prompt_files(c: str | None, agent: str) -> dict[str, Path]:
-    """{prompt file: the file that replaces it} for `agent` in workspace `c` (prompts.custom): the config's `prompt`,
-    else the role's prompt, or the task's, as the active extensions change it (roles.prompt_file, tasks.files); {} for
-    none."""
+    """{prompt file: the file that replaces it} for `agent` in workspace `c` (prompts.custom): the config's `prompt`;
+    {} for none."""
     value = load_or_defaults(c)[0]["agents"][agent].get("prompt")
     if isinstance(value, str) and value:
         return {PROMPT_FILES[agent]: Path(value)}
-    from . import roles, tasks  # noqa: PLC0415 — roles reads the extensions, which import this module
-
-    if agent in TASK_AGENTS:
-        return tasks.files(c, PROMPT_FILES[agent])
-    if agent in roles.SESSION_ROLES:
-        try:
-            made = roles.prompt_file(c, agent)
-        except Exception:  # noqa: BLE001 — an extension's broken prompt leaves the role on thimble's own
-            log.exception("%s: the %s prompt of the active extensions could not be made", c, agent)
-            made = None
-        if made is not None:
-            return {PROMPT_FILES[agent]: made}
     return {}
 
 

@@ -1,6 +1,6 @@
 """The server's port (app.cli, module note): without THIMBLE_PORT, a port another program or another install's server
-holds is passed over for a free one, which server.json records and every reader finds there (this CLI, the launcher,
-the browser link, the plugin's shim, watcher, statusline and permission hook). With THIMBLE_PORT that port alone is
+holds is passed over for a free one, which server.json records and every reader finds there (this CLI and the
+browser link). With THIMBLE_PORT that port alone is
 used, and a taken one gets today's answer: FOREIGN_LINE for another install's server, the port line for another
 program. A thimble server that server.json does not record is not this install's own: thimble-browser links to its own
 server alone and stops it alone. Two THIMBLE_HOMEs side by side each start and find their own server. A real listener
@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import contextlib
 import errno
-import importlib.machinery
-import importlib.util
 import json
 import os
 import shutil
@@ -25,13 +23,11 @@ from pathlib import Path
 import pytest
 from conftest import bound_port, free_port
 
-from app import cli, config, hook_auth, permission_hook, procs
+from app import cli, config, hook_auth, procs
 
 PORT_FREE = cli.port_free  # before the home fixture stands it in
 HEALTH_LEADER, FOREIGN_HOME = cli.health_leader, cli.foreign_home  # the same
-SERVER_FOR_LAUNCH = cli.server_for_launch  # before conftest's autouse fixture stands it in
 BACKEND = Path(__file__).resolve().parents[1]
-PLUGIN_BIN = config.REPO_ROOT / "plugin" / "bin"
 
 
 def _held() -> socket.socket:
@@ -39,23 +35,6 @@ def _held() -> socket.socket:
     s = bound_port()
     s.listen(8)
     return s
-
-
-def _script(name: str):
-    """A plugin script of bin/, loaded as a module (its shell line is a string to Python)."""
-    loader = importlib.machinery.SourceFileLoader(f"port_test_{name.strip('.').replace('-', '_')}", str(PLUGIN_BIN / name))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    mod = importlib.util.module_from_spec(spec)
-    loader.exec_module(mod)
-    return mod
-
-
-def _found_by_readers() -> set[str]:
-    """The server address each reader of server.json in THIMBLE_HOME finds: the plugin's MCP shim, its hooks' watcher,
-    its statusline and the permission hook."""
-    found = {_script(n).server() for n in ("thimble-mcp", ".thimble-watch", "thimble-agents")}
-    found.add(permission_hook.server())
-    return {f[0] if f else "" for f in found}
 
 
 class FakeServer:
@@ -79,9 +58,10 @@ class FakeServer:
 @pytest.fixture()
 def server(home, monkeypatch):
     """The supervisor with FakeServer for spawn, the real port probes, and health answered where it runs, where the
-    server names the last spawn's pid as its leader."""
+    server names the last spawn's pid as its leader. The folder's session opens with no request (open_session)."""
     sp = FakeServer()
     monkeypatch.setattr(cli, "spawn", sp)
+    monkeypatch.setattr(cli, "open_session", lambda url, name, cwd, chosen: True)
     monkeypatch.setattr(cli, "port_free", PORT_FREE)
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: bool(sp.port) and
                         (url or cli.api_url()) == f"http://127.0.0.1:{sp.port}")
@@ -94,24 +74,23 @@ def server(home, monkeypatch):
 
 def test_a_taken_default_port_is_passed_over_for_a_free_one_that_server_json_records_and_every_reader_finds(
         server, data, monkeypatch, capsys):
-    """Another program holds the default port: `up` starts the server on a free port above it, server.json records it,
-    the link names it, and the CLI and the plugin's readers find the server there; the next `up` starts nothing."""
+    """Another program holds the default port: thimble-browser starts the server on a free port above it, server.json
+    records it, the link names it, and the CLI finds the server there; the next start starts nothing."""
     held = _held()
     try:
         taken = held.getsockname()[1]
         monkeypatch.setattr(cli, "DEFAULT_PORT", taken)
         assert cli.explicit_port() is None and cli.port() == taken
-        assert cli.main(["up", "--cwd", str(data / "mini")]) == 0
+        assert cli.main(["browser", "--cwd", str(data / "mini"), "--detach"]) == 0
         picked = server.ports[0]
         assert picked != taken and taken < picked <= taken + cli.PORT_SCAN
         st = json.loads((cli.server_json()).read_text())
         assert (st["port"], st["api"], st["url"]) == (picked, f"http://127.0.0.1:{picked}", f"http://127.0.0.1:{picked}")
-        assert capsys.readouterr().out.splitlines()[0] == f"thimble: http://127.0.0.1:{picked}/?ws=mini"
+        assert capsys.readouterr().out.splitlines()[0] == f"thimble browser: http://127.0.0.1:{picked}/?ws=mini"
         assert cli.port() == picked and cli.api_url() == f"http://127.0.0.1:{picked}"
-        assert _found_by_readers() == {f"http://127.0.0.1:{picked}"}
-        assert cli.main(["up", "--cwd", str(data / "mini")]) == 0
+        assert cli.main(["browser", "--cwd", str(data / "mini"), "--detach"]) == 0
         assert server.ports == [picked], "found: no second start"
-        assert capsys.readouterr().out.splitlines()[0] == f"thimble: http://127.0.0.1:{picked}/?ws=mini"
+        assert capsys.readouterr().out.splitlines()[0] == f"thimble browser: http://127.0.0.1:{picked}/?ws=mini"
     finally:
         held.close()
 
@@ -159,8 +138,8 @@ def test_a_port_this_installs_own_stuck_server_holds_is_kept_so_the_failure_name
 
 def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed_over(server, data, monkeypatch,
                                                                                     capsys):
-    """THIMBLE_PORT names the port: another install's server there is refused with FOREIGN_LINE by `up` and the launch,
-    which start nothing, and another program there makes the start fail with the port line. Without THIMBLE_PORT the
+    """THIMBLE_PORT names the port: another install's server there is refused with FOREIGN_LINE by thimble-browser,
+    which starts nothing, and another program there makes the start fail with the port line. Without THIMBLE_PORT the
     same port is passed over: no FOREIGN_LINE, and the server starts on a free port."""
     held = _held()
     try:
@@ -178,17 +157,15 @@ def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed
                            "to a free port, or unset it and thimble picks one.")
 
         monkeypatch.setenv("THIMBLE_PORT", str(p))
-        assert cli.main(["up", "--cwd", str(data / "mini")]) == 0
+        assert cli.main(["browser", "--cwd", str(data / "mini"), "--detach"]) == 1
         assert capsys.readouterr().out.splitlines() == [foreign]
-        assert SERVER_FOR_LAUNCH("mini") == [foreign]
         assert server.calls == [], "refused: nothing started"
 
         monkeypatch.delenv("THIMBLE_PORT")
-        assert SERVER_FOR_LAUNCH("mini") == []
-        assert cli.main(["up", "--cwd", str(data / "mini")]) == 0
+        assert cli.main(["browser", "--cwd", str(data / "mini"), "--detach"]) == 0
         out = capsys.readouterr().out
         assert foreign not in out and len(server.ports) == 1 and server.ports[0] != p
-        assert out.splitlines()[0] == f"thimble: http://127.0.0.1:{server.ports[0]}/?ws=mini"
+        assert out.splitlines()[0] == f"thimble browser: http://127.0.0.1:{server.ports[0]}/?ws=mini"
 
         # another program on the port THIMBLE_PORT names: the start tries it and fails, with the port line
         (cli.server_json()).unlink()
@@ -197,10 +174,11 @@ def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed
         theirs["healthy"] = False
         monkeypatch.setenv("THIMBLE_PORT", str(p))
         monkeypatch.setattr(cli, "spawned_exited", lambda pid: True)
-        assert cli.main(["up", "--cwd", str(data / "mini")]) == 0
+        assert cli.main(["browser", "--cwd", str(data / "mini"), "--detach"]) == 1
         out = capsys.readouterr().out
         assert server.ports == [p], "THIMBLE_PORT alone"
-        assert f"thimble: no server answers: {p} is taken by another program" in out and foreign not in out
+        assert f"thimble browser: the server did not start: {p} is taken by another program" in out
+        assert foreign not in out
         assert "start thimble-browser on a free port with `thimble-browser --port <port>`" in out
     finally:
         held.close()
@@ -366,8 +344,8 @@ def _app_main_imports() -> None:
 @pytest.mark.timeout(300)
 def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp_path, fake_claude):
     """Two installs (THIMBLE_HOMEs) whose server.json both name one free port: the first starts there, the second
-    finds another install's server there and starts on a free port; each `up` again finds its own server, each reader
-    of each home finds its own, and stopping one leaves the other running."""
+    finds another install's server there and starts on a free port; each start again finds its own server, and stopping
+    one leaves the other running."""
     _app_main_imports()
     held = _held()
     shared = held.getsockname()[1]
@@ -389,7 +367,7 @@ def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp
 
     def up(name: str) -> list[str]:
         cwd = Path(envs[name]["THIMBLE_DATA_DIR"]) / "mini"
-        out = subprocess.run([sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(cwd)], cwd=BACKEND,
+        out = subprocess.run([sys.executable, "-m", "app.cli", "browser", "--cwd", str(cwd), "--detach"], cwd=BACKEND,
                              env=envs[name], capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out
         return out.stdout.splitlines()
@@ -403,11 +381,12 @@ def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp
         first = up("a")
         st_a = json.loads((homes["a"] / "server.json").read_text())
         ports.append(st_a["port"])
-        assert st_a["port"] == shared and first[0] == f"thimble: http://127.0.0.1:{shared}/?ws=mini", (first, log("a"))
+        assert st_a["port"] == shared and first[0] == f"thimble browser: http://127.0.0.1:{shared}/?ws=mini", (
+            first, log("a"))
         second = up("b")
         st_b = json.loads((homes["b"] / "server.json").read_text())
         ports.append(st_b["port"])
-        assert st_b["port"] != shared and second[0] == f"thimble: http://127.0.0.1:{st_b['port']}/?ws=mini", (
+        assert st_b["port"] != shared and second[0] == f"thimble browser: http://127.0.0.1:{st_b['port']}/?ws=mini", (
             second, log("b"))
         assert not any("(set by THIMBLE_PORT)" in ln for ln in second), "no FOREIGN_LINE without THIMBLE_PORT"
         assert st_a["pid"] != st_b["pid"] and cli.pid_alive(st_a["pid"]) and cli.pid_alive(st_b["pid"])
@@ -417,9 +396,6 @@ def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp
         assert up("a")[0] == first[0] and up("b")[0] == second[0]
         for name, st in (("a", st_a), ("b", st_b)):
             assert json.loads((homes[name] / "server.json").read_text())["pid"] == st["pid"], "found: no new start"
-            with pytest.MonkeyPatch.context() as mp:
-                mp.setenv("THIMBLE_HOME", str(homes[name]))
-                assert _found_by_readers() == {st["api"]}
         stop = subprocess.run([sys.executable, "-m", "app.cli", "stop", "--yes"], cwd=BACKEND, env=envs["b"],
                               capture_output=True, text=True, timeout=30)
         assert f"pid {st_b['pid']}" in stop.stdout, stop

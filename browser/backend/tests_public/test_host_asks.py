@@ -328,27 +328,6 @@ async def test_main_s_prompt_with_an_api_key_says_no_request_to_a_host_asks_as_i
     assert hits == ["/rows"] and asked == []
 
 
-async def test_the_launcher_s_main_is_told_claude_code_sign_in_s_words_whatever_way_the_workbench_reaches_claude(on):
-    """The legacy launcher's main (plugin/bin/thimble, cli.launch_args) is the analyst's own Claude Code session, which
-    reaches Claude through Claude Code whatever way the workbench is set to; its prompt is rendered without `edits`,
-    as for any main the server does not run. With an API key or WIF saved for the workbench it was told "Bash commands,
-    web fetches, web searches and card code reach any host without asking the analyst.", the words for a main the
-    server runs on the Messages API. It gets Claude Code sign-in's words now, and the server's own main keeps its way's."""
-    from app import config
-
-    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
-    corpus = str(config.corpus_dir(CORPUS))
-    assert runtime.network() == "on"
-    launcher = _permissions(events.session_prompt(corpus, terminal=False))
-    assert ("A Bash command's request to a host the analyst has not allowed asks them first, while web fetches, web "
-            "searches and card code reach any host without asking.") in launcher
-    assert "reach any host without asking the analyst" not in launcher
-    for edits in (True, False):
-        served = _permissions(events.session_prompt(corpus, terminal=False, edits=edits))
-        assert "Bash commands, web fetches, web searches and card code reach any host without asking the analyst." in served
-        assert "asks them first" not in served
-
-
 @pytest.mark.parametrize("way", [claude_access.API_KEY, claude_access.CLAUDE_CODE])
 async def test_main_s_prompt_names_no_web_fetch_or_search_while_settings_has_main_s_web_off(way, on, monkeypatch):
     """Settings' row for main shows main's web (the orientation's `web` in thimble's config, main's fence's), and with
@@ -369,12 +348,12 @@ async def test_main_s_prompt_names_no_web_fetch_or_search_while_settings_has_mai
     conf.write_text(json.dumps({"agents": {"orientation": {"web": "off"}}}))
     assert ledger.agent_rows(CORPUS)["main"]["web"] == "off"
     for edits in (None, True, False):
-        said = _permissions(events.session_prompt(corpus, terminal=False, edits=edits))
+        said = _permissions(events.session_prompt(corpus, edits=edits))
         assert ("card code reach" in said or "card code reaches" in said) and "web fetches" not in said, (way, edits, said)
         assert "web searches" not in said
     assert not {"WebFetch", "WebSearch"} & set(runtime.ensure(CORPUS).main.spec().builtins)
     conf.write_text(json.dumps({"agents": {"orientation": {"web": "ask"}}}))
     runtime._spaces.clear()
-    said = _permissions(events.session_prompt(corpus, terminal=False, edits=True))
+    said = _permissions(events.session_prompt(corpus, edits=True))
     assert "web fetches, web searches and card code reach any host without asking" in said
     assert {"WebFetch", "WebSearch"} <= set(runtime.ensure(CORPUS).main.spec().builtins)

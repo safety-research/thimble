@@ -1,7 +1,6 @@
 """app.work_files: when an agent's run ends, its work folder lets go of its subagents' scratch folders and of the large
 files nothing uses, and keeps what a card or a document names, the files a named script reads, small files, its
-dot-entries and Python environments. While it runs, the agent hears when the folder grows past a budget (the plugin's
-watcher, plugin/bin/.thimble-watch). The work folder and the notebook are invented."""
+dot-entries and Python environments. The work folder and the notebook are invented."""
 from __future__ import annotations
 
 import json
@@ -10,8 +9,6 @@ from pathlib import Path
 import pytest
 
 from app import config, work_files
-
-BUDGET_FILE = ".thimble-budget.json"  # the watcher's BUDGET_FILE
 
 C = "board"
 MB = 1024 * 1024

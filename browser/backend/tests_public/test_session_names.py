@@ -1,7 +1,5 @@
 """The names of the Claude Code sessions thimble starts (config.session_name): `thimble:<role> · <workspace>`, since
-`claude agents` lists the sessions of every folder; a long name kept short and distinct, and main's name as launch-args
-prints it (cli.main_name) and the launcher passes it. The statusline and /thimble:agents name thimble's agents by what
-they do (tray.py)."""
+`claude agents` lists the sessions of every folder; a long name kept short and distinct."""
 from __future__ import annotations
 
 
@@ -15,7 +13,6 @@ def test_names_carry_the_workspace():
     assert config.session_name("main", "logs-2") == "thimble:main · logs-2"
     assert config.session_name("dev", None) == "thimble:dev", "a ticket of no workspace"
     assert dev.dev_session_name(CORPUS) == "thimble:dev · mini"
-    assert dev.view_session_name(CORPUS, "board") == "thimble:view-board · mini"
 
 
 def test_a_long_name_stays_within_the_limit_and_distinct():

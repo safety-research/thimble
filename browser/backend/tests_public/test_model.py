@@ -14,6 +14,9 @@ from claude_agent_sdk import (
 from app import model
 from app.model import ToolSpec
 
+# model calls go through Claude Code, which the tests fake (conftest claude_code_sign_in)
+pytestmark = pytest.mark.usefixtures("claude_code_sign_in")
+
 
 def _no_real_cli(opts):
     raise AssertionError("no fake SDK client installed: this test would have spawned a real `claude` session")
@@ -222,7 +225,7 @@ def test_every_structured_call_site_passes_its_model_effort_and_refusal_row():
                     assert name in kw, f"{path.name}:{node.lineno} passes no {name}"
                     assert not (isinstance(kw[name], ast.Constant) and kw[name].value is None), \
                         f"{path.name}:{node.lineno} passes {name}=None"
-    assert len(sites) >= 6, sites
+    assert len(sites) >= 5, sites
 
 
 async def test_a_model_without_an_effort_runs_with_none_and_the_call_says_so(monkeypatch, caplog):

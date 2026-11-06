@@ -60,5 +60,5 @@ def test_every_command_the_cli_and_server_texts_name_is_one_the_current_clis_acc
                     command = re.sub(r"[.,;:)]+$", "", m.group(1).strip())
                     if not accepted(command):
                         wrong.append(f"{f.relative_to(APP)} {target.id}: {command}")
-    assert named > 10, "the texts name thimble-browser's commands"
+    assert named > 5, "the texts name thimble-browser's commands"
     assert wrong == []

@@ -80,7 +80,6 @@ def call(name: str, args: dict[str, Any], tid: str = "toolu_1") -> list[Block]:
 @pytest.fixture()
 def on(monkeypatch, workspaces_tmp):
     """The runtime on, in workspace `mini`, with the checks off (Heads up and Explainers would start at main's turn end)."""
-    monkeypatch.setenv("THIMBLE_RUNTIME", "on")
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     from app import checks
@@ -1224,15 +1223,11 @@ async def test_a_structured_call_streams_so_the_sdk_takes_its_long_reply(on, mon
     assert sent[0]["stream"] is True and sent[0]["max_tokens"] == model.API_MAX_TOKENS
 
 
-async def test_extension_programs_start_no_claude_code_with_an_api_key(on):
+async def test_model_calls_go_to_the_api_with_an_api_key_and_to_claude_code_on_its_sign_in(on):
     claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
     assert runtime.uses_api()
     claude_access.save(claude_access.CLAUDE_CODE, consent=True)
     assert not runtime.uses_api()
-
-
-def test_the_runtime_is_off_for_0_8s_own_tests():
-    assert not runtime.enabled()
 
 
 async def test_the_checker_and_proposer_forks_run_on_the_messages_api_without_claude(on, monkeypatch):

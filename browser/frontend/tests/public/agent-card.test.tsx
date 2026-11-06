@@ -71,12 +71,6 @@ describe('the card', () => {
     expect(el.querySelector('.chat-task-stop')).not.toBeNull()
   })
 
-  test("without thimble's module in main's session there is no Stop, and the card says to press Esc in the terminal", async () => {
-    const el = await card(meta({}), { module: false })
-    expect(el.querySelector('.chat-task-stop')).toBeNull()
-    expect(el.querySelector('.chat-sub-nostop')?.textContent).toMatch(/press Esc in its view/)
-  })
-
   test("a writer main's quit stopped offers Write again, which posts again; nothing offers Resume", async () => {
     const el = await card(meta({ id: 'w1', role: 'writer', title: 'report', doc: 'report', status: 'stopped', stopped_by: 'quit', request: 'r9', agent_type: 'thimble:writer' }))
     expect(el.querySelector('.chat-sub-stopped')?.textContent).toBe('Stopped when your Claude Code session ended.')

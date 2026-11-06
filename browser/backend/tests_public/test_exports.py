@@ -1,6 +1,5 @@
-"""A written document exported: Markdown with footnotes, one self-contained HTML file, the formats a report type's
-export.py declares, such as the video extension's video file, and PDF and video offered disabled when there is no
-browser. No model call and no browser."""
+"""A written document exported: Markdown with footnotes, one self-contained HTML file, and PDF offered disabled when
+there is no browser. No model call and no browser."""
 from __future__ import annotations
 
 
@@ -84,20 +83,6 @@ async def test_routes_offer_the_formats_and_save_markdown_as_a_file(report, monk
     assert TestClient(app).get(f"{BASE}/report/export/video").status_code == 404
 
 
-async def test_an_extension_report_types_formats_join_the_built_in_ones(report, tmp_path, monkeypatch):
-    """An extension's type adds formats or replaces one; thimble's own types keep theirs whatever an extension names."""
-    await _write(report)
-    hook = tmp_path / "export.py"
-    hook.write_text('FORMATS = [{"id": "csv", "name": "CSV", "ext": "csv"}, {"id": "html", "name": "Web page", "ext": "html"}]\n')
-    types = [{"id": i, "export": str(tmp_path / "copy.py"), "export_src": str(hook)} for i in ("digest", "report")]
-    monkeypatch.setattr(exports, "_extension_types", lambda c: types)
-    monkeypatch.setattr(exports, "browser", lambda: ("system", "/usr/bin/chromium"))
-    got = {f["id"]: f for f in exports.formats(CORPUS, "digest", "document")}
-    assert got["csv"] == {"id": "csv", "name": "CSV", "ext": "csv", "ok": True, "hook": True}
-    assert got["html"]["name"] == "Web page" and got["html"].get("hook") and not got["markdown"].get("hook")
-    assert not any(f.get("hook") for f in exports.formats(CORPUS, "report", "document"))
-
-
 async def test_a_document_not_written_yet_answers_no_content_and_a_written_one_itself(report):
     """GET …/types/report before a write is a normal answer (204, which the page reads as no document), not a 404."""
     api = FastAPI()
@@ -112,12 +97,3 @@ async def test_a_document_not_written_yet_answers_no_content_and_a_written_one_i
     await _write(report)
     r = client.get(f"{BASE}/report")
     assert r.status_code == 200 and r.json()["id"] == report_types.read_doc(CORPUS, MAIN, "report")["id"]
-
-
-def test_the_export_hook_s_files_go_outside_the_kernels_scratch_mirror(data_tmp, workspaces_tmp):
-    """The kernels' scratch mirror links each entry of the corpus folder, so a corpus folder named exports stands there
-    as a link to it: the export hook writes its request and its result in the workspace's temp folder instead."""
-    (data_tmp / CORPUS / "exports").mkdir()
-    scratch = notebook.scratch_dir(CORPUS, fresh=True)
-    folder = exports._scratch(CORPUS)
-    assert (scratch / "exports").is_symlink() and scratch not in folder.parents and folder.is_dir()

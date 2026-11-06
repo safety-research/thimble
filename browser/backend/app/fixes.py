@@ -1087,8 +1087,6 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
         return await redo(c, int(rec["id"]))
     if why := problem():
         raise HTTPException(409, why)
-    if not events.reachable(c):
-        raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     text = prompts.render(PROMPT, {"words": words, "fixes": fixes_context(await asyncio.to_thread(records))})
     said = f"{COMMAND} {words}"
     eid = secrets.token_hex(4)

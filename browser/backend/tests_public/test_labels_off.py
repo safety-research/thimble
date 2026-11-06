@@ -21,7 +21,6 @@ GENERIC = ("with a bold label on each point", "cuts or overlaps long labels", "h
 
 @pytest.fixture()
 def space(monkeypatch, workspaces_tmp, data_tmp):
-    monkeypatch.setenv("THIMBLE_RUNTIME", "on")
     config.workspace_dir(CORPUS)
     runtime._spaces.clear()
     yield runtime.ensure(CORPUS)
@@ -36,35 +35,17 @@ def label_words(text: str, folder: str = "") -> list[str]:
 
 
 def test_each_part_labels_off_leaves_out_stands_once_in_its_text(monkeypatch):
-    """A part reworded in its prompt file fails here, with the file and its words, before it reaches a model. In each
-    launch mode, since main.md words some of its label parts in each mode's own words."""
+    """A part reworded in its prompt file fails here, with the file and its words, before it reaches a model."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    for mode in prompts.MODES:
-        texts = {"main.md": prompts.load("main", mode), "shared.md": prompts.load("shared", mode),
-                 "tools.md": prompts.load("tools", mode)}
-        for file, parts in labels_off.CUTS.items():
-            for part in parts:
-                for words in part if isinstance(part, tuple) else (part,):
-                    assert words in texts[file], (mode, file, words)
-            # each part, in order, stands once in what the parts before it left (labels_off.cut raises else)
-            assert len(labels_off.cut(texts[file], [file])) < len(texts[file]), (mode, file)
+    texts = {"main.md": prompts.load("main"), "shared.md": prompts.load("shared"), "tools.md": prompts.load("tools")}
+    for file, parts in labels_off.CUTS.items():
+        for part in parts:
+            for words in part if isinstance(part, tuple) else (part,):
+                assert words in texts[file], (file, words)
+        # each part, in order, stands once in what the parts before it left (labels_off.cut raises else)
+        assert len(labels_off.cut(texts[file], [file])) < len(texts[file]), file
     with pytest.raises(prompts.PromptError, match="main.md"):
         labels_off.cut("no such words", ["main.md"])
-
-
-def test_with_labels_off_the_terminal_launch_s_prompt_says_nothing_of_labels_either(space, analyst, monkeypatch):
-    """The 0.8 terminal launch (launch_mode.py) renders main's prompt in terminal mode, whose `label_done` and `rerun`
-    bullets have words of their own: Labels off leaves them out too, and the launch's prompt renders."""
-    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    workdir = str(space.corpus)
-    ledger.put_settings_route(CORPUS, analyst, {"labels": False})
-    with prompts.rendering("terminal"):
-        text = events.session_prompt(workdir, terminal=False)
-        tool_texts = tools.tool_sections([n for n in tools.REGISTRY if n not in labels_off.TOOLS], False)
-    assert "## Events from thimble" in text and label_words(text, workdir) == [], label_words(text, workdir)
-    for name in ("add_card", "set_filter", "open_view"):
-        desc, schema = tool_texts[name]
-        assert label_words(desc) == [] and label_words(str(schema)) == [], name
 
 
 def test_with_labels_off_main_s_prompt_and_the_shared_text_say_nothing_of_labels_and_with_labels_on_all_of_it(
@@ -122,11 +103,6 @@ async def test_with_labels_off_no_agent_is_offered_a_label_tool_and_the_tools_te
     # a tool that stays keeps what it does: set_filter still filters the cards
     assert secs["set_filter"][1]["properties"].keys() == on_secs["set_filter"][1]["properties"].keys() - {"label", "value"}
     assert secs["set_filter"][0].startswith("Filter the cards by their kind, group, maker, card check, star, lock or words.")
-    # main's shim lists them alike
-    listed = [t["name"] for t in tools.list("analyst", labels=False)]
-    assert listed and not set(labels_off.TOOLS) & set(listed)
-    assert [t["name"] for t in tools.list("analyst")] == [s.name for s in tools.REGISTRY.values()
-                                                       if "analyst" in s.roles]
 
 
 async def test_with_labels_off_a_label_tool_s_call_answers_with_the_one_line_and_changes_nothing(space, analyst):

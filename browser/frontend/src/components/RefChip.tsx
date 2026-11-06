@@ -12,7 +12,6 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { openCited } from '../lib/citeTargets'
 import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../lib/calls'
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
 import { callDetail, callFile, callTarget } from '../chat/model'
@@ -462,12 +461,10 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const onEnter = () => {
     cancelHide()
     window.clearTimeout(showTimer.current)
-    if (home) bus.emit('citeHover', { card: home, ref })
     if (pointing()) return
     showTimer.current = window.setTimeout(() => void open(), HOVER_DELAY_MS)
   }
   const onLeave = () => {
-    if (home) bus.emit('citeHover', { card: home, ref: null })
     window.clearTimeout(showTimer.current)
     reqSeq.current++
     unmark()
@@ -485,7 +482,6 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     setPop(null)
     unmark()
     if (unresolved) return
-    if (home && openCited(home, ref)) return
     void clickTarget().then((to) => teleport(to))
   }
 

@@ -52,7 +52,7 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
-  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension' | 'thimble'; tray?: boolean; event?: string; run?: number; extension?: string }
+  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'thimble'; tray?: boolean; event?: string; run?: number }
   | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
@@ -663,14 +663,6 @@ export interface ViewShown {
 }
 
 /** What a view's page gets as `open` (`GET /ws/{c}/views/{slug}/resolve?ref=`). */
-/** A view opened from a card of a card type (Open as view): the card, its question and the arguments of its call, which
- * choose the view's records. */
-export interface ViewQuery {
-  card: string
-  title: string
-  args: Record<string, unknown>
-}
-
 export interface ViewOpen {
   ref: string | null
   path?: string
@@ -683,8 +675,6 @@ export interface ViewOpen {
   excerpt?: string
   refs?: string[]
   error?: string
-  /** in a view: the card it is drawn from, or null for none */
-  query?: ViewQuery | null
 }
 
 // ---- orientation ----
@@ -773,19 +763,17 @@ export interface SessionAlert {
 export type RefusalKind = 'auto-mode' | 'no-call' | 'limit' | 'not-launched' | 'hook' | 'earlier-session' | 'no-module' | 'error' | (string & {})
 
 /** A start that did not happen (run.json `refused`, a document's `report {status: refused}`, a proposal's): Claude
- * Code's or thimble's reason, as given, its kind, when, the pending request it was (Start it and Try again start it
- * again), and `expired` for a click the module did not answer in time. */
+ * Code's or thimble's reason, as given, its kind, when, and the pending request it was (Start it and Try again start
+ * it again). */
 export interface Refusal {
   reason: string
   kind: RefusalKind
   at?: string
   request?: string | null
-  expired?: boolean
 }
 
 /** What a click start answers (Write, Accept, Start it, Try again; subagents.Answer): the agent id when it started,
- * else the refusal's kind and reason; `request` is the pending request either way, `program` an extension's program
- * that runs it instead. */
+ * else the refusal's kind and reason; `request` is the pending request either way. */
 export interface StartAnswer {
   agentId?: string
   /** the started agent's chat, which the browser opens (its thread, on its first steps) */
@@ -793,8 +781,6 @@ export interface StartAnswer {
   request?: string
   kind?: RefusalKind
   reason?: string
-  expired?: boolean
-  program?: string
 }
 
 /** A pending request as the refused card shows it before Start it (`GET /ws/{c}/subagents/requests/{id}`): its role,
@@ -1250,12 +1236,9 @@ export interface Settings {
   config_error?: string
   /** the keys thimble's config files hold that this build reads and ignores, each as its key path (userconf.ignored) */
   config_ignored?: string[]
-  /** who runs each agent and what it may do (backend ledger.agent_rows): `main` carries thimble's rules for main and
-   * its agents, its subagents; orient, writer, critic and checks name who runs them and their own `web`; `dev`, labels
-   * and cardCheck keep fences of their own */
+  /** what each agent may do (backend ledger.agent_rows): `main` carries thimble's rules for main and its agents, its
+   * subagents; orient, writer, critic and checks their own `web`; `dev` keeps a fence of its own */
   agents?: Partial<Record<AgentRowKey, AgentRow>> & { main?: MainFence }
-  /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
-  tasks?: TaskRow[]
   /** the minutes a code ticket's permission request waits before it is declined (thimble's config `cardWait`) */
   card_wait?: number
   /** View proposals: whether thimble proposes views after a turn and viewers for file types (thimble's config
@@ -1274,45 +1257,22 @@ export interface Settings {
   [k: string]: unknown
 }
 
-/** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
-export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
+/** The agent rows of the settings: thimble's subagents and the code tickets' dev agent. */
+export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev'
 
-/** thimble's rules for main and its agents (backend ledger.agent_rows `main`): the extensions adding to main's prompt,
- * its web tools and edits of the corpus, and where its shell's network reaches: `ask` on Claude Code sign-in, where a
- * host the analyst's Claude Code settings do not allow asks first, `on` with an API key or WIF. */
+/** thimble's rules for main and its agents (backend ledger.agent_rows `main`): its web tools and edits of the corpus,
+ * and where its shell's network reaches: `ask` on Claude Code sign-in, where a host the analyst's Claude Code settings
+ * do not allow asks first, `on` with an API key or WIF. */
 export interface MainFence {
-  additions: string[]
   web?: 'ask' | 'off' | 'allow'
   data?: 'ask' | 'allow' | 'off'
   network?: 'ask' | 'on'
   config?: string
 }
 
-/** One of thimble's tasks in the settings (backend tasks.public): thimble's own or an extension's prompt, Agent SDK
- * program or command, the extensions adding to its prompt, and those that all replace it. */
-export interface TaskRow {
-  task: string
-  way: AgentRow['way']
-  extension: string
-  additions: string[]
-  conflict: string[]
-}
-
-/** The agents of thimble's config that are one model call each, unless an extension's program runs their tasks (backend
- * userconf.CALLS). */
-export type CallAgent = 'labels' | 'cardCheck'
-
-/** One agent's row in the settings (backend ledger.agent_rows): thimble's own agent or an extension's (its prompt in
- * place of thimble's, an Agent SDK program or a command), the extensions adding to its prompt, two that both replace
- * it, and its consent settings from thimble's config. */
+/** One agent's row in the settings (backend ledger.agent_rows): its consent settings from thimble's config. */
 export interface AgentRow {
-  way: 'thimble' | 'prompt' | 'sdk' | 'command'
-  /** labels and cardCheck only: the tasks whose programs run under its settings (backend tasks.TASKS) */
-  tasks?: string[]
-  extension: string
-  additions: string[]
-  conflict: string[]
-  /** the fence keys of an agent with a fence of its own (dev, labels, cardCheck); a subagent of main has main's */
+  /** the fence keys of an agent with a fence of its own (dev); a subagent of main has main's */
   sandbox?: 'on' | 'off'
   sandbox_runs?: boolean
   network?: 'on' | 'off'
@@ -1338,73 +1298,6 @@ export interface SettingsPatch {
   /** Labels: false turns it off, null puts back the default (on) */
   labels?: boolean | null
   [k: string]: unknown
-}
-
-/** One view an extension gives, as this workspace finds it (backend extensions.public): whether it shows here, the
- * check's reason, where its switch stands (switched here, else as the check says), and whether that switch can change
- * anything (`locked`: the extension does not run here, or no file here matches the view's claims). */
-export interface ExtensionViewRow {
-  slug: string
-  name: string
-  shown: boolean
-  note: string
-  on: boolean
-  locked: boolean
-}
-
-/** One extension added to thimble, as this workspace finds it (backend extensions.public): whether it runs here and
- * why not, this workspace's switch, whether it cannot run here whatever that switch says (`locked`), what it gives,
- * the settings it runs under, and its views. */
-export interface ExtensionRow {
-  name: string
-  version: string
-  /** what it is, from its extension.json */
-  description?: string
-  /** one thimble ships, whose version is thimble's */
-  builtin?: boolean
-  active: boolean
-  why: string
-  /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
-  note: string
-  on: boolean
-  locked: boolean
-  views: ExtensionViewRow[]
-  /** what it gives, each in a few words */
-  parts?: string[]
-  /** the settings of the agents it changes or adds, in words */
-  consent?: string
-  /** whether its code runs in a sandbox; null for one with no code */
-  sandboxed?: boolean | null
-  /** an extension thimble ships that is not added: turning its switch on adds it */
-  addable?: boolean
-  /** for one not added: the extensions thimble ships that adding it adds with it */
-  needs?: string[]
-}
-
-/** One view built for this workspace, in its local extension (backend views.local_extension). */
-export interface LocalViewRow {
-  slug: string
-  name: string
-  /** what it shows, from its view.json */
-  description?: string
-  /** a file viewer, which opens in the File browser */
-  file_viewer: boolean
-  /** true: every view built here shows (backend views.local_extension) */
-  on: boolean
-}
-
-/** The workspace's local extension: the views built for this workspace, which no other workspace shows. */
-export interface LocalExtension {
-  name: string
-  views: LocalViewRow[]
-}
-
-/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, and the
- * workspace's local extension. */
-export interface Extensions {
-  extensions: ExtensionRow[]
-  conflicts: string[]
-  local?: LocalExtension | null
 }
 
 // ---- the corpus (backend corpus.py) ----
@@ -2095,9 +1988,6 @@ export interface LabelRowText extends LabelRow {
 
 // ---- the chat: the mirror of the analyst's session ----
 
-/** Which Manual-mode notice shows (Attached.manual). */
-export type ManualHint = 'switch' | 'org' | 'settings'
-
 /** The Claude Code session mirrored as main while `/thimble` has it attached. */
 export interface Attached {
   session: string
@@ -2120,12 +2010,6 @@ export interface Attached {
    * bypassPermissions, dontAsk), which the dev agent's program follows until the analyst sets its row, Bypass as Manual
    * (backend modes.py) */
   permission_mode?: string
-  /** while that mode is Claude Code's Manual mode (backend modes.manual_hint), which Manual-mode notice shows (backend
-   * notices `manual-mode`): `switch` how to switch to auto mode, `org` or `settings` that the organization's or the
-   * analyst's Claude Code settings turn auto mode off */
-  manual?: ManualHint
-  /** main's terminal said once that the session runs in Manual mode (backend session.note_mode) */
-  manual_told?: boolean
   /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
   fast_choice?: boolean
   /** the session that was main until this one took its place while it runs on in another terminal */
@@ -2183,8 +2067,7 @@ export interface ChatMeta {
   hosts?: HostAsk[]
   /** a code ticket's session: what the analyst's "don't ask again" answers added for the rest of it */
   session_rules?: { text: string }[]
-  /** the agent a session or a program runs as: thimble's own as `thimble:<role>`, an extension's program's as
-   * `<extension>:<role or task>` (backend harness.start) */
+  /** the agent a session runs as: thimble's own as `thimble:<role>` */
   agent_type?: string | null
   /** a writer: the document it writes (write_session.py) */
   doc?: string | null
@@ -2225,11 +2108,7 @@ export interface ChatMeta {
   paused?: 'critique' | (string & {}) | null
   /** the latest run began with a message the analyst typed in Claude Code's agent tray */
   typed_in_tray?: boolean | null
-  // ---- main only (module_bridge) ----
-  /** thimble's hooks module holds the long poll for main (module_bridge.live) */
-  module?: boolean | null
-  /** why it does not (module_bridge.why_not), '' while it does */
-  module_why?: string | null
+  // ---- main only ----
   /** the analyst's messages that came while main's turn ran and that main has not read yet, oldest first, which its
    * chat shows waiting (backend runtime.unread) */
   unread?: { event: string; text: string }[]

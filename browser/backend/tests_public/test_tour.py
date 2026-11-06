@@ -13,9 +13,8 @@ from fastapi.testclient import TestClient
 from app import main
 
 
-def test_the_tour_is_offered_once_per_install_and_recorded_in_thimble_home(claude_global_config):
+def test_the_tour_is_offered_once_per_install_and_recorded_in_thimble_home():
     home = Path(os.environ["THIMBLE_HOME"])
-    claude_before = claude_global_config.read_text()
     c = TestClient(main.create_app())
     assert c.get("/api/tour").json() == {"seen": False}
     assert not (home / "tour.json").exists()
@@ -24,7 +23,6 @@ def test_the_tour_is_offered_once_per_install_and_recorded_in_thimble_home(claud
     assert json.loads((home / "tour.json").read_text())["seen"]
     # a new app on the same home (a restarted server) still knows
     assert TestClient(main.create_app()).get("/api/tour").json() == {"seen": True}
-    assert claude_global_config.read_text() == claude_before
 
 
 @pytest.mark.parametrize("answered_in", ["THIMBLE_BROWSER_HOME", "THIMBLE_PLUGIN_HOME"])

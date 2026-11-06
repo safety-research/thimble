@@ -72,8 +72,6 @@ export function ProposalCard({ ws }: { ws: string }) {
     return () => window.clearTimeout(t)
   }, [slug])
   const [busy, setBusy] = useState<'accept' | 'reject' | 'off' | null>(null)
-  // why this tab's Accept could not start the build, for the proposal it answered
-  const [refused, setRefused] = useState<{ slug: string; reason: string } | null>(null)
   if (!offer) return null
   const p = offer
   const ready = armed === p.slug && !busy
@@ -81,14 +79,9 @@ export function ProposalCard({ ws }: { ws: string }) {
     if (!ready) return
     track('view-build', { target: `view:${p.slug}`, detail: { offer: true } })
     setBusy('accept')
-    setRefused(null)
     api
       .acceptProposal(ws, p.slug)
-      .then((row) => {
-        // a start that cannot happen keeps the proposal open with the refusal (backend views.click_refused)
-        if (row?.status === 'suggested' && row.refused) setRefused({ slug: p.slug, reason: row.refused.reason || 'The build could not start.' })
-        return refreshProposals(ws)
-      })
+      .then(() => refreshProposals(ws))
       .catch((e: Error) => bus.emit('toast', { text: `Could not build ${p.name}. ${why(e)}`, kind: 'error' }))
       .finally(() => setBusy(null))
   }
@@ -114,8 +107,6 @@ export function ProposalCard({ ws }: { ws: string }) {
       .finally(() => setBusy(null))
   }
   const gate = { 'aria-disabled': !ready || undefined }
-  // this tab's refusal, else the one the row keeps from an earlier Accept
-  const reason = refused?.slug === p.slug ? refused.reason : p.refused?.reason || null
   const line = offerFor(p)
   const files = (p.claims ?? []).filter(Boolean)
   return (
@@ -140,11 +131,6 @@ export function ProposalCard({ ws }: { ws: string }) {
           Don&rsquo;t ask again
         </button>
       </div>
-      {reason && (
-        <p className="chat-offer-refused" role="status">
-          {reason}
-        </p>
-      )}
     </div>
   )
 }

@@ -15,7 +15,7 @@ import { mount, settle, unmountAll } from './mount.tsx'
 const T = '2026-10-15T10:00:00+00:00'
 const LATER = '2026-10-15T10:00:05+00:00'
 const ATTACHED = { session: 's1', cwd: '/corpus', at: T, model: 'claude-opus-5-5' }
-const MAIN = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED, module: true, unread: [] } as unknown as ChatMeta
+const MAIN = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: true, attached: ATTACHED, unread: [] } as unknown as ChatMeta
 const THREAD = { id: 'th1', kind: 'thread', role: 'thread', title: 'push-retries', created_at: T, parent: 'main', anchor: null, anchor_text: null, running: true, fork: { agent_id: 'afork1' } } as unknown as ChatMeta
 const ORIENT = { id: 'or1', kind: 'agent', role: 'orient', title: 'Orientation', created_at: T, parent: 'main', status: 'running' } as unknown as ChatMeta
 /** the first agent of the orientation's workflow, a step of its session, and its record in the orientation's log */

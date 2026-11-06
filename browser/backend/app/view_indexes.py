@@ -1,14 +1,13 @@
 """The indexes view readers keep on disk (workspaces/<c>/view-indexes), held to a bounded size.
 
 A reader's index is pickled by fingerprint (views._prepare): `<dir>/<fp>.index.pickle`, with `<fp>.reads.json` beside
-it, where `<dir>` is a view's slug, or a folder below a dot-folder for a card type: `.cardtypes/<slug>` for one thimble
-ships, `.extensions/<extension>/<view>` or `.extensions/<extension>/cards/<slug>` for an extension's. The fingerprint
+it, where `<dir>` is a view's slug. The fingerprint
 changes with the claimed files and with reader.py, so every change to either leaves a new pickle beside the old ones.
 thimble keeps:
 
 - in each folder, the KEEP_PER_DIR most recently used fingerprints, and the one a built view (not a draft) used last,
   which a page still on the version before a change uses while the change's checks build new ones;
-- no folder of a view that no longer exists (a dot-folder is no view's, so it is never deleted whole);
+- no folder of a view that no longer exists;
 - across every workspace, at most cap() bytes of pickles, the least recently used deleted first, but never one used in
   the last IN_USE_S.
 
@@ -134,23 +133,11 @@ def prune_dir(d: Path, keep: str | None = None) -> int:
 
 
 def _folders(root: Path) -> list[Path]:
-    """The folders under a workspace's indexes folder that may hold indexes: one per view, and every folder below a
-    dot-folder (the card types'), at any depth, without following links."""
-    out: list[Path] = []
+    """The folders under a workspace's indexes folder that may hold indexes, one per view, without following links."""
     try:
-        subs = [d for d in root.iterdir() if d.is_dir() and not d.is_symlink()]
+        return [d for d in root.iterdir() if d.is_dir() and not d.is_symlink() and d.name != CALLS_DIR]
     except OSError:
-        return out
-    for d in subs:
-        if d.name == CALLS_DIR:
-            continue
-        if not d.name.startswith("."):
-            out.append(d)
-            continue
-        for here, dirs, _ in os.walk(d):
-            dirs[:] = [x for x in dirs if not os.path.islink(os.path.join(here, x))]
-            out.append(Path(here))
-    return out
+        return []
 
 
 def built(c: str, pickle: Path, by_built: bool = False) -> None:
@@ -220,7 +207,7 @@ def prune_workspace(c: str, alive: Any) -> int:
     root = config.workspace_dir(c) / INDEXES_SUBDIR
     freed = 0
     for d in _folders(root):
-        if d.parent == root and not d.name.startswith(".") and not alive(d.name):
+        if not alive(d.name):
             freed += drop(c, d.name)
         else:
             freed += prune_dir(d)

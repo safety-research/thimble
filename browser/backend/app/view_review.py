@@ -1,12 +1,12 @@
 """The view review: once a view passes its checks, which code runs without pictures (views.check), a
-`thimble:view-reviewer`, a subagent of the analyst's Claude Code session (subagents.py), looks at pictures of its page
+`thimble:view-reviewer`, a subagent of main (subagents.py), looks at pictures of its page
 and fixes clear problems in how it draws, with a fresh context. The view reaches the analyst at once and the review runs
 beside it; each revision that passes the view's checks replaces it, with Undo back to the view as it was built.
 
 dev._settle calls after_built() when a build or a change to a view passes, and the review starts through thimble's
 plugin module as part of the start that asked for the build (a follow-on start); Review again is the analyst's click.
-The reviewer's registered prompt is the `review` section of prompts/view-review.md (the view-review task's part, which
-an extension's prompt changes, tasks.py); its run's prompt names the view (prompts/dev-view-review.md, task). It works
+The reviewer's registered prompt is the `review` section of prompts/view-review.md; its run's prompt names the view
+(prompts/dev-view-review.md, task). It works
 in rounds, through two thimble tools (view_tools.py):
 1. view_pictures: the overview as the Views bar opens it, then the states it asks for, up to EXTRA_SHOTS more a round
    (EXTRA_STATES, such as a control clicked or another pane width), shot into views-work/<slug>/review/<round>/ with
@@ -18,9 +18,6 @@ in rounds, through two thimble tools (view_tools.py):
    before ROUNDS rounds it is told to take the pictures again; a failure puts the view back as it was before the round
    (REVISION_FAILED_NOTE). A review with no problems calls finish_review with nothing revised. While it edits, readers
    see the view as it last passed (views.read_built's digest rule).
-An extension's program that replaces the view-review task (tasks.program) reads the pictures in place of the reviewer:
-each view_pictures call passes them to it (review_input, the input docs/agents.md documents), and the reviewer gets the
-problems it found to fix. A program that fails ends the review failed with why (PROGRAM_FAILED_NOTE).
 A reviewer that ends without finish_review after editing has the gate run once at its end (views.regate), which keeps
 or undoes its edit the same way. A reviewer whose model refuses ends failed with that reason; Review again runs it again
 on the model Settings name.
@@ -51,7 +48,6 @@ from . import config, headless, nofollow, subagents, views
 log = logging.getLogger("thimble.view_review")
 
 PROMPT = "view-review"  # prompts/view-review.md: its `review` section is the reviewer's registered prompt
-TASK = "view-review"  # tasks.TASKS: a program that replaces it reads the pictures (program_reading)
 TASK_PROMPT = "dev-view-review"  # prompts/dev-view-review.md: a review run's prompt
 REVIEWER = "view-reviewer"  # subagents.TYPES
 ROUNDS = 1  # revisions a review may make: one light pass after the build, for clear problems in how the view draws
@@ -69,11 +65,6 @@ STOPPED_NOTE = "The review was stopped."
 CHANGED_NOTE = "The view changed while it was reviewed."
 QUIT_NOTE = "The review stopped when your Claude Code session ended."
 LEFT_AS_IS = "the view's files, as the review left them"  # a revision the reviewer kept without finish_review
-PROGRAM_FAILED_NOTE = "{extension}'s view-review program failed: {why}"
-# the view-review task's output, which a program that replaces the task returns (docs/agents.md); the reviewer asks for
-# more pictures itself, so the program's input has `ask` false and its `more` is not read
-PROGRAM_SCHEMA = {"type": "object", "properties": {"problems": {"type": "array", "items": {"type": "string"}}},
-                  "required": ["problems"]}
 NO_MORE = ("No picture is left in this round: the overview and {n} more states are taken. Judge from those, then call "
            "finish_review.")
 # the states the reviewer may ask to see beside the overview, each with its pane: the overview with the test label on and
@@ -172,8 +163,8 @@ def _sections(text: str) -> dict[str, str]:
 
 
 def reviewer_prompt(c: str) -> str:
-    """The reviewer's registered prompt: the `review` section of prompts/view-review.md, read with its includes (the
-    caller sets the active extensions' change of it, prompts.custom), its slots filled."""
+    """The reviewer's registered prompt: the `review` section of prompts/view-review.md, read with its includes, its
+    slots filled."""
     from . import prompts  # noqa: PLC0415
 
     text = _sections(prompts.load(PROMPT)).get("review", "")
@@ -516,11 +507,10 @@ def _wanted(states: Any, left: int) -> list[dict[str, Any]]:
     return more[:max(0, left)]
 
 
-async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str, str]:
+async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str]:
     """view_pictures for the reviewer `agent_id`: in a round's first call the overview, then the states asked for, up
     to EXTRA_SHOTS a round, into views-work/<slug>/review/<round>/. (The pictures' lines, each its number, path and
-    what it shows, then what the checks found; the records the pages fetched; what an extension's program that replaces
-    the view-review task found in them, program_reading.) NoPictures for none, or for a program that failed."""
+    what it shows, then what the checks found; the records the pages fetched.) NoPictures for none."""
     prop = views.read_proposal(c, slug)
     view = views.read_view(c, slug)
     if prop is None or view is None:
@@ -552,43 +542,7 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
     checks = views.gate_notes(c, slug)
     if checks:
         lines += ["", "What the view's checks found:", *checks]
-    return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots)
-
-
-def review_input(c: str, prop: dict[str, Any], view: dict[str, Any], shots: list[dict[str, Any]]) -> dict[str, Any]:
-    """The view-review task's input (tasks.py, docs/agents.md): the view (its name, description, what the analyst does
-    with it, the files it claims, any layout its proposal gave and what its checks found), each picture's path and what
-    it shows (_about), the controls the first picture shows, the first records the pages fetched, and `ask` false, since
-    the reviewer asks for more pictures itself."""
-    return {"view": {"slug": str(view["slug"]), "name": str(prop.get("name") or view["name"]),
-                     "description": str(prop.get("description") or view["description"]),
-                     "task": str(prop.get("task") or ""),
-                     "claims": [str(x) for x in prop.get("claims") or view["claims"]], "spec": views.layout_lines(prop),
-                     "checks": list(views.gate_notes(c, view["slug"]))},
-            "pictures": [{"path": str(s["png"]), "about": _about(s)} for s in shots if s.get("png")],
-            "controls": [str(x) for x in (shots[0].get("controls") or [])] if shots else [],
-            "records": records_text(shots), "ask": False}
-
-
-async def program_reading(c: str, slug: str, agent_id: str, prop: dict[str, Any], view: dict[str, Any],
-                          shots: list[dict[str, Any]]) -> str:
-    """'' when thimble's reviewer reads the pictures `shots` itself; else the problems that the program of the one
-    extension that replaces the view-review task here (tasks.program) found in them, as the reviewer's hint. A program
-    that fails, or answers with no list of problems, ends the review failed (PROGRAM_FAILED_NOTE): NoPictures."""
-    from . import tasks, tools, view_tools  # noqa: PLC0415
-
-    part = tasks.program(c, TASK)
-    if part is None:
-        return ""
-    res = await tasks.call(c, TASK, review_input(c, prop, view, shots), schema=PROGRAM_SCHEMA)
-    if res.status != "ok" or not isinstance(res.output, dict):
-        why = " ".join(str(res.detail or f"it ended {res.status}").split())[:400]
-        _set(c, slug, state="failed", note=PROGRAM_FAILED_NOTE.format(extension=part.extension, why=why), finished=True)
-        view_tools.stop_after_grace(c, key(slug), agent_id)
-        raise NoPictures(tools.hint("view-review-program-failed", extension=part.extension, why=why))
-    problems = [" ".join(str(p).split()) for p in res.output.get("problems") or [] if str(p).strip()]
-    return tools.hint("view-review-program", extension=part.extension,
-                      problems="\n".join(f"- {p}" for p in problems) or "- none")
+    return "\n".join(lines), records_text(shots) or "-"
 
 
 def _about(s: dict[str, Any]) -> str:
@@ -663,21 +617,6 @@ async def finish(c: str, slug: str, agent_id: str, revised: list[str], left: lis
          digest=views.digest(d))
     view_tools.stop_after_grace(c, key(slug), agent_id)
     return "finish-review-done"
-
-
-# --------------------------------------------------------------------------- the view-review task
-
-
-async def review_task(c: str, inp: dict[str, Any], *, model: str | None = None, **_: Any) -> Any:
-    """The view-review task's own implementation (tasks.py), which a program that replaces the task is lent as
-    `thimble.default(input)`: the review is a subagent with pictures and tools now, so there is no one-call reading to
-    lend, and the call fails. The task's prompt part,
-    the `review` section of prompts/view-review.md, is the reviewer's registered prompt, which an extension's prompt
-    still changes (view_tools.reviewer_definition)."""
-    from . import model as model_mod  # noqa: PLC0415
-
-    return model_mod.CallResult(status="error", detail="thimble's view review runs as a subagent, with no one-call "
-                                                       "reading to run")
 
 
 # --------------------------------------------------------------------------- routes

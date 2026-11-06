@@ -84,7 +84,6 @@ The browser workbench, `browser/`:
 |---|---|
 | the page (React and Vite), and its unit tests | `browser/frontend/src`, `browser/frontend/tests/public` |
 | the server: the workspace, the tools, the agents' sessions, the card harness | `browser/backend/app/` |
-| the Claude Code plugin the session loads: MCP shim, hooks, hooks module, skills | `browser/plugin/` |
 | the texts Claude reads | `browser/prompts/` |
 | the view kit's guides and worked examples, which the view builder reads | `browser/docs/`, `browser/plugin/viewers/` |
 | the server's tests | `browser/backend/tests_public/` |
@@ -126,7 +125,7 @@ When the model does something you do not want, change the cause, not the symptom
    status) is fixed in code.
 5. Read every sentence again as if for a request nobody has thought of yet, and keep only what is still right there.
 
-The browser workbench (`browser/`, thimble 0.8's browser mode) keeps its own texts in `browser/prompts/`. Of these it
+The browser workbench (`browser/`) keeps its own texts in `browser/prompts/`. Of these it
 reads the texts of what it runs as the terminal does, the citation checker, the look and the fixer (`checker.md`,
 `observer.md`, `observer-turn.md`, `lens-explain.md`, `lens-heads.md`, `fixer.md`), and `fix-draft.md`. Both modes read
 a text the same way: it may hold another text, `{{include:NAME}}`, and where the modes need different words it names

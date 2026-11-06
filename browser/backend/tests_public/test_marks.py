@@ -518,7 +518,7 @@ def test_a_card_s_takeaway_is_checked_as_its_write_lands_and_main_s_reply_leaves
     assert notebook.takeaways_to_check(CORPUS) == []
 
 
-def test_a_takeaway_waits_while_its_card_check_may_rewrite_it_or_main_has_no_turn_to_fork(_fresh, monkeypatch):
+def test_a_takeaway_waits_while_its_card_check_may_rewrite_it(_fresh, monkeypatch):
     from types import SimpleNamespace
 
     from app import card_check, notebook
@@ -531,10 +531,6 @@ def test_a_takeaway_waits_while_its_card_check_may_rewrite_it_or_main_has_no_tur
     marks.card_written(CORPUS, cid)
     assert started == []  # the card check's end calls card_written again
     monkeypatch.setattr(card_check, "_runs", {})
-    monkeypatch.setenv("THIMBLE_RUNTIME", "off")
-    _main_at(monkeypatch, None)
-    marks.card_written(CORPUS, cid)
-    assert started == []  # main's first turn has not ended: its end checks the takeaway
     _main_at(monkeypatch, "cut-1")
     marks.card_written(CORPUS, cid)
     assert started == ["check"]

@@ -1,51 +1,32 @@
-"""thimble's agents as subagents of the analyst's Claude Code session (main): the orientation, its critic, the writers,
-the view builders and reviewers (dev.py, view_review.py), the runs of report checks (checks.py) and the agents of code
-tickets (dev.py, ticket_tools.py). Each is a named subagent with a fresh context, of a type thimble's plugin module
-registers (`thimble:<role>`, roles); the orientation's own subagents run as `thimble:orient-helper`.
+"""thimble's agents: the orientation, its critic, the writers, the view builders and reviewers (dev.py,
+view_review.py), the runs of report checks (checks.py) and the agents of code tickets (dev.py, ticket_tools.py). Each is
+a named agent with a fresh context, which the server runs (runtime.py), of the type `thimble:<role>` (roles); the
+orientation's own subagents run as `thimble:orient-helper`.
 
-Starts. A click in the browser (Write, a view proposal's Accept, Start it, …) starts its agent through the plugin's module, with no turn of
-main: start_job writes the pending request, then asks the module (module_bridge.request) to spawn it, and the module's
-answer ends the request ({agentId}, a deny of thimble's own --agent-check, Claude Code's concurrency limit, or no
-module). A follow-on start (a run's own next step, such as a view build's review) goes the same way. A typed
-request goes through main: the start tool records the pending request and returns the exact Agent call, which main
-makes; the plugin's --agent-check hook lets only that call through, and the mirror watches for a start that does not
-happen (R1–R3, session.py). The typed start of a thread's fork's start_orientation, propose_view, file_dev_ticket,
-start_writing or run_check, whose Agent call Claude Code does not let a fork make, main makes on a `start_agent` event
-that carries the exact call (ask_main, tools._ask_main), with no step of the analyst's; a turn that missed the event
-gets it once more (ask_again). Every click route takes the analyst's browser cookie (hook_auth.analyst), never the
-server's token alone, since a start through the module is not judged by auto mode. There is no second route: without
-the module thimble's agents cannot start (start-refused-no-module). Each agent takes up the start its own Agent call
-claimed. The SubagentStart hook does not name that call, so when two or more starts of the agent's type wait (main
-started several in one turn), the agent is unsettled until a sign names its call: the call's result in main's
-transcript (session._settle), its PostToolUse hook, the agent's meta.json at its first thimble call (caller), or the
-module's answer to a click (bind); or until every other start it could have is taken or refused
-(subagent_files.settle and eliminate).
+Starts. A click in the browser (Write, a view proposal's Accept, Start it, …), a follow-on start (a run's own next step,
+such as a view build's review) and a start tool's call (a typed start) each write the pending request, and the runtime
+starts its agent (start_job, module_bridge.request); the answer ends the request ({agentId}, or why it did not start),
+and the agent takes up its start (bind). The typed start of a thread's fork's propose_view, file_dev_ticket,
+start_writing or run_check the server starts with the fork's call (tools._fork_start). Every click route takes the
+analyst's browser cookie (hook_auth.analyst), never the server's token alone.
 
-Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for). A click registers
-the role with them first (the module); a typed start gets them from the module's spawn and step hooks, which read the
-request's values (subagents.json) by the request id on the prompt's first line.
+Run values. Every run gets exactly the model and effort its arguments or Settings name (values_for), which the runtime
+runs it with.
 
-The files. subagents.json, callers.jsonl and launch.json, in the workspace's `trusted` folder, hold what the hooks and
-the module trust (subagent_files.py); the hooks write them first and post here only when a server runs. Kernels see the
-folder read-only (kernel_wrap.TRUSTED_DIR).
+The files. subagents.json and callers.jsonl, in the workspace's `trusted` folder, hold the pending requests, the agents
+and which agent made each thimble call (subagent_files.py). Kernels see the folder read-only (kernel_wrap.TRUSTED_DIR).
 
-Runs and ends. A run is one turn sequence of an agent, from its start or a follow-up to its hand-back. The mirror
-(session.py) and the hooks tell run_ended the end once per run, by whichever signal comes first; a SubagentStop alone is
-a turn's end, which ends the run only when no child of the agent runs and no hand-back follows within HANDBACK_WAIT_S.
-Each role's handlers (Type.started, Type.ended, Type.refused) do what its run's start, end and refusal mean for it.
+Runs and ends. A run is one turn sequence of an agent, from its start or a follow-up to its hand-back. run_ended hears
+its end once per run, by whichever signal comes first. Each role's handlers (Type.started, Type.ended, Type.refused) do
+what its run's start, end and refusal mean for it.
 
 Notices. A start or a message that did not happen, and a run that ended failed, are told in the foreground with their
 fix (notices.agent_refused, agent_failed), under the agent's key; its next start and a run that ended done clear it. A
 role whose module settles what its end means (Type.own_notices: a view's build, a report check, a code ticket) tells
 its own failures there, since a run's status is not its outcome (a build that ends failed may be repaired).
 
-Attribution. A PreToolUse hook on thimble's tools records which agent makes each call (callers.jsonl); caller() names
-the agent, and its key is the session the call runs as (tools.call_route), a descendant's that of its thimble ancestor.
-
-Terminal mode. No server runs: the starts, follow-ups and stops above reach the module through the trusted folder
-(module_bridge's file transport), main's permission mode and plan mode come from the files (session.main_mode), and the
-hooks' records are followed by their backend calls (local_hooks.py), which run the same bodies as the routes below
-(hook_started, hook_stopped, hook_denied, hook_end, hook_rekey). Plan mode stops no running agent there either.
+Attribution. The runtime records which agent makes each thimble call (callers.jsonl); caller() names the agent, and its
+key is the session the call runs as (tools._as_caller), a descendant's that of its thimble ancestor.
 """
 from __future__ import annotations
 
@@ -58,7 +39,6 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -72,9 +52,7 @@ log = logging.getLogger("thimble.subagents")
 
 @contextlib.asynccontextmanager
 async def _lifespan(app: Any):
-    """At start, in a task: what an earlier version left running in each workspace is stopped (recover_old). The
-    module's `ended` posts reach `ended` (module_bridge.on_ended)."""
-    _hear_module()
+    """At start, in a task: what an earlier version left running in each workspace is stopped (recover_old)."""
     task = asyncio.get_running_loop().create_task(_recover_logged(), name="subagents-recover-old")
     yield
     task.cancel()
@@ -92,8 +70,6 @@ ROUTES = (CLICK, FOLLOW_ON, TYPED)
 # earlier builds may also hold not-launched, for a main that thimble's launcher had not started
 AUTO_MODE, NO_CALL, LIMIT, HOOK, EARLIER, NO_MODULE, ERROR = (
     "auto-mode", "no-call", "limit", "hook", "earlier-session", "no-module", "error")
-# a refused start in the first seconds after main attached says thimble's plugin is still connecting (refusal_before)
-CONNECT_GRACE_S = 30.0
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
 # in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
 AUTO_HANDBACK_WAIT_S = 30.0
@@ -269,7 +245,7 @@ def roles(c: str) -> dict[str, Role]:
     """Every type's definition for workspace `c`, which the module registers as `thimble:<name>` (GET
     /api/module/roles): each of TYPES's that is registered there (Type.when) with its fixed prompt and description, the full model id and explicit effort of
     Settings (values_for), `background: true`, `disallowedTools` with the web tools when its agent's `web` is off and
-    `omitClaudeMd` when its `memory` is off; then the extensions' agents (extension_types)."""
+    `omitClaudeMd` when its `memory` is off."""
     out: dict[str, Role] = {}
     for role, t in TYPES.items():
         try:
@@ -291,24 +267,6 @@ def roles(c: str) -> dict[str, Role]:
             d["omitClaudeMd"] = True
         d.pop("hooks", None)  # module note: none, since a definition's hooks miss its nested agents (U3)
         out[role] = d
-    for name, d in extension_types(c).items():
-        if name not in out:
-            out[name] = {**d, "name": name, "type": type_name(name), "background": True}
-    return out
-
-
-def extension_types(c: str) -> dict[str, dict[str, Any]]:
-    """The active extensions' agents (extensions.agent_definitions, and roles.subagents of the orientation, the critic
-    and the writer), by the name the orientation's session gave them; a web that is off already takes the web tools."""
-    from . import extensions, roles as role_parts  # noqa: PLC0415
-
-    out: dict[str, dict[str, Any]] = {}
-    try:
-        out.update(extensions.agent_definitions(c))
-        for role in ("writer",):  # the orientation and its critic are gone
-            out.update(role_parts.subagents(c, role))
-    except Exception:  # noqa: BLE001
-        log.exception("%s: the extensions' agents were not read", c)
     return out
 
 
@@ -328,7 +286,7 @@ def ws(c: str) -> Path:
 
 
 def ensure_files(c: str) -> None:
-    """The trusted folder with subagents.json, callers.jsonl and launch.json made in the workspace when missing
+    """The trusted folder with subagents.json and callers.jsonl made in the workspace when missing
     (subagent_files.ensure)."""
     files.ensure(ws(c))
 
@@ -436,19 +394,13 @@ def refusal(kind: str, reason: str) -> Answer:
     return Answer({"kind": kind, "reason": reason})
 
 
-def _from_module(raw: Any, why: Callable[[], str] = lambda: "") -> Answer:
-    """The module's answer (module_bridge.request) as an Answer: {agentId}, {deny}, {limit}, {error}, or `no-module` as
-    the string, or a dict naming it (`why` gives its reason when the answer has none); Claude Code's concurrency-limit
-    text in an error is a limit."""
+def _from_module(raw: Any) -> Answer:
+    """The runtime's answer (module_bridge.request) as an Answer: {agentId}, {deny}, {limit} or {error}; Claude Code's
+    concurrency-limit text in an error is a limit."""
     if isinstance(raw, Answer):
         return raw
-    if raw is None or raw == NO_MODULE:
-        return Answer({NO_MODULE: why()})
     if not isinstance(raw, dict):
         return Answer({"error": str(raw)})
-    for k in (NO_MODULE, "no_module", "noModule"):
-        if k in raw:
-            return Answer({NO_MODULE: str(raw.get(k) or "") or why()})
     ans = Answer(raw)
     if isinstance(ans.get("deny"), str):  # thimble's own reason, as the analyst reads it, without Claude Code's label
         ans["deny"] = HOOK_ERROR_RE.sub("", ans["deny"]) or ans["deny"]
@@ -459,22 +411,13 @@ def _from_module(raw: Any, why: Callable[[], str] = lambda: "") -> Answer:
 
 
 async def _bridge(c: str, op: str, **args: Any) -> Answer:
-    """module_bridge.request(c, op, **args) as an Answer (lane M owns the bridge); `no-module` when it is not live, and
-    `no-module` marked `expired` when a module that holds the long-poll did not answer within the bridge's wait."""
+    """module_bridge.request(c, op, **args) as an Answer."""
     from . import module_bridge  # noqa: PLC0415
 
-    def why() -> str:
-        return str(module_bridge.why_not(c) or "")
-
-    if not module_bridge.live(c):
-        return Answer({NO_MODULE: why()})
     raw = module_bridge.request(c, op, **args)
     if inspect.isawaitable(raw):
         raw = await raw
-    ans = _from_module(raw, why)
-    if ans.kind == NO_MODULE:  # a module that held the long-poll and did not answer in time: the request expired
-        ans["expired"] = True
-    return ans
+    return _from_module(raw)
 
 
 # --------------------------------------------------------------------------- pending requests
@@ -499,14 +442,6 @@ def request_id() -> str:
     return files.request_id()
 
 
-def with_request_line(prompt: str, rid: str) -> str:
-    """`prompt` whose first line names the request `rid`, which the module's spawn hook finds a typed start by: as it
-    is when its first line carries the id already (the orientation's prompt does, orient-subagent-prompt), else with
-    the line `## subagent-request` gives it (`[thimble request <id>]`) before it."""
-    first = prompt.split("\n", 1)[0]
-    return prompt if rid in first else f"{tools.hint('subagent-request', request_id=rid) or rid}\n{prompt}"
-
-
 def _set(c: str, rid: str, **fields: Any) -> dict[str, Any] | None:
     with update(c) as state:
         r = files.requests(state).get(rid)
@@ -514,15 +449,6 @@ def _set(c: str, rid: str, **fields: Any) -> dict[str, Any] | None:
             return None
         r.update(fields)
         return dict(r)
-
-
-def claim(c: str, tool_use_id: str, input: dict[str, Any], *, tool_name: str = "Agent", caller: str | None = None,
-          permission_mode: str = "") -> str | None:
-    """The server's own use of the --agent-check decision (subagent_files.check_call): the reason a call must not run,
-    or None, the matching request then claimed by `tool_use_id`."""
-    with update(c) as state:
-        return files.check_call(state, {"tool_name": tool_name, "tool_input": input, "tool_use_id": tool_use_id,
-                                        "agent_id": caller, "permission_mode": permission_mode})
 
 
 def refuse(c: str, rid: str, reason: str, kind: str) -> dict[str, Any] | None:
@@ -578,32 +504,16 @@ def _tell_refused(c: str, t: Type, rec: dict[str, Any]) -> None:
                           message=kind == "message")
 
 
-def expire(c: str, rid: str) -> dict[str, Any] | None:
-    """A click the module did not answer within module_bridge's wait: the request expires, so --agent-check denies a
-    late spawn of it, and it is refused as `no-module`, marked `expired` (the browser's no-answer text and Try
-    again)."""
-    from . import module_bridge  # noqa: PLC0415
-
-    rec = _set(c, rid, state="expired", at=files.now(), refused_kind=NO_MODULE, expired=True)
-    if rec is not None:
-        _refused(c, {**rec, "id": rid, "reason": str(module_bridge.why_not(c) or ""), "refused_kind": NO_MODULE,
-                     "expired": True})
-        _settle_left(c)
-    return rec
-
-
 async def start_it(c: str, rid: str) -> Answer:
     """Start it on a refused typed start: the same request, with the same values and the same call, started through
     the module as a click (the caller checked the analyst's cookie)."""
     r = request(c, rid)
     if r is None or r.get("kind") != "start":
         return refusal(ERROR, "no such request")
-    if r.get("state") not in ("refused", "expired"):
+    if r.get("state") != "refused":
         return refusal(HOOK, "this request is not refused")
     if r.get("caller_role"):  # the critic: the module would start it as main's subagent, not its orientation's
         return refusal(HOOK, "an agent's own start (the orientation's critic) can't be started from the browser")
-    if (before := refusal_before(c, click=True)) is not None:  # as every click: no module
-        return before
     _set(c, rid, route=CLICK, state="pending", claimed_by=None, reason=None, refused_kind=None, again=files.now())
     return await _spawn(c, rid, r)
 
@@ -617,48 +527,7 @@ async def again(c: str, rid: str) -> Answer:
     if r.get("kind") == "message":
         return await send(c, str(r.get("agent") or ""), str((r.get("input") or {}).get("message") or ""),
                           values=r.get("values"))
-    return await start_it(c, rid) if r.get("state") in ("refused", "expired") else refusal(HOOK, "the request runs")
-
-
-# --------------------------------------------------------------------------- refusals before a start
-
-
-def connecting(c: str) -> bool:
-    """Whether main's session in workspace `c` attached less than CONNECT_GRACE_S ago (session.current's `since`, an
-    ISO time; one that does not parse counts as old): the plugin's hooks module of a session /thimble just opened may
-    not have said hello yet."""
-    from . import session  # noqa: PLC0415
-
-    lv = session.current(c)
-    try:
-        since = datetime.fromisoformat(str(lv.since)) if lv is not None else None
-    except (TypeError, ValueError):
-        return False
-    if since is None:
-        return False
-    if since.tzinfo is None:
-        since = since.replace(tzinfo=timezone.utc)
-    return 0 <= (datetime.now(timezone.utc) - since).total_seconds() < CONNECT_GRACE_S
-
-
-def refusal_before(c: str, click: bool = False) -> Answer | None:
-    """Why no agent of thimble's can start now in workspace `c`, before any request is made: main is in plan mode
-    (hook, start-plan-mode), or the module does not hold the long-poll (no-module): still connecting in the first
-    CONNECT_GRACE_S after main attached when Claude Code has not loaded it yet (start-refused-connecting), else
-    start-refused-no-module with why. None when nothing stands in the way. A `click` leaves plan mode to
-    --agent-check, which reads main's mode as the module's call runs: thimble hears main's mode only at main's turns, so
-    after a shift+tab while main is idle the mode it keeps is stale (live check L21), and the click would stay refused
-    after the analyst left plan mode."""
-    from . import module_bridge, session  # noqa: PLC0415
-
-    if not click and session.main_mode(c) == files.PLAN_MODE:
-        return refusal(HOOK, tools.hint("start-plan-mode"))
-    if not module_bridge.live(c):
-        why = module_bridge.why_not(c)
-        if connecting(c) and why == module_bridge.NOT_LOADED:
-            return refusal(NO_MODULE, tools.hint("start-refused-connecting"))
-        return refusal(NO_MODULE, tools.hint("start-refused-no-module", reason=str(why or "")))
-    return None
+    return await start_it(c, rid) if r.get("state") == "refused" else refusal(HOOK, "the request runs")
 
 
 # --------------------------------------------------------------------------- starts
@@ -674,26 +543,6 @@ def fork_call(c: str, call: str | None) -> bool:
     """Whether the thimble call `call` is a thread's fork's (the caller hook's line names its type, FORK_TYPE)."""
     line = files.find_caller(ws(c), call or "") if call else None
     return bool(line) and str(line.get("agent_type") or "") == files.FORK_TYPE
-
-
-async def typed_caller(c: str, call: str | None) -> str | None:
-    """The subagent that made the start tool call `call`, when it is no agent of thimble's: a thread's fork, or a
-    subagent of main's own. Its agent id, which a typed start's request keeps (`caller_agent`), so that its own Agent
-    call claims the request and the agent becomes its child, as Claude Code lets a subagent start subagents (U5). Read
-    from the caller hook's line, else from the mirror's search of the transcripts (session.call_holder). None for main's
-    own call, and for one of thimble's agents or their descendants, whose starts are their role's (`caller_role`)."""
-    from . import session  # noqa: PLC0415
-
-    if not call:
-        return None
-    line = files.find_caller(ws(c), call)
-    agent_id = str((line or {}).get("agent_id") or "")
-    if line is None:  # a line with no agent is main's own call (caller)
-        held = await session.call_holder(c, call, CALLER_WAIT_S)
-        agent_id = str(held.agent_id or "") if isinstance(held, session.Sub) else ""
-    if not agent_id or agent(c, agent_id) is not None:
-        return None
-    return agent_id
 
 
 # The forks the mirror did not follow within CALLER_WAIT_S, by workspace folder and agent id: fork_thread waits for
@@ -723,90 +572,26 @@ async def fork_thread(c: str, call: str | None, *, wait: bool = True) -> dict[st
     return meta if meta is not None and meta.get("kind") == agents.KIND_THREAD else None
 
 
-def ask_main(c: str, rid: str, event_id: str, **fields: Any) -> list[str]:
-    """The typed start `rid` that a thread's fork asked for, which main makes on the event `event_id` (tools._ask_main),
-    since a fork may not start subagents: the request keeps the event as its `call`, so that the turn of main's that got
-    the event and ended without the Agent call refuses it (R3, session._no_call) once the event was posted again
-    (ask_again), and is marked `via_main`. A start of
-    the same agent that an earlier event asked for and main has not made yet is replaced by this one: no Agent call
-    claims it from now on, and its role's refusal handler does not run, since this start takes up its work. `fields`
-    hold what the event names (`ask`, which ask_again posts again) and the thread. The ids of the requests it
-    replaced."""
-    replaced: list[str] = []
-    with update(c) as state:
-        reqs = files.requests(state)
-        r = reqs.get(rid)
-        if not isinstance(r, dict):
-            return replaced
-        r.update(call=event_id, via_main=True, **fields)
-        for other, o in reqs.items():
-            if (other != rid and isinstance(o, dict) and o.get("kind") == "start" and o.get("key") == r.get("key")
-                    and o.get("state") == "pending" and o.get("via_main")):
-                o.update(state="replaced", replaced_by=rid, at=files.now())
-                replaced.append(other)
-    if replaced:
-        log.info("%s: the start %s main is asked for replaces %s", c, rid, ", ".join(replaced))
-    return replaced
-
-
-def ask_again(c: str, rid: str, call: str, event_id: str) -> dict[str, Any] | None:
-    """The start `rid` main was asked for on the event `call`, which main's turn missed (R3, tools.ask_main_again),
-    asked for once more on the event `event_id`: the request keeps the new event as its `call` and is marked
-    `asked_again`, so a turn that misses this event too refuses it. The request, or None when it is no longer
-    pending on `call` (claimed, replaced, or asked for again already)."""
-    with update(c) as state:
-        r = files.requests(state).get(rid)
-        if (not isinstance(r, dict) or r.get("state") != "pending" or r.get("call") != call or not r.get("via_main")
-                or r.get("asked_again")):
-            return None
-        r.update(call=event_id, asked_again=True)
-        return dict(r)
-
-
 async def start_job(c: str, role: str, key: str, task: str, values: dict[str, Any], route: str, *,
                     description: str = "", request_id: str | None = None, chat: dict[str, Any] | None = None,
                     work: Path | str | None = None, call: str | None = None, caller_role: str | None = None,
-                    check: bool = True, fields: dict[str, Any] | None = None) -> Answer:
-    """One start of any role, for the agent of `key`, with the prompt `task` and the run's values. A click or a
-    follow-on start writes the pending request, then asks the module to spawn it, and answers what the module did
-    (Answer); a typed one records the request and answers the exact Agent call for the start tool's result. Without a
-    live module, or while main is in plan mode, it refuses before making the request (refusal_before;
-    `check` False skips that, for a caller that checked). `request_id` is the request's id when the caller made it
-    (request_id), for a prompt that names it. `chat` holds the fields of the agent's chat (its title, a
-    writer's document), `work` its work folder (the scratch folders of its subagents), `call` the start tool's call
-    in main (R3), and `caller_role` the role of the agent that makes a typed call itself (the critic's start, made by
-    the orientation). A typed start whose tool call a thread's fork or another subagent of main's made keeps that
-    subagent (`caller_agent`, typed_caller): only its Agent call claims the request. `fields` are more fields of the
-    request, such as an orientation's continuation's `continues` (ensure_chat)."""
+                    fields: dict[str, Any] | None = None) -> Answer:
+    """One start of any role, for the agent of `key`, with the prompt `task` and the run's values: the pending request,
+    then the runtime starts it (module_bridge.request), and the answer says what it did (Answer). A typed start, which a
+    start tool's call asked for, is made at once as a follow-on is, and its answer carries the call it stands for
+    (`input`). `request_id` is the request's id when the caller made it (request_id), for a prompt that names it.
+    `chat` holds the fields of the agent's chat (its title, a writer's document), `work` its work folder (the scratch
+    folders of its subagents), `call` the start tool's call, and `caller_role` the role of the agent whose call asked
+    for it. `fields` are more fields of the request (ensure_chat)."""
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
-    if check and not caller_role:
-        before = refusal_before(c, click=route == CLICK)
-        if before is not None:
-            return before
     rid = request_id or files.request_id()
-    from . import runtime  # noqa: PLC0415
-
-    if route == TYPED and runtime.enabled():
-        # the server starts the agent itself (runtime.py): a typed start is made at once, as a follow-on is, and its
-        # tool's result says it started (tools.RUNTIME_HINTS)
-        inp = call_input(role, task, description or role)
-        rid = new_request(c, "start", key, inp, values, FOLLOW_ON, role=role, rid=rid, chat=dict(chat or {}),
-                          work=str(work) if work else None, call=call, caller_role=caller_role, typed=True,
-                          **(fields or {}))
-        ans = await _spawn(c, rid, request(c, rid) or {})
-        return Answer({**ans, "input": inp}) if ans.started else ans
-    prompt = with_request_line(task, rid) if route == TYPED else task
-    inp = call_input(role, prompt, description or role)
-    caller_agent = await typed_caller(c, call) if route == TYPED and not caller_role else None
-    rid = new_request(c, "start", key, inp, values, route, role=role, rid=rid, chat=dict(chat or {}),
-                      work=str(work) if work else None, call=call, caller_role=caller_role,
-                      **({"caller_agent": caller_agent} if caller_agent else {}), **(fields or {}))
-    if route == TYPED:
-        if work:
-            make_work(c, Path(work))
-        return Answer({"request": rid, "input": inp})
-    return await _spawn(c, rid, request(c, rid) or {})
+    inp = call_input(role, task, description or role)
+    rid = new_request(c, "start", key, inp, values, FOLLOW_ON if route == TYPED else route, role=role, rid=rid,
+                      chat=dict(chat or {}), work=str(work) if work else None, call=call, caller_role=caller_role,
+                      **({"typed": True} if route == TYPED else {}), **(fields or {}))
+    ans = await _spawn(c, rid, request(c, rid) or {})
+    return Answer({**ans, "input": inp}) if route == TYPED and ans.started else ans
 
 
 def make_work(c: str, work: Path) -> None:
@@ -831,16 +616,13 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
     if ans.started:
         meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (the started agent's thread)
         return Answer({**ans, "request": rid, **({"chat": meta["id"]} if meta and meta.get("id") else {})})
-    if ans.get("expired"):
-        expire(c, rid)
-    else:
-        refuse(c, rid, ans.reason, ans.kind or ERROR)
+    refuse(c, rid, ans.reason, ans.kind or ERROR)
     return Answer({**ans, "request": rid})
 
 
 def _what(r: dict[str, Any]) -> str:
-    """The server-checked name a module note gives (module-started-note's {what}): a writer's document, a view's slug, a
-    check's id and its document; never text an agent wrote."""
+    """The server-checked name of what a start is for: a writer's document, a view's slug, a check's id and its
+    document; never text an agent wrote."""
     key = str(r.get("key") or "")
     return key.split(":", 1)[1].replace(":", " on ") if ":" in key else ""
 
@@ -902,7 +684,7 @@ def settle_unsettled(c: str, agent_id: str) -> list[str]:
 
 
 def _settle_left(c: str) -> None:
-    """A start that ended without its agent (refused, expired) can leave an unsettled agent one start: it takes that start
+    """A start that ended without its agent (refused) can leave an unsettled agent one start: it takes that start
     (subagent_files.eliminate), with its chat and its role's start handler (hook_started)."""
     with update(c) as state:
         left = files.eliminate(state)
@@ -952,9 +734,6 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
     a = agent(c, agent_id)
     if a is None:
         return refusal(EARLIER, unknown_agent_text(c, agent_id))
-    before = refusal_before(c, click=route == CLICK)
-    if before is not None:
-        return before
     vals = dict(values or a.get("values") or {})
     rid = new_request(c, "message", a.get("key"), message_input(agent_id, text), vals, route, role=a.get("role"),
                       agent=agent_id, **({"quiet": True} if quiet else {}))
@@ -964,10 +743,7 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
         return Answer({**ans, "agentId": agent_id, "request": rid})
     if USER_STOP_RE.search(ans.reason):  # stopped with Esc in its view, though no notification said so here
         mark_cancelled(c, agent_id)
-    if ans.get("expired"):
-        expire(c, rid)
-    else:
-        refuse(c, rid, ans.reason, ans.kind or ERROR)
+    refuse(c, rid, ans.reason, ans.kind or ERROR)
     return Answer({**ans, "request": rid})
 
 
@@ -993,14 +769,9 @@ def stop_done(text: str) -> bool:
 
 
 async def stop(c: str, agent_id: str) -> Answer:
-    """Stop an agent through the module (TaskStop), and the background shells it started (add_shell). Refused when the
-    module is not live: the card then says to press Esc in the agent's view. An agent that had ended already counts as
+    """Stop an agent's run, and the background shells it started (add_shell). An agent that had ended already counts as
     stopped."""
-    from . import module_bridge  # noqa: PLC0415
-
     a = agent(c, agent_id) or {}
-    if not module_bridge.live(c):
-        return refusal(NO_MODULE, str(module_bridge.why_not(c) or ""))
     rid = new_request(c, "stop", a.get("key"), {"task_id": agent_id}, None, CLICK, role=a.get("role"), agent=agent_id)
     ans = await _bridge(c, "stop", agent=agent_id, request=rid, shells=list(a.get("shells") or []))
     if ans.refused and (ans.get("gone") or stop_done(ans.reason)):
@@ -1016,14 +787,9 @@ THREAD_STOPPED_HINT = "thread-stopped-note"  # prompts/tools.md: {thread}, {agen
 
 
 async def stop_main(c: str) -> Answer:
-    """The analyst's Stop of main: main's running turn ended through the module (`$.turn.abort`), as Esc ends it in the
-    terminal, and main told so (MAIN_STOPPED_HINT, note_main), so that a later turn, such as one a subagent's report
-    starts, leaves the stopped work alone (live check L4-12). Refused when the module is not live: the browser then says
-    to press Esc in the terminal. A turn that had ended already counts as done, and main is told nothing."""
-    from . import module_bridge  # noqa: PLC0415
-
-    if not module_bridge.live(c):
-        return refusal(NO_MODULE, str(module_bridge.why_not(c) or ""))
+    """The analyst's Stop of main: main's running turn ended, and main told so (MAIN_STOPPED_HINT, note_main), so that a
+    later turn, such as one a subagent's report starts, leaves the stopped work alone (live check L4-12). A turn that
+    had ended already counts as done, and main is told nothing."""
     ans = await _bridge(c, "abort")
     if ans.refused and ans.get("gone"):
         return Answer({"done": True})
@@ -1509,56 +1275,6 @@ def stopped(c: str, agent_id: str, last_stop: float | None = None) -> None:
         check()
 
 
-STOPPED_REASONS = ("abort", "interrupt", "cancel", "kill", "stop")  # a turn.complete reason that means the turn was cut off
-# a turn.complete reason that means the run failed: an API error ended it (`error`), or the model refused with no fallback
-# model to retry on (`refusal`)
-FAILED_REASONS = ("error", "fail", "refus")
-NO_ERROR_TEXT = "Claude Code ended the run ({reason}) and gave no error text"  # a failed run's report when none came
-# Claude Code writes an API error's line to the agent's transcript a moment after the module hears the turn end (19 ms
-# in live check L18): a failed end with no text waits this long before it reads the transcript again
-ERROR_TEXT_WAIT_S = 1.0
-
-
-def ended(c: str, agent_id: str, answer: str | None = None, reason: str = "") -> bool:
-    """The module's `ended {agentId, answer, reason}` (its turn.complete, which reaches it for the agents it started
-    although its other hooks skip them): a turn's end with its answer, which ends the run once when no child of the
-    agent runs; stopped or failed when the reason says so (`aborted`; `error`, `refusal`), a failure with the API's
-    error line as its report (run_ended)."""
-    state = read(c)
-    a = files.registry(state).get(agent_id)
-    if not isinstance(a, dict) or children_running(state, agent_id):
-        return False
-    why = str(reason or "").lower()
-    status = "stopped" if any(w in why for w in STOPPED_REASONS) else "failed" if any(
-        w in why for w in FAILED_REASONS) else "done"
-    if status == "failed" and not str(answer or "").strip():
-        answer = NO_ERROR_TEXT.format(reason=why)
-        if api_error(c, agent_id) is None:  # not written yet: read again in a moment (run_ended reads it then)
-            k = int(a.get("run") or 0)
-
-            def late() -> None:
-                if int((agent(c, agent_id) or {}).get("run") or 0) == k:
-                    run_ended(c, agent_id, status, answer, source="module")
-
-            try:
-                asyncio.get_running_loop().call_later(ERROR_TEXT_WAIT_S, late)
-                return True
-            except RuntimeError:  # no loop (a synchronous caller): at once
-                pass
-    return run_ended(c, agent_id, status, answer, source="module")
-
-
-def _hear_module() -> None:
-    """Register `ended` for the module's ended posts (module_bridge.on_ended), once; nothing without the bridge."""
-    try:
-        from . import module_bridge  # noqa: PLC0415
-    except ImportError:
-        return
-    hear = getattr(module_bridge, "on_ended", None)
-    if callable(hear):
-        hear(ended)
-
-
 def child_ended(c: str, agent_id: str) -> None:
     """A child of a registered agent ended (the critic's hand-back to the orientation): the parent goes on in its run,
     no longer paused."""
@@ -1595,42 +1311,6 @@ async def out_of_plan(c: str, poll_s: float = 2.0) -> None:
 
 
 # --------------------------------------------------------------------------- main's quit and moves
-
-
-def close_running(c: str, why: str = STOPPED_QUIT) -> list[str]:
-    """Main quit (any SessionEnd reason but clear and resume): every running agent of thimble's ends stopped, its chat
-    `stopped_by: quit` (`why`) and `continue: here`, so a follow-up after `thimble --continue` resumes it; nothing
-    restarts it. The ids stopped."""
-    gone = [k for k, a in agents_of(c).items() if a.get("status") in ("running", "waiting")]
-    for agent_id in gone:
-        mark_stopped_by(c, agent_id, why)
-        run_ended(c, agent_id, "stopped", QUIT_LINE, source="quit", interrupted=True)
-        a = agent(c, agent_id) or {}
-        t = TYPES.get(str(a.get("role") or ""))
-        if a.get("chat") and not (t is not None and t.keeps_chat):  # a code ticket's end handler ended its chat
-            with contextlib.suppress(Exception):
-                agents.update_agent(c, str(a["chat"]), stopped_by=why, **{"continue": "here"})
-    return gone
-
-
-def rekey(c: str, old: str, new: str) -> list[str]:
-    """After /clear or an in-session /resume: the running agents move from main's session `old` to `new` in the registry
-    and their chats (`session`, `sessions`), and the mirror follows their transcripts in the new session's folder from
-    offset 0 (session.rekeyed). Either order with the module's new hello works (V2)."""
-    from . import session  # noqa: PLC0415
-
-    with update(c) as state:
-        files.rekey(state, old, new)  # the --rekey hook moved them in the file already, or not yet
-        moved = [k for k, a in files.registry(state).items() if isinstance(a, dict) and a.get("status") == "running"
-                 and (a.get("sessions") or [""])[-1] == new and old in (a.get("sessions") or [])]
-        snaps = {k: dict(files.registry(state)[k]) for k in moved}
-    for agent_id, a in snaps.items():
-        if a.get("chat"):
-            with contextlib.suppress(Exception):
-                agents.update_agent(c, str(a["chat"]), session=new, sessions=list(a.get("sessions") or []))
-    with contextlib.suppress(Exception):
-        session.rekeyed(c, old, new, moved)
-    return moved
 
 
 # --------------------------------------------------------------------------- the caller of a thimble tool
@@ -1708,22 +1388,7 @@ def allowed(who: Caller, name: str) -> bool:
 # --------------------------------------------------------------------------- routes (the hooks' fast path)
 
 
-class HookBody(BaseModel):
-    """A hook's input with its folder: what the hook already wrote to the workspace's files, posted when a server runs."""
-
-    cwd: str
-    hook: dict[str, Any] = {}
-
-
-def _workspace(body: HookBody) -> str:
-    c = config.workspace_for_cwd(body.cwd)
-    if not c:
-        raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
-    return c
-
-
-# Each hook's body below is what its route does once the hook wrote its record: the server's route in browser mode, and
-# in terminal mode the hook's backend call (local_hooks.py), with no HTTP.
+# Each hook's body below is what its route does once the hook wrote its record.
 
 
 def hook_started(c: str, hook: dict[str, Any]) -> dict[str, Any]:
@@ -1737,168 +1402,6 @@ def hook_started(c: str, hook: dict[str, Any]) -> dict[str, Any]:
     if a.get("parent") and a.get("role") in ROLES:
         set_paused(c, str(a["parent"]), "critique" if a.get("role") == "critic" else None)
     return {"agent": agent_id, "chat": (meta or {}).get("id")}
-
-
-@router.post("/subagents/started")
-async def started_route(body: HookBody) -> dict[str, Any]:
-    """SubagentStart (hook_started)."""
-    return hook_started(_workspace(body), body.hook)
-
-
-@router.post("/subagents/caller")
-async def caller_route(body: HookBody) -> dict[str, Any]:
-    """PreToolUse on thimble's tools: the caller hook wrote its line; nothing more is needed here."""
-    return {}
-
-
-def hook_denied(c: str, hook: dict[str, Any]) -> dict[str, Any]:
-    """PermissionDenied: R1. The hook refused the request in subagents.json (its `request`); here its role's refusal
-    handler tells the run record and the browser."""
-    rid = str(hook.get("request") or "")
-    r = request(c, rid) if rid else None
-    if r is not None and r.get("state") == "refused":
-        _refused(c, {**r, "id": rid})
-        _settle_left(c)
-    return {"request": rid or None}
-
-
-@router.post("/subagents/denied")
-async def denied_route(body: HookBody) -> dict[str, Any]:
-    """PermissionDenied (hook_denied)."""
-    return hook_denied(_workspace(body), body.hook)
-
-
-def hook_stopped(c: str, hook: dict[str, Any]) -> dict[str, Any]:
-    """SubagentStop: a turn's end of a registered agent (stopped), or of a subagent that is no agent of thimble's whose
-    typed starts the hook refused as never claimed (`refused`, subagent_files.refuse_unclaimed): their role's refusal
-    handler tells the browser."""
-    if hook.get("stop_hook_active") or not str(hook.get("agent_type") or ""):
-        return {}
-    for rid in [str(x) for x in hook.get("refused") or [] if x]:
-        r = request(c, rid)
-        if r is not None and r.get("state") == "refused":
-            log.info("%s: the typed start %s of %s was never made: %s", c, rid, hook.get("agent_id"),
-                     str(r.get("reason") or "")[:200])
-            _refused(c, {**r, "id": rid})
-    agent_id = str(hook.get("agent_id") or "")
-    if agent(c, agent_id) is not None:
-        stopped(c, agent_id)
-    return {}
-
-
-@router.post("/subagents/stopped")
-async def stopped_route(body: HookBody) -> dict[str, Any]:
-    """SubagentStop (hook_stopped)."""
-    return hook_stopped(_workspace(body), body.hook)
-
-
-def hook_end(c: str, hook: dict[str, Any]) -> dict[str, Any]:
-    """SessionEnd: main quit, so its thimble agents' chats close (close_running) and the server's jobs stop at once
-    (session.main_quit); on `clear` and `resume`, and for a session that is not main, only the record, which the hook
-    made."""
-    from . import session  # noqa: PLC0415
-
-    reason = str(hook.get("reason") or "")
-    sid = str(hook.get("session_id") or "")
-    lv = session.current(c)
-    if reason in ("clear", "resume") or (lv is not None and sid and lv.sid != sid):
-        return {"closed": []}
-    closed = close_running(c, STOPPED_QUIT)
-    session.main_quit(c, sid)
-    # the chats that followed its label runs, which the session's process ran (agents.end_left_label_chats)
-    closed += agents.end_left_label_chats(c)
-    return {"closed": closed}
-
-
-@router.post("/subagents/end")
-async def end_route(body: HookBody) -> dict[str, Any]:
-    """SessionEnd (hook_end)."""
-    return hook_end(_workspace(body), body.hook)
-
-
-def hook_rekey(c: str, hook: dict[str, Any]) -> dict[str, Any]:
-    """SessionStart `clear` or `resume`: the hook moved the agents to the new session in subagents.json (its `old`); the
-    chats and the mirror follow (rekey)."""
-    old, new = str(hook.get("old") or ""), str(hook.get("session_id") or "")
-    if old and new:
-        try:
-            from . import module_bridge  # noqa: PLC0415
-
-            move = getattr(module_bridge, "rekey", None)
-            if callable(move):
-                move(c, old, new)  # a hello from `new` is accepted, whichever came first
-        except ImportError:
-            pass
-    return {"moved": rekey(c, old, new) if old and new else []}
-
-
-@router.post("/subagents/rekey")
-async def rekey_route(body: HookBody) -> dict[str, Any]:
-    """SessionStart `clear` or `resume` (hook_rekey)."""
-    return hook_rekey(_workspace(body), body.hook)
-
-
-FORK_DEDUPE_S = 600.0  # how long a thread's fork counts as starting, until the mirror sees it finish
-_forking: dict[tuple[str, str], float] = {}  # (workspace, thread) -> time.monotonic() when its fork's Agent call ran
-
-
-def fork_check(c: str, tool_input: dict[str, Any], tool_use_id: str | None = None) -> str | None:
-    """Main's Agent call that would start a second fork of a thread whose fork runs or is starting: why it must not
-    run, else None, and the call is kept by its `tool_use_id` as the thread's fork (files.note_fork_call) (the
-    --agent-check hook asks the server this, since it needs the threads)."""
-    from . import session  # noqa: PLC0415
-
-    from . import threads  # noqa: PLC0415
-
-    if str(tool_input.get("subagent_type") or "") != "fork":
-        return None
-    ref = threads.fork_ref(tool_input)
-    tid = session.thread_for(c, ref)
-    if not tid:
-        return None
-    started = _forking.get((c, tid))
-    if started is not None and time.monotonic() - started < FORK_DEDUPE_S:
-        return files.fork_refusal(str(ref).removeprefix("thread:"),
-                                  files.cut_words(threads.first_question(c, tid), files.QUESTION_CHARS))
-    _forking[(c, tid)] = time.monotonic()
-    if tool_use_id:
-        with update(c) as state:
-            files.note_fork_call(state, tool_use_id, str(ref))
-    return None
-
-
-def fork_ended(c: str, thread_id: str) -> None:
-    """A thread's fork stopped, so a new Agent call may fork it again (fork_check); in terminal mode, where the
-    --agent-check hook keeps the forks starting in subagents.json by their description (subagent_files.fork_check),
-    each description that names the thread goes."""
-    from . import session  # noqa: PLC0415
-
-    _forking.pop((c, thread_id), None)
-    if not files.terminal(config.workspace_path(c)):
-        return
-    with update(c) as state:
-        table = state.get(files.FORKING)
-        if isinstance(table, dict):
-            for desc in [d for d in table if session.thread_for(c, d) == thread_id]:
-                table.pop(desc, None)
-
-
-class AgentCheckBody(BaseModel):
-    cwd: str
-    agent_id: str | None = None
-    tool_use_id: str | None = None
-    tool_input: dict[str, Any] = {}
-
-
-@router.post("/bg/agent-check")
-async def agent_check_route(body: AgentCheckBody) -> dict[str, Any]:
-    """The --agent-check hook, for main's Agent call, once it found nothing to deny in subagents.json: {deny, reason}
-    for a second fork of a thread (fork_check)."""
-    c = config.workspace_for_cwd(body.cwd)
-    reason = fork_check(c, body.tool_input, body.tool_use_id) if c and not body.agent_id else None
-    if reason:
-        log.info("%s: an Agent call is refused: %s", c, reason)
-    return {"deny": bool(reason), "reason": reason or ""}
 
 
 # --------------------------------------------------------------------------- the analyst's clicks

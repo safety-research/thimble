@@ -24,7 +24,7 @@ log = logging.getLogger("thimble.work_files")
 
 EXTRACT_MIN = 1024 * 1024
 TEXT_MAX = 2 * 1024 * 1024
-TEMP_PREFIX = "tmp_"  # plugin/bin/.thimble-watch SCRATCH_PREFIX
+TEMP_PREFIX = "tmp_"  # the prefix of a scratch file the run made for itself
 SCRIPT_SUFFIXES = (".py", ".sh", ".sql", ".r", ".jl", ".js", ".mjs", ".ipynb", ".md", ".txt", ".json", ".yaml",
                    ".yml", ".toml", ".cfg", ".ini")
 CODE_KEYS = ("code", "previous_code")

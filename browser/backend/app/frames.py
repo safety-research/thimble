@@ -21,7 +21,7 @@ Number formats match d3-format in the browser (lib/dataFrame.ts): whole numbers 
 decimals that give the largest absolute value three significant digits, trailing zeros dropped (`,.2~f`), with
 JavaScript's rounding and d3's minus sign.
 
-Only the standard library, since tools.py imports this module and the MCP shim imports tools.
+Only the standard library, since tools.py imports this module.
 """
 from __future__ import annotations
 

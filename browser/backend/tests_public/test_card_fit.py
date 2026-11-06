@@ -90,7 +90,7 @@ async def checking(monkeypatch):
         return render.Rendered(png=png(), body=size(cell).body)
 
     async def read(c, cell, picture, run, path=None):
-        too = (await card_check.card_input(c, cell, run, None, card_check._sections()))["card"]["too_large"]
+        too = (await card_check.card_input(c, cell, run, None))["card"]["too_large"]
         revision["read"].append(too)
         if "gate" in revision:
             await revision["gate"].wait()
@@ -423,11 +423,8 @@ async def test_nothing_is_held_where_no_card_can_be_drawn(_harness, monkeypatch)
 
 def test_a_card_is_held_only_where_the_card_check_reads_cards_by_itself(monkeypatch):
     """A held card shows when its check ends: where the workspace does not check cards by itself, none would end."""
-    from app import launch_mode
-
     monkeypatch.setattr(render, "enabled", lambda: True)
     monkeypatch.setattr(render, "down", lambda: False)
-    monkeypatch.setattr(launch_mode, "current", lambda: launch_mode.BROWSER)
     monkeypatch.setattr(card_check, "enabled", lambda: True)
     monkeypatch.setattr(card_check, "auto", lambda c: c == "checked")
     assert HOLDS_HERE("checked") and not HOLDS_HERE("unchecked")

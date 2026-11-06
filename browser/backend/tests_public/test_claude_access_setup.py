@@ -331,9 +331,9 @@ def test_a_claude_code_that_is_not_signed_in_is_said(tmp_path, capsys, monkeypat
 
 def test_what_keeps_claude_from_being_reached_says_to_change_it_in_settings_claude_access(tmp_path):
     """The workbench signs no one in, so it has no /login: the words for the server's start line and the chat's card
-    (problem), an extension's program that needs Claude Code (harness) and the Bash sandbox that could not start
-    (runtime_cc) send the person to Settings' first row, Claude access, or to thimble-browser --setup."""
-    from app import harness, runtime_cc
+    (problem) and the Bash sandbox that could not start (runtime_cc) send the person to Settings' first row, Claude
+    access, or to thimble-browser --setup."""
+    from app import runtime_cc
 
     claude_access.save(claude_access.API_KEY)
     assert claude_access.problem() == {
@@ -346,9 +346,8 @@ def test_what_keeps_claude_from_being_reached_says_to_change_it_in_settings_clau
                                               "terminal.")
     assert claude_access.problem_line().endswith("Open Claude access in Settings, or run thimble-browser --setup in "
                                                  "a terminal.")
-    for said in (harness.NO_CC_SESSIONS, runtime_cc.SANDBOX_NOTICE, claude_access.HINTS[claude_access.API_KEY]):
+    for said in (runtime_cc.SANDBOX_NOTICE, claude_access.HINTS[claude_access.API_KEY]):
         assert "/login" not in said and "Settings" in said, said
-    assert "Choose Claude Code sign-in in Settings, Claude access, to run it." in harness.NO_CC_SESSIONS
     assert "Settings, Claude access, can switch to an API key instead." in runtime_cc.SANDBOX_NOTICE
 
 

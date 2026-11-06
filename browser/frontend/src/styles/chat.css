@@ -1612,11 +1612,6 @@ button.chat-strip-head:hover {
   outline-offset: 2px;
   border-radius: var(--radius-chip);
 }
-.chat-offer-refused {
-  margin: 0;
-  color: var(--status-negative);
-  overflow-wrap: anywhere;
-}
 
 /* -------- the composer: glass floating over the transcript -------- */
 .chat-foot {

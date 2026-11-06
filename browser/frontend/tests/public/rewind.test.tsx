@@ -100,7 +100,7 @@ describe("Rewind in main's chat", () => {
       const u = String(url)
       if (init?.method === 'POST' && !u.includes('/telemetry')) posted.push({ url: u, body: init.body ? JSON.parse(String(init.body)) : null })
       let body: unknown = {}
-      const main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: unread.length > 0, unread, attached: ATTACHED, module: true } as unknown as ChatMeta
+      const main = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at: T, parent: null, running: unread.length > 0, unread, attached: ATTACHED } as unknown as ChatMeta
       if (u.endsWith('/chats/main/rewind')) {
         events = [...events, { ...REWOUND, event: (posted[posted.length - 1].body as { event: string }).event, words: back }]
         unread = []
