@@ -23,9 +23,9 @@ describe('which cards the page follows', () => {
     expect(cardClaudeMade({ type: 'view', op: 'created', cell: 'c1', by: 'main' })).toBeNull()
   })
 
-  test("a card a chat working in the background made (a writer's figure, an orientation's card) is not followed", () => {
+  test("a card a chat working in the background made (a writer's figure, a check's card) is not followed", () => {
     for (const role of ['main', 'thread', 'subagent']) expect(cardClaudeMade({ type: 'cell', op: 'created', cell: 'c1', by: 'chat:x', by_role: role }), role).toBe('c1')
-    for (const role of ['writer', 'orient', 'check', 'dev']) expect(cardClaudeMade({ type: 'cell', op: 'created', cell: 'c1', by: 'chat:x', by_role: role }), role).toBeNull()
+    for (const role of ['writer', 'check', 'dev']) expect(cardClaudeMade({ type: 'cell', op: 'created', cell: 'c1', by: 'chat:x', by_role: role }), role).toBeNull()
   })
 
   test('an open Report stays open while a writer writes and for a while after it ends; other surfaces do not', () => {

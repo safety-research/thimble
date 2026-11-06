@@ -1,6 +1,5 @@
 """Text an agent reads whole with Claude Code's Read tool (read_parts.py): a text that one Read call cannot return is
-cut at line ends into numbered files of at most READ_UNITS UTF-16 code units, which its prompt names in order, and a
-file that stays whole gets a window of lines one Read call returns whole wherever it starts.
+cut at line ends into numbered files of at most READ_UNITS UTF-16 code units, which its prompt names in order.
 
 Whether one Read call returns a text whole is Claude Code 2.1.300's rule (read_returns_whole): a text of at most 25,000
 UTF-16 code units comes back whole uncounted; past that Read counts its tokens, and past 25,000 tokens a whole-file Read
@@ -8,7 +7,7 @@ gives only the first lines and an offset/limit Read fails. No tokenizer runs her
 times the tokens a character that Read counted in a live 2.1.300 session (claude-opus-5-5) for each kind of text below,
 reading the 40,000-character parts the cap in characters made: Chinese 42,463 tokens for 39,912 characters (a partial
 view, lines 1-348 of 697), Japanese 34,737 for 39,912, Korean 41,237 for 39,820, a table of UUIDs 29,277 for 39,906, a
-table of floats 26,070 for 39,948, and a 36-line window of a Chinese digest 40,461 for 36,990 (an error)."""
+table of floats 26,070 for 39,948."""
 from __future__ import annotations
 
 import random
@@ -80,31 +79,14 @@ def test_named_names_one_file_or_every_part_in_order(monkeypatch, tmp_path):
     assert read_parts.named([a, b, c], "x-file", "x-files") == f"READ 3: {a}, {b}, {c}"
 
 
-def test_window_is_the_most_lines_one_read_call_returns_whole_from_any_line():
-    """Every run of `window` lines, each with its line break and room for Read's line-number prefix, fits READ_UNITS,
-    and one more line does not fit somewhere. Lines of the digest's longest (CALL_CHARS, 1,500) come to 16 a window; a
-    file that fits whole is all its lines."""
-    lines = [("y" * 1_400 if i % 5 == 0 else "z" * 90) for i in range(2_000)]
-    w = read_parts.window(lines)
-    sizes = [len(x) + 1 + read_parts.LINE_PREFIX_CHARS for x in lines]
-    assert all(sum(sizes[i:i + w]) <= read_parts.READ_UNITS for i in range(len(lines)))
-    assert any(sum(sizes[i:i + w + 1]) > read_parts.READ_UNITS for i in range(len(lines)))
-    dense = read_parts.window(["d" * 1_500] * 500)
-    assert dense == read_parts.READ_UNITS // (1_500 + 1 + read_parts.LINE_PREFIX_CHARS) == 16
-    assert read_parts.window(["short"] * 10) == 10
-    assert read_parts.window(["v" * (2 * read_parts.READ_UNITS), "short"]) == 1, "a line past the cap alone: 1"
-    assert read_parts.window([]) == 1
-
-
-def test_cut_and_window_count_utf16_code_units_as_claude_code_does():
+def test_cut_counts_utf16_code_units_as_claude_code_does():
     """Claude Code measures a text in UTF-16 code units, where a character past U+FFFF, such as an emoji, counts 2: cut
-    holds each part to `limit` of them and never splits a character, and window counts a line's emoji twice."""
+    holds each part to `limit` of them and never splits a character."""
     assert read_parts.units("abc") == 3 and read_parts.units("東京") == 2 and read_parts.units("🙂x") == 3
     text = "🙂" * 30 + "\n" + "東" * 10 + "\n"
     parts = read_parts.cut(text, limit=25)
     assert "".join(parts) == text
     assert parts == ["🙂" * 12, "🙂" * 12, "🙂" * 6 + "\n" + "東" * 10 + "\n"]
-    assert read_parts.window(["🙂" * 10] * 4, limit=2 * (20 + 1 + read_parts.LINE_PREFIX_CHARS)) == 2
 
 
 def _prose(par: str, n: int = 100_000) -> str:
@@ -138,13 +120,5 @@ def test_each_part_of_a_dense_or_multi_byte_text_is_one_read_call_whole(tmp_path
     assert len(paths) >= 2 and "".join(p.read_text("utf-8") for p in paths) == text
     over = [(p.name, len(p.read_text("utf-8"))) for p in paths if not read_returns_whole(p.read_text("utf-8"), kind)]
     assert not over, f"{kind}: parts past Read's token cap: {over}"
-
-
-def zh_digest(paragraphs: int) -> list[str]:
-    """The lines of a digest of an orientation that wrote Chinese, each paragraph wrapped as render wraps it."""
-    lines = ["# orientation", ""]
-    for i in range(paragraphs):
-        lines += [*critique_session._wrap(f"{i}: " + ZH * 40), ""]
-    return lines
 
 

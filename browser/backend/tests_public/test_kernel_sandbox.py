@@ -66,7 +66,7 @@ def test_on_macos_srt_hides_the_home_and_user_data_and_shows_the_kernel_its_own_
     assert linux["allowWrite"] == own and set(own) <= set(linux["denyRead"])
 
 
-@pytest.mark.skipif(NODE is None or SRT is None, reason="needs node and frontend/node_modules (scripts/check.sh install)")
+@pytest.mark.skipif(NODE is None or SRT is None, reason="needs node and frontend/node_modules (npm ci in frontend/)")
 def test_srt_makes_a_seatbelt_profile_of_the_rules_that_keeps_the_workspace_config_hidden(tmp_path):
     """With the platform mocked as macOS, the profile srt makes of the rules (kernel_srt.mjs --print) denies reads under
     the home, allows the kernel's paths after that, denies the workspace's config after those, allows writes to the

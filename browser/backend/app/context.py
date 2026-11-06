@@ -365,14 +365,10 @@ class _Part:
     oldest: Callable[[int], str] = lambda n: _hint("context-cut-oldest", n=n)
     level: int = 0
     dropped: set[int] = field(default_factory=set)
-    cut_line: str = ""  # a line added whenever the part is cut in any way (the orientation's, naming its ref)
-
-    def cut(self) -> bool:
-        return bool(self.level or self.dropped)
 
     def text(self) -> str:
         shown = [t for i, it in enumerate(self.items) if i not in self.dropped and (t := it.at(self.level))]
-        lead = self.cut_line if self.cut() and self.cut_line else self.oldest(len(self.dropped)) if self.dropped else ""
+        lead = self.oldest(len(self.dropped)) if self.dropped else ""
         return self.sep.join([lead, *shown] if lead else shown)
 
 
@@ -702,8 +698,8 @@ def canvas(c: str) -> str:
 
 
 def views(c: str) -> str:
-    """The corpus's own views, each with the files it claims and what it is for, then the proposals not built yet (one
-    an orientation from before 0.8.0 dropped, or a view proposal the analyst rejected, is not among them). The view proposal that waits
+    """The corpus's own views, each with the files it claims and what it is for, then the proposals not built yet (a
+    view proposal the analyst rejected is not among them). The view proposal that waits
     for the analyst's answer (views.open_offer) is listed as thimble's, so main leaves it to the analyst rather than
     building it; a `suggested` row without `offered`, a 0.7.x orientation's viewer for a file type, is left out, and so
     is the waiting view proposal while view proposals are off (views.propose_enabled), since the analyst then sees
@@ -801,7 +797,7 @@ def _fit(parts: list[_Part], budget: int, fixed: int) -> None:
         rest = size() - len(p.text())
         lengths = [len(it.at(p.level)) for it in p.items]
         body = sum(n + len(p.sep) for i, n in enumerate(lengths) if n and i not in p.dropped)
-        lead = len(p.cut_line or p.oldest(len(p.items))) + len(p.sep)
+        lead = len(p.oldest(len(p.items))) + len(p.sep)
         for i, it in enumerate(p.items):
             if rest + lead + body <= budget:
                 break

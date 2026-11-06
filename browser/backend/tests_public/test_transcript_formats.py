@@ -68,8 +68,8 @@ EXPECT: dict[str, tuple | None] = {
     "openai/responses-api/responses.jsonl": ("conversations", 12, {"assistant"}, 4, 0, 5, None),
 }
 
-# JSON lines are kept as `<name>.jsonl.txt`, since no .jsonl file belongs in the tree (scripts/check_content.py), and
-# logs as `<name>.log.txt`, since git ignores *.log; both are copied into the corpus under their own names
+# JSON lines are kept as `<name>.jsonl.txt`, since no .jsonl file belongs in the tree, and logs as `<name>.log.txt`,
+# since git ignores *.log; both are copied into the corpus under their own names
 KEPT = (".jsonl.txt", ".log.txt")
 FILES = sorted(str(p.relative_to(SAMPLES)).removesuffix(".txt") if p.name.endswith(KEPT) else str(p.relative_to(SAMPLES))
                for p in SAMPLES.rglob("*") if p.is_file())

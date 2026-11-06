@@ -28,7 +28,7 @@ file or those files in order (`## check-task-file`, `## check-task-files`). It c
 one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
 analyst's Stop ends it (subagents.stop). A check made or changed (its name, prompt,
 colour, shown or covers) emits `checks` on the stream, so every list of the checks, the top bar's Comments, the
-canvas's and the Comments pane beside the slides, the story and a page, in any tab, reads the checks again.
+canvas's and the Comments pane beside a page, in any tab, reads the checks again.
 
 How a run starts: a writer's end starts each shown check on its document, a follow-on start of the writer's own start
 (_writer_ended); Run on a check's row, or turning a check on, is the analyst's click; main's run_check starts it the
@@ -338,8 +338,8 @@ def save(c: str, check: dict[str, Any]) -> dict[str, Any]:
 
 def _announce(c: str, cid: str) -> None:
     """A check was made or changed (its name, prompt, colour, shown or covers): a `checks` record on the stream, so every
-    surface that lists the checks (the top bar's Comments, the canvas's and the Comments pane beside the slides, the
-    story and a page, in any tab) reads them again."""
+    surface that lists the checks (the top bar's Comments, the canvas's and the Comments pane beside a page, in any
+    tab) reads them again."""
     try:
         investigation.emit(c, investigation.MAIN, {"type": "checks", "id": cid})
     except Exception:  # noqa: BLE001 — a surface reads the checks again on its next record
@@ -443,15 +443,11 @@ def passages(slug: str, doc: dict[str, Any] | None) -> list[dict[str, Any]]:
         out.append({"ref": f"report:{slug}#{rt.TITLE_BLOCK}", "kind": "title", "fp": fingerprint("t", [key(title)]),
                     "locked": doc.get("title_locked") is True, "anchor": rt.TITLE_BLOCK, "ids": [rt.TITLE_BLOCK]})
 
-    def sentence(x: dict[str, Any]) -> None:  # a story's answer or a page's claim, which no lock holds
+    def sentence(x: dict[str, Any]) -> None:  # a page's claim, which no lock holds
         sid = str(x.get("id"))
         out.append({"ref": f"report:{slug}#{sid}", "kind": "sentence", "fp": fingerprint("s", [key(x.get("text"))]),
                     "locked": False, "anchor": sid, "ids": [sid]})
 
-    answer = doc.get("answer") if isinstance(doc.get("answer"), dict) else None
-    if answer and rt.is_sentence(answer):
-        sentence(answer)
-        in_units.add(str(answer.get("id")))
     for u in rt.units(doc):
         uid = str(u.get("id"))
         sents = rt.unit_sentences(u)
@@ -469,10 +465,6 @@ def passages(slug: str, doc: dict[str, Any] | None) -> list[dict[str, Any]]:
                             "fp": fingerprint("p", [key(x.get("text")) for x in xs]),
                             "locked": p.get("locked") is True or u.get("locked") is True, "anchor": str(xs[0].get("id")),
                             "ids": [f"p{pid}", *(str(x.get("id")) for x in xs)]})
-        elif sents or _collapse(u.get("heading")):
-            out.append({"ref": f"report:{slug}#{uid}", "kind": "unit",
-                        "fp": fingerprint("u", [key(u.get("heading")), *(key(x.get("text")) for x in sents)]),
-                        "locked": u.get("locked") is True, "anchor": uid, "ids": [uid, *(str(x.get("id")) for x in sents)]})
     for x in rt.all_sentences(doc):
         if str(x.get("id")) not in in_units:
             sentence(x)

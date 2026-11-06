@@ -300,9 +300,9 @@ def session_records(ws: Path, chats: list[dict[str, Any]], tickets: Iterable[dic
         if kind == "main":
             put((meta.get("attached") or {}).get("session") if isinstance(meta.get("attached"), dict) else None, role="main", chat="main")
             put(meta.get("sdk_session_id"), role="main", chat="main")
-        # A `step` with a session and no agent id is a session started as a step of another (such as a critique); a step
-        # with an agent id is a subagent, found under its parent's folder.
-        elif meta.get("session") and not meta.get("agent_id") and role in ("orient", "writer", "dev", "step"):
+        # A `step` with a session and no agent id is a session started as a step of another; a step with an agent id is a
+        # subagent, found under its parent's folder.
+        elif meta.get("session") and not meta.get("agent_id") and role in ("writer", "dev", "step"):
             put(meta.get("session"), role=role, chat=meta.get("id"))
         elif kind == "thread":
             put(meta.get("sdk_session_id"), role="thread", chat=meta.get("id"))
@@ -546,13 +546,6 @@ def _documents(w: Writer, ws: Path) -> dict[str, int]:
             "documents/comments.jsonl": w.jsonl("documents/comments.jsonl", [v for _, v in sorted(comments.values(), key=lambda kv: str(kv[1].get("ts") or ""))])}
 
 
-def _orientation(w: Writer, ws: Path) -> None:
-    for name in ("run.json", "summary.md"):
-        p = ws / "orient" / name
-        if p.is_file():
-            w.copy(f"orientation/{name}", p)
-
-
 def _dev_rows(c: str, name: str) -> list[dict[str, Any]]:
     """The dev tickets filed from this workspace (dev/ holds every workspace's)."""
     from . import dev  # noqa: PLC0415
@@ -614,7 +607,6 @@ def build(c: str, out: Path) -> dict[str, Any]:
         _labels(w, ws)
         _views(w, ws)
         _documents(w, ws)
-        _orientation(w, ws)
         w.jsonl("tickets.jsonl", tickets)
         try:
             corpus_info = _corpus_files(c)

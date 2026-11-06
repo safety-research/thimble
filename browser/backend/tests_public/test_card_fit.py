@@ -339,37 +339,40 @@ async def test_a_card_held_with_no_check_shows_as_it_stands_when_main_s_turn_end
     assert card_fit.turn_ended(CORPUS) == []
 
 
+WRITER = f"{tools.WRITER_SESSION}:report"  # the session a writer of the report runs as
+
+
 async def as_session(session: str | None = None, tool_use_id: str | None = None, **args):
     """add_card as one of thimble's agents (`session`) or a subagent of main's (the caller hook's `tool_use_id`)."""
     return await tools.call(CORPUS, "add_card", args, actor="analyst", terminal=True, session=session,
                             tool_use_id=tool_use_id)
 
 
-async def test_a_card_the_orientation_or_a_thread_s_fork_holds_waits_for_its_own_end_not_main_s(_harness):
-    """Main's turn end shows only the cards main's own calls hold. The orientation's card shows when the
-    orientation's run ends (subagents.run_ended), and a thread's fork's when the fork ends (session._finish_sub)."""
+async def test_a_card_a_writer_or_a_thread_s_fork_holds_waits_for_its_own_end_not_main_s(_harness):
+    """Main's turn end shows only the cards main's own calls hold. A writer's card shows when the writer's run ends
+    (subagents.run_ended), and a thread's fork's when the fork ends (session._finish_sub)."""
     from app import agents, config, session, subagents
     from app import subagent_files as sf
 
     ws = config.workspace_dir(CORPUS)
     mine = _cid(await call("add_card", kind="custom", question="Which runs failed?", html=page(2400)))
-    orient = _cid(await as_session(tools.ORIENT_SESSION, kind="custom", question="How long did each stage take?",
-                                   html=page(2400)))
+    written = _cid(await as_session(WRITER, kind="custom", question="How long did each stage take?",
+                                    html=page(2400)))
     sf.add_caller(ws, "toolu_fork1", "fork1", sf.FORK_TYPE)
     forked = _cid(await as_session(None, "toolu_fork1", kind="custom", question="Which stage failed most?",
                                    html=page(2400)))
-    assert held(orient)["author"] == tools.ORIENT_SESSION and held(forked)["agent"] == "fork1"
+    assert held(written)["author"] == WRITER and held(forked)["agent"] == "fork1"
     assert "agent" not in held(mine)
 
     lv = session.Live(CORPUS, "sid", str(ws), None, None)
     session._open_turn(lv)
     session._end_turn(lv)
-    assert held(mine) is None and held(orient) and held(forked)
+    assert held(mine) is None and held(written) and held(forked)
 
     with subagents.update(CORPUS) as state:
-        sf.registry(state)["orient1"] = {"role": "orientation", "key": tools.ORIENT_SESSION, "status": "running"}
-    assert subagents.run_ended(CORPUS, "orient1", "done", "The analysis.", source="handback")
-    assert held(orient) is None and held(forked)
+        sf.registry(state)["writer1"] = {"role": "writer", "key": WRITER, "status": "running"}
+    assert subagents.run_ended(CORPUS, "writer1", "done", "The report.", source="handback")
+    assert held(written) is None and held(forked)
 
     tid = agents.new_thread(CORPUS, None, None, "Which stage failed most?")["id"]
     session._finish_sub(lv, session.Sub(CORPUS, tid, "toolu_fork", "fork1", thread=True), "completed", None)
@@ -377,7 +380,7 @@ async def test_a_card_the_orientation_or_a_thread_s_fork_holds_waits_for_its_own
     assert [r["why"] for r in card_fit_lines() if r["action"] == "shown"] == ["turn ended", "run ended", "agent ended"]
 
 
-async def test_main_s_turn_end_leaves_a_card_the_orientation_s_call_is_measuring(_harness, monkeypatch):
+async def test_main_s_turn_end_leaves_a_card_a_writer_s_call_is_measuring(_harness, monkeypatch):
     """A card waits for its measure with who made it on its record, so main's turn end in that moment leaves it, and
     the measure holds it."""
     seen: dict = {}
@@ -388,10 +391,9 @@ async def test_main_s_turn_end_leaves_a_card_the_orientation_s_call_is_measuring
         return card_fit.Size(body=2400)
 
     monkeypatch.setattr(card_fit, "_measure", measure)
-    cid = _cid(await as_session(tools.ORIENT_SESSION, kind="custom", question="How long did each stage take?",
-                                html=page(2400)))
-    assert seen == {"held": {**notebook.MEASURING_HELD, "author": tools.ORIENT_SESSION}, "shown": []}
-    assert held(cid)["author"] == tools.ORIENT_SESSION and held(cid)["body"] == 2400
+    cid = _cid(await as_session(WRITER, kind="custom", question="How long did each stage take?", html=page(2400)))
+    assert seen == {"held": {**notebook.MEASURING_HELD, "author": WRITER}, "shown": []}
+    assert held(cid)["author"] == WRITER and held(cid)["body"] == 2400
 
 
 async def test_a_page_wider_than_its_card_is_held_with_its_width_and_the_card_s(_harness):

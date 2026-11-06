@@ -271,21 +271,21 @@ def test_the_event_log_s_readers_read_no_fifo_and_no_link_a_card_left_as_the_log
 
 def test_a_report_type_s_texts_are_read_through_no_link_a_card_left_in_their_place(tmp_path_factory):
     """A custom document type is a folder of the workspace, report-types/<slug>/, which a card's code writes: its
-    type.json was read as nofollow reads it, but its prompt.md, rubric.md and renderer.tsx by their paths, so a link a
-    card's code put in their place had the server hand a writer, which reads the type's text (read_ref "type:<slug>"),
-    the file it points to."""
+    type.json was read as nofollow reads it, but its prompt.md and rubric.md by their paths, so a link a card's code put
+    in their place had the server hand a writer, which reads the type's text (read_ref "type:<slug>"), the file it
+    points to."""
     from app import report_types
 
     outside = _outside(tmp_path_factory)
     (outside / "made-up-credentials").write_text("MADE-UP-SECRET-TOKEN 0123456789\n")
     d = report_types.types_dir(CORPUS) / "notes"
     d.mkdir(parents=True)
-    (d / "type.json").write_text(json.dumps({"slug": "notes", "name": "Notes", "renderer": "custom", "schema": {},
+    (d / "type.json").write_text(json.dumps({"slug": "notes", "name": "Notes", "renderer": "document",
                                              "created_by": "analyst"}))
-    for name in ("prompt.md", "rubric.md", "renderer.tsx"):
+    for name in ("prompt.md", "rubric.md"):
         (d / name).symlink_to(outside / "made-up-credentials")
     t = report_types.read_type(CORPUS, "notes")
-    assert t is not None and (t["prompt"], t["rubric"], t["component"]) == ("", "", "")
+    assert t is not None and (t["prompt"], t["rubric"]) == ("", "")
     assert "MADE-UP-SECRET-TOKEN" not in report_types.type_form(t)
 
 
@@ -460,12 +460,6 @@ def _case_view_progress(out):
     return lambda: view_calls.progress(CORPUS, "made-up"), lambda r: r is not None and "done" not in r
 
 
-def _case_cli_orient_status(out, monkeypatch=None):
-    from app import cli
-    _fifo(_ws() / "orient" / "run.json")
-    return lambda: cli.orient_status(CORPUS), lambda r: r == "not started"
-
-
 def _case_undo_journal(out):
     from app import undo
     undo.forget()
@@ -473,13 +467,6 @@ def _case_undo_journal(out):
                                              op="deleted", target="madeup01", by="", label="OUTSIDE-SECRET",
                                              before={"id": "madeup01"}, after=None))
     return lambda: (undo.labels(CORPUS), undo.forget())[0], lambda r: r["undo"] is None
-
-
-def _case_calls_store(out):
-    from app import calls
-    calls._indexes.clear()
-    _link(calls.path(CORPUS, "made-up"), out, _line(n=1, id="toolu_made_up", name="OUTSIDE-SECRET", chat="made-up"))
-    return lambda: calls.get(CORPUS, "made-up", 1), lambda r: r is None
 
 
 def _case_chat_events(out):
@@ -521,34 +508,13 @@ def _case_telemetry_events(out):
     return lambda: telemetry._read_jsonl(log), lambda r: r == []
 
 
-_SCHEMA = {"type": "object", "properties": {"claim": {"$sentence": True}}}
-
-
-def _case_type_component(out):
-    from app import report_types
-    report_types.write_type(CORPUS, "made-up", name="Made-up", description="", renderer="custom", prompt="made-up",
-                            rubric="", schema=_SCHEMA, component="export default () => null", create=True)
-    _link(report_types._type_dir(CORPUS, "made-up") / "renderer.tsx", out, "OUTSIDE-SECRET")
-
-    def save():
-        from fastapi import HTTPException
-        try:
-            report_types.write_type(CORPUS, "made-up", name="Made-up", description="", renderer="custom",
-                                    prompt="made-up", rubric="", schema=_SCHEMA)
-        except HTTPException:
-            pass
-        p = report_types._type_dir(CORPUS, "made-up") / "renderer.tsx"  # what the server wrote there, a card reads
-        return "" if p.is_symlink() or not p.is_file() else p.read_text()
-    return save, lambda r: "OUTSIDE-SECRET" not in r
-
-
 READERS = {f.__name__.removeprefix("_case_"): f for f in (
     _case_tail_records, _case_last_uuid, _case_chat_of, _case_context_records, _case_marks_transcript,
     _case_session_cost, _case_sub_meta, _case_fork_ref, _case_continued_in, _case_held_events,
     _case_citing_documents, _case_mark_interrupted, _case_migrate_scratch, _case_work_texts, _case_work_read_text,
     _case_render_theme, _case_libs_lock, _case_last_seq, _case_label_rows, _case_view_progress,
-    _case_cli_orient_status, _case_undo_journal, _case_calls_store, _case_chat_events,
-    _case_chat_lines, _case_chat_meta, _case_chats_listed, _case_telemetry_events, _case_type_component)}
+    _case_undo_journal, _case_chat_events,
+    _case_chat_lines, _case_chat_meta, _case_chats_listed, _case_telemetry_events)}
 
 
 @pytest.mark.parametrize("reader", sorted(READERS))

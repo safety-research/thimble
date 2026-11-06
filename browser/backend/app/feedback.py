@@ -3,8 +3,7 @@
 `build` writes <Downloads>/thimble-feedback-<YYYYMMDD-HHMMSS>.zip (else <home>, else the temp folder) holding
 contents.txt, description.txt, an optional screenshot, versions.txt, doctor.txt, import-error.txt when the supervisor
 could not be imported, and, unless the tester leaves the logs out: server and install log tails, the browser's recent
-errors, and the workspace's permissions, orientation record, checks, views, dev tickets, events, agent sessions'
-transcripts and chats.
+errors, and the workspace's permissions, checks, views, dev tickets, events, agent sessions' transcripts and chats.
 
 Only thimble's own files and the workspace's state are read, and transcripts only under a Claude Code projects folder;
 symlinks, files resolving outside their folder, and the corpus's files are never read. The content stays under MAX_BYTES
@@ -56,7 +55,7 @@ INSTALL_LOG_MAX = 200_000
 BROWSER_MAX = 300_000
 BROWSER_ENTRIES = 300
 PERMISSIONS_MAX = 300_000
-STATE_MAX = 300_000  # each of the orientation, card checks, report checks, view proposals, dev tickets and sessions
+STATE_MAX = 300_000  # each of the card checks, report checks, view proposals, dev tickets and sessions
 VIEWS_MAX = 1_000_000  # the view proposals and the views' own code
 VIEW_FILE_MAX = 200_000
 VIEW_SUFFIXES = (".py", ".json", ".js", ".mjs", ".ts", ".tsx", ".html", ".css", ".md", ".txt")
@@ -95,7 +94,7 @@ SID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 DOCTOR_LOG_MARK = "  log tail ("  # where cli.doctor_text's tail of the server log starts
 # the chats of the sessions thimble starts beside main: a step with a session and no agent id is a session started as a
 # step of another; a step with an agent id is a subagent, whose transcript lies under its parent's
-BACKGROUND_ROLES = ("orient", "writer", "check", "step", "dev")
+BACKGROUND_ROLES = ("writer", "check", "step", "dev")
 NAME_MIN = 4  # the shortest chat title or slug, in letters and digits, a description is taken to name
 
 # (kind, pattern, bounded): the whole match is replaced, or only the group `v` when present. A bounded pattern counts
@@ -208,12 +207,8 @@ def workspace_for(cwd: Path) -> tuple[str, Path] | None:
 
 
 def repo_slug(root: Path) -> str:
-    """The `owner/name` of the GitHub repo releases and issues live on: RELEASE.json's `repo` in a release install, else
-    the `repository` URL of the terminal plugin's manifest beside the workbench (plugin/.claude-plugin/plugin.json)."""
-    rel = _read_json(root / "RELEASE.json")
-    slug = str(rel.get("repo") or "").strip() if isinstance(rel, dict) else ""
-    if slug:
-        return slug
+    """The `owner/name` of the GitHub repo releases and issues live on: the `repository` URL of the terminal plugin's
+    manifest beside the workbench (plugin/.claude-plugin/plugin.json)."""
     plugin = _read_json(root.parent / "plugin" / ".claude-plugin" / "plugin.json")
     url = str(plugin.get("repository") or "").strip() if isinstance(plugin, dict) else ""
     return re.sub(r"^(?:https?://)?(?:www\.)?github\.com/", "", url).removesuffix(".git").strip("/")
@@ -420,18 +415,13 @@ def _checkout() -> bool:
 
 
 def install_kind() -> tuple[str, str]:
-    """(`release`, `checkout` or `unknown`, the line versions.txt shows) from RELEASE.json or the git checkout's state.
-    """
-    rel = _read_json(REPO_ROOT / "RELEASE.json")
-    if isinstance(rel, dict):
-        return "release", (f"release {rel.get('version', '?')} @ {rel.get('commit', '?')}, {rel.get('date', '?')}, "
-                           f"at {REPO_ROOT}")
+    """(`checkout` or `unknown`, the line versions.txt shows) from the git checkout's state."""
     if _checkout():
         dirty = _git("status", "--porcelain")
         return "checkout", (f"git {_git('rev-parse', '--abbrev-ref', 'HEAD') or '?'} @ "
                             f"{_git('rev-parse', '--short', 'HEAD') or '?'} ({len(dirty.splitlines())} uncommitted "
                             f"paths), at {REPO_ROOT}")
-    return "unknown", f"no RELEASE.json and not a git checkout, at {REPO_ROOT}"
+    return "unknown", f"not a git checkout, at {REPO_ROOT}"
 
 
 def versions(user_agent: str = "", workspace: str | None = None) -> dict[str, str]:
@@ -897,10 +887,6 @@ def _workspace(b: Bundle, c: str, ws: Path, description: str, focus: list[str]) 
     if _own_file(perms, ws):
         b.part("workspace/permissions.jsonl", b.file_tail, "workspace/permissions.jsonl", perms, PERMISSIONS_MAX,
                "the permission requests of the workspace's sessions and their answers")
-    run = ws / "orient" / "run.json"
-    if _own_file(run, ws):
-        record = json.dumps(trimmed(_read_json(run)), indent=1, ensure_ascii=False)[:STATE_MAX]
-        b.part("workspace/orientation.json", b.text, "workspace/orientation.json", record, "the orientation's record")
     b.part("workspace/card-checks.jsonl", lambda: b.rows(
         "workspace/card-checks.jsonl", _card_checks(ws), STATE_MAX, "each card's latest check and its fixes"))
     times = ws / "card-checks" / "timings.jsonl"

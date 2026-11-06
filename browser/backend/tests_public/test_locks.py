@@ -1,5 +1,5 @@
-"""The locks of the stores more than one process writes (ledger.locked, calls_file): two processes that add cards to one
-group keep every card, and a hook and the backend number calls in one sequence."""
+"""The locks of the stores more than one process writes (ledger.locked): two processes that add cards to one group keep
+every card, and every lock of a workspace lies in its locks folder."""
 from __future__ import annotations
 
 import json
@@ -110,14 +110,14 @@ def test_chat_meta_changes_from_two_processes_both_land(workspaces_tmp: Path, tm
     assert got["a"] == list(range(30)) and got["b"] == list(range(30))
 
 
-def test_a_hook_and_the_server_take_one_lock_of_a_calls_store_in_the_workspace_s_locks_folder(tmp_path: Path) -> None:
-    """Every lock of a workspace's stores lies in its locks folder, which no kernel sees: the lock calls_file takes in
-    a hook is the one ledger.locked takes in the server, and a store outside the workspaces keeps its lock beside it."""
-    from app import calls_file, nofollow
+def test_every_lock_of_a_workspace_s_stores_lies_in_its_locks_folder(tmp_path: Path) -> None:
+    """Every lock of a workspace's stores lies in its locks folder, which no kernel sees, and a store outside the
+    workspaces keeps its lock beside it."""
+    from app import nofollow
 
     ws = config.workspace_dir("mini")
-    store = calls_file.path(ws, "made-up-chat")
-    assert calls_file._Lock(store).lf == ledger.lock_file(store) == ws / "locks" / "calls" / "made-up-chat.jsonl.lock"
+    store = ws / "chats" / "made-up-chat.jsonl"
+    assert ledger.lock_file(store) == ws / "locks" / "chats" / "made-up-chat.jsonl.lock"
     assert ledger.lock_file(ws / "notebooks") == ws / "locks" / "notebooks.lock"
     elsewhere = tmp_path / "made-up" / "store.json"
     assert nofollow.lock_file(elsewhere) == elsewhere.with_name("store.json.lock")

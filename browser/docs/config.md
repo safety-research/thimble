@@ -10,7 +10,7 @@ The Label tool switch, on or off at the head of the Labels sidebar, works as the
 
 Main and thimble's agents edit this file and a workspace's `config.json` under main's permission mode, as any file outside the folder you opened. A session thimble runs on its own, such as `thimble fix`, asks you before it edits them, and one with nobody to ask can't. A permission mode of `"bypass"` written in this file counts as Manual (`permissionMode` below).
 
-thimble changes none of Claude Code's settings files. The orientation, its critic, the writers, view builds, view reviews, report checks and code tickets are subagents of main: they run in main's permission mode, and thimble adds no rules or sandbox to them. Only `thimble fix` keeps a permission mode and a sandbox of its own (the `dev` entry).
+thimble changes none of Claude Code's settings files. The writers, view builds, view reviews, report checks and code tickets are subagents of main: they run in main's permission mode, and thimble adds no rules or sandbox to them. Only `thimble fix` keeps a permission mode and a sandbox of its own (the `dev` entry).
 
 ```json
 {
@@ -36,7 +36,7 @@ If the file isn't valid JSON, or a key or value is unknown, no agent starts. The
 | `browser` | `"system"`, `"bundled"`, `"off"` | the system browser when one is found, else Playwright's Chromium if installed, else off | The browser for screenshots: card checks, view checks and reviews, and the screenshot tool. `"system"` uses Chrome, Edge or Chromium installed on the machine. `"bundled"` uses the Chromium that the installer downloaded. `"off"` takes no screenshots, so cards and views are checked without pictures and graphics aren't repaired. Only in the file in thimble's home. Start thimble-browser again after changing it. |
 | `cardWait` | minutes, a number above 0 and up to 720 | `10` | How long a code ticket's card waits for your answer to thimble's questions about its own code: whether the change may be applied, and, where the sandbox runtime can't run, whether the ticket may start. A question nobody answers in that time is a no, and the card says so, with the wait. Requests of main and of thimble's agents, a ticket's agent among them, are never declined on a timer. A change applies to the next card. Only in the file in thimble's home. |
 | `askKey` | `"meta"`, `"alt"`, `null` | `null`, which is `"meta"` | The key you hold while you click something in the browser to ask about it: `"meta"` is ⌘-click on a Mac and Ctrl-click elsewhere, `"alt"` is ⌥-click on a Mac and Alt-click elsewhere. The other key places a card freely on the canvas while you drag it. Settings' Ask Claude with choice writes it. Only in the file in thimble's home. |
-| `views.propose` | `true`, `false`, `null` | `null`, which is on | Whether thimble proposes views. After each of your messages, when a side thread answers and when an orientation ends, a card above the reply box may propose a view, and opening a file only Raw can show may propose a viewer for its type. Nothing builds until you accept. Deciding whether to propose takes one model call on a copy of main's context, on the `suggest` row. `false` turns view proposals off: the proposal's Don't ask again writes it, and Settings' View proposals switch writes it and takes it out. |
+| `views.propose` | `true`, `false`, `null` | `null`, which is on | Whether thimble proposes views. After each of your messages and when a side thread answers, a card above the reply box may propose a view, and opening a file only Raw can show may propose a viewer for its type. Nothing builds until you accept. Deciding whether to propose takes one model call on a copy of main's context, on the `suggest` row. `false` turns view proposals off: the proposal's Don't ask again writes it, and Settings' View proposals switch writes it and takes it out. |
 
 ## Agents
 
@@ -49,7 +49,7 @@ If the file isn't valid JSON, or a key or value is unknown, no agent starts. The
 - **`dev`**: view builds, view reviews and code tickets, each a subagent of main, and `thimble fix`
 - **`labels`**: the label classifier
 - **`cardCheck`**: the card check's reading of a card's picture
-- **`suggest`**: the view proposals: the check for one after each of your messages, after a side thread answers and after an orientation ends, and the call that proposes a viewer for a file type
+- **`suggest`**: the view proposals: the check for one after each of your messages and after a side thread answers, and the call that proposes a viewer for a file type
 - **`refusal`**: the model and effort a classifier's call runs again on when its own model refuses it
 
 Each agent runs on exactly the model and effort its entry gives, the defaults included, unless a start tool names another model or effort for one run. None of them takes your own Claude Code model or effort. thimble's model calls run without `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so that none can change what runs. Your organization's managed settings rank above thimble's, so a variable an `env` block there sets still applies.

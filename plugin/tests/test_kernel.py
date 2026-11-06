@@ -158,7 +158,7 @@ def test_the_help_lists_the_options_thimble_has(root: Path) -> None:
 
 def test_the_usage_line_names_only_the_commands_thimble_has(root: Path) -> None:
     """A word that is no command gets the usage line, whose list of commands is the commands thimble has: each one of
-    them runs, thimble doctor too. thimble demo and browser are gone (thimble-browser and its --demo replace them)."""
+    them runs, thimble doctor too. thimble demo and browser are gone (thimble-browser replaces them)."""
     bad = run(root, "demo")
     assert bad.returncode == 2 and "no command 'demo'" in bad.stderr
     listed = re.search(r"\{([a-z,]+)\}", bad.stderr)
@@ -171,6 +171,6 @@ def test_the_usage_line_names_only_the_commands_thimble_has(root: Path) -> None:
 def test_the_browser_launcher_names_only_commands_thimble_has(root: Path) -> None:
     """thimble-browser --help names a thimble command only when the terminal plugin's thimble has it."""
     launcher = Path(__file__).resolve().parents[2] / "browser" / "scripts" / "thimble-browser"
-    help_ = "\n".join(launcher.read_text().splitlines()[1:21])
+    help_ = "\n".join(launcher.read_text().splitlines()[1:20])
     for name in re.findall(r"\bthimble (?!-)([a-z]+)", help_):
         assert run(root, name, "--help").returncode == 0, f"thimble-browser --help names thimble {name}, which does not run"

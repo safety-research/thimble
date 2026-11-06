@@ -20,13 +20,13 @@ and when a side thread answers (proposer.trigger).
 Each subagent transcript becomes an agent chat, except `thread:<id>` subagents, which are that thread's fork
 (threads.py), and thimble's own agents (subagents.py): an agent of one of thimble's roles goes to its role's chat (made
 by subagents.ensure_chat from the module's answer, its SubagentStart or its transcript, since a plugin start leaves no
-record in main's transcript), and a descendant of one, a `thimble:orient-helper` among them, is a step of its thimble
-ancestor. The ends of their runs come from their hand-back (the SubagentHandback call in the agent's transcript, or the
-hand-back in main's), a task notification, or the hooks' and the module's turn ends (subagents.run_ended, stopped,
-ended); a message from main or the analyst to one that finished starts its next run (subagents.run_again). For a typed
-start or follow-up the mirror watches main's call (R2: its result) and main's turn (R3: the turn in which main called
-the start tool ends without the call), and refuses the request when it did not happen. A Workflow call is one agent chat
-whose members are the run's agent transcripts.
+record in main's transcript), and a descendant of one is a step of its thimble ancestor. The ends of their runs come
+from their hand-back (the SubagentHandback call in the agent's transcript, or the hand-back in main's), a task
+notification, or the hooks' and the module's turn ends (subagents.run_ended, stopped, ended); a message from main or the
+analyst to one that finished starts its next run (subagents.run_again). For a typed start or follow-up the mirror
+watches main's call (R2: its result) and main's turn (R3: the turn in which main called the start tool ends without the
+call), and refuses the request when it did not happen. A Workflow call is one agent chat whose members are the run's
+agent transcripts.
 
 Main ends a turn with nothing for the analyst with END_TOKEN; no chat shows END_TOKEN, nor a line that opens with
 TERMINAL_ONLY."""
@@ -123,8 +123,8 @@ COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 PASTE_RE = re.compile(r'\n{0,2}<pasted_content id="([0-9a-f]{4})">\n(.*?)\n</pasted_content id="\1">\n{0,2}', re.S)
 LOCAL_CAVEAT = "<local-command-caveat>"  # the meta record before a local command's line (module note, the table)
 CONNECT_COMMANDS = ("/thimble", "/thimble:thimble")  # /thimble's command line, whose turn is not mirrored (module note)
-# /thimble:ask's command line: a message for a thread, the orientation or a view's build, as that chat's composer in the
-# browser sends it, so its turn is no analyst's turn of main (Live.turn_analyst)
+# /thimble:ask's command line: a message for a thread or a view's build, as that chat's composer in the browser sends
+# it, so its turn is no analyst's turn of main (Live.turn_analyst)
 ASK_COMMANDS = ("/thimble:ask",)
 TASK_FIELD_RE = re.compile(r"<(task-id|tool-use-id|status|result|summary)>(.*?)</\1>", re.S)
 # one task's notification: Claude Code puts the notifications of tasks that end together in one message
@@ -137,7 +137,7 @@ PLAN_EXIT_ATTACHMENT = "plan_mode_exit"
 # a Bash call's result when it runs in the background: its shell's task id, which TaskStop takes (live check L33)
 BG_SHELL_RE = re.compile(r"\A\s*Command running in background with ID:\s*([A-Za-z0-9_-]+)")
 HANDBACK_RE = re.compile(r"\A\[Subagent hand-back\].*?follows:\n", re.S)  # the harness's lead of a hand-back
-START_TOOLS = ("start_orientation", "start_writing", "message_orientation", "propose_view", "run_check")  # R3, the Bash true
+START_TOOLS = ("start_writing", "propose_view", "run_check")  # R3, the Bash true
 # R2: what an error result of main's call for one of thimble's agents says, by the kind of refusal it is
 NOT_FOUND_RE = re.compile(r"agent type .{0,80}not found|not found.{0,40}agent type", re.I)
 EARLIER_RE = re.compile(r"could not be resumed|no transcript found", re.I)
@@ -206,7 +206,7 @@ class Sub:
     def __init__(self, c: str, chat: str, tool_use_id: str | None, agent_id: str | None, *, thread: bool = False,
                  role: str = SUBAGENT_ROLE) -> None:
         self.chat, self.tool_use_id, self.agent_id, self.thread = chat, tool_use_id, agent_id, thread
-        self.role = "thread" if thread else role  # the agent chat's role: subagent, or orient for the orientation
+        self.role = "thread" if thread else role  # the agent chat's role: subagent, or the role of one of thimble's agents
         self.rec = agents.Recorder(c, chat)
         self.path: Path | None = None  # its transcript once found
         self.offset = 0
@@ -223,9 +223,6 @@ class Sub:
         # tool_use id -> input of an Agent call of this subagent for one of thimble's roles, when it is no agent of
         # thimble's (a thread's fork): its result is watched as main's is (R2, _sub_start_result)
         self.starts: dict[str, dict] = {}
-        # an orientation's continuation (U2): its first prompt is thimble's, holding the stopped run's context, and the
-        # analyst's message shows as the run's own (orient_session.subagent_started), so the prompt is no message
-        self.skip_prompt = False
         # a fork the server started for a chat of its own (follow): its prompts are thimble's texts, and the chat shows
         # the person's words itself, so no prompt is a message
         self.own_prompts = False
@@ -248,10 +245,6 @@ class Sub:
         self.workflow = False  # a Workflow call of main's, whose members are its agents (module note, workflows)
         self.workflow_dir: Path | None = None  # the run's transcript directory, from the call's result
         self.owner: Sub | None = None  # the workflow this Sub's transcript is one agent of
-        # the call store of an orientation (calls.Numbering, set for the orientation and its descendants): each call
-        # this Sub writes is numbered in the orientation's sequence, its record carries `n`, and each result is stored
-        # whole
-        self.calls: Any = None
         # when main left the session this one's agent is carried into: the records its file there holds from before
         # then were read while that session was main's, and are skipped
         self.skip_before: float | None = None
@@ -1098,9 +1091,9 @@ def _proposer_turn(lv: Live, cut: str | None) -> None:
 
 
 def _no_call(lv: Live) -> None:
-    """R3 (module note): the turn in which main called a start tool, or message_orientation, ended, and the request that
-    call stands for was never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's
-    last text in the turn (its first two lines) as the reason."""
+    """R3 (module note): the turn in which main called a start tool ended, and the request that call stands for was
+    never claimed by main's Agent call or SendMessage: it is refused, kind `no-call`, with main's last text in the turn
+    (its first two lines) as the reason."""
     if not lv.turn_calls:
         return
     from . import subagents  # noqa: PLC0415
@@ -1112,7 +1105,7 @@ def _no_call(lv: Live) -> None:
     said = "\n".join([ln for ln in lv.turn_text.strip().splitlines() if ln.strip()][:2])
     for rid, r in list(reqs.items()):
         if (isinstance(r, dict) and r.get("route") == subagents.TYPED and r.get("state") == "pending"
-                and r.get("call") in lv.turn_calls and not r.get("caller_role") and not r.get("caller_agent")):
+                and r.get("call") in lv.turn_calls and not r.get("caller_agent")):
             subagents.refuse(lv.c, rid, said, subagents.NO_CALL)
 
 
@@ -1297,8 +1290,7 @@ def _task_status(status: Any) -> str:
 
 
 def _child_finished(lv: Live, text: str) -> None:
-    """A task notification in a subagent's own transcript: a subagent it started (the writer's verifier, the
-    orientation's critic) has stopped. Main never sees that notification, so the child's chat is finished here, and
+    """A task notification in a subagent's own transcript: a subagent it started (the writer's verifier) has stopped. Main never sees that notification, so the child's chat is finished here, and
     main's turn is left alone."""
     for fields in task_notices(text):
         sub = _sub_by(lv, agent_id=fields.get("task-id")) or _sub_by(lv, tool_use_id=fields.get("tool-use-id"))
@@ -1615,26 +1607,16 @@ def _request_of(lv: Live, tool_use_id: str, name: str, inp: dict) -> str | None:
 
 
 def _thimble_sub(lv: Live, chat: str, agent_id: str, tool_use_id: str | None, chat_role: str) -> Sub:
-    """A Sub following one of thimble's agents (or a descendant's step) into its chat: an orientation's calls, and its
-    descendants', numbered in its call store."""
-    from . import calls, subagents  # noqa: PLC0415
+    """A Sub following one of thimble's agents (or a descendant's step) into its chat."""
+    from . import subagents  # noqa: PLC0415
 
     sub = Sub(lv.c, chat, tool_use_id, agent_id, role=chat_role)
     a = subagents.agent(lv.c, agent_id) or {}
     if a.get("role") in subagents.ROLES:
         sub.thimble = str(a["role"])
-        sub.skip_prompt = bool(a.get("continues"))
         sub.of_main = not a.get("parent")
-        up = subagents.agent(lv.c, str(a.get("parent") or "")) or {}
-        if sub.thimble == "orientation":
-            sub.calls = calls.Numbering(lv.c, chat)
-        elif up.get("role") == "orientation" and up.get("chat"):  # the critic: numbered in the orientation's sequence
-            sub.calls = calls.Numbering(lv.c, str(up["chat"]), agent=agent_id)
     else:
-        root = subagents.agent(lv.c, str(a.get("root") or "")) or {}
         sub.root = str(a.get("root") or "") or None
-        if root.get("role") == "orientation" and root.get("chat"):
-            sub.calls = calls.Numbering(lv.c, str(root["chat"]), agent=agent_id)
     return sub
 
 
@@ -1650,10 +1632,6 @@ def expect_agent(c: str, agent_id: str, chat: str, chat_role: str) -> None:
         lv.subs.append(sub)
     elif sub.chat != chat:
         sub.chat, sub.rec = chat, agents.Recorder(c, chat)
-        if sub.offset == 0:  # found before its chat: an orientation's continuation goes to the stopped run's (U2)
-            from . import subagents  # noqa: PLC0415
-
-            sub.skip_prompt = bool((subagents.agent(c, agent_id) or {}).get("continues"))
     lv.wake.set()
 
 
@@ -1786,8 +1764,6 @@ def _sub_who(c: str, sub: Sub) -> tuple[str, str]:
         return notices.who("thread", title)
     if sub.root:
         root = subagents.agent(c, sub.root) or {}
-        if root.get("role") == "orientation":
-            return notices.who(subagents.HELPER)
         name, subject = notices.who(root.get("role"), notices.chat_title(c, root.get("chat")))
         return name, f"A subagent of {subject[0].lower()}{subject[1:]}"
     return notices.who("", title)
@@ -2037,10 +2013,6 @@ def _spawn_thimble(lv: Live, tool_use_id: str | None, agent_id: str, title: str,
                             agent_type=agent_type if isinstance(agent_type, str) else None)
     sub = Sub(lv.c, str(meta["id"]), tool_use_id, agent_id, role=agents.STEP_ROLE)
     sub.root = str(root_id)
-    if root.get("role") == "orientation":
-        from . import calls  # noqa: PLC0415
-
-        sub.calls = calls.Numbering(lv.c, str(root["chat"]), agent=agent_id)
     lv.subs.append(sub)
     return sub
 
@@ -2666,8 +2638,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 return 0  # the stop's own line: the chat's end says it was stopped
             sub.api_error = sub.api_error_class = None  # a new run's prompt, which may run on another model
             sub.run_model = sub.switched_to = None
-            if sub.skip_prompt or sub.own_prompts:
-                sub.skip_prompt = False
+            if sub.own_prompts:
                 return 0
             if sub.thimble and sub.agent_id and _sent_quietly(lv.c, str(sub.agent_id), prompt):
                 return 0  # thimble's wrapping of the person's words, which the chat shows where they were said
@@ -2683,8 +2654,6 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if tid == sub.tool_use_id or f"result:{tid}" in sub.seen or f"skip:{tid}" in sub.seen:
                 continue
             sub.seen.add(f"result:{tid}")
-            if sub.calls is not None:
-                sub.calls.result(tid, b, rec, sub.path)
             data = _result_data(tid, sub.names.get(tid, ""), b.get("content"), bool(b.get("is_error")))
             shell = BG_SHELL_RE.search(data["summary"]) if sub.names.get(tid) == "Bash" else None
             owner = str(sub.agent_id if sub.thimble else sub.root or "")
@@ -2719,7 +2688,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             from . import subagents  # noqa: PLC0415
 
             sub.ran = True
-            # Claude Code writes the request's effort beside the message, not in it (contract_module.assistant_runs)
+            # Claude Code writes the request's effort beside the message, not in it
             effort = rec.get("effort") if isinstance(rec.get("effort"), str) else msg.get("effort")
             subagents.ran_on(lv.c, str(sub.agent_id), msg["model"], effort if isinstance(effort, str) else None)
     for b in _blocks(rec):
@@ -2746,8 +2715,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 continue
             sub.seen.add(f"use:{tid}")
             sub.names[tid] = name
-            n_ = sub.calls.use(tid, name, b.get("input")) if sub.calls is not None else None
-            sub.rec.tool_use(tid, name, b.get("input"), by=TERMINAL, **({"n": n_} if n_ else {}))
+            sub.rec.tool_use(tid, name, b.get("input"), by=TERMINAL)
             inp = b.get("input") if isinstance(b.get("input"), dict) else {}
             if name in AGENT_TOOLS and not sub.thimble and not sub.root:
                 from . import subagents  # noqa: PLC0415

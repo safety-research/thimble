@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
@@ -37,7 +37,7 @@ async def _write(cid: str) -> None:
 
 
 def _model() -> dict:
-    return exports.read_model(CORPUS, report_types.read_doc(CORPUS, MAIN, "report"), "document")
+    return exports.read_model(CORPUS, report_types.read_doc(CORPUS, MAIN, "report"))
 
 
 async def test_markdown_numbers_each_citation_once_as_a_footnote(report):
@@ -91,9 +91,6 @@ async def test_a_document_not_written_yet_answers_no_content_and_a_written_one_i
     r = client.get(f"{BASE}/report")
     assert r.status_code == 204 and r.content == b""
     assert client.get(f"{BASE}/no-such-type").status_code == 404
-    with pytest.raises(HTTPException) as e:  # the terminal's callers (local.py, term_report.py) still hear 404
-        report_types.get_doc(CORPUS, MAIN, "report")
-    assert e.value.status_code == 404
     await _write(report)
     r = client.get(f"{BASE}/report")
     assert r.status_code == 200 and r.json()["id"] == report_types.read_doc(CORPUS, MAIN, "report")["id"]

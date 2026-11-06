@@ -25,16 +25,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import cite, config, investigation, ledger, material, nofollow, notebook, prompts, refs, slides, undo
+from . import cite, config, investigation, ledger, material, nofollow, notebook, prompts, refs, undo
 from .ledger import atomic_write_text, read_json, unlinked, write_json
-from .report import (_Refs, _collapse, _cut, _new_id, _put_text, _replace_text, _title_ok, plain_text, reopen_comment,
-                     settle_carried_comment)
-from .schemas import CELL_REF, SENTENCE_TEXT, TAGS
-from .story import StoryBody
+from .report import _Refs, _collapse, _cut, _new_id, _put_text, _replace_text, _title_ok, plain_text, settle_carried_comment
+from .schemas import SENTENCE_TEXT, TAGS
 
 log = logging.getLogger("thimble.report_types")
 
-RENDERERS = ("document", "custom")  # slides, story and video are gone; a stored one reads as a document
+RENDERERS = ("document", "custom")  # a stored type of another renderer reads as a document
 BUILTIN_SLUGS = ("report",)
 RESERVED = set(BUILTIN_SLUGS) | {"story", "slides", "video", "brief", "findings", "run", "investigation", "events", "notes", "critiques", "reports",
                                  "types", "draft", "versions", "presets", "new"}
@@ -57,7 +55,7 @@ def _stamp() -> str:
 router = APIRouter()
 
 
-# --------------------------------------------------------------------------- a custom type's schema
+# --------------------------------------------------------------------------- a page's schema
 
 
 def undescribed(schema: dict) -> dict:
@@ -69,15 +67,7 @@ def undescribed(schema: dict) -> dict:
     return schema
 
 
-PLACEHOLDERS = ("$sentence", "$cell", "$graphic")
-_CELL_SCHEMA = {"type": "string", "pattern": CELL_REF,
-                "description": f"A card that draws a figure, as card:<id>: {material.FIGURE_WORDS}."}
-
-
-def _graphic_schema() -> dict[str, Any]:
-    from . import story  # noqa: PLC0415
-
-    return {**story._GRAPHIC, "type": ["object", "null"]}
+PLACEHOLDERS = ("$sentence",)
 
 
 def placeholder_of(node: Any) -> str | None:
@@ -99,8 +89,8 @@ def _nodes(node: Any):
 
 
 def expand_schema(raw: Any) -> dict[str, Any]:
-    """The tool's input schema from a custom type's schema: placeholders replaced, a root `title` ensured,
-    `additionalProperties: false` on every object. 400 when the schema is not usable."""
+    """The input schema from a page's schema: placeholders replaced, a root `title` ensured, `additionalProperties:
+    false` on every object. 400 when the schema is not usable."""
     if not isinstance(raw, dict) or raw.get("type", "object") != "object":
         raise HTTPException(400, "the document schema must be a JSON Schema object (type: object) with properties")
     if len(json.dumps(raw)) > SCHEMA_MAX:
@@ -108,12 +98,12 @@ def expand_schema(raw: Any) -> dict[str, Any]:
     if not any(placeholder_of(n) == "$sentence" for n in _nodes(raw)):
         raise HTTPException(400, 'the document schema must place at least one {"$sentence": true} so the document\'s claims carry refs')
     described: set[str] = set()
-    real = {"$sentence": SENTENCE_TEXT, "$cell": _CELL_SCHEMA}
+    real = {"$sentence": SENTENCE_TEXT}
 
     def walk(node: Any) -> Any:
         ph = placeholder_of(node)
         if ph:
-            base = json.loads(json.dumps(_graphic_schema() if ph == "$graphic" else real[ph]))
+            base = json.loads(json.dumps(real[ph]))
             out = undescribed(base) if ph in described else base
             described.add(ph)
             if isinstance(node.get("description"), str) and node["description"].strip():
@@ -228,28 +218,19 @@ def read_type(c: str, slug: str) -> dict[str, Any] | None:
         "created_by": str(meta.get("created_by") or ANALYST),
         "ts": meta.get("ts"),
         "updated": meta.get("updated"),
-        "forked_from": meta.get("forked_from"),
         "builtin": False,
     }
     if made_from:
         out["preset"] = made_from["id"]
-    out["page"] = renderer == "custom" and bool(meta.get("page"))
+    out["page"] = renderer == "custom"
     if out["page"]:
         out["schema_source"] = PAGE_SCHEMA
         out["schema"] = expand_schema(PAGE_SCHEMA)
-    elif renderer == "custom":
-        out["schema_source"] = meta.get("schema") if isinstance(meta.get("schema"), dict) else {}
-        try:
-            out["schema"] = expand_schema(out["schema_source"])
-        except HTTPException:
-            out["schema"] = out["schema_source"]
-        # the component is kept as text; nothing installs or renders it (a page is the open form)
-        out["component"] = _type_text(d / "renderer.tsx")
     return out
 
 
 def _type_text(path: Path) -> str:
-    """A custom type's text file (prompt.md, rubric.md, renderer.tsx), '' when there is none: missing, or no regular
+    """A custom type's text file (prompt.md, rubric.md), '' when there is none: missing, or no regular
     file, such as a link a card's code left in the type's folder, which is never followed there (nofollow)."""
     try:
         return nofollow.read_text(path)
@@ -288,12 +269,10 @@ def _clean_prompt(prompt: str) -> str:
 
 
 def write_type(c: str, slug: str, *, name: str, description: str, renderer: str, prompt: str, rubric: str,
-               schema: Any = None, component: str | None = None, created_by: str = ANALYST,
-               forked_from: str | None = None, create: bool = False, page: bool = False,
-               preset_id: str | None = None) -> dict[str, Any]:
-    """Store a custom type; a `custom` renderer needs its schema and its checked component source, unless it is a
-    `page` (renderer custom, the page schema, no component; an empty prompt takes PAGE_PROMPT). A type made from a
-    preset (`preset_id`) keeps an empty prompt.md and reads the preset's text (read_type) until its text is edited."""
+               created_by: str = ANALYST, create: bool = False, preset_id: str | None = None) -> dict[str, Any]:
+    """Store a custom type; a `custom` renderer is a page (the page schema; an empty prompt takes PAGE_PROMPT). A type
+    made from a preset (`preset_id`) keeps an empty prompt.md and reads the preset's text (read_type) until its text is
+    edited."""
     slug = _check_slug(slug)
     if renderer not in RENDERERS:
         raise HTTPException(400, f"renderer must be one of {', '.join(RENDERERS)}")
@@ -308,18 +287,9 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
         prompt = ""  # the preset's own text, as read_type gave it: the file stays its one source
     if len(rubric or "") > RUBRIC_MAX:
         raise HTTPException(400, f"rubric is longer than {RUBRIC_MAX} characters")
-    page = renderer == "custom" and (page or bool(isinstance(existing, dict) and existing.get("page")))
+    page = renderer == "custom"
     if page:
-        schema, component = PAGE_SCHEMA, None
         prompt = (prompt or "").strip() or ("" if from_preset else PAGE_PROMPT)
-    elif renderer == "custom":
-        if schema is None and isinstance(existing, dict):
-            schema = existing.get("schema")
-        expand_schema(schema)
-        if component is None:
-            component = _type_text(d / "renderer.tsx") or None
-        if not (component or "").strip():
-            raise HTTPException(400, "a custom renderer needs its component source")
     try:
         unlinked(config.workspace_dir(c), d / "type.json")
     except ValueError as e:
@@ -327,22 +297,15 @@ def write_type(c: str, slug: str, *, name: str, description: str, renderer: str,
     nofollow.makedirs(d)
     meta = dict(existing) if isinstance(existing, dict) else {"slug": slug, "created_by": created_by, "ts": _now()}
     meta.update(name=_collapse(name) or slug, description=(description or "").strip(), renderer=renderer, updated=_now())
-    if forked_from:
-        meta["forked_from"] = forked_from
-    if renderer == "custom":
-        meta["schema"] = schema
+    if page:
+        meta.update(schema=PAGE_SCHEMA, page=True)
     else:
         meta.pop("schema", None)
-    if page:
-        meta["page"] = True
-    else:
         meta.pop("page", None)
     if from_preset:
         meta["preset"] = from_preset
     atomic_write_text(d / "prompt.md", _clean_prompt(prompt) if not from_preset or (prompt or "").strip() else "")
     atomic_write_text(d / "rubric.md", (rubric or "").replace("\r\n", "\n").strip() + "\n")
-    if renderer == "custom" and component is not None:
-        atomic_write_text(d / "renderer.tsx", component.replace("\r\n", "\n"))
     write_json(d / "type.json", meta)
     return read_type(c, slug) or meta
 
@@ -424,11 +387,9 @@ def _free_name(c: str, name: str) -> str:
 
 def create_document_type(c: str, kind: str, *, name: str | None = None, brief: str = "", slug: str | None = None,
                          created_by: str = ANALYST) -> dict[str, Any]:
-    """A new document for + New and start_writing: a preset by its id, a page, or a document, slides or story type whose
-    text
-    is the brief. Its name and slug are made unique. Emits `report {slug, status: created}`. 400 for an unknown kind
-    or a
-    missing brief; 409 when `slug` is taken."""
+    """A new document for + New and start_writing: a preset by its id, a page, or a document whose text is the brief.
+    Its name and slug are made unique. Emits `report {slug, status: created}`. 400 for an unknown kind or a missing
+    brief; 409 when `slug` is taken."""
     kind = (kind or "").strip().lower()
     made_from = preset(kind) if kind not in NEW_KINDS else None
     if kind not in NEW_KINDS and made_from is None:
@@ -439,12 +400,11 @@ def create_document_type(c: str, kind: str, *, name: str | None = None, brief: s
     brief = (brief or "").strip()
     if kind == "page":
         t = write_type(c, slug, name=name, description="", renderer="custom", prompt=brief, rubric="",
-                       created_by=created_by, create=True, page=True)
+                       created_by=created_by, create=True)
     elif made_from:
-        page = made_from["renderer"] == "page"
-        renderer = "custom" if page else "document"
+        renderer = "custom" if made_from["renderer"] == "page" else "document"
         t = write_type(c, slug, name=name, description=made_from["description"], renderer=renderer,
-                       prompt="", rubric="", created_by=created_by, create=True, page=page, preset_id=kind)
+                       prompt="", rubric="", created_by=created_by, create=True, preset_id=kind)
     elif not brief:
         raise HTTPException(400, "a document of your own needs its brief, what it is for")
     else:
@@ -464,9 +424,6 @@ def _words(text: str) -> int:
 def doc_words(doc: dict[str, Any]) -> int:
     """The words a reader sees in a stored document."""
     parts = [_collapse(doc.get("title"))]
-    answer = doc.get("answer") if isinstance(doc.get("answer"), dict) else None
-    if answer:
-        parts.append(plain_text(str(answer.get("text") or "")))
     for u in units(doc):
         parts.append(_collapse(u.get("heading")))
         parts += [plain_text(str(s.get("text") or "")) for s in unit_sentences(u)]
@@ -502,9 +459,6 @@ def frame_file(c: str, inv_id: str, slug: str) -> Path:
 
 
 def _with_defaults(doc: dict[str, Any]) -> dict[str, Any]:
-    from . import story  # noqa: PLC0415
-
-    story.upgrade(doc)
     doc.setdefault("comments", [])
     # a legacy `locked` list of edited sentences locks nothing: only a block the analyst locked is locked
     # (set_block_lock)
@@ -516,8 +470,6 @@ def _with_defaults(doc: dict[str, Any]) -> dict[str, Any]:
     for x in all_sentences(doc):
         x.setdefault("tags", [])
         x.setdefault("tag_notes", {})
-    if isinstance(doc.get("slides"), list):
-        slides.upgrade(doc)
     return doc
 
 
@@ -533,8 +485,6 @@ def read_doc(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
     if slug == "report":
         doc.setdefault("renderer", "document")
         doc.setdefault("title_ok", _title_ok(_collapse(doc.get("title"))))
-    elif slug == "slides":
-        doc.setdefault("renderer", "slides")
     _legacy_comments(doc)
     _split_comments(c, doc)
     return _with_defaults(doc)
@@ -622,9 +572,8 @@ def store(c: str, inv_id: str, slug: str, doc: dict[str, Any]) -> None:
 
 
 # --------------------------------------------------------------------------- shape adapters
-# A document and a story have `sections`, a deck `slides`, a video `lines`, a custom document its own schema; a legacy
-# story has `beats` and an `answer` until it is read (story.upgrade). A unit is a section, a slide or a beat, a heading
-# with sentences, or a video's line, sentences without a heading.
+# A document has `sections`, each a unit: a heading with paragraphs of sentences, and figures. A page (renderer custom)
+# has its claims.
 
 
 def is_sentence(x: Any) -> bool:
@@ -642,61 +591,28 @@ META_KEYS = {"id", "type", "renderer", "generation", "comments", "locked", "gene
              "title_locked", "lock_reverts", "writer_run", "revision"}
 
 
-def _walk_units(node: Any, out: list[dict[str, Any]]) -> None:
-    if isinstance(node, dict):
-        if is_sentence(node):
-            return
-        if isinstance(node.get("heading"), str):
-            out.append(node)
-        for v in node.values():
-            _walk_units(v, out)
-    elif isinstance(node, list):
-        for v in node:
-            _walk_units(v, out)
-
-
-def _walk_sentences(node: Any, out: list[dict[str, Any]], *, stop_at_units: bool) -> None:
+def _walk_sentences(node: Any, out: list[dict[str, Any]]) -> None:
     if isinstance(node, dict):
         if is_sentence(node):
             out.append(node)
             return
         for v in node.values():
-            if stop_at_units and isinstance(v, dict) and isinstance(v.get("heading"), str) and not is_sentence(v):
-                continue
-            _walk_sentences(v, out, stop_at_units=stop_at_units)
+            _walk_sentences(v, out)
     elif isinstance(node, list):
         for v in node:
-            if stop_at_units and isinstance(v, dict) and isinstance(v.get("heading"), str) and not is_sentence(v):
-                continue
-            _walk_sentences(v, out, stop_at_units=stop_at_units)
+            _walk_sentences(v, out)
 
 
 def units(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    """The heading-bearing units of any shape, in document order."""
-    if is_custom(doc):
-        out: list[dict[str, Any]] = []
-        for k, v in doc.items():
-            if k not in META_KEYS:
-                _walk_units(v, out)
-        return out
-    for key in ("beats", "slides", "sections", "lines"):
-        if isinstance(doc.get(key), list):
-            return [u for u in doc[key] if isinstance(u, dict)]
+    """The sections, in document order; none for a page."""
+    if isinstance(doc.get("sections"), list):
+        return [u for u in doc["sections"] if isinstance(u, dict)]
     return []
 
 
 def unit_sentences(unit: dict[str, Any]) -> list[dict[str, Any]]:
-    if isinstance(unit.get("paragraphs"), list):
-        return [x for p in unit["paragraphs"] if isinstance(p, dict)
-                for x in (p.get("sentences") or []) if isinstance(x, dict)]
-    if isinstance(unit.get("sentences"), list):
-        return [x for x in unit["sentences"] if isinstance(x, dict)]
-    out: list[dict[str, Any]] = []
-    for k, v in unit.items():
-        if k == "heading" or (isinstance(v, dict) and isinstance(v.get("heading"), str) and not is_sentence(v)):
-            continue
-        _walk_sentences(v, out, stop_at_units=True)
-    return out
+    return [x for p in unit.get("paragraphs") or [] if isinstance(p, dict)
+            for x in (p.get("sentences") or []) if isinstance(x, dict)]
 
 
 def all_sentences(doc: dict[str, Any]) -> list[dict[str, Any]]:
@@ -704,10 +620,8 @@ def all_sentences(doc: dict[str, Any]) -> list[dict[str, Any]]:
     if is_custom(doc):
         for k, v in doc.items():
             if k not in META_KEYS:
-                _walk_sentences(v, out, stop_at_units=False)
+                _walk_sentences(v, out)
         return out
-    if isinstance(doc.get("answer"), dict):
-        out.append(doc["answer"])
     for u in units(doc):
         out.extend(unit_sentences(u))
     return out
@@ -715,10 +629,6 @@ def all_sentences(doc: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _ids(doc: dict[str, Any]) -> set[str]:
     out: set[str] = set()
-    if is_custom(doc):
-        for n in _nodes({k: v for k, v in doc.items() if k not in META_KEYS}):
-            if isinstance(n, dict) and isinstance(n.get("id"), str):
-                out.add(n["id"])
     for x in all_sentences(doc):
         out.add(str(x.get("id")))
     for u in units(doc):
@@ -729,9 +639,6 @@ def _ids(doc: dict[str, Any]) -> set[str]:
         for f in u.get("figures") or []:
             if isinstance(f, dict):
                 out.add(str(f.get("id")))
-        g = u.get("graphic")
-        if isinstance(g, dict) and g.get("id"):
-            out.add(str(g["id"]))
     for cm in doc.get("comments") or []:
         out.add(str(cm.get("id")))
     return out
@@ -739,8 +646,6 @@ def _ids(doc: dict[str, Any]) -> set[str]:
 
 def find_target(doc: dict[str, Any], tid: str) -> dict[str, Any]:
     """{kind: sentence, unit, sentence} for a sentence id, {kind: heading, unit} for a unit id; 404 when neither."""
-    if isinstance(doc.get("answer"), dict) and doc["answer"].get("id") == tid:
-        return {"kind": "sentence", "unit": None, "sentence": doc["answer"]}
     for u in units(doc):
         for x in unit_sentences(u):
             if x.get("id") == tid:
@@ -776,24 +681,17 @@ def _find_comment(doc: dict[str, Any], cid: str) -> dict[str, Any]:
 
 
 def empty_frame(slug: str, t: dict[str, Any]) -> dict[str, Any]:
-    """A frame with nothing in it: a deck's has slides, any other type's sections."""
-    units_key = "slides" if t["renderer"] == "slides" else "sections"
-    return {"id": slug, "type": slug, "renderer": t["renderer"], "title": "", units_key: [], "frame": True, "generation": 0}
+    """A frame with nothing in it."""
+    return {"id": slug, "type": slug, "renderer": t["renderer"], "title": "", "sections": [], "frame": True, "generation": 0}
 
 
 def read_frame(c: str, inv_id: str, slug: str) -> dict[str, Any] | None:
-    """The stored frame; a deck frame stored as sections reads as slides. None for a name no route takes."""
+    """The stored frame; None for a name no route takes."""
     if not isinstance(slug, str) or not SLUG_RE.match(slug):
         return None
     f = read_json(frame_file(c, inv_id, slug), None)
-    if not isinstance(f, dict) or not (isinstance(f.get("sections"), list) or isinstance(f.get("slides"), list)):
+    if not isinstance(f, dict) or not isinstance(f.get("sections"), list):
         return None
-    if f.get("renderer") == "slides" or isinstance(f.get("slides"), list):
-        f = slides.upgrade(slides.frame_from_sections(f))
-    elif f.get("renderer") == "story":
-        from . import story  # noqa: PLC0415
-
-        story.upgrade(f)
     return f
 
 
@@ -809,8 +707,7 @@ def has_content(doc: dict[str, Any]) -> bool:
     """Whether a frame or a document holds anything: a word or a figure."""
     if doc_words(doc) > 0:
         return True
-    return any(isinstance(f, dict) and f.get("cell") for u in units(doc)
-               for f in [u.get("figure"), *(u.get("figures") or [])])
+    return any(isinstance(f, dict) and f.get("cell") for u in units(doc) for f in u.get("figures") or [])
 
 
 def analyst_draft(c: str, inv_id: str, slug: str, frame: dict[str, Any]) -> dict[str, Any]:
@@ -855,184 +752,6 @@ def _pinned(rec: dict[str, Any], by: str) -> dict[str, Any]:
     rec["pinned"] = True
     rec["by"] = by
     return rec
-
-
-def add_section(c: str, slug: str, heading: str, *, inv_id: str = investigation.MAIN, by: str = ANALYST) -> dict[str, Any]:
-    """A pinned section with `heading` appended to the frame or the document; returns the section."""
-    heading = _collapse(heading)
-    if not heading:
-        raise HTTPException(400, "heading is required")
-    target, is_doc = frame_or_doc(c, inv_id, slug)
-    key = "beats" if isinstance(target.get("beats"), list) else "slides" if isinstance(target.get("slides"), list) else "sections"
-    sec: dict[str, Any] = {"id": _new_id(_ids(target)), "heading": heading}
-    if key == "sections" and target.get("renderer") == "story":
-        sec.update(card="right", paragraphs=[], figures=[])
-    elif key == "sections":
-        sec.update(role="custom", paragraphs=[], figures=[])
-    elif key == "beats":
-        sec.update(sentences=[], stakes="", figures=[])
-    else:
-        sec.update(sentences=[], figure=None, notes="")
-    target.setdefault(key, []).append(_pinned(sec, by))
-    _save_frame_or_doc(c, inv_id, slug, target, is_doc)
-    return sec
-
-
-def _unit_by_id(target: dict[str, Any], sid: str) -> dict[str, Any]:
-    u = next((u for u in units(target) if str(u.get("id")) == sid), None)
-    if u is None:
-        raise HTTPException(404, f"no such section: {sid}")
-    return u
-
-
-def add_paragraph(c: str, slug: str, sid: str, text: str, *, inv_id: str = investigation.MAIN, by: str = ANALYST) -> dict[str, Any]:
-    """A pinned paragraph of `text` appended to section `sid` of the frame or the document, not locked, since a lock is
-    only the one the analyst sets (set_block_lock). Returns the paragraph, or the sentences added to a unit without
-    paragraphs."""
-    from . import report_format  # noqa: PLC0415
-
-    if not _collapse(text):
-        raise HTTPException(400, "text is required")
-    target, is_doc = frame_or_doc(c, inv_id, slug)
-    unit = _unit_by_id(target, sid)
-    used = _ids(target)
-    valid = _Refs(c)
-    sentences = [_pinned(x, by) for x in report_format.sentence_units(text, valid, used)]
-    if not sentences:
-        raise HTTPException(400, "text is required")
-    if isinstance(unit.get("paragraphs"), list):
-        para = _pinned({"id": _new_id(used), "sentences": sentences}, by)
-        unit["paragraphs"].append(para)
-        out: dict[str, Any] = para
-    else:
-        unit.setdefault("sentences", []).extend(sentences)
-        out = {"id": str(unit["id"]), "sentences": sentences, "pinned": True, "by": by}
-    _save_frame_or_doc(c, inv_id, slug, target, is_doc)
-    return out
-
-
-def add_frame_figure(c: str, slug: str, sid: str, cell: str, caption: str | None = None, after: str | None = None, *,
-                     inv_id: str = investigation.MAIN, by: str = ANALYST) -> dict[str, Any]:
-    """A pinned figure showing `cell` appended to section `sid`, after paragraph `after` when given; returns it."""
-    target, is_doc = frame_or_doc(c, inv_id, slug)
-    unit = _unit_by_id(target, sid)
-    cid = cite.strip_card(cell)
-    valid = _Refs(c)
-    if cid not in valid.cells:
-        raise HTTPException(404, f"no such card: {cell}")
-    pid = None
-    if after:
-        pid = str(after).strip().removeprefix("report:").split("#", 1)[-1].removeprefix("p")
-        hit = find_paragraph(target, pid)
-        if hit is None or hit[0] is not unit:
-            raise HTTPException(404, f"no paragraph {after} in section {sid}")
-    fig = _pinned({"id": _new_id(_ids(target)), "cell": f"card:{cid}", "caption": _collapse(caption) or valid.artifacts.get(cid) or "",
-                   "after_paragraph": pid}, by)
-    if target.get("renderer") == "story" and pid is None:
-        from . import story  # noqa: PLC0415
-
-        story.place_figure(unit, fig)
-    elif isinstance(unit.get("figures"), list) or "figures" in unit or isinstance(unit.get("paragraphs"), list) or "sentences" in unit:
-        unit.setdefault("figures", []).append(fig)
-    _save_frame_or_doc(c, inv_id, slug, target, is_doc)
-    return fig
-
-
-def delete_unit(c: str, slug: str, uid: str, *, inv_id: str = investigation.MAIN) -> dict[str, Any]:
-    """Remove a pinned section, paragraph, sentence or figure of the frame or the document; returns what remains."""
-    target, is_doc = frame_or_doc(c, inv_id, slug)
-    key = "beats" if isinstance(target.get("beats"), list) else "slides" if isinstance(target.get("slides"), list) else "sections"
-    found = False
-    for u in list(units(target)):
-        if str(u.get("id")) == uid:
-            if is_doc and not u.get("pinned"):
-                raise HTTPException(409, "only a unit the analyst pinned can be removed here")
-            target[key] = [x for x in target.get(key) or [] if x is not u]
-            found = True
-            break
-        for p in list(u.get("paragraphs") or []):
-            if str(p.get("id")) == uid:
-                if is_doc and not p.get("pinned"):
-                    raise HTTPException(409, "only a unit the analyst pinned can be removed here")
-                u["paragraphs"] = [x for x in u["paragraphs"] if x is not p]
-                found = True
-                break
-        if found:
-            break
-        for f in list(u.get("figures") or []):
-            if str(f.get("id")) == uid:
-                if is_doc and not f.get("pinned"):
-                    raise HTTPException(409, "only a unit the analyst pinned can be removed here")
-                u["figures"] = [x for x in u["figures"] if x is not f]
-                found = True
-                break
-        if found:
-            break
-        if isinstance(u.get("sentences"), list):
-            hit = next((x for x in u["sentences"] if str(x.get("id")) == uid), None)
-            if hit is not None:
-                if is_doc and not hit.get("pinned"):
-                    raise HTTPException(409, "only a unit the analyst pinned can be removed here")
-                u["sentences"] = [x for x in u["sentences"] if x is not hit]
-                found = True
-                break
-    if not found:
-        raise HTTPException(404, f"no such unit: {uid}")
-    _save_frame_or_doc(c, inv_id, slug, target, is_doc)
-    return target
-
-
-def edit_unit(c: str, slug: str, uid: str, *, text: str | None = None, heading: str | None = None, caption: str | None = None,
-              inv_id: str = investigation.MAIN, by: str = ANALYST) -> dict[str, Any]:
-    """The text of a pinned paragraph, the heading of a section or the caption of a figure changed, none of them locked
-    by the edit (set_block_lock); returns the frame or the document."""
-    from . import report_format  # noqa: PLC0415
-
-    target, is_doc = frame_or_doc(c, inv_id, slug)
-    changed = False
-    for u in units(target):
-        if str(u.get("id")) == uid and heading is not None:
-            h = _collapse(heading)
-            if not h:
-                raise HTTPException(400, "heading is required")
-            changed = _put_text(u, "heading", h, undo=True) or changed
-            break
-        para = next((p for p in u.get("paragraphs") or [] if str(p.get("id")) == uid), None)
-        sent = next((x for x in unit_sentences(u) if str(x.get("id")) == uid), None)
-        if (para is not None or sent is not None) and text is not None:
-            t = _collapse(text)
-            if not t:
-                raise HTTPException(400, "text is required")
-            used = _ids(target)
-            valid = _Refs(c)
-            new = [_pinned(x, by) for x in report_format.sentence_units(t, valid, used)]
-            if para is not None:
-                para["sentences"] = new
-            else:
-                assert sent is not None
-                if isinstance(u.get("sentences"), list):
-                    i = next(i for i, x in enumerate(u["sentences"]) if x is sent)
-                    u["sentences"][i:i + 1] = new
-                else:
-                    hit = next((p for p in u.get("paragraphs") or [] if any(x is sent for x in p.get("sentences") or [])), None)
-                    if hit is not None:
-                        i = next(i for i, x in enumerate(hit["sentences"]) if x is sent)
-                        hit["sentences"][i:i + 1] = new
-            changed = True
-            break
-        fig = next((f for f in u.get("figures") or [] if str(f.get("id")) == uid), None)
-        if fig is not None and caption is not None:
-            cap = _collapse(caption)
-            if not cap:
-                raise HTTPException(400, "caption is required")
-            fig["caption"] = cap
-            changed = True
-            break
-    else:
-        raise HTTPException(404, f"no such unit: {uid}")
-    if changed:
-        _save_frame_or_doc(c, inv_id, slug, target, is_doc)
-    return target
 
 
 def pinned_figures(*docs: dict[str, Any] | None) -> list[tuple[int, str, dict[str, Any]]]:
@@ -1082,12 +801,7 @@ def place_pinned(doc: dict[str, Any], pinned: list[tuple[int, str, dict[str, Any
         target = best if best is not None and score >= 0.5 else us[min(index, len(us) - 1)]
         rec = {"id": _new_id(used), "cell": cell, "caption": fig.get("caption") or "", "after_paragraph": None,
                "pinned": True, "by": fig.get("by") or ANALYST}
-        if doc.get("renderer") == "story":
-            from . import story  # noqa: PLC0415
-
-            story.place_figure(target, rec)
-        else:
-            target.setdefault("figures", []).append(rec)
+        target.setdefault("figures", []).append(rec)
         inserted += 1
     return inserted
 
@@ -1148,7 +862,7 @@ def _normalize_document(raw: dict[str, Any], valid: _Refs, slug: str) -> dict[st
 
 def normalize(t: dict[str, Any], raw: dict[str, Any], valid: _Refs) -> dict[str, Any]:
     """The stored document from the shape parse_markdown gives, by the type's form. 400 when nothing survives."""
-    from . import report, story  # noqa: PLC0415
+    from . import report  # noqa: PLC0415
 
     slug = t["slug"]
     try:
@@ -1158,17 +872,9 @@ def normalize(t: dict[str, Any], raw: dict[str, Any], valid: _Refs) -> dict[str,
             return doc
         if t["renderer"] == "document":
             return _normalize_document(raw, valid, slug)
-        if t["renderer"] == "slides":
-            doc = slides.normalize(raw, valid)
-            doc.update(id=slug, type=slug, renderer="slides")
-            return doc
-        if t["renderer"] == "story":
-            return story.normalize_outline(raw, valid, slug)
-        if t.get("page"):
-            return _normalize_page(t, raw, valid)
+        return _normalize_page(t, raw, valid)
     except HTTPException as e:
         raise HTTPException(400, str(e.detail)) from e
-    raise HTTPException(400, f"the {slug} has a form of its own, which is not written from markdown")
 
 
 def _normalize_page(t: dict[str, Any], raw: dict[str, Any], valid: _Refs) -> dict[str, Any]:
@@ -1251,10 +957,10 @@ def block_ref(slug: str, kind: str, rec: dict[str, Any] | None) -> str:
 def set_block_lock(c: str, inv_id: str, slug: str, bid: str, locked: bool) -> dict[str, Any]:
     """The analyst's lock on the block `bid` set or cleared, in the written document or else the frame, and a `lock` or
     `unlock` row of the telemetry when it changed. Returns the document or the frame. 409 for a type the editor does
-    not show (a deck, a page), 404 for a block it does not have."""
+    not show (a page), 404 for a block it does not have."""
     from . import telemetry  # noqa: PLC0415
 
-    if _require_type(c, slug)["renderer"] not in ("document", "story"):
+    if _require_type(c, slug)["renderer"] != "document":
         raise HTTPException(409, "only the blocks of a document with sections are locked")
     target, is_doc = frame_or_doc(c, inv_id, slug)
     kind, rec = lock_target(target, bid)
@@ -1297,17 +1003,6 @@ def locked_sentence_ids(doc: dict[str, Any]) -> set[str]:
     """The ids of the sentences in locked paragraphs, which the citation check of a save leaves as they are."""
     return {str(x.get("id")) for u in units(doc) for p in u.get("paragraphs") or []
             if isinstance(p, dict) and p.get("locked") is True for x in p.get("sentences") or [] if isinstance(x, dict)}
-
-
-def locked_refs(doc: dict[str, Any], slug: str) -> list[str]:
-    """The refs of every locked block of a document or a frame, in document order."""
-    out = [block_ref(slug, "title", None)] if doc.get("title_locked") is True else []
-    for u in units(doc):
-        if u.get("locked") is True:
-            out.append(block_ref(slug, "heading", u))
-        out += [block_ref(slug, "paragraph", p) for p in u.get("paragraphs") or [] if isinstance(p, dict) and p.get("locked") is True]
-        out += [block_ref(slug, "figure", f) for f in u.get("figures") or [] if isinstance(f, dict) and f.get("locked") is True]
-    return out
 
 
 def locked_blocks(prev: dict[str, Any] | None) -> dict[str, Any]:
@@ -1733,12 +1428,6 @@ def finish_generation(c: str, inv_id: str, slug: str, doc: dict[str, Any], *, re
     placed = place_pinned(doc, pinned_figures(prev, frame))
     if placed:
         log.info("%s/%s: %d pinned figure(s) the writer left out were put back", c, slug, placed)
-    if isinstance(doc.get("slides"), list):
-        slides.carry_layouts(doc, prev, frame)
-    elif doc.get("renderer") == "story":
-        from . import story  # noqa: PLC0415
-
-        story.carry_cards(doc, prev, frame)
     doc["snapshot"] = revise_diff.snapshot(c, inv_id, doc)
     instruction = revise_diff.typed_instruction(request)
     if instruction:
@@ -1772,16 +1461,12 @@ def _locate_span(doc: dict[str, Any], uid: str) -> tuple[dict[str, Any], dict[st
         unit, para = hit
         return unit, para, para.setdefault("sentences", []), list(para["sentences"])
     t = find_target(doc, uid)
-    if t["kind"] == "heading" and "heading" not in t["unit"] and isinstance(t["unit"].get("sentences"), list):
-        return t["unit"], None, t["unit"]["sentences"], list(t["unit"]["sentences"])  # a video's line, whole
     if t["kind"] != "sentence" or t.get("unit") is None:
         raise HTTPException(404, f"no sentence or paragraph {uid}")
     unit, sentence = t["unit"], t["sentence"]
     for p in unit.get("paragraphs") or []:
         if isinstance(p, dict) and any(x is sentence for x in p.get("sentences") or []):
             return unit, p, p["sentences"], [sentence]
-    if isinstance(unit.get("sentences"), list) and any(x is sentence for x in unit["sentences"]):
-        return unit, None, unit["sentences"], [sentence]
     for v in unit.values():
         if isinstance(v, list) and any(x is sentence for x in v):
             return unit, None, v, [sentence]
@@ -1811,25 +1496,7 @@ async def replace_passage(c: str, slug: str, uid: str, text: str, entry: dict[st
     unit, para, holder, passage = _locate_span(doc, uid)
     used = _ids(doc)
     # read_ref's marks copied back with the text are no words of it
-    text, marked_by = strip_marks(text)
-    if para is not None and para.get("kind") == "quote":
-        # a story's quote stays its quote block, its speaker named in a `> — Name` line or kept
-        q, _ = slides.split_quote([text.strip()])
-        q = q or {"text": text, "speaker": ""}
-        if q["speaker"] or marked_by:
-            para["speaker"] = q["speaker"] or marked_by
-        new = report_format.sentence_units(q["text"], _Refs(c), used)
-    elif len(passage) == 1 and passage[0].get("quote"):
-        # a slide's quote stays its quote cell: the text is the quote, in `> ` lines with a `> — Speaker` line or bare,
-        # and a
-        # speaker it does not name stays the one it had
-        q, _ = slides.split_quote([text.strip()])
-        q = q or {"text": text, "speaker": ""}
-        speaker = q["speaker"] or marked_by or passage[0].get("speaker") or ""
-        rec = slides.quote_record({"text": q["text"], "speaker": speaker}, _Refs(c), used)
-        new = [rec] if rec else []
-    else:
-        new = report_format.sentence_units(text, _Refs(c), used)
+    new = report_format.sentence_units(strip_marks(text), _Refs(c), used)
     if not new:
         raise HTTPException(400, "the new passage has no sentence")
     start = next((i for i, x in enumerate(holder) if passage and x is passage[0]), 0)
@@ -1842,8 +1509,6 @@ async def replace_passage(c: str, slug: str, uid: str, text: str, entry: dict[st
     old_ids = [str(x.get("id")) for x in passage]
     passage_text = report_format.body_of(passage)
     holder[start:start + len(passage)] = new
-    if para is not None and para.get("kind") == "divider":
-        para.pop("kind")
     node = para if para is not None else unit
     node.setdefault("history", []).append({"text": passage_text, "ts": _now(), **entry})
     node["rewritten_at"] = _now()
@@ -1937,7 +1602,7 @@ def replace_title(c: str, slug: str, text: str, actor: str, *, span: str | None 
     before = copy.deepcopy(doc)
     if "\n" in text.strip():
         raise HTTPException(400, "a title is replaced by one line of text")
-    words, _ = strip_marks(re.sub(r"^#+[ \t]+", "", text.strip()))
+    words = strip_marks(re.sub(r"^#+[ \t]+", "", text.strip()))
     title = _collapse(_TITLE_ID_RE.sub("", words))
     if not title:
         raise HTTPException(400, "a title is replaced by one line of text")
@@ -1957,27 +1622,23 @@ def replace_title(c: str, slug: str, text: str, actor: str, *, span: str | None 
 
 # --------------------------------------------------------------------------- a document written as markdown
 # The writer saves a whole document as markdown, each form reading it its own way (prompts/report-<form>.md). `# ` opens
-# the title and `## ` a section or a slide; in a document `### ` or deeper opens a subsection with that `level`. A line
-# that is only `![caption](card:<id>)` (or `cell:<id>`) is a figure. In a story a `### ` line is a headline; in a deck a
-# paragraph starting `Notes` is the speaker notes; a page is its title, one ```html block and its claims, and a video its
-# title, its lines as a page's claims and its film as the ```html block.
+# the title and `## ` a section; `### ` or deeper opens a subsection with that `level`. A line that is only
+# `![caption](card:<id>)` (or `cell:<id>`) is a figure. A page is its title, one ```html block and its claims.
 
 _MD_TITLE_RE = re.compile(r"^#[ \t]+(.+?)[ \t]*#*[ \t]*$")
 _MD_HEADING_RE = re.compile(r"^#{2,6}[ \t]+(.+?)[ \t]*#*[ \t]*$")
 # a figure line: its caption may hold brackets, such as a citation or "[run 3]", since the line ends at the card; a title in
-# quotes after the card is a story's step on that figure (story.py)
+# quotes after the card is left out
 _MD_FIGURE_RE = re.compile(r"^!\[(.*)\]\(\s*((?:card|cell):[A-Za-z0-9_-]+)(?:\s+\"([^\"]*)\")?\s*\)$")
-_MD_LEAD_RE = {"stakes": re.compile(r"^\**stakes\**\s*[:.\-–—]\**\s*", re.I), "notes": re.compile(r"^\**(?:speaker )?notes\**\s*[:.\-–—]\**\s*", re.I),
-               "layout": re.compile(r"^\**layout\**\s*[:.\-–—]\**\s*", re.I)}
 _MD_HTML_RE = re.compile(r"^```html[ \t]*\n(.*?)^```[ \t]*$", re.M | re.S | re.I)
 _MD_BULLET_RE = re.compile(r"^\s*(?:[-*+•]|\d{1,2}[.)])\s+")
 
 
-def _md_sections(text: str, *, headlines: bool = False) -> tuple[str, list[dict[str, Any]]]:
+def _md_sections(text: str) -> tuple[str, list[dict[str, Any]]]:
     """(title, [{heading, level, lines, figures}]) of a markdown document: the first `# ` line before any text is the
     title, each `## ` (or deeper) line opens a section of that level (the number of `#`), and a figure line becomes
     {cell, caption, after_paragraph}, the number of paragraphs above it in its section. Text before the first heading is
-    a section with no heading. With `headlines`, a `### ` (or deeper) line stays in its section's lines."""
+    a section with no heading."""
     title = ""
     sections: list[dict[str, Any]] = []
     cur: dict[str, Any] = {"heading": "", "lines": [], "figures": []}
@@ -1991,16 +1652,13 @@ def _md_sections(text: str, *, headlines: bool = False) -> tuple[str, list[dict[
         if not title and not sections and not "".join(cur["lines"]).strip() and (m := _MD_TITLE_RE.match(st)):
             title = _TITLE_ID_RE.sub("", m.group(1))
             continue
-        if (m := _MD_HEADING_RE.match(st)) and not (headlines and st.startswith("###")):
+        if m := _MD_HEADING_RE.match(st):
             close()
             cur = {"heading": m.group(1), "level": len(st) - len(st.lstrip("#")), "lines": [], "figures": []}
             continue
         if m := _MD_FIGURE_RE.match(st):
             done = [q for q in re.split(r"\n\s*\n", "\n".join(cur["lines"]).strip()) if q.strip()]
-            fig = {"cell": m.group(2), "caption": m.group(1).strip(), "after_paragraph": len(done) or None}
-            if m.group(3):
-                fig["step"] = m.group(3).strip()
-            cur["figures"].append(fig)
+            cur["figures"].append({"cell": m.group(2), "caption": m.group(1).strip(), "after_paragraph": len(done) or None})
             continue
         cur["lines"].append(line)
     close()
@@ -2011,20 +1669,9 @@ def _paragraphs(lines: list[str]) -> list[str]:
     return [q.strip() for q in re.split(r"\n\s*\n", "\n".join(lines).strip()) if q.strip()]
 
 
-def _lead(kind: str, paras: list[str]) -> tuple[str, list[str]]:
-    """(the text of the paragraphs that start with the `kind` label, the other paragraphs)."""
-    hits, rest = [], []
-    for q in paras:
-        m = _MD_LEAD_RE[kind].match(q)
-        (hits if m else rest).append(q[m.end():].strip() if m else q)
-    return " ".join(hits), rest
-
-
 def parse_markdown(text: str, form: str) -> dict[str, Any]:
     """The shape a form's normalizer reads from a document written as markdown (module note above): for a document
-    {title, sections: [{heading, level, body, figures}]}, for a story {title, sections: [{heading, body, figures}]}, for
-    slides {title, slides: [{heading, body, figure, notes}]}, for a page {title, html, claims}, for a video {title,
-    lines, film} (video.parse)."""
+    {title, sections: [{heading, level, body, figures}]}, for a page {title, html, claims}."""
     if form == "page":
         m = _MD_HTML_RE.search(str(text or ""))
         html = m.group(1) if m else ""
@@ -2035,19 +1682,7 @@ def parse_markdown(text: str, form: str) -> dict[str, Any]:
     # Markdown link to a ref, `[[↗|ref]]`): a writer wrote `[v|ref]` and the document showed it as written (live check
     # term-fix7)
     text = cite.normalise_markup(str(text or ""))
-    title, secs = _md_sections(text, headlines=form == "story")
-    if form == "slides":
-        out = []
-        for sec in secs:
-            notes, paras = _lead("notes", _paragraphs(sec["lines"]))
-            layout, paras = _lead("layout", paras)
-            quote, paras = slides.split_quote(paras)
-            out.append({"heading": sec["heading"], "body": "\n\n".join(paras), "notes": notes, "layout": layout.strip().lower(),
-                        "quote": quote, "figures": [{"cell": f["cell"], "caption": f["caption"]} for f in sec["figures"]]})
-        return {"title": title, "slides": out}
-    if form == "story":
-        return {"title": title, "sections": [{"heading": sec["heading"], "body": "\n".join(sec["lines"]).strip(), "figures": sec["figures"]}
-                                             for sec in secs]}
+    title, secs = _md_sections(text)
     return {"title": title, "sections": [{"heading": sec["heading"], "level": sec.get("level") or 2,
                                           "body": "\n".join(sec["lines"]).strip(), "figures": sec["figures"]}
                                          for i, sec in enumerate(secs)
@@ -2080,12 +1715,9 @@ def _level(value: Any) -> int:
     return min(value, 6) if isinstance(value, int) and value > 2 else 2
 
 
-def form_of(t: dict[str, Any]) -> str | None:
-    """The markdown form a type is written in: document or page; None for a custom type with a schema of its own,
-    which is not written from markdown."""
-    if t.get("renderer") == "document":
-        return str(t["renderer"])
-    return "page" if t.get("page") else None
+def form_of(t: dict[str, Any]) -> str:
+    """The markdown form a type is written in: document, or page for the custom renderer."""
+    return "document" if t.get("renderer") == "document" else "page"
 
 
 # --------------------------------------------------------------------------- a document as its writer reads it
@@ -2099,8 +1731,6 @@ READ_HTML_CHARS = 40_000
 
 def _marks(x: dict[str, Any]) -> str:
     out = []
-    if x.get("quote"):
-        out.append("quote" + (f" by {_collapse(x.get('speaker'))}" if _collapse(x.get("speaker")) else ""))
     if x.get("pinned") and x.get("by") == ANALYST:
         out.append("the analyst's")
     if "unverified" in (x.get("tags") or []):
@@ -2110,17 +1740,13 @@ def _marks(x: dict[str, Any]) -> str:
 
 
 # the marks _marks writes after a passage's text in read_ref, which a model may copy back with the text it edits
-_MARKS_RE = re.compile(r"(?:\s+·\s+(?:quote(?:\s+by\s+[^·]+?)?|locked|the analyst's|unverified(?:\s+\([^)]*\))?))+\s*$")
-_QUOTE_BY_RE = re.compile(r"·\s+quote\s+by\s+([^·]+?)\s*(?=·|$)")
+_MARKS_RE = re.compile(r"(?:\s+·\s+(?:locked|the analyst's|unverified(?:\s+\([^)]*\))?))+\s*$")
 
 
-def strip_marks(text: str) -> tuple[str, str]:
-    """(the text without the read_ref marks a model copied after it, the speaker a `· quote by` mark among them named)."""
+def strip_marks(text: str) -> str:
+    """The text without the read_ref marks a model copied after it."""
     m = _MARKS_RE.search(text or "")
-    if not m:
-        return text, ""
-    by = _QUOTE_BY_RE.search(m.group(0))
-    return text[:m.start()].rstrip(), (by.group(1).strip() if by else "")
+    return text[:m.start()].rstrip() if m else text
 
 
 def _marks_of(unit: dict[str, Any]) -> str:
@@ -2133,36 +1759,23 @@ def _sentence_lines(sentences: list[dict[str, Any]], pad: str = "") -> list[str]
 
 
 def _figure_line(f: dict[str, Any]) -> str:
-    from . import story  # noqa: PLC0415
-
     if not isinstance(f, dict):
         return ""
-    # a story's step on its card, in the quotes the writer wrote it in (story.step_of), and a picture of a card's
-    step = f"callout: {_collapse(f['callout'])}" if f.get("callout") else ", ".join(str(t) for t in f.get("highlight") or [])
-    step = step or (story.IMAGE if f.get("role") == story.IMAGE else "")
-    card = cite.canon(str(f.get("cell"))) + (f' "{step}"' if step else "")
+    card = cite.canon(str(f.get("cell")))
     what = f"![{_collapse(f.get('caption'))}]({card})" if f.get("cell") else f"(a figure asked for, not drawn: {_collapse(f.get('make'))})"
-    return (f"{what} · #{f.get('id')}" + story.figure_mark(f) + (" · pinned" if f.get("pinned") else "")
+    return (f"{what} · #{f.get('id')}" + (" · pinned" if f.get("pinned") else "")
             + (" · locked" if f.get("locked") is True else ""))
 
 
 def document_lines(doc: dict[str, Any]) -> list[str]:
     """Every passage of a document or a frame, of any form, on its own line with its id. `locked` marks a block the
-    analyst
-    locked. A deck's slides carry their number as shown in the rail, since the deck's title is no slide."""
-    from . import story  # noqa: PLC0415
-
+    analyst locked."""
     # the title with its block's id, so a writer asked to change the headline edits `report:<slug>#title` (live check
     # term-fix9, quirk 2: with no id it set the first section's heading to the headline, and the report had two)
     lines = [f"# {doc.get('title') or '(no title)'} · #{TITLE_BLOCK}" + (" · locked" if doc.get("title_locked") is True else "")]
-    answer = doc.get("answer") if isinstance(doc.get("answer"), dict) else None
-    if answer:
-        lines += ["", "answer"] + _sentence_lines([answer])
-    deck = isinstance(doc.get("slides"), list)
-    told = story.is_story(doc)
-    for n, u in enumerate(units(doc), 1):
-        lines += ["", f"{_marks_of(u)} {u.get('heading') or '(no heading)'} · #{u.get('id')}" + (f" · slide {n}" if deck else "")
-                  + (story.section_mark(u) if told else "") + (" · locked" if u.get("locked") is True else "")]
+    for u in units(doc):
+        lines += ["", f"{_marks_of(u)} {u.get('heading') or '(no heading)'} · #{u.get('id')}"
+                  + (" · locked" if u.get("locked") is True else "")]
         if isinstance(u.get("paragraphs"), list):
             figs = [f for f in u.get("figures") or [] if isinstance(f, dict)]
             for f in (f for f in figs if not f.get("after_paragraph")):
@@ -2170,8 +1783,7 @@ def document_lines(doc: dict[str, Any]) -> list[str]:
             for p in u["paragraphs"]:
                 if not isinstance(p, dict):
                     continue
-                lines.append(f"¶ #p{p.get('id')}" + (story.paragraph_mark(p) if told else "")
-                             + (" · the analyst's" if p.get("pinned") and p.get("by") == ANALYST else "")
+                lines.append(f"¶ #p{p.get('id')}" + (" · the analyst's" if p.get("pinned") and p.get("by") == ANALYST else "")
                              + (" · locked" if p.get("locked") is True else ""))
                 lines += _sentence_lines(p.get("sentences") or [], "  ")
                 lines += [_figure_line(f) for f in figs if str(f.get("after_paragraph") or "") == str(p.get("id"))]
@@ -2179,14 +1791,7 @@ def document_lines(doc: dict[str, Any]) -> list[str]:
             lines += [_figure_line(f) for f in figs if f.get("after_paragraph") and str(f["after_paragraph"]) not in known]
         else:
             lines += _sentence_lines(unit_sentences(u))
-            for f in [u.get("figure")] + list(u.get("figures") or []):
-                if isinstance(f, dict):
-                    lines.append(_figure_line(f))
-            if deck:
-                lines.append(f"layout {slides.preset_of(u)}" + slides.slots_note(u))
-            for key in ("stakes", "notes"):
-                if _collapse(u.get(key)):
-                    lines.append(f"{key} {_collapse(u.get(key))}")
+            lines += [_figure_line(f) for f in u.get("figures") or [] if isinstance(f, dict)]
     if is_custom(doc):
         claims = doc.get("claims") if isinstance(doc.get("claims"), list) else []
         if claims:
@@ -2437,8 +2042,6 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
     if t is None:
         return tools.err(f"write_document: no document type {slug!r}; the types are {', '.join(x['slug'] for x in list_types(ctx.c))}")
     form = form_of(t)
-    if form is None:
-        return tools.err(tools.hint("write_document-form", doc=slug) or f"write_document: the {slug} is not written from markdown")
     inv = investigation.MAIN
     prev = read_doc(ctx.c, inv, slug)
     frame = read_frame(ctx.c, inv, slug) if prev is None else None
@@ -2453,8 +2056,7 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
     raw = parse_markdown(text, form)
     what_changed = (raw.pop("what_changed", None) or versions.pop_what_changed(raw)) if base is not None else []
     # the cards the writer's figure lines named, to say which of them the saved document shows
-    asked = [str(f.get("cell")) for s in raw.get("sections") or [] for f in s.get("figures") or [] if isinstance(f, dict)] + \
-        [str(f.get("cell")) for u in raw.get("slides") or [] for f in (u.get("figures") or [])[:slides.MAX_FIGURES] if isinstance(f, dict)]
+    asked = [str(f.get("cell")) for s in raw.get("sections") or [] for f in s.get("figures") or [] if isinstance(f, dict)]
     try:
         doc = normalize(t, raw, _Refs(ctx.c))
     except HTTPException as e:
@@ -2493,8 +2095,8 @@ async def tool_write_document(ctx: Any, args: dict[str, Any]) -> Any:
         except Exception:  # noqa: BLE001
             log.debug("chip not written", exc_info=True)
     # a figure the writer named stands when the document shows its card, as its own figure or as one the analyst pinned
-    # there, which takes its place (place_pinned, slides.carry_layouts)
-    shown = {cite.canon(str(f.get("cell"))) for u in units(doc) for f in [u.get("figure"), *(u.get("figures") or [])]
+    # there, which takes its place (place_pinned)
+    shown = {cite.canon(str(f.get("cell"))) for u in units(doc) for f in u.get("figures") or []
              if isinstance(f, dict) and f.get("cell")}
     kept = sum(1 for cell in asked if cite.canon(cell) in shown)
     saved_as = f"generation {doc['generation']}" + (f" (this run's save {doc['revision']} of it)" if same_run else "")
@@ -2536,7 +2138,7 @@ def flagged_lines(slug: str, sentences: list[dict[str, Any]], ids: list[str] | N
 
 # --------------------------------------------------------------------------- numbers in the title and the headings
 # The citation check reads sentences, and the writer's title and headings carry claims too: live check term-fix8 had a
-# title saying "for seven weeks" (40 days in the data) and a slide heading "seven weeks before the busiest days", which
+# title saying "for seven weeks" (40 days in the data) and a heading "seven weeks before the busiest days", which
 # no card stated and no check read. A save's result names each title or heading that writes a number, or a span of
 # time, that no link shows: a link in the heading's own section and its subsections, or anywhere in the document for
 # the title. The analyst's locked title or heading, and a heading of the analyst's own frame, are left out, since they
@@ -2656,7 +2258,6 @@ async def insert_passage(c: str, slug: str, uid: str, text: str, actor: str, *, 
 
     doc = _load(c, inv_id, slug)
     before = copy.deepcopy(doc)
-    deck = isinstance(doc.get("slides"), list)
     unit = unit_of(doc, uid)
     if unit is None:
         raise HTTPException(404, f"no passage {uid}")
@@ -2673,26 +2274,20 @@ async def insert_passage(c: str, slug: str, uid: str, text: str, actor: str, *, 
             unit, para, _, _ = _locate_span(doc, uid)
     valid = _Refs(c)
     used = _ids(doc)
-    if doc.get("renderer") == "story":
-        return await _insert_story_blocks(c, inv_id, slug, doc, before, unit, para, text, actor, valid, used)
     fig = _MD_FIGURE_RE.match(text.strip())
     if fig:
-        # a slide or a story's beat shows any card, a document's figure a card that draws one (material.figure_kind)
-        cid = slides.card_id(valid, fig.group(2)) if deck or doc.get("renderer") == "story" else valid.artifact_id(fig.group(2))
+        # a document's figure shows a card that draws one (material.figure_kind)
+        cid = valid.artifact_id(fig.group(2))
         if cid is None:
             raise HTTPException(400, f"{fig.group(2)} is no card, or draws no figure, so it cannot be one: a figure shows "
                                      f"{material.FIGURE_WORDS}")
-        if deck and len(slides.figures_of(unit)) >= slides.MAX_FIGURES:
-            raise HTTPException(400, f"the slide shows {slides.MAX_FIGURES} figures already; insert a slide for another")
         rec = {"id": _new_id(used), "cell": f"card:{cid}", "caption": _collapse(fig.group(1)) or valid.artifacts.get(cid, ""),
                "after_paragraph": str(para["id"]) if para is not None else None, "by": actor}
-        if not deck and para is None and after_fig is None and isinstance(unit.get("paragraphs"), list):
+        if para is None and after_fig is None and isinstance(unit.get("paragraphs"), list):
             rec["lead"] = True
         held_figs = unit.setdefault("figures", [])
         at = next((i + 1 for i, f in enumerate(held_figs) if f is after_fig), len(held_figs))
         held_figs.insert(at, rec)
-        if deck:
-            slides.grow_slots(unit)
         reverted = _save_edit(c, inv_id, slug, doc, before, actor)
         _emit(c, {"type": "report", "slug": slug, "status": "figures", "span": f"report:{slug}#{rec['id']}"})
         return {"ref": f"report:{slug}#{rec['id']}", "reverted": reverted}
@@ -2701,18 +2296,7 @@ async def insert_passage(c: str, slug: str, uid: str, text: str, actor: str, *, 
         raise HTTPException(400, "the new passage has no sentence")
     paras = unit.get("paragraphs")
     if not isinstance(paras, list):
-        # a slide's or a beat's lines: the new sentences after the one the span names, else at the end
-        held = unit.get("sentences")
-        if not isinstance(held, list):
-            raise HTTPException(400, f"the {slug} has no passage there to insert after; replace the passage instead")
-        await report.verify_and_tag(c, new)
-        at = next((i + 1 for i, x in enumerate(held) if str(x.get("id")) == uid), len(held))
-        held[at:at] = new
-        reverted = _save_edit(c, inv_id, slug, doc, before, actor)
-        ref = f"report:{slug}#{new[0]['id']}"
-        _emit(c, {"type": "report", "slug": slug, "status": "rewritten", "span": ref})
-        return {"ref": ref, "text": report_format.body_of(new), "unverified": [str(x["id"]) for x in new if "unverified" in (x.get("tags") or [])],
-                "reverted": reverted}
+        raise HTTPException(400, f"the {slug} has no passage there to insert after; replace the passage instead")
     if para is None and after_fig is None and paras:
         raise HTTPException(400, f"the {slug} has no paragraph there to insert after; replace the passage instead")
     await report.verify_and_tag(c, new)
@@ -2726,39 +2310,16 @@ async def insert_passage(c: str, slug: str, uid: str, text: str, actor: str, *, 
             "reverted": reverted}
 
 
-async def _insert_story_blocks(c: str, inv_id: str, slug: str, doc: dict[str, Any], before: dict[str, Any], unit: dict[str, Any],
-                               para: dict[str, Any] | None, text: str, actor: str, valid: _Refs, used: set[str]) -> dict[str, Any]:
-    """insert_passage in a story: the blocks `text` holds after `para` (story.insert_blocks), their sentences checked
-    and tagged."""
-    from . import report, report_format, story  # noqa: PLC0415
-
-    out = story.insert_blocks(unit, para, text, valid, used, actor)
-    if out["sentences"]:
-        await report.verify_and_tag(c, out["sentences"])
-    reverted = _save_edit(c, inv_id, slug, doc, before, actor)
-    ref = f"report:{slug}#{out['ref']}"
-    _emit(c, {"type": "report", "slug": slug, "status": "rewritten", "span": ref})
-    return {"ref": ref, "text": report_format.body_of(out["sentences"]),
-            "unverified": [str(x["id"]) for x in out["sentences"] if "unverified" in (x.get("tags") or [])], "reverted": reverted}
-
-
 def unit_of(doc: dict[str, Any], uid: str) -> dict[str, Any] | None:
-    """The section, slide or beat that is `uid` or holds the sentence, paragraph or figure `uid` names; None for none."""
+    """The section that is `uid` or holds the sentence, paragraph or figure `uid` names; None for none."""
     for u in units(doc):
         if str(u.get("id")) == uid or any(str(x.get("id")) == uid for x in unit_sentences(u)):
             return u
         if any(isinstance(p, dict) and str(p.get("id")) == uid for p in u.get("paragraphs") or []):
             return u
-        if any(isinstance(f, dict) and str(f.get("id")) == uid for f in [u.get("figure"), *(u.get("figures") or [])]):
+        if any(isinstance(f, dict) and str(f.get("id")) == uid for f in u.get("figures") or []):
             return u
     return None
-
-
-def _units_key(doc: dict[str, Any]) -> str:
-    for key in ("beats", "slides", "lines"):
-        if isinstance(doc.get(key), list):
-            return key
-    return "sections"
 
 
 def _reid(nodes: list[dict[str, Any]], used: set[str]) -> None:
@@ -2792,14 +2353,14 @@ def _reid(nodes: list[dict[str, Any]], used: set[str]) -> None:
 
 
 async def insert_unit(c: str, slug: str, uid: str, text: str, actor: str, *, inv_id: str = investigation.MAIN) -> dict[str, Any]:
-    """New sections, slides or beats after the one that is or holds `uid`, from `text` in the document's markdown (each
-    opening with its `## ` heading), made as a write makes them (parse_markdown, normalize) and checked and tagged as
-    an inserted passage is; the units around them keep their ids. Returns {ref, ids, unverified, reverted}."""
+    """New sections after the one that is or holds `uid`, from `text` in the document's markdown (each opening with its
+    `## ` heading), made as a write makes them (parse_markdown, normalize) and checked and tagged as an inserted passage
+    is; the sections around them keep their ids. Returns {ref, ids, unverified, reverted}."""
     from . import report  # noqa: PLC0415
 
     t = _require_type(c, slug)
     form = form_of(t)
-    if form not in ("document", "slides", "story"):
+    if form != "document":
         raise HTTPException(400, f"the {slug} takes no new section; replace a passage instead")
     doc = _load(c, inv_id, slug)
     before = copy.deepcopy(doc)
@@ -2814,14 +2375,11 @@ async def insert_unit(c: str, slug: str, uid: str, text: str, actor: str, *, inv
     if not made:
         raise HTTPException(400, "the new section has no heading and no sentence")
     _reid(made, _ids(doc))
-    if isinstance(doc.get("slides"), list):
-        for s in made:
-            s["layout"] = slides.layout_of(s)
     fresh = [x for u in made for x in unit_sentences(u)]
     await report.verify_and_tag(c, fresh)
     for u in made:
         u.setdefault("history", []).append({"text": "", "ts": _now(), "by": "edit", "actor": actor})
-    held = doc[_units_key(doc)]
+    held = doc["sections"]
     at = next(i for i, u in enumerate(held) if u is host) + 1
     held[at:at] = made
     reverted = _save_edit(c, inv_id, slug, doc, before, actor)
@@ -2831,45 +2389,8 @@ async def insert_unit(c: str, slug: str, uid: str, text: str, actor: str, *, inv
             "unverified": [str(x["id"]) for x in fresh if "unverified" in (x.get("tags") or [])], "reverted": reverted}
 
 
-def set_layout(c: str, slug: str, uid: str, layout: str, *, inv_id: str = investigation.MAIN) -> dict[str, Any]:
-    """The layout of the slide that is or holds `uid`, by one of slides.PRESETS, its cards and lines kept, in the
-    written deck
-    or its frame. 400 for an unknown layout or a document that is not a deck."""
-    spec = slides.layout_spec(layout)
-    if spec is None:
-        raise HTTPException(400, f"no layout {layout!r}; the layouts are {', '.join(slides.PRESETS)}")
-    doc, is_doc = frame_or_doc(c, inv_id, slug)
-    if not isinstance(doc.get("slides"), list):
-        raise HTTPException(400, f"the {slug} is not a deck, so it has no layouts")
-    unit = unit_of(doc, uid)
-    if unit is None:
-        raise HTTPException(404, f"no slide {uid}")
-    slides.apply_spec(unit, spec)
-    _save_frame_or_doc(c, inv_id, slug, doc, is_doc)
-    _emit(c, {"type": "report", "slug": slug, "status": "layout", "span": f"report:{slug}#{unit['id']}"})
-    return {"ref": f"report:{slug}#{unit['id']}", "layout": slides.preset_of(unit)}
-
-
-def set_story_card(c: str, slug: str, uid: str, side: str, *, inv_id: str = investigation.MAIN) -> dict[str, Any]:
-    """Where the card of the story section that is or holds `uid` stands (story.set_card). 400 for a document that is
-    not a story."""
-    from . import story  # noqa: PLC0415
-
-    doc = _load(c, inv_id, slug)
-    if not story.is_story(doc):
-        raise HTTPException(400, f"the {slug} is not a story, so its sections have no card to move")
-    unit = unit_of(doc, uid)
-    if unit is None:
-        raise HTTPException(404, f"no section {uid}")
-    placed = story.set_card(doc, unit, side)
-    write_doc(c, inv_id, slug, doc)
-    _emit(c, {"type": "report", "slug": slug, "status": "layout", "span": f"report:{slug}#{unit['id']}"})
-    return {"ref": f"report:{slug}#{unit['id']}", "card": placed}
-
-
 def delete_passage(c: str, slug: str, uid: str, *, inv_id: str = investigation.MAIN, actor: str = "model") -> dict[str, Any]:
-    """The passage `uid` names taken out of a written document: a section, slide or beat whole, a paragraph, a sentence
-    or a figure; a locked block it reached is put back first (hold_locks), then the comments on what went settle as a
+    """The passage `uid` names taken out of a written document: a section whole, a paragraph, a sentence or a figure; a locked block it reached is put back first (hold_locks), then the comments on what went settle as a
     rewritten passage's do (a check's is superseded). Returns {ref, removed, reverted}."""
     doc = _load(c, inv_id, slug)
     before = copy.deepcopy(doc)
@@ -2878,14 +2399,11 @@ def delete_passage(c: str, slug: str, uid: str, *, inv_id: str = investigation.M
         raise HTTPException(404, f"no passage {uid}")
     had = _ids(doc)
     if str(unit.get("id")) == uid:
-        key = _units_key(doc)
-        doc[key] = [u for u in doc[key] if u is not unit]
+        doc["sections"] = [u for u in doc["sections"] if u is not unit]
     elif (hit := find_paragraph(doc, uid)) is not None:
         _drop_paragraph(hit[0], hit[1])
-    elif (fig := next((f for f in [unit.get("figure"), *(unit.get("figures") or [])] if isinstance(f, dict) and str(f.get("id")) == uid), None)) is not None:
-        if unit.get("figure") is fig:
-            unit["figure"] = None
-        unit["figures"] = [f for f in unit.get("figures") or [] if f is not fig]
+    elif (fig := next((f for f in unit.get("figures") or [] if isinstance(f, dict) and str(f.get("id")) == uid), None)) is not None:
+        unit["figures"] = [f for f in unit["figures"] if f is not fig]
     else:
         for p in [p for p in unit.get("paragraphs") or [] if isinstance(p, dict)]:
             if any(str(x.get("id")) == uid for x in p.get("sentences") or []):
@@ -2893,8 +2411,6 @@ def delete_passage(c: str, slug: str, uid: str, *, inv_id: str = investigation.M
                 if not p["sentences"]:
                     _drop_paragraph(unit, p)
                 break
-        else:
-            unit["sentences"] = [x for x in unit.get("sentences") or [] if str(x.get("id")) != uid]
     reverted = hold_locks(c, inv_id, slug, doc, before, tool="edit_document", by=actor)
     gone = had - _ids(doc)
     for cm in doc.get("comments") or []:
@@ -2906,32 +2422,28 @@ def delete_passage(c: str, slug: str, uid: str, *, inv_id: str = investigation.M
 
 
 async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
-    """The `edit_document` tool: replace a passage (replace_passage), insert after it (insert_passage, insert_unit), set
-    a
-    slide's layout, change a block's type, set a story section's card side, or delete the passage. A passage in a
-    locked
-    block is refused with `## edit_document-locked`; a locked block any edit still reached is put back (hold_locks)."""
+    """The `edit_document` tool: replace a passage (replace_passage), insert after it (insert_passage, insert_unit),
+    change a block's type, or delete the passage. A passage in a locked block is refused with
+    `## edit_document-locked`; a locked block any edit still reached is put back (hold_locks)."""
     from . import agents, tools  # noqa: PLC0415
 
     span = str(args.get("span") or "").strip().strip("[]").strip()
     text = str(args.get("text") or "").strip()
-    layout = str(args.get("layout") or "").strip()
     block_type = str(args.get("block_type") or "").strip().lower()
-    card = str(args.get("card") or "").strip()
-    if not span or not (text or layout or block_type or card or args.get("delete")):
-        return tools.err("edit_document: `span` is required, with `text`, `layout`, `block_type`, `card` or `delete`")
+    if not span or not (text or block_type or args.get("delete")):
+        return tools.err("edit_document: `span` is required, with `text`, `block_type` or `delete`")
     try:
         slug, _ = parse_span(span)
         slug, uid = parse_span(span, read_doc(ctx.c, investigation.MAIN, slug) if SLUG_RE.match(slug) else None)
         title = uid == TITLE_BLOCK and TITLE_BLOCK not in _ids(read_doc(ctx.c, investigation.MAIN, slug) or {})
-        if title and (args.get("delete") or args.get("insert") or layout or block_type or card or not text):
+        if title and (args.get("delete") or args.get("insert") or block_type or not text):
             return tools.err(f"edit_document: report:{slug}#{TITLE_BLOCK} is the title, which takes new `text` alone")
         # a `# ` line is the title's mark: on any other passage it would make a second headline
         if not title and text and _TITLE_MARK_RE.match(text):
             return tools.err(f"edit_document: {title_mark_refusal(slug)}")
         # a figure line with other text would be stored as a sentence's words (live check term-fix10, quirk 1); a new
         # section, which opens with its heading, reads its figure lines as figures, as write_document does
-        if text and _figure_with_text(text) and not (args.get("insert") and _opens_unit(text, (read_type(ctx.c, slug) or {}).get("renderer"))):
+        if text and _figure_with_text(text) and not (args.get("insert") and _opens_unit(text)):
             return tools.err(f"edit_document: {FIGURE_WITH_TEXT}")
         # a passage inside a block the analyst locked is refused; a passage inserted after it leaves it as it is
         held = None if args.get("insert") else locked_block_ref(read_doc(ctx.c, investigation.MAIN, slug) or {}, slug, uid,
@@ -2944,16 +2456,10 @@ async def tool_edit_document(ctx: Any, args: dict[str, Any]) -> Any:
         if args.get("delete"):
             out = delete_passage(ctx.c, slug, uid, actor=ctx.cell_author)
             chip, line = "deleted a passage", f"deleted [[{span}]]"
-        elif layout and not text:
-            out = set_layout(ctx.c, slug, uid, layout)
-            chip, line = "set a slide's layout", f"set the layout of [[{out['ref']}]] to {out['layout']}"
         elif block_type and not text:
             out = set_block_type(ctx.c, slug, uid, block_type, ctx.cell_author)
             chip, line = "changed a block's type", f"turned [[{span}]] into {block_type}, now [[{out['ref']}]]"
-        elif card and not text:
-            out = set_story_card(ctx.c, slug, uid, card)
-            chip, line = "moved a section's card", f"set the card of [[{out['ref']}]] to {out['card']}"
-        elif args.get("insert") and _opens_unit(text, (read_type(ctx.c, slug) or {}).get("renderer")):
+        elif args.get("insert") and _opens_unit(text):
             out = await insert_unit(ctx.c, slug, uid, text, ctx.cell_author)
             chip, line = "added a section", "inserted " + ", ".join(f"[[report:{slug}#{i}]]" for i in out["ids"]) + f" after [[{span}]]"
         elif args.get("insert"):
@@ -3010,11 +2516,9 @@ def _figure_with_text(text: str) -> bool:
     return any(_FIGURE_MARK_RE.search(ln) for ln in lines)
 
 
-def _opens_unit(text: str, renderer: str | None) -> bool:
-    """Whether inserted text opens a new unit: its first line a heading, in a story a `## ` one (a deeper one is a
-    headline among a section's blocks)."""
-    first = text.split("\n", 1)[0].strip()
-    return bool(_MD_HEADING_RE.match(first)) and not (renderer == "story" and first.startswith("###"))
+def _opens_unit(text: str) -> bool:
+    """Whether inserted text opens a new section: its first line a heading."""
+    return bool(_MD_HEADING_RE.match(text.split("\n", 1)[0].strip()))
 
 
 async def tool_screenshot(ctx: Any, args: dict[str, Any]) -> Any:
@@ -3029,7 +2533,7 @@ async def tool_screenshot(ctx: Any, args: dict[str, Any]) -> Any:
         slug, uid = parse_span(ref, doc)
     except HTTPException as e:
         return tools.err(f"screenshot: {e.detail}")
-    fig = next((f for u in units(doc) for f in [u.get("figure"), *(u.get("figures") or [])]
+    fig = next((f for u in units(doc) for f in u.get("figures") or []
                 if isinstance(f, dict) and str(f.get("id")) == uid and f.get("cell")), None)
     if fig is None:
         return tools.err(tools.hint("screenshot-none", what=f"{ref} is text, not a figure") or f"screenshot: {ref} is not a figure")
@@ -3205,8 +2709,6 @@ def _export_units(doc: dict[str, Any]) -> list[dict[str, Any]]:
         else:
             paragraphs = [unit_sentences(u)]
         figs = [f for f in (u.get("figures") or []) if isinstance(f, dict)]
-        if isinstance(u.get("figure"), dict):
-            figs.append(u["figure"])
         out.append({"heading": _collapse(u.get("heading")), "marks": _marks_of(u), "paragraphs": [p for p in paragraphs if p],
                     "figures": figs, "tldr": _is_tldr(u.get("heading"))})
     out.sort(key=lambda u: 0 if u["tldr"] else 1)
@@ -3220,16 +2722,11 @@ def render_markdown(c: str, doc: dict[str, Any], *, appendix: bool = False) -> d
     cites = _Citations(c)
     us = _export_units(doc)
     title = _collapse(doc.get("title")) or _collapse(doc.get("type")) or "Report"
-    answer = doc.get("answer") if isinstance(doc.get("answer"), dict) else None
     page_html = doc["html"] if isinstance(doc.get("html"), str) and doc["html"].strip() else None
     claims = [x for x in doc.get("claims") or [] if isinstance(x, dict)] if page_html is not None else []
     lines: list[str] = [f"# {title}", ""]
     prose = [title]
     tldr_words = 0
-    if answer:
-        text, plain = _sentence_md(answer, cites)
-        lines += [text, ""]
-        prose.append(plain)
     for x in claims:
         text, plain = _sentence_md(x, cites)
         lines.append(f"- {text}")
@@ -3263,7 +2760,7 @@ def render_markdown(c: str, doc: dict[str, Any], *, appendix: bool = False) -> d
         appendix_lines += [f"- card:{cid}: {t}" for cid, t in cites.titles.items()]
         appendix_md = "\n".join(appendix_lines).rstrip() + "\n"
     words = _words(body)
-    sentences = sum(len(p) for u in us for p in u["paragraphs"]) + (1 if answer else 0) + len(claims)
+    sentences = sum(len(p) for u in us for p in u["paragraphs"]) + len(claims)
     return {"markdown": body + (appendix_md if appendix else ""), **({"html": page_html} if page_html is not None else {}),
             "words": words, "prose_words": _words(" ".join(prose)),
             "tldr_words": tldr_words, "has_tldr": any(u["tldr"] for u in us), "tldr_first": bool(us) and us[0]["tldr"],
@@ -3352,56 +2849,12 @@ def _fallback_slug(name: str) -> str:
     return s if SLUG_RE.match(s) and s not in RESERVED else f"type-{_stamp()[-6:]}"
 
 
-class TypeBody(BaseModel):
-    slug: str | None = None
-    name: str
-    description: str = ""
-    renderer: str
-    prompt: str
-    rubric: str = ""
-    forked_from: str | None = None
-    model_config = ConfigDict(populate_by_name=True)
-    doc_schema: dict[str, Any] | None = Field(default=None, alias="schema")
-    component: str | None = None
-    # a page: renderer custom with the page schema and no component
-    page: bool = False
-
-
 class TypeEdit(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-    name: str | None = None
-    description: str | None = None
-    renderer: str | None = None
-    prompt: str | None = None
-    rubric: str | None = None
-    doc_schema: dict[str, Any] | None = Field(default=None, alias="schema")
-    component: str | None = None
+    name: str
 
 
 def _ws_ok(c: str) -> None:
     config.workspace_dir(c)
-
-
-@router.get("/ws/{c}/report-types")
-async def list_types_route(c: str) -> list[dict[str, Any]]:
-    _ws_ok(c)
-    return list_types(c)
-
-
-@router.post("/ws/{c}/report-types", status_code=201)
-async def create_type_route(c: str, body: TypeBody) -> dict[str, Any]:
-    _ws_ok(c)
-    slug = body.slug or _fallback_slug(body.name)
-    if body.page:
-        if body.renderer != "custom":
-            raise HTTPException(400, "a page has the custom renderer")
-        return write_type(c, slug, name=body.name, description=body.description, renderer="custom", prompt=body.prompt,
-                          rubric=body.rubric, forked_from=body.forked_from, create=True, page=True)
-    if body.renderer == "custom":
-        expand_schema(body.doc_schema)
-    return write_type(c, slug, name=body.name, description=body.description, renderer=body.renderer,
-                      prompt=body.prompt, rubric=body.rubric, schema=body.doc_schema, component=body.component,
-                      forked_from=body.forked_from, create=True)
 
 
 class NewDocBody(BaseModel):
@@ -3425,28 +2878,16 @@ async def new_document_route(c: str, body: NewDocBody) -> dict[str, Any]:
     return create_document_type(c, body.kind, name=body.name, brief=body.brief)
 
 
-@router.get("/ws/{c}/report-types/{slug}")
-async def get_type_route(c: str, slug: str) -> dict[str, Any]:
-    _ws_ok(c)
-    return _require_type(c, _check_slug(slug, custom=False))
-
-
 @router.put("/ws/{c}/report-types/{slug}")
 async def update_type_route(c: str, slug: str, body: TypeEdit) -> dict[str, Any]:
+    """A type of the workspace's own renamed (the document menu's Rename)."""
     _ws_ok(c)
     slug = _check_slug(slug, custom=False)
     if slug in BUILTIN_SLUGS:
         raise HTTPException(409, f"{slug!r} is built in and read-only; save a copy under another slug to edit it")
     t = _require_type(c, slug)
-    renderer = body.renderer if body.renderer is not None else t["renderer"]
-    if renderer == "custom" and not t.get("page"):
-        expand_schema(body.doc_schema if body.doc_schema is not None else t.get("schema_source"))
-    out = write_type(c, slug, name=body.name if body.name is not None else t["name"],
-                     description=body.description if body.description is not None else t["description"],
-                     renderer=renderer,
-                     prompt=body.prompt if body.prompt is not None else t["prompt"],
-                     rubric=body.rubric if body.rubric is not None else t["rubric"],
-                     schema=body.doc_schema, component=body.component)
+    out = write_type(c, slug, name=body.name, description=t["description"], renderer=t["renderer"], prompt=t["prompt"],
+                     rubric=t["rubric"])
     _emit(c, {"type": "report", "slug": slug, "status": "renamed" if out["name"] != t["name"] else "type-edited", "by": ANALYST})
     return out
 
@@ -3469,41 +2910,6 @@ class CommentBody(BaseModel):
     sentence_id: str
     text: str
     kind: str | None = None
-
-
-class SentenceEdit(BaseModel):
-    text: str | None = None
-    locked: bool | None = None  # the lock on the sentence's block, its paragraph (set_block_lock)
-
-
-class UnitEdit(BaseModel):
-    heading: str | None = None
-    locked: bool | None = None  # the lock on the section's heading (set_block_lock)
-
-
-class TitleEdit(BaseModel):
-    title: str | None = None
-    locked: bool | None = None  # the lock on the title (set_block_lock)
-
-
-class FrameSectionBody(BaseModel):
-    heading: str
-
-
-class FrameParagraphBody(BaseModel):
-    text: str
-
-
-class FrameFigureBody(BaseModel):
-    cell: str
-    caption: str | None = None
-    after: str | None = None
-
-
-class FrameUnitEdit(BaseModel):
-    text: str | None = None
-    heading: str | None = None
-    caption: str | None = None
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types")
@@ -3530,13 +2936,6 @@ async def types_state_route(c: str, inv_id: str) -> dict[str, Any]:
     return out
 
 
-def get_doc(c: str, inv_id: str, slug: str) -> dict[str, Any]:
-    """The stored document of type `slug`; 404 when the type is unknown or nothing is written yet."""
-    investigation.inv_dir(c, inv_id)
-    _require_type(c, _check_slug(slug, custom=False))
-    return _load(c, inv_id, slug)
-
-
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}", response_model=None)
 async def get_doc_route(c: str, inv_id: str, slug: str) -> dict[str, Any] | Response:
     """The stored document, or 204 with no body before one is written (a fresh workspace's report), which the page
@@ -3561,23 +2960,21 @@ async def versions_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
 async def version_route(c: str, inv_id: str, slug: str, n: int) -> dict[str, Any]:
     from . import versions  # noqa: PLC0415
 
-    from . import story  # noqa: PLC0415
-
     investigation.inv_dir(c, inv_id)
     slug = _check_slug(slug, custom=False)
     _require_type(c, slug)
-    return story.upgrade(copy.deepcopy(versions.document_of(c, inv_id, slug, n, _load(c, inv_id, slug))))
+    return versions.document_of(c, inv_id, slug, n, _load(c, inv_id, slug))
 
 
 @router.get("/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}/revisions/{i}")
 async def revision_route(c: str, inv_id: str, slug: str, n: int, i: int) -> dict[str, Any]:
     """Revision `i` of generation `n`: an earlier save of the writer run that wrote it (versions.revision_of)."""
-    from . import story, versions  # noqa: PLC0415
+    from . import versions  # noqa: PLC0415
 
     investigation.inv_dir(c, inv_id)
     slug = _check_slug(slug, custom=False)
     _require_type(c, slug)
-    return story.upgrade(copy.deepcopy(versions.revision_of(c, inv_id, slug, n, i, _load(c, inv_id, slug))))
+    return versions.revision_of(c, inv_id, slug, n, i, _load(c, inv_id, slug))
 
 
 # what a restored draft leaves behind of the writer run that wrote it: it is the analyst's draft now
@@ -3644,36 +3041,6 @@ async def frame_route(c: str, inv_id: str, slug: str) -> dict[str, Any]:
     """The document when one is written, else the frame."""
     investigation.inv_dir(c, inv_id)
     return frame_or_doc(c, inv_id, _check_slug(slug, custom=False))[0]
-
-
-@router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections", status_code=201)
-async def frame_section_route(c: str, inv_id: str, slug: str, body: FrameSectionBody) -> dict[str, Any]:
-    investigation.inv_dir(c, inv_id)
-    return add_section(c, _check_slug(slug, custom=False), body.heading, inv_id=inv_id)
-
-
-@router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections/{sid}/paragraphs", status_code=201)
-async def frame_paragraph_route(c: str, inv_id: str, slug: str, sid: str, body: FrameParagraphBody) -> dict[str, Any]:
-    investigation.inv_dir(c, inv_id)
-    return add_paragraph(c, _check_slug(slug, custom=False), sid, body.text, inv_id=inv_id)
-
-
-@router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections/{sid}/figures", status_code=201)
-async def frame_figure_route(c: str, inv_id: str, slug: str, sid: str, body: FrameFigureBody) -> dict[str, Any]:
-    investigation.inv_dir(c, inv_id)
-    return add_frame_figure(c, _check_slug(slug, custom=False), sid, body.cell, body.caption, body.after, inv_id=inv_id)
-
-
-@router.delete("/ws/{c}/investigations/{inv_id}/types/{slug}/frame/units/{uid}")
-async def frame_delete_route(c: str, inv_id: str, slug: str, uid: str) -> dict[str, Any]:
-    investigation.inv_dir(c, inv_id)
-    return delete_unit(c, _check_slug(slug, custom=False), uid, inv_id=inv_id)
-
-
-@router.put("/ws/{c}/investigations/{inv_id}/types/{slug}/frame/units/{uid}")
-async def frame_edit_route(c: str, inv_id: str, slug: str, uid: str, body: FrameUnitEdit) -> dict[str, Any]:
-    investigation.inv_dir(c, inv_id)
-    return edit_unit(c, _check_slug(slug, custom=False), uid, text=body.text, heading=body.heading, caption=body.caption, inv_id=inv_id)
 
 
 # --------------------------------------------------------------------------- routes: the editor's blocks
@@ -3762,8 +3129,6 @@ def _flat_units(text: str) -> list[str]:
 def apply_blocks(target: dict[str, Any], title: str, blocks: list[BlockIn], valid: _Refs, *, is_doc: bool,
                  by: str = ANALYST) -> dict[str, Any]:
     """Reconcile the editor's blocks into `target` (a document or a frame); mutates and returns it."""
-    if isinstance(target.get("slides"), list) or isinstance(target.get("beats"), list):
-        raise HTTPException(409, "the editor saves a document with sections")
     from . import report_format  # noqa: PLC0415
 
     secs, paras, sents, figs, para_of = _index_units(target)
@@ -3998,11 +3363,9 @@ def apply_blocks(target: dict[str, Any], title: str, blocks: list[BlockIn], vali
 
 
 def save_blocks(c: str, inv_id: str, slug: str, title: str, blocks: list[BlockIn], *, by: str = ANALYST) -> dict[str, Any]:
-    """The editor's blocks into the written document, else into the frame (created when there is something to keep). A
-    slides
-    type not written yet takes blocks too; a written deck, a story and a page do not."""
-    renderer = _require_type(c, slug)["renderer"]
-    if renderer not in ("document", "slides"):
+    """The editor's blocks into the written document, else into the frame (created when there is something to keep); a
+    page takes none."""
+    if _require_type(c, slug)["renderer"] != "document":
         raise HTTPException(409, "the editor saves a document with sections")
     target, is_doc = frame_or_doc(c, inv_id, slug)
     apply_blocks(target, title, flat_blocks(blocks), _Refs(c), is_doc=is_doc, by=by)
@@ -4103,244 +3466,6 @@ async def blocks_route(c: str, inv_id: str, slug: str, body: BlocksBody) -> dict
     return target
 
 
-# --------------------------------------------------------------------------- routes: the deck's editor
-# The deck's editor (frontend/src/report/Deck.tsx) saves the whole deck as its slides in order, each line carrying the
-# id
-# of the sentence it showed. Kept slides keep their records, unchanged or respelled lines keep their sentences, changed
-# lines keep the id and become the analyst's (a deck has no locks), and what the editor dropped goes with its comments.
-
-
-class SlideLineIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = ""
-    text: str = ""
-
-
-class SlideFigureIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = ""
-    cell: str
-    caption: str | None = None
-
-
-class SlideQuoteIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = ""
-    text: str = ""
-    speaker: str = ""
-
-
-class SlideIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = ""
-    heading: str = ""
-    layout: str | None = None
-    format: dict[str, Any] | None = None
-    lines: list[SlideLineIn] = Field(default_factory=list)
-    bullets: bool = True
-    quote: SlideQuoteIn | None = None
-    figures: list[SlideFigureIn] = Field(default_factory=list)
-    notes: str = ""
-
-
-class DeckBody(BaseModel):
-    title: str = ""
-    slides: list[SlideIn] = Field(default_factory=list)
-    client: str | None = Field(default=None, max_length=64)  # as BlocksBody's
-
-
-def apply_deck(target: dict[str, Any], title: str, slides_in: list[SlideIn], valid: _Refs, *, is_doc: bool,
-               by: str = ANALYST) -> dict[str, Any]:
-    """Reconcile the deck editor's slides into `target`, a deck or its frame (section note above); mutates and returns
-    it. 409 for a target that is not a deck."""
-    from . import report_format  # noqa: PLC0415
-
-    if not isinstance(target.get("slides"), list):
-        raise HTTPException(409, "only a deck takes slides")
-    old_slides = {str(s.get("id")): s for s in target["slides"] if isinstance(s, dict)}
-    old_sents = {str(x.get("id")): x for s in old_slides.values() for x in s.get("sentences") or [] if isinstance(x, dict)}
-    old_figs = {str(f.get("id")): f for s in old_slides.values() for f in slides.figures_of(s)}
-    used = _ids(target)
-    taken: set[str] = set()
-    changed: set[str] = set()
-
-    def claim(preferred: str | None) -> str:
-        pid = preferred if preferred and BLOCK_ID_RE.match(preferred) and preferred not in taken else None
-        if pid is None:
-            pid = _new_id(used)
-        used.add(pid)
-        taken.add(pid)
-        return pid
-
-    def same(old: dict[str, Any], text: str) -> bool:
-        return _collapse(old.get("text")) == text or sentence_key(old.get("text")) == sentence_key(text)
-
-    def record(text: str, bullet: str | None, line_id: str, pool: list[dict[str, Any]]) -> dict[str, Any]:
-        """The sentence a line holds: the one it showed when unchanged, else one of the slide's with the same text,
-        else one moved from another slide, else its own sentence changed (keeping the id), else a new one."""
-        old = old_sents.get(line_id) if line_id and line_id not in taken else None
-        hit = old if old is not None and same(old, text) else None
-        hit = hit or next((x for x in pool if str(x.get("id")) not in taken and same(x, text)), None) or \
-            next((x for x in old_sents.values() if str(x.get("id")) not in taken and _collapse(x.get("text")) == text), None)
-        if hit is not None:
-            rec = copy.deepcopy(hit)
-            rec["id"] = claim(str(hit.get("id")))
-            rec["text"] = text
-        else:
-            # a changed line keeps its sentence's id, and a new one the id the editor minted for it
-            keep = old is not None
-            rec = {"id": claim(line_id if line_id and (keep or line_id not in old_sents) else None), "text": text,
-                   "refs": valid.clean(refs.extract_refs(text), text), "tags": [], "tag_notes": {}}
-            _pinned(rec, by)
-            if keep:
-                changed.add(rec["id"])
-        if bullet:
-            rec["bullet"] = bullet
-        else:
-            rec.pop("bullet", None)
-        rec.pop("quote", None)
-        rec.pop("speaker", None)
-        return rec
-
-    out: list[dict[str, Any]] = []
-    for s in slides_in:
-        old = old_slides.get(s.id) if s.id not in taken else None
-        slide = copy.deepcopy(old) if old is not None else _pinned({}, by)
-        slide["id"] = claim(s.id if old is not None or BLOCK_ID_RE.match(s.id or "") else None)
-        heading = _collapse(s.heading)
-        if old is not None:
-            _put_text(slide, "heading", heading)
-        else:
-            slide["heading"] = heading
-        pool = [x for x in (old or {}).get("sentences") or [] if isinstance(x, dict)]
-        sentences: list[dict[str, Any]] = []
-        if s.quote is not None and _collapse(s.quote.text):
-            q = record(_collapse(s.quote.text), None, s.quote.id, pool)
-            q["quote"] = True
-            if _collapse(s.quote.speaker):
-                q["speaker"] = _collapse(s.quote.speaker)
-            sentences.append(q)
-        for line in s.lines:
-            text = _collapse(line.text)
-            if not text:
-                continue
-            parts = [text] if s.bullets else [u["text"] for para in report_format.segment_units(text) for u in para] or [text]
-            for i, part in enumerate(parts):
-                sentences.append(record(part, report_format.BULLET if s.bullets else None, line.id if i == 0 else "", pool))
-        figures: list[dict[str, Any]] = []
-        for f in s.figures:
-            if len(figures) >= slides.MAX_FIGURES:
-                break
-            cid = slides.card_id(valid, f.cell)
-            prev = old_figs.get(f.id) if f.id and f.id not in taken else None
-            if prev is not None and (cid is None or cite.canon(str(prev.get("cell") or "")) == f"card:{cid}"):
-                fig = copy.deepcopy(prev)
-                fig["id"] = claim(f.id)
-            elif cid is not None:
-                fid = claim(f.id if f.id and f.id not in old_figs else None)
-                fig = _pinned({"id": fid, "cell": f"card:{cid}", "caption": valid.artifacts.get(cid, "")}, by)
-            else:
-                continue
-            if f.caption is not None and _collapse(f.caption):
-                fig["caption"] = _collapse(f.caption)
-            figures.append(fig)
-        slide["sentences"], slide["figures"] = sentences, figures
-        slide.pop("figure", None)
-        slide["notes"] = _collapse(s.notes)
-        layout = slides.layout_name(s.layout)
-        if layout:
-            slide["layout"] = layout
-        else:
-            slide.pop("layout", None)
-        fmt = slides.clean_format(s.format)
-        if fmt:
-            slide["format"] = fmt
-        else:
-            slide.pop("format", None)
-        out.append(slide)
-    target["slides"] = out
-    title = _collapse(title)
-    if title != _collapse(target.get("title")):
-        if is_doc:
-            _put_text(target, "title", title, history="title_history", edited_by="title_edited_by")
-        else:
-            target["title"] = title
-    if "comments" in target or is_doc:
-        kept: list[dict[str, Any]] = []
-        for cm in target.get("comments") or []:
-            if not isinstance(cm, dict) or str(cm.get("sentence_id") or "") not in taken:
-                continue
-            if str(cm.get("sentence_id")) in changed:
-                settle_carried_comment(cm, anchored=False, generation=int(target.get("generation") or 0))
-            kept.append(cm)
-        target["comments"] = kept
-    return target
-
-
-def save_deck(c: str, inv_id: str, slug: str, title: str, slides_in: list[SlideIn], *, by: str = ANALYST) -> dict[str, Any]:
-    """The deck editor's slides into the written deck, else into its frame (apply_deck). 409 for a type that is not a
-    deck."""
-    if _require_type(c, slug)["renderer"] != "slides":
-        raise HTTPException(409, "only a deck takes slides")
-    target, is_doc = frame_or_doc(c, inv_id, slug)
-    apply_deck(target, title, slides_in, _Refs(c), is_doc=is_doc, by=by)
-    if is_doc:
-        write_doc(c, inv_id, slug, target)
-    else:
-        write_frame(c, inv_id, slug, target)
-    return target
-
-
-@router.put("/ws/{c}/investigations/{inv_id}/types/{slug}/deck")
-async def deck_route(c: str, inv_id: str, slug: str, body: DeckBody) -> dict[str, Any]:
-    """The deck editor's save: the whole deck as its slides (save_deck). The stream carries `report {slug, status:
-    edited,
-    client}`, as the report editor's save does."""
-    investigation.inv_dir(c, inv_id)
-    slug = _check_slug(slug, custom=False)
-    target = save_deck(c, inv_id, slug, body.title, body.slides)
-    if inv_id == investigation.MAIN:
-        ev: dict[str, Any] = {"type": "report", "slug": slug, "status": "edited", "by": ANALYST}
-        if body.client:
-            ev["client"] = body.client
-        _emit(c, ev)
-    return target
-
-
-# --------------------------------------------------------------------------- routes: the story's editor
-
-
-def save_story(c: str, inv_id: str, slug: str, body: Any, *, by: str = ANALYST) -> dict[str, Any]:
-    """The story editor's sections into the written story, else into its frame (story.apply_story). 409 for a type that
-    is not a story."""
-    from . import story  # noqa: PLC0415
-
-    if _require_type(c, slug)["renderer"] != "story":
-        raise HTTPException(409, "only a story takes the story editor's sections")
-    target, is_doc = frame_or_doc(c, inv_id, slug)
-    story.apply_story(target, body.title, body.sections, _Refs(c), is_doc=is_doc, by=by)
-    if is_doc:
-        write_doc(c, inv_id, slug, target)
-    else:
-        write_frame(c, inv_id, slug, target)
-    return target
-
-
-@router.put("/ws/{c}/investigations/{inv_id}/types/{slug}/story")
-async def story_route(c: str, inv_id: str, slug: str, body: StoryBody) -> dict[str, Any]:
-    """The story editor's save: the whole story as its sections (save_story). The stream carries `report {slug,
-    status: edited, client}`, as the report editor's save does."""
-    investigation.inv_dir(c, inv_id)
-    slug = _check_slug(slug, custom=False)
-    target = save_story(c, inv_id, slug, body)
-    if inv_id == investigation.MAIN:
-        ev: dict[str, Any] = {"type": "report", "slug": slug, "status": "edited", "by": ANALYST}
-        if body.client:
-            ev["client"] = body.client
-        _emit(c, ev)
-    return target
-
-
 class LockBody(BaseModel):
     locked: bool
     client: str | None = Field(default=None, max_length=64)  # as BlocksBody's
@@ -4415,74 +3540,6 @@ async def dismiss(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
     write_doc(c, inv_id, slug, doc)
     _commented(c, inv_id, slug, cm.get("sentence_id"))
     return doc
-
-
-@router.post("/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/reopen")
-async def reopen(c: str, inv_id: str, slug: str, cid: str) -> dict[str, Any]:
-    """The analyst opened a resolved comment again. Returns the document; a change puts `report {status: commented}`
-    on the stream (_commented)."""
-    investigation.inv_dir(c, inv_id)
-    slug, doc = _any_doc(c, inv_id, slug)
-    cm = _find_comment(doc, cid)
-    if reopen_comment(cm):
-        write_doc(c, inv_id, slug, doc)
-        _commented(c, inv_id, slug, cm.get("sentence_id"))
-    return doc
-
-
-@router.put("/ws/{c}/investigations/{inv_id}/types/{slug}/sentences/{sid}")
-async def edit_sentence(c: str, inv_id: str, slug: str, sid: str, body: SentenceEdit) -> dict[str, Any]:
-    """The analyst's edit of a sentence, which does not lock it; an explicit `locked` sets or clears the lock on its
-    block, the paragraph (set_block_lock)."""
-    investigation.inv_dir(c, inv_id)
-    slug, doc = _any_doc(c, inv_id, slug)
-    target = find_target(doc, sid)
-    if target["kind"] != "sentence":
-        raise HTTPException(404, f"no such sentence: {sid}")
-    sentence = target["sentence"]
-    if body.text is not None:
-        text = _collapse(body.text)
-        if not text:
-            raise HTTPException(400, "sentence text is required")
-        if _put_text(sentence, "text", text, valid=_Refs(c)):
-            write_doc(c, inv_id, slug, doc)
-    return set_block_lock(c, inv_id, slug, sid, body.locked) if body.locked is not None else doc
-
-
-@router.put("/ws/{c}/investigations/{inv_id}/types/{slug}/units/{uid}")
-async def edit_heading(c: str, inv_id: str, slug: str, uid: str, body: UnitEdit) -> dict[str, Any]:
-    """The analyst's edit of a heading, which does not lock it; an explicit `locked` sets or clears its lock
-    (set_block_lock)."""
-    investigation.inv_dir(c, inv_id)
-    slug, doc = _any_doc(c, inv_id, slug)
-    target = find_target(doc, uid)
-    if target["kind"] != "heading":
-        raise HTTPException(404, f"no such heading: {uid}")
-    unit = target["unit"]
-    if body.heading is not None:
-        heading = _collapse(body.heading)
-        if not heading:
-            raise HTTPException(400, "heading is required")
-        if _put_text(unit, "heading", heading):
-            write_doc(c, inv_id, slug, doc)
-    return set_block_lock(c, inv_id, slug, uid, body.locked) if body.locked is not None else doc
-
-
-@router.put("/ws/{c}/investigations/{inv_id}/types/{slug}/title")
-async def edit_title(c: str, inv_id: str, slug: str, body: TitleEdit) -> dict[str, Any]:
-    """The analyst's edit of the title, which does not lock it; an explicit `locked` sets or clears its lock
-    (set_block_lock)."""
-    investigation.inv_dir(c, inv_id)
-    slug, doc = _any_doc(c, inv_id, slug)
-    if body.title is not None:
-        title = _collapse(body.title)
-        if not title:
-            raise HTTPException(400, "title is required")
-        if _put_text(doc, "title", title, history="title_history", edited_by="title_edited_by"):
-            if doc.get("renderer") == "document":
-                doc["title_ok"] = _title_ok(title)
-            write_doc(c, inv_id, slug, doc)
-    return set_block_lock(c, inv_id, slug, TITLE_BLOCK, body.locked) if body.locked is not None else doc
 
 
 # --------------------------------------------------------------------------- routes: a page's html

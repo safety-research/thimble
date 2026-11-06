@@ -28,10 +28,11 @@ def card(workspaces_tmp) -> str:
 
 
 def _frame(cid: str) -> None:
-    """The analyst's notes: a section with a point and a figure of the card."""
-    sec = report_types.add_section(CORPUS, "report", "My notes")
-    report_types.add_paragraph(CORPUS, "report", sec["id"], "Alice did most of it.")
-    report_types.add_frame_figure(CORPUS, "report", sec["id"], f"card:{cid}", caption="Per account")
+    """The analyst's notes, laid out in the editor: a section with a point and a figure of the card."""
+    report_types.save_blocks(CORPUS, MAIN, "report", "", [
+        report_types.BlockIn(type="heading", text="My notes", level=2),
+        report_types.BlockIn(type="paragraph", text="Alice did most of it."),
+        report_types.BlockIn(type="figure", cell=f"card:{cid}", caption="Per account")])
 
 
 def _texts(doc: dict) -> list[str]:

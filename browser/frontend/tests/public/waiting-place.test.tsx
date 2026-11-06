@@ -20,8 +20,8 @@ const MAIN = { id: 'main', kind: 'main', role: 'main', title: 'main', created_at
 const THREAD = { id: 'th1', kind: 'thread', role: 'thread', title: 'push-retries', created_at: T, parent: 'main', anchor: null, anchor_text: null, running: true, fork: { agent_id: 'afork1' } } as unknown as ChatMeta
 /** a subagent of main's own (an Agent call of main's), which the tree does not list */
 const SUB = { id: 'sa1', kind: 'agent', role: 'subagent', title: 'Explore the runs', created_at: LATER, parent: 'main', status: 'running', agent_id: 'asub1', session: 's1' } as unknown as ChatMeta
-/** the orientation, run as main's subagent */
-const ORIENT = { id: 'or1', kind: 'agent', role: 'orient', title: 'Orientation', created_at: T, parent: 'main', status: 'running', route: 'subagent', agent_id: 'aor1', session: 's1', sessions: ['s1'] } as unknown as ChatMeta
+/** the report's writer, run as main's subagent */
+const WRITER = { id: 'wr1', kind: 'agent', role: 'writer', title: 'report', doc: 'report', created_at: T, parent: 'main', status: 'running', route: 'subagent', agent_id: 'awr1', session: 's1', sessions: ['s1'] } as unknown as ChatMeta
 /** A request main's session relays for the agent of `chat`, none for its own; Claude Code asks one of thimble's agents'
  * in the terminal. */
 const relayed = (chat?: string, terminal = false): PermissionRequest => ({ id: 'p1', tool: 'Bash', what: 'List the runs', since: LATER, ...(chat ? { chat } : {}), ...(terminal ? { terminal } : {}) })
@@ -89,29 +89,24 @@ describe('a request that waits for the analyst', () => {
     expect(await shown('main')).toEqual({ from: 'main', strip: 'dot', waiting: ['main'] })
   })
 
-  test("of the orientation run as main's subagent waits at the orientation: its strip in its thread, and in main's chat while main is idle", async () => {
-    others = [ORIENT]
-    main = { ...MAIN, permissions: [relayed('or1', true)] }
-    expect(await shown('or1')).toEqual({ from: 'or1', strip: 'dot', waiting: ['or1'] })
-    // main's turn works on
-    expect(await shown('main')).toEqual({ from: 'or1', strip: 'spinner', waiting: ['or1'] })
-    // with main idle, main's chat shows the orientation's strip
-    main = { ...main, running: false }
-    mainEvents = [...mainEvents, { type: 'done' }]
-    expect(await shown('main')).toEqual({ from: 'or1', strip: 'dot', waiting: ['or1'] })
+  test("of a writer run as main's subagent waits at the writer: its strip in its thread, and main's turn works on", async () => {
+    others = [WRITER]
+    main = { ...MAIN, permissions: [relayed('wr1', true)] }
+    expect(await shown('wr1')).toEqual({ from: 'wr1', strip: 'dot', waiting: ['wr1'] })
+    expect(await shown('main')).toEqual({ from: 'wr1', strip: 'spinner', waiting: ['wr1'] })
   })
 
-  test("of the orientation run as main's subagent puts the wait on the orientation's card in main's chat", async () => {
+  test("of a writer run as main's subagent puts the wait on the writer's card in main's chat", async () => {
     const waits = async (mainMeta: ChatMeta) => {
       unmountAll()
       const el = await mount(
-        <ThreadsContext.Provider value={{ labels: new Map(), metas: new Map([mainMeta, ORIENT].map((m) => [m.id, m])), main: mainMeta }}>
-          <AgentCard ws="mini" chat="or1" role="orient" title="Orientation" log={{ meta: ORIENT, records: [], error: null }} />
+        <ThreadsContext.Provider value={{ labels: new Map(), metas: new Map([mainMeta, WRITER].map((m) => [m.id, m])), main: mainMeta }}>
+          <AgentCard ws="mini" chat="wr1" role="writer" title="report" log={{ meta: WRITER, records: [], error: null }} />
         </ThreadsContext.Provider>,
       )
       return el.querySelector('.chat-task')?.getAttribute('data-waiting') ?? null
     }
-    expect(await waits({ ...MAIN, permissions: [relayed('or1', true)] })).toBe('true')
+    expect(await waits({ ...MAIN, permissions: [relayed('wr1', true)] })).toBe('true')
     expect(await waits({ ...MAIN, permissions: [relayed()] })).toBeNull()
   })
 

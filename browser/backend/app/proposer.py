@@ -1,16 +1,13 @@
-"""The view proposer: after the analyst's turn of main, after a side thread answers them and when an orientation ends,
-one model call on a fork of main's own session decides whether thimble shows the analyst a view proposal card, and
-writes it (views.offer).
+"""The view proposer: after the analyst's turn of main and after a side thread answers them, one model call on a fork of
+main's own session decides whether thimble shows the analyst a view proposal card, and writes it (views.offer).
 
 When it runs (trigger): at the end of a turn of main that answered the analyst (session.turn_analyst: a line they typed,
 their message from the browser), at the cut of that turn's turn_duration record (turn_ended); when a side thread's fork
 answered (session._finish_sub), not at the end of main's turn that handed the thread's question from the browser to
-that fork; and once when the first run of an orientation ends done
-(orient_session). Each trigger merges into the workspace's pending job (JOB_FILE's `job`: the reasons, main's session
-and its cut), so a restarted server runs it. One loop per workspace (_loop) waits DEBOUNCE_MAIN_S after a main turn,
-else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an orientation's end merges with main's `↳` turn),
-and runs the job once main is idle; a main turn still open leaves it pending until that turn ends. A running fork is
-never cancelled; a trigger that comes meanwhile is the next job.
+that fork. Each trigger merges into the workspace's pending job (JOB_FILE's `job`: the reasons, main's session and its
+cut), so a restarted server runs it. One loop per workspace (_loop) waits DEBOUNCE_MAIN_S after a main turn, else
+DEBOUNCE_OTHER_S, and runs the job once main is idle; a main turn still open leaves it pending until that turn ends. A
+running fork is never cancelled; a trigger that comes meanwhile is the next job.
 
 The gate (due): view proposals are on (views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
 Claude can be reached the way chosen (claude_access.problem; the chat's card says what is missing, so no notice
@@ -21,8 +18,8 @@ The call (_argv): `claude -p --resume <main> --resume-session-at <cut> --fork-se
 tools, no MCP server, no slash command, `--safe-mode` (no plugin hook moves thimble's main to the fork) and the server-
 side advisor off, on the `suggest` row's model and effort (config.call_settings) with Claude Code's 1M-token window when
 main's context needs it. The fork writes nothing into the analyst's projects (spike: a-notes.md). Its prompt (assemble)
-is prompts/view-propose.md, the threads, the orientation, the views the analyst has (built, building, failed, accepted
-and rejected proposals, deleted views) and what just happened; the answer is one JSON object (parse).
+is prompts/view-propose.md, the threads, the views the analyst has (built, building, failed, accepted and rejected
+proposals, deleted views) and what just happened; the answer is one JSON object (parse).
 
 Each run appends a line to the run log (LOG_FILE). Every failure tells the analyst in the foreground with an easy fix
 (notices.post, NOTICE_KEY): a request Claude's safeguards blocked (Try again, Turn off view proposals), Claude Code not
@@ -64,7 +61,7 @@ JOB_FILE = views.PROPOSER_FILE
 NOTICE_KEY = "proposals"  # the key of the proposer's notices (notices.post)
 AGENT = "View proposals"  # the proposer's name on its notices
 BUILTIN = "Files shows every file in its built-in views: Raw, Table, Text, Transcript and Timeline, as fit its type."
-MAIN, ORIENTATION, THREAD = "main", "orientation", "thread:"
+MAIN, THREAD = "main", "thread:"
 REPLY_CHARS = 1_500  # of a thread's question quoted in the Now section
 # the words of an error that says the model's safeguards refused the request, of one that says Claude Code has no
 # working sign-in (spike G: "Not logged in · Please run /login", error authentication_failed), of one that says the
@@ -154,7 +151,7 @@ def _pop(c: str) -> dict[str, Any] | None:
 
 def trigger(c: str, after: str, *, cut: str | None = None, sid: str | None = None) -> None:
     """Something happened after which a view proposal may help: `after` is "main" (with main's session `sid` and the
-    `cut` its turn ended at), "thread:<id>" or "orientation". Nothing happens while view proposals are off. The job is
+    `cut` its turn ended at) or "thread:<id>". Nothing happens while view proposals are off. The job is
     kept, and its loop starts when an event loop runs here (else a later turn end starts it)."""
     if not enabled(c):
         return
@@ -334,7 +331,7 @@ def _views_section(c: str) -> str:
                 out.append(f"- {name}: {desc} {who}, and the analyst accepted it; {state[status]}.")
             elif status == "suggested":
                 out.append(f"- {name}: {desc} {who}; it waits for the analyst's answer.")
-        elif status in state:  # main's proposals, and an older orientation's (a dropped or legacy row is left out)
+        elif status in state:  # main's proposals (a dropped or legacy row is left out)
             out.append(f"- {name}: {desc} {state[status].capitalize()}.")
     have = {p["slug"] for p in rows}
     out += [f"- {_one(v.get('name'))}: {_one(v.get('description'))} Built." for s, v in built.items() if s not in have]
@@ -354,8 +351,6 @@ def _last_question(c: str, chat: str) -> str:
 
 def _now_section(c: str, after: list[str]) -> str:
     said = [f"It is {datetime.now(timezone.utc).strftime('%H:%M')} UTC."]
-    if ORIENTATION in after:
-        said.append("The orientation has just finished.")
     for a in after:
         if a.startswith(THREAD):
             q = _last_question(c, a[len(THREAD):])
@@ -367,8 +362,8 @@ def _now_section(c: str, after: list[str]) -> str:
 
 
 def assemble(c: str, job: dict[str, Any]) -> str:
-    """The fork's message (module note): the proposer prompt, the threads, the orientation, the views the analyst has
-    and what just happened (job's `after`)."""
+    """The fork's message (module note): the proposer prompt, the threads, the views the analyst has and what just
+    happened (job's `after`)."""
     parts = [prompts.load(PROMPT).strip(), _threads_section(c), _views_section(c),
              _now_section(c, list(job.get("after") or []))]
     return "\n\n".join(p for p in parts if p) + "\n"
@@ -668,9 +663,7 @@ def _log_line(c: str, line: dict[str, Any]) -> None:
 
 
 def _after_of(after: list[str]) -> str:
-    """What an offer comes after, by priority: the orientation, a thread, main."""
-    if ORIENTATION in after:
-        return ORIENTATION
+    """What an offer comes after, by priority: a thread, main."""
     return next((a for a in after if a.startswith(THREAD)), MAIN)
 
 

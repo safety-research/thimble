@@ -84,7 +84,7 @@ def test_every_read_needs_the_cookie_or_the_token_and_only_the_open_reads_answer
     by_cookie.cookies.set(hook_auth.ui_cookie(), UI_COOKIE_VALUE)
     reads = [p for m, p, _, _ in rows if m == "GET" and not hook_auth.guarded(m, p)]
     gated = [p for p in reads if p not in hook_auth.OPEN_READS]
-    assert sorted(set(reads) - set(gated)) == sorted(hook_auth.OPEN_READS) and len(gated) >= 100
+    assert sorted(set(reads) - set(gated)) == sorted(hook_auth.OPEN_READS) and len(gated) >= 95
     refused = {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}
     for path in gated:
         url = _concrete(path)
@@ -139,13 +139,11 @@ OPEN_READS = hook_auth.OPEN_READS  # what the CLI or a script reads with no cred
 
 def test_every_write_the_cli_makes_is_a_token_route():
     """Each cli._request with a write method and a written path, in the app, the CLI and the scripts, goes to a token
-    route, except a call that sends a browser's cookie (cookie=)."""
+    route."""
     call = re.compile(r"_request\(\s*\"(POST|PUT|PATCH|DELETE)\",\s*(f?\"[^\n]*)")
     found = []
     for f in [*sorted((REPO / "backend" / "app").glob("*.py")), *sorted((REPO / "scripts").rglob("*.py"))]:
         for m in call.finditer(f.read_text("utf-8")):
-            if "cookie=" in m.group(2):
-                continue
             for path in _paths(m.group(2)):
                 found.append((f.name, m.group(1), path))
     assert ("cli.py", "POST", "/api/corpora/register") in found and ("cli.py", "POST", "/api/dev/revert") in found

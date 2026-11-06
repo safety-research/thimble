@@ -1,8 +1,7 @@
-"""The analyst's changes to a document's comments (the margin's Comment, Done in the margin or in the top bar's Comments,
-and a comment opened again) put `report {status: commented, by: analyst}` on the stream, as a check's or main's comment
-does: every open page reads that document's comments again, so the top bar's Comments and the Report's margin follow a
-Done made elsewhere (frontend report/docComments.ts). Through the route functions, as the browser reaches them; no
-model call."""
+"""The analyst's changes to a document's comments (the margin's Comment, and Done in the margin or in the top bar's
+Comments) put `report {status: commented, by: analyst}` on the stream, as a check's or main's comment does: every open
+page reads that document's comments again, so the top bar's Comments and the Report's margin follow a Done made
+elsewhere (frontend report/docComments.ts). Through the route functions, as the browser reaches them; no model call."""
 from __future__ import annotations
 
 from app import investigation, report_types, tools
@@ -19,7 +18,7 @@ def _commented() -> list[dict]:
             if e.get("type") == "report" and e.get("status") == "commented"]
 
 
-async def test_a_comment_added_resolved_and_opened_again_tells_the_open_pages_that_its_document_changed(workspaces_tmp):
+async def test_a_comment_added_and_resolved_tells_the_open_pages_that_its_document_changed(workspaces_tmp):
     report_types.create_document_type(CORPUS, "casefile", name="Cases", slug="cases")
     r = await tools.call(CORPUS, "write_document", {"doc": "cases", "text": "# Two tests fail\n\n## test_upload_retry\n\n"
                                                                            "It timed out after 30 seconds.\n"},
@@ -32,8 +31,3 @@ async def test_a_comment_added_resolved_and_opened_again_tells_the_open_pages_th
     doc = await report_types.dismiss(CORPUS, MAIN, "cases", cm["id"])
     assert [c["status"] for c in doc["comments"]] == ["dismissed"]
     assert _commented() == [said, said]
-    await report_types.reopen(CORPUS, MAIN, "cases", cm["id"])
-    assert _commented() == [said, said, said]
-    # opened again while open: nothing changed, nothing said
-    await report_types.reopen(CORPUS, MAIN, "cases", cm["id"])
-    assert len(_commented()) == 3

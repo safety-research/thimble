@@ -154,9 +154,8 @@ ROUTER_MODULES = [
     "undo",
     # browser events to main, and the mirror of its transcript (listed for its shutdown)
     "events", "session",
-    # thimble's agents (Start it), a code ticket's own questions (shut down with the server), and the orientation's
-    # calls, stored whole and citable
-    "subagents", "agent_session", "calls", "write_session",
+    # thimble's agents (Start it) and a code ticket's own questions (shut down with the server)
+    "subagents", "agent_session", "write_session",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
     # where the check's records and fixes are kept (the Undo of a fix); a card drawn taller than the canvas shows,
     # which its author is told

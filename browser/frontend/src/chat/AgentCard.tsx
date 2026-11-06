@@ -1,14 +1,12 @@
 // A subagent or workflow agent as a chip (AgentChip): its name, steps, duration, state and the chips of what it made;
 // open, the files its calls read and its calls as plain-word steps (model.plainStep).
 //
-// The orientation, a writer and a report check, each one of thimble's agents run as a subagent of the analyst's Claude
-// Code session (backend subagents.py), are a tool-call card whose steps are that agent's own subagents (sessionSteps).
-// Its header names the model and effort the run used. While it runs the card shows Stop (in its own thread the
-// composer's stop square is its Stop instead, ChatPanel), which stops it through thimble's plugin; while the orientation
-// waits for its critic, "Waiting for the critique". Its permission requests wait on the one permission card above the
-// composer (PermissionCard), which the terminal answers. A run stopped by the analyst's quit says so, with Write again
-// on a writer's card. In main, a finished orientation's card follows one line counting what it left for review. A follow-up of the orientation is the same card for that run alone (`run`), with
-// what it changed and Undo while the last undo step is that follow-up's (backend undo.py).
+// A writer and a report check, each one of thimble's agents run as a subagent of the analyst's Claude Code session
+// (backend subagents.py), are a tool-call card whose steps are that agent's own subagents (sessionSteps). Its header
+// names the model and effort the run used. While it runs the card shows Stop (in its own thread the composer's stop
+// square is its Stop instead, ChatPanel), which stops it through thimble's plugin. Its permission requests wait on the
+// one permission card above the composer (PermissionCard), which the terminal answers. A run stopped by the analyst's
+// quit says so, with Write again on a writer's card.
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -16,28 +14,25 @@ import { Icon } from '../components/Icon'
 import { RefChip } from '../components/RefChip'
 import { Mark } from '../components/Marks'
 import { Spinner } from '../components/Spinner'
-import { UserMessage } from '../components/Message'
 import { ChipRun, StepGlyph, ToolCard, type ToolSection, type ToolState } from '../components/ToolCard'
-import { api, undoApi } from '../lib/api'
+import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { useProposals, withoutDropped } from '../lib/proposals'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { ChatMeta, ChatRecord } from '../lib/types'
-import { ApiErrorCard } from './ApiError'
 import { waitingAt } from './waiting'
-import { agentChipName, agentFiles, messageRuns, apiErrorAt, changeSummary, deckCards, durationText, foldRecords, followUpSummary, lastRowTs, leadText, madeBy, madeCards, orientMade, orientRuns, orientWriterOf, orientWriters, reviewList, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type OrientWriter, type Row } from './model'
+import { agentChipName, agentFiles, messageRuns, durationText, foldRecords, lastRowTs, madeBy, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type Row } from './model'
 import { openThread, ThreadChip, ThreadsContext } from './Notes'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
 import { ViewChip } from './ViewChip'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
-import { RefText } from './markdown'
-import { MAIN_ESC_LINE, PAUSED_LINE, STOP_DONE_LINE, isSubagent, mainStopFailedLine, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
+import { MAIN_ESC_LINE, STOP_DONE_LINE, isSubagent, mainStopFailedLine, runValues, stopFailedLine, stoppedLine, valuesText } from './subagent'
 
 const REFETCH_DEBOUNCE_MS = 150
-/** The roles of thimble's agents whose card lists their own subagents as steps and carries Stop: the orientation, a
- * writer and a report check's run (backend subagents.TYPES). */
-const SESSION_ROLES = new Set(['orient', 'writer', 'check'])
+/** The roles of thimble's agents whose card lists their own subagents as steps and carries Stop: a writer and a report
+ * check's run (backend subagents.TYPES). */
+const SESSION_ROLES = new Set(['writer', 'check'])
 
 /** An agent chat's meta and records, refetched on the stream's `chat` events for it; nothing for a null chat. */
 export function useAgentLog(ws: string, chat: string | null): { meta: ChatMeta | null; records: ChatRecord[]; error: string | null } {
@@ -75,7 +70,7 @@ export function useAgentLog(ws: string, chat: string | null): { meta: ChatMeta |
   return { meta, records, error }
 }
 
-/** The logs of the agent chats in `ids` (the orientation and tickets that run), each folded, refetched on the stream's
+/** The logs of the agent chats in `ids` (the writers and tickets that run), each folded, refetched on the stream's
  * `chat` events for them. */
 export function useAgentRows(ws: string, ids: readonly string[]): ReadonlyMap<string, Row[]> {
   const [rows, setRows] = useState<ReadonlyMap<string, Row[]>>(new Map())
@@ -121,9 +116,8 @@ export function openLabel(ws: string, name: string) {
     .catch(() => showTab('files'))
 }
 
-/** The section rows of what a run made: one per surface it landed on. `writer` is the writer of the report pass of an
- * orientation from before 0.8.0 (its meta's `orient`), shown under Report with its document's chip or its progress. */
-export function madeSections(ws: string, made: Made, opts: { writer?: OrientWriter | null } = {}): ToolSection[] {
+/** The section rows of what a run made: one per surface it landed on. */
+export function madeSections(ws: string, made: Made): ToolSection[] {
   const out: ToolSection[] = []
   if (made.views.length) {
     out.push({
@@ -135,7 +129,7 @@ export function madeSections(ws: string, made: Made, opts: { writer?: OrientWrit
   }
   if (made.cells.length || made.labelCards.length) {
     // a group's count is every card the run left in it, its labels' cards included, as the canvas counts them; its chip
-    // opens focus mode on the first card of the frame its first card sits in (the orientation's deck from its chip)
+    // opens focus mode on the first card of the frame its first card sits in
     const groups = new Map<string, { ids: string[]; n: number }>()
     const inGroup = (g: string) => {
       let entry = groups.get(g)
@@ -180,27 +174,13 @@ export function madeSections(ws: string, made: Made, opts: { writer?: OrientWrit
       chips: made.labels.map((l) => <LabelChip key={l} name={l} onClick={() => openLabel(ws, l)} />),
     })
   }
-  const writer = opts.writer ?? null
-  const docs = [...new Set([...made.docs, ...(writer ? [writer.doc] : [])])]
+  const docs = [...new Set(made.docs)]
   if (docs.length) {
     out.push({
       key: 'report',
       label: 'Report',
       onOpen: () => showTab('report'),
-      chips: (
-        <>
-          {docs.map((d) => (
-            <DocChip key={d} ws={ws} slug={d} onClick={() => teleport(`report:${d}`)} />
-          ))}
-          {writer && writer.status !== 'done' && (
-            <span className="chat-task-writer" data-status={writer.status} data-chat={writer.chat}>
-              {writer.status === 'running' ? <Spinner size={10} label="writing" /> : <Mark kind="failed" label={writer.status} />}
-              <span className="chat-task-writer-word">{writer.status === 'running' ? 'writing in' : writer.status === 'stopped' ? 'stopped in' : 'failed in'}</span>
-              <ThreadChip id={writer.chat} />
-            </span>
-          )}
-        </>
-      ),
+      chips: docs.map((d) => <DocChip key={d} ws={ws} slug={d} onClick={() => teleport(`report:${d}`)} />),
     })
   }
   return out
@@ -214,21 +194,18 @@ export interface AgentCardProps {
   ts?: string
   /** the log when the caller already reads it (the thread being shown), else the card reads it */
   log?: { meta: ChatMeta | null; records: readonly ChatRecord[]; error: string | null }
-  /** open on its steps while it runs (the orientation in its own thread) */
+  /** open on its steps while it runs (a session in its own thread) */
   openWhileRunning?: boolean
-  /** the run the card stands for: 0 its first, then each follow-up (the orientation's, or a subagent's next message,
-   * such as a round of a fix); unset, its whole session */
+  /** the run the card stands for: 0 its first, then each of a subagent's next messages, such as a round of a fix;
+   * unset, its whole session */
   run?: number
   /** a subagent with a thread of its own: the card links to it */
   thread?: boolean
   /** a running session's Stop shows on the card; its own thread has it on the composer instead */
   stopHere?: boolean
-  /** the analyst's instructions show as their own message above the card rather than inside it (the orientation in
-   * its own thread) */
-  briefAbove?: boolean
 }
 
-/** The browser's Stop of one of thimble's agents (the orientation, a writer, a check's run), of main's turn or of a side
+/** The browser's Stop of one of thimble's agents (a writer, a check's run), of main's turn or of a side
  * thread's fork: its chat is interrupted (backend agents.interrupt_route), which stops it through thimble's plugin. A
  * Stop that found it ended already counts as done; one thimble could not pass on says how to stop it in the terminal,
  * for main with Esc (MAIN_ESC_LINE). The
@@ -275,31 +252,24 @@ function WriteAgain({ ws, request }: { ws: string; request: string }) {
   )
 }
 
-/** What a subagent's card says under its steps, or null when it says nothing: that the orientation waits for its critic
- * (`paused`), why it stopped (`stopped`), and Write again on a writer that main's quit stopped (`again`, its request).
- * Nothing else says where the terminal shows the agent, in any state. Pure. */
-export function subagentNotes(meta: ChatMeta | null, running: boolean, back = false): { paused: boolean; stopped: string; again: string | null } | null {
+/** What a subagent's card says under its steps, or null when it says nothing: why it stopped (`stopped`), and Write
+ * again on a writer that main's quit stopped (`again`, its request). Nothing else says where the terminal shows the
+ * agent, in any state. Pure. */
+export function subagentNotes(meta: ChatMeta | null, running: boolean): { stopped: string; again: string | null } | null {
   if (!isSubagent(meta)) return null
   const n = {
-    paused: running && meta?.paused === 'critique',
-    stopped: stoppedLine(meta, back && meta?.continue === 'here'),
+    stopped: stoppedLine(meta),
     again: (meta?.role === 'writer' && meta.stopped_by === 'quit' && !running && meta.request) || null,
   }
-  return n.paused || n.stopped || n.again ? n : null
+  return n.stopped || n.again ? n : null
 }
 
 /** The notes of a subagent's card (subagentNotes), drawn; nothing when there are none. */
-export function SubagentNotes({ ws, meta, running, back = false }: { ws: string; meta: ChatMeta | null; running: boolean; back?: boolean }) {
-  const n = subagentNotes(meta, running, back)
+export function SubagentNotes({ ws, meta, running }: { ws: string; meta: ChatMeta | null; running: boolean }) {
+  const n = subagentNotes(meta, running)
   if (!n) return null
   return (
-    <div className="chat-sub-notes" data-paused={meta?.paused ?? undefined}>
-      {n.paused && (
-        <p className="chat-sub-paused" role="status">
-          <Spinner size={10} label={PAUSED_LINE} />
-          <span>{PAUSED_LINE}</span>
-        </p>
-      )}
+    <div className="chat-sub-notes">
       {n.stopped && <p className="chat-sub-stopped" data-by={meta?.stopped_by ?? undefined}>{n.stopped}</p>}
       {n.again && <WriteAgain ws={ws} request={n.again} />}
     </div>
@@ -403,52 +373,11 @@ function AgentChip({ ws, chat, role, title, ts, log, run, thread }: AgentCardPro
   )
 }
 
-/** Whether the step an undo would revert belongs to run `run` of orientation `chat` (undo.py's `undo_run`), read again
- * after every change to a card or a document the stream announces; false while `want` is off. */
-function useUndoRun(ws: string, chat: string, run: number | undefined, want: boolean): boolean {
-  const [top, setTop] = useState<string | null>(null)
-  useEffect(() => {
-    if (!want) return
-    let alive = true
-    let timer: number | null = null
-    const read = () =>
-      undoApi
-        .labels(ws)
-        .then((l) => alive && setTop(l.undo_run ?? null))
-        .catch(() => undefined)
-    const later = () => {
-      if (timer != null) window.clearTimeout(timer)
-      timer = window.setTimeout(read, REFETCH_DEBOUNCE_MS)
-    }
-    void read()
-    const offCell = bus.on('cell', later)
-    const offReport = bus.on('report', later)
-    return () => {
-      alive = false
-      offCell()
-      offReport()
-      if (timer != null) window.clearTimeout(timer)
-    }
-  }, [ws, want])
-  return want && top === `${chat}/${run}`
-}
-
-function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, run, stopHere = true, briefAbove = false }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
+function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = false, run, stopHere = true }: AgentCardProps & { log: NonNullable<AgentCardProps['log']> }) {
   const { meta, records, error } = log
-  const all = useMemo(() => foldRecords(records), [records])
-  // the run the card stands for, and whether a later one followed it (an earlier run has ended, whatever the chat's
-  // status says of the run going on now)
-  const runs = useMemo(() => (role === 'orient' && run != null ? orientRuns(all) : null), [all, role, run])
-  const scoped = runs?.find((r) => r.k === run) ?? null
-  const later = runs && scoped ? runs.find((r) => r.k > scoped.k) ?? null : null
-  const rows = scoped ? scoped.rows : all
-  const chatStatus: ToolState = meta?.status ?? (error ? 'failed' : 'running')
-  // a follow-up's own record on the chat's meta (backend orientation.run_finished): its state, times and counts
-  const record = run != null && run > 0 ? (meta?.followups ?? []).find((u) => u.run === run) : undefined
-  const ended = record?.status === 'done' || record?.status === 'failed' || record?.status === 'stopped' ? (record.status as ToolState) : null
-  const status: ToolState = ended ?? (later ? 'done' : chatStatus)
+  const rows = useMemo(() => foldRecords(records), [records])
+  const status: ToolState = meta?.status ?? (error ? 'failed' : 'running')
   const running = status === 'running'
-  const followUp = !!scoped && scoped.k > 0
   const tools = useMemo(() => rows.filter((r) => r.kind === 'tool'), [rows])
   const { metas, main } = useContext(ThreadsContext)
   const own = SESSION_ROLES.has(role)
@@ -461,9 +390,9 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     setStopping(true)
     void stopSession(ws, chat, role).finally(() => setStopping(false))
   }
-  // what the card says of the agent besides its steps: its wait for its critic, why it stopped
-  const notes = own && !followUp && subagentNotes(meta, running, !!main?.attached) ? <SubagentNotes ws={ws} meta={meta} running={running} back={!!main?.attached} /> : null
-  // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)
+  // what the card says of the agent besides its steps: why it stopped
+  const notes = own && subagentNotes(meta, running) ? <SubagentNotes ws={ws} meta={meta} running={running} /> : null
+  // waiting for the analyst on its own prompt (chat/waiting.ts)
   const waitingFor = useMemo(() => {
     if (!running) return null
     const all = new Map<string, ChatMeta>(metas ?? [])
@@ -471,67 +400,36 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     return waitingAt(chat, all.values(), main)
   }, [running, chat, meta, metas, main])
   const waiting = !!waitingFor
-  // the orientation's cards that name no group are in its deck (backend tools.default_group), so they count there; a
-  // view an orientation from before 0.8.0 proposed that was dropped when the analyst stopped it is not among what it
-  // made
+  // a view proposal the analyst rejected is not among what it made
   const proposals = useProposals(ws)
-  const made = useMemo(() => withoutDropped(role === 'orient' ? orientMade(madeBy(rows)) : madeBy(rows), proposals), [rows, role, proposals])
-  const brief = useMemo(
-    () => (followUp ? scoped!.messages.map(leadText).join('\n\n') : stripHarness(meta?.brief?.trim() || rows.find((r) => r.kind === 'user')?.text.trim() || '') || null),
-    [followUp, scoped, meta?.brief, rows],
-  )
-  // the writer of its report pass (an orientation from before 0.8.0), which its Report section carries (the card for a
-  // run, that run's; else the latest)
-  const writer = useMemo(() => (role === 'orient' && metas ? orientWriterOf(orientWriters(metas.values()), chat, run) : null), [role, metas, chat, run])
+  const made = useMemo(() => withoutDropped(madeBy(rows), proposals), [rows, proposals])
+  const brief = useMemo(() => stripHarness(meta?.brief?.trim() || rows.find((r) => r.kind === 'user')?.text.trim() || '') || null, [meta?.brief, rows])
   const [open, setOpen] = useState<boolean | null>(null)
   const shownOpen = open ?? (openWhileRunning && running)
-  // how long it took: the whole session, or the run from its message to the next run's (or the session's end)
-  const from = followUp ? (record?.started ?? scoped!.messages[0]?.ts) : meta?.created_at
-  // an earlier run ended with its last call, which may be long before the next run's message
-  const to = followUp && record?.ended ? record.ended : later ? (lastRowTs(rows) ?? later.messages[0]?.ts) : meta?.ts_end
-  const took = running ? '' : durationText(from, to)
+  const took = running ? '' : durationText(meta?.created_at, meta?.ts_end)
   const count = steps.length
-  // what it changed: the server's counts from the run's undo steps when it kept them, else the log's calls
-  const changed = followUp && !running ? (record && record.revised != null ? changeSummary(record) : followUpSummary(rows)) : ''
   const values = valuesText(runValues(meta, run))
-  const metaText = changed || [values, count > 0 ? `${count} ${count === 1 ? 'step' : 'steps'}` : '', took].filter(Boolean).join(' · ')
-  const undoable = useUndoRun(ws, chat, run, followUp && !running && !!changed)
-  const [undoing, setUndoing] = useState(false)
-  const undo = () => {
-    setUndoing(true)
-    track('ui-click', { target: `chat:${chat}`, detail: { action: 'undo-follow-up', run } })
-    undoApi
-      .undo(ws)
-      .catch((e: Error) => bus.emit('toast', { text: `Could not undo it: ${e.message}`, kind: 'error' }))
-      .finally(() => setUndoing(false))
-  }
-  const card = (
+  const metaText = [values, count > 0 ? `${count} ${count === 1 ? 'step' : 'steps'}` : '', took].filter(Boolean).join(' · ')
+  return (
     <ToolCard
       className="chat-task"
       data-chat={chat}
       data-role={role}
       data-status={status}
       data-ts={ts}
-      data-run={run}
       data-waiting={waiting || undefined}
-      title={<span className="chat-task-title">{role === 'orient' ? 'Orientation' : taskTitle(meta?.title || title)}</span>}
+      title={<span className="chat-task-title">{taskTitle(meta?.title || title)}</span>}
       meta={metaText || undefined}
       state={status}
       flush
-      lead={brief && !briefAbove ? <span className="chat-task-brief">{brief}</span> : undefined}
+      lead={brief ? <span className="chat-task-brief">{brief}</span> : undefined}
       steps={steps}
       body={error ? <div className="chat-error">{error}</div> : undefined}
       chips={
-        notes || undoable || status === 'failed' ? (
+        notes || status === 'failed' ? (
           <>
             {notes}
-            {undoable ? (
-              <Button variant="ghost" size="sm" icon="undo" className="chat-task-undo" busy={undoing} onClick={undo}>
-                Undo
-              </Button>
-            ) : status === 'failed' ? (
-              <ReportProblemButton description={failureText(`${role === 'orient' ? 'The orientation' : taskTitle(meta?.title || title)} failed.`, meta?.result)} focus={[chat]} className="chat-task-report" />
-            ) : null}
+            {status === 'failed' && <ReportProblemButton description={failureText(`${taskTitle(meta?.title || title)} failed.`, meta?.result)} focus={[chat]} className="chat-task-report" />}
           </>
         ) : undefined
       }
@@ -541,89 +439,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
         if (o) track('agent-row-expand', { target: `chat:${chat}`, detail: { role } })
         setOpen(o)
       }}
-      sections={madeSections(ws, made, { writer })}
+      sections={madeSections(ws, made)}
     />
-  )
-  if (!briefAbove || !brief) return card
-  return (
-    <>
-      <div className="chat-msg chat-user">
-        <UserMessage className="chat-message">
-          <RefText text={brief} workspace={ws} />
-        </UserMessage>
-      </div>
-      {card}
-    </>
-  )
-}
-
-/** Claude Code's API error line in a failed orientation's result, or null. Pure. */
-export function failedApiLine(result: string | null | undefined): string | null {
-  const text = result ?? ''
-  const at = apiErrorAt(text)
-  return at < 0 ? null : text.slice(at).trim()
-}
-
-/** The landing line of a failed orientation: why, in the error's own words on one line; an API error is shown as its
- * card instead (failedApiLine). Pure. */
-export function failedLine(result: string | null | undefined): string {
-  const why = failedApiLine(result) == null ? (result ?? '').split(/\s+/).filter(Boolean).join(' ') : ''
-  if (!why) return 'Orientation failed.'
-  return `Orientation failed: ${why.length > 400 ? `${why.slice(0, 399).trimEnd()}…` : why}${/[.!?…]$/.test(why) ? '' : '.'}`
-}
-
-/** Where the orientation finished, in main: what its first run left for review, then its card. A follow-up has a card of
- * its own where main asked for it. A report counts as the orientation's only when its report pass wrote it (a writer
- * whose meta names the orientation, from before 0.8.0); since 0.8.0 the analyst asks for a report, which is theirs. */
-export function OrientLanding({ ws, chat }: { ws: string; chat: string }) {
-  const log = useAgentLog(ws, chat)
-  const runs = useMemo(() => orientRuns(foldRecords(log.records)), [log.records])
-  const rows = runs[0].rows
-  const proposals = useProposals(ws)
-  const made = useMemo(() => withoutDropped(orientMade(madeBy(rows)), proposals), [rows, proposals])
-  const { metas } = useContext(ThreadsContext)
-  const writer = useMemo(() => (metas ? orientWriterOf(orientWriters(metas.values()), chat, 0) : null), [metas, chat])
-  const report = writer?.status === 'done'
-  const status = runs.length > 1 ? 'done' : (log.meta?.status ?? 'running')
-  // the cards for review are the deck's, counted as the canvas counts them: a label's card is one of them
-  const cards = deckCards(made) || madeCards(made)
-  const list = reviewList({ views: made.views.length, cells: cards, labels: made.labels.length, report })
-  const apiLine = status === 'failed' ? failedApiLine(log.meta?.result) : null
-  return (
-    <div className="chat-msg chat-landing" data-chat={chat}>
-      <p className="chat-text chat-landing-line">
-        {status === 'failed' ? failedLine(log.meta?.result) : status === 'stopped' ? 'Orientation stopped.' : status === 'running' ? 'Orientation is running.' : 'Orientation has finished.'}
-        {status === 'failed' && <ReportProblemButton description={failureText('The orientation failed.', log.meta?.result)} focus={[chat]} className="chat-landing-report" />}
-        {list && (
-          <>
-            {' thimble has '}
-            <ReviewCounts views={made.views.length} cells={cards} labels={made.labels.length} report={report} />
-            {' for you to review.'}
-          </>
-        )}
-      </p>
-      {apiLine && <ApiErrorCard line={apiLine} />}
-      <AgentCard ws={ws} chat={chat} role="orient" title="Orientation" log={log} run={0} />
-    </div>
-  )
-}
-
-/** The review line's counts, each in ink: `3 views`, `17 cards` and `a report`. */
-function ReviewCounts({ views, cells, labels, report }: { views: number; cells: number; labels: number; report: boolean }) {
-  const parts: string[] = []
-  const n = (k: number, one: string, many: string) => k > 0 && parts.push(`${k} ${k === 1 ? one : many}`)
-  n(views, 'view', 'views')
-  n(cells, 'card', 'cards')
-  n(labels, 'label', 'labels')
-  if (report) parts.push('a draft report')
-  return (
-    <>
-      {parts.map((p, i) => (
-        <span key={p}>
-          {i > 0 && (i === parts.length - 1 ? ' and ' : ', ')}
-          <b className="chat-landing-count">{p}</b>
-        </span>
-      ))}
-    </>
   )
 }

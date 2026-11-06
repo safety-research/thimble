@@ -1,5 +1,5 @@
 // Export: the formats the server offers for the document shown (GET …/exports), each saved as a file (GET
-// …/export/{fmt}). A format this machine cannot make (no browser for PDF or video, no ffmpeg) stays in the menu,
+// …/export/{fmt}). A format this machine cannot make (no browser for PDF) stays in the menu,
 // disabled, with the server's reason as its tip. A page's HTML is the page as it is shown, built here as before.
 import { useState } from 'react'
 import { Menu, type MenuItem } from '../components/Menu'

@@ -33,7 +33,7 @@ const label: Concept = {
   kind: 'prompt',
   spec: '',
   labels: ['message to other runs', 'posts links', 'other'],
-  created_by: 'orient',
+  created_by: 'chat:main',
   ts: '',
   classes: [
     { name: 'message to other runs', color: 1, highlight: true },

@@ -10,23 +10,14 @@ import pytest
 
 # the hints the subagent paths name (prompts/tools.md), each with its placeholders, so a test reads what was filled in
 HINTS = {
-    "start_orientation-subagent": "AGENT CALL {input}",
-    "critique-subagent": "AGENT CALL {input}",
-    "orient-subagent-prompt": "{request_id}\nREQUEST {request}",
-    "orient-subagent-message": "SEND TO {agent}\n{text}",
     "writer-context-file": "READ {path} FIRST",
     "writer-context-files": "READ {n} FILES {paths} FIRST",
-    "critic-brief-file": "READ {path} FIRST",
-    "critic-brief-files": "READ {n} FILES {paths} FIRST",
     "check-task-files": "READ {n} FILES {paths} FIRST",
-    "orient-continue-earlier-session": "EARLIER SESSION: {session}",
-    "orient-continue-earlier-version": "EARLIER VERSION",
+    "agent-continue-earlier-session": "EARLIER SESSION: {session}",
+    "agent-continue-earlier-version": "EARLIER VERSION",
     "main-stopped-note": "MAIN STOPPED",
     "thread-stopped-note": "THREAD STOPPED {thread} {agent_id}",
     "follow-up-ran-on": "RAN ON {model} {effort}",
-    "orient-continuation-prompt": "{request_id}\nSUMMARY {summary}\nCARDS {cards}\nTRANSCRIPTS {transcripts}\n"
-                                  "MESSAGE {message}",
-    "message_orientation-continues": "CONTINUE WITH AGENT CALL {input}",
 }
 
 

@@ -1,8 +1,7 @@
 // Inline SVG icons: glyphs in a 24x24 box, stroke 1.75, round caps and joins, no fill, except the filled silhouettes
 // (FILLED). Dots are zero-length round-capped segments so they scale with the stroke. Most glyphs are drawn for
 // thimble; seven follow published icon sets, whose licenses need the notice below in every copy, the built UI included.
-// A comment that opens with /*! is one the production build keeps, and scripts/third_party_notices.py copies it into a
-// release's THIRD_PARTY_NOTICES.
+// A comment that opens with /*! is one the production build keeps.
 /*! The gear, branch and reader glyphs follow the settings, git-branch and book-open icons of Feather, Copyright (c)
  * 2013-2023 Cole Bemis; the edit glyph follows the pencil icon of Tabler Icons, Copyright (c) 2020-2026 Paweł Kuna.
  * Both under the MIT License: Permission is hereby granted, free of charge, to any person obtaining a copy of this
@@ -131,10 +130,6 @@ export type IconName =
   | 'markdown'
   | 'pause'
   | 'exclaim'
-  | 'card-right'
-  | 'card-left'
-  | 'card-full'
-  | 'card-none'
 
 const BUBBLE = 'M12 3a8.5 8.5 0 0 1 0 17c-1.6 0-3.1-.45-4.4-1.2L3.5 20l1.2-4.1A8.5 8.5 0 0 1 12 3z'
 
@@ -256,16 +251,9 @@ const PATHS: Record<IconName, string> = {
   sliders: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4',
   image: 'M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM4 16.5l4.5-4.5 4 4 2.5-2.5 5 5M15.5 8.5h.01',
   markdown: 'M3.5 6h17a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-17a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM6 15V9l2.75 3L11.5 9v6M17 9v6M14.75 12.75L17 15l2.25-2.25',
-  // a pause (the video's Pause) and an exclamation mark, drawn for the permission modes Manual and Bypass, beside Auto's
-  // play triangle `run`
+  // a pause and an exclamation mark, drawn for the permission modes Manual and Bypass, beside Auto's play triangle `run`
   pause: 'M9 5.5v13M15 5.5v13',
   exclaim: 'M12 4.5v10M12 19.5h.01',
-  // where a story section's card stands (the story editor's section bar), drawn as alignment glyphs are, the text as
-  // lines and the card as a box: at the right of the text, at its left, across the page under it, and no card
-  'card-right': 'M3 7h8M3 12h8M3 17h5M14.5 5h5a1.5 1.5 0 0 1 1.5 1.5v11a1.5 1.5 0 0 1-1.5 1.5h-5a1.5 1.5 0 0 1-1.5-1.5v-11A1.5 1.5 0 0 1 14.5 5z',
-  'card-left': 'M13 7h8M13 12h8M13 17h5M4.5 5h5A1.5 1.5 0 0 1 11 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 3 17.5v-11A1.5 1.5 0 0 1 4.5 5z',
-  'card-full': 'M3 4h18M3 8h12M4.5 12h15a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-5A1.5 1.5 0 0 1 4.5 12z',
-  'card-none': 'M3 7h18M3 12h18M3 17h12',
 }
 
 /** The glyphs drawn as a filled shape: the path takes currentColor as its fill and no stroke. */

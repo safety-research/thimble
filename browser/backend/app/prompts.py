@@ -29,8 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR") or REPO_ROOT / "prompts").resolve()
 
 # The files a model call sends as they are rendered: main (the analyst session's system-prompt append), shared (rules
-# main's and the orientation's prompts include), tools, dev, labels (the label classifier's system prompt), context
-# (what the context engine renders for writers, checks and critiques), card-check (card_check.py's calls), view-review
+# main's prompt includes), tools, dev, labels (the label classifier's system prompt), context
+# (what the context engine renders for writers and checks), card-check (card_check.py's calls), view-review
 # (the view reviewer's registered prompt, its `review` section), dev-view-review (a review run's prompt), dev-view-task
 # (a view build's prompt), dev-view-repair (what a repair's builder gets besides it), dev-view-change (a change to a
 # view, sent to its builder), dev-view-message (a message about a built view from its thread, sent to its builder),
@@ -339,19 +339,6 @@ def render_head(name: str, values: dict[str, str]) -> str:
 def render_section(name: str, heading: str, values: dict[str, str]) -> str:
     """section(name, heading) with its slots filled from `values`, as render fills a whole file."""
     return _fill(section(name, heading), values, f"{_norm(name)} ## {heading}")
-
-
-def agent_prompt(name: str, values: dict[str, str]) -> str:
-    """The body of an agent definition among AGENT_FILES with its includes pasted in and its slots filled from `values`,
-    for an agent whose body is a template (orient.md). PromptError where render raises it, or when the file does not
-    open with its frontmatter."""
-    if name not in AGENT_FILES:
-        raise PromptError(f"{name!r} is not an agent definition ({', '.join(AGENT_FILES)})")
-    text = render(name, values)
-    _, sep, body = text.removeprefix("---\n").partition("\n---\n")
-    if not text.startswith("---\n") or not sep:
-        raise PromptError(f"{_norm(name)}: an agent definition opens with its frontmatter between two `---` lines")
-    return body.strip()
 
 
 _HEADING_RE = re.compile(r"^(#{1,4}) (.+?)[ \t]*$")

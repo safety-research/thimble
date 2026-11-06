@@ -46,7 +46,6 @@ export const CLIENT_KINDS = [
   'filter-set',
   'filter-clear',
   'report-frame-edit',
-  'rewrite-span',
   'error',
   'ui-click',
   'ui-select',
@@ -247,8 +246,6 @@ export function classifyRequest(method: string, url: string, body?: string | nul
     const thread = str(payload.thread)
     return { kind: 'ask-send', target: k === 'main' ? 'chat:main' : thread ? `chat:${thread}` : null, detail: { event: k, chars: (str(payload.text) ?? '').length } }
   }
-  // a message typed into the orientation's thread, which resumes it or waits in its queue
-  if (a === 'orientation' && b === 'message' && method === 'POST') return { kind: 'ask-send', target: 'chat:orient', detail: { event: 'orient-follow-up', chars: (str(B()?.text) ?? '').length } }
   if (a === 'filters') {
     if (method === 'PUT') {
       const o = B()
@@ -266,14 +263,6 @@ export function classifyRequest(method: string, url: string, body?: string | nul
       return { kind: 'cell-edit', target: cell, detail: { field: 'code' in o ? 'code' : 'title' in o ? 'title' : 'payload' } }
     }
     if (!c && method === 'DELETE') return { kind: 'cell-delete', target: cell }
-  }
-  if (a === 'investigations' && parts[3]) {
-    const slug = decodeURIComponent(parts[3])
-    if (parts[4] === 'rewrite' && method === 'POST') {
-      const o = B()
-      return { kind: 'rewrite-span', target: str(o?.span), detail: { text: text(o?.instruction) } }
-    }
-    if (parts[4] === 'frame' && parts[5] && method !== 'GET') return { kind: 'report-frame-edit', target: `report:${slug}`, detail: { unit: parts[5], method: method.toLowerCase() } }
   }
   return null
 }

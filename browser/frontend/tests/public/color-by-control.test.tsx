@@ -48,7 +48,7 @@ const label: Concept = {
   kind: 'prompt',
   spec: '',
   labels: ['posts links', 'other'],
-  created_by: 'orient',
+  created_by: 'chat:main',
   ts: '',
   glob: 'revisions.jsonl',
   n_labeled: 12,

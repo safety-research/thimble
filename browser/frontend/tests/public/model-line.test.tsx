@@ -9,7 +9,7 @@ import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const SETTINGS = { models: { orient: { model: 'claude-opus-5-5', effort: 'ultracode', fast: true }, dev: { model: 'claude-custom-9', effort: 'high' } } }
+const SETTINGS = { models: { writer: { model: 'claude-opus-5-5', effort: 'xhigh', fast: false }, dev: { model: 'claude-custom-9', effort: 'high' } } }
 
 beforeEach(() => {
   invalidateSettings('mini')
@@ -47,9 +47,9 @@ describe("fast mode's bolt", () => {
   })
 
   test("is not drawn on the line of one of thimble's agents, which has no fast mode of its own", async () => {
-    const el = await mount(<ModelLine model="claude-opus-5-5" effort="high" noFast label="the orientation" />)
+    const el = await mount(<ModelLine model="claude-opus-5-5" effort="high" noFast label="the view build" />)
     expect(el.querySelector('.fast-bolt')).toBeNull()
-    expect(el.querySelector('button[aria-label="Effort for the orientation"]')).not.toBeNull()
+    expect(el.querySelector('button[aria-label="Effort for the view build"]')).not.toBeNull()
   })
 
   test('says why where it cannot be switched, and shows on keyboard focus too', async () => {

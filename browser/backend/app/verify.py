@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from . import cite, config, heal, investigation, jobs, notebook, refs, undo
+from . import cite, config, heal, investigation, jobs, notebook, refs
 
 log = logging.getLogger("thimble.verify")
 router = APIRouter()
@@ -184,14 +184,9 @@ def _links_version(cell: dict) -> str:
 
 def _enqueue_links(c: str, cell: dict, version: str) -> bool:
     cid = str(cell.get("id") or "")
-    # The job's repair of the takeaway runs in a worker outside the tool call, so it takes the undo batch the call was
-    # in
-    # (undo.py, batches).
-    batch = undo.current_batch()
 
     async def job() -> None:
-        with undo.batching(batch):
-            await _links_job(c, cid, version)
+        await _links_job(c, cid, version)
 
     return jobs.enqueue("links", f"card:{cid}", version, job, workspace=c,
                         on_failed=lambda note: _links_failed(c, cid, version, note))

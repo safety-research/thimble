@@ -67,7 +67,7 @@ async function gate() {
 }
 
 describe('the sign-in gate', () => {
-  test('the lines are the contract the server and the release test share, and each starts by saying the browser is not signed in', async () => {
+  test('each line starts by saying the browser is not signed in, and ends with the way in', async () => {
     const { SIGN_IN_LINE, CODE_GONE_LINE } = await gate()
     expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Open the new link in the terminal where `thimble-browser` runs.")
     expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Open the new link in the terminal where `thimble-browser` runs.")

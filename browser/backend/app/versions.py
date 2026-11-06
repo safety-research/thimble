@@ -24,8 +24,6 @@ log = logging.getLogger(__name__)
 
 DIR = "versions"
 WHAT_CHANGED = "what changed"  # the heading of the writer's closing section
-UNIT_KEYS = ("sections", "slides", "beats")
-UNIT_NOUNS = {"sections": "section", "slides": "slide", "beats": "beat"}
 SUMMARY_LINES = 5
 LINE_CHARS = 500
 NAMES_CAP = 3
@@ -104,33 +102,28 @@ def _pop_body_tail(unit: dict[str, Any]) -> list[str]:
 
 def pop_what_changed(raw: Any) -> list[str]:
     """Remove the writer's closing "What changed" block from its raw output, in place, and return its lines. Only the
-    last unit is looked at, and it is dropped whole when it is the block, unless it is the whole document."""
-    if not isinstance(raw, dict):
+    last section is looked at, and it is dropped whole when it is the block, unless it is the whole document."""
+    items = raw.get("sections") if isinstance(raw, dict) else None
+    if not isinstance(items, list) or not items:
         return []
-    for key in UNIT_KEYS:
-        items = raw.get(key)
-        if not isinstance(items, list) or not items:
-            continue
-        last = items[-1]
-        if not isinstance(last, dict):
+    last = items[-1]
+    if not isinstance(last, dict):
+        return []
+    if _norm_heading(last.get("heading") or last.get("title")) == WHAT_CHANGED:
+        if len(items) < 2:
             return []
-        if _norm_heading(last.get("heading") or last.get("title")) == WHAT_CHANGED:
-            if len(items) < 2:
-                return []
-            lines = _lines_of(last)
-            del items[-1]
-            return lines
-        return _pop_body_tail(last)
-    return []
+        lines = _lines_of(last)
+        del items[-1]
+        return lines
+    return _pop_body_tail(last)
 
 
 # --------------------------------------------------------------------------- the fallback summary
 
 
-def _units(doc: dict[str, Any]) -> tuple[str, list[tuple[tuple[str, int], str, str]]]:
+def _units(doc: dict[str, Any]) -> list[tuple[tuple[str, int], str, str]]:
     from . import report_types  # noqa: PLC0415
 
-    noun = next((UNIT_NOUNS[k] for k in UNIT_KEYS if isinstance(doc.get(k), list)), "section")
     out: list[tuple[tuple[str, int], str, str]] = []
     seen: dict[str, int] = {}
     for u in report_types.units(doc):
@@ -141,7 +134,7 @@ def _units(doc: dict[str, Any]) -> tuple[str, list[tuple[tuple[str, int], str, s
         seen[name] = seen.get(name, 0) + 1
         # a unit with no heading is named by its first sentence whole, never cut mid-word
         out.append(((name, seen[name]), heading or (texts[0] if texts else ""), text))
-    return noun, out
+    return out
 
 
 def _names(items: list[str]) -> str:
@@ -157,8 +150,7 @@ def _plural(n: int, noun: str) -> str:
 def fallback_summary(prev: dict[str, Any] | None, doc: dict[str, Any]) -> list[str]:
     """A section-level diff in plain lines: the title, the units added, removed and reworded, and how many kept their
     text."""
-    noun, new = _units(doc)
-    _, old = _units(prev or {})
+    new, old = _units(doc), _units(prev or {})
     old_by = {k: t for k, _, t in old}
     new_by = {k: t for k, _, t in new}
     added = [h for k, h, _ in new if k not in old_by]
@@ -169,15 +161,15 @@ def fallback_summary(prev: dict[str, Any] | None, doc: dict[str, Any]) -> list[s
     if prev is not None and plain(prev.get("title")) != plain(doc.get("title")):
         lines.append(f"The title changed to “{plain(doc.get('title'))}”.")
     if added:
-        lines.append(f"{_plural(len(added), noun)} added: {_names(added)}.")
+        lines.append(f"{_plural(len(added), 'section')} added: {_names(added)}.")
     if removed:
-        lines.append(f"{_plural(len(removed), noun)} removed: {_names(removed)}.")
+        lines.append(f"{_plural(len(removed), 'section')} removed: {_names(removed)}.")
     if reworded:
-        lines.append(f"{_plural(len(reworded), noun)} reworded: {_names(reworded)}.")
+        lines.append(f"{_plural(len(reworded), 'section')} reworded: {_names(reworded)}.")
     if not lines:
-        return [f"No {noun} changed."]
+        return ["No section changed."]
     if kept:
-        lines.append(f"{_plural(kept, noun)} kept as written.")
+        lines.append(f"{_plural(kept, 'section')} kept as written.")
     return lines[:SUMMARY_LINES]
 
 

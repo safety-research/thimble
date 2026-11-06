@@ -1,4 +1,4 @@
-// Comment on a selection where a document shows without its editor (a slide, a story's beat, a page's claims): a
+// Comment on a selection where a document shows without its editor (a page's claims): a
 // selection that starts in a sentence (selection.ts sidAt) shows a one-button bar; the button opens a new-comment card,
 // and Enter stores the comment on that sentence (commentsApi.add). Escape or an empty field drops it. The bar and the
 // card are fixed to the viewport and re-placed on scroll.
@@ -33,7 +33,7 @@ interface Spot {
 }
 
 /** The sentence a selection in the view comments on, and the selection's range; null when it starts outside the view,
- * is empty, or names no sentence. The search stays in the slide, beat or claim it starts in: the nearest element with a
+ * is empty, or names no sentence. The search stays in the claim it starts in: the nearest element with a
  * ⌘ anchor that is no sentence of its own. */
 export function spotOf(sel: Selection | null, root: HTMLElement | null): Spot | null {
   if (!sel || !root || sel.isCollapsed || !sel.rangeCount) return null

@@ -949,56 +949,6 @@ def own_stamp(c: str, slug: str, raw: dict[str, Any]) -> bool:
     return bool(VERSION_RE.match(version)) and (_versions_dir(c, slug) / version / VIEW_JSON).is_file()
 
 
-def keep_installed(ws: Path) -> list[str]:
-    """The copies kept at their versions (VERSIONS_SUBDIR) of the views of a workspace folder thimble installs whole (a
-    pre-cache, demo.install), which carries the views' files with their `version` stamps but not thimble's state of
-    them: a view whose files still hash to its stamp gets that copy, so readers see it as it passed when the pre-cache
-    was made (read_built) rather than nothing until its checks run again here. The slugs kept."""
-    root = ws / LOCAL_SUBDIR / VIEWS_SUBDIR
-    kept: list[str] = []
-    if not root.is_dir() or root.is_symlink():
-        return kept
-    for d in sorted(root.iterdir()):
-        if not SLUG_RE.match(d.name) or not d.is_dir() or d.is_symlink():
-            continue
-        raw = _view_json(d)
-        version = str(raw.get("version") or "")
-        if raw.get("built") and VERSION_RE.match(version) and view_digest(d)[:12] == version:
-            _keep_version(d, ws / VIEWS_SUBDIR / VERSIONS_SUBDIR / d.name, version)
-            kept.append(d.name)
-    return kept
-
-
-def install_view(ws: Path, src: Path, slug: str | None = None) -> str:
-    """The view in the folder `src` (its view.json, reader.py, view.html and vendored packages) installed as the view
-    `slug`, by default the folder's name, of the workspace folder `ws`, replacing a view of that slug: stamped built at
-    its files' digest, with the copy kept at that version, as keep_installed leaves a pre-cache's views, so readers see
-    it at once without its checks running here (read_built). The folder is written beside the views and renamed into
-    place, so a server reading the workspace meanwhile never sees it half written. The version."""
-    slug = _check_slug(slug or src.name)
-    root = ensure_local(ws) / VIEWS_SUBDIR
-    tmp = root / f".{slug}.install-{os.getpid()}-{time.monotonic_ns()}"
-    old = tmp.with_name(tmp.name.replace(".install-", ".old-"))
-    tmp.mkdir()
-    try:
-        for name in (READER_PY, VIEW_HTML):
-            shutil.copyfile(src / name, tmp / name)
-        view_libs.copy_lib(src, tmp)
-        raw = {k: v for k, v in _view_json(src).items() if k not in ("built", "version")}
-        write_json(tmp / VIEW_JSON, raw)
-        version = view_digest(tmp)[:12]
-        write_json(tmp / VIEW_JSON, {**raw, "built": _now(), "version": version})
-        _keep_version(tmp, ws / VIEWS_SUBDIR / VERSIONS_SUBDIR / slug, version)
-        if (root / slug).exists():
-            (root / slug).rename(old)
-        tmp.rename(root / slug)
-    except BaseException:
-        nofollow.rmtree(tmp, ignore_errors=True)
-        raise
-    nofollow.rmtree(old, ignore_errors=True)
-    return version
-
-
 def _keep_version(src: Path, root: Path, version: str, stamped: dict[str, Any] | None = None) -> None:
     """The files of the view folder `src` kept at `version` in `root`, the newest VERSIONS_KEPT of its versions, with
     `stamped` as the copy's view.json when given."""
@@ -2537,7 +2487,7 @@ def title_case(name: Any) -> str:
 #
 # In the code such a view proposal is an offer, unlike main's proposals (propose), which build at once. It is a proposal
 # row with `status: "suggested"` and an `offered` object {at, after, why}: when it was shown, what it came after
-# ("main", "thread:<id>", "orientation" or "file") and why. At most one waits at a time (open_offer), and it waits until
+# ("main", "thread:<id>" or "file") and why. At most one waits at a time (open_offer), and it waits until
 # the analyst answers it: Accept queues it as a view the analyst asked for, Reject drops it. The answer is stamped on
 # the row (`answer`, `answered_at`), so the proposer sees which views the analyst rejected. proposer.json holds the
 # proposer's pending job (proposer_state), which proposer.py writes under the file's lock.
@@ -2545,7 +2495,7 @@ def title_case(name: Any) -> str:
 PROPOSE_ENV = "THIMBLE_PROPOSE_VIEWS"  # "off" turns view proposals off, whatever thimble's config says (the test suite)
 PROPOSER_FILE = "proposer.json"  # in the views state folder: {job} (proposer_state)
 PROPOSER_DEFAULTS: dict[str, Any] = {"job": None}
-OFFER_AFTER = ("main", "orientation", "file")  # what a view proposal comes after, or "thread:<id>"
+OFFER_AFTER = ("main", "file")  # what a view proposal comes after, or "thread:<id>"
 OFFER_OPEN = "a view proposal already waits for the analyst's answer"
 
 
@@ -2626,7 +2576,7 @@ def offer(c: str, *, name: str, description: str, task: str, claims: Any, after:
         if not value:
             return None, f"the view proposal has no {field_name}"
     if not _after_ok(after):
-        return None, f"the view proposal comes after {after!r}, not main, thread:<id>, orientation or file"
+        return None, f"the view proposal comes after {after!r}, not main, thread:<id> or file"
     taken = f"the name {name!r} is taken by a proposal, a view or a deleted proposal"
     if name.casefold() in _names_taken(c):
         return None, taken
@@ -3027,24 +2977,6 @@ def discard(c: str, slug: str) -> dict[str, Any]:
     _emit(c, slug, "built", chat=prop.get("chat"))
     dev._view_cleared(c, slug)
     return {"ok": True}
-
-
-def drop(c: str, slug: str, why: str) -> dict[str, Any] | None:
-    """Leave the proposal of an orientation from before 0.8.0 out once the analyst stopped the orientation before its
-    view was built (dev.stop_orientation_views): the row stays as `dropped` with the reason, so every chip that names it
-    knows to hide, its draft folder is removed, and `view {dropped}` goes on the stream. None when there is no such
-    proposal. A proposal whose build failed through its repairs is not dropped: it fails with Retry
-    (dev._repairs_failed)."""
-    prop = update_proposal(c, slug, status="dropped", error=" ".join(str(why or "").split())[:ERROR_MAX] or None)
-    if prop is None:
-        return None
-    d = views_dir(c) / slug
-    if d.is_dir() and not _view_json(d).get("built"):
-        nofollow.rmtree(d, ignore_errors=True)
-        nofollow.rmtree(index_dir(c, slug), ignore_errors=True)
-    _forget(c, slug)
-    _emit(c, slug, "dropped", chat=prop.get("chat"))
-    return prop
 
 
 def delete_proposal(c: str, slug: str) -> None:
@@ -4980,8 +4912,8 @@ async def suggest(c: str, rel: str) -> str | None:
     proposal claiming the suffix's glob (offer, `proposed_by` "files", after "file"), shown on the same card as the
     proposer's, and the suffix's answer `suggested`; a no is the suffix's answer `none`, so it is never asked again. The
     view proposal's slug, or None. No call is made while view proposals are off (propose_enabled), one waits, or views
-    cannot be built here. A call that fails, or a view proposal that offer refuses, caches nothing, so the next file of the type
-    asks again. A call that fails is also a notice, with Try again (_check_failed); a call that answers
+    cannot be built here. A call that fails, or a view proposal that offer refuses, caches nothing, so the next file of
+    the type asks again. A call that fails is also a notice, with Try again (_check_failed); a call that answers
     clears it, or, when its view proposal came from the refusal row's model, says so (SUGGEST_FALLBACK)."""
     if not await asyncio.to_thread(propose_enabled, c) or await asyncio.to_thread(open_offer, c) is not None:
         return None

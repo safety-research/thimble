@@ -86,8 +86,7 @@ Color by does, and draw no color.
 
 [plugin/viewers/timeline](../plugin/viewers/timeline), one of the worked examples the dev agent reads, uses it: a
 ferry operator's alerts, deploys, chat and tickets on one time axis, colored by a source or a label, with the time
-range selector ([time-range.md](time-range.md)) above its lanes. `thimble demo --examples` opens it, and the other
-worked examples, each on its sample with its sample labels, on the server of your stack.
+range selector ([time-range.md](time-range.md)) above its lanes.
 
 ## Mount it
 

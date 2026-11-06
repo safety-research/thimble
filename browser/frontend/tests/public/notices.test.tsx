@@ -56,14 +56,14 @@ describe('a notice as the server sends it', () => {
     dispatch({ type: 'notice', id: 'n1', key: 'proposals', kind: 'proposals', text: SIGN_IN, agent: 'View proposals', chat: null, action: TRY, foreground: true } as never)
     dispatch({ type: 'notice', id: 'n1', key: 'proposals', cleared: true } as never)
     dispatch({ type: 'notice', chat: 'main', dismissed: true, key: 'safeguards-fallback' } as never)
-    dispatch({ type: 'notice', id: 'n2', chat: 'orient-1', text: DOWNGRADE } as never, true)
+    dispatch({ type: 'notice', id: 'n2', chat: 'writer-1', text: DOWNGRADE } as never, true)
     dispatch({ type: 'notice', chat: 't1', text: '' } as never)
     off()
     expect(got).toEqual([
       { chat: null, notice: { id: 'n1', key: 'proposals', kind: 'proposals', text: SIGN_IN, agent: 'View proposals', action: TRY }, gone: null, foreground: true, replay: false },
       { chat: null, notice: null, gone: { id: 'n1', key: 'proposals' }, foreground: false, replay: false },
       { chat: 'main', notice: null, gone: { key: 'safeguards-fallback' }, foreground: false, replay: false },
-      { chat: 'orient-1', notice: { id: 'n2', chat: 'orient-1', text: DOWNGRADE }, gone: null, foreground: true, replay: true },
+      { chat: 'writer-1', notice: { id: 'n2', chat: 'writer-1', text: DOWNGRADE }, gone: null, foreground: true, replay: true },
     ])
   })
 })
@@ -73,7 +73,7 @@ describe('the row in a chat', () => {
     const rows = foldRecords([
       record('n1', "Couldn't check for a view proposal: the request timed out.", { key: 'proposals', action: TRY }),
       { type: 'user', text: 'Which agents merged most?', by: 'browser' },
-      record('d1', DOWNGRADE, { kind: 'safeguards', agent: 'Orientation' }),
+      record('d1', DOWNGRADE, { kind: 'safeguards', agent: 'Writer: report' }),
       record('n2', SIGN_IN, { key: 'proposals', action: TRY }),
       record('x', ''),
       { type: 'notice', dismissed: true, key: 'proposals' } as ChatRecord,
@@ -82,7 +82,7 @@ describe('the row in a chat', () => {
     expect(rows.map((r) => r.kind)).toEqual(['notice', 'user', 'notice', 'notice'])
     const [first, , down, again] = rows as NoticeRowT[]
     expect(first).toMatchObject({ index: 0, id: 'n2', key: 'proposals', text: SIGN_IN, closed: true })
-    expect(down).toMatchObject({ id: 'd1', noticeKind: 'safeguards', agent: 'Orientation', text: DOWNGRADE, closed: false })
+    expect(down).toMatchObject({ id: 'd1', noticeKind: 'safeguards', agent: 'Writer: report', text: DOWNGRADE, closed: false })
     expect(again).toMatchObject({ index: 6, id: 'n3', text: BLOCKED, closed: false })
   })
 
@@ -127,7 +127,7 @@ describe('the strip above the composer, and the rows', () => {
     vi.unstubAllGlobals()
   })
 
-  const labels = new Map([['orient-1', 'orient'], ['dev-1', 'dev · view Agent Network']])
+  const labels = new Map([['writer-1', 'writer'], ['dev-1', 'dev · view Agent Network']])
   /** The strip of workspace `ws` (one per test: the open notices are kept per workspace) in the chat `current`. */
   async function strip(ws: string, current = 'main', onOpen: (chat: string) => void = () => undefined) {
     const el = await mount(<NoticeStrip ws={ws} current={current} labels={labels} onOpen={onOpen} />)
@@ -172,23 +172,23 @@ describe('the strip above the composer, and the rows', () => {
   })
 
   test('a command in the text is code; with no agent named, the thread it happened in names it', async () => {
-    open = [{ id: 'n1', text: SIGN_IN, action: TRY }, { id: 'n2', chat: 'orient-1', text: DOWNGRADE }]
+    open = [{ id: 'n1', text: SIGN_IN, action: TRY }, { id: 'n2', chat: 'writer-1', text: DOWNGRADE }]
     const el = await strip('nt-code')
     expect([...el.querySelectorAll('.chat-notice-text code')].map((c) => c.textContent)).toEqual(['claude auth login', 'thimble server restart'])
-    expect(el.querySelectorAll('.chat-notice-agent')[0]?.textContent).toBe('orient')
+    expect(el.querySelectorAll('.chat-notice-agent')[0]?.textContent).toBe('writer')
   })
 
   test("the stream's notices come in live: one under a key shown replaces it in place, a cleared one goes, a replayed one is left to the read", async () => {
     open = [{ id: 'n1', key: 'proposals', text: BLOCKED, action: TRY }]
     const el = await strip('nt-live')
-    await live({ id: 'd1', key: 'safeguards-fallback', chat: 'orient-1', agent: 'Orientation', text: DOWNGRADE, foreground: true })
-    expect(lines(el)).toEqual([BLOCKED, `Orientation ${DOWNGRADE}`])
+    await live({ id: 'd1', key: 'safeguards-fallback', chat: 'writer-1', agent: 'Writer: report', text: DOWNGRADE, foreground: true })
+    expect(lines(el)).toEqual([BLOCKED, `Writer: report ${DOWNGRADE}`])
     await live({ id: 'n2', key: 'proposals', text: SIGN_IN, action: TRY, foreground: true })
-    expect(lines(el)).toEqual([SIGN_IN.replace(/`/g, ''), `Orientation ${DOWNGRADE}`])
+    expect(lines(el)).toEqual([SIGN_IN.replace(/`/g, ''), `Writer: report ${DOWNGRADE}`])
     await live({ id: 'n2', key: 'proposals', cleared: true })
-    expect(lines(el)).toEqual([`Orientation ${DOWNGRADE}`])
+    expect(lines(el)).toEqual([`Writer: report ${DOWNGRADE}`])
     await act(async () => dispatch({ type: 'notice', id: 'old', text: BUILD } as never, true))
-    expect(lines(el)).toEqual([`Orientation ${DOWNGRADE}`])
+    expect(lines(el)).toEqual([`Writer: report ${DOWNGRADE}`])
   })
 
   test('a notice the stream sends while the read is under way is kept over its answer', async () => {
@@ -200,14 +200,14 @@ describe('the strip above the composer, and the rows', () => {
   })
 
   test('the strip follows the analyst: the same notices in main and in a thread; Open goes to the thread and is gone there', async () => {
-    open = [{ id: 'd1', chat: 'orient-1', agent: 'Orientation', text: DOWNGRADE }]
+    open = [{ id: 'd1', chat: 'writer-1', agent: 'Writer: report', text: DOWNGRADE }]
     const opened: string[] = []
     let el = await strip('nt-follow', 'main', (c) => opened.push(c))
     await click(el.querySelector('.chat-notice-open'))
-    expect(opened).toEqual(['orient-1'])
+    expect(opened).toEqual(['writer-1'])
     unmountAll()
-    el = await strip('nt-follow', 'orient-1')
-    expect(lines(el)).toEqual([`Orientation ${DOWNGRADE}`])
+    el = await strip('nt-follow', 'writer-1')
+    expect(lines(el)).toEqual([`Writer: report ${DOWNGRADE}`])
     expect(el.querySelector('.chat-notice-open')).toBeNull()
     unmountAll()
     el = await strip('nt-follow', 'thread-9')

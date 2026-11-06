@@ -1,13 +1,10 @@
 // The Claude Code session behind the workspace, as the whole page shows it. While no session is attached to main, the
 // shell is greyed out and inert under a scrim and one card (portaled to the body, with every other body layer inert
 // too) that gives the command to reconnect. thimble's agents are subagents of that session, so they stopped with it:
-// the card names them, and says that a message continues the orientation once the session is back
-// (stoppedAgentsLine). A code ticket's session goes on without main, so the permission card with its requests shows
-// under the card, where it can be answered. It goes when a session attaches, and is not shown while the stream is
-// down, unless main's session had ended before it went down (the server stops itself after a quit). A session that
-// takes main over from another terminal is followed at once, with a toast. A workspace `thimble demo` installed from a
-// pre-cache, and a worked example's that `thimble demo --examples` opened (the start page's `example` row), are static:
-// each is read without a session until the first attaches, so the card waits for that session's end there.
+// the card names them (stoppedAgentsLine). A code ticket's session goes on without main, so the permission card with
+// its requests shows under the card, where it can be answered. It goes when a session attaches, and is not shown while
+// the stream is down, unless main's session had ended before it went down (the server stops itself after a quit). A
+// session that takes main over from another terminal is followed at once, with a toast.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ThreadsContext } from '../chat/Notes'
@@ -18,7 +15,7 @@ import { useChatMetas } from '../chat/waiting'
 import { Button } from '../components/Button'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import type { ChatMeta, CorpusInfo, SessionEnded, WorkspaceRow } from '../lib/types'
+import type { ChatMeta, CorpusInfo, SessionEnded } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { copyText } from './ProblemReport'
 
@@ -75,32 +72,24 @@ function Wrapped({ text }: { text: string }) {
 }
 
 /** The agents of thimble's that main's quit stopped (route `subagent`, stopped by `quit`), as the card names them: the
- * orientation, the writer of a document, a check; '' when none. Pure. */
+ * writer of a document, a check; '' when none. Pure. */
 export function stoppedAgentsLine(metas: Iterable<ChatMeta>): string {
   const names: string[] = []
-  let orient = false
   for (const m of metas) {
     if (m.route !== 'subagent' || m.status !== 'stopped' || m.stopped_by !== 'quit') continue
-    const name = m.role === 'orient' ? 'the orientation' : m.role === 'writer' ? (m.doc ? `the writer of the ${m.doc}` : 'a writer') : m.role === 'check' ? (m.title ? `the ${m.title} check` : 'a check') : m.title || 'an agent'
-    if (m.role === 'orient') orient = true
+    const name = m.role === 'writer' ? (m.doc ? `the writer of the ${m.doc}` : 'a writer') : m.role === 'check' ? (m.title ? `the ${m.title} check` : 'a check') : m.title || 'an agent'
     if (!names.includes(name)) names.push(name)
   }
   if (!names.length) return ''
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0]
-  return `thimble's agents stopped with it: ${list}.${orient ? ' Once it is back, send the orientation a message to continue it.' : ''}`
+  return `thimble's agents stopped with it: ${list}.`
 }
 
 /** Whether main's meta, once loaded, has no session attached while the stream is up, or after main's session ended
  * (`ended`), also once the stream went down: the server stops itself soon after the analyst quits, and the card, not
- * the server-down line, says what to run (live check L10); in a workspace read without a session (`readable`: a
- * pre-cache's or a worked example's), only once a session attached and ended. Pure. */
-export function isGone(main: ChatMeta | null | undefined, streamUp: boolean, readable = false): boolean {
-  return !!main && !main.attached && (streamUp || !!main.ended) && !(readable && !main.ended)
-}
-
-/** Whether the workspace `ws` is a worked example's, as the start page lists it (backend start_page.py). Pure. */
-export function isExample(rows: readonly WorkspaceRow[], ws: string): boolean {
-  return rows.some((r) => r.name === ws && r.kind === 'example')
+ * the server-down line, says what to run (live check L10). Pure. */
+export function isGone(main: ChatMeta | null | undefined, streamUp: boolean): boolean {
+  return !!main && !main.attached && (streamUp || !!main.ended)
 }
 
 /** Whether main's session is `session`, which took main from `after` in another terminal, while this tab followed
@@ -115,13 +104,10 @@ export function useSessionGone(ws: string): Gone | null {
   const [up, setUp] = useState(true)
   const [due, setDue] = useState(false)
   const [corpus, setCorpus] = useState<CorpusInfo | null>(null)
-  // whether the workspace is a worked example's, null until the start page's rows are read: the card waits for them
-  const [example, setExample] = useState<boolean | null>(null)
   const followed = useRef<string | null>(null)
   useEffect(() => {
     let alive = true
     let timer: number | null = null
-    setExample(null)
     const load = () =>
       api
         .chats(ws)
@@ -135,10 +121,6 @@ export function useSessionGone(ws: string): Gone | null {
       .corpora()
       .then((cs) => alive && setCorpus(cs.find((c) => c.name === ws) ?? null))
       .catch(() => undefined)
-    api
-      .workspaces()
-      .then((rows) => alive && setExample(isExample(rows, ws)))
-      .catch(() => alive && setExample(false))
     const offs = [
       bus.on('chat', (e) => {
         if (e.chat !== 'main') return
@@ -156,7 +138,7 @@ export function useSessionGone(ws: string): Gone | null {
       if (timer != null) window.clearTimeout(timer)
     }
   }, [ws])
-  const gone = isGone(main, up, example !== false)
+  const gone = isGone(main, up)
   useEffect(() => {
     setDue(false)
     if (!gone) return

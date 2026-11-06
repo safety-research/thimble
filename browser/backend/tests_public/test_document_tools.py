@@ -239,7 +239,7 @@ async def test_the_title_has_an_id_the_writer_edits_and_no_section_takes_a_headl
     assert doc["title"] == "A sharper headline" and doc["title_history"][-1]["text"] == "One account issued every deletion"
     assert [s.get("heading") for s in doc["sections"]] == [first.get("heading"), "One account"]
     assert report_types.document_lines(doc)[0] == "# A sharper headline · #title"
-    for extra in ({"delete": True}, {"insert": True}, {"layout": "title"}):
+    for extra in ({"delete": True}, {"insert": True}, {"block_type": "heading"}):
         r = await call("edit_document", span="report:report#title", text="x", **extra)
         assert r.is_error and "is the title" in r.text, (extra, r.text)
     # a locked title is refused, and read_ref's lines say so

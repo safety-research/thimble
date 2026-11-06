@@ -3,7 +3,7 @@
 
 One headless Chromium keeps POOL_PAGES pages loaded on `render.html` (frontend/src/render.tsx), which mounts CardFace
 with a stub canvas context. Each request carries everything the page needs (the card, its resolved refs, card and
-label names, cited calls, the theme), so the page never calls the API. The page comes from THIMBLE_RENDER_URL, the
+label names, the theme), so the page never calls the API. The page comes from THIMBLE_RENDER_URL, the
 Vite dev server in dev mode, or the built UI served from memory at RENDER_ORIGIN. A page is replaced after
 RECYCLE_AFTER renders or any failure; without Playwright or its Chromium, available() is False, why() says why, and
 the harness stays down until the server restarts (headless.py). The browser and its driver close once no card was drawn
@@ -503,25 +503,6 @@ def label_names(c: str, cell: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def call_part(c: str, refs: list[str]) -> dict[str, Any]:
-    """{"calls": {"<chat>/<n>": the call as GET /ws/{c}/calls/{chat}/{n} returns it}} for the calls the refs cite, so a
-    call
-    citation's preview can load; a call not in the store is left out."""
-    from . import calls  # noqa: PLC0415 — calls imports the chat machinery; kept off import time
-
-    out: dict[str, Any] = {}
-    for r in refs:
-        p = calls.parse_ref(r)
-        key = f"{p['chat_id']}/{p['n']}" if p else ""
-        if not key or key in out:
-            continue
-        try:
-            out[key] = calls.whole(c, p["chat_id"], p["n"])
-        except Exception:  # noqa: BLE001 — one call that is gone never stops the card's render
-            continue
-    return {"calls": out} if out else {}
-
-
 def theme(c: str) -> dict[str, str]:
     """The theme the analyst's browser last reported for workspace `c` (PUT /ws/{c}/render/theme), else Warm and iris."""
     try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there (nofollow)
@@ -579,7 +560,6 @@ def request_for(c: str, cell: dict[str, Any], *, width: int | None = None) -> di
         "ws": c,
         "card": card,
         "citations": resolve_all(c, refs),
-        **call_part(c, refs),
         "names": card_names(c, refs, cell),
         "labels": label_names(c, cell),
         "theme": theme(c),

@@ -697,74 +697,16 @@ button.chat-call-chip:hover,
   font: var(--type-mono-sm);
   line-height: 1.6;
 }
-/* a call of the orientation open: its whole output from the store, one numbered line each, the number in the tertiary
-   ink in a gutter as a file's line numbers are, a cited line marked as a table's cited cell is */
+/* an open call: its input fields and its result */
 .chat-call.open .chat-call-body {
   max-height: 360px;
-}
-.chat-call-out {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font: var(--type-mono-sm);
-  line-height: 1.6;
-  color: var(--text-secondary);
-}
-.chat-call-fields + .chat-call-out,
-.chat-tool-fields + .chat-call-out {
-  margin-top: 6px;
 }
 /* a failed call opens on its error, its input under it */
 .chat-call-body > .chat-tool-label:first-child {
   margin-top: 0;
 }
-.chat-call-out + .chat-tool-fields,
-.chat-call-more + .chat-tool-fields,
 .chat-tool-result + .chat-tool-fields {
   margin-top: 10px;
-}
-.chat-call-line {
-  display: flex;
-  gap: 10px;
-  min-width: 0;
-  border-radius: 2px;
-}
-.chat-call-ln {
-  flex: none;
-  min-width: 3ch;
-  text-align: right;
-  color: var(--text-tertiary);
-  user-select: none;
-}
-.chat-call-lt {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.chat-call-out-error .chat-call-lt {
-  color: var(--status-negative);
-}
-.chat-call-more {
-  margin-top: 4px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--text-accent);
-  font: var(--type-ui-sm);
-  cursor: pointer;
-}
-.chat-call-more:hover {
-  text-decoration: underline;
-}
-.chat-call-none {
-  margin-top: 4px;
-  color: var(--text-tertiary);
-  font: var(--type-ui-sm);
-}
-.chat-call-loading {
-  display: flex;
-  padding: 2px 0;
 }
 
 /* the analyst's message stands in from the left, and its right edge is the column's, so it reads apart from the
@@ -809,10 +751,9 @@ button.chat-call-chip:hover,
   gap: 6px;
   margin-left: auto;
 }
-/* a message to the orientation on its way, or queued until the run going on ends, and one to main until main reads it:
-   the analyst's tile, a step quieter, with a line under it while the server holds it */
-.chat-pending,
-.chat-user[data-event='orient-follow-up'] {
+/* a message to main until main reads it: the analyst's tile, a step quieter, with a line under it while the server
+   holds it */
+.chat-pending {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -861,20 +802,6 @@ button.chat-call-chip:hover,
 .chat-chip-settled-failed {
   color: var(--status-negative);
 }
-/* the writer of the report pass of an orientation from before 0.8.0, after its document's chip on its card (AgentCard
-   madeSections): the spinner (or ✕), a quiet word and its thread's chip, until it has written */
-.chat-task-writer {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.chat-task-writer-word {
-  color: var(--text-tertiary);
-  font: 400 11.5px / 1.4 var(--font-body);
-  white-space: nowrap;
-}
-
 /* a view proposal's chip (chat/ViewChip.tsx), the same in main's notes and on a tool or agent card: the view's tab,
    then the build's state after it */
 .view-chip {
@@ -1084,21 +1011,6 @@ button.label-row-chip:hover {
 }
 .chat-divider-text {
   white-space: nowrap;
-}
-
-/* the orientation's end in main: one line of what it left for review, the counts in ink, then its card */
-.chat-landing {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.chat-landing-line {
-  margin: 0;
-  line-height: 1.55;
-}
-.chat-landing-count {
-  color: var(--text-primary);
-  font-weight: 500;
 }
 
 /* a dev ticket's shot: the picture on the cell's paper under a tinted bar that names the phase */
@@ -1857,7 +1769,7 @@ button.chat-strip-head:hover {
 .chat-foot .chat-hold {
   background: color-mix(in oklab, var(--status-warning) 12%, var(--surface-card));
 }
-/* a critique's prompts at the top of its own thread (a step that is a session of its own) */
+/* a step's holds at the top of its own thread (a step that is a session of its own) */
 .chat-step-holds {
   margin: 6px 0;
 }
@@ -1965,37 +1877,7 @@ button.chat-strip-head:hover {
   flex: none;
 }
 
-/* a workspace installed from a pre-cache (chat/Precached): the card at the top of the orientation's thread */
-.precached-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.precached-card .card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.precached-text {
-  margin: 0;
-  color: var(--text-secondary);
-  font: var(--type-body);
-}
-.precached-note {
-  margin: 0;
-  color: var(--text-tertiary);
-  font: var(--type-body-sm);
-}
-
 /* -------- thimble's agents as subagents of main -------- */
-/* the orientation's start before its thread exists: Starting…, in the transcript's quiet ink */
-.chat-starting {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-}
 /* -------- notices (chat/Notice.tsx): a failure of main or of one of thimble's agents with its fix. Above the composer,
    the open ones stack under the view proposal's place, each one line on the warning's wash mixed into the card's own
    surface (the foot floats over the rows), with the warning's edge: the glyph, the agent in bold, the failure and Open,
@@ -2325,7 +2207,7 @@ button.chat-strip-head:hover {
   align-items: center;
   gap: 6px;
 }
-/* what a subagent's card says under its steps: the critic's wait, the terminal, why it stopped */
+/* what a subagent's card says under its steps: the terminal, why it stopped */
 .chat-sub-notes {
   display: flex;
   flex-basis: 100%;
@@ -2339,50 +2221,13 @@ button.chat-strip-head:hover {
   color: var(--text-tertiary);
   overflow-wrap: anywhere;
 }
-.chat-sub-paused {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-secondary) !important;
-}
 .chat-sub-stopped {
   flex-basis: 100%;
   color: var(--text-secondary) !important;
 }
-/* in place of the composer: an orientation an earlier session or version ran, which takes no message here */
-.chat-continue {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: var(--radius-card);
-  background: var(--surface-card);
-  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-  overflow-wrap: anywhere;
-}
-.chat-continue-ico {
-  flex: none;
-  margin-top: 2px;
-}
 /* a request of one of thimble's agents, which the terminal answers: no buttons, the line says where */
 .chat-perm-terminal .chat-perm-why {
   color: var(--text-primary);
-}
-/* a follow-up that was not passed on: the reason, Send again, and the message */
-.chat-not-passed {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.chat-not-passed-text {
-  margin: 0;
-  padding-left: 12px;
-  border-left: 2px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font: var(--type-body-sm);
-  overflow-wrap: anywhere;
 }
 .chat-by {
   margin-bottom: 2px;

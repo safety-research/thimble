@@ -303,25 +303,6 @@ def test_what_sessions_json_names_is_taken_only_where_the_mirror_itself_keeps_it
     assert context.transcript_path(CORPUS) == mirror
 
 
-def test_an_orientation_s_session_a_card_names_in_its_chat_backfills_no_file_outside(mirror, tmp_path_factory):
-    """An orientation's calls are stored from its session's transcripts on their first read, the session named by the
-    orientation's chat's meta, chats/<id>.meta.json, which a card's code writes; the server found the transcript by
-    that name as it was, so a name that was a path had it store the calls of any transcript-shaped file into the
-    workspace, where the card reads them."""
-    from app import agents, calls
-
-    outside = _outside(tmp_path_factory)
-    (outside / "made-up.jsonl").write_text("\n".join(json.dumps(r) for r in (
-        {"type": "assistant", "message": {"role": "assistant", "content": [
-            {"type": "tool_use", "id": "toolu_made_up", "name": "Read", "input": {"file_path": "made-up"}}]}},
-        {"type": "user", "message": {"role": "user", "content": [
-            {"type": "tool_result", "tool_use_id": "toolu_made_up", "content": "OUTSIDE-SECRET"}]}})) + "\n")
-    chat = agents.new_agent(CORPUS, "orient", "made-up orientation", announce=False)
-    agents.update_agent(CORPUS, chat["id"], session=str(outside / "made-up"))
-    assert calls.backfill(CORPUS, chat["id"]) == 0
-    assert not calls.path(CORPUS, chat["id"]).exists()
-
-
 def test_a_workflow_s_folder_a_card_names_in_its_chat_is_not_read(mirror, tmp_path_factory):
     """A workflow's chat keeps the folder of its agents' transcripts in its meta, chats/<id>.meta.json, which a card's
     code writes; after a restart the mirror read every agent-*.jsonl of the folder the meta named into the chat, where
@@ -366,27 +347,6 @@ def test_a_fork_s_transcript_is_read_only_from_main_s_session_folder(tmp_path_fa
             f"<task-notification><task-id>{agent}</task-id><tool-use-id>toolu_fork</tool-use-id>"
             "<status>completed</status></task-notification>")}})) + "\n")
     assert "OUTSIDE-SECRET" not in json.dumps([e.__dict__ for e in context._entries(main)])
-
-
-def test_a_long_output_claude_code_saved_is_read_through_no_link_a_card_left_on_its_way(tmp_path_factory):
-    """An orientation's long tool outputs are stored whole from the file Claude Code saved each to, which the call's
-    record names (toolUseResult.persistedOutputPath, <session>/tool-results/<file> beside the session's transcript). On
-    the Messages API the transcripts lie in the workspace, which a card's code writes, and the server followed a link
-    put in place of tool-results/, so it stored the file the link led to among the calls, where the card reads it."""
-    from app import calls
-
-    outside = _outside(tmp_path_factory)
-    (outside / "made-up.txt").write_text("OUTSIDE-SECRET\n")
-    d = config.workspace_dir(CORPUS) / "runtime"
-    (d / SID).mkdir(parents=True)
-    (d / f"{SID}.jsonl").write_text("")
-    (d / SID / calls.TOOL_RESULTS).symlink_to(outside, target_is_directory=True)
-    rec = {"type": "user", "sessionId": SID,
-           "toolUseResult": {"persistedOutputPath": str(d / SID / calls.TOOL_RESULTS / "made-up.txt")}}
-    block = {"type": "tool_result", "tool_use_id": "toolu_made_up", "content": "the output's preview"}
-    calls.number(CORPUS, "made-up-orient", "toolu_made_up", "Bash", {"command": "made-up"})
-    calls.Numbering(CORPUS, "made-up-orient").result("toolu_made_up", block, rec)
-    assert calls.get(CORPUS, "made-up-orient", 1)["result"] == "the output's preview"
 
 
 async def test_a_thread_s_picture_is_read_only_where_the_server_keeps_it(tmp_path_factory):

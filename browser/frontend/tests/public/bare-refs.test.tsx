@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A ref the model writes bare in a reply, without its [[ ]], is the same link as its [[ref]] (src/chat/markdown.tsx
-// BARE_SRC): a report's passage, a view's unit, an orientation call, a thread and each form of a card's ref. Prose that
-// only looks like one ("the report: it") stays text.
+// BARE_SRC): a report's passage, a view's unit, a thread and each form of a card's ref. Prose that only looks like one
+// ("the report: it") stays text.
 import { act } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
@@ -40,13 +40,13 @@ test('every kind of thimble ref written bare is a link, its trailing punctuation
   const text = [
     'A card card:ab12cd34, its run card:ab12cd34@2, its lines card:ab12cd34@out0#L3-5, its step card:ab12cd34#step-2,',
     'its cell card:ab12cd34#merged/agent-07. A label concept:k1a2b3c4, a group group:g1a2b3c4, a report report:findings,',
-    'a paragraph report:story#p12, a view view:inbox, a unit view:inbox/c-4471; a call call:orient/12#L3-L9 and a thread chat:t1a2b3c4#5.',
+    'a paragraph report:story#p12, a view view:inbox, a unit view:inbox/c-4471 and a thread chat:t1a2b3c4#5.',
   ].join(' ')
   const el = await mount(<ChatMarkdown text={text} />)
   expect(refsIn(el)).toEqual([
     'card:ab12cd34', 'card:ab12cd34@2', 'card:ab12cd34@out0#L3-5', 'card:ab12cd34#step-2', 'card:ab12cd34#merged/agent-07',
     'concept:k1a2b3c4', 'group:g1a2b3c4', 'report:findings', 'report:story#p12', 'view:inbox', 'view:inbox/c-4471',
-    'call:orient/12#L3-L9', 'chat:t1a2b3c4#5',
+    'chat:t1a2b3c4#5',
   ])
 })
 

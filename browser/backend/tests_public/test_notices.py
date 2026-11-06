@@ -243,7 +243,7 @@ async def test_a_notice_cut_short_keeps_its_whole_text_as_details(sent):
 
 
 def test_an_agent_is_named_by_its_role_and_its_run_s_title():
-    assert notices.who("orientation", "Orientation") == ("Orientation", "The orientation")
+    assert notices.who("check", "Unverified") == ("Report check: Unverified", "The report check Unverified")
     assert notices.who("view-builder", "view: Agent Network") == ("View build: Agent Network",
                                                                   "The build of the view Agent Network")
     assert notices.who("writer", "Write report") == ("Writer: report", "The writer of report")

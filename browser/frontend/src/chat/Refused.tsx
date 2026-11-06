@@ -1,10 +1,10 @@
-// A start of one of thimble's agents that did not happen, as one card wherever the agent would have shown: the
-// orientation's in main, a writer's on its document, a view build's on its chip, a check's on its row. It names the
-// agent, says why on one line in the words of whoever refused (Claude Code's auto mode, main's own reply, Claude Code's
-// subagent limit, thimble's own check, or no hooks module), shows the request in full (the text the agent would get,
-// its role, model and effort) since main may have written it, and offers the kind's buttons (refusalActions): Start it
-// (a click through thimble's plugin: the analyst's own approval, which auto mode does not judge), Try again and
-// Dismiss. Every button is a click, which the server takes only with the analyst's cookie (403 otherwise).
+// A start of one of thimble's agents that did not happen, as one card wherever the agent would have shown: a writer's
+// on its document, a view build's on its chip, a check's on its row. It names the agent, says why on one line in the
+// words of whoever refused (Claude Code's auto mode, main's own reply, Claude Code's subagent limit, thimble's own
+// check, or no hooks module), shows the request in full (the text the agent would get, its role, model and effort)
+// since main may have written it, and offers the kind's buttons (refusalActions): Start it (a click through thimble's
+// plugin: the analyst's own approval, which auto mode does not judge), Try again and Dismiss. Every button is a click,
+// which the server takes only with the analyst's cookie (403 otherwise).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -74,7 +74,7 @@ export function refusalLine(r: Pick<Refusal, 'kind' | 'reason'>): string {
     case 'limit': {
       const n = /\b(\d+)\b/.exec(reason)?.[1]
       return n
-        ? `Claude Code runs at most ${n} subagents at once in this session, and that many are running (thread forks and the subagents of running agents, the orientation's own and its critic, count too). Start it again when some finish, or raise \`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS\` and restart.`
+        ? `Claude Code runs at most ${n} subagents at once in this session, and that many are running (thread forks and the subagents of running agents count too). Start it again when some finish, or raise \`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS\` and restart.`
         : dot(reason || 'Claude Code runs as many subagents as it allows at once in this session')
     }
     case 'no-module':
@@ -89,9 +89,7 @@ export const PERMISSIONS_LINE = 'Or approve it in your terminal: /permissions â†
 
 /** A role's name as the request's line names it. */
 const ROLE_WORDS: Readonly<Record<string, string>> = {
-  orientation: 'thimble:orientation',
   writer: 'thimble:writer',
-  critic: 'thimble:critic',
   'view-builder': 'thimble:view-builder',
   'view-reviewer': 'thimble:view-reviewer',
   check: 'thimble:check',
@@ -114,7 +112,7 @@ function answered(what: string, a: StartAnswer): boolean {
 
 export function RefusedCard({ ws, what, refusal, text, onDismiss, onStarted, className = '' }: {
   ws: string
-  /** the agent, as the head names it: "the orientation", "the report's writer", "the view Posts" */
+  /** the agent, as the head names it: "the report's writer", "the view Posts" */
   what: string
   refusal: Refusal
   /** the request as the analyst or main wrote it, when the record keeps it apart from the full task */

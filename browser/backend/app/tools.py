@@ -34,11 +34,9 @@ log = logging.getLogger("thimble.tools")
 SERVER_NAME = "thimble"  # workers see mcp__thimble__<tool>; the user's session mcp__plugin_thimble_thimble__<tool>
 TOOLS_PROMPT = "tools"  # prompts/tools.md: the `## <tool>` sections (description and schema) and the hint sections
 ANALYST = "analyst"
-# The key of each of thimble's agents (subagents.py), the session its calls run as: `orient`, or `writer:<doc>` since
-# two documents may be written at once (session_kind).
-ORIENT_SESSION = "orient"
+# The key of each of thimble's agents (subagents.py), the session its calls run as: `writer:<doc>`, since two documents
+# may be written at once (session_kind), and the kinds below.
 WRITER_SESSION = "writer"
-CRITIQUE_SESSION = "critique"  # `critique:orient`, the critic of the orientation's analysis (critique_session.py)
 CHECK_SESSION = "check"  # `check:<id>:<doc>`, a run of a report check on a document (checks.py)
 VIEW_SESSION = "view"  # `view:<slug>`, a build of a view (dev.py, view_tools.py)
 REVIEW_SESSION = "review"  # `review:<slug>`, a review of a built view (view_review.py, view_tools.py)
@@ -50,7 +48,7 @@ ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
 # notebook.CHAT_EXEC_TIMEOUT when the card names no allowance (_default_timeout); the sessions in
 # FULL_TIME_SESSIONS keep notebook.EXEC_TIMEOUT.
 CHAT_ACTORS = (ANALYST,)
-FULL_TIME_SESSIONS = (ORIENT_SESSION, WRITER_SESSION)
+FULL_TIME_SESSIONS = (WRITER_SESSION,)
 TERMINAL = "terminal"  # created_by of the terminal session's cells (notebook.TERMINAL_CREATOR), never of a group
 MAIN_GROUP_AUTHOR = "main"  # created_by of a group main makes for a sequence of cards, at the root (_group_author)
 BROWSER_AUTHOR = "user"  # a browser chat's comments, labels and report requests: the analyst asking through their chat
@@ -345,7 +343,7 @@ def session_kind(session: str | None) -> str | None:
     return str(session).split(":", 1)[0] or None if session else None
 
 
-PLUGIN_NAME = "thimble"  # the plugin's name (orientation.PLUGIN), the scope of its MCP server's tools
+PLUGIN_NAME = "thimble"  # the plugin's name (subagent_files.PLUGIN), the scope of its MCP server's tools
 WEB_TOOLS = ("WebFetch", "WebSearch")  # Claude Code's web tools, which an agent's `web: off` takes away
 
 
@@ -386,7 +384,7 @@ class Ctx:
     # the chat (agents.py) a call comes from: its cards are stamped `created_by: chat:<id>`; None from the terminal's
     # shim, but the thread's for a call of a thread's fork that makes a card (_as_fork)
     chat: str | None = None
-    session: str | None = None  # the THIMBLE_SESSION of the shim that posted the call: None for main's, `orient`, `writer:<doc>`
+    session: str | None = None  # the THIMBLE_SESSION of the shim that posted the call: None for main's, `writer:<doc>`
     # the id Claude Code gave the call (MCP `_meta` "claudecode/toolUseId"), named by the `agent` record a call writes
     # into
     # main
@@ -439,15 +437,14 @@ def _own_root(r: dict) -> bool:
 # One of thimble's agents beside main (a writer, a report check) is not the analyst. A card it adds, and a group it
 # makes, carry its THIMBLE_SESSION under SESSION_KEY, so its work is told apart from the analyst's (the report's
 # Figures) and never goes into the analyst's groups. Workspaces from before keep the agents' own groups, stamped the
-# same way. The orientation is not one of them.
+# same way.
 SESSION_KEY = "session"
 
 
 def agent_session(session: str | None) -> bool:
     """Whether the session `session` names (a THIMBLE_SESSION) is one of thimble's agents beside main: every session
-    thimble runs except the orientation, and never main's shim (None)."""
-    kind = session_kind(session)
-    return kind is not None and kind != ORIENT_SESSION
+    thimble runs, and never main's shim (None)."""
+    return session_kind(session) is not None
 
 
 def session_chat(c: str, session: str | None) -> str | None:
@@ -535,9 +532,8 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     if name in labels_off.TOOLS and not ledger.labels_on(c):
         # Labels is off in the workspace's Settings: no label is made, shown or deleted (labels_off.py)
         return with_call_line(name, args, err(labels_off.line()))
-    batch = None
-    # a session thimble started (the orientation, a writer) owns the steps its calls make (undo, sessions)
-    with undo.batching(batch), undo.acting_session(session):
+    # a session thimble started (a writer, a check) owns the steps its calls make (undo, sessions)
+    with undo.acting_session(session):
         ctx = Ctx(c, actor, notebook, terminal, anchor, chat, session, tool_use_id)
         # the thread a call of a thread's fork is for, found once (_as_fork): a card the call makes is the thread's
         # from the start, and the fork is told about the thread's cards
@@ -1915,10 +1911,7 @@ def _payload_lines(kind: str, payload: dict, limit: int | None = CELL_READ_LIMIT
 
 async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """Anything citable, by its ref: a card or span (_read_cell), `type:<name>`, a whole document (`report:<slug>`),
-    `view:`
-    refs, an orientation call (`call:<chat>/<n>`), and every other ref through refs.resolve (_read_excerpt). A
-    value-ref
-    reads its ref."""
+    `view:` refs, and every other ref through refs.resolve (_read_excerpt). A value-ref reads its ref."""
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     if "|" in ref:  # a value-ref: the ref is the part after the bar
         ref = ref.split("|", 1)[1].strip()
@@ -1932,11 +1925,6 @@ async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return await _delegate("app.report_types:tool_read_ref", ctx, {**args, "ref": ref})
     if ref.startswith("view:"):
         return await _delegate("app.views:tool_read_ref", ctx, {**args, "ref": ref})
-    if ref.startswith("call:"):
-        from . import calls  # noqa: PLC0415
-
-        text, bad = calls.tool_read_ref(ctx.c, ref, READ_REF_UNITS)
-        return err(text) if bad else ok(text)
     return await _read_excerpt(ctx, ref)
 
 
@@ -2450,8 +2438,8 @@ def _chip(c: str, kind: str, text: str, **fields: Any) -> None:
 
 async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """Define a category and apply it over one scope's units (concepts.apply_scoped): the label is a card (in `group`,
-    else loose on the canvas) and, when `filter` is true, the scope's filter. The orientation's labels get no card. A
-    changed label names the cards that read it before (`## apply_label-stale`)."""
+    else loose on the canvas) and, when `filter` is true, the scope's filter. A changed label names the cards that read
+    it before (`## apply_label-stale`)."""
     from . import concepts
 
     scope = str(args.get("scope") or "files").strip().lower()
@@ -2491,11 +2479,10 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if prior is not None and concepts.SCOPE_OF_UNIT.get(prior["unit"]) != scope:
         return err(hint("apply_label-other-scope", label=prior["name"], ref=f"concept:{prior['id']}",
                         scope=concepts.SCOPE_OF_UNIT.get(prior["unit"]), new=scope))
-    orienting = session_kind(ctx.session) == ORIENT_SESSION
     group = str(args.get("group") or "").strip()
     # a label's card stands loose unless the call names its group, as any card does, and a thread's fork's label and
     # its card are the thread's (call); a card the label has already stays where it is (concepts.label_card)
-    target = None if orienting else _group_id(ctx, group, []) if group else default_group(ctx)
+    target = _group_id(ctx, group, []) if group else default_group(ctx)
     question = _question(args.get("question")) or None
     within = args.get("within") or None
     if isinstance(within, str):
@@ -2503,7 +2490,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
-                                    card=not orienting, within=within, show=bool(args.get("show")),
+                                    within=within, show=bool(args.get("show")),
                                     unit=LABEL_UNITS.get(unit_arg))
     if s.get("asked"):
         # a big prompt label waits for the analyst's choice in the page (concepts.ask_first, label_asks.py)
@@ -2515,7 +2502,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if s.get("cell"):
             line += f" The label's card is [[card:{s['cell']}]]."
         return ok(line)
-    if s.get("partial") and not orienting and ctx.session is None:
+    if s.get("partial") and ctx.session is None:
         concepts.tell_when_done(ctx.c, str(s["concept"]))
     # the counts as thimble.labels() and the label's panel read the rows: each record the analyst set to another value
     # counted under that value (live check term-fix5, new quirk 5: a fork took the one row a verdict moved for a bug)
@@ -2551,7 +2538,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         line += " " + hint("apply_label-unchanged")
     if s.get("partial"):
         line += (" The run goes on in the background, and a label_done event comes when it finishes."
-                 if not orienting and ctx.session is None else
+                 if ctx.session is None else
                  " The run goes on in the background; the counts are final when its card stops spinning.")
     if s.get("cell"):
         line += f" The label's card is [[card:{s['cell']}]]."
@@ -2636,12 +2623,11 @@ async def _h_delete_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 async def _h_propose_view(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     """A proposal for a view: what the analyst sees in it (`description`), what they do with it (`task`) and the files
     it reads (`claims`), which a `thimble:view-builder` builds at once (views.propose, dev.start_build), reading those
-    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row. Since
-    0.8.0 the orientation proposes no views (it does not have this tool); thimble's own view proposals wait for the
-    analyst's Accept (views.offer). A claim that matches no corpus file is refused, naming real paths near it; where
-    views cannot be built the proposal fails at once. A proposal of main's is one the analyst asked for: the server starts
-    its builder (`## agent-started`), and the browser opens the view once built. A thread's fork's proposal is built when the server starts its builder with the fork's call
-    (_fork_start)."""
+    files itself for the fields, keys and counts, on the model and effort the call names, else Settings' dev row.
+    thimble's own view proposals wait for the analyst's Accept (views.offer). A claim that matches no corpus file is
+    refused, naming real paths near it; where views cannot be built the proposal fails at once. A proposal of main's is
+    one the analyst asked for: the server starts its builder (`## agent-started`), and the browser opens the view once
+    built. A thread's fork's proposal is built when the server starts its builder with the fork's call (_fork_start)."""
     from . import views
 
     claims = args.get("claims")
@@ -2855,8 +2841,8 @@ async def _h_fix_thimble(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 async def _as_caller(c: str, name: str, tool_use_id: str | None) -> tuple[str, str | None]:
     """(why the call is refused, '' when it runs; the session it runs as) for a call the runtime runs: the key of the
     agent of thimble's that made it (subagents.caller, from its caller line, else the transcript that holds the call),
-    or None for main's own. A call its caller may not make is refused (subagents.allowed): main's `critique`, the
-    critic's `add_card`. A thread's fork's call runs as main's own (_fork_of)."""
+    or None for main's own. A call its caller may not make is refused (subagents.allowed). A thread's fork's call runs
+    as main's own (_fork_of)."""
     from . import subagents  # noqa: PLC0415 — it imports this module
 
     canon = canonical(name)

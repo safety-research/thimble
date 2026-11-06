@@ -1,7 +1,6 @@
-"""thimble's agents: the orientation, its critic, the writers, the view builders and reviewers (dev.py,
-view_review.py), the runs of report checks (checks.py) and the agents of code tickets (dev.py, ticket_tools.py). Each is
-a named agent with a fresh context, which the server runs (runtime.py), of the type `thimble:<role>` (roles); the
-orientation's own subagents run as `thimble:orient-helper`.
+"""thimble's agents: the writers, the view builders and reviewers (dev.py, view_review.py), the runs of report checks
+(checks.py) and the agents of code tickets (dev.py, ticket_tools.py). Each is a named agent with a fresh context, which
+the server runs (runtime.py), of the type `thimble:<role>` (roles).
 
 Starts. A click in the browser (Write, a view proposal's Accept, Start it, …), a follow-on start (a run's own next step,
 such as a view build's review) and a start tool's call (a typed start) each write the pending request, and the runtime
@@ -61,7 +60,6 @@ async def _lifespan(app: Any):
 router = APIRouter(lifespan=_lifespan)
 
 PLUGIN = files.PLUGIN
-HELPER = files.HELPER
 ROLES = files.ROLES
 STEP_ROLE = agents.STEP_ROLE
 CLICK, FOLLOW_ON, TYPED = "click", "follow-on", "typed"
@@ -84,10 +82,7 @@ CANCELLED = "stopped-by-user"  # a chat's `continue` then: no follow-up can reac
 # the line of a run main's plan mode held at its end, which left no work (plan_failed_line), and its parts by role
 PLAN_FAILED_LINE = ("Your Claude Code session went into plan mode while {who} ran, so {what}. Switch out of plan mode "
                     "(shift+tab in your terminal), then {how}.")
-PLAN_FAILED = {"orientation": ("the orientation", "it could not finish its work", "send it a message to continue it"),
-               "critic": ("the critic", "it could not finish the critique",
-                          "send the orientation a message to continue it"),
-               "writer": ("the writer", "it could not save the document", "write it again"),
+PLAN_FAILED = {"writer": ("the writer", "it could not save the document", "write it again"),
                "view-builder": ("the view's builder", "it could not build the view", "choose Retry on the view"),
                "view-reviewer": ("the view's reviewer", "it could not finish the review",
                                  "choose Review again on the view"),
@@ -95,7 +90,7 @@ PLAN_FAILED = {"orientation": ("the orientation", "it could not finish its work"
                "dev-ticket": ("the ticket's agent", "it could not finish the change", "choose Retry on the ticket")}
 USER_STOP_RE = re.compile(r"stopped by (the )?user", re.I)  # Esc's task notification and a SendMessage's error say so
 QUIT_LINE = "Stopped when Claude Code quit."  # a chat's end line, its card's text is the browser's (AgentCard)
-WORK_DIRS = ("orient/work", "writers", "critique-work", "check-work", "views-work", "extension/views", "card-libs")
+WORK_DIRS = ("writers", "check-work", "views-work", "extension/views", "card-libs")
 LIMIT_RE_WORDS = ("concurrent", "subagents")  # Claude Code's concurrency-limit text holds both (R2, the module's answer)
 # the label Claude Code puts before a PreToolUse hook's deny in what $.agent.spawn and $.tool.call answer
 HOOK_ERROR_RE = re.compile(r"^\s*PreToolUse:[A-Za-z]+ hook error:\s*")
@@ -125,8 +120,7 @@ def _resolve(ref: str) -> Any:
 @dataclass(frozen=True)
 class Type:
     """One of thimble's agent types. `kind` is the session kind of its key (tools.session_kind), `chat_role` the role
-    of its chat (a step of its parent's for the critic; none for the helper, whose calls and transcript are its
-    ancestor's), `row` its row of config.models_for and `agent` its row of thimble's config (userconf.AGENTS: web,
+    of its chat, `row` its row of config.models_for and `agent` its row of thimble's config (userconf.AGENTS: web,
     memory). `define`, `own`, `started`, `ended` and `refused` name `module:attr`: the role's definition for a workspace,
     the thimble tools it may call, and its handlers (module note, runs and ends). `when` names `module:attr`, a function
     of the workspace that says whether the role is registered there (none: always). With `keeps_chat` a run's end
@@ -199,26 +193,15 @@ def own_tools(role: str) -> tuple[str, ...] | None:
     return tuple(_resolve(t.own)) if t is not None and t.own else None
 
 
-def helper_definition(c: str) -> dict[str, Any]:
-    """thimble:orient-helper, the type of the orientation's own subagents (Q10): general-purpose tools, and the fixed
-    description and short prompt of prompts/orient-helper.md (its frontmatter and body)."""
-    from . import prompts  # noqa: PLC0415
-
-    front, body = prompts.frontmatter(HELPER)
-    return {"description": str(front.get("description") or "").strip(), "prompt": body.strip()}
-
-
 def values_for(c: str, role: str, args: dict[str, Any] | None = None) -> dict[str, str]:
     """{model, effort} of a run of `role`: those its arguments name, else Settings' row for the role
-    (config.models_for). A model alias is written as its full id, the orientation's with `[1m]` where the model has
-    the 1M window, as Settings shows it; Ultracode's effort is xhigh (config.effort_level). An effort that is none of
+    (config.models_for). A model alias is written as its full id, as Settings shows it; Ultracode's effort is xhigh
+    (config.effort_level). An effort that is none of
     the levels Claude Code takes is not passed on, since the registration would then carry a value Claude Code does not
     run at: Settings' effort stands. A model Claude Code runs with no effort (config.has_effort) gets none."""
     args = args or {}
     conf = config.models_for(c)[TYPES[role].row]
     model = config.exact_model(str(args.get("model") or "").strip()) or str(conf.get("model") or "")
-    if role == "orientation":
-        model = config.long_context(model)
     asked = str(args.get("effort") or "").strip()
     effort = config.effort_level(asked) or str(conf.get("effort") or "")
     if asked and not config.effort_level(asked):
@@ -271,9 +254,9 @@ def roles(c: str) -> dict[str, Role]:
 
 
 def write_dirs(c: str) -> list[Path]:
-    """The agents' work folders in workspace `c`, which a card's trial may write (cardrun.trial_sandbox): orient/work,
-    writers, critique-work, check-work, views-work, the local extension's views and card-libs, where main installs the
-    npm packages its custom cards load (card_libs). They need not exist yet."""
+    """The agents' work folders in workspace `c`, which a card's trial may write (cardrun.trial_sandbox): writers,
+    check-work, views-work, the local extension's views and card-libs, where main installs the npm packages its custom
+    cards load (card_libs). They need not exist yet."""
     ws = config.workspace_path(c)
     return [ws / d for d in WORK_DIRS]
 
@@ -512,8 +495,6 @@ async def start_it(c: str, rid: str) -> Answer:
         return refusal(ERROR, "no such request")
     if r.get("state") != "refused":
         return refusal(HOOK, "this request is not refused")
-    if r.get("caller_role"):  # the critic: the module would start it as main's subagent, not its orientation's
-        return refusal(HOOK, "an agent's own start (the orientation's critic) can't be started from the browser")
     _set(c, rid, route=CLICK, state="pending", claimed_by=None, reason=None, refused_kind=None, again=files.now())
     return await _spawn(c, rid, r)
 
@@ -574,21 +555,20 @@ async def fork_thread(c: str, call: str | None, *, wait: bool = True) -> dict[st
 
 async def start_job(c: str, role: str, key: str, task: str, values: dict[str, Any], route: str, *,
                     description: str = "", request_id: str | None = None, chat: dict[str, Any] | None = None,
-                    work: Path | str | None = None, call: str | None = None, caller_role: str | None = None,
+                    work: Path | str | None = None, call: str | None = None,
                     fields: dict[str, Any] | None = None) -> Answer:
     """One start of any role, for the agent of `key`, with the prompt `task` and the run's values: the pending request,
     then the runtime starts it (module_bridge.request), and the answer says what it did (Answer). A typed start, which a
     start tool's call asked for, is made at once as a follow-on is, and its answer carries the call it stands for
     (`input`). `request_id` is the request's id when the caller made it (request_id), for a prompt that names it.
     `chat` holds the fields of the agent's chat (its title, a writer's document), `work` its work folder (the scratch
-    folders of its subagents), `call` the start tool's call, and `caller_role` the role of the agent whose call asked
-    for it. `fields` are more fields of the request (ensure_chat)."""
-    if role not in TYPES or role == HELPER:
+    folders of its subagents) and `call` the start tool's call. `fields` are more fields of the request (ensure_chat)."""
+    if role not in TYPES:
         raise ValueError(f"no role {role!r}")
     rid = request_id or files.request_id()
     inp = call_input(role, task, description or role)
     rid = new_request(c, "start", key, inp, values, FOLLOW_ON if route == TYPED else route, role=role, rid=rid,
-                      chat=dict(chat or {}), work=str(work) if work else None, call=call, caller_role=caller_role,
+                      chat=dict(chat or {}), work=str(work) if work else None, call=call,
                       **({"typed": True} if route == TYPED else {}), **(fields or {}))
     ans = await _spawn(c, rid, request(c, rid) or {})
     return Answer({**ans, "input": inp}) if route == TYPED and ans.started else ans
@@ -699,15 +679,6 @@ def message_input(agent_id: str, text: str) -> dict[str, Any]:
     return {"to": agent_id, "message": text}
 
 
-def message_request(c: str, agent_id: str, text: str, *, call: str | None = None) -> Answer:
-    """A follow-up typed to main (message_orientation): the pending message request and the exact SendMessage."""
-    a = agent(c, agent_id) or {}
-    inp = message_input(agent_id, text)
-    rid = new_request(c, "message", a.get("key"), inp, a.get("values"), TYPED, role=a.get("role"), agent=agent_id,
-                      call=call)
-    return Answer({"request": rid, "input": inp})
-
-
 def unknown_agent_text(c: str, agent_id: str) -> str:
     """Why a follow-up cannot reach an agent that is not in the registry: the earlier-session text with the session its
     chat last ran under, which `thimble -r` resumes; the earlier-version text when no chat of the workspace names a
@@ -720,8 +691,8 @@ def unknown_agent_text(c: str, agent_id: str) -> str:
                 sid = sessions[-1] if sessions else ""
                 break
     if sid:
-        return tools.hint("orient-continue-earlier-session", session=sid)
-    return tools.hint("orient-continue-earlier-version")
+        return tools.hint("agent-continue-earlier-session", session=sid)
+    return tools.hint("agent-continue-earlier-version")
 
 
 async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | None = None, route: str = CLICK,
@@ -923,8 +894,7 @@ def cancelled(c: str, agent_id: str | None) -> bool:
 @dataclass
 class Run:
     """A registered agent of one of thimble's roles as its handlers see it: its key, chat, agent id, run (0 the first,
-    then one per follow-up), main's session, and the chat whose call store numbers its calls (`calls`, the
-    orientation's)."""
+    then one per follow-up) and main's session."""
 
     c: str
     key: str
@@ -938,10 +908,6 @@ class Run:
     route: str = ""
     request: str = ""
     interrupted: bool = False
-
-    @property
-    def calls(self) -> str | None:
-        return self.chat if self.role == "orientation" else None
 
 
 def _run(c: str, agent_id: str, a: dict[str, Any]) -> Run | None:
@@ -999,9 +965,6 @@ def ensure_chat(c: str, agent_id: str) -> dict[str, Any] | None:
         if meta is not None:
             return meta
     r = request(c, str(a.get("request") or "")) or {}
-    cont = r.get("continues") if isinstance(r.get("continues"), dict) else {}
-    if cont.get("chat") and agents.meta_or_none(c, str(cont["chat"])) is not None:
-        return _continue_chat(c, agent_id, a, r, t, str(cont["chat"]), int(cont.get("run") or 1))
     fields = dict(r.get("chat") or {})
     title = str(fields.pop("title", "") or t.role)
     parent = str(fields.pop("parent", "") or agents.MAIN_ID)
@@ -1033,39 +996,6 @@ def ensure_chat(c: str, agent_id: str) -> dict[str, Any] | None:
     return meta
 
 
-def _continue_chat(c: str, agent_id: str, a: dict[str, Any], r: dict[str, Any], t: Type, chat: str,
-                   k: int) -> dict[str, Any] | None:
-    """A continuation's agent (U2: an orientation stopped with Esc, which Claude Code resumes no more) takes up the
-    stopped run's chat as its run `k`: the chat names the new agent and runs again, the registry entry carries the chat,
-    the run and `continues`, so the mirror shows its prompt not as a message (session._thimble_sub), and the role's
-    start handler sees run k > 0 with the request."""
-    from . import session  # noqa: PLC0415
-
-    sid = (a.get("sessions") or [""])[-1] or (session.current(c).sid if session.current(c) is not None else "")
-    old = agents.meta_or_none(c, chat) or {}
-    sessions = [*[x for x in old.get("sessions") or [] if x and x != sid], *([sid] if sid else [])]
-    agents.update_agent(c, chat, agent_id=agent_id, agent_type=type_name(t.role), values=a.get("values") or {},
-                        session=sid or old.get("session"), sessions=sessions, request=a.get("request"), run=k,
-                        status="running", ts_end=None, result=None, stopped_by=None, paused=None, plan_mode=None,
-                        started_by=CLICK if a.get("route") in (CLICK, FOLLOW_ON) else TYPED,
-                        tool_use_id=r.get("claimed_by"), **{"continue": None})
-    with update(c) as state:
-        reg = files.registry(state)
-        if isinstance(reg.get(agent_id), dict):
-            reg[agent_id].update(chat=chat, run=k, continues=r.get("continues"))
-        snap = dict(reg.get(agent_id) or {**a, "chat": chat, "run": k})
-    run = _run(c, agent_id, {**snap, "chat": chat, "run": k})
-    with contextlib.suppress(Exception):
-        session.expect_agent(c, agent_id, chat, t.chat_role)
-    _started_notice(c, t, snap.get("key"))
-    if run is not None and t.started:
-        try:
-            _resolve(t.started)(c, run, r)
-        except Exception:  # noqa: BLE001 — the chat runs either way
-            log.exception("%s: the %s's start handler failed for its continuation", c, t.role)
-    return agents.meta_or_none(c, chat)
-
-
 def run_again(c: str, agent_id: str, by: str = "") -> Run | None:
     """A finished agent was sent a message (a follow-up from main or the module, `by` coordinator) or typed to in the
     agent tray (`by` human): run k+1 begins. The role's start handler sees it as run.k > 0."""
@@ -1082,7 +1012,7 @@ def run_again(c: str, agent_id: str, by: str = "") -> Run | None:
     if snap.get("chat"):
         with contextlib.suppress(Exception):
             agents.update_agent(c, str(snap["chat"]), status="running", ts_end=None, result=None, run=snap["run"],
-                                stopped_by=None, typed_in_tray=by == "human" or None, paused=None, plan_mode=None,
+                                stopped_by=None, typed_in_tray=by == "human" or None, plan_mode=None,
                                 **({"continue": None} if was_cancelled else {}))
     run = _run(c, agent_id, snap)
     t = TYPES[str(snap["role"])]
@@ -1211,7 +1141,7 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
     if snap.get("chat") and not (t is not None and t.keeps_chat):
         try:
             fields = {"stopped_by": snap.get("stopped_by")} if status == "stopped" and snap.get("stopped_by") else {}
-            agents.finish_agent(c, str(snap["chat"]), status, (report or "")[:400] or None, paused=None, **fields)
+            agents.finish_agent(c, str(snap["chat"]), status, (report or "")[:400] or None, **fields)
         except Exception:  # noqa: BLE001 — a chat deleted under the run
             log.debug("%s: the chat of %s was not ended", c, agent_id, exc_info=True)
     run = _run(c, agent_id, snap)
@@ -1230,21 +1160,13 @@ def children_running(state: dict[str, Any], agent_id: str) -> bool:
                for a in files.registry(state).values())
 
 
-def set_paused(c: str, agent_id: str, paused: str | None) -> None:
-    """The chat of `agent_id` marked `paused` (the orientation while it waits for its critic), or no longer."""
-    a = agent(c, agent_id)
-    if a and a.get("chat"):
-        with contextlib.suppress(Exception):
-            agents.update_agent(c, str(a["chat"]), paused=paused)
-
-
 _waits: dict[tuple[str, str], asyncio.TimerHandle] = {}
 
 
 def stopped(c: str, agent_id: str, last_stop: float | None = None) -> None:
-    """A SubagentStop of a registered agent: its turn ended. With a child running it waits for it (the orientation for
-    its critic); otherwise the run ends with that turn's answer (session.agent_answer) unless a hand-back follows within
-    HANDBACK_WAIT_S (AUTO_HANDBACK_WAIT_S in auto mode)."""
+    """A SubagentStop of a registered agent: its turn ended. With a child running it waits for it; otherwise the run
+    ends with that turn's answer (session.agent_answer) unless a hand-back follows within HANDBACK_WAIT_S
+    (AUTO_HANDBACK_WAIT_S in auto mode)."""
     from . import session  # noqa: PLC0415
 
     state = read(c)
@@ -1275,19 +1197,8 @@ def stopped(c: str, agent_id: str, last_stop: float | None = None) -> None:
         check()
 
 
-def child_ended(c: str, agent_id: str) -> None:
-    """A child of a registered agent ended (the critic's hand-back to the orientation): the parent goes on in its run,
-    no longer paused."""
-    a = agent(c, agent_id)
-    if a and a.get("status") == "waiting":
-        with update(c) as st:
-            if isinstance(files.registry(st).get(agent_id), dict):
-                files.registry(st)[agent_id].update(status="running", waiting_since=None)
-    set_paused(c, agent_id, None)
-
-
 def tell_main(c: str, kind: str, payload: dict[str, Any]) -> bool:
-    """A browser event for main from server code (an `orient` or `written` end line): posted, or, with no session
+    """A browser event for main from server code (a `written` end line): posted, or, with no session
     listening, logged and dropped, since thimble's agents end with main. False when no session heard it."""
     from . import events  # noqa: PLC0415
 
@@ -1399,8 +1310,6 @@ def hook_started(c: str, hook: dict[str, Any]) -> dict[str, Any]:
     if a is None:
         return {"agent": None}
     meta = ensure_chat(c, agent_id) if a.get("role") in ROLES else None
-    if a.get("parent") and a.get("role") in ROLES:
-        set_paused(c, str(a["parent"]), "critique" if a.get("role") == "critic" else None)
     return {"agent": agent_id, "chat": (meta or {}).get("id")}
 
 

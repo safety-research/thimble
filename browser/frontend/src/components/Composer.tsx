@@ -30,7 +30,7 @@ export interface ComposerFrameProps {
   /** rows above the text (a title field) */
   head?: ReactNode
   /** the running agent's Stop, which takes the send square's place while the field is empty and stands before it once
-   * text is typed: `label` names it in the tooltip and to a screen reader (Stop the orientation), and `busy` shows the
+   * text is typed: `label` names it in the tooltip and to a screen reader (Stop the writer), and `busy` shows the
    * ring while the stop request is in flight */
   stop?: { label: string; onStop: () => void; busy?: boolean }
   sendIcon?: IconName

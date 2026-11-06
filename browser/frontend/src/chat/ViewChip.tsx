@@ -10,8 +10,7 @@
 // row by default). A build whose builder stopped without passing its checks (`checks_failed`) offers no Retry, which
 // would build the same files again: the analyst's reply in its thread, which a click on its name opens, goes on with
 // the builder. A start that did not happen says why, with Start it where the kind takes it (chat/Refused). A
-// dropped proposal (a view proposal the analyst rejected, or an orientation's from before 0.8.0 that the analyst stopped)
-// is not drawn (lib/proposals isDropped). A built view whose last change failed (`failed_change`) shows the same as a
+// dropped proposal (a view proposal the analyst rejected) is not drawn (lib/proposals isDropped). A built view whose last change failed (`failed_change`) shows the same as a
 // failed one. A view proposal (`suggested`), which waits on the chat's card, is a plain name until it is accepted.
 import { useEffect, useState } from 'react'
 import type { MouseEvent } from 'react'

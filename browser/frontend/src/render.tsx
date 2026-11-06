@@ -26,9 +26,6 @@ export interface RenderRequest {
   /** the labels the card uses, for the tags in the Labels row under its question (canvas/CardFace CardLabels): each
    * one's name, and what its colour is read from (files/labels mainColour), as GET /ws/{c}/concepts lists it */
   labels?: ({ id: string; name: string } & Partial<Pick<Concept, 'unit' | 'marks' | 'labels' | 'classes'>>)[]
-  /** each orientation call a citation names, by `<chat>/<n>`, as GET /ws/{c}/calls/{chat}/{n} returns it, since a call
-   * citation's preview reads the call's whole output from there (lib/calls) */
-  calls?: Record<string, unknown>
   theme: { paper: Paper; accent: Accent }
   width: number
   /** a label card's label as the API returns it: GET /concepts/{id}, and the workspace's settings */
@@ -70,7 +67,7 @@ let current: RenderRequest | null = null
 let unanswered: string[] = []
 let n = 0
 
-// the page's own fetches, answered from the request: a ref's resolution, a cited call, the cards' and the labels' names;
+// the page's own fetches, answered from the request: a ref's resolution, the cards' and the labels' names;
 // anything else is refused and listed, so a card that needs more than the request carries is visible in the result
 const realFetch = window.fetch.bind(window)
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -82,10 +79,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
     const ref = url.searchParams.get('ref') ?? ''
     const hit = current?.citations?.[ref] as { error?: string; status?: number } | undefined
     if (hit && typeof hit === 'object' && typeof hit.error === 'string' && typeof hit.status === 'number') return json(hit.status, { detail: hit.error })
-    if (hit) return json(200, hit)
-  } else if (/^\/api\/ws\/[^/]+\/calls\/[^/]+\/\d+$/.test(url.pathname)) {
-    const [chat, n] = url.pathname.split('/').slice(-2)
-    const hit = current?.calls?.[`${decodeURIComponent(chat)}/${n}`]
     if (hit) return json(200, hit)
   } else if (/^\/api\/ws\/[^/]+\/cells\/names$/.test(url.pathname)) {
     return json(200, current?.names ?? [])

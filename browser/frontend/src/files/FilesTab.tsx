@@ -27,18 +27,18 @@ import { viewSurface } from '../shell/panes'
 import { typingIn } from '../shell/undo'
 import { findKey } from './find'
 import { FileSearch } from './FileSearch'
-import { folderPresence, presenceOf, viewDefaults, viewLabels, type Presence } from './labels'
+import { folderPresence, presenceOf, viewLabels, type Presence } from './labels'
 import { inferKind, TREE } from './params'
 import { pickKey, Reader, type FindAsk } from './Reader'
 import { baseName, defaultTabs, fmtSize, glyphOf, kindIn, parentOf, Tree, useFolderStore } from './Tree'
-import { useFilesLabels, type FilesLabels } from './useLabels'
+import { useFilesLabels } from './useLabels'
 import { OpenIn } from './OpenIn'
 import { chooseView, viewPlace, viewValue } from './viewChoice'
 import { ViewPane } from './ViewPane'
 import { FolderPane } from './FolderPane'
 import { AddLabelControls, useLabelRuns, useLabelSide } from './ViewSide'
 import type { ViewQuote } from './ViewerFrame'
-import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar, type BuiltView } from './ViewsBar'
+import { BROWSER, slugOfKey, useViews, viewKey, ViewsBar } from './ViewsBar'
 import { markOpened, useOpenAskedViews } from './viewReady'
 import { fitTabs } from './viewsFit'
 
@@ -236,31 +236,6 @@ function useSessionChoice(ws: string, name: string): [boolean | null, (v: boolea
     [key],
   )
   return [v, set]
-}
-
-/** A view's labels by default: the first time the analyst opens a view (per workspace), while no label marking its
- * files is on, the orientation's labels over those files are turned on (labels.viewDefaults), so the view opens
- * coloured, its own label controls as the legend. */
-function useViewDefaults(ws: string, view: BuiltView | null, labels: FilesLabels) {
-  const [orient, setOrient] = useState<Set<string> | null>(null)
-  useEffect(() => {
-    let alive = true
-    api
-      .chats(ws)
-      .then((list) => alive && setOrient(new Set(list.filter((c) => c.role === 'orient').map((c) => c.id))))
-      .catch(() => alive && setOrient(new Set()))
-    return () => {
-      alive = false
-    }
-  }, [ws])
-  const { all, presence, toggle } = labels
-  useEffect(() => {
-    if (!view?.claims?.length || !orient || !all.length || !presence.size) return
-    const key = storageKey(ws, `viewLabels:${view.slug}`)
-    if (readStorage<unknown>(key, false) === true) return
-    writeStorage(key, true)
-    for (const id of viewDefaults(all, presence, view.claims, orient)) toggle(id)
-  }, [ws, view, orient, all, presence, toggle])
 }
 
 /** A per-workspace flag kept in browser storage (the sidebar, the tree and the Labels pane folded or not). */
@@ -629,7 +604,6 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
   }, [])
   // what a new label applies to: the files the view in front claims, else the file open in the reader
   const appliesTo = useMemo(() => (shownView ? shownView.claims ?? (shownPath ? [shownPath] : []) : open?.path ? [open.path] : []), [shownView, shownPath, open?.path])
-  useViewDefaults(ws, shownView, labels)
   const fillNew = useCallback((draft: LabelDraft) => {
     setEditing('new')
     setDrafted(draft)

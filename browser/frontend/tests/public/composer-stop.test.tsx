@@ -30,9 +30,9 @@ describe('the composer while an agent runs', () => {
   test('an empty field shows the stop square, named for what it stops, which stops it', async () => {
     const onStop = vi.fn()
     const onSubmit = vi.fn()
-    const el = await mount(<ComposerFrame value="" onChange={() => undefined} onSubmit={onSubmit} stop={{ label: 'Stop the orientation', onStop }} />)
+    const el = await mount(<ComposerFrame value="" onChange={() => undefined} onSubmit={onSubmit} stop={{ label: 'Stop the writer', onStop }} />)
     const btn = stopSquare(el)!
-    expect(btn.getAttribute('aria-label')).toBe('Stop the orientation')
+    expect(btn.getAttribute('aria-label')).toBe('Stop the writer')
     expect(btn.type).toBe('button')
     expect(btn.disabled).toBe(false)
     btn.click()
@@ -52,9 +52,9 @@ describe('the composer while an agent runs', () => {
   test('text in the field brings the send square beside the stop square: Send sends it, and Stop still stops', async () => {
     const onStop = vi.fn()
     const onSubmit = vi.fn()
-    const el = await mount(<ComposerFrame value="and the runs?" onChange={() => undefined} onSubmit={onSubmit} stop={{ label: 'Stop the orientation', onStop }} />)
+    const el = await mount(<ComposerFrame value="and the runs?" onChange={() => undefined} onSubmit={onSubmit} stop={{ label: 'Stop the writer', onStop }} />)
     const squares = [...el.querySelectorAll<HTMLButtonElement>('button.composer-send')]
-    expect(squares.map((b) => b.getAttribute('aria-label'))).toEqual(['Stop the orientation', 'Send'])
+    expect(squares.map((b) => b.getAttribute('aria-label'))).toEqual(['Stop the writer', 'Send'])
     const btn = squares[1]
     btn.click()
     expect(onSubmit).toHaveBeenCalledTimes(1)
@@ -76,10 +76,9 @@ describe('what the composer stops (composerStopOf)', () => {
   const ticket = (status: string, chat = 'd1') => ({ id: 't1', n: 3, status, chat }) as Pick<Ticket, 'id' | 'n' | 'status' | 'chat'>
 
   test("a running session of thimble's: its chat, named for its role", () => {
-    expect(composerStopOf('orient', meta('o1', 'running'), null)).toEqual({ kind: 'session', chat: 'o1', role: 'orient', label: 'Stop the orientation' })
-    expect(composerStopOf('writer', meta('w1', 'running'), null)?.label).toBe('Stop the writer')
+    expect(composerStopOf('writer', meta('w1', 'running'), null)).toEqual({ kind: 'session', chat: 'w1', role: 'writer', label: 'Stop the writer' })
     expect(composerStopOf('check', meta('c1', 'running'), null)?.label).toBe('Stop the check')
-    expect(composerStopOf('orient', meta('o1', 'done'), null)).toBeNull()
+    expect(composerStopOf('writer', meta('w1', 'done'), null)).toBeNull()
   })
 
   test('a running dev ticket of this chat, not a queued one or a retried ticket in another chat', () => {
@@ -118,21 +117,10 @@ describe('what the composer stops (composerStopOf)', () => {
   })
 
   test("a step: its parent's Stop while the parent runs, since its composer sends to the parent", () => {
-    const parent = (status: string, role = 'orient') => ({ id: 'o1', status, role }) as Pick<ChatMeta, 'id' | 'status' | 'role'>
-    expect(composerStopOf('step', meta('s1', 'running'), null, parent('running'))).toEqual({ kind: 'session', chat: 'o1', role: 'orient', label: 'Stop the orientation' })
+    const parent = (status: string, role = 'writer') => ({ id: 'w1', status, role }) as Pick<ChatMeta, 'id' | 'status' | 'role'>
+    expect(composerStopOf('step', meta('s1', 'running'), null, parent('running'))).toEqual({ kind: 'session', chat: 'w1', role: 'writer', label: 'Stop the writer' })
     expect(composerStopOf('step', meta('s1', 'running'), null, parent('done'))).toBeNull()
     expect(composerStopOf('step', meta('s1', 'running'), null, null)).toBeNull()
-  })
-
-  test('the critique: its own Stop, also in a step of the critic, so the orientation goes on without it', () => {
-    const critique = (status: string, how: Partial<ChatMeta> = { agent_type: 'thimble:critic' }) => ({ id: 'k1', status, role: 'step', ...how }) as ChatMeta
-    const stop = { kind: 'session', chat: 'k1', role: 'critic', label: 'Stop the critique' }
-    const orient = { id: 'o1', status: 'running', role: 'orient' } as ChatMeta
-    expect(composerStopOf('step', critique('running'), null, orient)).toEqual(stop)
-    expect(composerStopOf('step', critique('running', { agent_type: 'mine:critic' }), null, orient)).toEqual(stop)
-    expect(composerStopOf('step', critique('done'), null, orient)).toBeNull()
-    expect(composerStopOf('step', meta('s1', 'running'), null, critique('running'))).toEqual(stop)
-    expect(composerStopOf('step', meta('s1', 'running'), null, critique('done'))).toBeNull()
   })
 })
 
@@ -155,7 +143,7 @@ describe('the Stop sent', () => {
     const off = bus.on('toast', (t) => seen.push(t))
     return { seen, off }
   }
-  const session = { kind: 'session', chat: 'o1', role: 'orient', label: 'Stop the orientation' } as const
+  const session = { kind: 'session', chat: 'w1', role: 'writer', label: 'Stop the writer' } as const
 
   test('a session stopped resolves true with no toast', async () => {
     answer({ stopped: true })
@@ -168,9 +156,9 @@ describe('the Stop sent', () => {
   test('nothing to stop resolves false with an error toast; one thimble could not pass on says how to stop it in the terminal', async () => {
     const t = toasts()
     answer({ stopped: false })
-    expect(await stopSession('mini', 'o1', 'orient')).toBe(false)
+    expect(await stopSession('mini', 'w1', 'writer')).toBe(false)
     answer({ stopped: false, kind: 'error', reason: 'the request timed out' })
-    expect(await stopSession('mini', 'o1', 'orient')).toBe(false)
+    expect(await stopSession('mini', 'w1', 'writer')).toBe(false)
     answer({ detail: 'down' }, 500)
     expect(await stopRun('mini', session, () => undefined)).toBe(false)
     expect(t.seen.map((x) => x.kind)).toEqual(['error', 'error', 'error'])
@@ -183,7 +171,7 @@ describe('the Stop sent', () => {
   test('a Stop that found the agent ended already counts as done, with a quiet toast', async () => {
     answer({ stopped: true, done: true })
     const t = toasts()
-    expect(await stopSession('mini', 'o1', 'orient')).toBe(true)
+    expect(await stopSession('mini', 'w1', 'writer')).toBe(true)
     expect(t.seen).toEqual([{ text: 'It had already ended.' }])
     t.off()
   })
@@ -218,7 +206,7 @@ describe('the Stop sent', () => {
   test('a subagent of main is asked of main: an info toast, not an error', async () => {
     answer({ stopped: false, asked: 'main' })
     const t = toasts()
-    expect(await stopSession('mini', 'a1', 'orient')).toBe(true)
+    expect(await stopSession('mini', 'a1', 'writer')).toBe(true)
     expect(t.seen).toEqual([{ text: 'Asked main to stop it.' }])
     t.off()
   })
@@ -285,15 +273,15 @@ describe("a session's thread while it shows no activity", () => {
 })
 
 describe("a running session's card", () => {
-  const log = { meta: { id: 'o1', kind: 'agent', role: 'orient', title: 'Orientation', status: 'running' } as ChatMeta, records: [], error: null }
+  const log = { meta: { id: 'w1', kind: 'agent', role: 'writer', title: 'report', status: 'running' } as ChatMeta, records: [], error: null }
 
   test("keeps its Stop in main, and leaves it to the composer in its own thread while the spinner stays", async () => {
     vi.stubGlobal('fetch', async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }))
-    const inMain = await mount(<AgentCard ws="mini" chat="o1" role="orient" title="Orientation" log={log} />)
+    const inMain = await mount(<AgentCard ws="mini" chat="w1" role="writer" title="report" log={log} />)
     await settle()
     expect(inMain.querySelector('.chat-task-stop')).not.toBeNull()
     unmountAll()
-    const own = await mount(<AgentCard ws="mini" chat="o1" role="orient" title="Orientation" log={log} stopHere={false} />)
+    const own = await mount(<AgentCard ws="mini" chat="w1" role="writer" title="report" log={log} stopHere={false} />)
     await act(async () => undefined)
     await settle()
     expect(own.querySelector('.chat-task-stop')).toBeNull()

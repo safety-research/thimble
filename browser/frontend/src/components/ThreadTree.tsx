@@ -18,7 +18,7 @@ export const WAITING_TEXT = 'Waiting for you'
 
 export interface ThreadNode {
   id: string
-  /** the row's text: main, orient, why-the-spike */
+  /** the row's text: main, why-the-spike */
   name: string
   /** the full name the collapsed card shows: main/why-the-spike, dev/group-board-by-round; `name` when absent */
   path?: string

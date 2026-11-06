@@ -19,7 +19,7 @@ import { runLine } from '../../src/report/checkComments.ts'
 import { failedText, nextFailures, nextRefusals, useWriteRefusals, writingAfter } from '../../src/report/writeFailures.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const P = (slug: string, extra: Partial<Proposal> = {}): Proposal => ({ slug, name: slug, description: '', task: '', claims: [], arrangement: '', proposed_by: 'orient', status: 'building', ts: '', chat: `c-${slug}`, ...extra }) as Proposal
+const P = (slug: string, extra: Partial<Proposal> = {}): Proposal => ({ slug, name: slug, description: '', task: '', claims: [], arrangement: '', proposed_by: 'main', status: 'building', ts: '', chat: `c-${slug}`, ...extra }) as Proposal
 let proposals: Proposal[] = []
 let posted: [string, unknown][] = []
 beforeEach(() => {
@@ -97,7 +97,7 @@ describe('a view build\'s chip', () => {
     }
   })
 
-  test("an orientation's proposal that failed through its repairs: its thread's line shows the chip with ✕ and Retry (U3)", async () => {
+  test("a proposal nobody asked for that failed through its repairs: its thread's line shows the chip with ✕ and Retry (U3)", async () => {
     proposals = [P('posts', { status: 'failed', repairs: 2, error: 'problem: the page says FAIL' })]
     await act(async () => refreshProposals('jobs'))
     const item = { kind: 'chip' as const, index: 3, chip: 'view_failed', text: 'The view posts did not pass its checks after 2 repairs, so it shows as failed: problem: the page says FAIL', ref: 'view:posts', view: 'posts' }

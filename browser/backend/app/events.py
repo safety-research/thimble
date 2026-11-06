@@ -198,7 +198,7 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any]) -> d
 
 # the kinds that say something ended and ask main for nothing: each waits and rides along with main's next event, under
 # MEANWHILE (prompts/main.md)
-QUIET_KINDS = frozenset({"orient", "written", "labeled", "label_ask", "view", "citations"})
+QUIET_KINDS = frozenset({"written", "labeled", "label_ask", "view", "citations"})
 MEANWHILE = "meanwhile:"
 HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts
 _held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notes, once read
@@ -211,11 +211,7 @@ def describe(kind: str, payload: dict[str, Any]) -> str:
 
 def terminal_line(kind: str, words: str, fields: dict[str, Any]) -> str:
     """An event's line in main's terminal (module note): the analyst's `words` after SAID, else a short line saying what
-    happened, on one line and cut at LINE_CHARS. An `orient` event's text keeps its lines, since its second is the
-    orientation's coverage line (orient_session.status_text), which is cut only past three times that."""
-    if kind == "orient" and "\n" in str(words or "").strip():
-        first, *rest = [part for part in str(words).splitlines() if part.strip()]
-        return "\n".join([terminal_line(kind, first, fields), *(_cut(" ".join(r.split()), 3 * LINE_CHARS) for r in rest)])
+    happened, on one line and cut at LINE_CHARS."""
     words = " ".join(str(words or "").split())
     if kind in (MAIN, "card"):
         line = SAID + words

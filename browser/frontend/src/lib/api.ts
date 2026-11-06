@@ -24,7 +24,6 @@ import type {
   NewThreadBody,
   NewTicketBody,
   DevStatus,
-  OrientRun,
   Proposal,
   ResolvedRef,
   Settings,
@@ -41,9 +40,7 @@ import type {
   SourcePage,
   SourceTurns,
   StartAnswer,
-  StoredCall,
   SubagentRequest,
-  CallIndex,
   Ticket,
   View,
   ViewSuggestion,
@@ -457,12 +454,6 @@ export const api = {
      * always (kept for the workspace) or deny; 404 once the command that asked no longer waits. */
   answerHostAsk: (c: string, id: string, choice: HostAskChoice) =>
     j<{ ok: boolean }>(`${ws(c)}/host-asks/${enc(id)}`, { method: 'POST', body: JSON.stringify({ choice }) }),
-  /** The orientation thread's composer: a click, through thimble's plugin to the orientation's agent (orient_session.
-     * message_route): `sent`, or `held` while the coverage line is measured (it goes when that ends). 409 with the
-     * earlier-session text (and for a pre-cache, plan mode, or a module that did not pass it on), 410 with the
-     * earlier-version text; 403 without the analyst's cookie. */
-  messageOrientation: (c: string, text: string) =>
-    j<{ status: 'sent' | 'held' | (string & {}); chat?: string }>(`${ws(c)}/orientation/message`, { method: 'POST', body: JSON.stringify({ text }) }),
   /** Start it on a refused typed start (`POST /ws/{c}/subagents/start-it`): the same request, with the same values,
      * started through thimble's plugin as a click. */
   startIt: (c: string, request: string) => j<StartAnswer>(`${ws(c)}/subagents/start-it`, { method: 'POST', body: JSON.stringify({ request }) }).then(startAnswer),
@@ -470,11 +461,6 @@ export const api = {
   again: (c: string, request: string) => j<StartAnswer>(`${ws(c)}/subagents/again`, { method: 'POST', body: JSON.stringify({ request }) }).then(startAnswer),
   /** A pending request as the refused card shows it before Start it: its role, its exact call, its values, its state. */
   subagentRequest: (c: string, request: string) => j<SubagentRequest>(`${ws(c)}/subagents/requests/${enc(request)}`),
-  /** The numbers of an orientation's calls by tool_use id (backend calls.py's store, built from its transcript when the
-   * store has none). */
-  callIndex: (c: string, chat: string) => j<CallIndex>(`${ws(c)}/calls/${enc(chat)}`),
-  /** One call of an orientation's store: its tool, its input and its whole output. */
-  call: (c: string, chat: string, n: number) => j<StoredCall>(`${ws(c)}/calls/${enc(chat)}/${n}`),
 
   // ---- the workspace stream ----
   eventsUrl: (c: string, after?: number | string | null, log?: string | null) => {
@@ -629,17 +615,8 @@ export const api = {
   /** the libraries a custom card names (`libs`, comma-separated) as inline elements for its frame's head (backend
    * card_libs.libs_route) */
   cardLibs: (c: string, libs: string) => j<{ head: string; problems: string[] }>(`${ws(c)}/card-libs${q({ libs })}`),
-  // ---- orientation ----
-  /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
-  orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
-
   // ---- documents ----
   frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),
-  addFrameSection: (c: string, slug: DocumentType, heading: string) => j<Writeup>(`${inv(c, slug)}/frame/sections`, { method: 'POST', body: JSON.stringify({ heading }) }),
-  addFrameParagraph: (c: string, slug: DocumentType, sid: string, text: string) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/paragraphs`, { method: 'POST', body: JSON.stringify({ text }) }),
-  addFrameFigure: (c: string, slug: DocumentType, sid: string, body: { cell: string; caption?: string; after?: string }) => j<Writeup>(`${inv(c, slug)}/frame/sections/${enc(sid)}/figures`, { method: 'POST', body: JSON.stringify(body) }),
-  deleteFrameUnit: (c: string, slug: DocumentType, uid: string) => j<Writeup>(`${inv(c, slug)}/frame/units/${enc(uid)}`, { method: 'DELETE' }),
-  putFrameUnit: (c: string, slug: DocumentType, uid: string, patch: { text?: string; heading?: string; caption?: string }) => j<Writeup>(`${inv(c, slug)}/frame/units/${enc(uid)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   /** Write (`POST /ws/{c}/write`): a click, which starts the document's writer through thimble's plugin; it writes it,
    * or revises it once written. `text` is a request typed at one place, `after` that place, and `model` and `effort`
    * the run's values (Settings' writer row when left out). The answer is the agent id or the refusal's kind and reason;
@@ -783,8 +760,8 @@ export const labelApi = {
   answerAsk: (c: string, id: string, choice: LabelAskChoice) => j<{ ok: boolean }>(`${ws(c)}/label-asks/${enc(id)}`, { method: 'POST', body: JSON.stringify({ choice }) }),
 }
 
-// --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---
-import type { AnyDoc, DeckBody, DeckDoc, DocHistory, DocPreset, NewDocBody, PageDoc, ReportType, StoryBody, StoryDoc, TypesState } from './types'
+// --- documents: the Report tab's switcher and the page (report/) ---
+import type { AnyDoc, DocHistory, DocPreset, NewDocBody, PageDoc, ReportType, TypesState } from './types'
 
 export const docsApi = {
   /** `GET …/investigations/main/types`: per type, whether its document exists, its renderer and its name. */
@@ -809,14 +786,8 @@ export const docsApi = {
   renameType: (c: string, slug: string, name: string) => j<ReportType>(`${ws(c)}/report-types/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   /** `DELETE /report-types/{slug}`: a type of the workspace's own and its document. */
   deleteType: (c: string, slug: string) => j<{ ok: boolean }>(`${ws(c)}/report-types/${enc(slug)}`, { method: 'DELETE' }),
-  /** `PUT …/types/{slug}/deck`: the deck editor's whole deck, into the written deck or its frame; answers what is stored. */
-  putDeck: (c: string, slug: string, body: DeckBody) => j<DeckDoc>(`${inv(c, slug)}/deck`, { method: 'PUT', body: JSON.stringify(body) }),
-  /** `PUT …/types/{slug}/story`: the story editor's whole story, into the written story or its frame; answers what is stored. */
-  putStory: (c: string, slug: string, body: StoryBody) => j<StoryDoc>(`${inv(c, slug)}/story`, { method: 'PUT', body: JSON.stringify(body) }),
   /** `PUT …/types/{slug}/html`: the page's whole html from the code drawer; creates the page's document when none is written. */
   putHtml: (c: string, slug: string, html: string) => j<PageDoc>(`${inv(c, slug)}/html`, { method: 'PUT', body: JSON.stringify({ html }) }),
-  /** `GET …/types/{slug}/film`: a video's film as its frame loads it, under the views' policy, with its timing and bridge. */
-  film: (c: string, slug: string) => j<{ html: string }>(`${inv(c, slug)}/film`),
 }
 
 // --- scale: one folder at a time for the tree, one page of labels for the reader ---

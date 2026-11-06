@@ -3,7 +3,6 @@
 // ---- chats and records ----
 
 export type ChatKind = 'main' | 'thread' | 'agent'
-export type AgentRole = 'orient' | 'propose' | 'writer' | 'check' | 'labels' | 'dev'
 export type AgentStatus = 'running' | 'done' | 'failed' | 'stopped'
 
 /** `chats/<id>.meta.json`; the list route adds `n_messages`, `last_ts`, `running`. */
@@ -29,10 +28,6 @@ export interface ChatMeta {
   name?: string | null
   /** a writer's document (write_session.start) */
   doc?: string | null
-  /** a writer that answered the report pass of an orientation from before 0.8.0: the orientation's chat and its run
-     * then; null on every writer since (backend write_session.NO_REPORT_PASS); absent on an older writer's chat */
-  orient?: string | null
-  orient_run?: number | null
   /** a thread that a comment's reply field opened: the comment, which its anchor line names beside its passage or step
    * (backend comments.thread_comment) */
   anchor_comment?: ThreadComment | null
@@ -52,7 +47,7 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
-  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'thimble'; tray?: boolean; event?: string; run?: number }
+  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'thimble'; tray?: boolean; event?: string; run?: number }
   | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
@@ -79,7 +74,7 @@ export interface NoticeAction {
 
 /** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the
  * open ones and the stream's `notice` event sends a new one: one line naming the agent it happened to (`agent`, such as
- * "Orientation" or "View build: Agent Network"), its fix as buttons (`action`, one or several), and the chat the agent
+ * "View build: Agent Network"), its fix as buttons (`action`, one or several), and the chat the agent
  * writes in (`chat`, its thread, or main), where the notice is also a row. A later notice with the same `key` replaces
  * it, and a fix that worked clears it (the event's `cleared`). */
 export interface Notice {
@@ -99,23 +94,6 @@ export interface ChatDetail {
   meta: ChatMeta
   events: ChatRecord[]
 }
-
-/** One call of an orientation as its store keeps it (backend calls.py, `workspaces/<c>/calls/<chat>.jsonl`): its number
- * in the orientation's one sequence, the chat whose log holds its record (the orientation's, or a step's), the tool, its
- * input, and its whole output as text, null while it runs (`output` read the same). */
-export interface StoredCall {
-  n: number
-  id: string
-  chat?: string
-  name: string
-  input: unknown
-  result?: string | null
-  output?: string | null
-  is_error?: boolean
-}
-
-/** The index of an orientation's calls: each call's number by its tool_use id. A bare list reads the same. */
-export type CallIndex = { calls: { n: number; id: string; name?: string }[] } | { n: number; id: string; name?: string }[]
 
 export interface NewThreadBody {
   anchor?: string | null
@@ -151,7 +129,6 @@ export interface ChatPatch {
 export type WsEvent = { ts?: string; seq?: number } & (
   | { type: 'chat'; chat: string; deleted?: boolean }
   | { type: 'cell'; notebook: string; cell: string; kind: 'ran' | 'note' | 'verified' | string }
-  | { type: 'orient'; status: 'started' | 'done' | 'failed' | 'stopped' | 'refused' | string; kind?: string; reason?: string; [k: string]: unknown }
   | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'refused' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string; refused?: Refusal }
   | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
   | { type: 'ticket'; id: string; n: number; status: string }
@@ -286,8 +263,6 @@ export interface PlanRun {
 export interface CanvasResponse {
   groups: Group[]
   cells: Cell[]
-  /** the ids of the cards the route leaves out: a legacy orientation Scratch (backend notebook.canvas) */
-  hidden?: string[]
   /** the anchor of each thread that made a card here, by the thread's chat id (backend threads.anchors_of) */
   threads?: Record<string, string>
 }
@@ -481,10 +456,9 @@ export interface Filters {
 
 // ---- views and proposals ----
 
-/** A view ticket's build: `dropped` is a view proposal the analyst rejected, or the proposal of an orientation from
- * before 0.8.0 left out when the analyst stopped it, shown nowhere (backend views.drop); `suggested` a view proposal
- * that waits for the analyst's Accept or Reject (backend views.offer), or a 0.7.x orientation's viewer for a file type,
- * which no card shows (backend views.open_offer). */
+/** A view ticket's build: `dropped` is a view proposal the analyst rejected, shown nowhere (backend
+ * views.answer_offer); `suggested` a view proposal that waits for the analyst's Accept or Reject (backend views.offer),
+ * or a 0.7.x orientation's viewer for a file type, which no card shows (backend views.open_offer). */
 export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
 
 /** A view ticket (the propose_view tool): what the analyst sees in the view, what they do with it, the files it reads,
@@ -532,8 +506,8 @@ export interface Proposal {
   values?: { model?: string; effort?: string } | null
   model?: string | null
   effort?: string | null
-  /** a view proposal thimble made to the analyst (backend views.offer): when, after what (`main`, `thread:<id>`,
-   * `orientation`, or `file` for a viewer proposed when a file was opened) and why. An open
+  /** a view proposal thimble made to the analyst (backend views.offer): when, after what (`main`, `thread:<id>`, or
+   * `file` for a viewer proposed when a file was opened) and why. An open
    * proposal is `suggested` with this; a `suggested` row without it is from an older version and never shows */
   offered?: ProposalOffer | null
   /** how the analyst answered the view proposal: Accept or Reject */
@@ -677,7 +651,7 @@ export interface ViewOpen {
   error?: string
 }
 
-// ---- orientation ----
+// ---- agents ----
 
 /** The efforts Claude Code takes, lowest first (cc_settings.EFFORTS): every effort menu of thimble's agents offers
  * these. Main's composer adds Ultracode (MainEffort). */
@@ -804,25 +778,6 @@ export interface RunValues {
   effort?: string
 }
 
-/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request, the run's exact
- * model and effort, who started it, the pending request, and for a start that did not happen its refusal. {} before
- * any orientation was asked for. */
-export interface OrientRun {
-  status?: 'requested' | 'starting' | 'running' | 'done' | 'failed' | 'stopped' | 'refused' | (string & {})
-  query?: string | null
-  model?: string | null
-  effort?: string | null
-  route?: 'subagent' | 'program' | (string & {}) | null
-  started_by?: 'click' | 'typed' | (string & {}) | null
-  agent_id?: string | null
-  request?: string | null
-  refused?: Refusal | null
-  requested?: string | null
-  started?: string | null
-  ended?: string | null
-  chats?: { orient?: string }
-}
-
 /** Why a run of one of thimble's agents stopped (subagents.STOPPED_*): the analyst's Stop, main's quit, a refusal, or
  * Esc in its agent view (`user`), after which Claude Code resumes it no more. */
 export type StoppedBy = 'analyst' | 'quit' | 'refused' | 'user' | (string & {})
@@ -875,9 +830,6 @@ export interface WriteupSentence {
   pinned?: boolean
   by?: string
   rewritten_at?: string
-  /** a slide's quote of a record, and who said it (backend slides.py) */
-  quote?: boolean
-  speaker?: string
 }
 
 export interface WriteupParagraph {
@@ -888,10 +840,6 @@ export interface WriteupParagraph {
   rewritten_at?: string
   /** the analyst's lock on the paragraph (a list is one paragraph): no model may change it */
   locked?: boolean
-  /** a story's block of a kind other than text or a list; a divider has no sentences */
-  kind?: StoryBlockKind
-  /** a story quote's speaker */
-  speaker?: string
 }
 
 export interface WriteupFigure {
@@ -906,13 +854,6 @@ export interface WriteupFigure {
   pinned?: boolean
   /** the analyst's lock on the figure */
   locked?: boolean
-  /** a story's step on its figure (backend story.step_of): the rows, events or nodes its beat highlights, or a number
-   * or phrase it calls out over the figure */
-  highlight?: string[]
-  callout?: string
-  /** in a story, the section's card (`main`) or a picture of a card among the blocks (`image`); a card among the
-   * blocks has none */
-  role?: 'main' | 'image'
 }
 
 export interface WriteupSection {
@@ -930,8 +871,6 @@ export interface WriteupSection {
   history?: (WriteupRevision | string)[]
   edited_by?: 'analyst'
   rewriting?: boolean
-  /** in a story, where the section's card stands (right when unset) */
-  card?: StoryCardSide
 }
 
 export interface WriteupReply {
@@ -1069,7 +1008,7 @@ export interface LockRevert {
   ts?: string
 }
 
-export type DocumentType = 'report' | 'story' | 'slides' | string
+export type DocumentType = 'report' | string
 
 /** How a check's run on one document went (backend checks.py). */
 export type CheckRunStatus = 'running' | 'done' | 'failed' | 'stopped'
@@ -1317,27 +1256,17 @@ export interface CorpusInfo {
   shown?: string
 }
 
-/** One row of `GET /workspaces` (backend start_page.py): a workspace as the start page and the top bar's switcher list
- * it. `demo`: a dataset `thimble demo` downloaded, with its one-sentence blurb, `ready` when its pre-cached orientation
- * is installed; `example`: a worked example `thimble demo --examples` opened, with the view it shows; `folder`: any
- * other folder. */
+/** One row of `GET /workspaces` (backend start_page.py): a folder's workspace as the start page and the top bar's
+ * switcher list it. */
 export interface WorkspaceRow {
   name: string
-  kind: 'demo' | 'example' | 'folder'
-  /** what the page shows for it: a demo's dataset name, an example's workspace name, a folder's own name */
+  kind: 'folder'
+  /** what the page shows for it: the folder's own name */
   label?: string
   /** the folder's own name */
   folder: string
   /** the folder as the analyst opened it */
   path: string
-  dataset?: string
-  title?: string
-  blurb?: string
-  ready?: boolean
-  /** the view the row opens the workspace on: a demo dataset's pre-cache's main view, an example's view */
-  view?: { slug: string; name: string } | null
-  /** the names the workspace was renamed from (`thimble demo` renames a demo workspace demo-<dataset>) */
-  renamed_from?: string[]
 }
 
 export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
@@ -1800,12 +1729,12 @@ export interface VerdictResult {
   calibration: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null>; taught?: number }
 }
 
-// --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---
+// --- documents: the Report tab's switcher and the page (report/) ---
 
 /** One type's entry in `GET …/investigations/main/types`: whether its document exists and what it is. */
 export interface TypeState {
   exists: boolean
-  renderer: 'document' | 'slides' | 'story' | 'custom' | string
+  renderer: 'document' | 'custom' | string
   /** the type's name, as the switcher shows it */
   name: string
   /** a custom type that is a page (one html document) */
@@ -1819,90 +1748,6 @@ export interface TypeState {
 }
 
 export type TypesState = Record<string, TypeState>
-
-/** Where a story section's card stands (backend story.SIDES): at the right, at the left, across the page under the
- * section's text, or not shown. */
-export type StoryCardSide = 'right' | 'left' | 'full' | 'none'
-/** A story paragraph's kind (backend story.BLOCK_KINDS); a paragraph without one is text, or a list when its sentences
- * carry a bullet. */
-export type StoryBlockKind = 'headline' | 'quote' | 'callout' | 'divider'
-
-/** A story (backend story.py): sections of blocks beside their card, each a section in the report's shape whose
- * `card` says where its card stands, its paragraphs the text blocks and its figures the section's card (role `main`)
- * and the cards among the blocks. The frame before a write has the same shape. */
-export interface StoryDoc {
-  id?: string
-  type?: string
-  renderer: 'story'
-  title: string
-  sections: WriteupSection[]
-  comments?: WriteupComment[]
-  generation?: number
-  generated_at?: string
-  model?: string
-  frame?: boolean
-  title_locked?: boolean
-  lock_reverts?: LockRevert[]
-}
-
-/** `PUT …/types/{slug}/story`: the story editor's whole story (backend story.apply_story). A block's `text` is its
- * sentences as typed, a bullets block one item per line. */
-export interface StoryBody {
-  title: string
-  client?: string
-  sections: {
-    id: string
-    heading: string
-    card: StoryCardSide
-    main: { id: string; cell: string; caption: string } | null
-    blocks: { id: string; type: string; text?: string; speaker?: string; cell?: string; caption?: string }[]
-  }[]
-}
-
-/** A deck's slide: a heading, its layout, its lines as sentences (a quote marked `quote`), up to four figures (or a
- * single `figure`), its format (figure side and share, card slots, a grid), speaker notes. */
-export interface DeckSlide {
-  id: string
-  heading: string
-  layout?: 'title' | 'text' | 'figure' | 'card' | 'figures' | 'quote' | string
-  sentences: WriteupSentence[]
-  figure?: { id: string; cell: string; caption: string } | null
-  figures?: { id: string; cell: string; caption: string; pinned?: boolean }[]
-  format?: { side?: 'left' | 'right'; width?: number; slots?: number; grid?: boolean }
-  notes?: string
-  pinned?: boolean
-}
-
-export interface DeckDoc {
-  id?: string
-  type?: string
-  renderer: 'slides'
-  title: string
-  slides: DeckSlide[]
-  comments?: WriteupComment[]
-  generation?: number
-  generated_at?: string
-  model?: string
-  /** a deck not written yet: its frame (GET …/frame), which the deck's editor lays out */
-  frame?: boolean
-}
-
-/** `PUT …/types/{slug}/deck`: the deck editor's whole deck (backend report_types.apply_deck). */
-export interface DeckBody {
-  title: string
-  client?: string
-  slides: {
-    id: string
-    heading: string
-    layout: string
-    format: { side?: 'left' | 'right'; width?: number; slots?: number; grid?: boolean } | null
-    lines: { id: string; text: string }[]
-    bullets: boolean
-    quote: { id: string; text: string; speaker: string } | null
-    figures: { id: string; cell: string; caption: string }[]
-    notes: string
-  }[]
-}
 
 /** A page: one html document and the claims it makes as sentences. */
 export interface PageDoc {
@@ -1920,37 +1765,8 @@ export interface PageDoc {
   model?: string
 }
 
-/** A video's line (backend video.py): what the voice says, one or two cited sentences, and the seconds of silence
- * after it. */
-export interface VideoLine {
-  id: string
-  sentences: WriteupSentence[]
-  pause_after?: number
-}
-
-/** When each line starts and ends in the film, in seconds, the lines in script order (backend video.timing). */
-export interface VideoTiming {
-  duration: number
-  lines: { id: string; start: number; end: number }[]
-}
-
-/** A video: its narration as lines and its film, one html page drawn at 1280×720 from `window.seek(t)`. */
-export interface VideoDoc {
-  id?: string
-  type?: string
-  renderer: 'video'
-  title: string
-  lines: VideoLine[]
-  film?: string
-  timing?: VideoTiming
-  comments?: WriteupComment[]
-  generation?: number
-  generated_at?: string
-  model?: string
-}
-
 /** Any stored document the Report tab shows. */
-export type AnyDoc = Writeup | StoryDoc | DeckDoc | PageDoc | VideoDoc
+export type AnyDoc = Writeup | PageDoc
 
 /** A preset + New offers (`GET /report-types/presets`, backend prompts/types/<id>.md). */
 export interface DocPreset {
@@ -2042,9 +1858,6 @@ export interface ChatMeta {
   attached?: Attached | null
   /** main only: the session that was main last, while none is attached */
   ended?: SessionEnded | null
-  /** main only: the orientation's status from orient/run.json (requested, starting, running, done, failed, stopped or
-   * refused), null before any orientation was asked for */
-  orientation?: string | null
   /** a dev ticket's agent chat: the ticket it runs (dev.py) */
   ticket?: string | null
   /** a fix's chat (role fixer): the fix its fixer works on (backend fixes.fixer_chat) */
@@ -2054,7 +1867,7 @@ export interface ChatMeta {
   /** a view's agent chat that reviews it (view_review), not one that builds it */
   review?: boolean | null
   /** a view ticket's agent chat: the analyst asked for the view, so it is their dev thread; the builds of views nobody
-   * asked for, such as an orientation's from before 0.8.0, are not listed (dev._view_chat, chat/threads.ts) */
+   * asked for are not listed (dev._view_chat, chat/threads.ts) */
   asked?: boolean | null
   /** main, or a code ticket's session: a dialog holds the session where the browser cannot answer it */
   alert?: SessionAlert | null
@@ -2073,14 +1886,8 @@ export interface ChatMeta {
   doc?: string | null
   /** one of thimble's agents: what it was asked, for its card, when its first message is longer (a writer's task) */
   brief?: string | null
-  /** the orientation: each follow-up, its run's number, state and times, and once it ends what it changed, counted from
-   * its undo steps (backend orientation.run_finished) */
-  followups?: FollowUpRecord[]
   /** one of thimble's agents: its run's number, 0 for its start, then one per follow-up */
   run?: number
-  /** the orientation, in a workspace `thimble demo` installed from a pre-cache: it ran in advance, and its session was
-   * kept only from a full export (backend precached.py, demo.install) */
-  precached?: PrecachedMark | null
   // ---- one of thimble's agents, a subagent of main (backend subagents.ensure_chat) ----
   /** `subagent` for a chat of one of thimble's agents run as a subagent of the analyst's Claude Code session */
   route?: 'subagent' | (string & {}) | null
@@ -2104,46 +1911,12 @@ export interface ChatMeta {
   continue?: 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | (string & {}) | null
   /** a job waiting in its queue (a view build, a report check) */
   waiting?: 'queued' | (string & {}) | null
-  /** the orientation while it waits for its critic's report */
-  paused?: 'critique' | (string & {}) | null
   /** the latest run began with a message the analyst typed in Claude Code's agent tray */
   typed_in_tray?: boolean | null
   // ---- main only ----
   /** the analyst's messages that came while main's turn ran and that main has not read yet, oldest first, which its
    * chat shows waiting (backend runtime.unread) */
   unread?: { event: string; text: string }[]
-}
-
-/** What `thimble demo` installed a workspace from (backend demo.install): the dataset, when its orientation ran and on
- * what model, the folder of the files it ran on, the orientation's chat, and whether its session came with it. */
-export interface PrecachedMark {
-  dataset?: string | null
-  created?: string | null
-  /** when the orientation ended (or started) */
-  ran?: string | null
-  installed?: string | null
-  folder?: string | null
-  orientation?: string | null
-  model?: string | null
-  /** `full` for a full export, `outputs-only` for the outputs alone (what demos/ holds) */
-  format?: string | null
-  /** whether the orientation's Claude Code session came with it, so a message in its thread continues it */
-  kept?: boolean | null
-  /** what the pre-cache holds (its manifest's counts), which the orientation's card names */
-  counts?: { cards?: number; labels?: number; views?: number; documents?: number } | null
-}
-
-/** A follow-up of the orientation as its chat's meta keeps it. */
-export interface FollowUpRecord {
-  run: number
-  status?: string
-  started?: string | null
-  ended?: string | null
-  messages?: { text: string; by?: string }[]
-  added?: number
-  revised?: number
-  deleted?: number
-  views?: number
 }
 
 /** Where the analyst's line was typed: the terminal of the Claude Code session, or the browser's composer. */
@@ -2184,9 +1957,6 @@ export interface LabelRowsPage extends LabelRowsResponse {
 export interface UndoLabels {
   undo: string | null
   redo: string | null
-  /** `<orientation chat>/<run>` while the step an undo would revert belongs to a follow-up of the orientation, whose
-   * steps one undo reverts together (backend undo.py) */
-  undo_run?: string | null
   /** why a session that still runs holds the undo (a writer changed the passage since), which Undo's tooltip says */
   held?: string | null
 }

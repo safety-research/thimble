@@ -1,6 +1,6 @@
 // The Report tab: the type bar, then the document in its arrangement. The bar holds the types as chips with an icon,
 // drawn as the Files views bar draws its views (Segmented), + New
-// (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
+// (DocMenus.tsx), Export (ExportMenu.tsx), the lock note (LockNote.tsx), History (History.tsx) and the primary action,
 // Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
 // `write` browser event; `report` stream events follow it). While a writer of the document runs, the action says what
 // it does, Writing until the text is saved and then Checking citations (WriteAction.tsx writePhase), with Stop beside
@@ -62,7 +62,7 @@ const CLIENT = Math.random().toString(36).slice(2, 10)
 type Load = { state: 'loading' } | { state: 'ok'; doc: AnyDoc } | { state: 'none' } | { state: 'error'; message: string }
 
 /** Each kind of document's icon in the type bar, by its renderer. */
-const DOC_ICON: Record<string, IconName> = { document: 'doc', slides: 'image', story: 'writeup', video: 'run', custom: 'page' }
+const DOC_ICON: Record<string, IconName> = { document: 'doc', custom: 'page' }
 
 export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const [slug, setSlugState] = useState<string>(() => readStorage<string>(docKey(ws), SLUG) || SLUG)
@@ -145,12 +145,12 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
       else kept.current.delete(s)
       if (slugRef.current === s) setLoad(next)
     }
-    // a page the state says is not written yet is not fetched: its route answers no document until then; the report,
-    // the slides and the story read as their frame before a write
-    const framed = renderer === 'document' || renderer === 'slides' || renderer === 'story'
+    // a page the state says is not written yet is not fetched: its route answers no document until then; a document
+    // reads as its frame before a write
+    const framed = renderer === 'document'
     if (!framed && state?.[s] && !state[s].exists) return settle({ state: 'none' })
     try {
-      if (framed && (renderer === 'document' || (state?.[s] && !state[s].exists))) {
+      if (framed) {
         try {
           return settle({ state: 'ok', doc: await api.frame(ws, s) })
         } catch (e) {
@@ -298,7 +298,6 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const doc = load.state === 'ok' ? load.doc : null
   const renderer = rendererOf(types, slug, doc)
   const isPage = renderer === 'custom'
-  const isVideo = renderer === 'video'
   useEffect(() => {
     if (doc) lastShown.current = { slug, doc }
   }, [slug, doc])
@@ -352,7 +351,6 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const items = switcherItems(types)
   // a document the writer has produced: the primary action reads Revise; a frame, or nothing yet, reads Write
   const written = !!bodyDoc && !(bodyDoc as Writeup).frame
-  const arranged = bodyRenderer === 'slides' || bodyRenderer === 'story'
   const fallback = (
     <div className="wu-status">
       <Spinner size={14} label="Loading the editor" />
@@ -367,7 +365,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     },
     [onSaved],
   )
-  const pastShown = past != null && written && !isPage && !isVideo
+  const pastShown = past != null && written && !isPage
   const view = pastShown ? (
     past.view.kind === 'diff' ? (
       <DraftDiff ws={ws} slug={slug} from={past.view.from} to={past.view.to} rows={past.rows} onClose={closePast} />
@@ -376,7 +374,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
     )
   ) : shown && (bodyDoc || (isPage && load.state === 'none')) ? (
       views ? (
-        <views.DocumentView ws={ws} slug={bodySlug} renderer={bodyRenderer} doc={bodyDoc} filter={filter} client={CLIENT} drawer={drawer || load.state === 'none'} onSaved={onSaved} writing={writingOf(bodySlug)} />
+        <views.DocumentView ws={ws} slug={bodySlug} renderer={bodyRenderer} doc={bodyDoc} filter={filter} client={CLIENT} drawer={drawer || load.state === 'none'} onSaved={onSaved} />
       ) : viewsError ? (
         <div className="wu-status wu-error">
           Could not load the editor
@@ -412,7 +410,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         <NewDocMenu ws={ws} onMade={(t) => void made(t)} />
         <span className="wu-bar-spacer" />
         {filter && <FilterChip concept={filter.concept} name={filter.name} value={filter.value} count={filter.sets.sids.size} onClear={() => void clearFilter()} />}
-        {written && !isPage && !isVideo && <HistoryMenu ws={ws} slug={slug} generation={bodyDoc?.generation} view={pastShown ? past.view : null} onView={(view, rows) => setPast(view == null ? null : { view, rows })} />}
+        {written && !isPage && <HistoryMenu ws={ws} slug={slug} generation={bodyDoc?.generation} view={pastShown ? past.view : null} onView={(view, rows) => setPast(view == null ? null : { view, rows })} />}
         {written && <ExportMenu ws={ws} slug={slug} page={isPage} />}
         {isPage && load.state !== 'loading' && <Button variant="icon" icon="code" title="Code" aria-label="Code" active={drawer || load.state === 'none'} disabled={load.state === 'none'} onClick={() => setDrawer((d) => !d)} />}
         {written && <LockNote doc={bodyDoc} root={root} />}
@@ -423,7 +421,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
           busy={busy}
           phase={phase ?? 'writing'}
           disabled={(load.state === 'loading' && !held) || load.state === 'error'}
-          history={!isPage && !isVideo}
+          history={!isPage}
           onWrite={() => void write()}
         />
       </div>
@@ -449,7 +447,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
           />
         </div>
       )}
-      <div className={`wu-body${arranged ? ' wu-body-strip' : ''}`}>
+      <div className="wu-body">
         {load.state === 'loading' && !held && (
           <div className="wu-status">
             <Spinner size={14} label="Loading the document" />
@@ -463,15 +461,6 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
         )}
         {view}
       </div>
-      {arranged && (
-        <div className="wu-strip glass">
-          <span className="wu-strip-name">Report</span>
-          <span>
-            {bodyRenderer}
-            {written && bodyDoc?.generation != null && ` · draft ${bodyDoc.generation}`}
-          </span>
-        </div>
-      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-// A view chip on the orientation's card names the view as its propose_view call did, and finds the proposal by that
+// A view chip on an agent's card names the view as its propose_view call did, and finds the proposal by that
 // name when the call's result gave no slug the browser could read (the result's summary is cut before its view ref).
 // The server title-cases the name it stores (backend views.propose), so the match ignores case: live check L19 (group
 // c) saw the chips of "Event counts" and "Wiki counts" show no build state, neither building, failed nor queued.

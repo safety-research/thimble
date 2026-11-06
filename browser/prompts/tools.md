@@ -178,7 +178,7 @@ Filter the cards, the records in Files or the report's sentences by a value of a
     "value": {"type": "string", "description": "The label's value to keep. Default its first."},
     "kinds": {"type": "array", "items": {"type": "string"}, "description": "Card kinds, such as table or plot."},
     "groups": {"type": "array", "items": {"type": "string"}, "description": "Groups' titles or ids."},
-    "makers": {"type": "array", "items": {"type": "string"}, "description": "Who made the cards, as each card names them, such as main, a thread's name or orient."},
+    "makers": {"type": "array", "items": {"type": "string"}, "description": "Who made the cards, as each card names them, such as main, a thread's name or writer."},
     "checks": {"type": "array", "items": {"type": "string", "enum": ["verified", "unverified", "failed", "not checked"]}, "description": "What the card check found, as each card's check mark shows it."},
     "starred": {"type": "boolean"},
     "locked": {"type": "boolean"},
@@ -267,7 +267,7 @@ Save a whole document as markdown in its type's form. To change one passage, use
 
 ## edit_document
 
-Replace one sentence, paragraph or heading of a written document, insert a passage after it, or delete it. Inserted text that opens with a `## ` heading is a new section, slide or beat after the one the span is in, in the document's markdown. `layout` alone sets a slide's layout, `block_type` alone turns a heading, paragraph or list item into another kind of block, its text kept, and `card` alone sets where a story section's card stands.
+Replace one sentence, paragraph or heading of a written document, insert a passage after it, or delete it. Inserted text that opens with a `## ` heading is a new section after the one the span is in, in the document's markdown. `block_type` alone turns a heading, paragraph or list item into another kind of block, its text kept.
 
 ```json
 {
@@ -277,9 +277,7 @@ Replace one sentence, paragraph or heading of a written document, insert a passa
     "text": {"type": "string"},
     "insert": {"type": "boolean"},
     "delete": {"type": "boolean"},
-    "layout": {"enum": ["title", "bullets", "paragraph", "bullets + card", "paragraph + card", "bullets + two cards", "paragraph + two cards", "card", "two cards", "three cards", "four cards", "card grid", "quote"]},
-    "block_type": {"enum": ["heading", "subheading", "text", "bullets", "numbers"]},
-    "card": {"enum": ["right", "left", "full", "none"]}
+    "block_type": {"enum": ["heading", "subheading", "text", "bullets", "numbers"]}
   },
   "required": ["span"]
 }
@@ -369,9 +367,8 @@ Get a picture of what the analyst sees in the browser, such as a card as thimble
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, report:<slug> of a video, thread:<id>, or an http address of thimble's own interface on this machine."},
-    "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."},
-    "t": {"type": "array", "items": {"type": "number"}, "description": "With a video, the seconds of its film to shoot, up to six frames, such as [2, 12.5]. Left out, a frame in the middle of each line, up to six."}
+    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, thread:<id>, or an http address of thimble's own interface on this machine."},
+    "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."}
   },
   "required": ["ref"]
 }
@@ -379,16 +376,16 @@ Get a picture of what the analyst sees in the browser, such as a card as thimble
 
 ## start_writing
 
-Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document.
+Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage of a written document.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "doc": {"type": "string", "description": "The document's slug, such as report, story or slides, or a `card` event's `doc`."},
+    "doc": {"type": "string", "description": "The document's slug, such as report, or a `card` event's `doc`."},
     "request": {"type": "string", "description": "What the analyst asked for, in their words. Empty for the document as its form asks."},
     "after": {"type": "string", "description": "The passage the request is about, such as a `card` event's `after`."},
-    "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document, slides or story for one the request describes."},
+    "type": {"type": "string", "description": "Only for a document that does not exist yet, which is then made: casefile (one document, a section per case, such as an agent, a run or a session), comparison (a page with a grid of the cases against measures), timeline (dated events in phases), page, or document for one the request describes."},
     "name": {"type": "string", "description": "The new document's name in thimble, such as Case file."},
     "model": {"type": "string", "description": "The model to run the writer on, such as opus, sonnet or a full model id, only when the analyst names one. Default: the writer's model in Settings."},
     "effort": {"type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "description": "The effort to run the writer at, only when the analyst names one. Default: the writer's effort in Settings."}
@@ -751,10 +748,6 @@ Found in this card's outputs but not linked, {values}: more than one place shows
 
 … {more}. `read_ref` on {ref} shows all of it.
 
-## write_document-form
-
-The {doc} has a form of its own, not markdown, so `write_document` cannot save it.
-
 ## write_document-locked
 
 A change to {blocks} the analyst locked was reverted: {refs}. A locked block stays word for word as the analyst left it, so those changes are not in the document.
@@ -779,14 +772,6 @@ The analyst laid out no frame, so the shape is yours.
 
 {what}, so screenshot cannot take it. `read_ref` on it reads what the analyst sees.
 
-## screenshot-frames
-
-The film of {ref}, {duration} s long, its lines at {windows} s.
-
-## screenshot-frames-errors
-
-The film reported: {errors}
-
 ## screenshot-terminal
 
 screenshot cannot take this picture in terminal mode. There it draws only a card, and only when Chromium and thimble's built page are installed, which `thimble doctor` shows. `read_ref` on the card reads what the analyst sees.
@@ -798,10 +783,6 @@ Proposed the view {view} (view:{slug}) over {claims}. The dev agent is building 
 ## propose_view-unmatched
 
 No file of the corpus matches {claims}, so the view was not proposed and the dev agent has nothing to build. {near} Propose it again with claims that match files the corpus holds.
-
-## propose_view-cap
-
-{view} was not proposed: a workspace gets at most {n} views from the orientation, and it has had {views}, counting any the analyst deleted. To improve one, propose it again under its name.
 
 ## propose_view-deleted
 
@@ -1294,175 +1275,13 @@ No cards in these turns.
 
 The session's calls above show what it read.
 
-## orient-no-request
+## agent-continue-earlier-session
 
-The analyst asked for nothing in particular, so cover the whole corpus.
+This agent ran in an earlier Claude Code session. To continue it, quit and run `thimble -r {session}` in this folder, or `claude -r {session}` and then /thimble.
 
-## orient-subagent-prompt
+## agent-continue-earlier-version
 
-[thimble request {request_id}]
-
-The analyst's request: {request}
-
-Start the orientation.
-
-## orient-finished
-
-The orientation has finished: {made}.
-
-## orient-stopped
-
-The orientation was stopped: {made}.
-
-## orient-failed
-
-The orientation failed: {made}. Its error: {error}
-
-## orient-made-views
-
-{views} proposed
-
-## orient-views-built
-
-{views} built
-
-## orient-views-failed
-
-{views} failed
-
-## orient-views-building
-
-{views} building
-
-## orient-views-stopped
-
-{views} stopped
-
-## orient-views-suggested
-
-{views} suggested for file types
-
-## orient-made-nothing
-
-no outputs, only its thread
-
-## orient-follow-up
-
-The analyst's side sent you this after you finished. Follow it up as `### Follow-ups` says.
-
-{messages}
-
-## orient-from-main
-
-This message is from the analyst's own session.
-
-## orient-from-analyst
-
-This message is from the analyst, typed in your thread.
-
-## orient-from-extension
-
-The analyst switched on the extension {extension} and asked you to run its instructions for the orientation now. Follow them as far as the work you did allows.
-
-## orient-followed-up
-
-The orientation's follow-up has finished: {changed}.
-
-## orient-follow-up-stopped
-
-The orientation's follow-up was stopped: {changed}.
-
-## orient-follow-up-failed
-
-The orientation's follow-up failed: {changed}. Its error: {error}
-
-## orient-changed-added
-
-{cards} added
-
-## orient-changed-revised
-
-{cards} revised
-
-## orient-changed-deleted
-
-{cards} deleted
-
-## orient-changed-nothing
-
-nothing changed
-
-## message_orientation-started
-
-The orientation has the message, and thimble shows it, so this turn needs no words from you unless it has something else for the analyst. An `orient` event tells you when it ends.
-
-## orient-subagent-message
-
-Pass the message on now with one SendMessage call, with `to` "{agent}" and exactly the text below as `message`, and end the turn on that call, with no words before or after it. Change nothing in the text, since thimble lets only this message through. Claude Code defers SendMessage, so load it with ToolSearch first if you have not yet.
-
-{text}
-
-## orient-continue-earlier-session
-
-This orientation ran in an earlier Claude Code session. To continue it, quit and run `thimble -r {session}` in this folder, or `claude -r {session}` and then /thimble, or start a new orientation.
-
-## orient-continue-earlier-version
-
-This orientation ran in an earlier version of thimble and cannot be continued. Start a new orientation to explore further.
-
-## orient-continue-stopped-by-user
-
-This orientation was stopped with Esc in your terminal, and Claude Code does not continue an agent stopped that way. A message to it starts a new run in its thread that takes up its work.
-
-## message_orientation-continues
-
-The analyst stopped this orientation with Esc in their terminal, and Claude Code does not continue an agent stopped that way. So thimble continues it as a new orientation run in its thread, which gets the message and what the stopped run left. Start that run now with one Agent call whose input is exactly this:
-
-{input}
-
-Change nothing in it, since thimble lets only this call through, and write no words before it. The call returns at once while the agent runs in the background; after its result, end the turn with no words and no other call, since the analyst sees the agent start.
-
-## orient-continuation-prompt
-
-[thimble request {request_id}]
-
-The analyst stopped the earlier run of this orientation with Esc in their terminal, and Claude Code does not continue a run stopped that way. You are a new run in its place, in the same thread. Take up its work from where it stopped, and do not do again what it did. What it left:
-
-Its last text: {summary}
-
-Its cards:
-{cards}
-
-Its transcript, which you can read for what it did and found:
-{transcripts}
-
-The analyst's message:
-
-{message}
-
-## orient-continuation-none
-
-none
-
-## message_orientation-none
-
-No orientation has run in this workspace. Answer the analyst yourself, or call `start_orientation` for a new orientation.
-
-## message_orientation-gone
-
-Claude Code no longer keeps this orientation's transcript, so it cannot continue. Its outputs and call refs still open. Call `start_orientation` for a new orientation that takes up the message.
-
-## message_orientation-precached
-
-This orientation ran in advance, before this workspace was installed, and its session was not kept, so it cannot continue. Answer from its cards and the report yourself, or call `start_orientation` for a new orientation that takes up the message.
-
-## precached-context
-
-This workspace was installed from a pre-cache: its orientation ran in advance on these same files ({made}), and its Claude Code session was not kept, so `message_orientation` cannot reach it. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
-
-## precached-context-kept
-
-This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), as a subagent of the exporter's Claude Code session, so `message_orientation` cannot reach it, though its thread shows every step it took. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
+This agent ran in an earlier version of thimble and cannot be continued.
 
 ## stop-subagent
 
@@ -1475,10 +1294,6 @@ thimble: the analyst pressed Stop in thimble and ended your turn, and any comman
 ## thread-stopped-note
 
 thimble: the analyst pressed Stop in thimble on the side thread {thread}, which stopped its fork `{agent_id}`. Leave it stopped: do not message, continue or restart it unless the analyst asks.
-
-## message_orientation-empty
-
-The message is empty. Pass what the analyst asks the orientation as `message`.
 
 ## session-unfinished
 
@@ -1511,10 +1326,6 @@ It could not be resumed: {why}
 ## session-mode-switching
 
 This call did not run, because the analyst is switching your permission mode, which pauses your session. Once it has resumed, make this call again if you still need it.
-
-## call-ref
-
-This call's ref is `{ref}`.
 
 ## digest-more
 

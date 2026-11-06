@@ -149,7 +149,7 @@ jobs:
           sudo apt-get install -y bubblewrap socat ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      # the content check's secret scan runs gitleaks, and under CI its test fails without it
+      # the privacy scan runs gitleaks when it is installed, and a server test shares a fix through it (test_fix_share.py)
       - name: Install gitleaks
         env:
           GITLEAKS_VERSION: 8.30.1
@@ -171,7 +171,13 @@ jobs:
       # the view checks load pages in the headless Chromium of the page's and the server's Playwright, and the sandbox
       # runtime the kernel runs in comes with the page's packages
       - name: Install the server's and the page's packages, and their headless Chromium
-        run: browser/scripts/check.sh install
+        run: |
+          cd browser/backend
+          uv sync --frozen --no-dev --no-install-project --extra dev
+          .venv/bin/python -m playwright install chromium-headless-shell
+          cd ../frontend
+          npm ci --no-audit --no-fund
+          npx playwright install chromium-headless-shell
 
       # without the sandbox runtime, or without working namespaces, the server tests of the sandbox skip, so this fails
       - name: Sandbox check (runs a command in bubblewrap and in the sandbox runtime)

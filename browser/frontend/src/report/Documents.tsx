@@ -5,7 +5,7 @@
 import { useMemo, useRef, useState, type MouseEvent } from 'react'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
-import type { AnyDoc, DeckDoc, PageDoc, StoryDoc, VideoDoc, Writeup, WriteupComment } from '../lib/types'
+import type { AnyDoc, PageDoc, Writeup, WriteupComment } from '../lib/types'
 import { ReadProbe } from '../shell/dock'
 import { CommentsSidebar, SidebarShow, useChecks, useSidebar } from './Checks'
 import { commentsApi } from './commentsApi'
@@ -28,8 +28,6 @@ export interface DocumentViewProps {
   /** the page's code drawer is open */
   drawer: boolean
   onSaved: (doc: AnyDoc) => void
-  /** a writer of the document still runs (a video then shows that it is being written) */
-  writing?: boolean
 }
 
 export function DocumentView(props: DocumentViewProps) {
@@ -39,11 +37,11 @@ export function DocumentView(props: DocumentViewProps) {
   return doc ? <ReportPage key={key} ws={ws} slug={slug} doc={doc as Writeup} filter={filter} client={client} onSaved={onSaved} /> : null
 }
 
-/** A frame, the shape a slides or story type has before a write (GET …/frame), rather than its written document. */
+/** A frame, what a type shows before a write (GET …/frame), rather than its written document. */
 const isFrame = (doc: AnyDoc | null): doc is Writeup => !!doc && (doc as Writeup).frame === true
 
-/** The slides, the story, a page or a video beside the sidebar's Comments pane. */
-function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, writing = false }: DocumentViewProps) {
+/** A page beside the sidebar's Comments pane. */
+function Arranged({ ws, slug, doc, drawer, onSaved }: DocumentViewProps) {
   const side = useSidebar(ws)
   const checks = useChecks(ws)
   const [pickedId, setPickedId] = useState<string | null>(null)

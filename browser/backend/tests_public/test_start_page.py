@@ -1,6 +1,6 @@
 """GET /api/workspaces (app/start_page.py): the start page's rows and the top bar's switcher's. Every folder is a row
-labeled by its own name, in the order of those names, with no names it was renamed from. A folder that is gone is left
-out, and the route is a read the page makes without the key's cookie."""
+labeled by its own name, in the order of those names. A folder that is gone is left out, and the route is a read the page
+makes without the key's cookie."""
 from __future__ import annotations
 
 import shutil
@@ -12,9 +12,9 @@ from fastapi.testclient import TestClient
 from app import config, main
 
 
-def register(folder: Path, name: str | None = None) -> str:
+def register(folder: Path) -> str:
     folder.mkdir(parents=True, exist_ok=True)
-    return str(config.register_corpus(folder, exact=True, name=name)["name"])
+    return str(config.register_corpus(folder, exact=True)["name"])
 
 
 @pytest.fixture()
@@ -34,7 +34,6 @@ def test_the_start_page_lists_each_folder_by_its_name(world):
     by_name = {r["name"]: r for r in rows}
     assert [(r["kind"], r["label"]) for r in rows] == [("folder", "alpha"), ("folder", "Logs"), ("folder", "runs")]
     assert by_name["runs"]["folder"] == "runs" and by_name["runs"]["path"] == str((world / "mine" / "runs").resolve())
-    assert all(r["renamed_from"] == [] for r in rows)
     assert "gone" not in by_name
 
 

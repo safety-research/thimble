@@ -15,7 +15,7 @@ BARE = re.compile(r"(?:[Ss]hell:|\b[Rr]un|\bthen)\s+(thimble(?:-browser)?(?: (?:
 def accepts() -> tuple[set[str], set[str], set[str]]:
     """What the current CLIs accept: the options `thimble-browser --help` lists, and the terminal plugin's thimble
     commands and options (its parser's)."""
-    usage = "\n".join((REPO / "browser" / "scripts" / "thimble-browser").read_text().splitlines()[1:21])
+    usage = "\n".join((REPO / "browser" / "scripts" / "thimble-browser").read_text().splitlines()[1:20])
     kernel = (REPO / "plugin" / "engine" / "kernel" / "cli.py").read_text()
     browser_opts = set(re.findall(r"(?<![\w-])(--?[a-z][\w-]*)", usage))
     commands = set(re.findall(r'sub\.add_parser\("([\w-]+)"', kernel)) | {"fixes", "help", "-h", "--help"}

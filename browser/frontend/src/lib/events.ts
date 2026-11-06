@@ -47,9 +47,6 @@ function fanOut(ev: WsEvent): void {
     case 'cell':
       if (typeof rest.cell === 'string') bus.emit('cell', { notebook: String(rest.notebook ?? ''), cell: rest.cell, kind: String(rest.kind ?? 'ran') })
       return
-    case 'orient':
-      bus.emit('orient', { ...rest, status: String(rest.status ?? '') })
-      return
     case 'report':
       if (typeof rest.slug === 'string') bus.emit('report', { slug: rest.slug, status: String(rest.status ?? ''), span: typeof rest.span === 'string' ? rest.span : undefined })
       return

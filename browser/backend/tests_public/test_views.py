@@ -1094,7 +1094,7 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the
-    frontend's packages with their Chromium (scripts/check.sh install)."""
+    frontend's packages with their Chromium."""
     if why := views.build_problem():
         if os.environ.get("CI") == "true":
             pytest.fail(why)  # CI installs them, so there the page is always loaded

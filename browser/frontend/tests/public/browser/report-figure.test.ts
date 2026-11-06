@@ -70,7 +70,7 @@ const CELL = {
   id: 'c1', notebook: 'g-orient', kind: 'plot', title: 'When did the agent edits happen during the run?', takeaway: TAKEAWAY,
   created_by: 'main', created_ts: T, ts: T, status: 'ok', code: 'chart()', outputs: [CHART],
 }
-const CANVAS = { groups: [{ id: 'g-orient', title: 'Orientation', role: 'exploration', parent: null }], cells: [CELL], hidden: [] }
+const CANVAS = { groups: [{ id: 'g-orient', title: 'Orientation', role: 'exploration', parent: null }], cells: [CELL] }
 const doc = (locked: boolean) => ({
   id: 'report', type: 'report', renderer: 'document', title: 'Agent edits', generation: 1, frame: false,
   sections: [
@@ -97,9 +97,9 @@ function answer(route: Route, locked: boolean) {
     '/api/tour': { seen: true },
     '/api/corpora': [{ name: WS, path: '/home/analyst/demo', registered: true, manifest: null }],
     [`/api/ws/${WS}/instance`]: { stamp: 'stamp-1' },
-    [`/api/ws/${WS}/undo`]: { undo: null, redo: null, undo_run: null, held: null },
+    [`/api/ws/${WS}/undo`]: { undo: null, redo: null, held: null },
     [`/api/ws/${WS}/chats`]: [{ ...MAIN, n_messages: 0, last_ts: T }],
-    [`/api/ws/${WS}/chats/main`]: { meta: { ...MAIN, orientation: null }, events: [] },
+    [`/api/ws/${WS}/chats/main`]: { meta: MAIN, events: [] },
     [`/api/ws/${WS}/settings`]: SETTINGS,
     [`/api/ws/${WS}/concepts`]: [],
     [`/api/ws/${WS}/views`]: [],

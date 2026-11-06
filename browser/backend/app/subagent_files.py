@@ -87,7 +87,7 @@ def type_name(role: str) -> str:
 
 
 def role_of(agent_type: Any) -> str | None:
-    """The role of an agent type when it is one of ROLES (`thimble:orientation` is orientation); None for any other."""
+    """The role of an agent type when it is one of ROLES (`thimble:writer` is writer); None for any other."""
     t = str(agent_type or "")
     role = t[len(PREFIX):] if t.startswith(PREFIX) else ""
     return role if role in ROLES else None

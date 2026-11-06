@@ -20,16 +20,9 @@ export const EFFORT_CHOICES: readonly MainEffort[] = ['low', 'medium', 'high', '
  * a mode of main only (cc_settings.EFFORTS). */
 export const AGENT_EFFORTS: readonly OrientEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
-/** A stored effort as an agent's line takes it: Ultracode, a mode of main only, as xhigh, the level it runs at
- * (config.LEGACY_EFFORTS); nothing as nothing. Pure. */
-export const agentEffort = (e: string | null | undefined): string | null => (e === 'ultracode' ? 'xhigh' : e ?? null)
-
 /** Main's effort when its session names none: the launcher's `--effort` for a session it started where the analyst's
  * settings name none (cc_settings.MAIN_DEFAULT_EFFORT). */
 export const MAIN_DEFAULT_EFFORT: MainEffort = 'high'
-
-/** The orientation's effort while Settings are not read yet (config.ORIENT_DEFAULT_EFFORT). */
-export const ORIENT_DEFAULT_EFFORT: OrientEffort = 'xhigh'
 
 /** Main's model's tip: a running session's model changes only by /model in its terminal. */
 export const MODEL_TIP = 'Run /model in the Claude Code terminal to change the model'
@@ -133,7 +126,7 @@ export function ModelLine({ model, modelTip, models, onModel, effort, efforts = 
   onFast?: (on: boolean) => void
   /** no bolt: one of thimble's agents, which runs with no fast mode of its own */
   noFast?: boolean
-  /** the session the line names, in its controls' accessible names: "main", "the orientation" */
+  /** the session the line names, in its controls' accessible names: "main", "the view build" */
   label: string
   className?: string
 }) {

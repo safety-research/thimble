@@ -71,14 +71,13 @@ from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/calls/ref")
 # the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes thimble-browser
 # and `thimble unpair` call
 CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert",
     "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
 })
-CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(precached/context|archive|restore|rename)")  # POST
+CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(archive|restore)")  # POST
 CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
 NONCE_HEADER = "x-thimble-nonce"
 AUTH_HEADER = "x-thimble-auth"
@@ -164,10 +163,8 @@ def headers(token: str, port: int, nonce: str | None = None) -> dict[str, str]:
 
 
 def guarded(method: str, path: str) -> bool:
-    """Whether a request needs the proof: a route only the CLI calls (CLI_PATHS, CLI_WS_PATHS, CLI_WS_DELETE), or the
-    call-ref route (SESSION_HOOK_PATHS)."""
-    return (SESSION_HOOK_PATHS.fullmatch(path) is not None
-            or (method == "POST" and (path in CLI_PATHS or CLI_WS_PATHS.fullmatch(path) is not None))
+    """Whether a request needs the proof: a route only the CLI calls (CLI_PATHS, CLI_WS_PATHS, CLI_WS_DELETE)."""
+    return ((method == "POST" and (path in CLI_PATHS or CLI_WS_PATHS.fullmatch(path) is not None))
             or (method == "DELETE" and CLI_WS_DELETE.fullmatch(path) is not None))
 
 

@@ -1,9 +1,7 @@
-"""The writer and the critic as subagents (write_session.py, critique_session.py): Write in the browser starts a writer
-through thimble's module with its context in a file its prompt names, two writers of two documents are told apart by
-their request ids, and a second writer of one document is refused; the orientation's `critique` writes the digest and
-the brief, records a pending critic start that only the orientation's own Agent call can claim, pauses its chat, and
-finds its descendants' transcripts by `parentAgentId`. Main's permission requests wait for the analyst as before, while
-a request of one of thimble's agents is answered in the terminal at once and its card has no buttons (U6b)."""
+"""The writer as a subagent (write_session.py): Write in the browser starts a writer through thimble's module with its
+context in a file its prompt names, two writers of two documents are told apart by their request ids, and a second
+writer of one document is refused. Main's permission requests wait for the analyst as before, while a request of one of
+thimble's agents is answered in the terminal at once and its card has no buttons (U6b)."""
 from __future__ import annotations
 
 
@@ -127,9 +125,6 @@ async def test_a_writer_the_analyst_stopped_ends_its_write_as_stopped_and_not_as
     subagents.run_ended(CORPUS, unsaved.agent_id, "done", None, source="turn")
     [end] = seen
     assert (end["status"], end["note"]) == ("failed", "The writer ended without saving the document.")
-
-
-# --------------------------------------------------------------------------- the critic
 
 
 # --------------------------------------------------------------------------- permission requests

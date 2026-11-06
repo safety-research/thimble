@@ -2,7 +2,7 @@
 
 The dev agent reads these when it builds a view (prompts/dev-view.md); thimble never installs them as views of a
 workspace. Each folder holds a view (view.json, reader.py and view.html), invented files under sample/
-and the sample labels `thimble demo --examples` defines over them (labels.json).
+and sample labels over them (labels.json).
 
 - `timeline`: events on a time axis in lanes. An overview of lanes on the time range, the events in the kit's
   table under it, the search, Filter by, Rows and Color by in the top row, and an event in the side panel, its words

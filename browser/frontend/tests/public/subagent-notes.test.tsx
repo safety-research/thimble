@@ -1,22 +1,15 @@
 // @vitest-environment jsdom
 // What else the browser says about thimble's agents as subagents of main: the line on the session-gone card naming the
 // agents main's quit stopped (src/shell/SessionGone.tsx), and in a thread, where each message came from (a prompt
-// thimble wrote is no one's), a follow-up not passed on with Send again, and the line when a typed follow-up ran on the
-// role's current values (src/chat/Rows.tsx).
-import { act } from 'react'
+// thimble wrote is no one's) and the line when a typed follow-up ran on the role's current values (src/chat/Rows.tsx).
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ChipRow, Rows, byLabel, devStarted, notPassedOn } from '../../src/chat/Rows.tsx'
+import { ChipRow, Rows, byLabel, devStarted } from '../../src/chat/Rows.tsx'
 import { stoppedAgentsLine } from '../../src/shell/SessionGone.tsx'
 import type { ChatMeta } from '../../src/lib/types.ts'
-import { mount, settle, unmountAll } from './mount.tsx'
+import { mount, unmountAll } from './mount.tsx'
 
-let posted: [string, unknown][] = []
 beforeEach(() => {
-  posted = []
-  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-    if (init?.method === 'POST') posted.push([String(url), JSON.parse(String(init.body))])
-    return new Response(JSON.stringify({ status: 'sent' }), { status: 200, headers: { 'content-type': 'application/json' } })
-  })
+  vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ status: 'sent' }), { status: 200, headers: { 'content-type': 'application/json' } }))
 })
 afterEach(() => {
   unmountAll()
@@ -24,12 +17,12 @@ afterEach(() => {
 })
 
 describe('the session-gone card', () => {
-  test("names the agents main's quit stopped, and how to continue the orientation", () => {
+  test("names the agents main's quit stopped", () => {
     const m = (extra: Partial<ChatMeta>) => ({ id: 'x', route: 'subagent', status: 'stopped', stopped_by: 'quit', ...extra }) as ChatMeta
-    expect(stoppedAgentsLine([m({ role: 'orient' }), m({ role: 'writer', doc: 'report' }), m({ role: 'check', title: 'Unverifiable', stopped_by: 'analyst' })])).toBe(
-      "thimble's agents stopped with it: the orientation and the writer of the report. Once it is back, send the orientation a message to continue it.",
+    expect(stoppedAgentsLine([m({ role: 'writer', doc: 'report' }), m({ role: 'check', title: 'Unverifiable' }), m({ role: 'check', title: 'Tone', stopped_by: 'analyst' })])).toBe(
+      "thimble's agents stopped with it: the writer of the report and the Unverifiable check.",
     )
-    expect(stoppedAgentsLine([m({ role: 'orient', status: 'done' })])).toBe('')
+    expect(stoppedAgentsLine([m({ role: 'writer', status: 'done' })])).toBe('')
   })
 })
 
@@ -60,15 +53,6 @@ describe('in a thread', () => {
     )
     expect([...el.querySelectorAll('.chat-user .chat-message')].map((m) => m.textContent)).toEqual(['Please color the failed nights red.'])
     expect(el.textContent).not.toContain('Build the view')
-  })
-
-  test('a follow-up not passed on shows why and the message, and Send again sends it to the orientation', async () => {
-    const el = await mount(<ChipRow ws="mini" item={{ kind: 'chip', index: 3, chip: 'not_passed_on', text: "thimble's module did not answer.", message: 'Does April look the same?' }} />)
-    expect(el.textContent).toContain(notPassedOn("thimble's module did not answer."))
-    expect(el.querySelector('.chat-not-passed-text')?.textContent).toBe('Does April look the same?')
-    await act(async () => el.querySelector<HTMLButtonElement>('.chat-send-again')!.click())
-    await settle()
-    expect(posted).toEqual([['/api/ws/mini/orientation/message', { text: 'Does April look the same?' }]])
   })
 
   test('a typed follow-up that ran on the role\'s current values says so', async () => {

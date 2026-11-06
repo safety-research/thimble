@@ -48,7 +48,7 @@ export function withDocName(text: string, name: string): string {
 }
 
 /** A chip that names a document, drawn as a view's chip is (`.view-tab`) with the document glyph: the name of its type
- * (Report, Slides, a workspace's own), or `children` in its place (a chat note's words about the document, the type's
+ * (Report, a workspace's own), or `children` in its place (a chat note's words about the document, the type's
  * name in them as its tab spells it). */
 export function DocChip({ ws, slug, onClick, className, children }: { ws: string; slug: string; onClick?: (e: MouseEvent<HTMLElement>) => void; className?: string; children?: ReactNode }) {
   const name = useDocName(ws, slug)
@@ -64,7 +64,7 @@ export function DocChip({ ws, slug, onClick, className, children }: { ws: string
 export const cardsText = (n: number): string => `${n} ${n === 1 ? 'card' : 'cards'}`
 
 /** A chip that names a canvas group, drawn as a view's chip is (`.view-tab`) with the group glyph: its name and, when
- * given, how many cards (Orientation · 8 cards). */
+ * given, how many cards (Charts · 8 cards). */
 export function GroupChip({ name, count, onClick, className, anchor }: { name: string; count?: number; onClick?: (e: MouseEvent<HTMLElement>) => void; className?: string; anchor?: string }) {
   return (
     <SurfaceChip className={viewCls('group-chip', className)} onClick={onClick} data-anchor={anchor}>

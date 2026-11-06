@@ -24,7 +24,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-244 routes, 139 of them writes: 10 token, 1 code, 128 cookie, 102 cookie or token, 1 media key, 2 none.
+227 routes, 126 of them writes: 9 token, 1 code, 116 cookie, 98 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -96,9 +96,6 @@ knows the key.
 | POST | `/api/ws/{c}/answer-comments/{cid}/reopen` | checks | cookie |
 | POST | `/api/ws/{c}/archive` | ledger | token |
 | GET | `/api/ws/{c}/archives` | ledger | cookie or token |
-| POST | `/api/ws/{c}/calls/ref` | calls | token |
-| GET | `/api/ws/{c}/calls/{chat}` | calls | cookie or token |
-| GET | `/api/ws/{c}/calls/{chat}/{n}` | calls | cookie or token |
 | GET | `/api/ws/{c}/canvas` | notebook | cookie or token |
 | GET | `/api/ws/{c}/canvas/comments` | canvas_comments | cookie or token |
 | POST | `/api/ws/{c}/canvas/comments/{cid}/reopen` | canvas_comments | cookie |
@@ -171,23 +168,12 @@ knows the key.
 | PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/blocks` | report_types | cookie |
 | POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/comments` | report_types | cookie |
 | POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/dismiss` | report_types | cookie |
-| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/comments/{cid}/reopen` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/deck` | report_types | cookie |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/export` | report_types | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/export/{fmt}` | exports | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/exports` | exports | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame` | report_types | cookie or token |
-| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections` | report_types | cookie |
-| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections/{sid}/figures` | report_types | cookie |
-| POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/sections/{sid}/paragraphs` | report_types | cookie |
-| DELETE | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/units/{uid}` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/frame/units/{uid}` | report_types | cookie |
 | PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/html` | report_types | cookie |
 | PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/locks/{block}` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/sentences/{sid}` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/story` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/title` | report_types | cookie |
-| PUT | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/units/{uid}` | report_types | cookie |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions` | report_types | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}` | report_types | cookie or token |
 | POST | `/api/ws/{c}/investigations/{inv_id}/types/{slug}/versions/{n}/restore` | report_types | cookie |
@@ -223,12 +209,9 @@ knows the key.
 | POST | `/api/ws/{c}/permission` | events | cookie |
 | POST | `/api/ws/{c}/redo` | undo | cookie |
 | PUT | `/api/ws/{c}/render/theme` | render | cookie |
-| GET | `/api/ws/{c}/report-types` | report_types | cookie or token |
-| POST | `/api/ws/{c}/report-types` | report_types | cookie |
 | POST | `/api/ws/{c}/report-types/new` | report_types | cookie |
 | GET | `/api/ws/{c}/report-types/presets` | report_types | cookie or token |
 | DELETE | `/api/ws/{c}/report-types/{slug}` | report_types | cookie |
-| GET | `/api/ws/{c}/report-types/{slug}` | report_types | cookie or token |
 | PUT | `/api/ws/{c}/report-types/{slug}` | report_types | cookie |
 | POST | `/api/ws/{c}/restore` | ledger | token |
 | PUT | `/api/ws/{c}/session/effort` | events | cookie |

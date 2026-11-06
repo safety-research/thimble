@@ -121,12 +121,12 @@ NO_UI_LINE = ("thimble: the dashboard is not built yet, so its link shows no pag
 STUCK_LINE = f"thimble's server (pid {{pid}}) is running but does not answer; to restart it, {config.RESTART_HOW}"
 STUCK_AFTER_S = 60.0  # a server server.json says started less long ago may still be starting, so is not called stuck
 REVERTED_LINE = "thimble: reverted \"{title}\" ({commit})"
-ARCHIVE_TIMEOUT_S = 60.0  # the archive stops an orientation's or a writer's session first, a few seconds each
+ARCHIVE_TIMEOUT_S = 60.0  # the archive stops a writer's session first, a few seconds each
 # marks the uvicorn `start` spawns, so a server knows the supervisor started it and may restart itself after a ticket
 # applies (dev.supervised); a server started by hand lacks it and is never restarted by a ticket
 SUPERVISED_ENV = "THIMBLE_SUPERVISED"
-# The agents defined for a session thimble starts with `--agents` (agent_definition: the writer's, the orientation's and
-# the critic's own sessions), each from a prompt file in a plugin agent's form (prompts.agent_file).
+# The agents defined for a session thimble starts with `--agents` (agent_definition: the writer's and the check's), each
+# from a prompt file in a plugin agent's form (prompts.agent_file).
 AGENT_FIELDS = ("model", "effort", "background")  # the frontmatter fields passed on as they are
 PLUGIN_NAME = "thimble"  # the plugin's name, which prefixes its skills (`thimble:shared`) outside a plugin agent's file
 RESTART_MARK_S = 60.0  # a `source_restart` mark in server.json younger than this means a restart is under way
@@ -137,17 +137,16 @@ SANDBOX_ENV = "SANDBOX_RUNTIME"  # "1" in a command Claude Code's Bash sandbox r
 MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 # what `restart` says before it asks (running_work, module note)
 RUNNING_HEAD = "thimble: running now:"
-RUNNING_BACK_LINE = ("A restart stops them. Once the server is back, the orientations and writers resume by themselves, "
-                     "and a view build or dev ticket starts again.")
+RUNNING_BACK_LINE = ("A restart stops them. Once the server is back, the writers resume by themselves, and a view build "
+                     "or dev ticket starts again.")
 RESTART_QUESTION = "Restart the server now? [y/N] "
 RESTART_UNASKED_LINE = "thimble: not restarted, since there is no terminal to ask in; pass --yes to restart anyway."
 RESTART_DECLINED_LINE = "thimble: not restarted."
-STOP_BACK_LINE = ("A stop ends them. The server's next start resumes the orientations and writers, and starts a view "
-                  "build or dev ticket again.")
+STOP_BACK_LINE = ("A stop ends them. The server's next start resumes the writers, and starts a view build or dev ticket "
+                  "again.")
 STOP_QUESTION = "Stop the server now? [y/N] "
 STOP_UNASKED_LINE = "thimble: not stopped, since there is no terminal to ask in; pass --yes to stop anyway."
 STOP_DECLINED_LINE = "thimble: not stopped."
-RUNNING_ORIENT = "the orientation"
 NOTICES: list[str] = []  # lines `ensure_running` leaves for `cmd_ensure`
 MAIN = "main"
 
@@ -502,25 +501,10 @@ def in_sandbox() -> bool:
     return os.environ.get(SANDBOX_ENV, "").strip() == "1"
 
 
-def browser_request(url: str, cookie: str) -> tuple[str, str]:
-    """(the URL, the Cookie header) of a request a signed-in browser makes, for a script holding browser_cookie's
-    `cookie` (`name=value; Path=/b/<key>/api/`): `url`, a URL of the server's API (/api/...), moved under the cookie's
-    path, where the server counts it (hook_auth.browser_path), and the cookie's `name=value`. A cookie that names no
-    such path leaves `url` as it is."""
-    pair, _, attrs = cookie.partition(";")
-    path = next((a.strip()[5:] for a in attrs.split(";") if a.strip().lower().startswith("path=")), "")
-    u = urllib.parse.urlsplit(url)
-    if path.startswith("/b/") and path.endswith("/api/") and (u.path == "/api" or u.path.startswith("/api/")):
-        url = urllib.parse.urlunsplit(u._replace(path=path[:-len("/api/")] + u.path))
-    return url, pair.strip()
-
-
-def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0,
-             cookie: str | None = None) -> tuple[int, Any]:
+def _request(method: str, url: str, body: dict | None = None, timeout: float = 5.0) -> tuple[int, Any]:
     """(status, parsed json | text). Transport failures are (0, message); an HTTP error is (status, its body). The
-    request proves the server's token (hook_auth), which the routes of hooks, the plugin and this CLI need; a write the
-    analyst's browser makes needs a signed-in browser's `cookie` (browser_cookie), sent as the Cookie header on the path
-    the cookie is scoped to (browser_request). A notebook kernel holds neither."""
+    request proves the server's token (hook_auth), which the routes of hooks, the plugin and this CLI need. A notebook
+    kernel holds none."""
     from . import hook_auth  # noqa: PLC0415
 
     data = json.dumps(body).encode() if body is not None else None
@@ -528,8 +512,6 @@ def _request(method: str, url: str, body: dict | None = None, timeout: float = 5
     tok = hook_auth.token()
     if tok:  # good only on the port `url` names, for a few minutes, once: a process that holds that port gains nothing
         headers.update(hook_auth.headers(tok, hook_auth.port_of(url)))
-    if cookie:
-        url, headers["Cookie"] = browser_request(url, cookie)
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with config.LOOPBACK.open(req, timeout=timeout) as r:  # never through the shell's proxy
@@ -1147,12 +1129,9 @@ def _workspace_names(workspaces_dir: Path) -> list[str]:
 
 
 def busy_reason(url: str) -> str | None:
-    """Why the server must not be restarted now: an orientation, job, ticket, report generation, or any other session or view
-    build its stop would end (running_work). None when idle; a server that does not answer is a reason."""
+    """Why the server must not be restarted now: a job, ticket, report generation, or any other session or view build its
+    stop would end (running_work). None when idle; a server that does not answer is a reason."""
     names = _workspace_names(Path(resolve_env()["workspaces_dir"]))
-    running = [c for c in names if orient_status(c) == "running"]
-    if running:
-        return f"an orientation is running in {', '.join(running)}"
     status, body = _request("GET", f"{url}/api/jobs", timeout=3.0)
     if status == 200 and isinstance(body, dict):
         n_run, n_q = int(body.get("running") or 0), int(body.get("depth") or 0)
@@ -1206,10 +1185,9 @@ def spawn_restart() -> int:
 
 
 def running_work(url: str) -> list[str]:
-    """What a restart of the server at `url` would interrupt, one line each: the orientations whose run.json says they
-    run, then the dev ticket the server runs (`GET /api/dev/status`). Empty when nothing runs."""
-    names = _workspace_names(Path(resolve_env()["workspaces_dir"]))
-    lines = [f"{c}: {RUNNING_ORIENT}" for c in names if orient_status(c) == "running"]
+    """What a restart of the server at `url` would interrupt, one line each: the dev ticket the server runs (`GET
+    /api/dev/status`). Empty when nothing runs."""
+    lines: list[str] = []
     status, body = _request("GET", f"{url}/api/dev/status", timeout=3.0)
     if status == 200 and isinstance(body, dict) and body.get("running"):
         cur = body.get("current") if isinstance(body.get("current"), dict) else {}
@@ -1375,34 +1353,6 @@ def ui_url(name: str | None, pair: bool = False) -> str:
     return f"{url}#p={code}" if code else url
 
 
-def browser_cookie(url: str | None = None) -> str:
-    """A browser's sign-in, for scripts (scripts/dev/precache_orientation.py, scripts/e2e): a code from the server at
-    `url` (pair_code), traded at `POST /api/ui/key` with no token, as a browser trades it; the cookie it sets with the
-    path of the browser's key it is scoped to (hook_auth.browser_path), as `name=value; Path=/b/<key>/api/` for
-    _request's `cookie` (browser_request). Each call is a new sign-in, with its terminal line and notice. RuntimeError
-    when the server gives no code or no cookie."""
-    base = url or api_url()
-    code = pair_code(base, None)
-    if not code:
-        raise RuntimeError(f"the server at {base} gave no sign-in code; see {log_path()}")
-    req = urllib.request.Request(f"{base}/api/ui/key", data=json.dumps({"code": code}).encode(), method="POST",
-                                 headers={"Content-Type": "application/json"})
-    try:
-        with config.LOOPBACK.open(req, timeout=PAIR_TIMEOUT_S) as r:
-            set_cookies = r.headers.get_all("Set-Cookie") or []
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"the server at {base} refused the sign-in code ({e.code})") from None
-    except OSError as e:
-        raise RuntimeError(f"the server at {base} did not answer the sign-in: {e}") from None
-    for raw in set_cookies:  # the cookie, beside the deletion of one an earlier build scoped to /api/
-        pair, _, attrs = raw.partition(";")
-        name, _, value = pair.strip().partition("=")
-        path = next((a.strip()[5:] for a in attrs.split(";") if a.strip().lower().startswith("path=")), "")
-        if name and value and path.startswith("/b/"):
-            return f"{name}={value}; Path={path}"
-    raise RuntimeError(f"the server at {base} set no cookie for the sign-in")
-
-
 def to_terminal() -> bool:
     """Whether stdout is a terminal, the analyst's; a command's output read by a program can reach a model's context."""
     return sys.stdout.isatty()
@@ -1478,19 +1428,6 @@ def has_ui_build() -> bool:
 # ----------------------------------------------------------------------------- status
 
 
-def orient_status(name: str | None) -> str:
-    if not name:
-        return "no workspace"
-    from . import nofollow  # noqa: PLC0415
-
-    root = Path(resolve_env()["workspaces_dir"])
-    p = root / name / "orient" / "run.json"
-    try:  # in the workspace, which a card's code writes: never through a link or a FIFO left there
-        return str(json.loads(nofollow.read_text(p, root=root)).get("status") or "unknown")
-    except (OSError, ValueError, AttributeError):
-        return "not started"
-
-
 # ----------------------------------------------------------------------------- doctor
 
 
@@ -1515,15 +1452,6 @@ def _git(*args: str) -> str:
     try:
         return subprocess.run(["git", *args], cwd=config.REPO_ROOT, capture_output=True, text=True, timeout=10).stdout.strip()
     except Exception:  # noqa: BLE001
-        return ""
-
-
-def release_line() -> str:
-    """`release <version> @ <commit>, <date>` from RELEASE.json, or ''."""
-    try:
-        r = json.loads((config.REPO_ROOT / "RELEASE.json").read_text("utf-8"))
-        return f"release {r.get('version', '?')} @ {r.get('commit', '?')}, {r.get('date', '?')}"
-    except (OSError, ValueError, AttributeError):
         return ""
 
 
@@ -2002,10 +1930,7 @@ def network_line(status: dict[str, Any] | None = None, timeout_s: float = NET_TI
 
 def versions_line() -> str:
     """thimble's version, Python and the OS, for the doctor and the startup line of server.log."""
-    rel = release_line()
-    if rel:
-        ver = rel
-    elif is_git_checkout():
+    if is_git_checkout():
         ver = f"git {git_branch()} @ {_git('rev-parse', '--short', 'HEAD') or '?'}"
     else:
         ver = "unknown"
@@ -2091,8 +2016,7 @@ def doctor_text(commands: bool = True) -> str:
         lines.append(f"  repo: {config.REPO_ROOT} (branch {git_branch()} @ {_git('rev-parse', '--short', 'HEAD') or '?'}, "
                      f"{len(dirty.splitlines())} uncommitted paths)")
     else:
-        rel = release_line()
-        lines.append(f"  repo: {config.REPO_ROOT} (not a git checkout{'; ' + rel if rel else ''})")
+        lines.append(f"  repo: {config.REPO_ROOT} (not a git checkout)")
     if dev:
         lines.append(f"  source changed since start: {source_changed_text(st, up)}")
     lines.append(f"  home: {home()} ({'THIMBLE_HOME' if os.environ.get('THIMBLE_HOME') else 'default'}); "
@@ -2848,7 +2772,7 @@ def interrupted(args: argparse.Namespace) -> int:
 
 def add_yes_flag(p: argparse.ArgumentParser, command: str) -> None:
     p.add_argument("-y", "--yes", action="store_true",
-                   help=f"{command} without asking, even while orientations, writers or view builds run")
+                   help=f"{command} without asking, even while writers or view builds run")
 
 
 def add_restart_flags(p: argparse.ArgumentParser) -> None:

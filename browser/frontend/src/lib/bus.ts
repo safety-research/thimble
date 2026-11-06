@@ -19,7 +19,6 @@ export type Events = {
    * message's text so far under its `piece`, or `end` once the message is complete and its log will hold it */
   chatLive: { chat: string; piece: string; text?: string; end?: boolean }
   cell: { notebook: string; cell: string; kind: string }
-  orient: { status: string; [k: string]: unknown }
   report: { slug: string; status: string; span?: string }
   /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
   /** `accepted`: the first build of a view the analyst accepted from a view proposal (files/viewReady.ts) */

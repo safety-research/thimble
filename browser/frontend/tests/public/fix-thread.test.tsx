@@ -35,7 +35,7 @@ describe('the fix in the tree', () => {
   })
 
   test('a message typed in its thread goes to the fix, as a round of it', () => {
-    expect(composerTarget('fix', fixer(), null)).toEqual({ to: 'fix', fix: 4 })
+    expect(composerTarget('fix', fixer())).toEqual({ to: 'fix', fix: 4 })
   })
 })
 

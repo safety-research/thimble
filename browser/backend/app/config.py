@@ -680,20 +680,16 @@ def shown_alias(shown: object, p: Path) -> str | None:
         return None
 
 
-def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KEEP_SHOWN, name: str | None = None) -> dict:
-    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest, shown?,
-    renamed_from?}. `shown` is the folder as the analyst named it when that was another path to it, through a symlink
-    (shown_alias), which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves
-    it. `name` is the name a new registration takes in place of the basename (`thimble demo` registers demo-<dataset>);
-    a folder registered already keeps its own name. `renamed_from` lists the names an earlier build moved the corpus from.
+def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KEEP_SHOWN) -> dict:
+    """Register a directory as a corpus and return its record {name, root, path, registered_at, manifest, shown?}.
+    `shown` is the folder as the analyst named it when that was another path to it, through a symlink (shown_alias),
+    which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves it. A folder
+    registered already keeps its own name.
 
     A path inside DATA_DIR/<c> is corpus c: nothing written. A path inside (not at) a registered directory is that
     directory's corpus unless `exact`, which registers the folder itself. Exactly a registered working directory refreshes
     its sidecar; exactly a root writes nothing. Otherwise the sidecar DATA_DIR/<name>.corpus.json is written atomically,
-    <name> being `name` (else the basename) or the next free `-2`, `-3` …. Raises ValueError for a path that is not a
-    directory and for a `name` that is not a valid corpus name."""
-    if name is not None and not _valid_name(name):
-        raise ValueError(f"invalid corpus name: {name!r}")
+    <name> being the basename or the next free `-2`, `-3` …. Raises ValueError for a path that is not a directory."""
     p = Path(path).expanduser().resolve()
     if not p.is_dir():
         raise ValueError(f"not a directory: {path}")
@@ -718,7 +714,7 @@ def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KE
             return {"name": kname, "root": str(bases.get("root", kbase)), "path": str(corpus_dir(kname)),
                     "registered_at": rec.get("registered_at"), "manifest": corpus_manifest(kname)}
         # inside (not at) a registered directory with `exact`: the folder becomes a corpus of its own
-    name = prev["name"] if prev else free_name(name or corpus_name_for(p))
+    name = prev["name"] if prev else free_name(corpus_name_for(p))
     # the working directory again: the root stays what the first registration recorded
     root = str(_sidecar_bases(prev).get("root", p)) if prev is not None else str(p)
     rec = {"name": name, "root": root, "path": str(p), "registered_at": (prev or {}).get("registered_at") or _now(),
@@ -726,8 +722,6 @@ def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KE
     alias = shown_alias((prev or {}).get("shown"), p) if shown is KEEP_SHOWN else shown_alias(shown, p)
     if alias:
         rec["shown"] = alias
-    if (prev or {}).get("renamed_from"):
-        rec["renamed_from"] = prev["renamed_from"]
     _write_sidecar(rec)
     log.info("registered corpus %r at %s (sidecar %s)", name, p, sidecar_path(name))
     return rec

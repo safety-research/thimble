@@ -969,11 +969,11 @@ export function scopeForUnit(unit: string | undefined): FilterScope | null {
 /** Whether `filters[scope]` is exactly this concept and value. */
 export const filterIs = (filters: Filters | null | undefined, scope: FilterScope, concept: string, value: string): boolean => filters?.[scope]?.concept === concept && filters?.[scope]?.value === value
 
-/** The chip tone for a `whoMade` word: thimble accent, orient warning, the analyst and anyone else neutral. */
-export const WHO_TONE: Readonly<Record<string, ChipTone>> = { thimble: 'accent', orient: 'warning' }
+/** The chip tone for a `whoMade` word: thimble accent, the analyst and anyone else neutral. */
+export const WHO_TONE: Readonly<Record<string, ChipTone>> = { thimble: 'accent' }
 export const whoTone = (who: string): ChipTone => WHO_TONE[who] ?? 'neutral'
 
-/** `you` for the analyst, `thimble` for a chat, `orient` for the orientation, else the creator as written. */
+/** `you` for the analyst, `thimble` for a chat, else the creator as written. */
 export function whoMade(createdBy: string | null | undefined): string {
   const c = createdBy ?? ''
   if (!c || c === 'user' || c === 'terminal') return 'you'
@@ -985,7 +985,7 @@ export function whoMade(createdBy: string | null | undefined): string {
 export interface CellThread {
   /** the chat to go back to; null when the maker is not a chat */
   chatId: string | null
-  /** `main`, a thread's name, or an agent's role (`orient`), in mono */
+  /** `main`, a thread's name, or an agent's role (`writer`), in mono */
   name: string
   /** main or a thread: a chat the analyst can write to */
   writable: boolean
@@ -993,7 +993,7 @@ export interface CellThread {
 
 /**
  * The analyst's own cards and a chat's cards say which thread made them (the analyst's say `main`, an agent's its role:
- * `orient`); anything else is named as written and has no chat to open.
+ * `writer`); anything else is named as written and has no chat to open.
  */
 export function cellThread(createdBy: string | null | undefined, chats: ReadonlyMap<string, Pick<ChatMeta, 'kind' | 'role' | 'title'>>): CellThread {
   const c = createdBy ?? ''

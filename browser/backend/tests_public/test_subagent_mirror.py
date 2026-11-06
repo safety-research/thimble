@@ -126,18 +126,6 @@ def _notice(agent: str, status: str, summary: str = "", result: str = "", at: st
             **({"timestamp": at} if at else {})}
 
 
-async def _click_orientation(bridge, project: Path) -> tuple[session.Live, str, Path]:
-    """An orientation started by a click: the module's answer names its agent, which leaves no record in main's
-    transcript; its file appears under main's session folder."""
-    lv = _attach(project)
-    bridge.answers.append({"agentId": AGENT})
-    ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
-    assert ans.agent_id == AGENT
-    path = _agent_file(project, AGENT, agentType="thimble:orientation", toolUseId="toolu_plugin_105f7e7c43f6",
-                       description="orientation: the whole corpus")
-    return lv, str(subagents.agent(CORPUS, AGENT)["chat"]), path
-
-
 SAFEGUARD = ("API Error: Opus 4.8's safeguards flagged this message. Our intentionally broad safeguards allow us to "
              "deliver more capabilities faster, but can sometimes flag legitimate cybersecurity work.\n\nDetails: "
              "`[cyber]`\n\nRequest ID: req_011CfjqEMn9QjcrgsnMLfo4s")
@@ -153,8 +141,8 @@ def _api_error(text: str = SAFEGUARD) -> dict:
 
 async def test_main_s_empty_bash_true_after_a_start_is_no_row(bridge, project):
     lv = _attach(project)
-    _write(Path(lv.transcript_path), _human("orient"),
-           _assistant(_use("toolu_so", "mcp__plugin_thimble_thimble__start_orientation", {})),
+    _write(Path(lv.transcript_path), _human("write the report"),
+           _assistant(_use("toolu_so", "mcp__plugin_thimble_thimble__start_writing", {"doc": "report"})),
            _result("toolu_so", "AGENT CALL"), _assistant(_use("toolu_true", "Bash", {"command": "true"})),
            _result("toolu_true", ""), _assistant(_use("toolu_ls", "Bash", {"command": "true"})),
            _result("toolu_ls", ""), END)

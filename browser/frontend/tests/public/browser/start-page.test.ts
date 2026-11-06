@@ -13,12 +13,10 @@ let browser: Browser
 let dir = ''
 
 const ROWS = [
-  { name: 'collusion-wiki', kind: 'demo', folder: 'collusion-wiki', path: '/home/ana/.thimble/demo/collusion-wiki', dataset: 'collusion-wiki', title: 'collusion.wiki', blurb: 'Logs of a small wiki that a swarm of AI agents used as a message board.', ready: true },
-  { name: 'mythos-5', kind: 'demo', folder: 'mythos-5', path: '/home/ana/.thimble/demo/mythos-5', dataset: 'mythos-5', title: 'Mythos 5', blurb: 'The transcript Anthropic released of Mythos 5 during a cybersecurity evaluation.', ready: true },
-  { name: 'transluce-urlquery', kind: 'demo', folder: 'transluce-urlquery', path: '/home/ana/.thimble/demo/transluce-urlquery', dataset: 'transluce-urlquery', title: 'urlquery', blurb: '38,160 urlquery.net scans that Transluce found were likely made by AI agents.', ready: false },
-  { name: 'example-linked-sessions', kind: 'example', folder: 'example-linked-sessions', path: '/home/ana/.thimble/examples/example-linked-sessions', view: { slug: 'linked-sessions', name: 'Linked sessions' } },
-  { name: 'example-timeline', kind: 'example', folder: 'example-timeline', path: '/home/ana/.thimble/examples/example-timeline', view: { slug: 'timeline', name: 'Timeline' } },
-  { name: 'logs', kind: 'folder', folder: 'logs', path: '/home/ana/research/runs/2026-09/logs' },
+  { name: 'wiki-logs', kind: 'folder', label: 'wiki-logs', folder: 'wiki-logs', path: '/home/ana/data/wiki-logs' },
+  { name: 'transcripts', kind: 'folder', label: 'transcripts', folder: 'transcripts', path: '/home/ana/data/transcripts' },
+  { name: 'scans', kind: 'folder', label: 'scans', folder: 'scans', path: '/home/ana/data/scans' },
+  { name: 'logs', kind: 'folder', label: 'logs', folder: 'logs', path: '/home/ana/research/runs/2026-09/logs' },
 ]
 const MIME: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff' }
 
@@ -35,7 +33,7 @@ beforeAll(async () => {
       `const q = new URLSearchParams(location.search)`,
       `const root = createRoot(document.getElementById('root')!)`,
       `root.render(q.get('switcher')`,
-      `  ? <header className="shell-topbar"><span className="shell-brand" style={{ width: 322 }}><span className="shell-word">thimble</span><WorkspaceSwitcher ws={q.get('switcher')!} label={'~/.thimble/demo/' + q.get('switcher')} /></span></header>`,
+      `  ? <header className="shell-topbar"><span className="shell-brand" style={{ width: 322 }}><span className="shell-word">thimble</span><WorkspaceSwitcher ws={q.get('switcher')!} label={'~/data/' + q.get('switcher')} /></span></header>`,
       `  : <StartPage />)`,
     ],
     {
@@ -83,7 +81,7 @@ const lum = (rgb: string) => {
 }
 
 test('the folder name opens the switcher under it, this workspace marked, and a row goes to its workspace', async () => {
-  const page = await open(1280, 800, 'warm', '?switcher=mythos-5')
+  const page = await open(1280, 800, 'warm', '?switcher=transcripts')
   await page.click('button.shell-corpus-name')
   await page.waitForSelector('.popover.ws-switcher a.ws-row')
   // the sheet's opening scales it a little: measured once that ends
@@ -106,8 +104,8 @@ test('the folder name opens the switcher under it, this workspace marked, and a 
   })
   assert.ok(within(got.sheet, { left: 0, right: 1280, top: 0, bottom: 800 }), `the sheet lies in the window ${JSON.stringify(got.sheet)}`)
   assert.ok(got.under, `the sheet hangs under the folder name ${JSON.stringify(got)}`)
-  assert.deepEqual(got.groups, ['Demo', 'Examples', 'Your folders'])
-  assert.deepEqual(got.current, ['mythos-5'])
+  assert.deepEqual(got.groups, ['Your folders'])
+  assert.deepEqual(got.current, ['transcripts'])
   assert.ok(got.rowsInside, 'every row lies in the sheet')
   assert.ok(lum(got.bg) > 0.9, `the sheet's paper: ${got.bg}`)
   await Promise.all([page.waitForURL(/\?ws=logs$/), page.click('.popover.ws-switcher a.ws-row[data-ws="logs"]')])

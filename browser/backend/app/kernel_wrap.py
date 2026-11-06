@@ -70,8 +70,8 @@ NO_SIDE_WRITES = {"PYTHONDONTWRITEBYTECODE": "1", "GIT_OPTIONAL_LOCKS": "0"}
 # nor write it
 HIDDEN_FILES = ("settings.json", "config.json")
 EMPTY_FILE = "/dev/null"
-# the workspace's folder of every lock file its writers take (nofollow.lock_file: the stores' locks, ledger.locked and
-# calls_file; subagent_files.LOCK), which a kernel can neither read nor write: a lock file the kernel may read it may
+# the workspace's folder of every lock file its writers take (nofollow.lock_file: the stores' locks and ledger.locked;
+# subagent_files.LOCK), which a kernel can neither read nor write: a lock file the kernel may read it may
 # also open and flock, and a cell that held a lock made every writer of that store wait for it (the server on its event
 # loop) and then write without it. bwrap mounts an empty read-only tmpfs over the folder, srt denies it; the server
 # makes the folder before a kernel starts and never removes it, since a folder removed and made again would show

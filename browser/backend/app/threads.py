@@ -760,7 +760,7 @@ def _proposer_after_main_reply(c: str, thread_id: str) -> None:
 
 
 # the roles of the agent chats the thread tree lists besides the threads (the frontend's chat/threads.ts threadKind)
-LISTED_ROLES = ("orient", "writer", "check", "dev", agents.STEP_ROLE)
+LISTED_ROLES = ("writer", "check", "dev", agents.STEP_ROLE)
 _TICKET_PREFIX_RE = re.compile(r"^ticket #\d+:\s*", re.I)
 
 

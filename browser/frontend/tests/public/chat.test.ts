@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, test } from 'vitest'
-import { callLineText, callTarget, deckCards, foldRecords, leadText, madeBy, mainSkips, MCP_PREFIXES, orientMade, type CallsRow, type ToolGroup, type UserRow } from '../../src/chat/model.ts'
+import { callLineText, foldRecords, madeBy, mainSkips, MCP_PREFIXES, type CallsRow, type ToolGroup } from '../../src/chat/model.ts'
 import { shownRows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
 
@@ -24,7 +24,7 @@ const LOG = records([
   { type: 'text', delta: 'There are [[3|card:abcd1234#agents/total]] agents.' },
   { type: 'done', ts: '2026-08-30T14:00:06Z', session_id: 'sess', cells: ['abcd1234'] },
   { type: 'chip', ts: '2026-08-30T14:01:00Z', kind: 'artifact', text: 'the cards', ref: 'group:g1' },
-  { type: 'agent', ts: '2026-08-30T14:01:01Z', chat: 'ag1', role: 'orient', title: 'orientation' },
+  { type: 'agent', ts: '2026-08-30T14:01:01Z', chat: 'ag1', role: 'writer', title: 'report' },
   { type: 'error', ts: '2026-08-30T14:02:00Z', message: 'stopped', kind: 'interrupted', detail: 'the analyst stopped it' },
 ])
 
@@ -83,36 +83,12 @@ test('the chat names a group whole, as the call named it: a path of titles, or a
     'did failures rise after 9/14?': 'Did failures rise after 9/14?',
     'other / detail': 'Other / Detail',
   })
-  // the orientation's deck, and a frame in it, are the deck
-  const deck = orientMade(madeBy(foldRecords(records([...add('o1', 'Orientation'), ...add('o2', 'Orientation / Charts'), ...add('o3', 'Charts / Orientation')]))))
-  expect(deckCards(deck)).toBe(2)
-})
-
-test('a follow-up leads with its message', () => {
-  expect(leadText({ kind: 'user', index: 0, text: ' Count them. ', by: 'browser' })).toBe('Count them.')
 })
 
 describe('tool names', () => {
   test("the chat recognizes thimble's tools by the prefix Claude Code gives the runtime's MCP server", () => {
     const server = /^SERVER = "([^"]+)"/m.exec(readFileSync(path.join(ROOT, 'backend/app/runtime_cc.py'), 'utf8'))?.[1]
     expect(MCP_PREFIXES).toContain(`mcp__${server}__`)
-  })
-})
-
-describe('a cited call', () => {
-  test('is named by what it points at in plain words, never by its tool or its input as JSON', () => {
-    const named = [
-      callTarget('Read', { file_path: '/data/toy/agents/agent-01.jsonl' }, 3, 'toy'),
-      callTarget('Grep', { pattern: 'escalat', path: '/data/toy/tickets' }, 4, 'toy'),
-      callTarget('Bash', { command: 'grep -c refund tickets/*.jsonl', description: 'Count refund tickets' }, 5, 'toy'),
-      callTarget('Bash', { command: 'wc -l notes.jsonl' }, 6, 'toy'),
-      callTarget(`${P}add_card`, { question: 'Reviews per agent', code: 'print(1)' }, 7, 'toy'),
-      callTarget(`${P}critique`, { context: 'The account the drafts present.' }, 8, 'toy'),
-      callTarget('StructuredOutput', { summary: 'What the agent found.' }, 9, 'toy'),
-      callTarget('mcp__other__lookup', { q: 'x' }, 10, 'toy'),
-    ]
-    expect(named).toEqual(['agents/agent-01.jsonl', 'search for “escalat” in tickets', 'Count refund tickets', 'wc -l notes.jsonl', 'Reviews per agent', 'the critic’s report', 'an agent’s report', 'step 10'])
-    for (const n of named) expect(n).not.toMatch(/[{}]|StructuredOutput|critique|Bash|Grep|Read/)
   })
 })
 
@@ -174,10 +150,10 @@ describe("main's look at the agent tray", () => {
     const log = records([
       { type: 'user', ts: '2026-08-30T14:00:00Z', text: 'What is running?' },
       { type: 'tool_use', ts: '2026-08-30T14:00:01Z', id: 'l1', name: `${P}list_agents`, input: {} },
-      { type: 'tool_result', ts: '2026-08-30T14:00:02Z', id: 'l1', summary: 'orientation: running' },
-      { type: 'text', delta: 'The orientation is running.' },
+      { type: 'tool_result', ts: '2026-08-30T14:00:02Z', id: 'l1', summary: 'writer: running' },
+      { type: 'text', delta: 'The writer is running.' },
     ])
-    expect([...mainSkips(log, { spawned: new Set(), summaries: [], runs: [] })].sort()).toEqual([1, 2])
+    expect([...mainSkips(log, { spawned: new Set(), runs: [] })].sort()).toEqual([1, 2])
     expect(callLineText(`${P}some_new_tool`, {}, '')).toBe('some_new_tool')
   })
 })
@@ -191,7 +167,7 @@ describe("main's start of a fix", () => {
       { type: 'tool_result', ts: '2026-08-30T14:00:03Z', id: 'f1', summary: 'thimble started a fork' },
       { type: 'text', delta: 'Started a fix for the card.' },
     ])
-    expect([...mainSkips(log, { spawned: new Set(), summaries: [], runs: [] })].sort()).toEqual([1, 3])
+    expect([...mainSkips(log, { spawned: new Set(), runs: [] })].sort()).toEqual([1, 3])
     expect(callLineText(`${P}fix_thimble`, { words: 'new the card should count its rows' }, '')).toBe('fix_thimble new the card should count its rows')
   })
 })

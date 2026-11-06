@@ -1,6 +1,6 @@
 // The fold of a chat log into rows the panel renders. `index` is the record's position in the log.
 import type { StepState, ToolState, ToolStep } from '../components/ToolCard'
-import { parseRef, refLabel } from '../lib/refs'
+import { parseRef } from '../lib/refs'
 import type { ChatRecord } from '../lib/types'
 import { marksIn, withoutMarks } from '../../../../plugin/marks/message.js'
 import type { MarkItem } from '../marks/marks'
@@ -11,16 +11,13 @@ export interface UserRow {
   index: number
   text: string
   ts?: string
-  /** where the analyst typed it: the session's terminal or the browser; `main` for a message main sent the orientation;
-   * `thimble` for a prompt thimble sent one of its agents (its task, a change), which no one typed */
+  /** where the analyst typed it: the session's terminal or the browser; `thimble` for a prompt thimble sent one of its
+   * agents (its task, a change), which no one typed */
   by?: string
   /** with `by` terminal: the analyst typed it in Claude Code's agent tray, not a prompt main's call sent */
   tray?: boolean
-  /** `orient-follow-up` on a message an earlier build passed to the orientation through main, kept in older logs; a
-   * follow-up's message now says so by its `run` */
+  /** with `by` browser: the browser event that carried it, which Rewind names */
   event?: string
-  /** the orientation's run that message started: 1 for its first follow-up */
-  run?: number
 }
 export interface TextRow {
   kind: 'text'
@@ -56,8 +53,6 @@ export interface ToolRow {
   id: string
   name: string
   input: unknown
-  /** the call's number in its orientation's one sequence, which its `call:` ref names (backend calls.py) */
-  n?: number
   ts?: string
   result?: ToolResult
   /** a subagent's records, nested under the tool call that spawned it */
@@ -72,14 +67,12 @@ export interface ChipRow {
   ts?: string
   /** the act's state when it was appended: `generating`, `proposed`, `building`, `done`, … */
   status?: string
-  /** the chat the act belongs to: a fork's act with no reply, a dev ticket's thread, the orientation that ended */
+  /** the chat the act belongs to: a fork's act with no reply, a dev ticket's thread */
   chat?: string
   /** a document save's generation (report_types.write_document) */
   generation?: number
   /** the writer's chat a document save came from (report_types._writer_chat) */
   writer?: string
-  /** a follow-up that was not passed on (orient_session.not_passed_on): the message, which Send again sends */
-  message?: string
   /** the view a `view_failed` line names (backend dev._repairs_failed), whose chip it shows */
   view?: string
 }
@@ -90,7 +83,7 @@ export interface AgentRow {
   role: string
   title: string
   ts?: string
-  /** an orientation's follow-up, in main: the run of its session a message started (1 for the first) */
+  /** the run of its session a message started (1 for the first): a fix's next round */
   run?: number
   /** a dev chat that builds or reviews this view rather than running a code ticket */
   view?: string
@@ -122,7 +115,7 @@ export interface ShotRow {
   note?: string
 }
 /** the summary an agent handed back to main at its end (its SubagentHandback call), which its thread shows folded under
- * one line (ChatPanel orientMessages) */
+ * one line (ChatPanel sessionMessages) */
 export interface HandBackRow {
   kind: 'handback'
   index: number
@@ -209,7 +202,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), event: e.event, run: e.run })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), event: e.event })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
@@ -238,7 +231,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       }
       case 'tool_use':
-        into.push({ kind: 'tool', index, id: e.id, name: e.name, input: e.input, ts: e.ts, children: [], ...(typeof e.n === 'number' ? { n: e.n } : {}) })
+        into.push({ kind: 'tool', index, id: e.id, name: e.name, input: e.input, ts: e.ts, children: [] })
         if (into === rows) rows.push(...(held.get(e.id) ?? []))
         held.delete(e.id)
         return
@@ -248,7 +241,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       }
       case 'chip': {
-        rows.push({ kind: 'chip', index, chip: String(e.kind), text: chipText(String(e.kind), e.text), ref: e.ref, ts: e.ts, status: typeof e.status === 'string' ? e.status : undefined, chat: typeof e.chat === 'string' ? e.chat : undefined, generation: typeof e.generation === 'number' ? e.generation : undefined, writer: typeof e.writer === 'string' ? e.writer : undefined, message: typeof e.message === 'string' ? e.message : undefined, view: typeof e.view === 'string' ? e.view : undefined })
+        rows.push({ kind: 'chip', index, chip: String(e.kind), text: chipText(String(e.kind), e.text), ref: e.ref, ts: e.ts, status: typeof e.status === 'string' ? e.status : undefined, chat: typeof e.chat === 'string' ? e.chat : undefined, generation: typeof e.generation === 'number' ? e.generation : undefined, writer: typeof e.writer === 'string' ? e.writer : undefined, view: typeof e.view === 'string' ? e.view : undefined })
         return
       }
       case 'agent': {
@@ -338,13 +331,12 @@ export function countTools(rows: readonly Row[]): number {
 
 export const MCP_PREFIXES: readonly string[] = ['mcp__plugin_thimble_thimble__', 'mcp__thimble__']
 
-/** Alias names of the card tools and start_orientation (backend tools.TOOL_ALIASES), read as the current ones. */
+/** Alias names of the card tools (backend tools.TOOL_ALIASES), read as the current ones. */
 const OLD_TOOL_NAMES: Record<string, string> = {
   add_cell: 'add_card',
   edit_cell: 'edit_card',
   delete_cell: 'delete_card',
   list_cells: 'list_cards',
-  orient: 'start_orientation',
 }
 
 export function toolDisplayName(name: string): string {
@@ -388,76 +380,6 @@ export function underCorpus(text: string, ws: string): string {
 export function callLineText(name: string, input: unknown, ws: string): string {
   const target = underCorpus(toolSummary(name, input, ws), ws)
   return target ? `${callToolName(name)} ${target}` : callToolName(name)
-}
-
-/** The tools that read or write one file, and the input keys that name it. */
-const FILE_TOOLS: Record<string, string[]> = {
-  Read: ['file_path', 'path'],
-  Edit: ['file_path', 'path'],
-  MultiEdit: ['file_path', 'path'],
-  Write: ['file_path', 'path'],
-  NotebookEdit: ['notebook_path', 'file_path'],
-}
-
-/** The file a call read or wrote, relative to the corpus; '' for a call of another kind. Pure. */
-export function callFile(name: string, input: unknown, ws = ''): string {
-  const keys = FILE_TOOLS[toolDisplayName(name)]
-  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
-  const key = keys?.find((k) => typeof inp[k] === 'string' && inp[k])
-  return key ? underCorpus(corpusRelative(str(inp[key])), ws) : ''
-}
-
-/** What a cited call points at, in plain words, as a citation's chip names it: the file it read or wrote, the search it
- * ran, what its command did, the card it made, the task it handed on, the critic's report. Never a tool's name or its
- * input as JSON: a call none of these fit reads as its step number `n`. Pure. */
-export function callTarget(name: string, input: unknown, n: number, ws = ''): string {
-  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
-  const file = callFile(name, input, ws)
-  if (file) return file
-  const step = `step ${n}`
-  const where = inp.path ? ` in ${underCorpus(corpusRelative(str(inp.path)), ws)}` : ''
-  switch (toolDisplayName(name)) {
-    case 'Grep':
-      return inp.pattern ? `search for “${oneLine(str(inp.pattern), 60)}”${where}` : step
-    case 'Glob':
-      return inp.pattern ? `files matching ${oneLine(str(inp.pattern), 60)}${where}` : step
-    case 'Bash':
-      return oneLine(str(inp.description)) || oneLine(underCorpus(str(inp.command), ws)) || step
-    case 'add_card':
-    case 'edit_card':
-      return oneLine(str(inp.question ?? inp.title)) || 'a card'
-    case 'Agent':
-    case 'Task':
-      return oneLine(str(inp.description)) || 'a subagent’s task'
-    case 'Workflow':
-      return workflowTitle(inp) || 'a workflow'
-    case 'WebFetch':
-      return str(inp.url) || step
-    case 'WebSearch':
-      return inp.query ? `web search for “${oneLine(str(inp.query), 60)}”` : step
-    case 'read_ref': {
-      const ref = str(inp.ref ?? inp.span)
-      return ref && parseRef(ref) ? refLabel(ref) : step
-    }
-    case 'apply_label':
-    case 'show_label':
-    case 'delete_label':
-      return inp.name ? `label “${oneLine(str(inp.name), 60)}”` : step
-    case 'critique':
-      return 'the critic’s report'
-    case 'StructuredOutput':
-      return 'an agent’s report'
-    default:
-      return step
-  }
-}
-
-/** What a citation's hover adds under a cited call's name: the command behind a shell call, which the chip names by what
- * it did; undefined for a call of another kind. Pure. */
-export function callDetail(name: string, input: unknown, ws = ''): string | undefined {
-  if (toolDisplayName(name) !== 'Bash') return undefined
-  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
-  return oneLine(underCorpus(str(inp.command), ws), 240) || undefined
 }
 
 /** The SDK's Read paths are absolute; show them relative to the corpus root. */
@@ -511,7 +433,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
     case 'delete_label':
       return str(inp.name)
     case 'set_filter': {
-      // what the filter keeps, in the words of the canvas's chips: `canvas · table · Orientation · "merge"`
+      // what the filter keeps, in the words of the canvas's chips: `canvas · table · Charts · "merge"`
       const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : typeof v === 'string' && v ? [v] : [])
       const label = inp.label ? `${str(inp.label)}${inp.value ? ` = ${str(inp.value)}` : ''}` : ''
       const parts = [str(inp.scope), label, ...list(inp.kinds), ...list(inp.groups), ...list(inp.makers), inp.starred ? 'starred' : '', inp.locked ? 'locked' : '', inp.text ? `"${str(inp.text)}"` : '']
@@ -552,7 +474,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return oneLine(str(inp.words))
     case 'Agent':
     case 'Task':
-      // the call that started a subagent or a tray entry of thimble's agents (thimble:orient, thimble:writer): its
+      // the call that started a subagent or a tray entry of thimble's agents (thimble:writer): its
       // description, never its input as JSON
       return oneLine(str(inp.description)) || oneLine(str(inp.subagent_type))
     case 'Workflow':
@@ -716,12 +638,12 @@ export function isRawCall(name: string): boolean {
   return !MCP_PREFIXES.some((p) => name.startsWith(p)) && !Object.hasOwn(TOOL_WORDS, n) && !Object.hasOwn(TOOL_GROUPS, n) && !SHOWN_TOOLS.has(n)
 }
 
-/** A piece of a run of calls as the transcript shows it: two or more calls in a row fold into one chip (`run`); a call
- * alone is a line of its own. Only raw calls fold, except in the orientation's thread, where every call does (`all`). */
+/** A piece of a run of calls as the transcript shows it: two or more raw calls in a row fold into one chip (`run`); a
+ * call alone is a line of its own. */
 export type CallPiece = { kind: 'run'; tools: ToolRow[] } | { kind: 'line'; tool: ToolRow }
 
-/** The pieces of a run of calls (CallPiece), in order; with `all`, calls of every tool fold together. Pure. */
-export function callPieces(tools: readonly ToolRow[], all = false): CallPiece[] {
+/** The pieces of a run of calls (CallPiece), in order. Pure. */
+export function callPieces(tools: readonly ToolRow[]): CallPiece[] {
   const out: CallPiece[] = []
   let run: ToolRow[] = []
   const flush = () => {
@@ -730,7 +652,7 @@ export function callPieces(tools: readonly ToolRow[], all = false): CallPiece[] 
     run = []
   }
   for (const t of tools) {
-    if (all || isRawCall(t.name)) {
+    if (isRawCall(t.name)) {
       run.push(t)
       continue
     }
@@ -830,8 +752,6 @@ export function refWords(ref: string, questions: ReadonlyMap<string, string>): s
       return 'a label'
     case 'chat':
       return 'a message'
-    case 'call':
-      return `call ${p.n}`
     case 'ui':
       return words(p.name)
     case 'table':
@@ -1001,8 +921,8 @@ export function groupState(tools: readonly ToolRow[], pending: boolean): ToolSta
 
 export interface MadeCell {
   id: string
-  /** the canvas group the call named, whole and in lower case (orientation, a group of the analyst's, a path of titles
-   * such as `analysis / spike`); '' when it named none */
+  /** the canvas group the call named, whole and in lower case (a group of the analyst's, a path of titles such as
+   * `analysis / spike`); '' when it named none */
   group: string
 }
 /** What a log's calls made, nested calls included, in order and once each: the cards (made or edited), the views
@@ -1014,40 +934,11 @@ export interface Made {
   viewSlugs?: Record<string, string>
   labels: string[]
   docs: string[]
-  /** each group's name as the call wrote it (Orientation), by its key in `cells` and `labelCards` */
+  /** each group's name as the call wrote it (Charts), by its key in `cells` and `labelCards` */
   groupNames?: Record<string, string>
-  /** the card of each applied label whose result named one (the orientation's labels get none), one per label name, in
-   * the group its call named ('' for none). The canvas counts these among a group's cards, so the chat's counts do too. */
+  /** the card of each applied label whose result named one, one per label name, in the group its call named ('' for
+   * none). The canvas counts these among a group's cards, so the chat's counts do too. */
   labelCards: { name: string; group: string; id: string }[]
-}
-
-/** Every card a log left on the canvas: the cards it made or edited and its labels' cards. Pure. */
-export function madeCards(made: Made): number {
-  return made.cells.length + made.labelCards.length
-}
-
-/** The group names a call gives the orientation's deck: `Orientation`, and the alias `Final` (backend
- * orientation.DECK_ALIASES). */
-const DECK_GROUPS = new Set(['orientation', 'final'])
-
-/** What an orientation's log made, as its session files it: a card whose call names no group is in the deck, where the
- * server puts it (backend tools.default_group). Pure. */
-export function orientMade(made: Made): Made {
-  const fill = (g: string) => g || 'orientation'
-  return {
-    ...made,
-    cells: made.cells.map((c) => ({ ...c, group: fill(c.group) })),
-    labelCards: made.labelCards.map((l) => ({ ...l, group: fill(l.group) })),
-    groupNames: { orientation: 'Orientation', ...made.groupNames },
-  }
-}
-
-/** Whether a group a call named is the orientation's deck or a frame in it: its first title names the deck. */
-const inDeck = (g: string): boolean => DECK_GROUPS.has(g.split(' / ')[0])
-
-/** The cards an orientation left in its deck, its labels' cards among them; 0 when it wrote no deck. Pure. */
-export function deckCards(made: Made): number {
-  return made.cells.filter((c) => inDeck(c.group)).length + made.labelCards.filter((l) => inDeck(l.group)).length
 }
 
 const CELL_HEAD_RE = /^(?:card|cell):([A-Za-z0-9_-]+)\s*$/m
@@ -1089,7 +980,7 @@ export function madeBy(rows: readonly Row[]): Made {
   }
   const walk = (list: readonly Row[]) => {
     for (const r of list) {
-      // a viewer thimble proposed for the run as it started (backend orient_session._note_proposed)
+      // a view chip in the run's log
       if (r.kind === 'chip' && r.chip === 'view') {
         add(out.views, r.text)
         const slug = VIEW_KEY_RE.exec(r.ref ?? '')?.[1]
@@ -1169,14 +1060,6 @@ export function durationText(start: string | null | undefined, end: string | nul
   return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`
 }
 
-/** `3 views, 17 cards and a draft report`: the counts that are not zero, joined the way a sentence lists them. Pure. */
-export function reviewList(counts: { views: number; cells: number; labels: number; report: boolean }): string {
-  const n = (k: number, one: string, many: string) => (k > 0 ? `${k} ${k === 1 ? one : many}` : '')
-  const parts = [n(counts.views, 'view', 'views'), n(counts.cells, 'card', 'cards'), n(counts.labels, 'label', 'labels'), counts.report ? 'a draft report' : ''].filter(Boolean)
-  if (parts.length <= 1) return parts.join('')
-  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
-}
-
 /** Where a thread branched from main: the number of main's records up to the thread's creation (the first record
  * stamped later, a text record belonging with the stamped record before it). Pure. */
 export function branchIndex(records: readonly ChatRecord[], createdAt: string): number {
@@ -1226,102 +1109,9 @@ export function withBranches<T extends { index: number }>(rows: readonly T[], re
 export interface MainContext {
   /** the Agent calls whose subagent has a chat of its own (its meta's `tool_use_id`), which shows as its card or thread */
   spawned: ReadonlySet<string>
-  /** the summaries the orientation handed back (orientSummaries: its last message, and in an earlier build's log, where
-   * it ran as main's subagent, its hand-backs); main's word-for-word relay of one is left out, since the orientation's
-   * thread shows it and main shows the counted line and the card */
-  summaries: readonly string[]
   /** when each subagent ran, from its chat's creation to its end (null while it runs): a label run started then is the
    * subagent's, and its card lists the label */
   runs: readonly { from: string; to: string | null }[]
-  /** the views the orientation's calls proposed (madeBy's views of its rows; an orientation from before 0.8.0, since
-   * one proposes none now): its card lists them under Views, so main writes no note of its own for them */
-  views?: readonly string[]
-  /** the writers of the report pass of an orientation from before 0.8.0 (orientWriters): the orientation's card shows
-   * each under Report, so main writes no row for its start or its saves */
-  orientWriters?: readonly OrientWriter[]
-}
-
-/** A writer that answers the report pass of an orientation from before 0.8.0, which the orientation's card carries
- * under Report. */
-export interface OrientWriter {
-  chat: string
-  /** the orientation's chat, and the run of it whose card carries the writer (0 for its first) */
-  orient: string
-  run: number
-  doc: string
-  from: string
-  to: string | null
-  status: 'running' | 'done' | 'failed' | 'stopped'
-  /** a writer with no `orient` in its meta, told by when it ran; its saves' chips are told by their time too */
-  inferred?: boolean
-}
-
-/** How soon after the orientation ended a writer of the report must start to count as its report pass, when its meta
- * cannot say (orientWriters). */
-export const ORIENT_WRITER_GAP_MS = 60_000
-
-type WriterMeta = { id: string; role: string; created_at: string; status?: string | null; ts_end?: string | null; doc?: string | null; orient?: string | null; orient_run?: number | null }
-
-/**
- * The writers of the report pass of an orientation from before 0.8.0 among `metas`: a writer whose meta names the
- * orientation (`orient`), or, for an older meta with no `orient` at all, a report writer that started while an
- * orientation ran or within ORIENT_WRITER_GAP_MS of its end. A writer whose `orient` is null was asked for by the
- * analyst and keeps its rows in main. Every writer since 0.8.0 carries `orient` (backend write_session.start), so the
- * inference reads old records only. Pure.
- */
-export function orientWriters(metas: Iterable<WriterMeta>): OrientWriter[] {
-  const all = [...metas]
-  const orients = all.filter((m) => m.role === 'orient')
-  const out: OrientWriter[] = []
-  for (const m of all) {
-    if (m.role !== 'writer') continue
-    let orient: string | null = null
-    let run = 0
-    let inferred = false
-    if (typeof m.orient === 'string' && m.orient) {
-      orient = m.orient
-      run = typeof m.orient_run === 'number' ? m.orient_run : 0
-    } else if (!('orient' in m) && (m.doc ?? 'report') === 'report') {
-      const at = Date.parse(m.created_at)
-      const o = orients.find((x) => {
-        const from = Date.parse(x.created_at)
-        const to = x.ts_end ? Date.parse(x.ts_end) + ORIENT_WRITER_GAP_MS : Infinity
-        return Number.isFinite(at) && at >= from && at <= to
-      })
-      orient = o?.id ?? null
-      inferred = true
-    }
-    if (!orient) continue
-    const status = m.status === 'done' || m.status === 'failed' || m.status === 'stopped' ? m.status : 'running'
-    out.push({ chat: m.id, orient, run, doc: m.doc || 'report', from: m.created_at, to: m.ts_end ?? null, status, ...(inferred ? { inferred } : {}) })
-  }
-  return out
-}
-
-/** The writer of orientation `orient`'s report pass that its card for run `run` carries (every run's card, the
- * latest, when `run` is unset): the latest one started for it. Pure. */
-export function orientWriterOf(writers: readonly OrientWriter[], orient: string, run?: number): OrientWriter | null {
-  const mine = writers.filter((w) => w.orient === orient && (run == null || w.run === run))
-  return mine.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0))[mine.length - 1] ?? null
-}
-
-/** Whether main's record is a row of a writer of the orientation's report pass: its start (`agent`), or a save of its
- * document that names the writer (`writer`) or, for an inferred writer, falls on its document while it ran. Pure. */
-export function isOrientWriterRecord(e: ChatRecord, writers: readonly OrientWriter[]): boolean {
-  if (!writers.length) return false
-  if (e.type === 'agent') return e.role === 'writer' && writers.some((w) => w.chat === e.chat)
-  if (e.type !== 'chip' || e.kind !== 'artifact') return false
-  const rec = e as { writer?: unknown; ref?: string; ts?: string }
-  if (typeof rec.writer === 'string') return writers.some((w) => w.chat === rec.writer)
-  const p = rec.ref ? parseRef(rec.ref) : null
-  if (!p || p.kind !== 'report') return false
-  const at = rec.ts ? Date.parse(rec.ts) : NaN
-  return writers.some((w) => {
-    if (!w.inferred || w.doc !== p.slug) return false
-    const from = Date.parse(w.from)
-    const to = w.to ? Date.parse(w.to) : Infinity
-    return Number.isFinite(at) && at >= from && at <= to
-  })
 }
 
 // the calls that start an agent chat of their own: a subagent, or a workflow the mirror follows as one chat (session.py)
@@ -1332,24 +1122,6 @@ const squash = (s: string) => s.replace(/\s+/g, ' ').trim()
 /** The name of the label a label run follows: its title after `label `. Pure. */
 export function labelRunName(title: string): string {
   return title.startsWith(LABEL_RUN_PREFIX) ? title.slice(LABEL_RUN_PREFIX.length).trim() : title.trim()
-}
-
-/** The summaries an orientation's rows handed back: each SubagentHandback's message (an earlier build's, which ran the
- * orientation as main's subagent; it now runs as its own session) and, once the orientation
- * has ended, its last message. Claude Code's API error line is no summary, so main's copy of the same line still shows.
- * Pure. */
-export function orientSummaries(rows: readonly Row[], ended = false): string[] {
-  const out: string[] = []
-  for (const r of rows) {
-    if (r.kind !== 'tool' || toolDisplayName(r.name) !== 'SubagentHandback') continue
-    const inp = (r.input && typeof r.input === 'object' ? r.input : {}) as Record<string, unknown>
-    const m = str(inp.message).trim()
-    if (m && !isApiError(m)) out.push(m)
-  }
-  if (!ended) return out
-  const last = [...rows].reverse().find((r) => r.kind === 'text')
-  if (last && last.kind === 'text' && last.text.trim() && !isApiError(last.text)) out.push(last.text.trim())
-  return out
 }
 
 // ---- Claude Code's API errors in main ----
@@ -1584,19 +1356,15 @@ export function rewoundRecords(records: readonly ChatRecord[]): Set<number> {
 }
 
 /**
- * The records of main's log its transcript leaves out, by index: those a rewind took out (rewoundRecords), Agent or Workflow calls whose agents show as their own
- * card or thread (with their results), text that repeats a summary the orientation handed back, label runs a subagent
- * or a call in main started, view chips of the views an orientation from before 0.8.0 proposed and the start and saves
- * of its report pass's writer (isOrientWriterRecord), main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
+ * The records of main's log its transcript leaves out, by index: those a rewind took out (rewoundRecords), Agent or
+ * Workflow calls whose agents show as their own card or thread (with their results), label runs a subagent or a call in
+ * main started, main's look at the agent tray (list_agents), session lines (isSessionLine) and feedback chips
  * (isFeedbackChip). Pure.
  */
 export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set<number> {
   const skip = rewoundRecords(records)
   const hidden = new Set<string>()
-  const summaries = new Set(ctx.summaries.map(squash).filter(Boolean))
   const labelsApplied = new Set<string>()
-  const orientViews = new Set((ctx.views ?? []).map(squash).filter(Boolean))
-  const writers = ctx.orientWriters ?? []
   const inRun = (ts: string | undefined) => {
     const at = ts ? Date.parse(ts) : NaN
     if (!Number.isFinite(at)) return false
@@ -1616,10 +1384,10 @@ export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set
           hidden.add(e.id)
           skip.add(i)
         }
-        // main's call that starts the orientation's or a writer's session: that session's own note in main stands for it,
-        // as the fixer's card stands for the fix_thimble call that started it. Its look at the agent
-        // tray is bookkeeping, which the tray itself shows
-        if ((name === 'start_orientation' || name === 'start_writing' || name === 'list_agents' || name === 'fix_thimble') && !e.parent_tool_use_id) {
+        // main's call that starts a writer's session: that session's own note in main stands for it, as the fixer's card
+        // stands for the fix_thimble call that started it. Its look at the agent tray is bookkeeping, which the tray
+        // itself shows
+        if ((name === 'start_writing' || name === 'list_agents' || name === 'fix_thimble') && !e.parent_tool_use_id) {
           hidden.add(e.id)
           skip.add(i)
         }
@@ -1633,16 +1401,10 @@ export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set
       case 'tool_result':
         if (hidden.has(e.id)) skip.add(i)
         return
-      case 'text':
-        if (summaries.size && !e.parent_tool_use_id && !isApiError(e.delta) && summaries.has(squash(e.delta))) skip.add(i)
-        return
       case 'agent':
         if (e.role === 'labels' && (inRun(e.ts) || labelsApplied.has(squash(labelRunName(e.title))))) skip.add(i)
-        if (isOrientWriterRecord(e, writers)) skip.add(i)
         return
       case 'chip':
-        if (isOrientWriterRecord(e, writers)) skip.add(i)
-        if (e.kind === 'view' && orientViews.has(squash(chipText('view', String(e.text ?? ''))))) skip.add(i)
         if (isSessionLine(e) || isFeedbackChip(e)) skip.add(i)
         return
       default:
@@ -1658,7 +1420,7 @@ function stepStateOf(status: string | undefined | null): 'running' | 'done' | 'f
 }
 
 /**
- * The steps of a session thimble started beside main (the orientation's or a writer's): its subagents and workflow
+ * The steps of a session thimble started beside main (a writer's): its subagents and workflow
  * agents, each an agent chat whose `agent` record is in the session's log, named by threads.shortStepNames and with its
  * state from its meta. `open` makes each step open its agent's transcript. A session's own calls are rows in its
  * thread, never steps. Pure.
@@ -1678,19 +1440,7 @@ export function sessionSteps(rows: readonly Row[], metas: ReadonlyMap<string, { 
 /** Whether a step has ended, well or not: what a strip counts as finished. Pure. */
 export const stepEnded = (s: { state?: StepState }): boolean => s.state !== 'running' && s.state !== 'pending'
 
-// ---- an orientation's runs: its first, then one per follow-up ----
-
-/** Whether a row is a message that started a follow-up of the orientation (backend orientation.message): a `user`
- * record that says so by its event or its run, which the orientation's first message never does. Pure. */
-export const isFollowUpRow = (r: Row): r is UserRow => r.kind === 'user' && (r.event === 'orient-follow-up' || (typeof r.run === 'number' && r.run > 0))
-
-/** The texts of the analyst's messages a thread's log holds, by which the browser stops showing one it sent as on its
- * way: a follow-up's first record (isFollowUpRow), or a message thimble's browser passed on (`by` browser), which the
- * server records as it sends it (orient_session._show_message) with no `run`, since a message to a running
- * orientation starts none. Pure. */
-export function landedTexts(rows: readonly Row[]): Set<string> {
-  return new Set(rows.filter((r): r is UserRow => r.kind === 'user' && (r.by === 'browser' || isFollowUpRow(r))).map((r) => r.text.trim()))
-}
+// ---- a subagent's runs ----
 
 /** A subagent's runs: each message to it starts one (a round of a fix opens with the person's words), and what came
  * before the first message is the first run's. Pure. */
@@ -1724,111 +1474,6 @@ export function lastRowTs(rows: readonly Row[]): string | null {
     }
   }
   return best
-}
-
-/** One run of an orientation's session: `k` 0 for the first, then one per follow-up, with its rows and the messages
- * that started it (none for the first). */
-export interface OrientRun {
-  k: number
-  rows: Row[]
-  messages: UserRow[]
-}
-
-/**
- * An orientation's rows cut into its runs. A follow-up's message opens the run its record names (`run`); a message with
- * no run opens the next one, unless it follows another follow-up's message directly, as the messages queued during a
- * run go together when it ends. Pure.
- */
-export function orientRuns(rows: readonly Row[]): OrientRun[] {
-  const out: OrientRun[] = [{ k: 0, rows: [], messages: [] }]
-  let prevFollowUp = false
-  for (const r of rows) {
-    if (!isFollowUpRow(r)) {
-      prevFollowUp = false
-      out[out.length - 1].rows.push(r)
-      continue
-    }
-    const cur = out[out.length - 1]
-    const k = typeof r.run === 'number' ? r.run : prevFollowUp ? cur.k : cur.k + 1
-    if (k === cur.k && cur.k > 0) {
-      cur.messages.push(r)
-      cur.rows.push(r)
-    } else out.push({ k, rows: [r], messages: [r] })
-    prevFollowUp = true
-  }
-  return out
-}
-
-/**
- * What a follow-up changed, in words for the orientation's card (`revised 2 cards, added 1`): the cards revised, added
- * and deleted, the views proposed and the labels applied; '' for no change. A card added then edited or deleted counts
- * once. Pure.
- */
-export function followUpSummary(rows: readonly Row[]): string {
-  const added = new Set<string>()
-  const revised = new Set<string>()
-  const deleted = new Set<string>()
-  const views = new Set<string>()
-  const labels = new Set<string>()
-  const walk = (list: readonly Row[]) => {
-    for (const r of list) {
-      if (r.kind !== 'tool') continue
-      const inp = (r.input && typeof r.input === 'object' ? r.input : {}) as Record<string, unknown>
-      const ok = !!r.result && !r.result.is_error
-      const name = toolDisplayName(r.name)
-      if (name === 'add_card') {
-        const id = madeCell(r)
-        if (id) added.add(id)
-      } else if (name === 'edit_card') {
-        const id = madeCell(r) ?? (CELL_ID_RE.exec(str(inp.card ?? inp.cell).trim())?.[1] ?? null)
-        if (ok && id && !added.has(id)) revised.add(id)
-      } else if (name === 'delete_card') {
-        const id = str(inp.card ?? inp.cell).trim().replace(/^(?:card|cell):/, '')
-        if (!ok || !id) continue
-        if (added.has(id)) added.delete(id)
-        else {
-          revised.delete(id)
-          deleted.add(id)
-        }
-      } else if (name === 'propose_view' && ok) {
-        const v = str(inp.name).trim()
-        if (v) views.add(v)
-      } else if (name === 'apply_label' && ok && (inp.limit == null || inp.limit === '')) {
-        const l = str(inp.name).trim()
-        if (l) labels.add(l)
-      }
-      walk(r.children)
-    }
-  }
-  walk(rows)
-  return changeSummary({ revised: revised.size, added: added.size, deleted: deleted.size, views: views.size, labels: labels.size })
-}
-
-/** A follow-up's message as the card of its run leads with it. Pure. */
-export function leadText(m: UserRow): string {
-  return m.text.trim()
-}
-
-/** What a follow-up changed, counted, in words: `revised 2 cards, added 1, proposed 1 view`; '' for nothing. The
- * server's counts (the chat meta's `followups`, read from the run's undo steps) or the log's (followUpSummary). Pure. */
-export function changeSummary(c: { revised?: number; added?: number; deleted?: number; views?: number; labels?: number }): string {
-  const parts: string[] = []
-  let noun = false
-  for (const [verb, n] of [['revised', c.revised ?? 0], ['added', c.added ?? 0], ['deleted', c.deleted ?? 0]] as const) {
-    if (!n) continue
-    parts.push(noun ? `${verb} ${n}` : `${verb} ${n} ${n === 1 ? 'card' : 'cards'}`)
-    noun = true
-  }
-  if (c.views) parts.push(`proposed ${c.views} ${c.views === 1 ? 'view' : 'views'}`)
-  if (c.labels) parts.push(`applied ${c.labels} ${c.labels === 1 ? 'label' : 'labels'}`)
-  return parts.join(', ')
-}
-
-/** The rows with each call's number filled in from an orientation's call index (by tool_use id) where its record has
- * none. Pure. */
-export function withCallNumbers(rows: readonly Row[], index: ReadonlyMap<string, number>): Row[] {
-  if (!index.size) return [...rows]
-  return rows.map((r) => (r.kind === 'tool' && r.n == null && index.has(r.id) ? { ...r, n: index.get(r.id)! } : r))
 }
 
 // ---- a subagent's own work, as its chip opens on it ----

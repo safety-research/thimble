@@ -612,12 +612,7 @@
   gap: 6px;
   margin-top: 2px;
 }
-/* Report a problem where something failed (ReportProblemButton): a small quiet button after the failure's own words or
-   controls; in a view chip, the bug alone at the chip's height */
-.chat-landing-report.btn {
-  margin-left: 6px;
-  vertical-align: middle;
-}
+/* Report a problem in a view chip (ReportProblemButton): the bug alone at the chip's height */
 .view-chip-report.btn {
   flex: none;
   width: 20px;
@@ -813,8 +808,8 @@
   color: var(--text-primary);
 }
 /* -------- the start page (StartPage): the page with no workspace in its URL. The top bar's brand, a title and the
-   workspaces in groups (WorkspaceList), in a column as wide as a card. The switcher (TopBar) draws the same list in a
-   popover, denser -------- */
+   workspaces (WorkspaceList), in a column as wide as a card. The switcher (TopBar) draws the same list in a popover,
+   denser -------- */
 .start {
   min-height: 100%;
   background: var(--bg-page);
@@ -865,7 +860,7 @@
   margin: 0 0 8px;
   padding: 0 12px;
 }
-/* the rows share their group's columns (subgrid), so each group's sentences line up */
+/* the rows share the list's columns (subgrid), so their paths line up */
 .ws-rows {
   display: grid;
   grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto;
@@ -979,7 +974,7 @@
   margin: 8px;
   color: var(--status-negative);
 }
-/* a phone's width: the sentence goes under the name */
+/* a phone's width: the path goes under the name */
 @media (max-width: 560px) {
   .ws-rows {
     grid-template-columns: minmax(0, 1fr) auto;

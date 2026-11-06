@@ -2,8 +2,8 @@
 // browser's layout, sandbox or drawing shows (a sandboxed output cannot reach the page or draw over it, a view's frame
 // draws the labels' marks). Each page is answered by its test on a made-up origin, so no port is opened and nothing
 // leaves the machine.
-// Run from frontend/: npm run test:browser. scripts/check.sh browser skips them, saying so, where no Chromium is
-// installed; `npx playwright install chromium-headless-shell` installs it.
+// Run from frontend/: npm run test:browser, once `npx playwright install chromium-headless-shell` has installed the
+// Chromium.
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({

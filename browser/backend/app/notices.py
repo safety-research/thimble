@@ -431,24 +431,20 @@ def reason(text: Any, *, server: bool = False, cls: str | None = None, main_mode
 
 # a role of subagents.TYPES -> (its name on a notice, the subject of a sentence about it); {t} is the run's title
 ROLE_NAMES: dict[str, tuple[str, str]] = {
-    "orientation": ("Orientation", "The orientation"),
-    "critic": ("Critic", "The orientation's critic"),
     "writer": ("Writer: {t}", "The writer of {t}"),
     "view-builder": ("View build: {t}", "The build of the view {t}"),
     "view-reviewer": ("View review: {t}", "The review of the view {t}"),
     "check": ("Report check: {t}", "The report check {t}"),
     "dev-ticket": ("Code ticket: {t}", "The code ticket {t}"),
-    "orient-helper": ("Orientation helper", "A helper of the orientation"),
     "thread": ("Side thread: {t}", "The side thread \"{t}\""),
 }
 # the words a chat's title has before the run's own title (dev.py's "view: …", view_review's "review: …",
-# write_session's "Write …"), and the titles that only name the role
+# write_session's "Write …")
 TITLE_PREFIXES = ("view: ", "review: ", "write ")
-ROLE_TITLES = ("orientation", "critic", "critique", "orientation critic")
 
 
 def agent_key(key: Any) -> str:
-    """The notices' key of an agent of thimble's, by the key it runs under (its session: `orientation`, `view:<slug>`,
+    """The notices' key of an agent of thimble's, by the key it runs under (its session: `view:<slug>`,
     `check:<id>:<doc>`)."""
     return f"agent:{key}"
 
@@ -460,8 +456,6 @@ def who(role: Any, title: Any = "") -> tuple[str, str]:
     for p in TITLE_PREFIXES:
         if t.lower().startswith(p):
             t = t[len(p):].strip()
-    if t.lower() in ROLE_TITLES:
-        t = ""
     name, subject = ROLE_NAMES.get(str(role or ""), ("Agent: {t}", "The agent \"{t}\""))
     if not t:
         name = name.replace(": {t}", "")

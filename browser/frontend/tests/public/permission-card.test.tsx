@@ -38,9 +38,9 @@ afterEach(() => {
 const armed = () => act(async () => new Promise((r) => setTimeout(r, ARM_MS + 30)))
 
 const T = (m: number) => `2026-09-25T10:${String(m).padStart(2, '0')}:00Z`
-const chat = (id: string, extra: Partial<ChatMeta> & { permission_mode?: string } = {}): ChatMeta => ({ id, kind: 'agent', role: 'orient', title: 'Orientation', created_at: T(0), parent: 'main', status: 'running', ...extra }) as ChatMeta
-const ORIENT = chat('or1', { permission_mode: 'manual' })
-const METAS = new Map([[ORIENT.id, ORIENT]])
+const chat = (id: string, extra: Partial<ChatMeta> & { permission_mode?: string } = {}): ChatMeta => ({ id, kind: 'agent', role: 'check', title: 'Unverified', created_at: T(0), parent: 'main', status: 'running', ...extra }) as ChatMeta
+const CHECK = chat('ck1', { permission_mode: 'manual' })
+const METAS = new Map([[CHECK.id, CHECK]])
 
 const req = (id: string, extra: Partial<PermissionRequest> = {}): PermissionRequest => ({ id, tool: 'Bash', what: 'Count the runs', ...extra }) as PermissionRequest
 
@@ -48,8 +48,8 @@ describe('the requests and their words', () => {
 
   test("every session's requests while it runs, main's among them, the one asked first first", () => {
     const main = { permissions: [req('m1', { since: T(5) })] }
-    const metas: ChatMeta[] = [chat('main', { kind: 'main' } as Partial<ChatMeta>), { ...ORIENT, permissions: [req('o1', { since: T(3) }), req('o2', { since: T(7) })] }, chat('w1', { role: 'writer', status: 'done', permissions: [req('w1', { since: T(1) })] })]
-    expect(pendingRequests(main, metas).map((a) => `${a.chat}:${a.request.id}`)).toEqual(['or1:o1', 'main:m1', 'or1:o2'])
+    const metas: ChatMeta[] = [chat('main', { kind: 'main' } as Partial<ChatMeta>), { ...CHECK, permissions: [req('o1', { since: T(3) }), req('o2', { since: T(7) })] }, chat('w1', { role: 'writer', status: 'done', permissions: [req('w1', { since: T(1) })] })]
+    expect(pendingRequests(main, metas).map((a) => `${a.chat}:${a.request.id}`)).toEqual(['ck1:o1', 'main:m1', 'ck1:o2'])
     expect(pendingRequests(null, [])).toEqual([])
   })
 
@@ -57,12 +57,12 @@ describe('the requests and their words', () => {
 
 describe('the card', () => {
   const asks: PendingAsk[] = [
-    { chat: 'or1', request: req('o1', { command: 'grep -c refund tickets/*.jsonl', what: 'Count refunds', always: 'Bash(grep *)', agent_id: 'a1', agent_type: 'workflow-subagent', agent_title: 'Audit: batch2', agent_chat: 's1' }) },
+    { chat: 'ck1', request: req('o1', { command: 'grep -c refund tickets/*.jsonl', what: 'Count refunds', always: 'Bash(grep *)', agent_id: 'a1', agent_type: 'workflow-subagent', agent_title: 'Audit: batch2', agent_chat: 's1' }) },
     { chat: 'main', request: req('m1', { tool: 'Write', what: 'Save notes', input: '{"file_path": "notes.md", "content": "hi"}' }) },
   ]
   const card = () =>
     mount(
-      <ThreadsContext.Provider value={{ labels: new Map([['s1', 'orient/audit: batch2']]) }}>
+      <ThreadsContext.Provider value={{ labels: new Map([['s1', 'unverified/audit: batch2']]) }}>
         <PermissionCard ws="mini" asks={asks} metas={METAS} labels={new Map()} />
       </ThreadsContext.Provider>,
     )
@@ -78,7 +78,7 @@ describe('the card', () => {
   test("each answer goes to the session that asked, and the next request takes the card's place", async () => {
     const el = await card()
     await answerNext(() => el.querySelector('.chat-perm-always'))
-    expect(posted).toEqual([['/api/ws/mini/chats/or1/permission', { id: 'o1', allow: true, always: true, shown: 0 }]])
+    expect(posted).toEqual([['/api/ws/mini/chats/ck1/permission', { id: 'o1', allow: true, always: true, shown: 0 }]])
     expect(el.querySelector('.chat-perm')?.getAttribute('data-request')).toBe('m1')
     expect(el.querySelector('.chat-perm-count')).toBeNull()
     await answerNext(() => el.querySelector('.chat-perm-deny'))
